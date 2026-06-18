@@ -14,9 +14,21 @@ func TestMemoryRepoRacioProjectionMaintainedByWrites(t *testing.T) {
 	repo.EnsureCompany(companyID, "RACIO Projection Co")
 	user := mustCreateInboxReadCompanyUser(t, repo, "racio-projection-user", companyID, "racio-projection@example.com", "RACIO User")
 
-	standaloneNode, err := repo.CreateNodeWithAssignee(companyID, "Standalone node", user.UserID)
+	standaloneNode, err := repo.CreateNode(companyID, "Standalone node")
 	if err != nil {
-		t.Fatalf("CreateNodeWithAssignee standalone: %v", err)
+		t.Fatalf("CreateNode standalone: %v", err)
+	}
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeNode,
+		ResourceID:   standaloneNode.NodeID,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: EntityPermissionSubjectUser,
+			PrincipalID:   user.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments standalone node: %v", err)
 	}
 
 	responsibleGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Responsible gate")

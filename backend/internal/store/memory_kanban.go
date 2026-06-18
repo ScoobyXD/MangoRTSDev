@@ -104,19 +104,13 @@ func (r *MemoryRepo) syncNodeStatusFromKanbanCardLocked(card domain.KanbanCard) 
 		return
 	}
 	status := ""
-	statusColor := ""
 	if card.IsIssue {
 		status = "Issue"
-		statusColor = "#ffd400"
 	} else if column, found := r.kanbanColumnLocked(card.CompanyID, card.BoardID, card.ColumnID); found {
 		status = column.Title
-		statusColor = column.ItemColor
 	}
 	if status != "" {
 		node.Status = &status
-	}
-	if statusColor != "" {
-		node.StatusColor = &statusColor
 	}
 	r.nodes[key(card.CompanyID, card.NodeID)] = node
 }
@@ -128,20 +122,7 @@ func (r *MemoryRepo) withKanbanCardProjectionFieldsLocked(card domain.KanbanCard
 		}
 		card.DueDate = cloneStringPointer(node.DueDate)
 		card.Priority = cloneIntPointer(node.Priority)
-		card.AssigneeUserID = cloneStringPointer(node.AssigneeUserID)
-		card.AssigneeName = cloneStringPointer(node.AssigneeName)
-		card.AssigneeEmail = cloneStringPointer(node.AssigneeEmail)
 		card.Accounts = r.accountSnapshotsForNodeLocked(card.CompanyID, card.NodeID)
-		if card.AssigneeUserID != nil {
-			if user, ok := r.users[*card.AssigneeUserID]; ok {
-				if strings.TrimSpace(user.DisplayName) != "" {
-					card.AssigneeName = &user.DisplayName
-				}
-				if strings.TrimSpace(user.Email) != "" {
-					card.AssigneeEmail = &user.Email
-				}
-			}
-		}
 	}
 	if card.ProjectionUpdatedTimestamp.IsZero() {
 		card.ProjectionUpdatedTimestamp = card.UpdatedTimestamp
@@ -165,9 +146,6 @@ func (r *MemoryRepo) kanbanProjectionRowFromCardLocked(card domain.KanbanCard) K
 		Status:                     &status,
 		DueDate:                    cloneStringPointer(card.DueDate),
 		Priority:                   cloneIntPointer(card.Priority),
-		AssigneeUserID:             cloneStringPointer(card.AssigneeUserID),
-		AssigneeDisplayName:        cloneStringPointer(card.AssigneeName),
-		AssigneeEmail:              cloneStringPointer(card.AssigneeEmail),
 		Accounts:                   cloneAccountSnapshots(card.Accounts),
 		CreatedTimestamp:           card.CreatedTimestamp,
 		UpdatedTimestamp:           card.ProjectionUpdatedTimestamp,
@@ -641,13 +619,6 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		nodeTitle = normalizeKanbanBoardTitle(input.NodeID, input.NodeTitle)
 	}
 	description := strings.TrimSpace(input.DescriptionSnapshot)
-	assignResponsible := func() error {
-		if board.LogicGateID == nil {
-			return nil
-		}
-		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, *board.LogicGateID, input.NodeID)
-		return nil
-	}
 	for index, card := range r.kanbanCards[k] {
 		if card.NodeID != input.NodeID {
 			continue
@@ -669,9 +640,6 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		}
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
-		if err := assignResponsible(); err != nil {
-			return domain.KanbanCard{}, err
-		}
 		if card.LogicGateID != nil {
 			r.upsertNodeLogicGateAssignmentFromCardLocked(card)
 			if hadPreviousAssignment && previousAssignment.LogicGateID != *card.LogicGateID {
@@ -707,9 +675,6 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		card.LogicGateID = &value
 	}
 	r.kanbanCards[k] = append(r.kanbanCards[k], card)
-	if err := assignResponsible(); err != nil {
-		return domain.KanbanCard{}, err
-	}
 	if card.LogicGateID != nil {
 		r.upsertNodeLogicGateAssignmentFromCardLocked(card)
 		if hadPreviousAssignment && previousAssignment.LogicGateID != *card.LogicGateID {
@@ -751,7 +716,7 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		if input.CreateNodeTitle == "" {
 			return LogicGateNodeAssignmentResult{}, ErrNotFound
 		}
-		createdNode, err = r.createNodeWithAssigneeIDLocked(input.CompanyID, input.NodeID, input.CreateNodeTitle, input.ActorUserID)
+		createdNode, err = r.createNodeWithAssigneeIDLocked(input.CompanyID, input.NodeID, input.CreateNodeTitle, "")
 		if err != nil {
 			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 			return LogicGateNodeAssignmentResult{}, err
@@ -759,8 +724,6 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 	} else if _, ok := logicGateAssignmentInputPriority(input); !ok && !logicGateAssignmentNodeHasPriority(r.nodes[nodeKey].Priority) {
 		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
 	}
-	previousNode := r.nodes[nodeKey]
-	previousAssigneeUserID := nodeAssigneeUserID(previousNode)
 	previousAssignment, hadPreviousAssignment := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, "")
 	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 
@@ -796,7 +759,6 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 			return LogicGateNodeAssignmentResult{}, err
 		}
 	}
-	_ = previousAssigneeUserID
 	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
 	projectionDeltas = append(projectionDeltas, r.syncRacioProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)...)
@@ -828,21 +790,6 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	return result, nil
-}
-
-func (r *MemoryRepo) responsibleUserIDForLogicGateLocked(companyID, logicGateID string) string {
-	assignments := r.logicGateGVICAssignmentsAsLogicGateRaciLocked(companyID, logicGateID)
-	sortLogicGateRaciAssignments(assignments)
-	for _, assignment := range assignments {
-		if assignment.Role == domain.GVICRoleGenerated && strings.TrimSpace(assignment.UserID) != "" {
-			return strings.TrimSpace(assignment.UserID)
-		}
-	}
-	return ""
-}
-
-func (r *MemoryRepo) assignNodeToLogicGateResponsibleLocked(companyID, logicGateID, nodeID string) bool {
-	return false
 }
 
 type memoryKanbanCardLocation struct {
@@ -885,14 +832,13 @@ func (r *MemoryRepo) applyNodeStatusAfterLogicGateAssignmentRemovalLocked(compan
 	if !ok {
 		return
 	}
-	if derivedStatus, derivedColor := r.deriveNodeStatusLocked(companyID, nodeID); derivedStatus != nil {
+	if derivedStatus, _ := r.deriveNodeStatusLocked(companyID, nodeID); derivedStatus != nil {
 		node.Status = derivedStatus
-		node.StatusColor = derivedColor
 	} else {
 		node.Status = fallbackStatus
-		node.StatusColor = fallbackStatusColor
 	}
 	r.nodes[nodeKey] = node
+	_ = fallbackStatusColor
 }
 
 func (r *MemoryRepo) moveEmailNodeLinksForKanbanCardLocked(companyID, nodeID, oldBoardID, oldCardID, newBoardID, newCardID, logicGateID string, updatedAt time.Time) {
@@ -1055,11 +1001,6 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		}
 	} else {
 		r.kanbanCards[location.mapKey][location.index] = resultCard
-	}
-	if input.AssigneePolicySet {
-		previousAssigneeUserID := nodeAssigneeUserID(r.nodes[nodeKey])
-		r.assignNodeToLogicGateResponsibleLocked(input.CompanyID, input.LogicGateID, input.NodeID)
-		_ = previousAssigneeUserID
 	}
 	r.syncNodeStatusFromKanbanCardLocked(resultCard)
 	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)

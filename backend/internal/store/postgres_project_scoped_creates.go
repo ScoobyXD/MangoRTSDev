@@ -61,7 +61,7 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 	if err := ensureProjectExistsForScopedCreateTx(ctx, tx, input.CompanyID, input.ProjectID); err != nil {
 		return ProjectScopedNodeCreateResult{}, err
 	}
-	node, err := r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, input.AssigneeUserID, false, true)
+	node, err := r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, "", false, true)
 	if err != nil {
 		return ProjectScopedNodeCreateResult{}, err
 	}

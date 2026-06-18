@@ -635,7 +635,7 @@ func highestLogicGateRaciRolesByUser(assignments []domain.LogicGateRaciAssignmen
 	out := map[string]string{}
 	for _, assignment := range assignments {
 		userID := strings.TrimSpace(assignment.UserID)
-		role, ok := store.NormalizeLogicGateRaciRole(assignment.Role)
+		role, ok := store.NormalizeGVICRole(assignment.Role)
 		if !ok || userID == "" {
 			continue
 		}

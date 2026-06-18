@@ -40,7 +40,6 @@ func workItemAssignmentEventPayload(assignment domain.NodeLogicGateAssignment, n
 		"position":               assignment.Position,
 		"is_issue":               assignment.IsIssue,
 		"priority":               optionalIntValue(node.Priority),
-		"assignee_user_id":       optionalStringValue(node.AssigneeUserID),
 		"compatibility_board_id": assignment.CompatibilityBoardID,
 		"compatibility_card_id":  assignment.CompatibilityCardID,
 		"board_id":               assignment.CompatibilityBoardID,

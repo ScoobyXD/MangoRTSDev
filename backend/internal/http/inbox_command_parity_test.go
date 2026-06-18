@@ -66,7 +66,7 @@ func TestInboxPriorityMoveCommandKeepsSourceProjectionReadsAndEventsConsistent(t
 		t.Fatalf("compatibility cards after priority move = %+v, want moved command card", cards)
 	}
 
-	readRec := getWorkItemInboxRead(t, handler, "/v1/work-items/responsible-inbox?company_id="+companyID, responsibleUserID, companyID, domain.RoleCompanyUser)
+	readRec := getWorkItemInboxRead(t, handler, "/v1/work-items/generated-inbox?company_id="+companyID, responsibleUserID, companyID, domain.RoleCompanyUser)
 	var readPayload struct {
 		Nodes []domain.Node `json:"nodes"`
 	}
@@ -173,13 +173,12 @@ func setupInboxCommandAssignedNode(t *testing.T, repo *store.MemoryRepo, company
 		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
 	}
 	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
-		CompanyID:      companyID,
-		LogicGateID:    logicGate.LogicGateID,
-		NodeID:         node.NodeID,
-		Status:         "pending",
-		Priority:       &priority,
-		PrioritySet:    true,
-		AssigneePolicy: store.LogicGateAssignmentAssigneePolicyFirstResponsible,
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    &priority,
+		PrioritySet: true,
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus setup: %v", err)
 	}

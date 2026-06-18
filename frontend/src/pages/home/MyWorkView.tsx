@@ -624,10 +624,9 @@ function buildMyWorkRows({
   const rows: MyWorkResourceRow[] = activeNodes.map((node) => {
     const logicGateIDs = cleanIDList(node.logic_gate_ids ?? []);
     const linkedLogicGates = logicGateIDs.map((logicGateID) => logicGateByID.get(logicGateID)).filter((logicGate): logicGate is LogicGateRecord => Boolean(logicGate));
-    const assignments = linkedLogicGates.flatMap((logicGate) => logicGate.raci_assignments ?? []);
-    const assigneeID = node.assignee_user_id?.trim() ?? "";
-    const people = assigneeID ? [personForUserID(assigneeID, userByID, node.assignee_name ?? undefined, node.assignee_email ?? undefined)] : peopleFromAssignments(assignments, userByID);
-    const participantUserIDs = uniqueStrings([assigneeID, ...assignments.map((assignment) => assignment.user_id)]);
+    const assignments = linkedLogicGates.flatMap((logicGate) => logicGate.gvic_assignments ?? []);
+    const people = peopleFromAssignments(assignments, userByID);
+    const participantUserIDs = uniqueStrings(assignments.map((assignment) => assignment.user_id));
     return {
       kind: "node",
       id: node.node_id,
@@ -639,7 +638,7 @@ function buildMyWorkRows({
       projectLabels: [],
       people,
       teams: teamsForUsers(people.map((person) => person.userID), groupIDsByUserID, groupByID),
-      raciRoles: uniqueRaciRoles(assignments.map((assignment) => assignment.role)),
+      gvicRoles: uniqueGVICRoles(assignments.map((assignment) => assignment.role)),
       participantUserIDs,
       logicGateLabels: logicGateIDs.map((logicGateID) => {
         const logicGate = logicGateByID.get(logicGateID);
@@ -808,7 +807,7 @@ function teamsForUsers(userIDs: string[], groupIDsByUserID: Map<string, string[]
   return Array.from(teams.values()).sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }));
 }
 
-function uniqueRaciRoles(roles: LogicGateRaciRole[]): LogicGateRaciRole[] {
+function uniqueGVICRoles(roles: LogicGateRaciRole[]): LogicGateRaciRole[] {
   const order: LogicGateRaciRole[] = ["generated", "verified", "consulted", "informed"];
   const seen = new Set(roles);
   return order.filter((role) => seen.has(role));
@@ -845,7 +844,7 @@ function createDefaultGroupingSetting(companyID: string, currentUserID: string):
     company_id: companyID,
     user_id: currentUserID,
     surface: "my_work",
-    name: "RACIO Priority Project",
+    name: "GVIC Priority Project",
     selected_scope: defaultMyWorkSelectedScope(currentUserID),
     groupings: [...DEFAULT_MY_WORK_GROUPINGS],
     panel_collapsed: false,
@@ -910,7 +909,7 @@ function groupHeaderBadgeLabel(field: MyWorkGroupingField): string {
   if (field === "person") return "P";
   if (field === "priority") return "#";
   if (field === "project") return "P";
-  if (field === "racio") return "R";
+  if (field === "gvic") return "G";
   if (field === "status") return "S";
   return "T";
 }

@@ -23,11 +23,11 @@ func TestWorkItemInboxReadEndpointValidation(t *testing.T) {
 		name string
 		path string
 	}{
-		{name: "missing company", path: "/v1/work-items/responsible-inbox"},
-		{name: "invalid company", path: "/v1/work-items/responsible-inbox?company_id=not-a-uuid"},
-		{name: "invalid user", path: "/v1/work-items/responsible-inbox?company_id=" + companyID + "&user_id=not-a-uuid"},
-		{name: "conflicting user aliases", path: "/v1/work-items/responsible-inbox?company_id=" + companyID + "&user_id=" + userID + "&target_user_id=" + otherUserID},
-		{name: "invalid limit", path: "/v1/work-items/aci-inbox?company_id=" + companyID + "&limit=0"},
+		{name: "missing company", path: "/v1/work-items/generated-inbox"},
+		{name: "invalid company", path: "/v1/work-items/generated-inbox?company_id=not-a-uuid"},
+		{name: "invalid user", path: "/v1/work-items/generated-inbox?company_id=" + companyID + "&user_id=not-a-uuid"},
+		{name: "conflicting user aliases", path: "/v1/work-items/generated-inbox?company_id=" + companyID + "&user_id=" + userID + "&target_user_id=" + otherUserID},
+		{name: "invalid limit", path: "/v1/work-items/gvic-inbox?company_id=" + companyID + "&limit=0"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,14 +89,16 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetLogicGateRaciAssignments aci: %v", err)
 	}
-	aciNode, err := repo.CreateNodeWithAssignee(companyID, "Read API ACI node", user.UserID)
+	aciNode, err := repo.CreateNode(companyID, "Read API ACI node")
 	if err != nil {
-		t.Fatalf("CreateNodeWithAssignee aci: %v", err)
+		t.Fatalf("CreateNode aci: %v", err)
 	}
-	standaloneNode, err := repo.CreateNodeWithAssignee(companyID, "Read API standalone node", user.UserID)
+	mustSetWorkItemReadNodeGVIC(t, repo, companyID, aciNode.NodeID, user.UserID)
+	standaloneNode, err := repo.CreateNode(companyID, "Read API standalone node")
 	if err != nil {
-		t.Fatalf("CreateNodeWithAssignee standalone: %v", err)
+		t.Fatalf("CreateNode standalone: %v", err)
 	}
+	mustSetWorkItemReadNodeGVIC(t, repo, companyID, standaloneNode.NodeID, user.UserID)
 	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: aciGate.LogicGateID, NodeID: aciNode.NodeID, Status: "done", Priority: testPriority(2), PrioritySet: true}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus aci: %v", err)
 	}
@@ -107,14 +109,10 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: responsibleGate.LogicGateID, NodeID: responsibleNode.NodeID, Status: "in progress", Priority: testPriority(4), PrioritySet: true}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus responsible: %v", err)
 	}
-	if _, err := repo.UpdateNode(store.UpdateNodeInput{CompanyID: companyID, NodeID: responsibleNode.NodeID, AssigneeUserIDSet: true}); err != nil {
-		t.Fatalf("clear responsible node assignee: %v", err)
-	}
-
 	handler := NewServer(repo).Routes()
 	baseQuery := "company_id=" + companyID
 
-	responsibleRec := getWorkItemInboxRead(t, handler, "/v1/work-items/responsible-inbox?"+baseQuery+"&limit=1", user.UserID, companyID, domain.RoleCompanyUser)
+	responsibleRec := getWorkItemInboxRead(t, handler, "/v1/work-items/generated-inbox?"+baseQuery+"&limit=1", user.UserID, companyID, domain.RoleCompanyUser)
 	var responsiblePayload struct {
 		CompanyID string        `json:"company_id"`
 		UserID    string        `json:"user_id"`
@@ -141,7 +139,7 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 		t.Fatalf("my nodes = %+v, want standalone assigned node %s", myNodesPayload.Nodes, standaloneNode.NodeID)
 	}
 
-	aciRec := getWorkItemInboxRead(t, handler, "/v1/work-items/aci-inbox?"+baseQuery, user.UserID, companyID, domain.RoleCompanyUser)
+	aciRec := getWorkItemInboxRead(t, handler, "/v1/work-items/gvic-inbox?"+baseQuery, user.UserID, companyID, domain.RoleCompanyUser)
 	var aciPayload struct {
 		LogicGates []store.WorkItemLogicGateInboxItem `json:"logic_gates"`
 	}
@@ -192,14 +190,16 @@ func TestWorkItemInboxReadUsesAuthenticatedActorUserID(t *testing.T) {
 	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, companyID, domain.RoleCompanyAdmin); err != nil {
 		t.Fatalf("AddCompanyMembership admin: %v", err)
 	}
-	ownNode, err := repo.CreateNodeWithAssignee(companyID, "Actor assigned node", actor.UserID)
+	ownNode, err := repo.CreateNode(companyID, "Actor assigned node")
 	if err != nil {
-		t.Fatalf("CreateNodeWithAssignee actor: %v", err)
+		t.Fatalf("CreateNode actor: %v", err)
 	}
-	otherNode, err := repo.CreateNodeWithAssignee(companyID, "Other assigned node", other.UserID)
+	mustSetWorkItemReadNodeGVIC(t, repo, companyID, ownNode.NodeID, actor.UserID)
+	otherNode, err := repo.CreateNode(companyID, "Other assigned node")
 	if err != nil {
-		t.Fatalf("CreateNodeWithAssignee other: %v", err)
+		t.Fatalf("CreateNode other: %v", err)
 	}
+	mustSetWorkItemReadNodeGVIC(t, repo, companyID, otherNode.NodeID, other.UserID)
 
 	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
 	actorToken := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
@@ -294,8 +294,8 @@ func TestWorkItemInboxReadHandlersUseRequestContext(t *testing.T) {
 		path string
 		want string
 	}{
-		{name: "responsible inbox", path: "/v1/work-items/responsible-inbox", want: "responsible"},
-		{name: "aci inbox", path: "/v1/work-items/aci-inbox", want: "aci"},
+		{name: "responsible inbox", path: "/v1/work-items/generated-inbox", want: "responsible"},
+		{name: "aci inbox", path: "/v1/work-items/gvic-inbox", want: "aci"},
 		{name: "my nodes", path: "/v1/work-items/my-nodes", want: "my_nodes"},
 		{name: "my logic gates", path: "/v1/work-items/my-logic-gates", want: "my_logic_gates"},
 	}
@@ -337,7 +337,7 @@ func TestWorkItemInboxReadHandlerPreservesCancelledRequestContext(t *testing.T) 
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/responsible-inbox?company_id="+companyID, nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/generated-inbox?company_id="+companyID, nil).WithContext(ctx)
 
 	handler.ServeHTTP(rec, req)
 
@@ -469,6 +469,22 @@ func decodeWorkItemInboxReadPayload(t *testing.T, rec *httptest.ResponseRecorder
 	t.Helper()
 	if err := json.NewDecoder(rec.Body).Decode(target); err != nil {
 		t.Fatalf("decode response: %v", err)
+	}
+}
+
+func mustSetWorkItemReadNodeGVIC(t *testing.T, repo *store.MemoryRepo, companyID, nodeID, userID string) {
+	t.Helper()
+	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: store.EntityTypeNode,
+		ResourceID:   nodeID,
+		Assignments: []store.ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: store.EntityPermissionSubjectUser,
+			PrincipalID:   userID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments %s: %v", nodeID, err)
 	}
 }
 

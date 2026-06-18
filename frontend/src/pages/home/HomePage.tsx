@@ -80,7 +80,7 @@ import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "
 import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, MESSAGE_POLL_REFRESH_INTERVAL_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isCustomMatrixViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, raciInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isCustomMatrixViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -126,7 +126,7 @@ type HomeNoticeResourceAction =
   | { kind: "logic_gate"; logicGateID: string }
   | { kind: "node"; nodeID: string };
 
-const RACIO_VIEWER_LIST_STORAGE_KEY_PREFIX = "mangorts.home.racioViewerList.v1";
+const RACIO_VIEWER_LIST_STORAGE_KEY_PREFIX = "mangorts.home.gvicViewerList.v1";
 
 function racioViewerListStorageKey(companyID: string, userID: string): string {
   const cleanCompanyID = companyID.trim() || "global";
@@ -1532,7 +1532,7 @@ export function HomePage({
       onGap(gap) {
         if (gap.companyID !== companyID) return;
         const touchesSharedInbox = gap.scopes.some((scope) => (
-          scope.eventType === "communications_shared_inbox_raci_updated" || scope.eventType === "shared_triage_access_updated" ||
+          scope.eventType === "communications_shared_inbox_gvic_updated" || scope.eventType === "shared_triage_access_updated" ||
           (scope.kind === "company_explorer" && (!scope.folderKind || scope.folderKind === "communications")) ||
           scope.kind === "workspace"
         ));
@@ -1542,11 +1542,11 @@ export function HomePage({
           (scope.kind === "logic_gate_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
           scope.kind === "kanban_board" ||
           scope.kind === "kanban_board_list" ||
-          scope.kind === "racio_matrix" ||
+          scope.kind === "gvic_matrix" ||
           scope.kind === "work_item_assignment" ||
           scope.kind === "workspace"
         ));
-        const touchesRacioMatrix = gap.scopes.some((scope) => scope.kind === "racio_matrix" || scope.kind === "workspace");
+        const touchesRacioMatrix = gap.scopes.some((scope) => scope.kind === "gvic_matrix" || scope.kind === "workspace");
         if (touchesSharedInbox) void loadSharedInboxes();
         if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
         if (touchesRacioMatrix) requestRacioProjectionRefreshRef.current?.();
@@ -1565,7 +1565,7 @@ export function HomePage({
         const data: Record<string, unknown> = envelope.data && typeof envelope.data === "object" ? envelope.data : {};
         const scopes = context.scopes ?? [];
         const touchesSharedInbox = scopes.some((scope) => (
-          scope.eventType === "communications_shared_inbox_raci_updated" || scope.eventType === "shared_triage_access_updated" ||
+          scope.eventType === "communications_shared_inbox_gvic_updated" || scope.eventType === "shared_triage_access_updated" ||
           (scope.kind === "company_explorer" && (!scope.folderKind || scope.folderKind === "communications"))
         ));
         const touchesWorkspacePanel = scopes.some((scope) => (
@@ -1574,11 +1574,11 @@ export function HomePage({
           (scope.kind === "logic_gate_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
           scope.kind === "kanban_board" ||
           scope.kind === "kanban_board_list" ||
-          scope.kind === "racio_matrix" ||
+          scope.kind === "gvic_matrix" ||
           scope.kind === "work_item_assignment" ||
           scope.kind === "workspace"
         ));
-        const touchesRacioMatrix = scopes.some((scope) => scope.kind === "racio_matrix" || scope.kind === "workspace");
+        const touchesRacioMatrix = scopes.some((scope) => scope.kind === "gvic_matrix" || scope.kind === "workspace");
         if (touchesSharedInbox) {
           void loadSharedInboxes();
         }
@@ -1619,7 +1619,7 @@ export function HomePage({
           } else {
             void refreshNodeRelationshipsForMatrix();
           }
-        } else if (type === "logic_gate_created" || type === "logic_gate_updated" || type === "logic_gate_raci_updated" || type === "logic_gate_permissions_updated") {
+        } else if (type === "logic_gate_created" || type === "logic_gate_updated" || type === "logic_gate_gvic_updated" || type === "logic_gate_permissions_updated") {
           const logicGate = data.logic_gate && typeof data.logic_gate === "object" ? data.logic_gate as LogicGateRecord : null;
           if (logicGate?.logic_gate_id) {
             setLogicGates((previous) => {
@@ -2279,7 +2279,7 @@ export function HomePage({
   const currentDirectSharedInboxRaciAssignments = useCallback((folderID: string): Array<{ role: CommunicationsSharedInboxRaciRole; subject_type: CommunicationsSharedInboxRaciSubjectType; subject_id: string }> => {
     const cleanFolderID = folderID.trim();
     const folder = sharedInboxes.find((item) => item.folder_id === cleanFolderID);
-    return (folder?.raci_assignments ?? [])
+    return (folder?.gvic_assignments ?? [])
       .filter((assignment) => assignment.folder_id === cleanFolderID)
       .map((assignment) => {
         const subjectType = (assignment.subject_type?.trim() || "user") as CommunicationsSharedInboxRaciSubjectType;
@@ -2301,11 +2301,11 @@ export function HomePage({
     try {
       const nextAssignments = await updateCommunicationsSharedInboxRaciAssignments(companyID, cleanFolderID, assignments);
       setSharedInboxes((previous) => previous.map((folder) => (
-        folder.folder_id === cleanFolderID ? { ...folder, raci_assignments: nextAssignments } : folder
+        folder.folder_id === cleanFolderID ? { ...folder, gvic_assignments: nextAssignments } : folder
       )));
       await loadSharedInboxes();
     } catch (raciError) {
-      setError(formatError(raciError, "Failed to update Shared Triage RACI"));
+      setError(formatError(raciError, "Failed to update Shared Triage GVIC"));
     } finally {
       setBusy("");
     }
@@ -2353,7 +2353,7 @@ export function HomePage({
   const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
   const logicGateByIDRef = useRef(logicGateByID);
   logicGateByIDRef.current = logicGateByID;
-  const activeRaciInboxSection = raciInboxSectionForView(activeViewID);
+  const activeRaciInboxSection = gvicInboxSectionForView(activeViewID);
   const matrixFilteredNodes = useMemo(() => (
     (isInboxMatrixView || isCustomMatrixView) && matrixAccountFilterIDs.length > 0
       ? nodes.filter((node) => entityMatchesAccountFilter(node, matrixAccountFilterIDs))
@@ -2391,7 +2391,7 @@ export function HomePage({
         let changed = false;
         for (const logicGate of fetched) {
           const current = byID.get(logicGate.logic_gate_id);
-          if (current?.header === logicGate.header && current?.raci_assignments === logicGate.raci_assignments) continue;
+          if (current?.header === logicGate.header && current?.gvic_assignments === logicGate.gvic_assignments) continue;
           byID.set(logicGate.logic_gate_id, logicGate);
           changed = true;
         }
@@ -2402,8 +2402,8 @@ export function HomePage({
   }, [apiBase, companyID, logicGateByID, nodes]);
   const myNodes = useMemo(() => {
     if (!workspacePanelUserID) return [];
-    return nodes.filter((node) => node.assignee_user_id?.trim() === workspacePanelUserID);
-  }, [nodes, workspacePanelUserID]);
+    return nodes.filter((node) => cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasAnyRaciRole(logicGateByID.get(logicGateID), workspacePanelUserID)));
+  }, [logicGateByID, nodes, workspacePanelUserID]);
   const assignedMyLogicGates = useMemo(() => {
     if (!workspacePanelUserID) return [];
     return logicGates.filter((logicGate) => logicGateHasAnyRaciRole(logicGate, workspacePanelUserID));
@@ -2891,7 +2891,6 @@ export function HomePage({
           ? racioProjectedNodeIDsRef.current
           : new Set(previous
             .filter((node) => (
-              node.assignee_user_id?.trim() === activeRacioMatrixUserID ||
               cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasAnyRaciRole(logicGateByIDRef.current.get(logicGateID), activeRacioMatrixUserID))
             ))
             .map((node) => node.node_id))
@@ -2908,12 +2907,8 @@ export function HomePage({
           node_id: nodeID,
           title: row.display_title || previousNode?.title || "Untitled node",
           status: row.status ?? null,
-          status_color: row.status_color ?? null,
           due_date: row.due_date ?? null,
           priority: row.priority ?? null,
-          assignee_user_id: row.assignee_user_id ?? null,
-          assignee_name: row.assignee_display_name ?? null,
-          assignee_email: row.assignee_email ?? null,
           logic_gate_ids: row.logic_gate_id?.trim() ? [row.logic_gate_id.trim()] : [],
           accounts: row.accounts ?? previousNode?.accounts ?? [],
           created_timestamp: row.resource_created_timestamp || previousNode?.created_timestamp || new Date().toISOString(),
@@ -2950,7 +2945,7 @@ export function HomePage({
           logic_gate_id: logicGateID,
           header: row.display_title || projectedLogicGate?.header || previousLogicGate?.header || "Untitled Logic Gate",
           created_timestamp: row.resource_created_timestamp || projectedLogicGate?.created_timestamp || previousLogicGate?.created_timestamp || new Date().toISOString(),
-          raci_assignments: projectedLogicGate?.raci_assignments ?? previousLogicGate?.raci_assignments ?? [],
+          gvic_assignments: projectedLogicGate?.gvic_assignments ?? previousLogicGate?.gvic_assignments ?? [],
           effective_access_level: projectedLogicGate?.effective_access_level ?? previousLogicGate?.effective_access_level ?? "edit",
           can_view: projectedLogicGate?.can_view ?? previousLogicGate?.can_view ?? true,
           can_edit: projectedLogicGate?.can_edit ?? previousLogicGate?.can_edit ?? true,
@@ -2990,7 +2985,7 @@ export function HomePage({
         racioProjectionSequenceRef.current = sequence;
       }
     } catch (projectionError) {
-      setError(formatError(projectionError, "Failed to refresh RACI matrix"));
+      setError(formatError(projectionError, "Failed to refresh GVIC matrix"));
     } finally {
       racioProjectionRefetchInFlightRef.current = false;
     }
@@ -3099,7 +3094,7 @@ export function HomePage({
           nodeByID: nodeMap,
           invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
         });
-        applyRacioProjectionRows(dropResult.racio_projection_rows);
+        applyRacioProjectionRows(dropResult.gvic_projection_rows);
         for (const node of dropResult.nodes) mergeUpdatedNode(node);
         setNotice("Node created and added to Logic Gate.");
         return;
@@ -3148,7 +3143,7 @@ export function HomePage({
       });
       if (result.logicGate) mergeCreatedLogicGate(result.logicGate, result.folderItems.filter((item) => item.item_type === "logic_gate"));
       mergeCreatedFolderItems(result.folderItems.filter((item) => item.item_type !== "logic_gate"));
-      applyRacioProjectionRows(result.racio_projection_rows);
+      applyRacioProjectionRows(result.gvic_projection_rows);
       mergeUpdatedNode(result.node);
       setNotice("Note created in a new Logic Gate.");
     } catch (createError) {
@@ -3211,7 +3206,7 @@ export function HomePage({
         nodeByID,
         invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
       });
-      applyRacioProjectionRows(dropResult.racio_projection_rows);
+      applyRacioProjectionRows(dropResult.gvic_projection_rows);
       for (const node of dropResult.nodes) {
         if (node) mergeUpdatedNode(node);
       }
@@ -3243,7 +3238,7 @@ export function HomePage({
         nodeByID,
         invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
       });
-      applyRacioProjectionRows(dropResult.racio_projection_rows);
+      applyRacioProjectionRows(dropResult.gvic_projection_rows);
       for (const node of dropResult.nodes) mergeUpdatedNode(node);
       setNotice(nodeIDs.length === 1 ? "Node moved into a new Logic Gate." : `${nodeIDs.length} nodes moved into a new Logic Gate.`);
     } catch (dropError) {
@@ -3263,7 +3258,7 @@ export function HomePage({
         const raciRoles: LogicGateRaciRole[] = ["generated", "verified", "consulted", "informed"];
         const assignmentUpdates = await Promise.all(logicGateIDs.map(async (logicGateID) => {
           const gate = logicGateByID.get(logicGateID);
-          let assignments = gate?.raci_assignments ?? [];
+          let assignments = gate?.gvic_assignments ?? [];
           const removalRoles = raciRoles.filter((role) => (
             role !== targetRole
             && assignments.some((assignment) => assignment.role === role && assignment.user_id?.trim() === currentUserID)
@@ -3279,7 +3274,7 @@ export function HomePage({
         }));
         setLogicGates((previous) => previous.map((logicGate) => {
           const update = assignmentUpdates.find((item) => item.logicGateID === logicGate.logic_gate_id);
-          return update ? { ...logicGate, raci_assignments: update.assignments } : logicGate;
+          return update ? { ...logicGate, gvic_assignments: update.assignments } : logicGate;
         }));
       }
 
@@ -3303,7 +3298,7 @@ export function HomePage({
           nodeByID,
           invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
         });
-        applyRacioProjectionRows(dropResult.racio_projection_rows);
+        applyRacioProjectionRows(dropResult.gvic_projection_rows);
         movedNodeCount += dropResult.nodes.length;
         for (const node of dropResult.nodes) mergeUpdatedNode(node);
       }
@@ -3503,7 +3498,7 @@ export function HomePage({
       }));
       setLogicGates((previous) => previous.map((logicGate) => {
         const update = updates.find((item) => item.logicGateID === logicGate.logic_gate_id);
-        return update ? { ...logicGate, raci_assignments: update.assignments } : logicGate;
+        return update ? { ...logicGate, gvic_assignments: update.assignments } : logicGate;
       }));
       setNotice(ids.length === 1 ? "Logic Gate assignments updated." : `${ids.length} Logic Gate assignments updated.`);
     } catch (bulkError) {

@@ -19,16 +19,11 @@ export type KanbanBoardProjectionRow = {
   node_id?: string;
   logic_gate_id?: string | null;
   node_title?: string;
-  title?: string;
   description_snapshot?: string;
   is_issue?: boolean | null;
   position?: number;
   due_date?: string | null;
   priority?: number | null;
-  assignee_user_id?: string | null;
-  assignee_display_name?: string | null;
-  assignee_name?: string | null;
-  assignee_email?: string | null;
   created_timestamp?: string;
   assignment_created_timestamp?: string;
   updated_timestamp?: string;
@@ -194,7 +189,7 @@ export function kanbanCardFromProjectionRow(row: KanbanBoardProjectionRow): Kanb
   const cardID = cleanString(row.card_id);
   const columnID = cleanString(row.column_id);
   const nodeID = cleanString(row.node_id);
-  const title = cleanString(row.node_title) || cleanString(row.title);
+  const title = cleanString(row.node_title);
   if (!companyID || !boardID || !cardID || !columnID || !nodeID) return null;
   const projectionUpdated = cleanString(row.projection_updated_timestamp);
   const updated = cleanString(row.updated_timestamp) || projectionUpdated;
@@ -211,9 +206,6 @@ export function kanbanCardFromProjectionRow(row: KanbanBoardProjectionRow): Kanb
     position: typeof row.position === "number" && Number.isFinite(row.position) ? row.position : 0,
     due_date: cleanOptionalString(row.due_date),
     priority: cleanOptionalNumber(row.priority),
-    assignee_user_id: cleanOptionalString(row.assignee_user_id),
-    assignee_name: cleanOptionalString(row.assignee_name) ?? cleanOptionalString(row.assignee_display_name),
-    assignee_email: cleanOptionalString(row.assignee_email),
     accounts: cleanAccounts(row.accounts) ?? [],
     projection_updated_timestamp: projectionUpdated || undefined,
     created_timestamp: cleanString(row.created_timestamp) || cleanString(row.assignment_created_timestamp) || updated,
@@ -228,17 +220,12 @@ function requestFallback(result: KanbanProjectionApplyResult, reason: KanbanProj
 function applyPatchToCard(card: KanbanCard, patch: Partial<KanbanBoardProjectionRow>, delta: KanbanProjectionDelta, envelope: KanbanProjectionEnvelope): KanbanCard {
   const patched = { ...card };
   if (typeof patch.column_id === "string") patched.column_id = patch.column_id.trim() || patched.column_id;
-  if (typeof patch.node_title === "string" || typeof patch.title === "string") patched.node_title = cleanString(patch.node_title) || cleanString(patch.title) || patched.node_title;
+  if (typeof patch.node_title === "string") patched.node_title = cleanString(patch.node_title) || patched.node_title;
   if (typeof patch.description_snapshot === "string") patched.description_snapshot = patch.description_snapshot;
   if (typeof patch.is_issue === "boolean") patched.is_issue = patch.is_issue;
   if (typeof patch.position === "number" && Number.isFinite(patch.position)) patched.position = patch.position;
   if (Object.prototype.hasOwnProperty.call(patch, "due_date")) patched.due_date = cleanOptionalString(patch.due_date);
   if (Object.prototype.hasOwnProperty.call(patch, "priority")) patched.priority = cleanOptionalNumber(patch.priority);
-  if (Object.prototype.hasOwnProperty.call(patch, "assignee_user_id")) patched.assignee_user_id = cleanOptionalString(patch.assignee_user_id);
-  if (Object.prototype.hasOwnProperty.call(patch, "assignee_display_name") || Object.prototype.hasOwnProperty.call(patch, "assignee_name")) {
-    patched.assignee_name = cleanOptionalString(patch.assignee_name) ?? cleanOptionalString(patch.assignee_display_name);
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, "assignee_email")) patched.assignee_email = cleanOptionalString(patch.assignee_email);
   if (Object.prototype.hasOwnProperty.call(patch, "accounts")) patched.accounts = cleanAccounts(patch.accounts) ?? [];
   const projectionUpdated = cleanString(patch.projection_updated_timestamp) || cleanString(delta.projected_timestamp) || cleanString(envelope.projected_timestamp);
   if (projectionUpdated) patched.projection_updated_timestamp = projectionUpdated;

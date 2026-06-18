@@ -226,7 +226,7 @@ function projectManagementWorkspaceEventTouchesPanel(type: string): boolean {
     cleanType === "logic_gate_created" ||
     cleanType === "logic_gate_updated" ||
     cleanType === "logic_gate_deleted" ||
-    cleanType === "logic_gate_raci_updated" ||
+    cleanType === "logic_gate_gvic_updated" ||
     cleanType === "logic_gate_permissions_updated" ||
     cleanType.startsWith("company_explorer_folder_");
 }
@@ -305,8 +305,6 @@ function normalizeTimelineRow(row: ProjectManagementTimelineRow): ProjectManagem
 }
 
 function rowColor(row: ProjectManagementTimelineRow): string {
-  const explicit = row.status_color?.trim();
-  if (explicit) return explicit;
   const status = row.status?.trim().toLowerCase() ?? "";
   if (status.includes("done") || status.includes("complete")) return "#22c55e";
   if (status.includes("progress")) return "#3b82f6";
@@ -360,16 +358,13 @@ function writeUserIDForPerspective(userIDs: string[], currentUserID: string): st
 function filterNodesByPerspective(nodes: NodeRecord[], perspective: CompanyPerspective, members: CompanyUserGroupMember[], currentUserID: string): NodeRecord[] {
   const userIDs = userIDsForPerspective(perspective, members, currentUserID);
   if (!userIDs) return nodes;
-  return nodes.filter((node) => {
-    const assignee = node.assignee_user_id?.trim() ?? "";
-    return assignee && userIDs.has(assignee);
-  });
+  return nodes;
 }
 
 function filterLogicGatesByPerspective(logicGates: LogicGateRecord[], perspective: CompanyPerspective, members: CompanyUserGroupMember[], currentUserID: string): LogicGateRecord[] {
   const userIDs = userIDsForPerspective(perspective, members, currentUserID);
   if (!userIDs) return logicGates;
-  return logicGates.filter((logicGate) => (logicGate.raci_assignments ?? []).some((assignment) => userIDs.has(assignment.user_id.trim())));
+  return logicGates.filter((logicGate) => (logicGate.gvic_assignments ?? []).some((assignment) => userIDs.has(assignment.user_id.trim())));
 }
 
 function readTimelinePayload(dataTransfer: DataTransfer): ProjectTimelinePayload | null {
@@ -592,11 +587,11 @@ function timelineGroupValues(
     return uniqueGroupValues([...rowAccounts, ...nodeAccounts].map((account) => ({ key: account.account_id, label: account.name || account.account_id })));
   }
   if (field === "team") {
-    const assigneeID = row.assignee_user_id?.trim() ?? "";
-    if (!assigneeID) return [fallbackGroupValue()];
+    const userID = row.user_id?.trim() ?? "";
+    if (!userID) return [fallbackGroupValue()];
     const groupsByID = new Map(groups.map((group) => [group.group_id, group]));
     const values = groupMembers
-      .filter((member) => member.user_id === assigneeID)
+      .filter((member) => member.user_id === userID)
       .map((member) => {
         const group = groupsByID.get(member.group_id);
         return { key: member.group_id, label: group?.name || member.group_id };

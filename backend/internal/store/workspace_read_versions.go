@@ -30,7 +30,7 @@ var (
 		"logic_gate_created",
 		"logic_gate_updated",
 		"logic_gate_deleted",
-		"logic_gate_raci_updated",
+		"logic_gate_gvic_updated",
 		"logic_gate_permissions_updated",
 	}
 	LogicGateRelationshipWorkspaceEventTypes = []string{
@@ -59,7 +59,7 @@ var (
 		"company_explorer_folder_updated",
 		"company_explorer_folder_deleted",
 		"company_explorer_folder_permissions_updated",
-		"communications_shared_inbox_raci_updated",
+		"communications_shared_inbox_gvic_updated",
 		"shared_triage_access_updated",
 	}
 	CompanyExplorerFolderItemWorkspaceEventTypes = []string{

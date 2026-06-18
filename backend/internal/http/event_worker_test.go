@@ -201,7 +201,7 @@ func TestEventWorkerPublishesRacioDeltaToUserScopeOnly(t *testing.T) {
 		t.Fatalf("processAvailableEventRows processed=%d err=%v", processed, err)
 	}
 	delta := clientA.readProjectionDelta(t)
-	if delta.Scope != scopeA || delta.Projection != store.ProjectionNameRacioMatrix || len(delta.Deltas) != 1 {
+	if delta.Scope != scopeA || delta.Projection != store.ProjectionNameGVICMatrix || len(delta.Deltas) != 1 {
 		t.Fatalf("RACIO worker delta = %+v, want user A scoped delta", delta)
 	}
 	if got := delta.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.UserID != userA.UserID {
@@ -253,7 +253,7 @@ func TestEventWorkerRacioPermissionLossSendsDeleteWithoutRowPayload(t *testing.T
 		t.Fatalf("processAvailableEventRows processed=%d err=%v", processed, err)
 	}
 	delta := client.readProjectionDelta(t)
-	if delta.Scope != scope || delta.Projection != store.ProjectionNameRacioMatrix || len(delta.Deltas) != 1 {
+	if delta.Scope != scope || delta.Projection != store.ProjectionNameGVICMatrix || len(delta.Deltas) != 1 {
 		t.Fatalf("RACIO permission delta = %+v, want one scoped delta", delta)
 	}
 	got := delta.Deltas[0]

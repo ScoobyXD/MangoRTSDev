@@ -12,7 +12,7 @@ const (
 	LogicGateWorkStatusBacklog    = "backlog"
 	LogicGateWorkStatusPending    = "pending"
 	LogicGateWorkStatusInProgress = "in_progress"
-	LogicGateWorkStatusVerify     = "review"
+	LogicGateWorkStatusReview     = "review"
 	LogicGateWorkStatusDone       = "done"
 )
 
@@ -28,7 +28,7 @@ var logicGateWorkStatusSpecs = []logicGateWorkStatusSpec{
 	{Key: LogicGateWorkStatusBacklog, Title: "Backlogs", Color: KanbanDefaultBacklogColor, Position: 500},
 	{Key: LogicGateWorkStatusPending, Title: "Pending", Color: KanbanDefaultPendingColor, Position: 1000},
 	{Key: LogicGateWorkStatusInProgress, Title: "In Progress", Color: KanbanDefaultInProgressColor, Position: 2000},
-	{Key: LogicGateWorkStatusVerify, Title: "Review", Color: KanbanDefaultVerifyColor, Position: 3000},
+	{Key: LogicGateWorkStatusReview, Title: "Review", Color: KanbanDefaultReviewColor, Position: 3000},
 	{Key: LogicGateWorkStatusDone, Title: "Done", Color: KanbanDefaultDoneColor, Position: 4000},
 }
 
@@ -49,7 +49,7 @@ func NormalizeLogicGateWorkStatusKey(status string) (string, bool) {
 	case "in progress", "inprogress", "ip":
 		return LogicGateWorkStatusInProgress, true
 	case "review":
-		return LogicGateWorkStatusVerify, true
+		return LogicGateWorkStatusReview, true
 	case "done", "d":
 		return LogicGateWorkStatusDone, true
 	default:
@@ -161,13 +161,10 @@ func buildLogicGateWorkView(logicGate domain.LogicGate, assignments []domain.Log
 func logicGateWorkNodeWithAssignment(node domain.Node, assignment domain.NodeLogicGateAssignment) domain.Node {
 	statusKey := logicGateWorkStatusKeyOrDefault(assignment.StatusKey, LogicGateWorkStatusPending)
 	status := LogicGateWorkStatusTitle(statusKey)
-	statusColor := LogicGateWorkStatusColor(statusKey)
 	if assignment.IsIssue {
 		status = "Issue"
-		statusColor = "#ffd400"
 	}
 	node.Status = &status
-	node.StatusColor = &statusColor
 	node.LogicGateIDs = cleanStringList(append(node.LogicGateIDs, assignment.LogicGateID))
 	return node
 }
@@ -222,9 +219,6 @@ func synthesizeLogicGateWorkCard(boardID string, assignment domain.NodeLogicGate
 		Position:         assignment.Position,
 		DueDate:          cloneStringPointer(node.DueDate),
 		Priority:         cloneIntPointer(node.Priority),
-		AssigneeUserID:   cloneStringPointer(node.AssigneeUserID),
-		AssigneeName:     cloneStringPointer(node.AssigneeName),
-		AssigneeEmail:    cloneStringPointer(node.AssigneeEmail),
 		CreatedTimestamp: assignment.CreatedTimestamp,
 		UpdatedTimestamp: assignment.UpdatedTimestamp,
 	}

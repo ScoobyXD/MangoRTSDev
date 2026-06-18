@@ -47,7 +47,7 @@ import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeC
 import { AppTaskbar } from "./AppTaskbar";
 import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, appTaskbarStorageScope, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
 import { readAppTimelineState, rollTimelineStateToDate, saveAppTimelineState, type AppTimelineState } from "./timelineState";
-import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute, buildRacioRoute, racioRoleForViewID, type DeepLinkRoute, type RacioDeepLinkRoute } from "./deepLinkRoutes";
+import { buildGvicRoute, buildLogicGateRoute, buildNodeRoute, buildProjectRoute, gvicRoleForViewID, type DeepLinkRoute, type GvicDeepLinkRoute } from "./deepLinkRoutes";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -351,7 +351,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   }, [initialPage, loaded.activeId, loaded.tabs, overrideContent]);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(initialActiveTabId);
-  const [homeViewID, setHomeViewID] = useState<HomeSidebarView>(() => (deepLink?.kind === "racio" ? deepLink.viewID : "my-triage"));
+  const [homeViewID, setHomeViewID] = useState<HomeSidebarView>(() => (deepLink?.kind === "gvic" ? deepLink.viewID : "my-triage"));
   const [movingTabId, setMovingTabId] = useState<string | null>(null);
   const [isDraggingTab, setIsDraggingTab] = useState(false);
 
@@ -993,8 +993,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     closeMenus();
     if (onNavigate) {
       saveViews(ensured.tabs, ensured.tab.id);
-      const role = racioRoleForViewID(view);
-      onNavigate(role ? buildRacioRoute(role) : routeForPage("home"));
+      const role = gvicRoleForViewID(view);
+      onNavigate(role ? buildGvicRoute(role) : routeForPage("home"));
     }
   }, [activatePrimaryPage, closeMenus, onNavigate]);
 
@@ -1052,15 +1052,15 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     ));
   }, [activatePrimaryPage, deepLinkProjectID]);
 
-  const racioDeepLink = deepLink?.kind === "racio" ? deepLink : null;
-  const racioDeepLinkViewID: HomeSidebarView | "" = racioDeepLink?.viewID ?? "";
+  const gvicDeepLink = deepLink?.kind === "gvic" ? deepLink : null;
+  const gvicDeepLinkViewID: HomeSidebarView | "" = gvicDeepLink?.viewID ?? "";
   useEffect(() => {
-    if (!racioDeepLinkViewID) return;
+    if (!gvicDeepLinkViewID) return;
     routeManagedExplorerNodePopupRef.current = false;
     setExplorerNodePopup(null);
-    setHomeViewID(racioDeepLinkViewID);
+    setHomeViewID(gvicDeepLinkViewID);
     activatePrimaryPage("home");
-  }, [activatePrimaryPage, racioDeepLinkViewID]);
+  }, [activatePrimaryPage, gvicDeepLinkViewID]);
 
   useEffect(() => {
     if (overrideContent || deepLink || !initialPage) return;
@@ -1212,8 +1212,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
 
   const openHomeNodeRoute = useCallback((nodeID: string) => {
     if (!onNavigate) return;
-    const role = racioRoleForViewID(homeViewID);
-    onNavigate(role ? buildRacioRoute(role, nodeID) : buildNodeRoute(nodeID));
+    const role = gvicRoleForViewID(homeViewID);
+    onNavigate(role ? buildGvicRoute(role, nodeID) : buildNodeRoute(nodeID));
   }, [homeViewID, onNavigate]);
 
   const openProjectManagementNodeOverlay = useCallback((nodeID: string) => {
@@ -1279,9 +1279,9 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
 
   const closeHomeNodeRoute = useCallback(() => {
     if (!onNavigate) return;
-    const role = (racioDeepLink as RacioDeepLinkRoute | null)?.role ?? racioRoleForViewID(homeViewID);
-    onNavigate(role ? buildRacioRoute(role) : "/", { replace: true });
-  }, [homeViewID, onNavigate, racioDeepLink]);
+    const role = (gvicDeepLink as GvicDeepLinkRoute | null)?.role ?? gvicRoleForViewID(homeViewID);
+    onNavigate(role ? buildGvicRoute(role) : "/", { replace: true });
+  }, [homeViewID, onNavigate, gvicDeepLink]);
 
   const openSidebarPin = useCallback((pin: SidebarPin) => {
     const companyID = getActiveCompanyID();
@@ -1672,7 +1672,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               embedded
               hideNavigation
               initialViewID={homeViewID}
-              deepLinkNodeID={racioDeepLink ? racioDeepLink.nodeID ?? "" : undefined}
+              deepLinkNodeID={gvicDeepLink ? gvicDeepLink.nodeID ?? "" : undefined}
               me={me}
               onNavigate={onNavigate}
               onNodeOverlayOpen={openHomeNodeRoute}

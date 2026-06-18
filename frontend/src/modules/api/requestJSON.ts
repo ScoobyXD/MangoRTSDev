@@ -182,8 +182,8 @@ function formatRequestTimingDuration(durationMs: number): string {
 function shouldLogBenchmarkRequestTiming(method: string, path: string): boolean {
   const cleanPath = path.split("?")[0] || path;
   if (method === "POST" && cleanPath === "/v1/workspace/entity-batches") return true;
-  if (method === "POST" && cleanPath === "/v2/racio-matrix/nodes") return true;
-  if (method === "POST" && /^\/v2\/racio-matrix\/nodes\/[^/]+\/move$/.test(cleanPath)) return true;
+  if (method === "POST" && cleanPath === "/v2/gvic-matrix/nodes") return true;
+  if (method === "POST" && /^\/v2\/gvic-matrix\/nodes\/[^/]+\/move$/.test(cleanPath)) return true;
   if (method === "POST" && /^\/v2\/logic-gates\/[^/]+\/nodes$/.test(cleanPath)) return true;
   if (method === "PUT" && /^\/v2\/logic-gates\/[^/]+\/nodes\/[^/]+\/state$/.test(cleanPath)) return true;
   if (method !== "GET") return false;

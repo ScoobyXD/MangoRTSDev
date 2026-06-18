@@ -35,12 +35,12 @@ export const RACI_STATUS_COLUMNS: ReadonlyArray<{ status: ResponsibleInboxStatus
   { status: "review", letter: "R", label: "Review" },
 ];
 
-export const RACI_INBOX_SECTIONS: ReadonlyArray<{ viewID: RaciInboxViewID; role: RaciInboxRole; letter: string; label: string; title: string }> = [
-  { viewID: "r-inbox", role: "generated", letter: "R", label: "generated", title: "R Nodes" },
-  { viewID: "a-inbox", role: "verified", letter: "A", label: "verified", title: "A Nodes" },
-  { viewID: "c-inbox", role: "consulted", letter: "C", label: "Consulted", title: "C Nodes" },
-  { viewID: "i-inbox", role: "informed", letter: "I", label: "Informed", title: "I Nodes" },
-  { viewID: "o-inbox", role: "other", letter: "O", label: "Other", title: "O Nodes" },
+export const GVIC_INBOX_SECTIONS: ReadonlyArray<{ viewID: RaciInboxViewID; role: RaciInboxRole; letter: string; label: string; title: string }> = [
+  { viewID: "r-inbox", role: "generated", letter: "G", label: "Generated", title: "Generated Nodes" },
+  { viewID: "a-inbox", role: "verified", letter: "V", label: "Verified", title: "Verified Nodes" },
+  { viewID: "c-inbox", role: "consulted", letter: "C", label: "Consulted", title: "Consulted Nodes" },
+  { viewID: "i-inbox", role: "informed", letter: "I", label: "Informed", title: "Informed Nodes" },
+  { viewID: "o-inbox", role: "other", letter: "O", label: "Other", title: "Other Nodes" },
 ];
 
 export const INBOX_PRIORITIES: ReadonlyArray<{ value: InboxPriority; label: string }> = [

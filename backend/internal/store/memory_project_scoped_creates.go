@@ -105,7 +105,7 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 	if _, ok := r.projects[key(input.CompanyID, input.ProjectID)]; !ok {
 		return ProjectScopedNodeCreateResult{}, ErrNotFound
 	}
-	node, err := r.createNodeWithAssigneeIDLocked(input.CompanyID, input.NodeID, input.Title, input.AssigneeUserID)
+	node, err := r.createNodeWithAssigneeIDLocked(input.CompanyID, input.NodeID, input.Title, "")
 	if err != nil {
 		rollback()
 		return ProjectScopedNodeCreateResult{}, err

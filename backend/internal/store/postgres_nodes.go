@@ -22,13 +22,7 @@ coalesce(
   end,
   nullif(n.status, '')
 ) as status,
-coalesce(
-  case
-    when assignment.is_issue then '#ffd400'
-    when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusColorSQL + `
-  end,
-  null
-) as status_color,
+null::text as status_color,
 n.due_date::text,
 n.priority,
 null::text as assignee_user_id,
@@ -219,15 +213,6 @@ where membership.company_id=$1 and membership.user_id::text=$2`,
 	return item, nil
 }
 
-func applyPostgresNodeAssigneeReadModel(node *domain.Node, assignee postgresNodeAssigneeReadModel) {
-	if assignee.UserID == "" {
-		return
-	}
-	node.AssigneeUserID = &assignee.UserID
-	node.AssigneeName = assignee.Name
-	node.AssigneeEmail = assignee.Email
-}
-
 func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) {
 	return r.CreateNodeWithAssignee(companyID, title, "")
 }
@@ -310,16 +295,7 @@ func (r *PostgresRepo) createNodeWithAssigneeIDWithoutProjectionOrFolderTx(ctx c
 
 func (r *PostgresRepo) createNodeWithAssigneeIDProjectionAndFolderTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string, syncProjection, syncFolderItem bool) (domain.Node, error) {
 	nodeID = strings.TrimSpace(nodeID)
-	assigneeUserID = strings.TrimSpace(assigneeUserID)
-	var assignee postgresNodeAssigneeReadModel
-	if assigneeUserID != "" {
-		var err error
-		assignee, err = loadPostgresNodeAssigneeReadModel(ctx, tx, companyID, assigneeUserID)
-		if err != nil {
-			return domain.Node{}, err
-		}
-		assigneeUserID = assignee.UserID
-	}
+	_ = strings.TrimSpace(assigneeUserID)
 	if nodeID == "" {
 		nodeID = newUUIDv7String()
 	}
@@ -331,24 +307,6 @@ func (r *PostgresRepo) createNodeWithAssigneeIDProjectionAndFolderTx(ctx context
 		item.CompanyID, item.NodeID, item.Title,
 	).Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp); err != nil {
 		return domain.Node{}, err
-	}
-	if assigneeUserID != "" {
-		if _, err := tx.ExecContext(ctx, `
-insert into resource_gvic_assignments (
-  company_id,
-  resource_type,
-  resource_id,
-  role,
-  principal_type,
-  principal_id,
-  created_timestamp,
-  updated_timestamp
-) values ($1::uuid, 'node', $2::uuid, 'generated', 'user', $3::uuid, now(), now())
-on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
-do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
-			companyID, item.NodeID, assigneeUserID); err != nil {
-			return domain.Node{}, err
-		}
 	}
 	if syncFolderItem {
 		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, companyID, CompanyExplorerSystemActiveNodesKey)
@@ -464,25 +422,6 @@ func (r *PostgresRepo) updateNodeTx(ctx context.Context, tx *sql.Tx, input Updat
 		value := strings.TrimSpace(*input.Status)
 		status = &value
 	}
-	assigneeUserID := (*string)(nil)
-	if input.AssigneeUserID != nil {
-		value := strings.TrimSpace(*input.AssigneeUserID)
-		assigneeUserID = &value
-	}
-	if input.AssigneeUserIDSet && assigneeUserID != nil && *assigneeUserID != "" {
-		var ok bool
-		if err := tx.QueryRowContext(ctx, `
-select exists(
-  select 1
-  from company_memberships
-  where company_id=$1 and user_id::text=$2
-)`, input.CompanyID, *assigneeUserID).Scan(&ok); err != nil {
-			return domain.Node{}, err
-		}
-		if !ok {
-			return domain.Node{}, ErrAssigneeNotInCompany
-		}
-	}
 	_, err := tx.ExecContext(ctx, `
 update nodes
 set name = case when $4 then $3 else name end,
@@ -503,35 +442,6 @@ where company_id = $1 and node_id = $2`,
 	)
 	if err != nil {
 		return domain.Node{}, err
-	}
-	if input.AssigneeUserIDSet {
-		if _, err := tx.ExecContext(ctx, `
-delete from resource_gvic_assignments
-where company_id=$1::uuid
-  and resource_type='node'
-  and resource_id=$2::uuid
-  and role='generated'
-  and principal_type='user'`, input.CompanyID, input.NodeID); err != nil {
-			return domain.Node{}, err
-		}
-		if assigneeUserID != nil && *assigneeUserID != "" {
-			if _, err := tx.ExecContext(ctx, `
-insert into resource_gvic_assignments (
-  company_id,
-  resource_type,
-  resource_id,
-  role,
-  principal_type,
-  principal_id,
-  created_timestamp,
-  updated_timestamp
-) values ($1::uuid, 'node', $2::uuid, 'generated', 'user', $3::uuid, now(), now())
-on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
-do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
-				input.CompanyID, input.NodeID, *assigneeUserID); err != nil {
-				return domain.Node{}, err
-			}
-		}
 	}
 	item, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`

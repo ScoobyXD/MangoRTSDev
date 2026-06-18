@@ -1,4 +1,4 @@
-import { RACI_INBOX_SECTIONS } from "../pages/home/homeConstants.js";
+import { GVIC_INBOX_SECTIONS } from "../pages/home/homeConstants.js";
 import type { RaciInboxRole, RaciInboxViewID } from "../pages/home/homeTypes.js";
 
 export type LogicGateDeepLinkRoute = {
@@ -17,14 +17,14 @@ export type ProjectDeepLinkRoute = {
   projectID: string;
 };
 
-export type RacioDeepLinkRoute = {
-  kind: "racio";
+export type GvicDeepLinkRoute = {
+  kind: "gvic";
   role: RaciInboxRole;
   viewID: RaciInboxViewID;
   nodeID?: string;
 };
 
-export type DeepLinkRoute = LogicGateDeepLinkRoute | NodeDeepLinkRoute | ProjectDeepLinkRoute | RacioDeepLinkRoute;
+export type DeepLinkRoute = LogicGateDeepLinkRoute | NodeDeepLinkRoute | ProjectDeepLinkRoute | GvicDeepLinkRoute;
 
 function cleanSegment(value: string): string {
   try {
@@ -44,18 +44,18 @@ export function normalizeAppPath(pathname: string): string {
   return "/";
 }
 
-export function racioSectionForRoleOrView(value: string): (typeof RACI_INBOX_SECTIONS)[number] | null {
+export function gvicSectionForRoleOrView(value: string): (typeof GVIC_INBOX_SECTIONS)[number] | null {
   const token = value.trim().toLowerCase();
   if (!token) return null;
-  return RACI_INBOX_SECTIONS.find((section) => section.role === token || section.viewID === token) ?? null;
+  return GVIC_INBOX_SECTIONS.find((section) => section.role === token || section.viewID === token) ?? null;
 }
 
-export function racioRoleForViewID(viewID: string): RaciInboxRole | null {
-  return RACI_INBOX_SECTIONS.find((section) => section.viewID === viewID)?.role ?? null;
+export function gvicRoleForViewID(viewID: string): RaciInboxRole | null {
+  return GVIC_INBOX_SECTIONS.find((section) => section.viewID === viewID)?.role ?? null;
 }
 
-export function racioViewIDForRole(role: string): RaciInboxViewID | null {
-  return RACI_INBOX_SECTIONS.find((section) => section.role === role)?.viewID ?? null;
+export function gvicViewIDForRole(role: string): RaciInboxViewID | null {
+  return GVIC_INBOX_SECTIONS.find((section) => section.role === role)?.viewID ?? null;
 }
 
 export function parseDeepLinkRoute(pathname: string): DeepLinkRoute | null {
@@ -77,14 +77,14 @@ export function parseDeepLinkRoute(pathname: string): DeepLinkRoute | null {
     const projectID = cleanSegment(segments[1]);
     return projectID ? { kind: "project", projectID } : null;
   }
-  if ((segments.length === 2 || segments.length === 4) && segments[0] === "racio") {
+  if ((segments.length === 2 || segments.length === 4) && segments[0] === "gvic") {
     if (segments.length === 4 && segments[2] !== "nodes") return null;
-    const section = racioSectionForRoleOrView(cleanSegment(segments[1]));
+    const section = gvicSectionForRoleOrView(cleanSegment(segments[1]));
     if (!section) return null;
     const nodeID = segments.length === 4 ? cleanSegment(segments[3]) : "";
     if (segments.length === 4 && !nodeID) return null;
     return {
-      kind: "racio",
+      kind: "gvic",
       role: section.role,
       viewID: section.viewID,
       nodeID: nodeID || undefined,
@@ -107,8 +107,8 @@ export function buildProjectRoute(projectID: string): string {
   return `/projects/${encodeSegment(projectID)}`;
 }
 
-export function buildRacioRoute(role: RaciInboxRole, nodeID?: string): string {
+export function buildGvicRoute(role: RaciInboxRole, nodeID?: string): string {
   const cleanRole = encodeSegment(role);
   const cleanNodeID = nodeID?.trim() ? encodeSegment(nodeID) : "";
-  return cleanNodeID ? `/racio/${cleanRole}/nodes/${cleanNodeID}` : `/racio/${cleanRole}`;
+  return cleanNodeID ? `/gvic/${cleanRole}/nodes/${cleanNodeID}` : `/gvic/${cleanRole}`;
 }

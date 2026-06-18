@@ -54,7 +54,7 @@ function preloadRouteSurface(path: string): void {
     preloadLogicGateArenaSurface();
     return;
   }
-  if (path === "/home" || path === "/communication" || path === "/communications" || route?.kind === "racio") {
+  if (path === "/home" || path === "/communication" || path === "/communications" || route?.kind === "gvic") {
     preloadHomeSurface();
     return;
   }
@@ -365,7 +365,7 @@ export default function AuthGate() {
   const deepLinkRoute = parseDeepLinkRoute(normalizedPath);
   const deepLinkInitialPage = deepLinkRoute?.kind === "logic_gate"
     ? "logic-gate-arena"
-    : deepLinkRoute?.kind === "racio"
+    : deepLinkRoute?.kind === "gvic"
       ? "home"
       : deepLinkRoute?.kind === "project" || normalizedPath === "/project-management"
         ? "project-management"

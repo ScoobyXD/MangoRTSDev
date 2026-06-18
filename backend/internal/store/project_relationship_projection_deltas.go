@@ -27,7 +27,6 @@ func cloneProjectRelationshipProjectionRow(row ProjectRelationshipProjectionRow)
 	out := row
 	out.LogicGateID = cloneStringPointer(row.LogicGateID)
 	out.Status = cloneStringPointer(row.Status)
-	out.StatusColor = cloneStringPointer(row.StatusColor)
 	return out
 }
 

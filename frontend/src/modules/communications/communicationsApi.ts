@@ -164,7 +164,6 @@ export type CommunicationsSharedInbox = {
   default_access?: "edit" | "no_access";
   account_email?: string;
   position: number;
-  raci_assignments?: CommunicationsSharedInboxRaciAssignment[];
   gvic_assignments?: CommunicationsSharedInboxRaciAssignment[];
   access_grants?: ResourceAccessGrant[];
   effective_access_level?: ResourceAccessLevel;
@@ -1667,11 +1666,10 @@ function cloneSharedInboxes(inboxes: CommunicationsSharedInbox[]): Communication
 }
 
 function cloneSharedInbox(inbox: CommunicationsSharedInbox): CommunicationsSharedInbox {
-  const assignments = cloneResourceGVICAssignmentsAsSharedInbox(inbox.gvic_assignments ?? inbox.raci_assignments ?? [], inbox.folder_id);
+  const assignments = cloneResourceGVICAssignmentsAsSharedInbox(inbox.gvic_assignments ?? [], inbox.folder_id);
   return {
     ...inbox,
     gvic_assignments: assignments,
-    raci_assignments: assignments,
     access_grants: cloneResourceAccessGrants(inbox.access_grants ?? []),
   };
 }
@@ -1736,11 +1734,10 @@ function cloneCompanyExplorerFolderItems(items: CompanyExplorerFolderItem[]): Co
 
 function cloneLogicGates(logicGates: LogicGateRecord[]): LogicGateRecord[] {
   return logicGates.map((logicGate) => {
-    const assignments = cloneLogicGateRaciAssignments(logicGate.gvic_assignments ?? logicGate.raci_assignments ?? []);
+    const assignments = cloneLogicGateRaciAssignments(logicGate.gvic_assignments ?? []);
     return {
       ...logicGate,
       gvic_assignments: assignments,
-      raci_assignments: assignments,
     };
   });
 }

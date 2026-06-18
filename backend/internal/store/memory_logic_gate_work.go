@@ -40,19 +40,5 @@ func (r *MemoryRepo) GetLogicGateWork(companyID, logicGateID string) (domain.Log
 
 func (r *MemoryRepo) logicGateWorkNodeSummaryLocked(node domain.Node, assignment domain.NodeLogicGateAssignment) domain.Node {
 	node.LogicGateIDs = []string{assignment.LogicGateID}
-	if node.AssigneeUserID == nil || strings.TrimSpace(*node.AssigneeUserID) == "" {
-		return node
-	}
-	if _, ok := r.memberships[membershipKey(node.CompanyID, *node.AssigneeUserID)]; !ok {
-		return node
-	}
-	if user, ok := r.users[*node.AssigneeUserID]; ok {
-		if name := strings.TrimSpace(user.DisplayName); name != "" {
-			node.AssigneeName = &name
-		}
-		if email := strings.TrimSpace(user.Email); email != "" {
-			node.AssigneeEmail = &email
-		}
-	}
 	return node
 }

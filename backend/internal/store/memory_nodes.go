@@ -46,12 +46,7 @@ func (r *MemoryRepo) createNodeWithAssigneeLocked(companyID, title, assigneeUser
 
 func (r *MemoryRepo) createNodeWithAssigneeIDLocked(companyID, nodeID, title, assigneeUserID string) (domain.Node, error) {
 	nodeID = strings.TrimSpace(nodeID)
-	assigneeUserID = strings.TrimSpace(assigneeUserID)
-	if assigneeUserID != "" {
-		if _, ok := r.memberships[membershipKey(companyID, assigneeUserID)]; !ok {
-			return domain.Node{}, ErrAssigneeNotInCompany
-		}
-	}
+	_ = strings.TrimSpace(assigneeUserID)
 	if nodeID == "" {
 		nodeID = newUUIDv7String()
 	} else if _, exists := r.nodes[key(companyID, nodeID)]; exists {
@@ -68,13 +63,6 @@ func (r *MemoryRepo) createNodeWithAssigneeIDLocked(companyID, nodeID, title, as
 	if _, err := r.assignNodeToActiveNodesFolderLocked(companyID, n.NodeID, 0); err != nil {
 		delete(r.nodes, key(companyID, n.NodeID))
 		return domain.Node{}, err
-	}
-	if assigneeUserID != "" {
-		keyValue := resourceGVICKey{companyID: companyID, resourceType: EntityTypeNode, resourceID: n.NodeID}
-		assignment := normalizedGVICAssignmentInput{role: domain.GVICRoleGenerated, principalType: EntityPermissionSubjectUser, principalID: assigneeUserID}
-		item := r.resourceGVICAssignmentForPrincipalLocked(keyValue, assignment, time.Now().UTC())
-		r.gvicAssignments[gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)] = item
-		r.syncResourceGVICEffectiveAssignmentsLocked([]resourceGVICKey{keyValue})
 	}
 	r.syncRacioProjectionForNodeLocked(companyID, n.NodeID)
 	return r.withNodeReadModelLocked(n), nil
@@ -106,12 +94,9 @@ func (r *MemoryRepo) deriveNodeStatusLocked(companyID, nodeID string) (*string, 
 }
 
 func (r *MemoryRepo) withDerivedNodeStatusLocked(node domain.Node) domain.Node {
-	derivedStatus, derivedColor := r.deriveNodeStatusLocked(node.CompanyID, node.NodeID)
+	derivedStatus, _ := r.deriveNodeStatusLocked(node.CompanyID, node.NodeID)
 	if derivedStatus != nil {
 		node.Status = derivedStatus
-	}
-	if derivedColor != nil {
-		node.StatusColor = derivedColor
 	}
 	return node
 }
@@ -220,24 +205,6 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 	}
 	if input.PrioritySet {
 		node.Priority = input.Priority
-	}
-	if input.AssigneeUserIDSet {
-		keyValue := resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}
-		for sourceKey, assignment := range r.gvicAssignments {
-			if assignment.CompanyID == input.CompanyID && assignment.ResourceType == EntityTypeNode && assignment.ResourceID == input.NodeID && assignment.Role == domain.GVICRoleGenerated && assignment.PrincipalType == EntityPermissionSubjectUser {
-				delete(r.gvicAssignments, sourceKey)
-			}
-		}
-		if input.AssigneeUserID != nil && strings.TrimSpace(*input.AssigneeUserID) != "" {
-			value := strings.TrimSpace(*input.AssigneeUserID)
-			if _, ok := r.memberships[membershipKey(input.CompanyID, value)]; !ok {
-				return domain.Node{}, ErrAssigneeNotInCompany
-			}
-			assignment := normalizedGVICAssignmentInput{role: domain.GVICRoleGenerated, principalType: EntityPermissionSubjectUser, principalID: value}
-			item := r.resourceGVICAssignmentForPrincipalLocked(keyValue, assignment, time.Now().UTC())
-			r.gvicAssignments[gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)] = item
-		}
-		r.syncResourceGVICEffectiveAssignmentsLocked([]resourceGVICKey{keyValue})
 	}
 	r.nodes[k] = node
 	r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)

@@ -15,7 +15,7 @@ export type WorkspaceStreamEnvelope = {
 export type WorkspaceReconciliationScopeKind =
   | "kanban_board"
   | "kanban_board_list"
-  | "racio_matrix"
+  | "gvic_matrix"
   | "node_graph"
   | "logic_gate_graph"
   | "company_explorer"
@@ -240,7 +240,7 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
   if (WORK_ITEM_ASSIGNMENT_EVENT_TYPES.has(type)) {
     addScope(scopes, seen, { kind: "work_item_assignment", eventType: type, boardID, logicGateID, nodeID, assignmentID, cardID, columnID });
     if (boardID) addScope(scopes, seen, { kind: "kanban_board", eventType: type, boardID, logicGateID, nodeID, cardID, columnID });
-    addScope(scopes, seen, { kind: "racio_matrix", eventType: type, logicGateID, nodeID, assignmentID });
+    addScope(scopes, seen, { kind: "gvic_matrix", eventType: type, logicGateID, nodeID, assignmentID });
     if (nodeID) addScope(scopes, seen, { kind: "node_graph", eventType: type, nodeID });
     return scopes;
   }
@@ -269,7 +269,7 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
         nodeID,
       });
     }
-    addScope(scopes, seen, { kind: "racio_matrix", eventType: type, nodeID });
+    addScope(scopes, seen, { kind: "gvic_matrix", eventType: type, nodeID });
     return scopes;
   }
 
@@ -278,13 +278,13 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
     return scopes;
   }
 
-  if (type === "logic_gate_created" || type === "logic_gate_updated" || type === "logic_gate_deleted" || type === "logic_gate_raci_updated" || type === "logic_gate_permissions_updated") {
+  if (type === "logic_gate_created" || type === "logic_gate_updated" || type === "logic_gate_deleted" || type === "logic_gate_gvic_updated" || type === "logic_gate_permissions_updated") {
     const logicGateBoardID = logicGateKanbanBoardID(logicGateID);
     addScope(scopes, seen, { kind: "logic_gate_graph", eventType: type, logicGateID });
     addScope(scopes, seen, { kind: "company_explorer", eventType: type, itemType: "logic_gate", itemID: logicGateID });
     if (logicGateBoardID) addScope(scopes, seen, { kind: "kanban_board", eventType: type, boardID: logicGateBoardID, logicGateID });
     addScope(scopes, seen, { kind: "kanban_board_list", eventType: type, boardID: logicGateBoardID, logicGateID });
-    addScope(scopes, seen, { kind: "racio_matrix", eventType: type, logicGateID });
+    addScope(scopes, seen, { kind: "gvic_matrix", eventType: type, logicGateID });
     return scopes;
   }
 
@@ -307,7 +307,7 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
     return scopes;
   }
 
-  if (type === "company_explorer_folder_created" || type === "company_explorer_folder_moved" || type === "company_explorer_folder_updated" || type === "company_explorer_folder_deleted" || type === "company_explorer_folder_permissions_updated" || type === "communications_shared_inbox_raci_updated" || type === "shared_triage_access_updated") {
+  if (type === "company_explorer_folder_created" || type === "company_explorer_folder_moved" || type === "company_explorer_folder_updated" || type === "company_explorer_folder_deleted" || type === "company_explorer_folder_permissions_updated" || type === "communications_shared_inbox_gvic_updated" || type === "shared_triage_access_updated") {
     addScope(scopes, seen, { kind: "company_explorer", eventType: type, folderID, folderKind });
     if (folderKind === "node") addScope(scopes, seen, { kind: "node_graph", eventType: type, folderID });
     if (folderKind === "logic_gate") addScope(scopes, seen, { kind: "logic_gate_graph", eventType: type, folderID });

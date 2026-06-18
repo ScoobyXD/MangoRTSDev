@@ -43,9 +43,6 @@ function row(overrides: Partial<KanbanBoardProjectionRow> = {}): KanbanBoardProj
     position: 2000,
     due_date: "2026-06-03",
     priority: 2,
-    assignee_user_id: "user-1",
-    assignee_display_name: "Casey",
-    assignee_email: "casey@example.com",
     created_timestamp: "2026-06-01T00:00:00.000Z",
     updated_timestamp: "2026-06-02T00:00:00.000Z",
     projection_updated_timestamp: "2026-06-02T00:00:00.000Z",
@@ -72,8 +69,6 @@ test("converts Kanban projection rows into card metadata", () => {
   assert.equal(converted?.node_title, "Alpha updated");
   assert.equal(converted?.due_date, "2026-06-03");
   assert.equal(converted?.priority, 2);
-  assert.equal(converted?.assignee_user_id, "user-1");
-  assert.equal(converted?.assignee_name, "Casey");
 });
 
 test("applies Kanban upsert and delete projection deltas locally", () => {
@@ -89,7 +84,7 @@ test("applies Kanban upsert and delete projection deltas locally", () => {
   assert.equal(upsert.fallback, false);
   assert.equal(upsert.changed, true);
   assert.equal(upsert.cards[0]?.column_id, "doing");
-  assert.equal(upsert.cards[0]?.assignee_name, "Casey");
+  assert.equal(upsert.cards[0]?.priority, 2);
 
   const deleted = applyKanbanProjectionEnvelope({
     envelope: envelope({

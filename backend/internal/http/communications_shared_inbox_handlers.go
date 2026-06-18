@@ -62,10 +62,6 @@ func (s *Server) handleCommunicationsSharedInboxByID(w http.ResponseWriter, r *h
 		s.handleCommunicationsSharedInboxAccess(w, r, folderID)
 		return
 	}
-	if len(parts) == 2 && parts[1] == "raci" {
-		writeError(w, http.StatusGone, "gvic_required")
-		return
-	}
 	if len(parts) != 1 {
 		writeError(w, http.StatusNotFound, "not_found")
 		return

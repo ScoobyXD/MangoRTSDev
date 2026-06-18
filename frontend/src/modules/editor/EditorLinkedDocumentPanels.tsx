@@ -11,7 +11,7 @@ import {
   KANBAN_NODE_PRIORITY_STYLE_OPTIONS,
   KANBAN_LOGIC_GATE_PENDING_COLOR,
   KANBAN_LOGIC_GATE_REQUESTED_COLOR,
-  KANBAN_LOGIC_GATE_VERIFY_COLOR,
+  KANBAN_LOGIC_GATE_REVIEW_COLOR,
 } from "../kanban/shared";
 import {
   avatarBackgroundForName,
@@ -34,18 +34,16 @@ type EditorLinkedDocumentPanelsProps = {
   linkedNodeMetadataRows: Array<{ label: string; value: string }>;
   linkedNodeHistoryRows: string[];
   canEdit: boolean;
-  canEditRaci?: boolean;
+  canEditGVIC?: boolean;
   nodePresetFields: {
     status: string;
-    statusColor: string;
     priorityDraft: string;
     priorityRequirementError?: string;
-    assigneeDraft: string;
     accounts: Account[];
     accountOptions: Account[];
     dueDateDraft: string;
   } | null;
-  logicGateRaciFields: {
+  gvicFields: {
     assignments: LogicGateRaciAssignment[];
   } | null;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
@@ -63,13 +61,11 @@ type EditorLinkedDocumentPanelsProps = {
   onCommitNodeStatus: (statusKey: string, statusLabel: string, statusColor: string) => void;
   onSetNodePriorityDraft: React.Dispatch<React.SetStateAction<string>>;
   onCommitNodePriorityDraft: (draft: string) => void;
-  onSetNodeAssigneeDraft: React.Dispatch<React.SetStateAction<string>>;
-  onCommitNodeAssigneeDraft: (draft: string) => void;
   onCommitNodeAccountIDs: (accountIDs: string[]) => void;
   onSetNodeDueDateDraft: React.Dispatch<React.SetStateAction<string>>;
   onCommitNodeDueDateDraft: (draft: string) => void;
-  onAddLogicGateRaciSubject: (role: LogicGateRaciRole, subjectType: LogicGateRaciSubjectType, subjectID: string) => void;
-  onRemoveLogicGateRaciSubject: (role: LogicGateRaciRole, subjectType: LogicGateRaciSubjectType, subjectID: string) => void;
+  onAddGVICSubject: (role: LogicGateRaciRole, subjectType: LogicGateRaciSubjectType, subjectID: string) => void;
+  onRemoveGVICSubject: (role: LogicGateRaciRole, subjectType: LogicGateRaciSubjectType, subjectID: string) => void;
 };
 
 const NODE_PRIORITY_OPTIONS = KANBAN_NODE_PRIORITY_STYLE_OPTIONS;
@@ -81,18 +77,18 @@ const NODE_STATUS_OPTIONS: ReadonlyArray<{ value: NodeStatusValue; label: string
   { value: "backlog", label: "Backlog", storageStatus: "Backlog", color: KANBAN_LOGIC_GATE_BACKLOG_COLOR },
   { value: "pending", label: "Pending", storageStatus: "Pending", color: KANBAN_LOGIC_GATE_PENDING_COLOR },
   { value: "in_progress", label: "In Progress", storageStatus: "In Progress", color: KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR },
-  { value: "review", label: "Review", storageStatus: "Review", color: KANBAN_LOGIC_GATE_VERIFY_COLOR },
+  { value: "review", label: "Review", storageStatus: "Review", color: KANBAN_LOGIC_GATE_REVIEW_COLOR },
   { value: "done", label: "Done", storageStatus: "Done", color: KANBAN_LOGIC_GATE_DONE_COLOR },
 ];
 
-const LOGIC_GATE_RACI_ROLES: ReadonlyArray<{ role: LogicGateRaciRole; label: string }> = [
+const GVIC_ROLES: ReadonlyArray<{ role: LogicGateRaciRole; label: string }> = [
   { role: "generated", label: "Generated" },
   { role: "verified", label: "Verified" },
   { role: "consulted", label: "Consulted" },
   { role: "informed", label: "Informed" },
 ];
 
-const RACI_ROLE_ACCENTS: Record<LogicGateRaciRole, string> = {
+const GVIC_ROLE_ACCENTS: Record<LogicGateRaciRole, string> = {
   generated: "#0891b2",
   verified: "#db2777",
   consulted: "#7c3aed",
@@ -249,13 +245,6 @@ const CalendarIcon: React.FC<{ color: string }> = ({ color }) => (
   </svg>
 );
 
-const PersonIcon: React.FC<{ color: string }> = ({ color }) => (
-  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block" }}>
-    <circle cx="8" cy="5.1" r="2.35" fill="none" stroke={color} strokeWidth="1.35" />
-    <path d="M3.3 13.1c.55-2.25 2.25-3.55 4.7-3.55s4.15 1.3 4.7 3.55" fill="none" stroke={color} strokeWidth="1.35" strokeLinecap="round" />
-  </svg>
-);
-
 export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProps> = ({
   activeTab,
   linkedEntityKind,
@@ -264,9 +253,9 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   linkedNodeMetadataRows,
   linkedNodeHistoryRows,
   canEdit,
-  canEditRaci = canEdit,
+  canEditGVIC = canEdit,
   nodePresetFields,
-  logicGateRaciFields,
+  gvicFields,
   companyUsers,
   companyUserGroups,
   companyUserGroupMembers,
@@ -282,38 +271,25 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onCommitNodeStatus,
   onSetNodePriorityDraft,
   onCommitNodePriorityDraft,
-  onSetNodeAssigneeDraft,
-  onCommitNodeAssigneeDraft,
   onCommitNodeAccountIDs,
   onSetNodeDueDateDraft,
   onCommitNodeDueDateDraft,
-  onAddLogicGateRaciSubject,
-  onRemoveLogicGateRaciSubject,
+  onAddGVICSubject,
+  onRemoveGVICSubject,
 }) => {
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [hoveredStatusValue, setHoveredStatusValue] = useState<NodeStatusValue | "">("");
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
   const [hoveredPriorityValue, setHoveredPriorityValue] = useState("");
   const statusMenuRef = useRef<HTMLSpanElement | null>(null);
-  const assigneeListID = useId();
-  const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
-  const assigneeMenuRef = useRef<HTMLSpanElement | null>(null);
   const priorityMenuRef = useRef<HTMLSpanElement | null>(null);
   const dueDatePickerRef = useRef<HTMLInputElement | null>(null);
   const selectedPriority = NODE_PRIORITY_OPTIONS.find((option) => option.value === (nodePresetFields?.priorityDraft || "0")) ?? NODE_PRIORITY_OPTIONS[0];
   const priorityRequirementError = nodePresetFields?.priorityRequirementError ?? "";
   const priorityHasRequirementError = Boolean(priorityRequirementError);
-  const statusColor = validHexColor(nodePresetFields?.statusColor ?? "");
   const selectedStatus = NODE_STATUS_OPTIONS.find((option) => option.value === normalizeNodeStatusValue(nodePresetFields?.status ?? ""));
-  const displayStatusColor = selectedStatus?.color ?? statusColor;
+  const displayStatusColor = selectedStatus?.color ?? "#64748b";
   const displayStatusLabel = selectedStatus?.label ?? displayNodeStatusFallback(nodePresetFields?.status ?? "");
-  const assigneeMatches = useMemo(() => {
-    const query = (nodePresetFields?.assigneeDraft ?? "").trim().toLowerCase();
-    const matches = query
-      ? companyUsers.filter((user) => companyUserOptionLabel(user).toLowerCase().includes(query) || (user.email ?? "").toLowerCase().includes(query) || (user.display_name ?? "").toLowerCase().includes(query))
-      : companyUsers;
-    return matches.slice(0, 8);
-  }, [companyUsers, nodePresetFields?.assigneeDraft]);
 
   useEffect(() => {
     if (canEdit) return;
@@ -321,7 +297,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     setHoveredStatusValue("");
     setPriorityMenuOpen(false);
     setHoveredPriorityValue("");
-    setAssigneeMenuOpen(false);
     onSetIsEditingTitle(false);
   }, [canEdit, onSetIsEditingTitle]);
 
@@ -366,23 +341,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
       window.removeEventListener("keydown", onKeyDown, true);
     };
   }, [priorityMenuOpen]);
-
-  useEffect(() => {
-    if (!assigneeMenuOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (assigneeMenuRef.current?.contains(event.target as Node)) return;
-      setAssigneeMenuOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setAssigneeMenuOpen(false);
-    };
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [assigneeMenuOpen]);
 
   const beginTitleEditAtEnd = () => {
     if (!canEdit) return;
@@ -493,7 +451,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               className="mango-editor-hover-highlight"
               style={{
                 display: "grid",
-                gridTemplateColumns: "164px 250px minmax(236px, 310px) minmax(260px, 340px) 160px",
+                gridTemplateColumns: "164px 250px minmax(260px, 340px) 160px",
                 justifyContent: "start",
                 columnGap: 8,
                 rowGap: 6,
@@ -612,95 +570,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   )}
                 </span>
               </div>
-              <label style={{ gridColumn: 3, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
-                <strong>Person In Charge:</strong>
-                <span ref={assigneeMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 290px)" }}>
-                  <input
-                    id={assigneeListID}
-                    value={nodePresetFields.assigneeDraft}
-                    disabled={!canEdit}
-                    readOnly={!canEdit}
-                    onFocus={() => { if (canEdit) setAssigneeMenuOpen(true); }}
-                    onChange={(event) => {
-                      if (!canEdit) return;
-                      const next = event.target.value;
-                      onSetNodeAssigneeDraft(next);
-                      setAssigneeMenuOpen(true);
-                      if (companyUsers.some((user) => companyUserOptionLabel(user) === next)) {
-                        onCommitNodeAssigneeDraft(next);
-                        setAssigneeMenuOpen(false);
-                      }
-                    }}
-                    onBlur={(event) => { if (canEdit) onCommitNodeAssigneeDraft(event.currentTarget.value); }}
-                    onKeyDown={(event) => {
-                      if (!canEdit) {
-                        event.preventDefault();
-                        return;
-                      }
-                      if (event.key === "Enter") {
-                        if (assigneeMatches[0]) {
-                          const label = companyUserOptionLabel(assigneeMatches[0]);
-                          onSetNodeAssigneeDraft(label);
-                          onCommitNodeAssigneeDraft(label);
-                          setAssigneeMenuOpen(false);
-                        }
-                        event.currentTarget.blur();
-                      }
-                    }}
-                    placeholder="Unassigned"
-                    aria-label="Person in charge"
-                    aria-haspopup="listbox"
-                    aria-expanded={canEdit && assigneeMenuOpen}
-                    aria-controls={`${assigneeListID}-options`}
-                    style={{ width: "100%", minWidth: 0, minHeight: 25, boxSizing: "border-box", border: assigneeMenuOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: assigneeMenuOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_ACTIVE_SURFACE, color: nodePresetFields.assigneeDraft ? userAccentForName(nodePresetFields.assigneeDraft) : "#111827", font: "inherit", fontSize: 11.5, fontWeight: 750, padding: "3px 27px 3px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
-                  />
-                  <span aria-hidden="true" style={{ position: "absolute", right: 7, top: 5, color: accent, pointerEvents: "none" }}>
-                    <PersonIcon color={accent} />
-                  </span>
-                  {canEdit && assigneeMenuOpen && (
-                    <div
-                      id={`${assigneeListID}-options`}
-                      role="listbox"
-                      aria-label="People"
-                      style={{ position: "absolute", zIndex: 30, top: "calc(100% + 5px)", left: 0, width: "min(330px, 86vw)", maxHeight: 250, overflowY: "auto", padding: 5, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
-                    >
-                      {assigneeMatches.length === 0 ? (
-                        <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>No matches</div>
-                      ) : assigneeMatches.map((user) => {
-                        const label = companyUserOptionLabel(user);
-                        const name = (user.display_name ?? "").trim() || label;
-                        const email = (user.email ?? "").trim();
-                        const selected = label === nodePresetFields.assigneeDraft;
-                        const userAccent = userAccentForName(name || user.user_id);
-                        return (
-                          <button
-                            key={user.user_id}
-                            type="button"
-                            role="option"
-                            aria-selected={selected}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => {
-                              onSetNodeAssigneeDraft(label);
-                              onCommitNodeAssigneeDraft(label);
-                              setAssigneeMenuOpen(false);
-                            }}
-                            style={{ width: "100%", minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "1px solid transparent", borderRadius: 10, background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "transparent", color: "#111827", cursor: "pointer", padding: "5px 8px", textAlign: "left", font: "inherit", boxShadow: selected ? "0 8px 20px rgba(15,23,42,0.10), 0 0 12px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : undefined }}
-                          >
-                            <span style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(name || user.user_id), color: "#ffffff", fontSize: 9, fontWeight: 900, boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.76)" }}>
-                              {initialsForName(name || user.user_id)}
-                            </span>
-                            <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
-                              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800, color: userAccent }}>{name}</span>
-                              {email && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 500 }}>{email}</span>}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </span>
-              </label>
-              <div style={{ gridColumn: 4, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
+              <div style={{ gridColumn: 3, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
                 <strong style={{ paddingTop: 7 }}>Accounts:</strong>
                 <AccountFilterControl
                   accounts={nodePresetFields.accountOptions}
@@ -713,7 +583,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   style={{ minWidth: 0, width: "100%" }}
                 />
               </div>
-              <label style={{ gridColumn: 5, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+              <label style={{ gridColumn: 4, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Due Date:</strong>
                 <span style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: 148 }}>
                   <input
@@ -879,7 +749,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               </label>
             </div>
           )}
-          {logicGateRaciFields && (
+          {gvicFields && (
             <div
               className="mango-editor-hover-highlight"
               style={{
@@ -897,21 +767,21 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                 pointerEvents: "auto",
               }}
             >
-              {LOGIC_GATE_RACI_ROLES.map((column) => (
-                <LogicGateRaciRoleEditor
+              {GVIC_ROLES.map((column) => (
+                <GVICRoleEditor
                   key={column.role}
                   role={column.role}
                   label={column.label}
-                  assignments={logicGateRaciFields.assignments.filter((assignment) => assignment.role === column.role)}
+                  assignments={gvicFields.assignments.filter((assignment) => assignment.role === column.role)}
                   companyUsers={companyUsers}
                   companyUserGroups={companyUserGroups}
                   companyUserGroupMembers={companyUserGroupMembers}
                   accent={accent}
                   panelBackground={panelBackground}
                   ruleColor={ruleColor}
-                  canEdit={canEditRaci}
-                  onAddSubject={onAddLogicGateRaciSubject}
-                  onRemoveSubject={onRemoveLogicGateRaciSubject}
+                  canEdit={canEditGVIC}
+                  onAddSubject={onAddGVICSubject}
+                  onRemoveSubject={onRemoveGVICSubject}
                 />
               ))}
             </div>
@@ -946,7 +816,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   );
 };
 
-function LogicGateRaciRoleEditor({
+function GVICRoleEditor({
   role,
   label,
   assignments,
@@ -979,7 +849,7 @@ function LogicGateRaciRoleEditor({
   const [assignedOpen, setAssignedOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const assignedSubjectKeys = useMemo(() => new Set(assignments.map(logicGateRaciAssignmentSubjectKey)), [assignments]);
-  const roleAccent = RACI_ROLE_ACCENTS[role];
+  const roleAccent = GVIC_ROLE_ACCENTS[role];
   const subjectMatches = useMemo(() => {
     const query = draft.trim().toLowerCase();
     const childrenByParent = new Map<string, Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>>();

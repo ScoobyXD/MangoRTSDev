@@ -700,10 +700,10 @@ where company_id=$1::uuid
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-delete from resource_raci_assignments
+delete from resource_gvic_assignments
 where company_id=$1::uuid
   and resource_type=$2
-  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedInboxFolder, idList); err != nil && !isPostgresUndefinedTable(err, "resource_raci_assignments") {
+  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedInboxFolder, idList); err != nil && !isPostgresUndefinedTable(err, "resource_gvic_assignments") {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -743,14 +743,8 @@ where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, compan
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-delete from resource_raci_assignments
-where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, EntityTypeSharedInbox, folderID); err != nil && !isPostgresUndefinedTable(err, "resource_raci_assignments") {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `delete from shared_inbox_raci_assignments where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID); err != nil && !isPostgresUndefinedTable(err, "shared_inbox_raci_assignments") {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `delete from shared_inbox_raci_group_assignments where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID); err != nil && !isPostgresUndefinedTable(err, "shared_inbox_raci_group_assignments") {
+delete from resource_gvic_assignments
+where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, EntityTypeSharedInbox, folderID); err != nil && !isPostgresUndefinedTable(err, "resource_gvic_assignments") {
 		return err
 	}
 	if cleanAccountEmail := normalizeEmail(accountEmail.String); cleanAccountEmail != "" {

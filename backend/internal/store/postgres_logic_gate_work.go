@@ -100,7 +100,7 @@ order by
   end asc,
   projection.position asc,
   projection.assignment_created_timestamp asc,
-  assignment.assignment_id asc`, companyID, logicGateID, KanbanDefaultRequestedColor, KanbanDefaultBacklogColor, KanbanDefaultInProgressColor, KanbanDefaultVerifyColor, KanbanDefaultDoneColor, KanbanDefaultPendingColor)
+  assignment.assignment_id asc`, companyID, logicGateID, KanbanDefaultRequestedColor, KanbanDefaultBacklogColor, KanbanDefaultInProgressColor, KanbanDefaultReviewColor, KanbanDefaultDoneColor, KanbanDefaultPendingColor)
 	if err != nil {
 		return domain.LogicGateWorkView{}, err
 	}
@@ -163,9 +163,6 @@ func scanLogicGateWorkAssignment(row interface{ Scan(dest ...any) error }) (doma
 	if status.Valid {
 		item.Node.Status = &status.String
 	}
-	if statusColor.Valid {
-		item.Node.StatusColor = &statusColor.String
-	}
 	if dueDate.Valid {
 		item.Node.DueDate = &dueDate.String
 	}
@@ -173,20 +170,15 @@ func scanLogicGateWorkAssignment(row interface{ Scan(dest ...any) error }) (doma
 		value := int(priority.Int64)
 		item.Node.Priority = &value
 	}
-	if assigneeUserID.Valid {
-		item.Node.AssigneeUserID = &assigneeUserID.String
-	}
-	if assigneeName.Valid {
-		item.Node.AssigneeName = &assigneeName.String
-	}
-	if assigneeEmail.Valid {
-		item.Node.AssigneeEmail = &assigneeEmail.String
-	}
 	if logicGateIDsJSON.Valid {
 		var ids []string
 		if json.Unmarshal([]byte(logicGateIDsJSON.String), &ids) == nil {
 			item.Node.LogicGateIDs = cleanStringList(ids)
 		}
 	}
+	_ = statusColor
+	_ = assigneeUserID
+	_ = assigneeName
+	_ = assigneeEmail
 	return item, nil
 }

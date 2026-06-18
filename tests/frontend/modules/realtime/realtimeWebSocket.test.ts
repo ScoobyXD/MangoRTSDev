@@ -279,7 +279,7 @@ test("realtime client ignores stale ticket opens after retain cleanup", async ()
   client.close();
 });
 
-test("realtime client reuses one websocket for RACIO and notification scopes", async () => {
+test("realtime client reuses one websocket for GVIC matrix and notification scopes", async () => {
   const openedURLs: string[] = [];
   const sentMessages: string[] = [];
 
@@ -318,18 +318,18 @@ test("realtime client reuses one websocket for RACIO and notification scopes", a
     reconnectDelayMs: 60_000,
   });
   const unsubscribeNotifications = client.subscribe("notifications:user:user-a");
-  const unsubscribeRacio = client.subscribe("racio:user:user-a", { getAfterSequence: () => 12 });
+  const unsubscribeGvic = client.subscribe("gvic_matrix:user:user-a", { getAfterSequence: () => 12 });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(openedURLs.length, 1);
   const subscriptions = sentMessages
     .map((message) => JSON.parse(message) as { type: string; scope?: string; after_sequence?: number })
     .filter((message) => message.type === "subscribe");
-  assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["notifications:user:user-a", "racio:user:user-a"]);
-  assert.equal(subscriptions.find((message) => message.scope === "racio:user:user-a")?.after_sequence, 12);
+  assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["gvic_matrix:user:user-a", "notifications:user:user-a"]);
+  assert.equal(subscriptions.find((message) => message.scope === "gvic_matrix:user:user-a")?.after_sequence, 12);
 
   unsubscribeNotifications();
-  unsubscribeRacio();
+  unsubscribeGvic();
   client.close();
 });
 

@@ -250,17 +250,6 @@ function logicGateIDForKanbanCard(card: Pick<KanbanCard, "logic_gate_id" | "boar
   return (card.logic_gate_id ?? "").trim() || logicGateIDFromKanbanBoardID(card.board_id || fallbackBoardID);
 }
 
-function requestedAssigneeDisplayName(card: Pick<KanbanCard, "assignee_user_id" | "assignee_name" | "assignee_email">, userByID: Map<string, CompanyUser>): string {
-  const assigneeUserID = (card.assignee_user_id ?? "").trim();
-  const assignee = assigneeUserID ? userByID.get(assigneeUserID) : undefined;
-  return (card.assignee_name ?? "").trim()
-    || (assignee?.display_name ?? "").trim()
-    || (card.assignee_email ?? "").trim()
-    || (assignee?.email ?? "").trim()
-    || assigneeUserID
-    || "assignee";
-}
-
 export const KanbanContent: React.FC<KanbanContentProps> = ({
   accent,
   widgetId,
@@ -626,9 +615,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         ...existing,
         due_date: card.due_date ?? existing?.due_date ?? null,
         priority: card.priority ?? existing?.priority ?? null,
-        assignee_user_id: card.assignee_user_id ?? existing?.assignee_user_id ?? null,
-        assignee_name: card.assignee_name ?? existing?.assignee_name ?? null,
-        assignee_email: card.assignee_email ?? existing?.assignee_email ?? null,
         accounts: card.accounts ?? existing?.accounts ?? [],
       });
     }
@@ -652,19 +638,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         card.is_issue ? "issue" : "",
         card.due_date ?? "",
         card.priority != null ? String(card.priority) : "",
-        card.assignee_user_id ?? "",
-        card.assignee_name ?? "",
-        card.assignee_email ?? "",
         ...(card.accounts ?? []).flatMap((account) => [account.name, account.account_id]),
         columnTitleByID.get(card.column_id) ?? "",
         node?.title ?? "",
         node?.status ?? "",
-        node?.status_color ?? "",
         node?.due_date ?? "",
         node?.priority != null ? String(node.priority) : "",
-        node?.assignee_user_id ?? "",
-        node?.assignee_name ?? "",
-        node?.assignee_email ?? "",
         ...(node?.accounts ?? []).flatMap((account) => [account.name, account.account_id]),
       ];
       return fields.some((field) => field.trim().toLowerCase().includes(normalizedContentSearchQuery));
@@ -767,7 +746,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (statusCards.length === 0) return;
     const columnsForStatus = columnSource ?? columnsRef.current;
     const columnByID = new Map(columnsForStatus.map((column) => [column.column_id, column]));
-    const statusColorByColumnID = new Map(columnsForStatus.map((column) => [column.column_id, getKanbanColumnDisplayColor(column)]));
     const nodeByID = new Map((getNodeRelationshipGraphSnapshot(apiBase, companyID).nodes ?? []).map((node) => [node.node_id, node]));
     const seenNodeIDs = new Set<string>();
     for (const card of statusCards) {
@@ -777,17 +755,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       if (!node) continue;
       const column = columnByID.get(card.column_id);
       const status = card.is_issue ? "Issue" : (column?.title.trim() || "Unknown");
-      const statusColor = getKanbanConditionalColor(card, statusColorByColumnID);
       invalidateNodeRecordStoreCaches(apiBase, companyID, card.node_id);
       upsertNodeRelationshipGraphNode(apiBase, companyID, {
         ...node,
         status,
-        status_color: statusColor,
         due_date: card.due_date ?? node.due_date ?? null,
         priority: card.priority ?? node.priority ?? null,
-        assignee_user_id: card.assignee_user_id ?? node.assignee_user_id ?? null,
-        assignee_name: card.assignee_name ?? node.assignee_name ?? null,
-        assignee_email: card.assignee_email ?? node.assignee_email ?? null,
       });
     }
   }, [apiBase, companyID]);
@@ -1582,9 +1555,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     });
     const issueWasSet = Object.prototype.hasOwnProperty.call(assignment, "isIssue");
     const priorityWasSet = Object.prototype.hasOwnProperty.call(assignment, "priority");
-    const assigneeWasSet = Object.prototype.hasOwnProperty.call(assignment, "assigneeUserID");
     const dueDateWasSet = Object.prototype.hasOwnProperty.call(assignment, "dueDate");
-    const hasAnyAssignment = !!assignment.columnID || issueWasSet || priorityWasSet || assigneeWasSet || dueDateWasSet;
+    const hasAnyAssignment = !!assignment.columnID || issueWasSet || priorityWasSet || dueDateWasSet;
     if (!hasAnyAssignment) return;
     if (priorityWasSet && assignment.priority == null && targetCards.some((card) => logicGateIDForKanbanCard(card, boardID))) {
       setError("Priority is required");
@@ -2102,7 +2074,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const dragAfter = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "after";
     const color = getKanbanConditionalColor(card, columnColorByID);
     const isRequestedCard = activeBoardIsLogicGate && isKanbanRequestedColumn({ column_id: card.column_id, title: columnTitleByID.get(card.column_id) ?? "" });
-    const isRequestedForCurrentUser = isRequestedCard && !!currentUserID && (card.assignee_user_id ?? "").trim() === currentUserID;
+    const isRequestedForCurrentUser = false;
     return (
       <KanbanCardView
         key={card.card_id}
@@ -2204,7 +2176,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           onAccept: () => void resolveRequestedCard(card, true),
           onDecline: () => void resolveRequestedCard(card, false),
         } : undefined}
-        requestedStatusText={isRequestedCard && currentUserID !== null && !isRequestedForCurrentUser ? `Request sent to ${requestedAssigneeDisplayName(card, arenaUserByID)}` : undefined}
+        requestedStatusText={isRequestedCard && currentUserID !== null && !isRequestedForCurrentUser ? "Request pending" : undefined}
       />
     );
   };

@@ -80,7 +80,6 @@ export type LogicGateRecord = ResourceAccessFields & {
   company_id: string;
   logic_gate_id: string;
   header: string;
-  raci_assignments?: LogicGateRaciAssignment[];
   gvic_assignments?: LogicGateRaciAssignment[];
   created_timestamp: string;
 };

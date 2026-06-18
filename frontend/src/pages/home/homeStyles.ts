@@ -56,7 +56,7 @@ const DEFAULT_RACI_HEADER_PALETTE: RaciHeaderPalette = {
 };
 
 const LOGIC_GATE_RACI_HEADER_PALETTES: Record<string, RaciHeaderPalette> = {
-  accountable: {
+  verified: {
     surface: "linear-gradient(135deg, rgba(255, 241, 242, 0.94), rgba(254, 249, 195, 0.72))",
     edge: "rgba(225, 29, 72, 0.40)",
     letterBackground: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(255, 228, 230, 0.88) 52%, rgba(254, 249, 195, 0.76))",
@@ -96,7 +96,7 @@ const LOGIC_GATE_RACI_HEADER_PALETTES: Record<string, RaciHeaderPalette> = {
     labelColor: "#134e4a",
     glow: "0 10px 24px rgba(13, 148, 136, 0.12)",
   },
-  verify: {
+  review: {
     surface: "linear-gradient(135deg, rgba(239, 246, 255, 0.95), rgba(236, 253, 245, 0.72))",
     edge: "rgba(37, 99, 235, 0.38)",
     letterBackground: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(219, 234, 254, 0.88) 52%, rgba(209, 250, 229, 0.76))",
@@ -1145,9 +1145,9 @@ export function logicGateInboxGroupNotificationStyle(role: string): React.CSSPro
 
 function inboxNotificationRoleColors(role: string): { background: string; border: string; color: string } {
   switch (role) {
-    case "responsible":
+    case "generated":
       return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.36)", color: "#334155" };
-    case "accountable":
+    case "verified":
       return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.38)", color: "#334155" };
     case "consulted":
       return { background: "#f1f5f9", border: "rgba(100, 116, 139, 0.34)", color: "#334155" };

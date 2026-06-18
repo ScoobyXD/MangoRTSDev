@@ -23,13 +23,13 @@ func TestHTTPMetricsRecordStatusConditionalAndRoute(t *testing.T) {
 	}
 
 	errorRec := httptest.NewRecorder()
-	handler.ServeHTTP(errorRec, httptest.NewRequest(http.MethodGet, "/v1/work-items/responsible-inbox?company_id=bad&user_id="+userID, nil))
+	handler.ServeHTTP(errorRec, httptest.NewRequest(http.MethodGet, "/v1/work-items/generated-inbox?company_id=bad&user_id="+userID, nil))
 	if errorRec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid inbox status = %d, want %d body=%s", errorRec.Code, http.StatusBadRequest, errorRec.Body.String())
 	}
 
 	firstRec := httptest.NewRecorder()
-	firstReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/responsible-inbox?company_id="+companyID, nil)
+	firstReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/generated-inbox?company_id="+companyID, nil)
 	firstReq = workItemInboxReadRequestWithActor(firstReq, userID, companyID, domain.RoleCompanyUser, false)
 	handler.ServeHTTP(firstRec, firstReq)
 	if firstRec.Code != http.StatusOK {
@@ -41,7 +41,7 @@ func TestHTTPMetricsRecordStatusConditionalAndRoute(t *testing.T) {
 	}
 
 	conditionalRec := httptest.NewRecorder()
-	conditionalReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/responsible-inbox?company_id="+companyID, nil)
+	conditionalReq := httptest.NewRequest(http.MethodGet, "/v1/work-items/generated-inbox?company_id="+companyID, nil)
 	conditionalReq = workItemInboxReadRequestWithActor(conditionalReq, userID, companyID, domain.RoleCompanyUser, false)
 	conditionalReq.Header.Set("If-None-Match", etag)
 	handler.ServeHTTP(conditionalRec, conditionalReq)
@@ -54,9 +54,9 @@ func TestHTTPMetricsRecordStatusConditionalAndRoute(t *testing.T) {
 
 	snapshot := metrics.Snapshot()
 	assertHTTPMetricCount(t, snapshot, HTTPRequestMetricKey{Method: http.MethodGet, Route: "/healthz", Status: http.StatusOK}, 1)
-	assertHTTPMetricCount(t, snapshot, HTTPRequestMetricKey{Method: http.MethodGet, Route: "/v1/work-items/responsible-inbox", Status: http.StatusBadRequest}, 1)
-	assertHTTPMetricCount(t, snapshot, HTTPRequestMetricKey{Method: http.MethodGet, Route: "/v1/work-items/responsible-inbox", Status: http.StatusOK}, 1)
-	assertHTTPMetricCount(t, snapshot, HTTPRequestMetricKey{Method: http.MethodGet, Route: "/v1/work-items/responsible-inbox", Status: http.StatusNotModified, Conditional: true, NotModified: true}, 1)
+	assertHTTPMetricCount(t, snapshot, HTTPRequestMetricKey{Method: http.MethodGet, Route: "/v1/work-items/generated-inbox", Status: http.StatusBadRequest}, 1)
+	assertHTTPMetricCount(t, snapshot, HTTPRequestMetricKey{Method: http.MethodGet, Route: "/v1/work-items/generated-inbox", Status: http.StatusOK}, 1)
+	assertHTTPMetricCount(t, snapshot, HTTPRequestMetricKey{Method: http.MethodGet, Route: "/v1/work-items/generated-inbox", Status: http.StatusNotModified, Conditional: true, NotModified: true}, 1)
 }
 
 func TestNormalizeHTTPRouteRemovesFallbackIDs(t *testing.T) {

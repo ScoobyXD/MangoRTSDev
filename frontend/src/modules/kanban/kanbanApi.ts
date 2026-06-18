@@ -176,18 +176,14 @@ export type RacioMatrixProjectionRow = {
   logic_gate_id?: string;
   display_title: string;
   status?: string;
-  status_color?: string;
   due_date?: string;
   priority?: number;
-  assignee_user_id?: string;
-  assignee_display_name?: string;
-  assignee_email?: string;
   accounts?: Account[];
   resource_created_timestamp: string;
   updated_timestamp: string;
 };
 
-export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord; racio_projection_rows: RacioMatrixProjectionRow[] };
+export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord; gvic_projection_rows: RacioMatrixProjectionRow[] };
 type LogicGateAssignmentMutationOrigin = "kanban" | "matrix";
 
 export type RacioMatrixNodeCreateResult = {
@@ -196,15 +192,15 @@ export type RacioMatrixNodeCreateResult = {
   assignment?: unknown;
   card?: KanbanCard;
   folder_items?: CompanyExplorerFolderItem[];
-  racio_projection_rows: RacioMatrixProjectionRow[];
+  gvic_projection_rows: RacioMatrixProjectionRow[];
 };
 
-type LogicGateAssignmentCommandPayload = Omit<LogicGateAssignmentCommandResult, "racio_projection_rows"> & {
-  racio_projection_rows?: RacioMatrixProjectionRow[] | null;
+type LogicGateAssignmentCommandPayload = Omit<LogicGateAssignmentCommandResult, "gvic_projection_rows"> & {
+  gvic_projection_rows?: RacioMatrixProjectionRow[] | null;
 };
 
-type RacioMatrixNodeCreatePayload = Omit<RacioMatrixNodeCreateResult, "racio_projection_rows"> & {
-  racio_projection_rows?: RacioMatrixProjectionRow[] | null;
+type RacioMatrixNodeCreatePayload = Omit<RacioMatrixNodeCreateResult, "gvic_projection_rows"> & {
+  gvic_projection_rows?: RacioMatrixProjectionRow[] | null;
 };
 
 function normalizeRacioProjectionRows(rows?: RacioMatrixProjectionRow[] | null): RacioMatrixProjectionRow[] {
@@ -215,14 +211,14 @@ function normalizeLogicGateAssignmentCommandResult(payload: LogicGateAssignmentC
   return {
     card: { ...payload.card },
     node: { ...payload.node },
-    racio_projection_rows: normalizeRacioProjectionRows(payload.racio_projection_rows),
+    gvic_projection_rows: normalizeRacioProjectionRows(payload.gvic_projection_rows),
   };
 }
 
 export async function createRacioMatrixNode(args: {
   apiBase: string;
   companyID: string;
-  title: string;
+  name: string;
   logicGateID?: string;
   createLogicGateHeader?: string;
   creatorLogicGateRaciRole?: LogicGateRaciRole;
@@ -232,11 +228,11 @@ export async function createRacioMatrixNode(args: {
   position?: number;
   isIssue?: boolean;
 }): Promise<RacioMatrixNodeCreateResult> {
-  const payload = await requestJSON<RacioMatrixNodeCreatePayload>(args.apiBase, "/v2/racio-matrix/nodes", {
+  const payload = await requestJSON<RacioMatrixNodeCreatePayload>(args.apiBase, "/v2/gvic-matrix/nodes", {
     method: "POST",
     json: {
       company_id: args.companyID,
-      title: args.title,
+      name: args.name,
       logic_gate_id: args.logicGateID,
       create_logic_gate_header: args.createLogicGateHeader,
       creator_logic_gate_gvic_role: args.creatorLogicGateRaciRole,
@@ -256,7 +252,7 @@ export async function createRacioMatrixNode(args: {
   markNodeMapWorkspaceSnapshotStale(args.apiBase, args.companyID);
   return {
     ...payload,
-    racio_projection_rows: normalizeRacioProjectionRows(payload.racio_projection_rows),
+    gvic_projection_rows: normalizeRacioProjectionRows(payload.gvic_projection_rows),
   };
 }
 
@@ -321,7 +317,7 @@ export async function moveLogicGateAssignment(args: {
     markLogicGateAssignmentWorkspaceSnapshotsStale({ apiBase: args.apiBase, companyID: args.companyID, logicGateID: args.logicGateID, fromLogicGateID: args.fromLogicGateID, nodeID: args.nodeID });
     return normalizeLogicGateAssignmentCommandResult(payload);
   }
-  const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, `/v2/racio-matrix/nodes/${encodeURIComponent(args.nodeID)}/move`, {
+  const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, `/v2/gvic-matrix/nodes/${encodeURIComponent(args.nodeID)}/move`, {
     method: "POST",
     json: {
       company_id: args.companyID,
@@ -345,7 +341,6 @@ export async function removeLogicGateAssignment(args: {
   logicGateID?: string;
   nodeID: string;
   fallbackStatus?: string | null;
-  fallbackStatusColor?: string | null;
 }): Promise<LogicGateAssignmentCommandResult> {
   const logicGateID = args.logicGateID?.trim() ?? "";
   if (logicGateID) {

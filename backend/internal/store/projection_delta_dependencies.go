@@ -782,7 +782,6 @@ func projectRelationshipProjectionRowFromDomain(item domain.ProjectRelationshipP
 		AssignmentID:                 strings.TrimSpace(pointerStringValue(item.AssignmentID)),
 		DisplayTitle:                 strings.TrimSpace(item.DisplayTitle),
 		Status:                       cloneStringPointer(item.Status),
-		StatusColor:                  cloneStringPointer(item.StatusColor),
 		Position:                     item.Position,
 		ResourceCreatedTimestamp:     item.ResourceCreatedTimestamp,
 		RelationshipCreatedTimestamp: item.RelationshipCreatedTimestamp,

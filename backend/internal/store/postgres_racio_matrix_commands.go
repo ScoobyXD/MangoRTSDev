@@ -104,9 +104,9 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.node_writes")
 	var node domain.Node
 	if deferCompanyExplorerFolderItems {
-		node, err = r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, input.ActorUserID, true, false)
+		node, err = r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, "", true, false)
 	} else {
-		node, err = r.createNodeWithAssigneeIDTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, input.ActorUserID)
+		node, err = r.createNodeWithAssigneeIDTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, "")
 	}
 	stop()
 	if err != nil {
@@ -122,7 +122,7 @@ func (r *PostgresRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (
 			return RacioMatrixNodeCreateResult{}, err
 		}
 	}
-	stop = observeTiming(ctx, "repo.CreateRacioMatrixNode.racio_projection_delta")
+	stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.gvic_matrix_projection_delta")
 	rows, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{node.NodeID}, nil)
 	stop()
 	if err != nil {
@@ -175,7 +175,7 @@ func createRacioMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input RacioMa
 	stop()
 	projectionDeltas := []ProjectionDelta{}
 	if input.ActorUserID != "" && input.CreatorLogicGateGVICRole != "" {
-		assignee, err := loadPostgresNodeAssigneeReadModel(ctx, tx, input.CompanyID, input.ActorUserID)
+		creator, err := loadPostgresNodeAssigneeReadModel(ctx, tx, input.CompanyID, input.ActorUserID)
 		if err != nil {
 			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
 		}
@@ -193,7 +193,7 @@ insert into resource_gvic_assignments (
 ) values ($1::uuid, 'logic_gate', $2::uuid, $3, 'user', $4::uuid, now(), now())
 on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id)
 do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
-			input.CompanyID, created.LogicGateID, input.CreatorLogicGateGVICRole, assignee.UserID,
+			input.CompanyID, created.LogicGateID, input.CreatorLogicGateGVICRole, creator.UserID,
 		); err != nil {
 			stop()
 			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err

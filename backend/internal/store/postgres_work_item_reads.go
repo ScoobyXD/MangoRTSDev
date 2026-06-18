@@ -38,7 +38,7 @@ func (r *PostgresRepo) listRacioProjectedNodes(ctx context.Context, query WorkIt
     where assignment.company_id=entry.company_id
       and assignment.logic_gate_id=entry.logic_gate_id
       and assignment.user_id=entry.user_id
-      and assignment.role='responsible'
+      and assignment.role='generated'
   )`
 	}
 	rows, err := r.db.QueryContext(ctx, `
@@ -48,12 +48,12 @@ select
   entry.resource_id::text,
   entry.display_title,
   entry.status,
-  entry.status_color,
+  null::text as status_color,
   entry.due_date::text,
   entry.priority,
-  entry.assignee_user_id::text,
-  nullif(entry.assignee_display_name, ''),
-  nullif(entry.assignee_email, ''),
+  null::text as assignee_user_id,
+  null::text as assignee_display_name,
+  null::text as assignee_email,
   entry.resource_created_timestamp,
   case
     when entry.logic_gate_id is null then '[]'::jsonb
@@ -106,7 +106,7 @@ func (r *PostgresRepo) listRacioProjectedLogicGates(ctx context.Context, query W
 	query = NormalizeWorkItemInboxQuery(query)
 	roleFilter := ""
 	if aciOnly {
-		roleFilter = "\n  and assignment.role in ('accountable', 'consulted', 'informed')"
+		roleFilter = "\n  and assignment.role in ('verified', 'consulted', 'informed')"
 	}
 	rows, err := r.db.QueryContext(ctx, `
 with recursive `+postgresLogicGateRaciUsersCTE+`
@@ -117,8 +117,8 @@ select
   entry.resource_created_timestamp,
   coalesce(jsonb_agg(assignment.role order by
     case assignment.role
-      when 'responsible' then 1
-      when 'accountable' then 2
+      when 'generated' then 1
+      when 'verified' then 2
       when 'consulted' then 3
       when 'informed' then 4
       else 5

@@ -43,7 +43,7 @@ func TestMemoryLogicGateRaciCommandsAreIdempotentAndInvalidateReadVersions(t *te
 		t.Fatalf("added result = %+v, want one changed assignment and event", added)
 	}
 	if added.Events[0].Type != LogicGateRaciUpdatedEventType || added.Events[0].Payload["logic_gate_id"] != logicGate.LogicGateID || added.Events[0].Payload["operation"] != LogicGateRaciCommandAdd {
-		t.Fatalf("add event = %+v, want logic_gate_raci_updated add payload", added.Events[0])
+		t.Fatalf("add event = %+v, want logic_gate_gvic_updated add payload", added.Events[0])
 	}
 	assertWorkspaceEventCount(t, repo, companyID, 1)
 	assertWorkspaceReadVersion(t, repo, companyID, "logic-gates", "", 1, true)

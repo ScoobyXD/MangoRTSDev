@@ -172,12 +172,12 @@ export type HomeCreateRacioMatrixNodeCommandResult = {
   node: NodeRecord;
   logicGate?: LogicGateRecord;
   folderItems: CompanyExplorerFolderItem[];
-  racio_projection_rows: RacioMatrixProjectionRow[];
+  gvic_projection_rows: RacioMatrixProjectionRow[];
 };
 
 export type HomeLogicGateDropCommandResult = {
   nodes: NodeRecord[];
-  racio_projection_rows: RacioMatrixProjectionRow[];
+  gvic_projection_rows: RacioMatrixProjectionRow[];
 };
 
 type HomeWorkspaceEntityBatchResponse = {
@@ -353,7 +353,7 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
   const rawFromLogicGateID = args.fromLogicGateID?.trim() ?? "";
   const fromLogicGateID = rawFromLogicGateID === INBOX_NO_LOGIC_GATE_ID ? "" : rawFromLogicGateID;
   const nodeIDs = cleanIDList(args.nodeIDs).filter((nodeID) => args.nodeByID.has(nodeID));
-  if (!logicGateID || nodeIDs.length === 0) return { nodes: [], racio_projection_rows: [] };
+  if (!logicGateID || nodeIDs.length === 0) return { nodes: [], gvic_projection_rows: [] };
 
   const assignNodeToLogicGateStatus = args.assignNodeToLogicGateStatus ?? defaultAssignNodeToLogicGateStatus;
   const moveLogicGateAssignment = args.moveLogicGateAssignment ?? defaultMoveLogicGateAssignment;
@@ -395,7 +395,7 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
   const assignmentResults = results.filter((result): result is LogicGateAssignmentCommandResult => result !== null);
   return {
     nodes: assignmentResults.map((result) => result.node),
-    racio_projection_rows: assignmentResults.flatMap((result) => result.racio_projection_rows),
+    gvic_projection_rows: assignmentResults.flatMap((result) => result.gvic_projection_rows),
   };
 }
 
@@ -498,7 +498,7 @@ export async function createHomeRacioMatrixNodeCommand(args: {
   const result = await createRacioMatrixNode({
     apiBase: args.apiBase,
     companyID: args.companyID,
-    title: args.title?.trim() || "new node",
+    name: args.title?.trim() || "new node",
     logicGateID: args.logicGateID,
     createLogicGateHeader: args.createLogicGateTitle,
     creatorLogicGateRaciRole: args.creatorRaciRole,
@@ -510,7 +510,7 @@ export async function createHomeRacioMatrixNodeCommand(args: {
     node: result.node,
     logicGate: result.logic_gate,
     folderItems: result.folder_items ?? [],
-    racio_projection_rows: result.racio_projection_rows,
+    gvic_projection_rows: result.gvic_projection_rows,
   };
 }
 
@@ -713,7 +713,7 @@ export async function addSharedInboxRaciSubjectCommand(args: {
   if (!folderID || !subjectID) return null;
   const folder = args.sharedInboxes.find((item) => item.folder_id === folderID);
   const subjectType = args.subjectType;
-  if (!folder || (folder.raci_assignments ?? []).some((assignment) => (
+  if (!folder || (folder.gvic_assignments ?? []).some((assignment) => (
     assignment.role === args.role
     && (assignment.subject_type ?? "user") === subjectType
     && (assignment.subject_id ?? assignment.user_id) === subjectID
@@ -725,7 +725,7 @@ export async function addSharedInboxRaciSubjectCommand(args: {
     companyID: args.companyID,
     folderID,
     assignments: [
-      ...(folder.raci_assignments ?? []),
+      ...(folder.gvic_assignments ?? []),
       {
         company_id: args.companyID,
         folder_id: folderID,
@@ -757,7 +757,7 @@ export async function removeSharedInboxRaciSubjectCommand(args: {
   if (!folderID || !subjectID) return null;
   const folder = args.sharedInboxes.find((item) => item.folder_id === folderID);
   if (!folder) return null;
-  const directAssignments = (folder.raci_assignments ?? []).filter((assignment) => assignment.folder_id === folderID);
+  const directAssignments = (folder.gvic_assignments ?? []).filter((assignment) => assignment.folder_id === folderID);
   const assignments = directAssignments.filter((assignment) => !(
     assignment.role === args.role
     && (assignment.subject_type ?? "user") === args.subjectType

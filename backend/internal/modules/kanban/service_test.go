@@ -40,14 +40,11 @@ func TestAssignNodeToLogicGateStatusWritesAssignmentSourceAndKanbanProjection(t 
 	}
 
 	fallbackStatus := "Direct fallback"
-	fallbackColor := "#123abc"
 	if _, err := repo.UpdateNode(store.UpdateNodeInput{
-		CompanyID:      companyID,
-		NodeID:         node.NodeID,
-		Status:         &fallbackStatus,
-		StatusSet:      true,
-		StatusColor:    &fallbackColor,
-		StatusColorSet: true,
+		CompanyID: companyID,
+		NodeID:    node.NodeID,
+		Status:    &fallbackStatus,
+		StatusSet: true,
 	}); err != nil {
 		t.Fatalf("UpdateNode fallback status: %v", err)
 	}
@@ -61,13 +58,12 @@ func TestAssignNodeToLogicGateStatusWritesAssignmentSourceAndKanbanProjection(t 
 
 	priority := 2
 	assigned, err := service.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
-		CompanyID:      companyID,
-		LogicGateID:    logicGate.LogicGateID,
-		NodeID:         node.NodeID,
-		Status:         "in_progress",
-		Priority:       &priority,
-		PrioritySet:    true,
-		AssigneePolicy: store.LogicGateAssignmentAssigneePolicyFirstResponsible,
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "in_progress",
+		Priority:    &priority,
+		PrioritySet: true,
 	})
 	if err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
@@ -78,8 +74,8 @@ func TestAssignNodeToLogicGateStatusWritesAssignmentSourceAndKanbanProjection(t 
 	if assigned.Node.Status == nil || *assigned.Node.Status != "In Progress" {
 		t.Fatalf("assigned node status = %+v, want In Progress", assigned.Node.Status)
 	}
-	if assigned.Node.StatusColor == nil || *assigned.Node.StatusColor != store.KanbanDefaultInProgressColor {
-		t.Fatalf("assigned node status_color = %+v, want %q", assigned.Node.StatusColor, store.KanbanDefaultInProgressColor)
+	if assigned.Node.StatusColor != nil {
+		t.Fatalf("assigned node status_color = %+v, want nil after GVIC migration", assigned.Node.StatusColor)
 	}
 	if assigned.Node.Priority == nil || *assigned.Node.Priority != priority {
 		t.Fatalf("assigned node priority = %+v, want %d", assigned.Node.Priority, priority)
@@ -127,8 +123,8 @@ func TestAssignNodeToLogicGateStatusWritesAssignmentSourceAndKanbanProjection(t 
 	if issueResult.Node.Status == nil || *issueResult.Node.Status != "Issue" {
 		t.Fatalf("issue node status = %+v, want Issue", issueResult.Node.Status)
 	}
-	if issueResult.Node.StatusColor == nil || *issueResult.Node.StatusColor != "#ffd400" {
-		t.Fatalf("issue node status_color = %+v, want issue color", issueResult.Node.StatusColor)
+	if issueResult.Node.StatusColor != nil {
+		t.Fatalf("issue node status_color = %+v, want nil after GVIC migration", issueResult.Node.StatusColor)
 	}
 	assertLogicGateAssignmentSource(t, repo, companyID, node.NodeID, logicGate.LogicGateID, issueResult.Card, true)
 }
@@ -459,13 +455,11 @@ func TestLogicGateAssignmentRemoveUsesExplicitFallback(t *testing.T) {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
 	fallbackStatus := "Backlog"
-	fallbackColor := "#123456"
 	removed, err := service.RemoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentRemoveInput{
-		CompanyID:           companyID,
-		LogicGateID:         logicGate.LogicGateID,
-		NodeID:              node.NodeID,
-		FallbackStatus:      &fallbackStatus,
-		FallbackStatusColor: &fallbackColor,
+		CompanyID:      companyID,
+		LogicGateID:    logicGate.LogicGateID,
+		NodeID:         node.NodeID,
+		FallbackStatus: &fallbackStatus,
 	})
 	if err != nil {
 		t.Fatalf("RemoveLogicGateNodeAssignment fallback: %v", err)
@@ -473,8 +467,8 @@ func TestLogicGateAssignmentRemoveUsesExplicitFallback(t *testing.T) {
 	if removed.Node.Status == nil || *removed.Node.Status != fallbackStatus {
 		t.Fatalf("fallback status = %+v, want %q", removed.Node.Status, fallbackStatus)
 	}
-	if removed.Node.StatusColor == nil || *removed.Node.StatusColor != fallbackColor {
-		t.Fatalf("fallback status color = %+v, want %q", removed.Node.StatusColor, fallbackColor)
+	if removed.Node.StatusColor != nil {
+		t.Fatalf("fallback status color = %+v, want nil after GVIC migration", removed.Node.StatusColor)
 	}
 }
 

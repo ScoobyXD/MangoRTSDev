@@ -81,16 +81,10 @@ func scanKanbanCard(row interface {
 		value := int(priority.Int64)
 		item.Priority = &value
 	}
-	if assigneeUserID.Valid {
-		item.AssigneeUserID = &assigneeUserID.String
-	}
-	if assigneeName.Valid {
-		item.AssigneeName = &assigneeName.String
-	}
-	if assigneeEmail.Valid {
-		item.AssigneeEmail = &assigneeEmail.String
-	}
 	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
+	_ = assigneeUserID
+	_ = assigneeName
+	_ = assigneeEmail
 	return item, err
 }
 
@@ -410,7 +404,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canoni
 			if deferCreatedNodeFolderItem {
 				createdNode, err = r.createNodeWithAssigneeIDWithoutProjectionOrFolderTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle, input.ActorUserID)
 			} else {
-				createdNode, err = r.createNodeWithAssigneeIDWithoutProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle, input.ActorUserID)
+				createdNode, err = r.createNodeWithAssigneeIDWithoutProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle, "")
 			}
 			if err != nil {
 				return LogicGateNodeAssignmentResult{}, err
@@ -480,11 +474,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	}
 	if err := syncNodeStatusFromLogicGateAssignmentTx(ctx, tx, assignment); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
-	}
-	if createdNode.CompanyID == "" {
-		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
-			return LogicGateNodeAssignmentResult{}, err
-		}
 	}
 	if hadPreviousAssignment && previousAssignment.LogicGateID != input.LogicGateID {
 		if err := copyPostgresLogicGateAccessPolicyToNodeTx(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
@@ -620,11 +609,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	}
 	if err := syncNodeStatusFromLogicGateAssignmentTx(ctx, tx, assignment); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
-	}
-	if input.AssigneePolicySet {
-		if err := assignNodeToLogicGateResponsibleSQL(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
-			return LogicGateNodeAssignmentResult{}, err
-		}
 	}
 	if crossLogicGateMove {
 		if err := copyPostgresLogicGateAccessPolicyToNodeTx(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {

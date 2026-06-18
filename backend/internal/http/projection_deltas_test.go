@@ -38,12 +38,12 @@ func TestRacioProjectionDeltaFanoutIsScopedAndPermissionFiltered(t *testing.T) {
 	server := NewServer(repo)
 	defer server.Close()
 
-	viewerCh := server.projectionHub.subscribe(companyID, store.ProjectionNameRacioMatrix, projectionUserScope(viewer.UserID))
-	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameRacioMatrix, projectionUserScope(viewer.UserID), viewerCh)
-	otherCh := server.projectionHub.subscribe(companyID, store.ProjectionNameRacioMatrix, projectionUserScope(other.UserID))
-	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameRacioMatrix, projectionUserScope(other.UserID), otherCh)
-	blockedCh := server.projectionHub.subscribe(companyID, store.ProjectionNameRacioMatrix, projectionUserScope(blocked.UserID))
-	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameRacioMatrix, projectionUserScope(blocked.UserID), blockedCh)
+	viewerCh := server.projectionHub.subscribe(companyID, store.ProjectionNameGVICMatrix, projectionUserScope(viewer.UserID))
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameGVICMatrix, projectionUserScope(viewer.UserID), viewerCh)
+	otherCh := server.projectionHub.subscribe(companyID, store.ProjectionNameGVICMatrix, projectionUserScope(other.UserID))
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameGVICMatrix, projectionUserScope(other.UserID), otherCh)
+	blockedCh := server.projectionHub.subscribe(companyID, store.ProjectionNameGVICMatrix, projectionUserScope(blocked.UserID))
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameGVICMatrix, projectionUserScope(blocked.UserID), blockedCh)
 
 	server.publishProjectionDeltasAsync([]store.ProjectionDelta{
 		racioProjectionDeltaForTest(companyID, viewer.UserID, visibleNode.NodeID, visibleNode.Title, visibleNode.CreatedTimestamp),
@@ -86,10 +86,10 @@ func TestRacioProjectionSequencesAreUserScoped(t *testing.T) {
 
 	viewerScope := projectionUserScope(viewer.UserID)
 	otherScope := projectionUserScope(other.UserID)
-	viewerCh := server.projectionHub.subscribe(companyID, store.ProjectionNameRacioMatrix, viewerScope)
-	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameRacioMatrix, viewerScope, viewerCh)
-	otherCh := server.projectionHub.subscribe(companyID, store.ProjectionNameRacioMatrix, otherScope)
-	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameRacioMatrix, otherScope, otherCh)
+	viewerCh := server.projectionHub.subscribe(companyID, store.ProjectionNameGVICMatrix, viewerScope)
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameGVICMatrix, viewerScope, viewerCh)
+	otherCh := server.projectionHub.subscribe(companyID, store.ProjectionNameGVICMatrix, otherScope)
+	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameGVICMatrix, otherScope, otherCh)
 
 	server.publishProjectionDeltasAsync([]store.ProjectionDelta{
 		racioProjectionDeltaForTest(companyID, viewer.UserID, node.NodeID, node.Title, node.CreatedTimestamp),
@@ -134,14 +134,13 @@ func TestKanbanProjectionDeltaFanoutIsActiveBoardScopedAndPermissionFiltered(t *
 	}
 	priority := 2
 	assigned, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
-		CompanyID:      companyID,
-		LogicGateID:    logicGate.LogicGateID,
-		NodeID:         node.NodeID,
-		Status:         "pending",
-		Priority:       &priority,
-		PrioritySet:    true,
-		AssigneePolicy: store.LogicGateAssignmentAssigneePolicyFirstResponsible,
-		ActorUserID:    viewer.UserID,
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    &priority,
+		PrioritySet: true,
+		ActorUserID: viewer.UserID,
 	})
 	if err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
@@ -458,7 +457,7 @@ func racioProjectionDeltaForTest(companyID, userID, nodeID, title string, create
 	}
 	return store.ProjectionDelta{
 		CompanyID:  companyID,
-		Projection: store.ProjectionNameRacioMatrix,
+		Projection: store.ProjectionNameGVICMatrix,
 		Operation:  store.ProjectionDeltaOperationUpsert,
 		RowKey: store.ProjectionRowKey{
 			UserID:       userID,

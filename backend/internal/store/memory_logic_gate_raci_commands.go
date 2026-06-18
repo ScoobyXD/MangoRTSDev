@@ -163,7 +163,7 @@ func (r *MemoryRepo) applyLogicGateRaciAssignmentCommand(input LogicGateRaciAssi
 		return LogicGateRaciAssignmentCommandResult{}, err
 	}
 	result.Events = []domain.DomainEvent{event}
-	if _, err := r.appendEventRowsLocked(RacioProjectionDeltaEventInputs(companyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
+	if _, err := r.appendEventRowsLocked(GVICMatrixProjectionDeltaEventInputs(companyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
 		r.restoreLogicGateRaciCommandStateLocked(snapshot)
 		return LogicGateRaciAssignmentCommandResult{}, err
 	}

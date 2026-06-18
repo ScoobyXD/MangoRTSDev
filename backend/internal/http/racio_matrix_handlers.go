@@ -149,7 +149,7 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleRacioMatrixNodeByIDV2(w http.ResponseWriter, r *http.Request) {
-	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v2/racio-matrix/nodes/"), "/")
+	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v2/gvic-matrix/nodes/"), "/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || parts[1] != "move" {
 		writeError(w, http.StatusNotFound, "not_found")
@@ -252,7 +252,7 @@ func (s *Server) handleRacioMatrixNodeMoveV2(w http.ResponseWriter, r *http.Requ
 	stop = timings.observeAccounted("source.transaction")
 	result, err := s.repo.MoveLogicGateNodeAssignment(input)
 	stop()
-	if !writeLogicGateWorkMutationError(w, err, "failed_to_move_racio_matrix_node") {
+	if !writeLogicGateWorkMutationError(w, err, "failed_to_move_gvic_matrix_node") {
 		return
 	}
 	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
@@ -319,7 +319,7 @@ func parseRacioMatrixNodeCreateMutationFields(w http.ResponseWriter, fields map[
 
 func writeRacioMatrixNodeCreateError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_racio_matrix_node")
+		writeError(w, http.StatusBadRequest, "invalid_gvic_matrix_node")
 		return false
 	}
 	if errors.Is(err, store.ErrPriorityRequired) {
@@ -331,12 +331,12 @@ func writeRacioMatrixNodeCreateError(w http.ResponseWriter, err error) bool {
 		return false
 	}
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "racio_matrix_reference_not_found")
+		writeError(w, http.StatusNotFound, "gvic_matrix_reference_not_found")
 		return false
 	}
 	if err != nil {
 		log.Printf("failed to create racio matrix node: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed_to_create_racio_matrix_node")
+		writeError(w, http.StatusInternalServerError, "failed_to_create_gvic_matrix_node")
 		return false
 	}
 	return true

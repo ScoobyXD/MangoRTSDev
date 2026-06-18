@@ -23,12 +23,8 @@ func cloneRacioMatrixProjectionRow(row RacioMatrixProjectionRow) RacioMatrixProj
 	out := row
 	out.LogicGateID = cloneStringPointer(row.LogicGateID)
 	out.Status = cloneStringPointer(row.Status)
-	out.StatusColor = cloneStringPointer(row.StatusColor)
 	out.DueDate = cloneStringPointer(row.DueDate)
 	out.Priority = cloneIntPointer(row.Priority)
-	out.AssigneeUserID = cloneStringPointer(row.AssigneeUserID)
-	out.AssigneeDisplayName = cloneStringPointer(row.AssigneeDisplayName)
-	out.AssigneeEmail = cloneStringPointer(row.AssigneeEmail)
 	out.Accounts = cloneAccountSnapshots(row.Accounts)
 	return out
 }
@@ -78,7 +74,7 @@ func diffRacioProjectionRows(before, after []RacioMatrixProjectionRow) []Project
 		case !hasAfter && hadBefore:
 			deltas = append(deltas, ProjectionDelta{
 				CompanyID:          beforeRow.CompanyID,
-				Projection:         ProjectionNameRacioMatrix,
+				Projection:         ProjectionNameGVICMatrix,
 				Operation:          ProjectionDeltaOperationDelete,
 				RowKey:             key,
 				ProjectedTimestamp: now,
@@ -91,7 +87,7 @@ func diffRacioProjectionRows(before, after []RacioMatrixProjectionRow) []Project
 			}
 			deltas = append(deltas, ProjectionDelta{
 				CompanyID:          row.CompanyID,
-				Projection:         ProjectionNameRacioMatrix,
+				Projection:         ProjectionNameGVICMatrix,
 				Operation:          ProjectionDeltaOperationUpsert,
 				RowKey:             key,
 				Row:                &row,

@@ -98,15 +98,11 @@ function dueDateGroup(dueDate: string | null | undefined): AxisGroup {
   return DUE_DATE_GROUPS[3];
 }
 
-function userLabel(user: Pick<CompanyUser, "display_name" | "email" | "user_id"> | undefined, fallbackID: string): string {
-  return user?.display_name?.trim() || user?.email?.trim() || fallbackID.trim() || "Unassigned";
-}
-
 function nodeAxisGroups(
   node: NodeRecord,
   field: CustomMatrixAxisField,
   logicGateByID: Map<string, LogicGateRecord>,
-  userByID: Map<string, CompanyUser>,
+  _userByID: Map<string, CompanyUser>,
 ): AxisGroup[] {
   if (field === "priority") {
     const priority = Number(node.priority);
@@ -122,13 +118,7 @@ function nodeAxisGroups(
   if (field === "dueDate") return [dueDateGroup(node.due_date)];
 
   if (field === "assignee") {
-    const assigneeID = node.assignee_user_id?.trim() ?? "";
-    if (!assigneeID) return [UNASSIGNED_USER_GROUP];
-    return [{
-      key: `assignee:${assigneeID}`,
-      label: userLabel(userByID.get(assigneeID), assigneeID),
-      sort: 100,
-    }];
+    return [UNASSIGNED_USER_GROUP];
   }
 
   const logicGateIDs = Array.from(new Set((node.logic_gate_ids ?? []).map((id) => id.trim()).filter(Boolean)));

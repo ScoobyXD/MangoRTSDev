@@ -872,7 +872,7 @@ func TestMemoryRepo_CreateLogicGateCreatesAttachedKanbanBoard(t *testing.T) {
 	inProgress := mustFindKanbanColumn(t, columns, "In Progress")
 	review := mustFindKanbanColumn(t, columns, "Review")
 	done := mustFindKanbanColumn(t, columns, "Done")
-	if requested.ItemColor != KanbanDefaultRequestedColor || backlog.ItemColor != KanbanDefaultBacklogColor || pending.ItemColor != KanbanDefaultPendingColor || inProgress.ItemColor != KanbanDefaultInProgressColor || review.ItemColor != KanbanDefaultVerifyColor || done.ItemColor != KanbanDefaultDoneColor {
+	if requested.ItemColor != KanbanDefaultRequestedColor || backlog.ItemColor != KanbanDefaultBacklogColor || pending.ItemColor != KanbanDefaultPendingColor || inProgress.ItemColor != KanbanDefaultInProgressColor || review.ItemColor != KanbanDefaultReviewColor || done.ItemColor != KanbanDefaultDoneColor {
 		t.Fatalf("default colors = %q/%q/%q/%q/%q/%q", requested.ItemColor, backlog.ItemColor, pending.ItemColor, inProgress.ItemColor, review.ItemColor, done.ItemColor)
 	}
 	if requested.Position >= backlog.Position || backlog.Position >= pending.Position || pending.Position >= inProgress.Position || inProgress.Position >= review.Position || review.Position >= done.Position {

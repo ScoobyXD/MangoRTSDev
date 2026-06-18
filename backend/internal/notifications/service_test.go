@@ -256,24 +256,24 @@ func TestProcessDomainEventsLogicGateWorkUsesRACIOnly(t *testing.T) {
 	process("removed", store.WorkItemLogicGateAssignmentRemovedEventType, "removed", removed.Events)
 }
 
-func TestProcessDomainEventLogicGateWorkVerifyMoveNotifiesRACIRecipients(t *testing.T) {
+func TestProcessDomainEventLogicGateWorkReviewMoveNotifiesGVICRecipients(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)
 	companyID := "66666666-6666-4666-8666-666666666612"
-	repo.EnsureCompany(companyID, "Verify Notification Co")
+	repo.EnsureCompany(companyID, "Review Notification Co")
 
-	responsible := mustNotificationUser(t, repo, companyID, "verify-responsible")
-	accountable := mustNotificationUser(t, repo, companyID, "verify-accountable")
-	consulted := mustNotificationUser(t, repo, companyID, "verify-consulted")
-	informed := mustNotificationUser(t, repo, companyID, "verify-informed")
-	actor := mustNotificationUser(t, repo, companyID, "verify-actor")
-	viewer := mustNotificationUser(t, repo, companyID, "verify-viewer")
+	generated := mustNotificationUser(t, repo, companyID, "review-generated")
+	verified := mustNotificationUser(t, repo, companyID, "review-verified")
+	consulted := mustNotificationUser(t, repo, companyID, "review-consulted")
+	informed := mustNotificationUser(t, repo, companyID, "review-informed")
+	actor := mustNotificationUser(t, repo, companyID, "review-actor")
+	viewer := mustNotificationUser(t, repo, companyID, "review-viewer")
 
-	logicGate, err := repo.CreateLogicGate(companyID, "Verify Gate")
+	logicGate, err := repo.CreateLogicGate(companyID, "Review Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	node, err := repo.CreateNode(companyID, "Verify Node")
+	node, err := repo.CreateNode(companyID, "Review Node")
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
@@ -281,8 +281,8 @@ func TestProcessDomainEventLogicGateWorkVerifyMoveNotifiesRACIRecipients(t *test
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateRaciAssignmentInput{
-			{Role: domain.GVICRoleGenerated, UserID: responsible.UserID},
-			{Role: domain.GVICRoleVerified, UserID: accountable.UserID},
+			{Role: domain.GVICRoleGenerated, UserID: generated.UserID},
+			{Role: domain.GVICRoleVerified, UserID: verified.UserID},
 			{Role: domain.GVICRoleConsulted, UserID: consulted.UserID},
 			{Role: domain.GVICRoleInformed, UserID: informed.UserID},
 		},
@@ -325,7 +325,7 @@ func TestProcessDomainEventLogicGateWorkVerifyMoveNotifiesRACIRecipients(t *test
 	if err != nil {
 		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
 	}
-	if moved.Assignment.StatusKey != store.LogicGateWorkStatusVerify || moved.Node.Status == nil || *moved.Node.Status != "Review" {
+	if moved.Assignment.StatusKey != store.LogicGateWorkStatusReview || moved.Node.Status == nil || *moved.Node.Status != "Review" {
 		t.Fatalf("moved status assignment=%q node=%+v, want Review", moved.Assignment.StatusKey, moved.Node.Status)
 	}
 
@@ -339,7 +339,7 @@ func TestProcessDomainEventLogicGateWorkVerifyMoveNotifiesRACIRecipients(t *test
 			t.Fatalf("review notification = %+v, want moved Review notification", item)
 		}
 		if item.LogicGateID != logicGate.LogicGateID || item.NodeID != node.NodeID {
-			t.Fatalf("verify notification target = %+v", item)
+			t.Fatalf("review notification target = %+v", item)
 		}
 		byUser[item.RecipientUserID] = item
 	}
@@ -347,28 +347,28 @@ func TestProcessDomainEventLogicGateWorkVerifyMoveNotifiesRACIRecipients(t *test
 		surface string
 		role    string
 	}{
-		responsible.UserID: {surface: domain.NotificationSurfaceRInbox, role: domain.GVICRoleGenerated},
-		accountable.UserID: {surface: domain.NotificationSurfaceACIInbox, role: domain.GVICRoleVerified},
-		consulted.UserID:   {surface: domain.NotificationSurfaceACIInbox, role: domain.GVICRoleConsulted},
-		informed.UserID:    {surface: domain.NotificationSurfaceACIInbox, role: domain.GVICRoleInformed},
+		generated.UserID: {surface: domain.NotificationSurfaceRInbox, role: domain.GVICRoleGenerated},
+		verified.UserID:  {surface: domain.NotificationSurfaceACIInbox, role: domain.GVICRoleVerified},
+		consulted.UserID: {surface: domain.NotificationSurfaceACIInbox, role: domain.GVICRoleConsulted},
+		informed.UserID:  {surface: domain.NotificationSurfaceACIInbox, role: domain.GVICRoleInformed},
 	}
 	if len(byUser) != len(want) {
-		t.Fatalf("verify notification recipients = %+v, want %d RACI users", byUser, len(want))
+		t.Fatalf("review notification recipients = %+v, want %d GVIC users", byUser, len(want))
 	}
 	for userID, expected := range want {
 		item, ok := byUser[userID]
 		if !ok {
-			t.Fatalf("missing verify notification for %s; got %+v", userID, byUser)
+			t.Fatalf("missing review notification for %s; got %+v", userID, byUser)
 		}
 		if item.Surface != expected.surface || item.Role != expected.role {
-			t.Fatalf("verify notification metadata for %s = %+v, want %s/%s", userID, item, expected.surface, expected.role)
+			t.Fatalf("review notification metadata for %s = %+v, want %s/%s", userID, item, expected.surface, expected.role)
 		}
 	}
 	if _, ok := byUser[actor.UserID]; ok {
-		t.Fatalf("actor received verify notification: %+v", byUser[actor.UserID])
+		t.Fatalf("actor received review notification: %+v", byUser[actor.UserID])
 	}
 	if _, ok := byUser[viewer.UserID]; ok {
-		t.Fatalf("non-RACI viewer received verify notification: %+v", byUser[viewer.UserID])
+		t.Fatalf("non-GVIC viewer received review notification: %+v", byUser[viewer.UserID])
 	}
 }
 
@@ -648,7 +648,7 @@ func TestProcessDomainEventSharedInboxGVICUsesNotificationRoles(t *testing.T) {
 		CompanyID:   companyID,
 		StreamType:  "workspace",
 		StreamID:    companyID,
-		Type:        "communications_shared_inbox_raci_updated",
+		Type:        "communications_shared_inbox_gvic_updated",
 		ActorUserID: &actor.UserID,
 		Payload: map[string]any{
 			"folder_id":       folder.FolderID,
@@ -935,7 +935,7 @@ func TestReplayDomainEventsSkipsMissingSourceEntityAndAdvancesCheckpoint(t *test
 			"logic_gate_id": "66666666-6666-4666-8666-666666666683",
 			"node_id":       node.NodeID,
 			"node_title":    node.Title,
-			"status":        "Verify",
+			"status":        "Review",
 		},
 	})
 	if err != nil {

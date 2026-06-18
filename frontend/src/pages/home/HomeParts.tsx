@@ -15,7 +15,7 @@ import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gat
 import { deleteNotification, fetchNotifications, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
-import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, RACI_INBOX_SECTIONS, RACI_STATUS_COLUMNS } from "./homeConstants";
+import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, GVIC_INBOX_SECTIONS, RACI_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeAttachment, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes";
 import { buildRaciRoleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, raciRoleCellKey, readTriageMessageIDs, responsibleStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
@@ -305,8 +305,8 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
             <label style={labelStyle}>
               Role
               <select value={raciRole} onChange={(event) => setRaciRole(event.target.value as CommunicationsSharedInboxRaciRole)} style={fieldStyle}>
-                <option value="generated">Responsible</option>
-                <option value="verified">Accountable</option>
+                <option value="generated">Generated</option>
+                <option value="verified">Verified</option>
                 <option value="consulted">Consulted</option>
                 <option value="informed">Informed</option>
               </select>
@@ -340,7 +340,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
   );
 }
 
-type InboxMatrixViewID = Extract<HomeViewID, "aci-inbox" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
+type InboxMatrixViewID = Extract<HomeViewID, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
 
 type InboxNodeDropInput = {
   logicGateID: string;
@@ -1392,9 +1392,9 @@ export function HomeSidebar({
             </div>
           )}
         </section>
-        {RACI_INBOX_SECTIONS.map((section) => {
+        {GVIC_INBOX_SECTIONS.map((section) => {
           const changedNodeCount = raciInboxNotificationCount(section.role);
-          const active = activeViewID === section.viewID || (activeViewID === "aci-inbox" && section.viewID === "a-inbox");
+          const active = activeViewID === section.viewID;
           return (
             <HomeNavButton
               key={section.viewID}
@@ -1671,8 +1671,8 @@ type CompanyUserGroupMember = {
 };
 
 const SHARED_INBOX_RACI_ROLES: ReadonlyArray<{ role: CommunicationsSharedInboxRaciRole; label: string }> = [
-  { role: "generated", label: "generated" },
-  { role: "verified", label: "verified" },
+  { role: "generated", label: "Generated" },
+  { role: "verified", label: "Verified" },
   { role: "consulted", label: "Consulted" },
   { role: "informed", label: "Informed" },
 ];
@@ -1742,7 +1742,7 @@ export function SharedInboxRaciSettingsModal({
   const [loadingGroups, setLoadingGroups] = useState(false);
   const userByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id, user])), [companyUsers]);
   const groupByID = useMemo(() => new Map(groups.map((group) => [group.group_id, group])), [groups]);
-  const assignments = folder.raci_assignments ?? [];
+  const assignments = folder.gvic_assignments ?? [];
   const updateUserDraft = (role: CommunicationsSharedInboxRaciRole, value: string) => {
     setUserDraftByRole((previous) => ({ ...previous, [role]: value }));
   };
@@ -1780,7 +1780,7 @@ export function SharedInboxRaciSettingsModal({
       })
       .catch((error) => {
         if (cancelled) return;
-        console.error("Failed to load shared inbox RACI groups", error);
+        console.error("Failed to load shared inbox GVIC groups", error);
         setLoadError("User groups could not be loaded.");
       })
       .finally(() => {
@@ -1808,10 +1808,10 @@ export function SharedInboxRaciSettingsModal({
 
   return (
     <div style={sharedRaciBackdropStyle}>
-      <section style={sharedRaciModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} RACI assignments`}>
+      <section style={sharedRaciModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} GVIC assignments`}>
         <div style={panelHeaderStyle}>
           <div style={{ minWidth: 0 }}>
-            <h2 style={panelTitleStyle}>{folder.name} RACI assignments</h2>
+            <h2 style={panelTitleStyle}>{folder.name} GVIC assignments</h2>
             {loadError && <div style={{ ...mutedSmallStyle, color: "#8b123f" }}>{loadError}</div>}
           </div>
           <button type="button" style={smallButtonStyle} disabled={busy} onClick={onClose}>Close</button>
@@ -3375,7 +3375,7 @@ export function RacioMatrixViewerSelector({
             if (event.key === "Escape") setSearchOpen(false);
           }}
           placeholder="Search people"
-          aria-label="Search RACIO matrix people"
+          aria-label="Search GVIC matrix people"
           spellCheck={false}
           style={racioViewerSearchInputStyle}
         />
@@ -3989,7 +3989,7 @@ export function RaciRoleInboxMatrix({
   onDropNodesInCell,
   onDropLogicGates,
 }: {
-  section: (typeof RACI_INBOX_SECTIONS)[number];
+  section: (typeof GVIC_INBOX_SECTIONS)[number];
   loading: boolean;
   nodes: NodeRecord[];
   nodeByID: Map<string, NodeRecord>;

@@ -144,21 +144,21 @@ func TestRacioMutationInsertsEventRowWithProjectionDelta(t *testing.T) {
 	}
 	var row EventRow
 	for _, candidate := range rows {
-		if candidate.EventType == EventTypeRacioProjectionDelta {
+		if candidate.EventType == EventTypeGVICMatrixProjectionDelta {
 			row = candidate
 			break
 		}
 	}
 	wantScope := RacioRealtimeUserScope(user.UserID)
-	wantSequenceScope := RacioProjectionUserScope(user.UserID)
+	wantSequenceScope := GVICMatrixProjectionUserScope(user.UserID)
 	if row.EventID == "" || row.PrimaryScope != wantScope || row.SequenceScope != wantSequenceScope || row.Sequence != 1 {
 		t.Fatalf("RACIO event row = %+v, want scope=%s sequence_scope=%s", row, wantScope, wantSequenceScope)
 	}
-	payload, err := DecodeRacioProjectionDeltaEventPayload(row)
+	payload, err := DecodeGVICMatrixProjectionDeltaEventPayload(row)
 	if err != nil {
-		t.Fatalf("DecodeRacioProjectionDeltaEventPayload: %v", err)
+		t.Fatalf("DecodeGVICMatrixProjectionDeltaEventPayload: %v", err)
 	}
-	if payload.Projection != ProjectionNameRacioMatrix || payload.Scope != wantScope || payload.ProjectionScope != wantSequenceScope || len(payload.Deltas) == 0 {
+	if payload.Projection != ProjectionNameGVICMatrix || payload.Scope != wantScope || payload.ProjectionScope != wantSequenceScope || len(payload.Deltas) == 0 {
 		t.Fatalf("payload = %+v, want RACIO projection deltas", payload)
 	}
 }
@@ -267,7 +267,7 @@ func TestRacioMatrixNodeCreateForExistingLogicGateWritesProjectionEventRows(t *t
 
 	newRows := eventRowsAfterPrefixForTest(t, repo, companyID, len(beforeRows))
 	kanbanRows := eventRowsOfTypeForTest(newRows, EventTypeKanbanProjectionDelta)
-	racioRows := eventRowsOfTypeForTest(newRows, EventTypeRacioProjectionDelta)
+	racioRows := eventRowsOfTypeForTest(newRows, EventTypeGVICMatrixProjectionDelta)
 	if len(kanbanRows) != 1 || len(racioRows) != 1 {
 		t.Fatalf("new event rows = %+v, want exactly one Kanban and one RACIO row", newRows)
 	}
@@ -313,13 +313,13 @@ func TestRacioMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *t
 		t.Fatalf("ListEventRows: %v", err)
 	}
 	kanbanRows := eventRowsOfTypeForTest(rows, EventTypeKanbanProjectionDelta)
-	racioRows := eventRowsOfTypeForTest(rows, EventTypeRacioProjectionDelta)
+	racioRows := eventRowsOfTypeForTest(rows, EventTypeGVICMatrixProjectionDelta)
 	if len(kanbanRows) != 1 || len(racioRows) != 1 {
 		t.Fatalf("event rows = %+v, want one Kanban row and one RACIO row for created logic-gate projection", rows)
 	}
 	assertKanbanProjectionEventRowForLogicGate(t, kanbanRows[0], result.LogicGate.LogicGateID, 1)
 	assertRacioProjectionEventRowForUser(t, racioRows[0], user.UserID, 1, []string{EntityTypeLogicGate})
-	if current, err := repo.CurrentEventRowSequence(companyID, RacioProjectionUserScope(user.UserID)); err != nil || current != 1 {
+	if current, err := repo.CurrentEventRowSequence(companyID, GVICMatrixProjectionUserScope(user.UserID)); err != nil || current != 1 {
 		t.Fatalf("CurrentEventRowSequence RACIO = %d err=%v, want 1", current, err)
 	}
 }
@@ -384,7 +384,7 @@ func TestUpdateNodeAndWorkspaceEventWritesProjectionEventRowsForTitleChange(t *t
 
 	newRows := eventRowsAfterPrefixForTest(t, repo, companyID, len(beforeRows))
 	kanbanRows := eventRowsOfTypeForTest(newRows, EventTypeKanbanProjectionDelta)
-	racioRows := eventRowsOfTypeForTest(newRows, EventTypeRacioProjectionDelta)
+	racioRows := eventRowsOfTypeForTest(newRows, EventTypeGVICMatrixProjectionDelta)
 	if len(kanbanRows) != 1 || len(racioRows) != 1 {
 		t.Fatalf("new event rows = %+v, want exactly one Kanban and one RACIO row", newRows)
 	}
@@ -395,9 +395,9 @@ func TestUpdateNodeAndWorkspaceEventWritesProjectionEventRowsForTitleChange(t *t
 	if len(kanbanPayload.Deltas) != 1 || kanbanPayload.Deltas[0].Row == nil || kanbanPayload.Deltas[0].Row.NodeTitle != updatedTitle {
 		t.Fatalf("Kanban title delta = %+v, want node_title %q", kanbanPayload.Deltas, updatedTitle)
 	}
-	racioPayload, err := DecodeRacioProjectionDeltaEventPayload(racioRows[0])
+	racioPayload, err := DecodeGVICMatrixProjectionDeltaEventPayload(racioRows[0])
 	if err != nil {
-		t.Fatalf("DecodeRacioProjectionDeltaEventPayload: %v", err)
+		t.Fatalf("DecodeGVICMatrixProjectionDeltaEventPayload: %v", err)
 	}
 	if len(racioPayload.Deltas) != 1 || racioPayload.Deltas[0].Row == nil || racioPayload.Deltas[0].Row.DisplayTitle != updatedTitle {
 		t.Fatalf("RACIO title delta = %+v, want display_title %q", racioPayload.Deltas, updatedTitle)
@@ -997,15 +997,15 @@ func assertKanbanProjectionEventRowForLogicGate(t *testing.T, row EventRow, logi
 func assertRacioProjectionEventRowForUser(t *testing.T, row EventRow, userID string, wantSequence int64, wantResourceTypes []string) {
 	t.Helper()
 	wantScope := RacioRealtimeUserScope(userID)
-	wantSequenceScope := RacioProjectionUserScope(userID)
+	wantSequenceScope := GVICMatrixProjectionUserScope(userID)
 	if row.EventID == "" || row.PrimaryScope != wantScope || row.SequenceScope != wantSequenceScope || row.Sequence != wantSequence {
 		t.Fatalf("RACIO event row = %+v, want scope=%s sequence_scope=%s sequence=%d", row, wantScope, wantSequenceScope, wantSequence)
 	}
-	payload, err := DecodeRacioProjectionDeltaEventPayload(row)
+	payload, err := DecodeGVICMatrixProjectionDeltaEventPayload(row)
 	if err != nil {
-		t.Fatalf("DecodeRacioProjectionDeltaEventPayload: %v", err)
+		t.Fatalf("DecodeGVICMatrixProjectionDeltaEventPayload: %v", err)
 	}
-	if payload.Projection != ProjectionNameRacioMatrix || payload.Scope != wantScope || payload.ProjectionScope != wantSequenceScope || len(payload.Deltas) == 0 {
+	if payload.Projection != ProjectionNameGVICMatrix || payload.Scope != wantScope || payload.ProjectionScope != wantSequenceScope || len(payload.Deltas) == 0 {
 		t.Fatalf("RACIO payload = %+v, want deltas for %s", payload, wantScope)
 	}
 	gotResourceTypes := make([]string, 0, len(payload.Deltas))

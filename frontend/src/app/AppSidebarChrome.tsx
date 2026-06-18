@@ -27,7 +27,7 @@ import {
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
 import { deleteNotification, deleteNotifications, EVENT_NOTIFICATIONS_UPDATED, fetchNotifications, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../modules/node-map/eventbus";
-import { INBOX_PRIORITIES, RACI_INBOX_SECTIONS } from "../pages/home/homeConstants";
+import { INBOX_PRIORITIES, GVIC_INBOX_SECTIONS } from "../pages/home/homeConstants";
 import { convertMessagesToLogicGateCommand } from "../pages/home/homeCommands";
 import {
   buildSharedInboxRows,
@@ -91,12 +91,12 @@ const SIDEBAR_ACTIVE_TEXT = "#111111";
 
 type SidebarSectionID = "shared-triage" | "views";
 
-export type HomeSidebarView = "my-triage" | "shared-root" | "aci-inbox" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "custom-matrix" | "my-work" | `shared:${string}`;
+export type HomeSidebarView = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "custom-matrix" | "my-work" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
-type RaciHomeSidebarView = Extract<HomeSidebarView, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
+type GVICHomeSidebarView = Extract<HomeSidebarView, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
 
-const APP_SIDEBAR_RACI_VIEWS = RACI_INBOX_SECTIONS.map((section) => {
+const APP_SIDEBAR_GVIC_VIEWS = GVIC_INBOX_SECTIONS.map((section) => {
   const label = section.role === "other" ? "Others" : section.label;
   return {
     viewID: section.viewID,
@@ -106,7 +106,7 @@ const APP_SIDEBAR_RACI_VIEWS = RACI_INBOX_SECTIONS.map((section) => {
     surface: section.role === "generated" ? "r_inbox" : "aci_inbox",
   };
 }) satisfies ReadonlyArray<{
-  viewID: RaciHomeSidebarView;
+  viewID: GVICHomeSidebarView;
   role: NotificationRaciRole;
   label: string;
   notificationTitle: string;
@@ -179,8 +179,8 @@ function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
   return dataTransfer.getData(SHARED_TRIAGE_FOLDER_DRAG_MIME).trim();
 }
 
-function homeSidebarViewForRaciNotification(surface: NotificationSurface | undefined, role: NotificationRaciRole | "" | undefined): RaciHomeSidebarView {
-  const roleView = APP_SIDEBAR_RACI_VIEWS.find((view) => view.role === role);
+function homeSidebarViewForRaciNotification(surface: NotificationSurface | undefined, role: NotificationRaciRole | "" | undefined): GVICHomeSidebarView {
+  const roleView = APP_SIDEBAR_GVIC_VIEWS.find((view) => view.role === role);
   if (roleView) return roleView.viewID;
   return surface === "r_inbox" ? "r-inbox" : "a-inbox";
 }
@@ -302,7 +302,7 @@ export function AppSidebar({
   );
   const sharedTriageActive = homeActive && (activeHomeView === "shared-root" || activeHomeView.startsWith("shared:"));
   const raciNotificationCounts = useMemo(
-    () => APP_SIDEBAR_RACI_VIEWS.reduce<Partial<Record<NotificationRaciRole, number>>>((counts, view) => {
+    () => APP_SIDEBAR_GVIC_VIEWS.reduce<Partial<Record<NotificationRaciRole, number>>>((counts, view) => {
       counts[view.role] = notificationSummaryRoleCount(notificationSummary, view.surface, view.role);
       return counts;
     }, {}),
@@ -1061,9 +1061,7 @@ export function AppSidebar({
     );
   };
 
-  const viewsActive = homeActive && APP_SIDEBAR_RACI_VIEWS.some((view) => (
-    activeHomeView === view.viewID || (activeHomeView === "aci-inbox" && view.viewID === "a-inbox")
-  ));
+  const viewsActive = homeActive && APP_SIDEBAR_GVIC_VIEWS.some((view) => activeHomeView === view.viewID);
   return (
     <aside className="company-explorer-scroll" data-app-sidebar="primary" style={appSidebarStyle}>
       <div style={appSidebarBrandStyle} aria-label="MangoRTS">
@@ -1186,11 +1184,11 @@ export function AppSidebar({
           </div>
           {viewsOpen && (
             <div className="app-sidebar-elevated-dropdown" style={appSidebarViewsNestedStyle}>
-              {APP_SIDEBAR_RACI_VIEWS.map((view) => (
+              {APP_SIDEBAR_GVIC_VIEWS.map((view) => (
                 <AppSidebarButton
                   key={view.viewID}
                   label={view.label}
-                  active={homeActive && (activeHomeView === view.viewID || (activeHomeView === "aci-inbox" && view.viewID === "a-inbox"))}
+                  active={homeActive && activeHomeView === view.viewID}
                   trailing={<SidebarNotificationBadges badges={[{
                     key: view.role,
                     count: raciNotificationCounts[view.role] ?? 0,

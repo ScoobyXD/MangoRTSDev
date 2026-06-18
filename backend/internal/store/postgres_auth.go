@@ -648,9 +648,6 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	if err = optionalCleanup("delete company racio matrix projection rows for user", "racio_matrix_projection_table", `delete from racio_matrix_projection_table where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if err = optionalCleanup("delete company resource raci assignments for user", "resource_raci_assignments", `delete from resource_raci_assignments where company_id = $1::uuid and subject_type = 'user' and subject_id = $2::uuid`, companyID, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
-	}
 	if _, err = tx.Exec(`delete from company_memberships where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, fmt.Errorf("delete company membership: %w", err)
 	}
@@ -739,9 +736,6 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 		return DeleteCompanyUserResult{}, err
 	}
 	if err = optionalCleanup("delete all racio matrix projection rows for user", "racio_matrix_projection_table", `delete from racio_matrix_projection_table where user_id = $1::uuid`, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
-	}
-	if err = optionalCleanup("delete all resource raci assignments for user", "resource_raci_assignments", `delete from resource_raci_assignments where subject_type = 'user' and subject_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
 	if err = optionalCleanup("delete all entity access permissions for user", "entity_access_permissions", `delete from entity_access_permissions where subject_type = 'user' and subject_id = $1::uuid`, userID); err != nil {

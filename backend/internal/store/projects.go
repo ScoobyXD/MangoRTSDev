@@ -114,7 +114,6 @@ func NormalizeProjectScopedNodeCreateInput(input ProjectScopedNodeCreateInput) (
 	input.ProjectID = cleanUUIDText(input.ProjectID)
 	input.NodeID = cleanUUIDText(input.NodeID)
 	input.Title = strings.TrimSpace(input.Title)
-	input.AssigneeUserID = cleanUUIDText(input.AssigneeUserID)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.ActorDisplayName = strings.TrimSpace(input.ActorDisplayName)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
@@ -217,7 +216,6 @@ func cloneProjectRelationshipProjection(item domain.ProjectRelationshipProjectio
 	item.NodeID = cloneStringPointer(item.NodeID)
 	item.AssignmentID = cloneStringPointer(item.AssignmentID)
 	item.Status = cloneStringPointer(item.Status)
-	item.StatusColor = cloneStringPointer(item.StatusColor)
 	return item
 }
 

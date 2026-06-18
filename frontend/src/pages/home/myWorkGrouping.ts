@@ -16,7 +16,7 @@ export type MyWorkGroupingField =
   | "person"
   | "priority"
   | "project"
-  | "racio"
+  | "gvic"
   | "status"
   | "team";
 
@@ -63,7 +63,7 @@ export type MyWorkResourceRow = {
   projectLabels?: string[];
   people: MyWorkPerson[];
   teams: MyWorkTeam[];
-  raciRoles: LogicGateRaciRole[];
+  gvicRoles: LogicGateRaciRole[];
   participantUserIDs: string[];
   logicGateLabels: string[];
   logicGateIDs: string[];
@@ -90,13 +90,13 @@ export const MY_WORK_GROUPING_FIELDS: ReadonlyArray<{ value: MyWorkGroupingField
   { value: "person", label: "Person" },
   { value: "priority", label: "Priority" },
   { value: "project", label: "Project" },
-  { value: "racio", label: "RACIO" },
+  { value: "gvic", label: "GVIC" },
   { value: "status", label: "Status" },
   { value: "team", label: "Team" },
 ];
 
 export const DEFAULT_MY_WORK_GROUPINGS: MyWorkGroupingSetting[] = [
-  { field: "racio", direction: "asc" },
+  { field: "gvic", direction: "asc" },
   { field: "priority", direction: "asc" },
   { field: "project", direction: "asc" },
 ];
@@ -226,9 +226,9 @@ export function getMyWorkGroupValues(row: MyWorkResourceRow, field: MyWorkGroupi
     return projects.map((label) => ({ key: `project:${label.toLowerCase()}`, label, sortValue: label.toLowerCase() }));
   }
 
-  if (field === "racio") {
-    if (row.raciRoles.length === 0) return [{ key: "racio:none", label: "Others", sortValue: "", sortLast: true }];
-    return row.raciRoles.map((role) => ({ key: `racio:${role}`, label: raciRoleLabel(role), sortValue: raciRoleSort(role) }));
+  if (field === "gvic") {
+    if (row.gvicRoles.length === 0) return [{ key: "gvic:none", label: "Others", sortValue: "", sortLast: true }];
+    return row.gvicRoles.map((role) => ({ key: `gvic:${role}`, label: raciRoleLabel(role), sortValue: raciRoleSort(role) }));
   }
 
   if (field === "status") {
@@ -349,8 +349,8 @@ export function priorityLabel(priority: number): string {
 }
 
 export function raciRoleLabel(role: LogicGateRaciRole): string {
-  if (role === "generated") return "generated";
-  if (role === "verified") return "verified";
+  if (role === "generated") return "Generated";
+  if (role === "verified") return "Verified";
   if (role === "consulted") return "Consulted";
   return "Informed";
 }

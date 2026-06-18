@@ -219,7 +219,7 @@ func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {
 	}
 }
 
-func TestLogicGateRaciRoutesRequireGVIC(t *testing.T) {
+func TestOldLogicGateAssignmentRoutesAreNotFound(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -227,11 +227,11 @@ func TestLogicGateRaciRoutesRequireGVIC(t *testing.T) {
 	handler := server.Routes()
 	companyID := "77777777-7777-4777-8777-777777777770"
 
-	editor, err := repo.UpsertAuthUser("raci-editor-subject", "raci-editor@example.com", "RACI Editor")
+	editor, err := repo.UpsertAuthUser("gvic-editor-subject", "gvic-editor@example.com", "GVIC Editor")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.AddCompanyMembership("raci-editor-subject", companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("gvic-editor-subject", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
 	logicGate, err := repo.CreateLogicGate(companyID, "Assignment gate")
@@ -239,12 +239,12 @@ func TestLogicGateRaciRoutesRequireGVIC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertGone := func(method, path string) {
+	assertNotFound := func(method, path string) {
 		t.Helper()
 		body, _ := json.Marshal(map[string]any{
 			"company_id": companyID,
 			"assignments": []map[string]string{{
-				"role":    "responsible",
+				"role":    domain.GVICRoleGenerated,
 				"user_id": editor.UserID,
 			}},
 		})
@@ -253,13 +253,13 @@ func TestLogicGateRaciRoutesRequireGVIC(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), "gvic_required") {
-			t.Fatalf("%s %s status = %d body=%s, want gvic_required", method, path, rec.Code, rec.Body.String())
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s %s status = %d body=%s, want not_found", method, path, rec.Code, rec.Body.String())
 		}
 	}
 
-	assertGone(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci")
-	assertGone(http.MethodPost, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci/add")
+	assertNotFound(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci")
+	assertNotFound(http.MethodPost, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci/add")
 }
 
 func TestNotificationSummaryCountsChangedTargetsForRoleBadges(t *testing.T) {

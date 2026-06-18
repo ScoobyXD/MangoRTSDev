@@ -22,7 +22,7 @@ function row(input: Partial<MyWorkResourceRow> & Pick<MyWorkResourceRow, "id" | 
     projectLabels: [],
     people: [],
     teams: [],
-    raciRoles: [],
+    gvicRoles: [],
     participantUserIDs: [],
     logicGateLabels: [],
     logicGateIDs: [],
@@ -52,19 +52,19 @@ test("normalizes My Work selected scope and grouping stack", () => {
   ]);
 });
 
-test("groups My Work rows by RACIO, priority, and project with missing fallbacks", () => {
+test("groups My Work rows by GVIC, priority, and project with missing fallbacks", () => {
   const rows = [
-    row({ id: "node-1", title: "Project node", priority: 1, projectLabels: ["Project A"], raciRoles: ["generated"] }),
-    row({ id: "node-2", title: "Missing project", priority: 2, raciRoles: ["generated"] }),
+    row({ id: "node-1", title: "Project node", priority: 1, projectLabels: ["Project A"], gvicRoles: ["generated"] }),
+    row({ id: "node-2", title: "Missing project", priority: 2, gvicRoles: ["generated"] }),
     row({ id: "node-3", title: "Others", priority: null }),
   ];
   const groups = buildNestedGroups(rows, [
-    { field: "racio", direction: "asc" },
+    { field: "gvic", direction: "asc" },
     { field: "priority", direction: "asc" },
     { field: "project", direction: "asc" },
   ]);
 
-  assert.equal(groups[0].label, "generated");
+  assert.equal(groups[0].label, "Generated");
   assert.equal(groups[0].groups[0].label, "1 URGENT(<1hr)");
   assert.equal(groups[0].groups[0].groups[0].label, "Project A");
   assert.equal(groups[0].groups[1].groups[0].label, "No project");
