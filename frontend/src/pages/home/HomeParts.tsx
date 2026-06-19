@@ -4898,12 +4898,12 @@ function attachmentAccent(contentType: string): { background: string; color: str
   return { background: "linear-gradient(145deg, #ffffff, #f1f5f9)", color: "#475569", stripe: "#94a3b8" };
 }
 
-function attachmentTileStyle(_interactive: boolean, highlighted: boolean): React.CSSProperties {
+function attachmentTileStyle(interactive: boolean, highlighted: boolean): React.CSSProperties {
   return {
     ...mailAttachmentTileStyle,
     position: "relative",
     gap: 7,
-    cursor: "default",
+    cursor: interactive ? "grab" : "default",
     borderColor: highlighted ? "rgba(14, 165, 233, 0.34)" : mailAttachmentTileStyle.borderColor,
     boxShadow: highlighted ? "0 14px 30px rgba(15, 23, 42, 0.12), inset 1px 1px 0 rgba(255, 255, 255, 0.9)" : mailAttachmentTileStyle.boxShadow,
   };
@@ -5385,6 +5385,59 @@ function composePanelStyle(replyMode: boolean): React.CSSProperties {
   };
 }
 
+const composeReplyHeaderStyle: React.CSSProperties = {
+  ...panelHeaderStyle,
+  alignItems: "start",
+  justifyContent: "flex-start",
+  gap: 12,
+};
+
+const composeReplyHeaderFieldsStyle: React.CSSProperties = {
+  flex: "1 1 720px",
+  maxWidth: "72%",
+  minWidth: 320,
+  display: "grid",
+  gap: 6,
+  minHeight: 0,
+};
+
+const composeHeaderActionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  alignItems: "center",
+  flex: "0 0 auto",
+  flexWrap: "wrap",
+  justifyContent: "flex-end",
+  marginLeft: "auto",
+};
+
+const composeReplySubjectFieldStyle: React.CSSProperties = {
+  ...mailPanelInputStyle,
+  minHeight: 40,
+  height: "auto",
+  display: "grid",
+  gridTemplateColumns: "28px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 6,
+  padding: "4px 8px",
+};
+
+const composeReplySubjectLabelStyle: React.CSSProperties = {
+  color: "rgba(15, 23, 42, 0.66)",
+  fontSize: 12,
+  fontWeight: 760,
+};
+
+const composeReplySubjectInputStyle: React.CSSProperties = {
+  border: "none",
+  outline: "none",
+  background: "transparent",
+  minWidth: 0,
+  color: "#111827",
+  font: "inherit",
+  fontSize: 13,
+};
+
 const composeReplyOriginalStyle: React.CSSProperties = {
   ...mailComposeOriginalStyle,
   minHeight: 0,
@@ -5407,19 +5460,48 @@ const composeReplyDockStyle: React.CSSProperties = {
   alignContent: "end",
 };
 
-const composeReplyMessagePreviewStyle: React.CSSProperties = {
-  ...composeMessagePreviewStyle,
-  height: 112,
-  minHeight: 92,
-  maxHeight: "20vh",
+const composeReplyResizeHandleStyle: React.CSSProperties = {
+  height: 10,
+  margin: "-2px 0",
+  display: "grid",
+  placeItems: "center",
+  cursor: "row-resize",
+  touchAction: "none",
 };
 
-const composeReplyMessageTextareaStyle: React.CSSProperties = {
-  ...composeMessageTextareaStyle,
-  height: 112,
-  minHeight: 92,
-  maxHeight: "20vh",
+const composeReplyResizeGripStyle: React.CSSProperties = {
+  width: 44,
+  height: 3,
+  borderRadius: 999,
+  background: "rgba(100, 116, 139, 0.38)",
 };
+
+function composeReplyMessageEditorShellStyle(height: number): React.CSSProperties {
+  return {
+    ...composeMessageEditorShellStyle,
+    height,
+    minHeight: 150,
+  };
+}
+
+function composeReplyMessagePreviewStyle(height: number): React.CSSProperties {
+  return {
+    ...composeMessagePreviewStyle,
+    height,
+    minHeight: 0,
+    maxHeight: "none",
+  };
+}
+
+function composeReplyMessageTextareaStyle(height: number): React.CSSProperties {
+  return {
+    ...composeMessageTextareaStyle,
+    height,
+    minHeight: 150,
+    maxHeight: "none",
+    resize: "none",
+  };
+}
 
 function recipientQuery(value: string): string {
   return value.trim().toLowerCase();
@@ -5534,6 +5616,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   const [signatureEditorOpen, setSignatureEditorOpen] = React.useState(false);
   const [activeRecipientField, setActiveRecipientField] = React.useState<ComposeRecipientField | "">("");
   const [recipientDrafts, setRecipientDrafts] = React.useState<Record<ComposeRecipientField, string>>({ to: "", cc: "" });
+  const [replyEditorHeight, setReplyEditorHeight] = React.useState(220);
   const update = (patch: Partial<ComposeState>) => onChange({ ...compose, ...patch });
   const totalAttachmentBytes = compose.attachments.reduce((sum, attachment) => sum + Math.max(0, attachment.size || 0), 0);
   const focusRecipientInput = (field: ComposeRecipientField) => {
@@ -5702,13 +5785,49 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     update({ body: body ? `${body}\n\n\n${signature}` : `\n\n\n${signature}` });
   };
   const isReplyMode = !!replyMessage;
-  const messagePreviewStyle = isReplyMode ? composeReplyMessagePreviewStyle : composeMessagePreviewStyle;
-  const messageTextareaStyle = isReplyMode ? composeReplyMessageTextareaStyle : composeMessageTextareaStyle;
+  const startReplyEditorResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = replyEditorHeight;
+    const maxHeight = Math.max(260, Math.floor((typeof window === "undefined" ? 900 : window.innerHeight) * 0.48));
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      setReplyEditorHeight(clampNumber(startHeight + startY - moveEvent.clientY, 150, maxHeight));
+    };
+    const onPointerUp = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+  };
+  const renderSubjectInput = (replyMode: boolean) => replyMode ? (
+    <div style={composeReplySubjectFieldStyle}>
+      <span style={composeReplySubjectLabelStyle}>Re</span>
+      <input
+        style={composeReplySubjectInputStyle}
+        value={compose.subject}
+        onChange={(event) => update({ subject: event.target.value })}
+        placeholder="Subject"
+      />
+    </div>
+  ) : (
+    <input style={mailPanelInputStyle} value={compose.subject} onChange={(event) => update({ subject: event.target.value })} placeholder="Subject" />
+  );
+  const messageEditorShellStyle = isReplyMode ? composeReplyMessageEditorShellStyle(replyEditorHeight) : composeMessageEditorShellStyle;
+  const messagePreviewStyle = isReplyMode ? composeReplyMessagePreviewStyle(replyEditorHeight) : composeMessagePreviewStyle;
+  const messageTextareaStyle = isReplyMode ? composeReplyMessageTextareaStyle(replyEditorHeight) : composeMessageTextareaStyle;
   return (
     <form style={composePanelStyle(isReplyMode)} onSubmit={onSubmit}>
-      <div style={panelHeaderStyle}>
+      <div style={isReplyMode ? composeReplyHeaderStyle : panelHeaderStyle}>
         <h2 style={panelTitleStyle}>{compose.replyToMessageID ? "Reply" : compose.draftID ? "Draft" : "New Message"}</h2>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+        {isReplyMode && (
+          <div style={composeReplyHeaderFieldsStyle}>
+            {renderRecipientInput("to", "To")}
+            {renderRecipientInput("cc", "Cc")}
+            {renderSubjectInput(true)}
+          </div>
+        )}
+        <div style={isReplyMode ? composeHeaderActionsStyle : { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
           <button type="button" style={mailPanelSmallButtonStyle} onClick={onSaveDraft}>Save to My Drafts</button>
           <button type="button" style={mailPanelSmallButtonStyle} onClick={onCancel}>Close</button>
         </div>
@@ -5722,10 +5841,20 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
         </div>
       )}
       <div style={isReplyMode ? composeReplyDockStyle : undefined}>
-        {renderRecipientInput("to", "To")}
-        {renderRecipientInput("cc", "Cc")}
-        <input style={mailPanelInputStyle} value={compose.subject} onChange={(event) => update({ subject: event.target.value })} placeholder="Subject" />
-        <div style={composeMessageEditorShellStyle}>
+        {!isReplyMode && renderRecipientInput("to", "To")}
+        {!isReplyMode && renderRecipientInput("cc", "Cc")}
+        {!isReplyMode && renderSubjectInput(false)}
+        {isReplyMode && (
+          <div
+            style={composeReplyResizeHandleStyle}
+            onPointerDown={startReplyEditorResize}
+            role="separator"
+            aria-orientation="horizontal"
+          >
+            <div style={composeReplyResizeGripStyle} />
+          </div>
+        )}
+        <div style={messageEditorShellStyle}>
           <div ref={bodyPreviewRef} aria-hidden="true" style={messagePreviewStyle}>
             {renderComposeMessagePreview(compose.body)}
           </div>
