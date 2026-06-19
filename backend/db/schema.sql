@@ -493,6 +493,7 @@ create table if not exists project_relationships (
   constraint project_relationships_resource_type_chk check (resource_type in ('logic_gate', 'node')),
   primary key (company_id, relationship_id),
   unique (company_id, project_id, resource_type, resource_id),
+  unique (company_id, resource_type, resource_id),
   foreign key (company_id, project_id) references projects(company_id, project_id) on delete cascade
 );
 
@@ -501,6 +502,8 @@ create index if not exists idx_project_relationships_project_position
 
 create index if not exists idx_project_relationships_resource
   on project_relationships(company_id, resource_type, resource_id, project_id);
+create unique index if not exists idx_project_relationships_one_project_per_resource
+  on project_relationships(company_id, resource_type, resource_id);
 
 create table if not exists project_relationship_projection (
   company_id uuid not null,
@@ -1485,6 +1488,7 @@ create table if not exists company_explorer_edges (
   constraint company_explorer_edges_not_self_chk check (parent_entity_id <> child_entity_id),
   primary key (company_id, edge_id),
   unique (company_id, parent_entity_id, child_entity_id),
+  unique (company_id, child_entity_id),
   foreign key (company_id, parent_entity_id) references company_explorer_entities (company_id, entity_id) on delete cascade,
   foreign key (company_id, child_entity_id) references company_explorer_entities (company_id, entity_id) on delete cascade
 );
@@ -1495,6 +1499,31 @@ create index if not exists idx_company_explorer_edges_parent_position
 create index if not exists idx_company_explorer_edges_child
   on company_explorer_edges(company_id, child_entity_id, parent_entity_id);
 
+create unique index if not exists idx_company_explorer_edges_one_parent_per_child
+  on company_explorer_edges(company_id, child_entity_id);
+
+create table if not exists company_explorer_subscriptions (
+  company_id uuid not null,
+  subscription_id uuid not null,
+  owner_type text not null,
+  owner_id uuid not null,
+  anchor_entity_id uuid not null,
+  position integer not null default 1000,
+  created_by_user_id uuid,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint company_explorer_subscriptions_owner_type_chk check (owner_type in ('user', 'team')),
+  primary key (company_id, subscription_id),
+  unique (company_id, owner_type, owner_id, anchor_entity_id),
+  foreign key (company_id, anchor_entity_id) references company_explorer_entities (company_id, entity_id) on delete cascade,
+  foreign key (created_by_user_id) references users (user_id) on delete set null
+);
+
+create index if not exists idx_company_explorer_subscriptions_owner_position
+  on company_explorer_subscriptions(company_id, owner_type, owner_id, position, created_timestamp, subscription_id);
+
+create index if not exists idx_company_explorer_subscriptions_anchor
+  on company_explorer_subscriptions(company_id, anchor_entity_id, owner_type, owner_id);
 create or replace function mangorts_prevent_company_explorer_edge_cycle()
 returns trigger as $$
 begin

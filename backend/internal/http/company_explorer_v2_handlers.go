@@ -254,6 +254,86 @@ func (s *Server) handleCompanyExplorerV2EntityDelete(w http.ResponseWriter, r *h
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+func (s *Server) handleCompanyExplorerV2Subscriptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID      string `json:"company_id"`
+		OwnerType      string `json:"owner_type"`
+		OwnerID        string `json:"owner_id"`
+		AnchorEntityID string `json:"anchor_entity_id"`
+		Position       int    `json:"position"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	if !requireCompanyAccess(w, r, req.CompanyID) {
+		return
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok || strings.TrimSpace(actor.User.UserID) == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	subscription, err := s.repo.UpsertCompanyExplorerV2Subscription(store.CompanyExplorerV2SubscriptionInput{
+		CompanyID:        req.CompanyID,
+		OwnerType:        req.OwnerType,
+		OwnerID:          req.OwnerID,
+		AnchorEntityID:   req.AnchorEntityID,
+		Position:         req.Position,
+		ActorUserID:      strings.TrimSpace(actor.User.UserID),
+		PermissionUserID: s.entityPermissionActorUserID(r, req.CompanyID),
+	})
+	if err != nil {
+		s.writeCompanyExplorerV2WriteError(w, err, "failed_to_upsert_company_explorer_v2_subscription")
+		return
+	}
+	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_v2_subscription_upserted", map[string]any{
+		"subscription_id":  subscription.SubscriptionID,
+		"owner_type":       subscription.OwnerType,
+		"owner_id":         subscription.OwnerID,
+		"anchor_entity_id": subscription.AnchorEntityID,
+		"subscription":     subscription,
+	})
+	writeJSON(w, http.StatusOK, subscription)
+}
+
+func (s *Server) handleCompanyExplorerV2SubscriptionByID(w http.ResponseWriter, r *http.Request) {
+	subscriptionID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v2/company-explorer/subscriptions/"), "/")
+	if subscriptionID == "" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if !requireCompanyAccess(w, r, companyID) {
+		return
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok || strings.TrimSpace(actor.User.UserID) == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if err := s.repo.DeleteCompanyExplorerV2Subscription(companyID, subscriptionID, strings.TrimSpace(actor.User.UserID)); errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_v2_subscription")
+		return
+	} else if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_v2_subscription")
+		return
+	}
+	s.publishWorkspaceEvent(companyID, "company_explorer_v2_subscription_deleted", map[string]any{"subscription_id": subscriptionID})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
 func (s *Server) handleCompanyExplorerV2Edges(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

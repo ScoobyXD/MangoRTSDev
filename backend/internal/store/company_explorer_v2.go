@@ -111,6 +111,27 @@ func normalizeCompanyExplorerV2MoveEdgeInput(input CompanyExplorerV2MoveEdgeInpu
 	return input, nil
 }
 
+func normalizeCompanyExplorerV2SubscriptionInput(input CompanyExplorerV2SubscriptionInput) (CompanyExplorerV2SubscriptionInput, error) {
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.OwnerType = strings.ToLower(strings.TrimSpace(input.OwnerType))
+	input.OwnerID = cleanUUIDText(input.OwnerID)
+	input.AnchorEntityID = cleanUUIDText(input.AnchorEntityID)
+	input.ActorUserID = cleanUUIDText(input.ActorUserID)
+	input.PermissionUserID = cleanUUIDText(input.PermissionUserID)
+	if input.OwnerType == "" {
+		input.OwnerType = CompanyExplorerV2SubscriptionOwnerUser
+	}
+	if input.OwnerType != CompanyExplorerV2SubscriptionOwnerUser && input.OwnerType != CompanyExplorerV2SubscriptionOwnerTeam {
+		return CompanyExplorerV2SubscriptionInput{}, ErrInvalid
+	}
+	if input.OwnerType == CompanyExplorerV2SubscriptionOwnerUser && input.OwnerID == "" {
+		input.OwnerID = input.ActorUserID
+	}
+	if input.CompanyID == "" || input.OwnerID == "" || input.AnchorEntityID == "" || input.ActorUserID == "" {
+		return CompanyExplorerV2SubscriptionInput{}, ErrInvalid
+	}
+	return input, nil
+}
 func companyExplorerV2NativeEntityID(companyID, entityType, resourceID string) string {
 	sum := md5.Sum([]byte(companyID + ":company_explorer_v2_entity:" + strings.ToLower(strings.TrimSpace(entityType)) + ":" + resourceID))
 	return uuidStringFromMD5(sum[:])
@@ -118,6 +139,10 @@ func companyExplorerV2NativeEntityID(companyID, entityType, resourceID string) s
 
 func companyExplorerV2EdgeID(companyID, parentEntityID, childEntityID string) string {
 	sum := md5.Sum([]byte(companyID + ":company_explorer_v2_edge:" + parentEntityID + ":" + childEntityID))
+	return uuidStringFromMD5(sum[:])
+}
+func companyExplorerV2SubscriptionID(companyID, ownerType, ownerID, anchorEntityID string) string {
+	sum := md5.Sum([]byte(companyID + ":company_explorer_v2_subscription:" + ownerType + ":" + ownerID + ":" + anchorEntityID))
 	return uuidStringFromMD5(sum[:])
 }
 

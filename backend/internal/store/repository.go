@@ -260,6 +260,8 @@ type CompanyExplorerRepository interface {
 	MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeInput) (CompanyExplorerV2Row, error)
 	DeleteCompanyExplorerV2Edge(companyID, edgeID string) error
 	DeleteCompanyExplorerV2Folder(companyID, entityID string) error
+	UpsertCompanyExplorerV2Subscription(input CompanyExplorerV2SubscriptionInput) (CompanyExplorerV2Subscription, error)
+	DeleteCompanyExplorerV2Subscription(companyID, subscriptionID, actorUserID string) error
 	ListCompanyExplorerRootRows(query CompanyExplorerLazyRowsQuery) (CompanyExplorerLazyRows, error)
 	ListCompanyExplorerFolderChildRows(query CompanyExplorerLazyRowsQuery) (CompanyExplorerLazyRows, error)
 	ListCompanyExplorerLogicGateChildRows(query CompanyExplorerLazyRowsQuery) (CompanyExplorerLazyRows, error)
@@ -396,6 +398,33 @@ type CompanyExplorerV2MoveEdgeInput struct {
 	CompanyID        string
 	EdgeID           string
 	ParentEntityID   string
+	Position         int
+	ActorUserID      string
+	PermissionUserID string
+}
+
+const (
+	CompanyExplorerV2SubscriptionOwnerUser = "user"
+	CompanyExplorerV2SubscriptionOwnerTeam = "team"
+)
+
+type CompanyExplorerV2Subscription struct {
+	CompanyID        string    `json:"company_id"`
+	SubscriptionID   string    `json:"subscription_id"`
+	OwnerType        string    `json:"owner_type"`
+	OwnerID          string    `json:"owner_id"`
+	AnchorEntityID   string    `json:"anchor_entity_id"`
+	Position         int       `json:"position"`
+	CreatedByUserID  string    `json:"created_by_user_id,omitempty"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type CompanyExplorerV2SubscriptionInput struct {
+	CompanyID        string
+	OwnerType        string
+	OwnerID          string
+	AnchorEntityID   string
 	Position         int
 	ActorUserID      string
 	PermissionUserID string

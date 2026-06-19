@@ -66,6 +66,9 @@ export type CompanyExplorerContextMenuState = {
   renameTarget: ExplorerRenameTarget | null;
   permissionsTarget: CompanyExplorerFolderPermissionsTarget | null;
   openInNewTabTarget: CompanyExplorerOpenInNewTabTarget | null;
+  subscriptionAnchorEntityID?: string;
+  canSubscribeToMe: boolean;
+  canSubscribeToTeam: boolean;
   renameTreeID: string;
   renameLabel: string;
   contextKind: CompanyExplorerFolderKind | null;

@@ -291,6 +291,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v2/company-explorer/roots", s.handleCompanyExplorerV2Roots)
 	mux.HandleFunc("/v2/company-explorer/entities/", s.handleCompanyExplorerV2Entities)
 	mux.HandleFunc("/v2/company-explorer/folders", s.handleCompanyExplorerV2Folders)
+	mux.HandleFunc("/v2/company-explorer/subscriptions/", s.handleCompanyExplorerV2SubscriptionByID)
+	mux.HandleFunc("/v2/company-explorer/subscriptions", s.handleCompanyExplorerV2Subscriptions)
 	mux.HandleFunc("/v2/company-explorer/edges/", s.handleCompanyExplorerV2EdgeByID)
 	mux.HandleFunc("/v2/company-explorer/edges", s.handleCompanyExplorerV2Edges)
 	mux.HandleFunc("/v2/company-explorer/drag", s.handleCompanyExplorerV2Drag)

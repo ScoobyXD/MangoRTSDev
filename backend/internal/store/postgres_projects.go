@@ -661,8 +661,9 @@ func (r *PostgresRepo) UpsertProjectRelationship(input ProjectRelationshipInput)
 insert into project_relationships (
   company_id, relationship_id, project_id, resource_type, resource_id, position, created_timestamp, updated_timestamp
 ) values ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, now(), now())
-on conflict (company_id, project_id, resource_type, resource_id)
+on conflict (company_id, resource_type, resource_id)
 do update set
+  project_id=excluded.project_id,
   position=excluded.position,
   updated_timestamp=now()
 returning relationship_id::text`, input.CompanyID, input.RelationshipID, input.ProjectID, input.ResourceType, input.ResourceID, input.Position).Scan(&returnedID)

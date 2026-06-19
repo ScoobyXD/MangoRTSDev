@@ -244,13 +244,13 @@ func TestMemoryRepoLogicGateGVICGroupAssignmentsIncludeSubgroups(t *testing.T) {
 	}
 }
 
-func TestMemoryRepoMyWorkMatrixRowsDuplicateAcrossActiveProjectRelationships(t *testing.T) {
+func TestMemoryRepoMyWorkMatrixRowsMoveResourceBetweenActiveProjectRelationships(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "44444444-4444-4444-8444-444444444444"
 	repo.EnsureCompany(companyID, "My Work Projects Company")
 	user := mustCreateInboxReadCompanyUser(t, repo, "my-work-project-user", companyID, "my-work-project@example.com", "My Work Project User")
 
-	logicGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Multi Project Gate")
+	logicGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Single Project Gate")
 	node, err := repo.CreateNode(companyID, "Done node under active project gate")
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
@@ -270,17 +270,15 @@ func TestMemoryRepoMyWorkMatrixRowsDuplicateAcrossActiveProjectRelationships(t *
 
 	alpha := mustCreateInboxReadProject(t, repo, companyID, "Alpha Project", "Active", user.UserID)
 	bravo := mustCreateInboxReadProject(t, repo, companyID, "Bravo Project", "In Progress", user.UserID)
-	doneProject := mustCreateInboxReadProject(t, repo, companyID, "Done Project", "Done", user.UserID)
 	mustLinkInboxReadProjectResource(t, repo, companyID, alpha.ProjectID, EntityTypeLogicGate, logicGate.LogicGateID, 1, user.UserID)
 	mustLinkInboxReadProjectResource(t, repo, companyID, bravo.ProjectID, EntityTypeLogicGate, logicGate.LogicGateID, 2, user.UserID)
-	mustLinkInboxReadProjectResource(t, repo, companyID, doneProject.ProjectID, EntityTypeLogicGate, logicGate.LogicGateID, 3, user.UserID)
 
-	rows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Limit: 1})
+	rows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListMyWorkMatrixRows: %v", err)
 	}
-	assertMyWorkProjectNames(t, rows, EntityTypeLogicGate, logicGate.LogicGateID, []string{"Alpha Project", "Bravo Project"})
-	assertMyWorkProjectNames(t, rows, EntityTypeNode, node.NodeID, []string{"Alpha Project", "Bravo Project"})
+	assertMyWorkProjectNames(t, rows, EntityTypeLogicGate, logicGate.LogicGateID, []string{"Bravo Project"})
+	assertMyWorkProjectNames(t, rows, EntityTypeNode, node.NodeID, []string{"Bravo Project"})
 }
 
 func TestMemoryRepoMyWorkMatrixRowsApplyProjectActiveRules(t *testing.T) {

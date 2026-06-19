@@ -56,6 +56,7 @@ export type CompanyExplorerStoreAction =
   | { type: "upsertProject"; project: ProjectRecord }
   | { type: "replaceProject"; project: ProjectRecord }
   | { type: "upsertV2Rows"; rows: CompanyExplorerV2Row[] }
+  | { type: "replaceV2Children"; parentEntityID: string; rows: CompanyExplorerV2Row[] }
   | {
       type: "removeDeletedEntities";
       deletedFolderIDs: ReadonlySet<string>;
@@ -148,6 +149,14 @@ export function reduceCompanyExplorerStore(
       return { ...state, projects: replaceByID(state.projects, action.project, (project) => project.project_id) };
     case "upsertV2Rows":
       return { ...state, rows: upsertCompanyExplorerV2Rows(state.rows, action.rows) };
+    case "replaceV2Children":
+      return {
+        ...state,
+        rows: upsertCompanyExplorerV2Rows(
+          state.rows.filter((row) => (row.parent_entity_id ?? "") !== action.parentEntityID),
+          action.rows,
+        ),
+      };
     case "removeDeletedEntities":
       return removeDeletedEntities(state, action);
     case "restore":
@@ -377,7 +386,7 @@ function upsertFolderItems(
 }
 
 function companyExplorerV2RowKey(row: CompanyExplorerV2Row): string {
-  return row.edge_id || `${row.parent_entity_id ?? ""}:${row.entity_id}`;
+  return row.entity_id;
 }
 
 function upsertCompanyExplorerV2Rows(
