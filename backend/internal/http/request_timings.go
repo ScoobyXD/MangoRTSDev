@@ -133,6 +133,14 @@ func normalizeTimingLabel(label string) string {
 		return "map.position_write"
 	case "repo.CreateWorkspaceEntityBatch.creator_assignee_read":
 		return "reread.assignment"
+	case "repo.assignNodeToLogicGateStatusTx.logic_gate_read":
+		return "source.logic_gate_read"
+	case "repo.assignNodeToLogicGateStatusTx.node_read":
+		return "source.node_read"
+	case "repo.assignNodeToLogicGateStatusTx.node_create":
+		return "source.node_create"
+	case "repo.assignNodeToLogicGateStatusTx.priority_write":
+		return "source.priority_write"
 	case "repo.CreateGVICMatrixNode.projection_reread",
 		"repo.assignNodeToLogicGateStatusTx.projection_reread",
 		"repo.MoveLogicGateNodeAssignment.projection_reread":
@@ -154,6 +162,8 @@ func normalizeTimingLabel(label string) string {
 		"repo.CreateWorkspaceEntityBatch.GVIC_MATRIX_PROJECTION_sync",
 		"repo.createGVICMatrixLogicGateTx.GVIC_MATRIX_PROJECTION_sync":
 		return "GVIC_MATRIX_PROJECTION.sync_call"
+	case "repo.assignNodeToLogicGateStatusTx.projection_dependencies":
+		return "projection.dependencies"
 	case "repo.syncPostgresGVICMatrixProjectionForNodeTx.total":
 		return "GVIC_MATRIX_PROJECTION.total"
 	case "repo.syncPostgresGVICMatrixProjectionForNodeTx.delete_stale":
@@ -170,6 +180,8 @@ func normalizeTimingLabel(label string) string {
 		"repo.MoveLogicGateNodeAssignment.domain_event_append",
 		"repo.CreateGVICMatrixNode.domain_event_append":
 		return "events.append.total"
+	case "repo.assignNodeToLogicGateStatusTx.projection_event_append":
+		return "events.projection_delta_append"
 	case "repo.appendDomainEventTx.normalize_payload":
 		return "events.payload_build"
 	case "repo.appendDomainEventTx.advisory_lock":

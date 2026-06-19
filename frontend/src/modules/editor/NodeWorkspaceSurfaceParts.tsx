@@ -1428,7 +1428,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const replaceMentionDraft = (mention: ActiveMentionDraft, user: MentionableCompanyUser) => {
     if (!editable) return;
-    const insert = `@${mentionUserDisplayName(user)} `;
+    const insert = `${mention.trigger}${mentionUserDisplayName(user)} `;
     const nextDraft = `${draft.slice(0, mention.start)}${insert}${draft.slice(mention.end)}`;
     onDraftChange(nextDraft);
     setActiveMentionDraft(null);

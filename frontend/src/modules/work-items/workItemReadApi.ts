@@ -51,6 +51,19 @@ export type GVICMatrixProjectionResponse = {
   rows: GVICMatrixProjectionRow[];
 };
 
+export type MyWorkMatrixRow = GVICMatrixProjectionRow & {
+  role: LogicGateGVICRole;
+  project_id?: string;
+  project_name?: string;
+};
+
+export type MyWorkMatrixResponse = {
+  company_id: string;
+  user_id: string;
+  limit: number;
+  rows: MyWorkMatrixRow[];
+};
+
 export async function listGeneratedInboxNodes(params: WorkItemInboxReadParams): Promise<GeneratedInboxNodesResponse> {
   return fetchWorkItemInboxRead<GeneratedInboxNodesResponse>(params, "/v1/work-items/generated-inbox");
 }
@@ -69,6 +82,10 @@ export async function listMyLogicGates(params: WorkItemInboxReadParams): Promise
 
 export async function listGVICMatrixProjectionRows(params: WorkItemInboxReadParams): Promise<GVICMatrixProjectionResponse> {
   return fetchWorkItemInboxRead<GVICMatrixProjectionResponse>(params, "/v1/work-items/gvic-matrix-projection");
+}
+
+export async function listMyWorkMatrixRows(params: WorkItemInboxReadParams): Promise<MyWorkMatrixResponse> {
+  return fetchWorkItemInboxRead<MyWorkMatrixResponse>(params, "/v1/work-items/my-work-matrix");
 }
 
 async function fetchWorkItemInboxRead<T>(params: WorkItemInboxReadParams, path: string): Promise<T> {

@@ -733,6 +733,7 @@ const (
 	NotificationEventNodeFieldsChanged    = "node.fields_changed"
 	NotificationEventNodeCommentCreated   = "node.comment_created"
 	NotificationEventMentionCreated       = "mention.created"
+	NotificationEventUrgentMentionCreated = "mention.urgent_created"
 	NotificationEventACIInboxChanged      = "aci_inbox.changed"
 	NotificationEventACIInboxGVICUpdated  = "aci_inbox.GVIC_updated"
 )

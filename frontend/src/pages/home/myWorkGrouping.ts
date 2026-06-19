@@ -1,5 +1,6 @@
 import type { Account } from "../../modules/accounts/accountsApi.js";
 import type { LogicGateGVICRole } from "../../modules/logic-gate-map/shared.js";
+import { buildUniversalNestedGroups, computeUniversalDefaultExpandedGroupIDs, type UniversalGroupValue, type UniversalNestedGroup } from "./universalGrouping.js";
 
 export type MyWorkScopeLevel = "me" | "team" | "all";
 export type MyWorkScopeSubjectType = "user" | "group" | "company";
@@ -53,6 +54,8 @@ export type MyWorkTeam = {
 };
 
 export type MyWorkResourceRow = {
+  rowKey?: string;
+  companyID?: string;
   kind: MyWorkResourceKind;
   id: string;
   title: string;
@@ -64,25 +67,17 @@ export type MyWorkResourceRow = {
   people: MyWorkPerson[];
   teams: MyWorkTeam[];
   gvicRoles: LogicGateGVICRole[];
+  primaryGVICRole?: LogicGateGVICRole;
   participantUserIDs: string[];
+  projectID?: string;
+  projectName?: string;
   logicGateLabels: string[];
   logicGateIDs: string[];
 };
 
-export type MyWorkGroupValue = {
-  key: string;
-  label: string;
-  sortValue: string | number;
-  sortLast?: boolean;
-};
+export type MyWorkGroupValue = UniversalGroupValue;
 
-export type MyWorkNestedGroup = MyWorkGroupValue & {
-  id: string;
-  field: MyWorkGroupingField;
-  depth: number;
-  groups: MyWorkNestedGroup[];
-  rows: MyWorkResourceRow[];
-};
+export type MyWorkNestedGroup = UniversalNestedGroup<MyWorkResourceRow, MyWorkGroupingField>;
 
 export const MY_WORK_GROUPING_FIELDS: ReadonlyArray<{ value: MyWorkGroupingField; label: string }> = [
   { value: "account", label: "Account" },
@@ -247,42 +242,11 @@ export function buildNestedGroups(
   getValues: (row: MyWorkResourceRow, field: MyWorkGroupingField) => MyWorkGroupValue[] = getMyWorkGroupValues,
 ): MyWorkNestedGroup[] {
   const cleanGroupings = normalizeMyWorkGroupingStack(groupings);
-  return buildNestedGroupLevel(rows, cleanGroupings, 0, "my-work", getValues);
-}
-
-function buildNestedGroupLevel(
-  rows: MyWorkResourceRow[],
-  groupings: MyWorkGroupingSetting[],
-  depth: number,
-  parentID: string,
-  getValues: (row: MyWorkResourceRow, field: MyWorkGroupingField) => MyWorkGroupValue[],
-): MyWorkNestedGroup[] {
-  const grouping = groupings[depth];
-  if (!grouping) return [];
-  const byKey = new Map<string, MyWorkGroupValue & { rows: MyWorkResourceRow[] }>();
-  for (const row of rows) {
-    const seenValues = new Set<string>();
-    for (const value of getValues(row, grouping.field)) {
-      if (seenValues.has(value.key)) continue;
-      seenValues.add(value.key);
-      const existing = byKey.get(value.key) ?? { ...value, rows: [] };
-      if (!existing.rows.some((item) => item.kind === row.kind && item.id === row.id)) existing.rows.push(row);
-      byKey.set(value.key, existing);
-    }
-  }
-  return sortGroups(Array.from(byKey.values()), grouping.direction).map((group) => {
-    const id = `${parentID}/${grouping.field}:${group.key}`;
-    return {
-      key: group.key,
-      label: group.label,
-      sortValue: group.sortValue,
-      sortLast: group.sortLast,
-      id,
-      field: grouping.field,
-      depth,
-      rows: groupings[depth + 1] ? [] : sortMyWorkRows(group.rows),
-      groups: buildNestedGroupLevel(group.rows, groupings, depth + 1, id, getValues),
-    };
+  return buildUniversalNestedGroups(rows, cleanGroupings, {
+    rootID: "my-work",
+    rowKey: (row) => row.rowKey ?? `${row.kind}:${row.id}`,
+    getValues,
+    sortRows: sortMyWorkRows,
   });
 }
 
@@ -293,17 +257,7 @@ export function sortGroups<T extends MyWorkGroupValue>(groups: T[], direction: M
 }
 
 export function computeDefaultExpandedGroupIDs(groups: MyWorkNestedGroup[]): Set<string> {
-  const expanded = new Set<string>();
-  const visit = (items: MyWorkNestedGroup[], level: number) => {
-    const limit = Math.max(1, level);
-    items.forEach((group, index) => {
-      if (index >= limit) return;
-      expanded.add(group.id);
-      visit(group.groups, level + 1);
-    });
-  };
-  visit(groups, 1);
-  return expanded;
+  return computeUniversalDefaultExpandedGroupIDs(groups);
 }
 
 export function applyManualExpandedState(defaultExpanded: Set<string>, manualState: Record<string, boolean>): Set<string> {

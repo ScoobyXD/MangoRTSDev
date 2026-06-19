@@ -512,8 +512,9 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 	if companyID == "" || entityType == "" || entityID == "" || informationID == "" || !isMentionNotificationInformationType(infoType) {
 		return
 	}
-	mentionedUserIDs, err := s.notifications.ResolveMentionedUserIDOccurrences(companyID, information)
-	if err != nil || len(mentionedUserIDs) == 0 {
+	regularMentionedUserIDs, regularErr := s.notifications.ResolveMentionedUserIDOccurrencesByKind(companyID, information, "regular")
+	urgentMentionedUserIDs, urgentErr := s.notifications.ResolveMentionedUserIDOccurrencesByKind(companyID, information, "urgent")
+	if regularErr != nil || urgentErr != nil || (len(regularMentionedUserIDs) == 0 && len(urgentMentionedUserIDs) == 0) {
 		return
 	}
 	actorUserID, actorLabel := notificationActorPayload(r)
@@ -537,41 +538,52 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 	default:
 		return
 	}
-	events := make([]domain.DomainEvent, 0, len(mentionedUserIDs))
-	mentionOccurrenceByUserID := map[string]int{}
-	for _, userID := range mentionedUserIDs {
-		userID = strings.TrimSpace(userID)
-		if userID == "" {
-			continue
+	events := make([]domain.DomainEvent, 0, len(regularMentionedUserIDs)+len(urgentMentionedUserIDs))
+	appendMentionEvents := func(mentionedUserIDs []string, mentionKind string) bool {
+		mentionKind = strings.TrimSpace(mentionKind)
+		if mentionKind == "" {
+			mentionKind = "regular"
 		}
-		occurrenceIndex := mentionOccurrenceByUserID[userID]
-		mentionOccurrenceByUserID[userID] = occurrenceIndex + 1
-		idempotencyKey := "mention:" + idempotencyEntityKey + ":" + entityID + ":" + informationID + ":" + userID + ":" + contentKey
-		if occurrenceIndex > 0 {
-			idempotencyKey += ":" + strconv.Itoa(occurrenceIndex+1)
+		mentionOccurrenceByUserID := map[string]int{}
+		for _, userID := range mentionedUserIDs {
+			userID = strings.TrimSpace(userID)
+			if userID == "" {
+				continue
+			}
+			occurrenceIndex := mentionOccurrenceByUserID[userID]
+			mentionOccurrenceByUserID[userID] = occurrenceIndex + 1
+			idempotencyKey := "mention:" + mentionKind + ":" + idempotencyEntityKey + ":" + entityID + ":" + informationID + ":" + userID + ":" + contentKey
+			if occurrenceIndex > 0 {
+				idempotencyKey += ":" + strconv.Itoa(occurrenceIndex+1)
+			}
+			event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
+				CompanyID:      companyID,
+				StreamType:     "notification",
+				StreamID:       streamID,
+				Type:           eventType,
+				ActorUserID:    actorUserID,
+				IdempotencyKey: idempotencyKey,
+				Payload: map[string]any{
+					payloadResourceKey:   entityID,
+					"entity_type":        entityType,
+					"entity_id":          entityID,
+					"comment":            comment,
+					"information_id":     informationID,
+					"mention_kind":       mentionKind,
+					"mentioned_user_ids": []string{userID},
+					"actor_display_name": actorLabel,
+				},
+			})
+			if err != nil {
+				log.Printf("failed to append mention notification domain event company_id=%s entity_type=%s entity_id=%s information_id=%s user_id=%s mention_kind=%s: %v", companyID, entityType, entityID, informationID, userID, mentionKind, err)
+				return false
+			}
+			events = append(events, event)
 		}
-		event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
-			CompanyID:      companyID,
-			StreamType:     "notification",
-			StreamID:       streamID,
-			Type:           eventType,
-			ActorUserID:    actorUserID,
-			IdempotencyKey: idempotencyKey,
-			Payload: map[string]any{
-				payloadResourceKey:   entityID,
-				"entity_type":        entityType,
-				"entity_id":          entityID,
-				"comment":            comment,
-				"information_id":     informationID,
-				"mentioned_user_ids": []string{userID},
-				"actor_display_name": actorLabel,
-			},
-		})
-		if err != nil {
-			log.Printf("failed to append mention notification domain event company_id=%s entity_type=%s entity_id=%s information_id=%s user_id=%s: %v", companyID, entityType, entityID, informationID, userID, err)
-			return
-		}
-		events = append(events, event)
+		return true
+	}
+	if !appendMentionEvents(regularMentionedUserIDs, "regular") || !appendMentionEvents(urgentMentionedUserIDs, "urgent") {
+		return
 	}
 	if len(events) > 0 {
 		s.projectCommittedNotificationEvents(events)

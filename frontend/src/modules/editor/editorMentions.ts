@@ -10,6 +10,7 @@ export type ActiveMentionDraft = {
   start: number;
   end: number;
   query: string;
+  trigger: "@" | "!";
 };
 
 export type MentionTextSegment = {
@@ -20,10 +21,12 @@ export type MentionTextSegment = {
 
 export const EDITOR_MENTION_ATTRIBUTE = "data-mango-mention";
 export const EDITOR_MENTION_USER_ID_ATTRIBUTE = "data-mango-mention-user-id";
+export const EDITOR_MENTION_KIND_ATTRIBUTE = "data-mango-mention-kind";
 export const EDITOR_MENTION_BACKGROUND = "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(230,252,255,0.66) 46%, rgba(247,239,255,0.72))";
 export const EDITOR_MENTION_COLOR = "#0f172a";
+export const EDITOR_URGENT_MENTION_BACKGROUND = "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(255,237,213,0.8) 46%, rgba(254,226,226,0.74))";
 
-const MENTION_BOUNDARY_PATTERN = /[A-Za-z0-9_@.-]/;
+const MENTION_BOUNDARY_PATTERN = /[A-Za-z0-9_@!.-]/;
 
 export function mentionUserDisplayName(user: MentionableCompanyUser): string {
   const name = (user.display_name ?? "").trim();
@@ -49,14 +52,17 @@ export function readActiveMentionDraft(value: string, caretIndex: number | null)
   if (caretIndex === null || caretIndex < 0 || caretIndex > value.length) return null;
   const beforeCaret = value.slice(0, caretIndex);
   const atIndex = beforeCaret.lastIndexOf("@");
-  if (atIndex < 0) return null;
-  const prefix = atIndex > 0 ? value[atIndex - 1] : "";
+  const urgentIndex = beforeCaret.lastIndexOf("!");
+  const startIndex = Math.max(atIndex, urgentIndex);
+  if (startIndex < 0) return null;
+  const trigger = value[startIndex] === "!" ? "!" : "@";
+  const prefix = startIndex > 0 ? value[startIndex - 1] : "";
   if (prefix && MENTION_BOUNDARY_PATTERN.test(prefix)) return null;
-  const query = beforeCaret.slice(atIndex + 1);
+  const query = beforeCaret.slice(startIndex + 1);
   if (query.includes("\n") || query.includes("\r")) return null;
   if (query.length > 0 && /\s$/.test(query)) return null;
   if (/[,;:()[\]{}]/.test(query)) return null;
-  return { start: atIndex, end: caretIndex, query };
+  return { start: startIndex, end: caretIndex, query, trigger };
 }
 
 export function mentionUserMatches(user: MentionableCompanyUser, query: string): boolean {
@@ -79,9 +85,10 @@ export function buildMentionOptions(users: MentionableCompanyUser[], query: stri
 
 export function applyEditorMentionStyle(element: HTMLElement) {
   element.setAttribute(EDITOR_MENTION_ATTRIBUTE, "true");
-  element.style.background = EDITOR_MENTION_BACKGROUND;
+  const urgent = element.getAttribute(EDITOR_MENTION_KIND_ATTRIBUTE) === "urgent";
+  element.style.background = urgent ? EDITOR_URGENT_MENTION_BACKGROUND : EDITOR_MENTION_BACKGROUND;
   element.style.color = EDITOR_MENTION_COLOR;
-  element.style.border = "1px solid rgba(183, 124, 255, 0.34)";
+  element.style.border = urgent ? "1px solid rgba(239, 68, 68, 0.34)" : "1px solid rgba(183, 124, 255, 0.34)";
   element.style.borderRadius = "6px";
   element.style.padding = "0 4px";
   element.style.fontWeight = "800";
@@ -89,11 +96,12 @@ export function applyEditorMentionStyle(element: HTMLElement) {
   element.style.setProperty("box-decoration-break", "clone");
 }
 
-export function createEditorMentionElement(ownerDocument: Document, user: MentionableCompanyUser): HTMLSpanElement {
+export function createEditorMentionElement(ownerDocument: Document, user: MentionableCompanyUser, trigger: "@" | "!" = "@"): HTMLSpanElement {
   const span = ownerDocument.createElement("span");
+  if (trigger === "!") span.setAttribute(EDITOR_MENTION_KIND_ATTRIBUTE, "urgent");
   applyEditorMentionStyle(span);
   span.setAttribute(EDITOR_MENTION_USER_ID_ATTRIBUTE, user.user_id.trim());
-  span.textContent = `@${mentionUserDisplayName(user)}`;
+  span.textContent = `${trigger}${mentionUserDisplayName(user)}`;
   return span;
 }
 
@@ -133,7 +141,7 @@ function mentionBoundaryAfter(value: string, endIndex: number): boolean {
 }
 
 export function splitTextByMentions(value: string, users: MentionableCompanyUser[]): MentionTextSegment[] {
-  if (!value || !value.includes("@") || users.length === 0) return value ? [{ text: value, mention: false }] : [];
+  if (!value || (!value.includes("@") && !value.includes("!")) || users.length === 0) return value ? [{ text: value, mention: false }] : [];
   const aliases = users
     .flatMap((user) => mentionAliasesForUser(user).map((alias) => ({ user, alias })))
     .sort((a, b) => b.alias.length - a.alias.length);
@@ -143,7 +151,8 @@ export function splitTextByMentions(value: string, users: MentionableCompanyUser
   const lowerValue = value.toLowerCase();
 
   while (cursor < value.length) {
-    if (value[cursor] !== "@" || !mentionBoundaryBefore(value, cursor)) {
+    const trigger = value[cursor];
+    if ((trigger !== "@" && trigger !== "!") || !mentionBoundaryBefore(value, cursor)) {
       cursor += 1;
       continue;
     }

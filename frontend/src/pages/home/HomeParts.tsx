@@ -1407,6 +1407,7 @@ export function HomeSidebar({
         })}
         <HomeCustomViewButton active={activeViewID === "custom-matrix"} onClick={() => onSelectView("custom-matrix", "all")} />
         <HomeNavButton label="My Work" active={activeViewID === "my-work"} onClick={() => onSelectView("my-work", "all")} />
+        <HomeNavButton label="Updates" active={activeViewID === "updates"} onClick={() => onSelectView("updates", "all")} />
         <HomeNavButton label="My Nodes" active={activeViewID === "my-nodes"} onClick={() => onSelectView("my-nodes", "all")} />
         <HomeNavButton label="My Logic Gates" active={activeViewID === "my-logic-gates"} onClick={() => onSelectView("my-logic-gates", "all")} />
       </nav>
@@ -4058,7 +4059,7 @@ export function GVICRoleInboxMatrix({
     const nextMenu: InboxNotificationMenuState = {
       x: event.clientX,
       y: event.clientY,
-      title: `${group.label} notifications`,
+      title: `${group.label} updates`,
       loading: true,
       error: "",
       items: [],
@@ -4077,7 +4078,7 @@ export function GVICRoleInboxMatrix({
       .catch((error) => {
         setNotificationMenu((current) => (
           current?.x === nextMenu.x && current?.y === nextMenu.y
-            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load notifications" }
+            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load updates" }
             : current
         ));
       });
@@ -4089,7 +4090,7 @@ export function GVICRoleInboxMatrix({
     const nextMenu: InboxNotificationMenuState = {
       x: event.clientX,
       y: event.clientY,
-      title: `${node ? nodeTitle(node) : "Node"} notifications`,
+      title: `${node ? nodeTitle(node) : "Node"} updates`,
       loading: true,
       error: "",
       items: [],
@@ -4108,7 +4109,7 @@ export function GVICRoleInboxMatrix({
       .catch((error) => {
         setNotificationMenu((current) => (
           current?.x === nextMenu.x && current?.y === nextMenu.y
-            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load notifications" }
+            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load updates" }
             : current
         ));
       });
@@ -4140,8 +4141,8 @@ export function GVICRoleInboxMatrix({
     if (menu.loading || notificationIDs.length === 0) return;
     setNotificationMenu((current) => current ? { ...current, items: [], seenNotificationIDs: [] } : current);
     void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, getActiveCompanyID()))).catch((error) => {
-      console.error("Failed to clear notifications", error);
-      setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear notifications" } : current);
+      console.error("Failed to clear updates", error);
+      setNotificationMenu((current) => current ? { ...current, error: error instanceof Error ? error.message : "Failed to clear updates" } : current);
     });
   }, []);
   const openCellCreateMenu = useCallback((event: React.MouseEvent, input: InboxCellCreateInput) => {
@@ -4543,8 +4544,8 @@ export function LogicGateInboxNodeGroupCard({
         {notificationCount > 0 && notificationRole && (
           <button
             type="button"
-            title="Show notifications"
-            aria-label="Show notifications"
+            title="Show updates"
+            aria-label="Show updates"
             style={logicGateInboxGroupNotificationButtonStyle(notificationRole)}
             draggable={false}
             onPointerDown={(event) => event.stopPropagation()}
@@ -4769,8 +4770,8 @@ export function LogicGateInboxNodeRow({
       {notificationCount > 0 && onOpenNotifications && (
         <button
           type="button"
-          title={`${formatInboxNotificationCount(notificationCount)} unread notifications`}
-          aria-label="Show node notifications"
+          title={`${formatInboxNotificationCount(notificationCount)} unread updates`}
+          aria-label="Show node updates"
           style={logicGateInboxNodeNotificationButtonStyle(notificationRole ?? "")}
           draggable={false}
           onPointerDown={(event) => event.stopPropagation()}
