@@ -2,6 +2,8 @@ package store
 
 import (
 	"miraeopus/backend/internal/domain"
+	"reflect"
+	"sort"
 	"testing"
 	"time"
 )
@@ -242,6 +244,85 @@ func TestMemoryRepoLogicGateGVICGroupAssignmentsIncludeSubgroups(t *testing.T) {
 	}
 }
 
+func TestMemoryRepoMyWorkMatrixRowsDuplicateAcrossActiveProjectRelationships(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "44444444-4444-4444-8444-444444444444"
+	repo.EnsureCompany(companyID, "My Work Projects Company")
+	user := mustCreateInboxReadCompanyUser(t, repo, "my-work-project-user", companyID, "my-work-project@example.com", "My Work Project User")
+
+	logicGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Multi Project Gate")
+	node, err := repo.CreateNode(companyID, "Done node under active project gate")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 3
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "done",
+		Priority:    &priority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, logicGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}})
+
+	alpha := mustCreateInboxReadProject(t, repo, companyID, "Alpha Project", "Active", user.UserID)
+	bravo := mustCreateInboxReadProject(t, repo, companyID, "Bravo Project", "In Progress", user.UserID)
+	doneProject := mustCreateInboxReadProject(t, repo, companyID, "Done Project", "Done", user.UserID)
+	mustLinkInboxReadProjectResource(t, repo, companyID, alpha.ProjectID, EntityTypeLogicGate, logicGate.LogicGateID, 1, user.UserID)
+	mustLinkInboxReadProjectResource(t, repo, companyID, bravo.ProjectID, EntityTypeLogicGate, logicGate.LogicGateID, 2, user.UserID)
+	mustLinkInboxReadProjectResource(t, repo, companyID, doneProject.ProjectID, EntityTypeLogicGate, logicGate.LogicGateID, 3, user.UserID)
+
+	rows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Limit: 1})
+	if err != nil {
+		t.Fatalf("ListMyWorkMatrixRows: %v", err)
+	}
+	assertMyWorkProjectNames(t, rows, EntityTypeLogicGate, logicGate.LogicGateID, []string{"Alpha Project", "Bravo Project"})
+	assertMyWorkProjectNames(t, rows, EntityTypeNode, node.NodeID, []string{"Alpha Project", "Bravo Project"})
+}
+
+func TestMemoryRepoMyWorkMatrixRowsApplyProjectActiveRules(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "55555555-5555-4555-8555-555555555555"
+	repo.EnsureCompany(companyID, "My Work Active Rules Company")
+	user := mustCreateInboxReadCompanyUser(t, repo, "my-work-active-user", companyID, "my-work-active@example.com", "My Work Active User")
+
+	standaloneDone, err := repo.CreateNode(companyID, "Standalone done node")
+	if err != nil {
+		t.Fatalf("CreateNode standalone done: %v", err)
+	}
+	mustUpdateInboxReadNodeStatus(t, repo, companyID, standaloneDone.NodeID, "Done", user.UserID)
+	mustSetInboxReadNodeGVIC(t, repo, companyID, standaloneDone.NodeID, user.UserID)
+
+	activeProjectDone, err := repo.CreateNode(companyID, "Project done node")
+	if err != nil {
+		t.Fatalf("CreateNode project done: %v", err)
+	}
+	mustUpdateInboxReadNodeStatus(t, repo, companyID, activeProjectDone.NodeID, "Done", user.UserID)
+	mustSetInboxReadNodeGVIC(t, repo, companyID, activeProjectDone.NodeID, user.UserID)
+	activeProject := mustCreateInboxReadProject(t, repo, companyID, "Active Project", "Active", user.UserID)
+	mustLinkInboxReadProjectResource(t, repo, companyID, activeProject.ProjectID, EntityTypeNode, activeProjectDone.NodeID, 1, user.UserID)
+
+	doneProjectNode, err := repo.CreateNode(companyID, "Done project active node")
+	if err != nil {
+		t.Fatalf("CreateNode done project node: %v", err)
+	}
+	mustUpdateInboxReadNodeStatus(t, repo, companyID, doneProjectNode.NodeID, "In Progress", user.UserID)
+	mustSetInboxReadNodeGVIC(t, repo, companyID, doneProjectNode.NodeID, user.UserID)
+	doneProject := mustCreateInboxReadProject(t, repo, companyID, "Closed Project", "Done", user.UserID)
+	mustLinkInboxReadProjectResource(t, repo, companyID, doneProject.ProjectID, EntityTypeNode, doneProjectNode.NodeID, 1, user.UserID)
+
+	rows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID})
+	if err != nil {
+		t.Fatalf("ListMyWorkMatrixRows: %v", err)
+	}
+	assertMyWorkProjectNames(t, rows, EntityTypeNode, standaloneDone.NodeID, nil)
+	assertMyWorkProjectNames(t, rows, EntityTypeNode, activeProjectDone.NodeID, []string{"Active Project"})
+	assertMyWorkProjectNames(t, rows, EntityTypeNode, doneProjectNode.NodeID, nil)
+}
+
 func mustCreateInboxReadCompanyUser(t *testing.T, repo *MemoryRepo, subject, companyID, email, displayName string) domain.User {
 	t.Helper()
 	user, err := repo.UpsertAuthUser(subject, email, displayName)
@@ -270,6 +351,45 @@ func mustSetInboxReadLogicGateGVIC(t *testing.T, repo *MemoryRepo, companyID, lo
 	}
 }
 
+func mustCreateInboxReadProject(t *testing.T, repo *MemoryRepo, companyID, name, status, actorUserID string) domain.Project {
+	t.Helper()
+	result, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: name, Status: status, ActorUserID: actorUserID})
+	if err != nil {
+		t.Fatalf("CreateProject %q: %v", name, err)
+	}
+	if result.Project == nil {
+		t.Fatalf("CreateProject %q returned nil project", name)
+	}
+	return *result.Project
+}
+
+func mustLinkInboxReadProjectResource(t *testing.T, repo *MemoryRepo, companyID, projectID, resourceType, resourceID string, position int, actorUserID string) {
+	t.Helper()
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID:    companyID,
+		ProjectID:    projectID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Position:     position,
+		ActorUserID:  actorUserID,
+	}); err != nil {
+		t.Fatalf("UpsertProjectRelationship %s %s: %v", resourceType, resourceID, err)
+	}
+}
+
+func mustUpdateInboxReadNodeStatus(t *testing.T, repo *MemoryRepo, companyID, nodeID, status, actorUserID string) {
+	t.Helper()
+	if _, err := repo.UpdateNode(UpdateNodeInput{
+		CompanyID:   companyID,
+		NodeID:      nodeID,
+		Status:      &status,
+		StatusSet:   true,
+		ActorUserID: actorUserID,
+	}); err != nil {
+		t.Fatalf("UpdateNode %s status: %v", nodeID, err)
+	}
+}
+
 func mustSetInboxReadNodeGVIC(t *testing.T, repo *MemoryRepo, companyID, nodeID, userID string) {
 	t.Helper()
 	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
@@ -283,6 +403,27 @@ func mustSetInboxReadNodeGVIC(t *testing.T, repo *MemoryRepo, companyID, nodeID,
 		}},
 	}); err != nil {
 		t.Fatalf("SetResourceGVICAssignments %s: %v", nodeID, err)
+	}
+}
+
+func assertMyWorkProjectNames(t *testing.T, rows []GVICMatrixProjectionRow, resourceType, resourceID string, want []string) {
+	t.Helper()
+	got := make([]string, 0)
+	for _, row := range rows {
+		if row.ResourceType == resourceType && row.ResourceID == resourceID {
+			got = append(got, row.ProjectName)
+		}
+	}
+	sort.Strings(got)
+	if got == nil {
+		got = []string{}
+	}
+	if want == nil {
+		want = []string{}
+	}
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("project names for %s %s = %+v, want %+v; rows=%+v", resourceType, resourceID, got, want, rows)
 	}
 }
 

@@ -488,95 +488,151 @@ with base as (
     and entry.user_id=$2::uuid
     and entry.resource_type in ('node', 'logic_gate')
     and effective.role in ('generated', 'verified', 'consulted', 'informed')
-    and mangorts_user_can_access_resource(entry.company_id, entry.resource_type, entry.resource_id, $4::uuid, 'edit')
-)
-select
-  base.company_id::text,
-  base.user_id::text,
-  base.resource_type,
-  base.resource_id::text,
-  base.logic_gate_id::text,
-  base.display_title,
-  base.status,
-  base.due_date::text,
-  base.priority,
-  base.accounts::text,
-  base.resource_created_timestamp,
-  base.updated_timestamp,
-  base.role,
-  project_display.project_id,
-  project_display.project_name
-from base
-left join lateral (
-  select
+    and mangorts_user_can_access_resource(entry.company_id, entry.resource_type, entry.resource_id, $3::uuid, 'edit')
+), project_matches as (
+  select distinct on (
+    base.company_id,
+    base.user_id,
+    base.resource_type,
+    base.resource_id,
+    base.role,
+    relationship.project_id,
+    relationship.relationship_id
+  )
+    base.*,
     project.project_id::text as project_id,
     project.name as project_name,
     lower(regexp_replace(coalesce(project.status, ''), '[\s_-]+', '_', 'g')) in ('done', 'complete', 'completed', 'closed', 'archived') as project_done,
     relationship.position,
     relationship.relationship_created_timestamp,
-    relationship.relationship_id
-  from project_relationship_projection relationship
+    relationship.relationship_id::text
+  from base
+  join project_relationship_projection relationship
+    on relationship.company_id=base.company_id
+   and (
+     (base.resource_type='logic_gate' and relationship.logic_gate_id=base.resource_id)
+     or (
+       base.resource_type='node'
+       and (
+         relationship.node_id=base.resource_id
+         or (base.logic_gate_id is not null and relationship.logic_gate_id=base.logic_gate_id)
+       )
+     )
+   )
   join projects project
     on project.company_id=relationship.company_id
    and project.project_id=relationship.project_id
-  where relationship.company_id=base.company_id
-    and (
-      (base.resource_type='logic_gate' and relationship.logic_gate_id=base.resource_id)
-      or (
-        base.resource_type='node'
-        and (
-          relationship.node_id=base.resource_id
-          or (base.logic_gate_id is not null and relationship.logic_gate_id=base.logic_gate_id)
-        )
-      )
-    )
   order by
-    case when lower(regexp_replace(coalesce(project.status, ''), '[\s_-]+', '_', 'g')) in ('done', 'complete', 'completed', 'closed', 'archived') then 1 else 0 end,
+    base.company_id,
+    base.user_id,
+    base.resource_type,
+    base.resource_id,
+    base.role,
+    relationship.project_id,
+    relationship.relationship_id,
     relationship.position asc,
-    lower(project.name) asc,
-    relationship.relationship_created_timestamp asc,
-    relationship.relationship_id asc
-  limit 1
-) project_display on true
-left join lateral (
+    relationship.relationship_created_timestamp asc
+), active_project_rows as (
+  select *
+  from project_matches
+  where not project_done
+), no_project_rows as (
   select
-    count(*) > 0 as has_project,
-    bool_or(not (lower(regexp_replace(coalesce(project.status, ''), '[\s_-]+', '_', 'g')) in ('done', 'complete', 'completed', 'closed', 'archived'))) as has_active_project
-  from project_relationship_projection relationship
-  join projects project
-    on project.company_id=relationship.company_id
-   and project.project_id=relationship.project_id
-  where relationship.company_id=base.company_id
+    base.*,
+    null::text as project_id,
+    null::text as project_name,
+    0 as position,
+    base.resource_created_timestamp as relationship_created_timestamp,
+    ''::text as relationship_id
+  from base
+  where not exists (
+    select 1
+    from project_matches match
+    where match.company_id=base.company_id
+      and match.user_id=base.user_id
+      and match.resource_type=base.resource_type
+      and match.resource_id=base.resource_id
+      and match.role=base.role
+  )
     and (
-      (base.resource_type='logic_gate' and relationship.logic_gate_id=base.resource_id)
-      or (
-        base.resource_type='node'
-        and (
-          relationship.node_id=base.resource_id
-          or (base.logic_gate_id is not null and relationship.logic_gate_id=base.logic_gate_id)
-        )
-      )
+      base.resource_type='logic_gate'
+      or lower(regexp_replace(coalesce(base.status, ''), '[\s_-]+', '_', 'g')) not in ('done', 'complete', 'completed', 'closed', 'archived')
     )
-) project_state on true
-where case
-  when coalesce(project_state.has_project, false) then coalesce(project_state.has_active_project, false)
-  when base.resource_type='logic_gate' then true
-  else lower(regexp_replace(coalesce(base.status, ''), '[\s_-]+', '_', 'g')) not in ('done', 'complete', 'completed', 'closed', 'archived')
-end
+), rows as (
+  select
+    company_id,
+    user_id,
+    resource_type,
+    resource_id,
+    logic_gate_id,
+    display_title,
+    status,
+    due_date,
+    priority,
+    accounts,
+    resource_created_timestamp,
+    updated_timestamp,
+    role,
+    project_id,
+    project_name,
+    position,
+    relationship_created_timestamp,
+    relationship_id
+  from active_project_rows
+  union all
+  select
+    company_id,
+    user_id,
+    resource_type,
+    resource_id,
+    logic_gate_id,
+    display_title,
+    status,
+    due_date,
+    priority,
+    accounts,
+    resource_created_timestamp,
+    updated_timestamp,
+    role,
+    project_id,
+    project_name,
+    position,
+    relationship_created_timestamp,
+    relationship_id
+  from no_project_rows
+)
+select
+  rows.company_id::text,
+  rows.user_id::text,
+  rows.resource_type,
+  rows.resource_id::text,
+  rows.logic_gate_id::text,
+  rows.display_title,
+  rows.status,
+  rows.due_date::text,
+  rows.priority,
+  rows.accounts::text,
+  rows.resource_created_timestamp,
+  rows.updated_timestamp,
+  rows.role,
+  rows.project_id,
+  rows.project_name
+from rows
 order by
-  case base.role
+  case rows.role
     when 'generated' then 1
     when 'verified' then 2
     when 'consulted' then 3
     when 'informed' then 4
     else 5
   end,
-  coalesce(base.priority, 6) asc,
-  lower(coalesce(project_display.project_name, '')) asc,
-  lower(base.display_title) asc,
-  base.resource_type asc,
-  base.resource_id::text asc
-limit $3`, companyID, userID, query.Limit, viewerUserID)
+  coalesce(rows.priority, 6) asc,
+  lower(coalesce(rows.project_name, '')) asc,
+  lower(rows.display_title) asc,
+  rows.resource_type asc,
+  rows.resource_id::text asc,
+  rows.relationship_created_timestamp asc,
+  rows.relationship_id asc`, companyID, userID, viewerUserID)
 	if err != nil {
 		return nil, err
 	}

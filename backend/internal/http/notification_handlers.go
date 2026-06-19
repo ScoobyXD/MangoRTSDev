@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	htmlpkg "html"
 	"log"
 	"miraeopus/backend/internal/domain"
@@ -91,6 +92,63 @@ func (s *Server) handleNotificationList(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"notifications": items})
+}
+
+func (s *Server) handleUpdateRootGroups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	groups, err := s.repo.ListUpdateRootGroups(store.UpdatesQuery{
+		UserID:    actor.User.UserID,
+		CompanyID: strings.TrimSpace(r.URL.Query().Get("company_id")),
+		Filter:    strings.TrimSpace(r.URL.Query().Get("filter")),
+	})
+	if errorsIsInvalid(err) {
+		writeError(w, http.StatusBadRequest, "invalid_updates_request")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_update_groups")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"groups": groups})
+}
+
+func (s *Server) handleUpdateBranch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	group, err := s.repo.ListUpdateBranch(store.UpdatesQuery{
+		UserID:    actor.User.UserID,
+		CompanyID: strings.TrimSpace(r.URL.Query().Get("company_id")),
+		Filter:    strings.TrimSpace(r.URL.Query().Get("filter")),
+		RootID:    strings.TrimSpace(r.URL.Query().Get("root_id")),
+	})
+	if errorsIsInvalid(err) {
+		writeError(w, http.StatusBadRequest, "invalid_updates_request")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "update_group_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_update_branch")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"group": group})
 }
 
 func (s *Server) handleNotificationDeleteAll(w http.ResponseWriter, r *http.Request) {

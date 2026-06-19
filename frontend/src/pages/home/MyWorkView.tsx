@@ -149,7 +149,7 @@ export function MyWorkView({
     setMatrixLoading(true);
     setMatrixError("");
     void Promise.all(targetUserIDs.map((targetUserID) => (
-      listMyWorkMatrixRows({ apiBase, companyID, targetUserID, limit: 500 })
+      listMyWorkMatrixRows({ apiBase, companyID, targetUserID })
         .then((payload) => payload.rows ?? [])
     ))).then((results) => {
       if (cancelled) return;
@@ -295,7 +295,7 @@ export function MyWorkView({
         <div style={myWorkTitleStackStyle}>
           <h2 style={myWorkTitleStyle}>My Work</h2>
           <div style={myWorkMetaStyle}>
-            {visibleRows.length} active item{visibleRows.length === 1 ? "" : "s"} for {scopeLabel}
+            {scopeLabel}
             {loading || matrixLoading ? " - Loading" : ""}
             {matrixError ? ` - ${matrixError}` : ""}
           </div>
@@ -496,14 +496,12 @@ function MyWorkGroupList({
       {groups.map((group) => {
         const open = expandedGroupIDs.has(group.id);
         const leafRows = group.groups.length === 0 ? group.rows : [];
-        const itemCount = countGroupRows(group);
         return (
           <div key={group.id} style={groupBlockStyle}>
             <button type="button" style={groupHeaderStyle(group.depth)} onClick={() => onToggleGroup(group.id)}>
               <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.66)" />
               <GroupHeaderIcon field={group.field} />
               <span style={groupHeaderLabelStyle}>{group.label}</span>
-              <span style={groupHeaderCountStyle}>{itemCount}</span>
             </button>
             {open && group.groups.length > 0 && (
               <MyWorkGroupList
@@ -568,7 +566,6 @@ function MyWorkRows({
               <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.66)" />
               {section.logicGateID ? <ExplorerRowIcon kind="logic_gate" /> : <span style={othersSectionBadgeStyle}>O</span>}
               <span style={workRowTitleTextStyle}>{section.title}</span>
-              <span style={groupHeaderCountStyle}>{section.rows.length}</span>
             </button>
             {open && (
               <div style={logicGateNodeListStyle}>
@@ -985,11 +982,6 @@ function createLocalID(): string {
 
 function scopesEqual(left: MyWorkSelectedScope, right: MyWorkSelectedScope): boolean {
   return left.level === right.level && left.subject_type === right.subject_type && left.subject_id === right.subject_id;
-}
-
-function countGroupRows(group: MyWorkNestedGroup): number {
-  if (group.groups.length === 0) return group.rows.length;
-  return group.groups.reduce((sum, child) => sum + countGroupRows(child), 0);
 }
 
 function ScopeIcon({ icon }: { icon: ScopePickerRow["icon"] }) {
@@ -1503,7 +1495,7 @@ function groupHeaderStyle(depth: number): React.CSSProperties {
     maxWidth: "100%",
     minHeight: 31,
     display: "grid",
-    gridTemplateColumns: "14px 16px minmax(0, auto) auto",
+    gridTemplateColumns: "14px 16px minmax(0, auto)",
     alignItems: "center",
     gap: 5,
     marginLeft: depth * 28,
@@ -1529,12 +1521,6 @@ const groupHeaderLabelStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
-const groupHeaderCountStyle: React.CSSProperties = {
-  color: "#64748b",
-  fontSize: 11,
-  fontWeight: 800,
-};
-
 const rowListStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
@@ -1553,7 +1539,7 @@ function logicGateSectionRowStyle(depth: number): React.CSSProperties {
     maxWidth: "min(980px, calc(100% - 16px))",
     minHeight: 30,
     display: "grid",
-    gridTemplateColumns: "14px 16px minmax(180px, auto) auto",
+    gridTemplateColumns: "14px 16px minmax(180px, auto)",
     alignItems: "center",
     gap: 5,
     marginLeft: depth * 28 + 42,

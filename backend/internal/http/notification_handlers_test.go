@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -50,6 +51,186 @@ func grantNotificationEntityAccess(t *testing.T, repo *store.MemoryRepo, company
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions %s %s: %v", entityType, entityID, err)
 	}
+}
+
+func mustCreateNotificationTestUser(t *testing.T, repo *store.MemoryRepo, subject, companyID, email, displayName string) domain.User {
+	t.Helper()
+	user, err := repo.UpsertAuthUser(subject, email, displayName)
+	if err != nil {
+		t.Fatalf("UpsertAuthUser %s: %v", subject, err)
+	}
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership %s: %v", subject, err)
+	}
+	return user
+}
+
+func TestUpdateGroupsLoadRootsAndBranches(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServerWithOptions(repo, ServerOptions{DisableNotificationCleanup: true})
+	handler := server.Routes()
+	companyID := "66666666-6666-4666-8666-666666666666"
+	repo.EnsureCompany(companyID, "Updates Groups Company")
+	user := mustCreateNotificationTestUser(t, repo, "updates-groups-user", companyID, "updates-groups@example.com", "Updates Groups User")
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Updates Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Updates Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 3
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "in progress",
+		Priority:    &priority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	alpha, err := repo.CreateProject(store.ProjectInput{CompanyID: companyID, Name: "Alpha Updates", Status: "Active", ActorUserID: user.UserID})
+	if err != nil || alpha.Project == nil {
+		t.Fatalf("CreateProject alpha: %v", err)
+	}
+	bravo, err := repo.CreateProject(store.ProjectInput{CompanyID: companyID, Name: "Bravo Updates", Status: "Active", ActorUserID: user.UserID})
+	if err != nil || bravo.Project == nil {
+		t.Fatalf("CreateProject bravo: %v", err)
+	}
+	for index, projectID := range []string{alpha.Project.ProjectID, bravo.Project.ProjectID} {
+		if _, err := repo.UpsertProjectRelationship(store.ProjectRelationshipInput{
+			CompanyID:    companyID,
+			ProjectID:    projectID,
+			ResourceType: store.EntityTypeLogicGate,
+			ResourceID:   logicGate.LogicGateID,
+			Position:     index + 1,
+			ActorUserID:  user.UserID,
+		}); err != nil {
+			t.Fatalf("UpsertProjectRelationship: %v", err)
+		}
+		grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeProject, projectID, user.UserID)
+	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, user.UserID)
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, user.UserID)
+
+	if _, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{
+		{
+			CompanyID:       companyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventNodeFieldsChanged,
+			SourceEventID:   "66666666-6666-4666-8666-666666666601",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        node.NodeID,
+			Title:           "Node updated",
+			LogicGateID:     logicGate.LogicGateID,
+			NodeID:          node.NodeID,
+		},
+		{
+			CompanyID:       companyID,
+			RecipientUserID: user.UserID,
+			Type:            domain.NotificationEventUrgentMentionCreated,
+			SourceEventID:   "66666666-6666-4666-8666-666666666602",
+			EntityType:      store.EntityTypeNode,
+			EntityID:        node.NodeID,
+			Title:           "Urgent mention",
+			LogicGateID:     logicGate.LogicGateID,
+			NodeID:          node.NodeID,
+		},
+	}}); err != nil {
+		t.Fatalf("CreateNotifications: %v", err)
+	}
+
+	rootsReq := httptest.NewRequest(http.MethodGet, "/v1/updates/groups/roots?company_id="+companyID+"&filter=update", nil)
+	rootsReq = requestWithActorForNotifications(rootsReq, user, companyID)
+	rootsRR := httptest.NewRecorder()
+	handler.ServeHTTP(rootsRR, rootsReq)
+	if rootsRR.Code != http.StatusOK {
+		t.Fatalf("roots status = %d body=%s", rootsRR.Code, rootsRR.Body.String())
+	}
+	var rootsPayload struct {
+		Groups []store.UpdatesNestedGroup `json:"groups"`
+	}
+	if err := json.NewDecoder(rootsRR.Body).Decode(&rootsPayload); err != nil {
+		t.Fatalf("decode roots: %v", err)
+	}
+	if len(rootsPayload.Groups) != 2 || rootsPayload.Groups[0].Label != "Alpha Updates" || rootsPayload.Groups[1].Label != "Bravo Updates" {
+		t.Fatalf("roots = %+v, want Alpha and Bravo project roots", rootsPayload.Groups)
+	}
+	if len(rootsPayload.Groups[0].Groups) != 0 || len(rootsPayload.Groups[0].Notifications) != 0 {
+		t.Fatalf("root payload should be unloaded branch only: %+v", rootsPayload.Groups[0])
+	}
+
+	branchReq := httptest.NewRequest(http.MethodGet, "/v1/updates/groups/branch?company_id="+companyID+"&filter=update&root_id="+url.QueryEscape(rootsPayload.Groups[0].ID), nil)
+	branchReq = requestWithActorForNotifications(branchReq, user, companyID)
+	branchRR := httptest.NewRecorder()
+	handler.ServeHTTP(branchRR, branchReq)
+	if branchRR.Code != http.StatusOK {
+		t.Fatalf("branch status = %d body=%s", branchRR.Code, branchRR.Body.String())
+	}
+	var branchPayload struct {
+		Group store.UpdatesNestedGroup `json:"group"`
+	}
+	if err := json.NewDecoder(branchRR.Body).Decode(&branchPayload); err != nil {
+		t.Fatalf("decode branch: %v", err)
+	}
+	if branchPayload.Group.Label != "Alpha Updates" || updateGroupNotificationCount(branchPayload.Group) != 1 {
+		t.Fatalf("branch = %+v, want Alpha update branch with one non-mention notification", branchPayload.Group)
+	}
+	if !updateGroupHasResource(branchPayload.Group, store.EntityTypeLogicGate, logicGate.LogicGateID) || !updateGroupHasResource(branchPayload.Group, store.EntityTypeNode, node.NodeID) {
+		t.Fatalf("branch hierarchy = %+v, want logic gate and node layers", branchPayload.Group)
+	}
+
+	urgentReq := httptest.NewRequest(http.MethodGet, "/v1/updates/groups/branch?company_id="+companyID+"&filter=urgent&root_id="+url.QueryEscape(rootsPayload.Groups[0].ID), nil)
+	urgentReq = requestWithActorForNotifications(urgentReq, user, companyID)
+	urgentRR := httptest.NewRecorder()
+	handler.ServeHTTP(urgentRR, urgentReq)
+	if urgentRR.Code != http.StatusOK {
+		t.Fatalf("urgent branch status = %d body=%s", urgentRR.Code, urgentRR.Body.String())
+	}
+	var urgentPayload struct {
+		Group store.UpdatesNestedGroup `json:"group"`
+	}
+	if err := json.NewDecoder(urgentRR.Body).Decode(&urgentPayload); err != nil {
+		t.Fatalf("decode urgent branch: %v", err)
+	}
+	if updateGroupNotificationCount(urgentPayload.Group) != 1 || updateFirstNotificationType(urgentPayload.Group) != domain.NotificationEventUrgentMentionCreated {
+		t.Fatalf("urgent branch = %+v, want urgent mention only", urgentPayload.Group)
+	}
+}
+
+func updateGroupNotificationCount(group store.UpdatesNestedGroup) int {
+	total := len(group.Notifications)
+	for _, child := range group.Groups {
+		total += updateGroupNotificationCount(child)
+	}
+	return total
+}
+
+func updateGroupHasResource(group store.UpdatesNestedGroup, resourceType, resourceID string) bool {
+	if group.ResourceType == resourceType && group.ResourceID == resourceID {
+		return true
+	}
+	for _, child := range group.Groups {
+		if updateGroupHasResource(child, resourceType, resourceID) {
+			return true
+		}
+	}
+	return false
+}
+
+func updateFirstNotificationType(group store.UpdatesNestedGroup) string {
+	if len(group.Notifications) > 0 {
+		return group.Notifications[0].Type
+	}
+	for _, child := range group.Groups {
+		if notificationType := updateFirstNotificationType(child); notificationType != "" {
+			return notificationType
+		}
+	}
+	return ""
 }
 
 func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {

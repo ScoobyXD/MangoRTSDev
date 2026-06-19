@@ -85,7 +85,6 @@ export type HomeViewID =
   | "c-inbox"
   | "i-inbox"
   | "o-inbox"
-  | "custom-matrix"
   | "my-work"
   | "updates"
   | "my-nodes"

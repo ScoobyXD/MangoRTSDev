@@ -25,6 +25,20 @@ export type NotificationItem = {
   created_timestamp: string;
 };
 
+export type UpdateFeedFilter = "all" | "urgent" | "mention" | "update";
+
+export type UpdateGroup = {
+  id: string;
+  key: string;
+  field: string;
+  label: string;
+  resource_type?: "project" | "logic_gate" | "node" | "";
+  resource_id?: string;
+  depth: number;
+  groups: UpdateGroup[];
+  notifications?: NotificationItem[];
+};
+
 export const NOTIFICATION_TYPE_MENTION = "mention.created";
 export const NOTIFICATION_TYPE_URGENT_MENTION = "mention.urgent_created";
 
@@ -130,6 +144,37 @@ export async function fetchNotifications(input: {
   return normalizeNotifications(payload.notifications ?? []);
 }
 
+export async function fetchUpdateRootGroups(input: {
+  companyID: string;
+  filter: UpdateFeedFilter;
+}): Promise<UpdateGroup[]> {
+  const query = new URLSearchParams();
+  query.set("company_id", input.companyID.trim());
+  query.set("filter", input.filter);
+  const payload = await apiFetchJSON<{ groups?: UpdateGroup[] }>(`/v1/updates/groups/roots?${query.toString()}`);
+  return normalizeUpdateGroups(payload.groups ?? []);
+}
+
+export async function fetchUpdateBranch(input: {
+  companyID: string;
+  filter: UpdateFeedFilter;
+  rootID: string;
+}): Promise<UpdateGroup> {
+  const query = new URLSearchParams();
+  query.set("company_id", input.companyID.trim());
+  query.set("filter", input.filter);
+  query.set("root_id", input.rootID.trim());
+  const payload = await apiFetchJSON<{ group?: UpdateGroup }>(`/v1/updates/groups/branch?${query.toString()}`);
+  return normalizeUpdateGroup(payload.group ?? {
+    id: input.rootID,
+    key: input.rootID,
+    field: "update",
+    label: "Updates",
+    depth: 0,
+    groups: [],
+  });
+}
+
 export async function markNotificationRead(notificationID: string, read = true): Promise<NotificationItem> {
   const cleanNotificationID = notificationID.trim();
   const action = read ? "read" : "unread";
@@ -220,6 +265,24 @@ export function normalizeRole(value: unknown): NotificationGVICRole | "" {
 
 function normalizeNotifications(items: NotificationItem[]): NotificationItem[] {
   return items.map(normalizeNotification);
+}
+
+function normalizeUpdateGroups(items: UpdateGroup[]): UpdateGroup[] {
+  return Array.isArray(items) ? items.map(normalizeUpdateGroup).filter((item) => item.id) : [];
+}
+
+function normalizeUpdateGroup(item: UpdateGroup): UpdateGroup {
+  return {
+    id: item.id?.trim() ?? "",
+    key: item.key?.trim() ?? "",
+    field: item.field?.trim() ?? "update",
+    label: item.label?.trim() || "Updates",
+    resource_type: item.resource_type?.trim() as UpdateGroup["resource_type"],
+    resource_id: item.resource_id?.trim() || undefined,
+    depth: Number.isFinite(Number(item.depth)) ? Number(item.depth) : 0,
+    groups: normalizeUpdateGroups(item.groups ?? []),
+    notifications: normalizeNotifications(item.notifications ?? []),
+  };
 }
 
 function normalizeNotification(item: NotificationItem): NotificationItem {

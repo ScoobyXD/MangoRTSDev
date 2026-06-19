@@ -205,6 +205,7 @@ func (s *Server) handleWorkItemMyWorkMatrix(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+	query.Limit = 0
 	rows, err := s.repo.ListMyWorkMatrixRows(query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_my_work_matrix")

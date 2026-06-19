@@ -91,7 +91,7 @@ const SIDEBAR_ACTIVE_TEXT = "#111111";
 
 type SidebarSectionID = "shared-triage" | "views";
 
-export type HomeSidebarView = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "custom-matrix" | "my-work" | "updates" | `shared:${string}`;
+export type HomeSidebarView = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "my-work" | "updates" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
 type GVICHomeSidebarView = Extract<HomeSidebarView, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
@@ -1202,16 +1202,6 @@ export function AppSidebar({
             </div>
           )}
         </div>
-        <button
-          type="button"
-          title="Create custom view"
-          aria-label="Create custom view"
-          style={appSidebarCustomViewButtonStyle(homeActive && activeHomeView === "custom-matrix")}
-          onClick={() => onHomeViewSelect("custom-matrix")}
-        >
-          <span style={appSidebarCustomViewPlusStyle}>+</span>
-          <span style={appSidebarTextStyle}>Custom View</span>
-        </button>
         <AppSidebarButton
           label="My Work"
           active={homeActive && activeHomeView === "my-work"}
@@ -2377,45 +2367,6 @@ function appSidebarButtonStyle(active: boolean, hasIcon: boolean, hasTrailing: b
     minWidth: 0,
   };
 }
-
-function appSidebarCustomViewButtonStyle(active: boolean): React.CSSProperties {
-  return {
-    width: "100%",
-    minHeight: 34,
-    display: "grid",
-    gridTemplateColumns: "28px minmax(0, 1fr)",
-    alignItems: "center",
-    gap: 8,
-    margin: "2px 0 0",
-    border: `1px solid ${active ? "transparent" : SIDEBAR_SOFT_BORDER}`,
-    borderRadius: SIDEBAR_ELEVATED_RADIUS,
-    background: active ? `${SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box` : SIDEBAR_NEUMORPHIC_SURFACE,
-    color: SIDEBAR_ACTIVE_TEXT,
-    boxShadow: active ? `${SIDEBAR_NEUMORPHIC_ACTIVE_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}` : SIDEBAR_NEUMORPHIC_SHADOW,
-    cursor: "pointer",
-    font: "inherit",
-    fontSize: 12,
-    fontWeight: active ? 700 : 600,
-    letterSpacing: 0,
-    padding: "4px 8px 4px 4px",
-    textAlign: "left",
-    minWidth: 0,
-  };
-}
-
-const appSidebarCustomViewPlusStyle: React.CSSProperties = {
-  width: 24,
-  height: 24,
-  display: "grid",
-  placeItems: "center",
-  border: "1px solid rgba(100, 116, 139, 0.32)",
-  borderRadius: 7,
-  background: "#ffffff",
-  color: "#334155",
-  fontSize: 18,
-  fontWeight: 800,
-  lineHeight: 1,
-};
 
 const appSidebarButtonIconStyle: React.CSSProperties = {
   width: 16,
