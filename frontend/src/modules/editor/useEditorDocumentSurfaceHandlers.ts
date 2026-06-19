@@ -1305,7 +1305,7 @@ function replaceEditorMentionDraft(
   setEditorSelectionByOffsets(root, mention.start, mention.end);
   const range = getEditorSelectionRange(root);
   if (!range) return;
-  const mentionElement = createEditorMentionElement(root.ownerDocument, user);
+  const mentionElement = createEditorMentionElement(root.ownerDocument, user, mention.trigger);
   const trailingSpace = root.ownerDocument.createTextNode(" ");
   const fragment = root.ownerDocument.createDocumentFragment();
   fragment.append(mentionElement, trailingSpace);

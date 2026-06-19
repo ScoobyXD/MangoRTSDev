@@ -17,6 +17,7 @@ test("active mention draft keeps the @ start and query before the caret", () => 
     start: 13,
     end: 18,
     query: "Jane",
+    trigger: "@",
   });
 });
 
@@ -29,6 +30,16 @@ test("active mention draft can resume after the next typed name character", () =
     start: 13,
     end: 20,
     query: "Jane D",
+    trigger: "@",
+  });
+});
+
+test("active urgent mention draft uses the ! trigger", () => {
+  assert.deepEqual(readActiveMentionDraft("Please check !Jane", "Please check !Jane".length), {
+    start: 13,
+    end: 18,
+    query: "Jane",
+    trigger: "!",
   });
 });
 
@@ -45,6 +56,19 @@ test("mention text splitting highlights the full @name token", () => {
   })), [
     { text: "Hi ", mention: false, userID: "" },
     { text: "@Jane Doe", mention: true, userID: "user-jane" },
+    { text: " and ", mention: false, userID: "" },
+    { text: "@lee", mention: true, userID: "user-lee" },
+  ]);
+});
+
+test("mention text splitting highlights urgent !name tokens", () => {
+  assert.deepEqual(splitTextByMentions("Now !Jane Doe and @lee", users).map((segment) => ({
+    text: segment.text,
+    mention: segment.mention,
+    userID: segment.user?.user_id ?? "",
+  })), [
+    { text: "Now ", mention: false, userID: "" },
+    { text: "!Jane Doe", mention: true, userID: "user-jane" },
     { text: " and ", mention: false, userID: "" },
     { text: "@lee", mention: true, userID: "user-lee" },
   ]);

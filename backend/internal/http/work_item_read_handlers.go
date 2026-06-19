@@ -196,6 +196,28 @@ func (s *Server) handleWorkItemMyLogicGates(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+func (s *Server) handleWorkItemMyWorkMatrix(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	query, ok := s.parseWorkItemInboxReadQuery(w, r)
+	if !ok {
+		return
+	}
+	rows, err := s.repo.ListMyWorkMatrixRows(query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_my_work_matrix")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+		"company_id": query.CompanyID,
+		"user_id":    query.UserID,
+		"limit":      query.Limit,
+		"rows":       rows,
+	})
+}
+
 func (s *Server) handleWorkItemGVICMatrixProjection(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

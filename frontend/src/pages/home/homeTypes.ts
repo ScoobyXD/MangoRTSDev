@@ -87,6 +87,7 @@ export type HomeViewID =
   | "o-inbox"
   | "custom-matrix"
   | "my-work"
+  | "updates"
   | "my-nodes"
   | "my-logic-gates"
   | `shared:${string}`;

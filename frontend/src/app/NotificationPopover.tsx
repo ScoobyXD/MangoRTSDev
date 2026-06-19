@@ -106,8 +106,8 @@ export function NotificationPopover({
           </button>
           <button
             type="button"
-            title="Close notifications"
-            aria-label="Close notifications"
+            title="Close updates"
+            aria-label="Close updates"
             style={notificationPopoverCloseButtonStyle}
             onClick={(event) => {
               event.preventDefault();
@@ -124,7 +124,7 @@ export function NotificationPopover({
       ) : error ? (
         <div style={notificationPopoverErrorStyle}>{error}</div>
       ) : items.length === 0 ? (
-        <div style={notificationPopoverEmptyStyle}>No unread notifications</div>
+        <div style={notificationPopoverEmptyStyle}>No unread updates</div>
       ) : items.map((notification, index) => {
         const notificationID = notification.notification_id;
         const selected = notificationID === selectedNotificationID;
@@ -141,8 +141,8 @@ export function NotificationPopover({
           >
             <button
               type="button"
-              title="Select notification"
-              aria-label="Select notification"
+              title="Select update"
+              aria-label="Select update"
               style={notificationPopoverSelectorStyle(selected, seen)}
               onClick={(event) => {
                 event.preventDefault();

@@ -454,6 +454,144 @@ limit $3`, companyID, userID, query.Limit, viewerUserID)
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error) {
+	query = NormalizeWorkItemInboxQuery(query)
+	companyID := cleanUUIDText(query.CompanyID)
+	userID := cleanUUIDText(query.UserID)
+	viewerUserID := cleanUUIDText(query.ViewerUserID)
+	if companyID == "" || userID == "" || viewerUserID == "" {
+		return nil, ErrInvalid
+	}
+	rows, err := r.db.QueryContext(context.Background(), `
+with base as (
+  select
+    entry.company_id,
+    entry.user_id,
+    entry.resource_type,
+    entry.resource_id,
+    entry.logic_gate_id,
+    entry.display_title,
+    entry.status,
+    entry.due_date,
+    entry.priority,
+    entry.accounts,
+    entry.resource_created_timestamp,
+    entry.updated_timestamp,
+    effective.role
+  from gvic_matrix_projection_table entry
+  join resource_gvic_effective_assignments effective
+    on effective.company_id=entry.company_id
+   and effective.resource_type=entry.resource_type
+   and effective.resource_id=entry.resource_id
+   and effective.user_id=entry.user_id
+  where entry.company_id=$1::uuid
+    and entry.user_id=$2::uuid
+    and entry.resource_type in ('node', 'logic_gate')
+    and effective.role in ('generated', 'verified', 'consulted', 'informed')
+    and mangorts_user_can_access_resource(entry.company_id, entry.resource_type, entry.resource_id, $4::uuid, 'edit')
+)
+select
+  base.company_id::text,
+  base.user_id::text,
+  base.resource_type,
+  base.resource_id::text,
+  base.logic_gate_id::text,
+  base.display_title,
+  base.status,
+  base.due_date::text,
+  base.priority,
+  base.accounts::text,
+  base.resource_created_timestamp,
+  base.updated_timestamp,
+  base.role,
+  project_display.project_id,
+  project_display.project_name
+from base
+left join lateral (
+  select
+    project.project_id::text as project_id,
+    project.name as project_name,
+    lower(regexp_replace(coalesce(project.status, ''), '[\s_-]+', '_', 'g')) in ('done', 'complete', 'completed', 'closed', 'archived') as project_done,
+    relationship.position,
+    relationship.relationship_created_timestamp,
+    relationship.relationship_id
+  from project_relationship_projection relationship
+  join projects project
+    on project.company_id=relationship.company_id
+   and project.project_id=relationship.project_id
+  where relationship.company_id=base.company_id
+    and (
+      (base.resource_type='logic_gate' and relationship.logic_gate_id=base.resource_id)
+      or (
+        base.resource_type='node'
+        and (
+          relationship.node_id=base.resource_id
+          or (base.logic_gate_id is not null and relationship.logic_gate_id=base.logic_gate_id)
+        )
+      )
+    )
+  order by
+    case when lower(regexp_replace(coalesce(project.status, ''), '[\s_-]+', '_', 'g')) in ('done', 'complete', 'completed', 'closed', 'archived') then 1 else 0 end,
+    relationship.position asc,
+    lower(project.name) asc,
+    relationship.relationship_created_timestamp asc,
+    relationship.relationship_id asc
+  limit 1
+) project_display on true
+left join lateral (
+  select
+    count(*) > 0 as has_project,
+    bool_or(not (lower(regexp_replace(coalesce(project.status, ''), '[\s_-]+', '_', 'g')) in ('done', 'complete', 'completed', 'closed', 'archived'))) as has_active_project
+  from project_relationship_projection relationship
+  join projects project
+    on project.company_id=relationship.company_id
+   and project.project_id=relationship.project_id
+  where relationship.company_id=base.company_id
+    and (
+      (base.resource_type='logic_gate' and relationship.logic_gate_id=base.resource_id)
+      or (
+        base.resource_type='node'
+        and (
+          relationship.node_id=base.resource_id
+          or (base.logic_gate_id is not null and relationship.logic_gate_id=base.logic_gate_id)
+        )
+      )
+    )
+) project_state on true
+where case
+  when coalesce(project_state.has_project, false) then coalesce(project_state.has_active_project, false)
+  when base.resource_type='logic_gate' then true
+  else lower(regexp_replace(coalesce(base.status, ''), '[\s_-]+', '_', 'g')) not in ('done', 'complete', 'completed', 'closed', 'archived')
+end
+order by
+  case base.role
+    when 'generated' then 1
+    when 'verified' then 2
+    when 'consulted' then 3
+    when 'informed' then 4
+    else 5
+  end,
+  coalesce(base.priority, 6) asc,
+  lower(coalesce(project_display.project_name, '')) asc,
+  lower(base.display_title) asc,
+  base.resource_type asc,
+  base.resource_id::text asc
+limit $3`, companyID, userID, query.Limit, viewerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]GVICMatrixProjectionRow, 0)
+	for rows.Next() {
+		item, err := scanMyWorkMatrixRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func postgresGVICMatrixProjectionRowsForResourcesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs, logicGateIDs []string) ([]GVICMatrixProjectionRow, error) {
 	companyID = cleanUUIDText(companyID)
 	nodeIDs = cleanUUIDTextSlice(nodeIDs)
@@ -571,6 +709,59 @@ func scanGVICMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (GVIC
 	if priority.Valid {
 		value := int(priority.Int64)
 		item.Priority = &value
+	}
+	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
+	return item, err
+}
+
+func scanMyWorkMatrixRow(row interface{ Scan(dest ...any) error }) (GVICMatrixProjectionRow, error) {
+	var item GVICMatrixProjectionRow
+	var logicGateID sql.NullString
+	var status sql.NullString
+	var dueDate sql.NullString
+	var priority sql.NullInt64
+	var accountsJSON sql.NullString
+	var role sql.NullString
+	var projectID sql.NullString
+	var projectName sql.NullString
+	err := row.Scan(
+		&item.CompanyID,
+		&item.UserID,
+		&item.ResourceType,
+		&item.ResourceID,
+		&logicGateID,
+		&item.DisplayTitle,
+		&status,
+		&dueDate,
+		&priority,
+		&accountsJSON,
+		&item.ResourceCreatedTimestamp,
+		&item.UpdatedTimestamp,
+		&role,
+		&projectID,
+		&projectName,
+	)
+	if logicGateID.Valid {
+		item.LogicGateID = &logicGateID.String
+	}
+	if status.Valid {
+		item.Status = &status.String
+	}
+	if dueDate.Valid {
+		item.DueDate = &dueDate.String
+	}
+	if priority.Valid {
+		value := int(priority.Int64)
+		item.Priority = &value
+	}
+	if role.Valid {
+		item.Role = role.String
+	}
+	if projectID.Valid {
+		item.ProjectID = projectID.String
+	}
+	if projectName.Valid {
+		item.ProjectName = projectName.String
 	}
 	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
 	return item, err

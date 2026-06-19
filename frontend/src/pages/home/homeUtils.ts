@@ -855,6 +855,7 @@ export function getHomeViewLabel(viewID: HomeViewID, sharedInboxes: Communicatio
   if (GVICSection) return GVICSection.title;
   if (viewID === "custom-matrix") return "Custom View";
   if (viewID === "my-work") return "My Work";
+  if (viewID === "updates") return "Updates";
   if (viewID === "my-nodes") return "My Nodes";
   if (viewID === "my-logic-gates") return "My Logic Gates";
   const folderID = viewID.startsWith("shared:") ? viewID.slice("shared:".length) : "";
@@ -916,7 +917,7 @@ export function workspaceEventTouchesHomePanel(type: string): boolean {
 }
 
 export function isWorkspacePanelHomeViewID(viewID: HomeViewID): boolean {
-  return isArchivableHomeViewID(viewID) || isInboxMatrixViewID(viewID) || isCustomMatrixViewID(viewID) || viewID === "my-work" || viewID === "my-nodes" || viewID === "my-logic-gates";
+  return isArchivableHomeViewID(viewID) || isInboxMatrixViewID(viewID) || isCustomMatrixViewID(viewID) || viewID === "my-work" || viewID === "updates" || viewID === "my-nodes" || viewID === "my-logic-gates";
 }
 
 export function mailboxForHomeView(viewID: HomeViewID): EmailMailbox {

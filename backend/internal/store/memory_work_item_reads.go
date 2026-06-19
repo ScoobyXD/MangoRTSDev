@@ -425,6 +425,75 @@ func (r *MemoryRepo) ListGVICMatrixProjectionRowsForUser(query WorkItemInboxQuer
 	return items, nil
 }
 
+func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error) {
+	query = NormalizeWorkItemInboxQuery(query)
+	if query.CompanyID == "" || query.UserID == "" {
+		return nil, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := make([]GVICMatrixProjectionRow, 0)
+	for _, row := range r.GVICMatrixProjectionRows {
+		if row.CompanyID != query.CompanyID || row.UserID != query.UserID {
+			continue
+		}
+		if row.ResourceType != GVICMatrixProjectionResourceNode && row.ResourceType != GVICMatrixProjectionResourceLogicGate {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, row.ResourceType, row.ResourceID, EntityPermissionEdit) {
+			continue
+		}
+		dto := memoryGVICMatrixProjectionRowToDTO(row)
+		projectID, projectName, hasProject, hasActiveProject := r.myWorkProjectContextLocked(row)
+		if hasProject {
+			if !hasActiveProject {
+				continue
+			}
+			dto.ProjectID = projectID
+			dto.ProjectName = projectName
+		} else if row.ResourceType == GVICMatrixProjectionResourceNode && workItemStatusDone(dto.Status) {
+			continue
+		}
+		for _, role := range r.myWorkRolesForProjectionRowLocked(row) {
+			item := dto
+			item.Role = role
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		leftRole := gvicRoleSortValue(items[i].Role)
+		rightRole := gvicRoleSortValue(items[j].Role)
+		if leftRole != rightRole {
+			return leftRole < rightRole
+		}
+		leftPriority := 6
+		if items[i].Priority != nil && *items[i].Priority > 0 {
+			leftPriority = *items[i].Priority
+		}
+		rightPriority := 6
+		if items[j].Priority != nil && *items[j].Priority > 0 {
+			rightPriority = *items[j].Priority
+		}
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
+		}
+		if items[i].ProjectName != items[j].ProjectName {
+			return strings.ToLower(items[i].ProjectName) < strings.ToLower(items[j].ProjectName)
+		}
+		if items[i].DisplayTitle != items[j].DisplayTitle {
+			return strings.ToLower(items[i].DisplayTitle) < strings.ToLower(items[j].DisplayTitle)
+		}
+		if items[i].ResourceType != items[j].ResourceType {
+			return items[i].ResourceType < items[j].ResourceType
+		}
+		return items[i].ResourceID < items[j].ResourceID
+	})
+	if len(items) > query.Limit {
+		items = items[:query.Limit]
+	}
+	return items, nil
+}
+
 func (r *MemoryRepo) ListGVICMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]GVICMatrixProjectionRow, error) {
 	companyID = strings.TrimSpace(companyID)
 	logicGateID = strings.TrimSpace(logicGateID)
@@ -485,6 +554,114 @@ func memoryGVICMatrixProjectionRowToDTO(row memoryGVICMatrixProjectionRow) GVICM
 	item.Priority = cloneIntPointer(row.Node.Priority)
 	item.Accounts = cloneAccountSnapshots(row.Node.Accounts)
 	return item
+}
+
+func (r *MemoryRepo) myWorkRolesForProjectionRowLocked(row memoryGVICMatrixProjectionRow) []string {
+	roles := map[string]bool{}
+	for _, assignment := range r.gvicEffectiveAssignments {
+		if assignment.CompanyID != row.CompanyID ||
+			assignment.UserID != row.UserID ||
+			assignment.ResourceType != row.ResourceType ||
+			assignment.ResourceID != row.ResourceID {
+			continue
+		}
+		switch assignment.Role {
+		case domain.GVICRoleGenerated, domain.GVICRoleVerified, domain.GVICRoleConsulted, domain.GVICRoleInformed:
+			roles[assignment.Role] = true
+		}
+	}
+	ordered := []string{domain.GVICRoleGenerated, domain.GVICRoleVerified, domain.GVICRoleConsulted, domain.GVICRoleInformed}
+	out := make([]string, 0, len(roles))
+	for _, role := range ordered {
+		if roles[role] {
+			out = append(out, role)
+		}
+	}
+	return out
+}
+
+func (r *MemoryRepo) myWorkProjectContextLocked(row memoryGVICMatrixProjectionRow) (projectID, projectName string, hasProject, hasActiveProject bool) {
+	type candidate struct {
+		projectID   string
+		projectName string
+		done        bool
+		position    int
+		created     time.Time
+		id          string
+	}
+	candidates := make([]candidate, 0)
+	for _, projection := range r.projectRelationshipProjection {
+		if projection.CompanyID != row.CompanyID {
+			continue
+		}
+		related := false
+		if row.ResourceType == GVICMatrixProjectionResourceLogicGate {
+			related = projection.LogicGateID != nil && strings.TrimSpace(*projection.LogicGateID) == row.ResourceID
+		} else if row.ResourceType == GVICMatrixProjectionResourceNode {
+			related = projection.NodeID != nil && strings.TrimSpace(*projection.NodeID) == row.ResourceID
+			if !related && strings.TrimSpace(row.LogicGateID) != "" {
+				related = projection.LogicGateID != nil && strings.TrimSpace(*projection.LogicGateID) == row.LogicGateID
+			}
+		}
+		if !related {
+			continue
+		}
+		project, ok := r.projects[key(row.CompanyID, projection.ProjectID)]
+		projectStatus := ""
+		name := strings.TrimSpace(projection.ProjectName)
+		if ok {
+			projectStatus = project.Status
+			if strings.TrimSpace(project.Name) != "" {
+				name = project.Name
+			}
+		}
+		done := workItemStatusDone(&projectStatus)
+		hasProject = true
+		if !done {
+			hasActiveProject = true
+		}
+		candidates = append(candidates, candidate{
+			projectID:   projection.ProjectID,
+			projectName: name,
+			done:        done,
+			position:    projection.Position,
+			created:     projection.RelationshipCreatedTimestamp,
+			id:          projection.RelationshipID,
+		})
+	}
+	if len(candidates) == 0 {
+		return "", "", false, false
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].done != candidates[j].done {
+			return !candidates[i].done
+		}
+		if candidates[i].position != candidates[j].position {
+			return candidates[i].position < candidates[j].position
+		}
+		if strings.ToLower(candidates[i].projectName) != strings.ToLower(candidates[j].projectName) {
+			return strings.ToLower(candidates[i].projectName) < strings.ToLower(candidates[j].projectName)
+		}
+		if !candidates[i].created.Equal(candidates[j].created) {
+			return candidates[i].created.Before(candidates[j].created)
+		}
+		return candidates[i].id < candidates[j].id
+	})
+	return candidates[0].projectID, candidates[0].projectName, hasProject, hasActiveProject
+}
+
+func workItemStatusDone(status *string) bool {
+	if status == nil {
+		return false
+	}
+	clean := strings.ToLower(strings.TrimSpace(*status))
+	clean = strings.NewReplacer(" ", "_", "-", "_").Replace(clean)
+	switch clean {
+	case "done", "complete", "completed", "closed", "archived":
+		return true
+	default:
+		return false
+	}
 }
 
 func stringPointer(value string) *string {

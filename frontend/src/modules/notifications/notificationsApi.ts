@@ -25,6 +25,9 @@ export type NotificationItem = {
   created_timestamp: string;
 };
 
+export const NOTIFICATION_TYPE_MENTION = "mention.created";
+export const NOTIFICATION_TYPE_URGENT_MENTION = "mention.urgent_created";
+
 export type NotificationRoleCount = {
   surface?: NotificationSurface;
   role?: NotificationGVICRole | "";
@@ -230,7 +233,7 @@ function normalizeNotification(item: NotificationItem): NotificationItem {
     source_event_id: item.source_event_id?.trim() ?? "",
     entity_type: item.entity_type?.trim() ?? "",
     entity_id: item.entity_id?.trim() ?? "",
-    title: item.title?.trim() ?? "Notification",
+    title: item.title?.trim() ?? "Update",
     body_preview: item.body_preview?.trim() || undefined,
     surface: normalizeSurface(item.surface),
     role: normalizeRole(item.role),

@@ -91,7 +91,7 @@ const SIDEBAR_ACTIVE_TEXT = "#111111";
 
 type SidebarSectionID = "shared-triage" | "views";
 
-export type HomeSidebarView = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "custom-matrix" | "my-work" | `shared:${string}`;
+export type HomeSidebarView = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "custom-matrix" | "my-work" | "updates" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
 type GVICHomeSidebarView = Extract<HomeSidebarView, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
@@ -102,7 +102,7 @@ const APP_SIDEBAR_GVIC_VIEWS = GVIC_INBOX_SECTIONS.map((section) => {
     viewID: section.viewID,
     role: section.role,
     label,
-    notificationTitle: `${label} notifications`,
+    notificationTitle: `${label} updates`,
     surface: section.role === "generated" ? "r_inbox" : "aci_inbox",
   };
 }) satisfies ReadonlyArray<{
@@ -386,7 +386,7 @@ export function AppSidebar({
       .catch((error) => {
         setNotificationMenu((current) => (
           current?.requestID === requestID
-            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load notifications" }
+            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load updates" }
             : current
         ));
       });
@@ -449,11 +449,11 @@ export function AppSidebar({
       surface: menu.surface,
       role: menu.role,
     }).catch((error) => {
-      console.error("Failed to clear notifications", error);
+      console.error("Failed to clear updates", error);
       setNotificationMenu({
         ...menu,
         loading: false,
-        error: error instanceof Error ? error.message : "Failed to clear notifications",
+        error: error instanceof Error ? error.message : "Failed to clear updates",
       });
     });
   }, [companyID, notificationMenu]);
@@ -1218,6 +1218,12 @@ export function AppSidebar({
           elevated
           onClick={() => onHomeViewSelect("my-work")}
         />
+        <AppSidebarButton
+          label="Updates"
+          active={homeActive && activeHomeView === "updates"}
+          elevated
+          onClick={() => onHomeViewSelect("updates")}
+        />
         {notificationMenu && (
           <div style={appSidebarNotificationPopoverOverlayStyle(notificationMenu.anchorTop)}>
             <NotificationPopover
@@ -1573,7 +1579,7 @@ function SidebarNotificationBadges({ badges }: { badges: SidebarNotificationBadg
   const visible = badges.filter((badge) => badge.showZero || normalizeSidebarNotificationCount(badge.count) > 0);
   if (visible.length === 0) return null;
   return (
-    <span style={appSidebarBadgeStripStyle} aria-label="Notification counts">
+    <span style={appSidebarBadgeStripStyle} aria-label="Update counts">
       {visible.map((badge) => (
         <span
           key={badge.key}

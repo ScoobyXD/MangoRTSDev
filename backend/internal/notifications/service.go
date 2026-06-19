@@ -18,7 +18,9 @@ type Service struct {
 
 const DefaultDomainEventReplayLimit = 100
 
+var mentionElementPattern = regexp.MustCompile(`(?is)<[^>]*data-mango-mention\s*=\s*(?:\\?["']true\\?["']|true)[^>]*>`)
 var mentionUserIDAttributePattern = regexp.MustCompile(`(?i)data-mango-mention-user-id\s*=\s*(?:\\?["']([^"'\\]+)\\?["']|([^\s>]+))`)
+var mentionKindAttributePattern = regexp.MustCompile(`(?i)data-mango-mention-kind\s*=\s*(?:\\?["']([^"'\\]+)\\?["']|([^\s>]+))`)
 
 type DomainEventReplayResult struct {
 	ProcessedEvents      int
@@ -407,9 +409,10 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		}
 		title = "New comment on " + nodeTitle
 		body = compactPreview(payloadString(payload, "comment"), 180)
-	case domain.NotificationEventMentionCreated:
+	case domain.NotificationEventMentionCreated, domain.NotificationEventUrgentMentionCreated:
 		mentionedUserIDs := payloadStringSlice(payload, "mentioned_user_ids")
 		informationID := payloadString(payload, "information_id")
+		urgent := event.Type == domain.NotificationEventUrgentMentionCreated
 		entityTitle := ""
 		switch event.EntityType {
 		case "logic_gate":
@@ -466,7 +469,13 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 			actorLabel = "Someone"
 		}
 		if entityTitle != "" {
-			title = fmt.Sprintf("%s has mentioned you in %s", actorLabel, entityTitle)
+			if urgent {
+				title = fmt.Sprintf("%s urgently mentioned you in %s", actorLabel, entityTitle)
+			} else {
+				title = fmt.Sprintf("%s has mentioned you in %s", actorLabel, entityTitle)
+			}
+		} else if urgent {
+			title = actorLabel + " urgently mentioned you"
 		} else {
 			title = actorLabel + " mentioned you"
 		}
@@ -539,6 +548,9 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationPro
 		entityID = payloadString(payload, "logic_gate_id")
 	case store.NodeMentionCreatedEventType:
 		notificationType = domain.NotificationEventMentionCreated
+		if payloadString(payload, "mention_kind") == "urgent" {
+			notificationType = domain.NotificationEventUrgentMentionCreated
+		}
 		entityType = store.EntityTypeNode
 		entityID = payloadString(payload, "node_id")
 		if entityID == "" {
@@ -546,6 +558,9 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationPro
 		}
 	case store.LogicGateMentionCreatedEventType:
 		notificationType = domain.NotificationEventMentionCreated
+		if payloadString(payload, "mention_kind") == "urgent" {
+			notificationType = domain.NotificationEventUrgentMentionCreated
+		}
 		entityType = store.EntityTypeLogicGate
 		entityID = payloadString(payload, "logic_gate_id")
 		if entityID == "" {
@@ -697,9 +712,18 @@ func (s *Service) ResolveMentionedUserIDs(companyID, text string) ([]string, err
 }
 
 func (s *Service) ResolveMentionedUserIDOccurrences(companyID, text string) ([]string, error) {
+	return s.ResolveMentionedUserIDOccurrencesByKind(companyID, text, "")
+}
+
+func (s *Service) ResolveMentionedUserIDOccurrencesByKind(companyID, text, mentionKind string) ([]string, error) {
 	companyID = strings.TrimSpace(companyID)
 	text = strings.TrimSpace(text)
-	if companyID == "" || text == "" || !strings.Contains(text, "@") {
+	mentionKind = strings.TrimSpace(mentionKind)
+	trigger := "@"
+	if mentionKind == "urgent" {
+		trigger = "!"
+	}
+	if companyID == "" || text == "" || (!strings.Contains(text, trigger) && !strings.Contains(text, "data-mango-mention")) {
 		return []string{}, nil
 	}
 	mentioned := make([]string, 0)
@@ -711,7 +735,22 @@ func (s *Service) ResolveMentionedUserIDOccurrences(companyID, text string) ([]s
 		}
 		mentioned = append(mentioned, userID)
 	}
-	for _, match := range mentionUserIDAttributePattern.FindAllStringSubmatch(text, -1) {
+	for _, tag := range mentionElementPattern.FindAllString(text, -1) {
+		tagKind := "regular"
+		if kindMatch := mentionKindAttributePattern.FindStringSubmatch(tag); len(kindMatch) > 0 {
+			if len(kindMatch) > 1 && strings.TrimSpace(kindMatch[1]) != "" {
+				tagKind = strings.TrimSpace(kindMatch[1])
+			} else if len(kindMatch) > 2 {
+				tagKind = strings.TrimSpace(kindMatch[2])
+			}
+		}
+		if mentionKind == "urgent" && tagKind != "urgent" {
+			continue
+		}
+		if mentionKind != "urgent" && tagKind == "urgent" {
+			continue
+		}
+		match := mentionUserIDAttributePattern.FindStringSubmatch(tag)
 		userID := ""
 		if len(match) > 1 && strings.TrimSpace(match[1]) != "" {
 			userID = strings.TrimSpace(match[1])
@@ -733,7 +772,7 @@ func (s *Service) ResolveMentionedUserIDOccurrences(companyID, text string) ([]s
 		if userID == "" || attributeCountsByUserID[userID] > 0 {
 			continue
 		}
-		for range mentionAliasOccurrenceStarts(text, mentionAliases(user)) {
+		for range mentionAliasOccurrenceStarts(text, mentionAliases(user), trigger) {
 			addMentionedUserID(userID)
 		}
 	}
@@ -767,18 +806,21 @@ func mentionAliases(user domain.CompanyUser) []string {
 }
 
 func containsMentionAlias(text, alias string) bool {
-	pattern := `(?i)(^|[^A-Za-z0-9_@])@` + regexp.QuoteMeta(alias) + `($|[^A-Za-z0-9_@])`
+	pattern := `(?i)(^|[^A-Za-z0-9_@!])@` + regexp.QuoteMeta(alias) + `($|[^A-Za-z0-9_@!])`
 	return regexp.MustCompile(pattern).FindStringIndex(text) != nil
 }
 
-func mentionAliasOccurrenceStarts(text string, aliases []string) []int {
+func mentionAliasOccurrenceStarts(text string, aliases []string, trigger string) []int {
+	if trigger != "!" {
+		trigger = "@"
+	}
 	starts := map[int]struct{}{}
 	for _, alias := range aliases {
 		alias = strings.TrimSpace(alias)
 		if alias == "" {
 			continue
 		}
-		pattern := `(?i)(^|[^A-Za-z0-9_@])@` + regexp.QuoteMeta(alias) + `($|[^A-Za-z0-9_@])`
+		pattern := `(?i)(^|[^A-Za-z0-9_@!])` + regexp.QuoteMeta(trigger) + regexp.QuoteMeta(alias) + `($|[^A-Za-z0-9_@!])`
 		for _, match := range regexp.MustCompile(pattern).FindAllStringSubmatchIndex(text, -1) {
 			if len(match) < 4 || match[2] < 0 {
 				continue
