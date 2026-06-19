@@ -529,11 +529,25 @@ function writeAuthResult(result: CognitoAuthResult): void {
     refresh_token: result.RefreshToken,
     expires_at: Date.now() + result.ExpiresIn * 1000,
   };
-  sessionStorage.setItem(TOKEN_KEY, JSON.stringify(token));
+  writeToken(token);
 }
 
 function readToken(): TokenSet | null {
-  const raw = sessionStorage.getItem(TOKEN_KEY);
+  const localToken = readTokenFromStorage(getAuthLocalStorage());
+  if (localToken) return localToken;
+  const sessionToken = readTokenFromStorage(getAuthSessionStorage());
+  if (sessionToken) writeToken(sessionToken);
+  return sessionToken;
+}
+
+function writeToken(token: TokenSet): void {
+  const serialized = JSON.stringify(token);
+  if (writeTokenToStorage(getAuthLocalStorage(), serialized)) return;
+  writeTokenToStorage(getAuthSessionStorage(), serialized);
+}
+
+function readTokenFromStorage(storage: Storage | null): TokenSet | null {
+  const raw = readTokenString(storage);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as TokenSet;
@@ -545,7 +559,44 @@ function readToken(): TokenSet | null {
 
 function clearToken(): void {
   clearCurrentUserCache();
-  sessionStorage.removeItem(TOKEN_KEY);
+  removeTokenFromStorage(getAuthLocalStorage());
+  removeTokenFromStorage(getAuthSessionStorage());
+}
+
+function getAuthLocalStorage(): Storage | null {
+  return typeof localStorage === "undefined" ? null : localStorage;
+}
+
+function getAuthSessionStorage(): Storage | null {
+  return typeof sessionStorage === "undefined" ? null : sessionStorage;
+}
+
+function readTokenString(storage: Storage | null): string | null {
+  if (!storage) return null;
+  try {
+    return storage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeTokenToStorage(storage: Storage | null, serialized: string): boolean {
+  if (!storage) return false;
+  try {
+    storage.setItem(TOKEN_KEY, serialized);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeTokenFromStorage(storage: Storage | null): void {
+  if (!storage) return;
+  try {
+    storage.removeItem(TOKEN_KEY);
+  } catch {
+    // Storage can be unavailable in locked-down browser modes.
+  }
 }
 
 function clearCurrentUserCache(): void {

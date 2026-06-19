@@ -24,3 +24,10 @@ export const MinimizeToLineIcon: React.FC = () => (
     <path d="M3 10.5h8" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="square" />
   </svg>
 );
+
+export const OpenInNewTabIcon: React.FC = () => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" style={{ display: "block" }}>
+    <path d="M5.2 3.2H3.6a1.4 1.4 0 0 0-1.4 1.4v5.8a1.4 1.4 0 0 0 1.4 1.4h5.8a1.4 1.4 0 0 0 1.4-1.4V8.8" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M7.4 2.2h4.4v4.4M11.6 2.4 6.4 7.6" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);

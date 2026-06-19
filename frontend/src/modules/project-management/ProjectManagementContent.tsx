@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildProjectRoute } from "../../app/deepLinkRoutes.js";
+import { openAppPathInNewTab } from "../../app/resourceLinks.js";
 import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl.js";
@@ -1307,6 +1309,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         onBack={() => setActiveProjectID("")}
         onNodeOpen={onNodeOpen}
         onLogicGateOpen={onLogicGateOpen}
+        onOpenInNewTab={() => openAppPathInNewTab(buildProjectRoute(activeProjectID))}
       />
     );
   }
@@ -1427,6 +1430,17 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           onPointerDown={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.preventDefault()}
         >
+          <button
+            type="button"
+            role="menuitem"
+            style={projectContextMenuButtonStyle}
+            onClick={() => {
+              openAppPathInNewTab(buildProjectRoute(projectContextMenu.project.project_id));
+              setProjectContextMenu(null);
+            }}
+          >
+            Open project in new browser tab
+          </button>
           <button
             type="button"
             role="menuitem"

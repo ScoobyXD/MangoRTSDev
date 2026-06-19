@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildLogicGateRoute, buildNodeRoute } from "../../app/deepLinkRoutes";
+import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl";
 import { entityMatchesAccountFilter, setNodeAccountAssignments } from "../accounts/accountsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
@@ -668,6 +670,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const orderedBoards = useMemo(() => sortKanbanBoards(boards), [boards]);
   const activeBoard = useMemo(() => orderedBoards.find((board) => board.board_id === boardID) ?? null, [boardID, orderedBoards]);
   const activeBoardIsLogicGate = !!(activeLogicGateID || logicGateIDFromKanbanBoardID(boardID));
+  const openableLogicGateID = activeLogicGateID || activeBoard?.logic_gate_id || logicGateIDFromKanbanBoardID(boardID);
   const bottomLaneColumns = useMemo(() => (activeBoardIsLogicGate ? orderedColumns.filter(isKanbanBottomLaneColumn) : []), [activeBoardIsLogicGate, orderedColumns]);
   const mainBoardColumns = useMemo(() => (activeBoardIsLogicGate ? orderedColumns.filter((column) => !isKanbanBottomLaneColumn(column)) : orderedColumns), [activeBoardIsLogicGate, orderedColumns]);
   const useBottomLaneLayout = activeBoardIsLogicGate && bottomLaneColumns.length > 0;
@@ -2391,6 +2394,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onSaveCurrentBoardView={() => void saveCurrentBoardView()}
         onCreateNewBoardView={() => void createNewBoardView()}
         onCollapseToTab={arenaMode ? onCollapseArenaToTab : undefined}
+        onOpenInNewTab={openableLogicGateID ? () => openAppPathInNewTab(buildLogicGateRoute(openableLogicGateID)) : undefined}
         timelineDragEntity={activeLogicGateID ? { kind: "logic_gate", id: activeLogicGateID, label: activeBoardTitle } : undefined}
         onSelectBoard={(nextBoardID) => {
           setSelectedCardIDs(new Set());
@@ -2491,6 +2495,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onToggleCardIssue={(card, isIssue) => void toggleCardIssue(card, isIssue)}
         onAssignAccounts={openAccountAssignment}
         onRenameNode={requestNodeRename}
+        onOpenNodeInNewTab={(nodeID) => openAppPathInNewTab(buildNodeRoute(nodeID))}
         onRequestNodeDeleteFromCards={requestNodeDeleteFromCards}
         onRequestCardDelete={requestCardDelete}
       />
@@ -2571,6 +2576,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           theme={theme}
           onClose={() => closeNodeEditorOverlay()}
           onCollapseToTab={collapseNodeEditorOverlayToTab}
+          onOpenInNewTab={() => openAppPathInNewTab(buildNodeRoute(nodeEditorOverlay.nodeID))}
         />
       )}
       {accountAssignmentModal && (

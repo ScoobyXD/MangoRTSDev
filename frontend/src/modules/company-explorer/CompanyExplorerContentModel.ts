@@ -127,6 +127,7 @@ export type CompanyExplorerContentProps = {
 };
 
 export type CompanyExplorerContextMenuActionID =
+  | "open_in_new_tab"
   | "folder_permissions"
   | "create_folder"
   | "create_node"
@@ -142,6 +143,7 @@ export type CompanyExplorerContextMenuAction = {
 };
 
 export function buildCompanyExplorerContextMenuSections(input: {
+  openInNewTabEnabled?: boolean;
   permissionsEnabled: boolean;
   createFolderEnabled: boolean;
   createNodeEnabled: boolean;
@@ -150,8 +152,14 @@ export function buildCompanyExplorerContextMenuSections(input: {
   renameEnabled: boolean;
   deleteEnabled: boolean;
 }): CompanyExplorerContextMenuAction[][] {
+  const resourceActions: CompanyExplorerContextMenuAction[] = input.openInNewTabEnabled
+    ? [{ id: "open_in_new_tab", label: "Open in new browser tab", enabled: true }]
+    : [];
   return [
-    [{ id: "folder_permissions", label: "Folder Permissions", enabled: input.permissionsEnabled }],
+    [
+      ...resourceActions,
+      { id: "folder_permissions", label: "Folder Permissions", enabled: input.permissionsEnabled },
+    ],
     [
       { id: "create_folder", label: "Create New Folder", enabled: input.createFolderEnabled },
       { id: "create_node", label: "Create Node", enabled: input.createNodeEnabled },

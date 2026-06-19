@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type React from "react";
-import { MinimizeToLineIcon } from "../../app/nodeEditorPopupControls";
+import { MinimizeToLineIcon, OpenInNewTabIcon } from "../../app/nodeEditorPopupControls";
 import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
 import {
   KANBAN_MODULE_TOP_CLEARANCE_PX,
@@ -56,6 +56,7 @@ type KanbanBoardSidebarProps = {
   onCreateNewBoardView: () => void;
   onSelectBoard: (boardID: string) => void;
   onCollapseToTab?: () => void;
+  onOpenInNewTab?: () => void;
   timelineDragEntity?: { kind: "logic_gate"; id: string; label: string };
 };
 
@@ -91,6 +92,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
   onCreateNewBoardView: _onCreateNewBoardView,
   onSelectBoard,
   onCollapseToTab,
+  onOpenInNewTab,
   timelineDragEntity,
 }) => {
   const headerRef = useRef<HTMLDivElement>(null);
@@ -117,26 +119,46 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
     };
   }, [boardPickerOpen, onCloseAllBoards]);
 
+  const headerActionCount = (onOpenInNewTab ? 1 : 0) + (onCollapseToTab ? 1 : 0);
+  const headerGridTemplateColumns = headerActionCount > 0
+    ? `minmax(150px, 270px) minmax(140px, 1fr) auto repeat(${headerActionCount}, 25px)`
+    : "minmax(150px, 270px) minmax(140px, 1fr) auto";
+  const headerButtonStyle = compactHeaderButtonStyle(isDark, line, text);
+
   if (compactArenaHeader) {
-    return onCollapseToTab ? (
-      <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, right: 10, zIndex: 7, pointerEvents: "auto" }}>
-        <button
-          className="mango-elevated-action"
-          type="button"
-          title="Minimize Logic Gate Arena to app tab"
-          aria-label="Minimize Logic Gate Arena to app tab"
-          onClick={onCollapseToTab}
-          style={{ width: 25, height: 25, display: "grid", placeItems: "center", border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 8, background: isDark ? "rgba(255,255,255,0.08)" : KANBAN_SURFACE, color: text, padding: 0, cursor: "pointer", boxShadow: isDark ? "none" : KANBAN_SHADOW }}
-        >
-          <MinimizeToLineIcon />
-        </button>
+    return onCollapseToTab || onOpenInNewTab ? (
+      <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, right: 10, zIndex: 7, display: "flex", alignItems: "center", gap: 6, pointerEvents: "auto" }}>
+        {onOpenInNewTab && (
+          <button
+            className="mango-elevated-action"
+            type="button"
+            title="Open Logic Gate in new browser tab"
+            aria-label="Open Logic Gate in new browser tab"
+            onClick={onOpenInNewTab}
+            style={headerButtonStyle}
+          >
+            <OpenInNewTabIcon />
+          </button>
+        )}
+        {onCollapseToTab && (
+          <button
+            className="mango-elevated-action"
+            type="button"
+            title="Minimize Logic Gate Arena to app tab"
+            aria-label="Minimize Logic Gate Arena to app tab"
+            onClick={onCollapseToTab}
+            style={headerButtonStyle}
+          >
+            <MinimizeToLineIcon />
+          </button>
+        )}
       </div>
     ) : null;
   }
 
   return (
   <>
-    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 3, left: 10, right: 10, display: "grid", gridTemplateColumns: onCollapseToTab ? "minmax(150px, 270px) minmax(140px, 1fr) auto 25px" : "minmax(150px, 270px) minmax(140px, 1fr) auto", alignItems: "center", gap: 8, padding: `3px 6px 3px ${Math.max(6, headerLeftPaddingPx)}px`, zIndex: 6, pointerEvents: "auto", border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 12, background: isDark ? "rgba(17,22,27,0.82)" : "linear-gradient(90deg, rgba(255,241,242,0.70), rgba(254,249,195,0.46) 34%, rgba(236,253,245,0.50) 66%, rgba(239,246,255,0.70))", boxShadow: isDark ? "none" : "0 10px 24px rgba(15, 23, 42, 0.08), inset 1px 1px 0 rgba(255,255,255,0.88)" }}>
+    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 3, left: 10, right: 10, display: "grid", gridTemplateColumns: headerGridTemplateColumns, alignItems: "center", gap: 8, padding: `3px 6px 3px ${Math.max(6, headerLeftPaddingPx)}px`, zIndex: 6, pointerEvents: "auto", border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 12, background: isDark ? "rgba(17,22,27,0.82)" : "linear-gradient(90deg, rgba(255,241,242,0.70), rgba(254,249,195,0.46) 34%, rgba(236,253,245,0.50) 66%, rgba(239,246,255,0.70))", boxShadow: isDark ? "none" : "0 10px 24px rgba(15, 23, 42, 0.08), inset 1px 1px 0 rgba(255,255,255,0.88)" }}>
       {editingBoardTitle ? (
         <input
           value={boardTitleDraft}
@@ -205,6 +227,18 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
         </span>
         All boards
       </button>
+      {onOpenInNewTab && (
+        <button
+          className="mango-elevated-action"
+          type="button"
+          title="Open Logic Gate in new browser tab"
+          aria-label="Open Logic Gate in new browser tab"
+          onClick={onOpenInNewTab}
+          style={headerButtonStyle}
+        >
+          <OpenInNewTabIcon />
+        </button>
+      )}
       {onCollapseToTab && (
         <button
           className="mango-elevated-action"
@@ -212,7 +246,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
           title="Minimize Logic Gate Arena to app tab"
           aria-label="Minimize Logic Gate Arena to app tab"
           onClick={onCollapseToTab}
-          style={{ width: 25, height: 25, display: "grid", placeItems: "center", border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 8, background: isDark ? "rgba(255,255,255,0.08)" : KANBAN_SURFACE, color: text, padding: 0, cursor: "pointer", boxShadow: isDark ? "none" : KANBAN_SHADOW }}
+          style={headerButtonStyle}
         >
           <MinimizeToLineIcon />
         </button>
@@ -253,3 +287,19 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
   </>
   );
 };
+
+function compactHeaderButtonStyle(isDark: boolean, line: string, text: string): React.CSSProperties {
+  return {
+    width: 25,
+    height: 25,
+    display: "grid",
+    placeItems: "center",
+    border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`,
+    borderRadius: 8,
+    background: isDark ? "rgba(255,255,255,0.08)" : KANBAN_SURFACE,
+    color: text,
+    padding: 0,
+    cursor: "pointer",
+    boxShadow: isDark ? "none" : KANBAN_SHADOW,
+  };
+}

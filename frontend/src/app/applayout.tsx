@@ -48,6 +48,7 @@ import { AppTaskbar } from "./AppTaskbar";
 import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, appTaskbarStorageScope, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
 import { readAppTimelineState, rollTimelineStateToDate, saveAppTimelineState, type AppTimelineState } from "./timelineState";
 import { buildGvicRoute, buildLogicGateRoute, buildNodeRoute, buildProjectRoute, gvicRoleForViewID, type DeepLinkRoute, type GvicDeepLinkRoute } from "./deepLinkRoutes";
+import { openAppPathInNewTab } from "./resourceLinks";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -1972,6 +1973,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
             }
           }}
           onCollapseToTab={collapseExplorerNodePopupToTab}
+          onOpenInNewTab={() => openAppPathInNewTab(buildNodeRoute(explorerNodePopup.nodeID))}
         />
       )}
 

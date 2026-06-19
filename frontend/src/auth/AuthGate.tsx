@@ -20,7 +20,7 @@ import {
   type CurrentUserResponse,
   type LoginResult,
 } from "./cognitoAuth";
-import { isAuthPath, nextPathForAuthState } from "./authRoutes";
+import { isAuthPath, nextPathAfterAuthentication, nextPathForAuthState } from "./authRoutes";
 import { listCompanyUsers, markCommunicationsWorkspacePanelStale } from "../modules/communications/communicationsApi";
 import { normalizeAppPath, parseDeepLinkRoute } from "../app/deepLinkRoutes";
 import { RecycleBinPage } from "../pages/recycle-bin/RecycleBinPage";
@@ -80,6 +80,20 @@ const logicGateArenaPrefetch = prefetchHandlers(preloadLogicGateArenaSurface);
 const homePrefetch = prefetchHandlers(preloadHomeSurface);
 const projectManagementPrefetch = prefetchHandlers(preloadProjectManagementSurface);
 const accountManagerPrefetch = prefetchHandlers(preloadAccountManagerSurface);
+const AUTH_RETURN_PATH_KEY = "mangorts:auth-return-path-v1";
+const AUTH_RETURN_STATIC_PATHS = new Set([
+  "/",
+  "/home",
+  "/communication",
+  "/communications",
+  "/logic-gate-arena",
+  "/project-management",
+  "/account-manager",
+  "/settings",
+  "/admin/users",
+  "/recycle-bin",
+  "/connect-google",
+]);
 
 type CompanyUser = {
   company_id: string;
@@ -149,6 +163,32 @@ type CommunicationsStatus = {
     status?: string;
   };
 };
+
+function canUseAuthReturnPath(pathname: string): boolean {
+  const path = normalizeAppPath(pathname);
+  return AUTH_RETURN_STATIC_PATHS.has(path) || parseDeepLinkRoute(path) !== null;
+}
+
+function rememberAuthReturnPath(pathname: string): void {
+  if (typeof sessionStorage === "undefined" || !canUseAuthReturnPath(pathname)) return;
+  try {
+    sessionStorage.setItem(AUTH_RETURN_PATH_KEY, normalizeAppPath(pathname));
+  } catch {
+    // Session storage can be unavailable in locked-down browser modes.
+  }
+}
+
+function consumeAuthReturnPath(): string {
+  if (typeof sessionStorage === "undefined") return "";
+  try {
+    const path = sessionStorage.getItem(AUTH_RETURN_PATH_KEY) ?? "";
+    sessionStorage.removeItem(AUTH_RETURN_PATH_KEY);
+    if (!path.trim()) return "";
+    return canUseAuthReturnPath(path) ? normalizeAppPath(path) : "";
+  } catch {
+    return "";
+  }
+}
 
 type InviteCreateResponse = {
   invitation: {
@@ -335,11 +375,15 @@ export default function AuthGate() {
         const companyID = current.memberships.find((item) => item.role !== "dev_admin")?.company_id ?? current.memberships[0]?.company_id;
         if (companyID) setActiveCompanyID(companyID);
       }
-      const nextPath = nextPathForAuthState(window.location.pathname, true);
+      const returnPath = isAuthPath(window.location.pathname) ? consumeAuthReturnPath() : "";
+      const nextPath = nextPathAfterAuthentication(window.location.pathname, returnPath);
       if (nextPath !== window.location.pathname) navigate(nextPath);
     } catch {
       setMe(null);
-      if (!isAuthPath(window.location.pathname)) navigate("/login");
+      if (!isAuthPath(window.location.pathname)) {
+        rememberAuthReturnPath(window.location.pathname);
+        navigate("/login");
+      }
     } finally {
       setLoading(false);
     }
@@ -355,7 +399,10 @@ export default function AuthGate() {
     if (!authEnabled) return;
     if (!hasStoredToken()) {
       const nextPath = nextPathForAuthState(window.location.pathname, false);
-      if (nextPath !== window.location.pathname) navigate(nextPath);
+      if (nextPath !== window.location.pathname) {
+        rememberAuthReturnPath(window.location.pathname);
+        navigate(nextPath);
+      }
       return;
     }
     void loadMe();
@@ -827,7 +874,6 @@ function CompleteAccountPage({ pendingChallenge, onChallenge, onAuthenticated, o
           await completeNewPassword(pendingChallenge.username, pendingChallenge.session, newPassword);
           onChallenge(null);
           await onAuthenticated();
-          onNavigate("/home");
         } catch (completeError) {
           console.error("Account completion failed", completeError);
           setError(formatAuthError(completeError, "Account completion failed"));

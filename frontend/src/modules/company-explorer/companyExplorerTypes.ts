@@ -48,6 +48,7 @@ export type ExplorerRenameDraft = { treeID: string; target: ExplorerRenameTarget
 export type ExplorerRowOrderUpdate = { row: ExplorerTreeNode; position: number };
 export type CompanyExplorerShareTarget = { folderID: string; label: string };
 export type CompanyExplorerFolderPermissionsTarget = { folderID: string; label: string; permissionsPath?: string };
+export type CompanyExplorerOpenInNewTabTarget = { kind: "node" | "logic_gate" | "project"; id: string };
 export type CompanyExplorerFindRequestDetail = {
   companyID?: string;
   sourceFrameID?: string;
@@ -64,6 +65,7 @@ export type CompanyExplorerContextMenuState = {
   deleteTargets: ExplorerDeleteTargetWithLabel[];
   renameTarget: ExplorerRenameTarget | null;
   permissionsTarget: CompanyExplorerFolderPermissionsTarget | null;
+  openInNewTabTarget: CompanyExplorerOpenInNewTabTarget | null;
   renameTreeID: string;
   renameLabel: string;
   contextKind: CompanyExplorerFolderKind | null;

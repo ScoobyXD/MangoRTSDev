@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildLogicGateRoute, buildNodeRoute } from "../../app/deepLinkRoutes.js";
+import { openAppPathInNewTab } from "../../app/resourceLinks.js";
 import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { useCompanyAccounts } from "../accounts/AccountFilterControl.js";
@@ -78,6 +80,7 @@ type ProjectSummaryContentProps = {
   onBack: () => void;
   onNodeOpen?: (nodeID: string) => void;
   onLogicGateOpen?: (logicGateID: string) => void;
+  onOpenInNewTab?: () => void;
   workspace?: ProjectSummaryWorkspaceSnapshot;
 };
 
@@ -147,6 +150,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   onBack,
   onNodeOpen,
   onLogicGateOpen,
+  onOpenInNewTab,
   workspace,
 }) => {
   const companyID = getActiveCompanyID();
@@ -793,6 +797,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setSplitResizeState({ left: rect.left, width: rect.width });
   };
 
+  const openRelationshipResourceInNewTab = (target: RelationshipContextTarget) => {
+    const path = target.resourceType === "logic_gate"
+      ? buildLogicGateRoute(target.resourceID)
+      : buildNodeRoute(target.resourceID);
+    openAppPathInNewTab(path);
+    setRelationshipContextMenu(null);
+  };
+
   if (loading) {
     return <div style={summaryLoadingStyle}>Loading</div>;
   }
@@ -843,6 +855,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           )}
         </div>
         <div style={summaryMetaPillsStyle}>
+          {onOpenInNewTab && (
+            <button type="button" style={summaryPermissionButtonStyle} onClick={onOpenInNewTab}>
+              Open in new tab
+            </button>
+          )}
           <button type="button" style={summaryPermissionButtonStyle} onClick={() => setAssignmentsOpen(true)}>
             Assignments
           </button>
@@ -1261,6 +1278,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               {!relationshipContextMenu.relationship || relationshipContextMenu.relationship.resourceType === "logic_gate" ? (
                 <button type="button" role="menuitem" style={relationshipContextMenuButtonStyle} onClick={() => void createRelationshipResource("node")}>
                   {relationshipContextMenu.logicGateID ? "Create new node in logic gate" : "Create new node"}
+                </button>
+              ) : null}
+              {relationshipContextMenu.relationship ? (
+                <button type="button" role="menuitem" style={relationshipContextMenuButtonStyle} onClick={() => openRelationshipResourceInNewTab(relationshipContextMenu.relationship!)}>
+                  {relationshipContextMenu.relationship.resourceType === "logic_gate" ? "Open logic gate in new browser tab" : "Open node in new browser tab"}
                 </button>
               ) : null}
               {relationshipContextMenu.relationship ? (

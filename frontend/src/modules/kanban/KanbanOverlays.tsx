@@ -1,7 +1,7 @@
 import React from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
-import { MinimizeToLineIcon } from "../../app/nodeEditorPopupControls";
+import { MinimizeToLineIcon, OpenInNewTabIcon } from "../../app/nodeEditorPopupControls";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import type { Account } from "../accounts/accountsApi";
 import { type KanbanCard, type KanbanColumn } from "./shared";
@@ -45,6 +45,7 @@ export function KanbanContextMenus({
   onToggleCardIssue,
   onAssignAccounts,
   onRenameNode,
+  onOpenNodeInNewTab,
   onRequestNodeDeleteFromCards,
   onRequestCardDelete,
 }: {
@@ -60,6 +61,7 @@ export function KanbanContextMenus({
   onToggleCardIssue: (card: KanbanCard, isIssue: boolean) => void;
   onAssignAccounts: (card: KanbanCard) => void;
   onRenameNode: (card: KanbanCard) => void;
+  onOpenNodeInNewTab: (nodeID: string) => void;
   onRequestNodeDeleteFromCards: (cardIDs: string[]) => void;
   onRequestCardDelete: (cardIDs: string[]) => void;
 }) {
@@ -89,6 +91,17 @@ export function KanbanContextMenus({
             {...contextMenuHoverHandlers}
           >
             Pin Node
+          </button>
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => {
+              onOpenNodeInNewTab(contextCard.node_id);
+              onCloseCardMenu();
+            }}
+            {...contextMenuHoverHandlers}
+          >
+            Open node in new browser tab
           </button>
           <button type="button" style={contextMenuButtonStyle} onClick={() => onAssignAccounts(contextCard)} {...contextMenuHoverHandlers}>
             Assign accounts
@@ -158,6 +171,7 @@ export function KanbanNodeEditorOverlay({
   allowHorizontalOverflow = false,
   onClose,
   onCollapseToTab,
+  onOpenInNewTab,
 }: {
   overlay: NodeEditorOverlayState;
   ratio: NodeEditorOverlayRatio;
@@ -169,6 +183,7 @@ export function KanbanNodeEditorOverlay({
   allowHorizontalOverflow?: boolean;
   onClose: () => void;
   onCollapseToTab: () => void;
+  onOpenInNewTab?: () => void;
 }) {
   const boardWidth = boardRootRef.current?.getBoundingClientRect().width ?? 0;
   const minLeftPx = getNodeEditorOverlayMinLeftPx(boardRootRef.current, allowHorizontalOverflow);
@@ -211,26 +226,24 @@ export function KanbanNodeEditorOverlay({
         data-frame-interactive="true"
         onMouseDown={(event) => event.stopPropagation()}
         onClick={onCollapseToTab}
-        style={{
-          position: "absolute",
-          top: 7,
-          right: 38,
-          zIndex: 80,
-          width: 24,
-          height: 24,
-          display: "grid",
-          placeItems: "center",
-          border: `1px solid ${KANBAN_SOFT_BORDER}`,
-          borderRadius: 8,
-          background: KANBAN_SURFACE,
-          color: "#334155",
-          padding: 0,
-          cursor: "pointer",
-          boxShadow: KANBAN_SHADOW,
-        }}
+        style={overlayHeaderButtonStyle(38)}
       >
         <MinimizeToLineIcon />
       </button>
+      {onOpenInNewTab && (
+        <button
+          className="mango-elevated-action"
+          type="button"
+          title="Open node in new browser tab"
+          aria-label="Open node in new browser tab"
+          data-frame-interactive="true"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={onOpenInNewTab}
+          style={overlayHeaderButtonStyle(68)}
+        >
+          <OpenInNewTabIcon />
+        </button>
+      )}
       <button
         className="mango-elevated-action"
         type="button"
@@ -302,6 +315,26 @@ export function KanbanNodeEditorOverlay({
       ))}
     </div>
   );
+}
+
+function overlayHeaderButtonStyle(right: number): React.CSSProperties {
+  return {
+    position: "absolute",
+    top: 7,
+    right,
+    zIndex: 80,
+    width: 24,
+    height: 24,
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${KANBAN_SOFT_BORDER}`,
+    borderRadius: 8,
+    background: KANBAN_SURFACE,
+    color: "#334155",
+    padding: 0,
+    cursor: "pointer",
+    boxShadow: KANBAN_SHADOW,
+  };
 }
 
 const modalBackdropStyle: React.CSSProperties = {

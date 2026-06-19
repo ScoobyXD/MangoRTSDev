@@ -12,7 +12,7 @@ import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-expl
 import type { CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
 import type { SidebarPin } from "./sidebarPins";
-import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
+import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, OpenInNewTabIcon, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
 import {
   createCommunicationsSharedInbox,
   deleteCommunicationsSharedInbox,
@@ -1944,13 +1944,14 @@ function defaultNodeEditorPopupRect(): NodeEditorPopupRect {
   });
 }
 
-export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab }: {
+export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab, onOpenInNewTab }: {
   nodeID: string;
   nodeTitle: string;
   focusInformationID?: string;
   focusRequestID?: number;
   onClose: () => void;
   onCollapseToTab?: () => void;
+  onOpenInNewTab?: () => void;
 }): React.ReactElement {
   const [popupRect, setPopupRect] = useState(defaultNodeEditorPopupRect);
   const popupRectRef = useRef(popupRect);
@@ -2062,6 +2063,19 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
             }}
           />
         ))}
+        {onOpenInNewTab && (
+          <button
+            type="button"
+            title="Open node in new browser tab"
+            aria-label="Open node in new browser tab"
+            data-frame-interactive="true"
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={onOpenInNewTab}
+            style={nodeEditorPopupIconButtonStyle(onCollapseToTab ? 68 : 38)}
+          >
+            <OpenInNewTabIcon />
+          </button>
+        )}
         {onCollapseToTab && (
           <button
             type="button"
@@ -2070,7 +2084,7 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
             data-frame-interactive="true"
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onCollapseToTab}
-            style={nodeEditorPopupCollapseButtonStyle}
+            style={nodeEditorPopupIconButtonStyle(38)}
           >
             <MinimizeToLineIcon />
           </button>
@@ -2935,3 +2949,10 @@ const nodeEditorPopupCollapseButtonStyle: React.CSSProperties = {
   padding: 0,
   cursor: "pointer",
 };
+
+function nodeEditorPopupIconButtonStyle(right: number): React.CSSProperties {
+  return {
+    ...nodeEditorPopupCollapseButtonStyle,
+    right,
+  };
+}

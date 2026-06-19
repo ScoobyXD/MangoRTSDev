@@ -6,6 +6,7 @@ import { KANBAN_NODE_PRIORITY_STYLE_OPTIONS } from "../kanban/shared";
 import type {
   CompanyExplorerContextMenuState,
   CompanyExplorerFolderPermissionsTarget,
+  CompanyExplorerOpenInNewTabTarget,
   ExplorerDeleteTargetWithLabel,
   ExplorerRenameTarget,
 } from "./companyExplorerTypes";
@@ -19,6 +20,7 @@ type CompanyExplorerContextMenuProps = {
   onCreateLogicGate: (parentFolderID: string, position?: number, GVICRole?: string) => void;
   onCreateProject: (parentFolderID: string, position?: number) => void;
   onOpenFolderPermissions: (target: CompanyExplorerFolderPermissionsTarget) => void;
+  onOpenInNewTab: (target: CompanyExplorerOpenInNewTabTarget) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
   onDeleteTargets: (targets: ExplorerDeleteTargetWithLabel[]) => void;
 };
@@ -31,6 +33,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   onCreateLogicGate,
   onCreateProject,
   onOpenFolderPermissions,
+  onOpenInNewTab,
   onRenameTarget,
   onDeleteTargets,
 }) => {
@@ -43,6 +46,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   const createNodeNeedsPriority = menu.canCreateNode && Boolean(menu.createNodeLogicGateID);
   const priorityOptions = KANBAN_NODE_PRIORITY_STYLE_OPTIONS.filter((option) => option.value !== "0");
   const menuSections = buildCompanyExplorerContextMenuSections({
+    openInNewTabEnabled: Boolean(menu.openInNewTabTarget),
     permissionsEnabled: Boolean(menu.permissionsTarget),
     createFolderEnabled: menu.canCreateFolder,
     createNodeEnabled: menu.canCreateNode,
@@ -152,6 +156,23 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   );
   const renderMenuAction = (action: CompanyExplorerContextMenuAction): React.ReactElement => {
     if (action.id === "create_node") return <React.Fragment key={action.id}>{createNodeButton}</React.Fragment>;
+    if (action.id === "open_in_new_tab") {
+      return (
+        <button
+          key={action.id}
+          type="button"
+          disabled={!action.enabled}
+          style={menuButtonStyle(action.enabled)}
+          {...menuItemEvents(action.enabled, closePrioritySubmenu)}
+          onClick={() => {
+            if (!menu.openInNewTabTarget) return;
+            onOpenInNewTab(menu.openInNewTabTarget);
+          }}
+        >
+          {action.label}
+        </button>
+      );
+    }
     if (action.id === "folder_permissions") {
       return (
         <button

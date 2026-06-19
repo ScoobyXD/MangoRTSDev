@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
+import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { getNodeTitle as getNodeRecordTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeTitle as getLogicGateRecordTitle, toLogicGateCanvasRecord, type LogicGateGVICRole, type LogicGateRecord as LogicGateApiRecord, type NodeRecord as LogicGateCanvasRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../node-map/eventbus";
@@ -29,6 +31,7 @@ import {
 import {
   type CompanyExplorerContextMenuState,
   type CompanyExplorerFolderPermissionsTarget,
+  type CompanyExplorerOpenInNewTabTarget,
   type ExplorerDeleteTargetWithLabel,
   type ExplorerDragPayload,
   type ExplorerRenameDraft,
@@ -84,6 +87,20 @@ type CompanyExplorerGVICFolderRole = LogicGateGVICRole | "other";
 type GVICProjectionCacheEntry = { rows: GVICMatrixProjectionRow[]; logicGates: ExplorerLogicGateRecord[]; loaded: boolean };
 type ExplorerUserSummary = { userID: string; label: string; email?: string };
 type ExplorerGroupSummary = { groupID: string; label: string; users: ExplorerUserSummary[]; children: ExplorerGroupSummary[] };
+
+function getOpenInNewTabTargetForExplorerRow(row?: ExplorerTreeNode | null): CompanyExplorerOpenInNewTabTarget | null {
+  if (!row) return null;
+  if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
+  if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
+  if (row.kind === "project" && row.projectID) return { kind: "project", id: row.projectID };
+  return null;
+}
+
+function openCompanyExplorerTargetInNewTab(target: CompanyExplorerOpenInNewTabTarget): void {
+  if (target.kind === "node") openAppPathInNewTab(buildNodeRoute(target.id));
+  else if (target.kind === "logic_gate") openAppPathInNewTab(buildLogicGateRoute(target.id));
+  else openAppPathInNewTab(buildProjectRoute(target.id));
+}
 
 function companyExplorerLazyScopeForView(scopeView: CompanyExplorerScopeView, scopeViewsEnabled: boolean): CompanyExplorerLazyScope {
   if (!scopeViewsEnabled) return "all";
@@ -3507,6 +3524,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       deleteTargets,
       renameTarget: protectedGVICRow ? null : resolveExplorerRenameTarget(row ?? null),
       permissionsTarget,
+      openInNewTabTarget: protectedGVICRow ? null : getOpenInNewTabTargetForExplorerRow(row),
       renameTreeID: row?.id ?? "",
       renameLabel: row?.label ?? "",
       contextKind,
@@ -3729,6 +3747,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         onOpenFolderPermissions={(target) => {
           setExplorerContextMenu(null);
           setFolderPermissionsTarget(target);
+        }}
+        onOpenInNewTab={(target) => {
+          setExplorerContextMenu(null);
+          openCompanyExplorerTargetInNewTab(target);
         }}
         onRenameTarget={(treeID, target, value) => {
           setExplorerContextMenu(null);
