@@ -90,10 +90,12 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 	}
 	assignmentsSnapshot := cloneMemoryMap(r.gvicAssignments)
 	effectiveSnapshot := cloneMemoryMap(r.gvicEffectiveAssignments)
+	GVICMatrixProjectionSnapshot := cloneMemoryMap(r.GVICMatrixProjectionRows)
 	eventRowsSnapshot := cloneMemoryMap(r.eventRows)
 	restore := func() {
 		r.gvicAssignments = assignmentsSnapshot
 		r.gvicEffectiveAssignments = effectiveSnapshot
+		r.GVICMatrixProjectionRows = GVICMatrixProjectionSnapshot
 		r.eventRows = eventRowsSnapshot
 	}
 
@@ -139,15 +141,7 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 	}
 
 	affected := r.affectedGVICResourceKeysLocked(keyValue)
-	deltas := r.syncResourceGVICEffectiveAssignmentsLocked(affected)
-	for _, affectedKey := range affected {
-		switch affectedKey.resourceType {
-		case EntityTypeNode:
-			deltas = append(deltas, r.syncGVICMatrixProjectionForNodeDeltasLocked(affectedKey.companyID, affectedKey.resourceID)...)
-		case EntityTypeLogicGate:
-			deltas = append(deltas, r.syncGVICMatrixProjectionForLogicGateAssignmentsDeltasLocked(affectedKey.companyID, affectedKey.resourceID, nil, nil)...)
-		}
-	}
+	deltas := r.syncGVICResourceKeysLocked(keyValue.companyID, affected)
 	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(keyValue.companyID, input.ActorUserID, input.IdempotencyKey, deltas)); err != nil {
 		restore()
 		return ResourceGVICAssignmentMutationResult{}, err
@@ -381,6 +375,11 @@ func (r *MemoryRepo) syncGVICGroupDependentResourcesForGroupsLocked(companyID st
 }
 
 func (r *MemoryRepo) syncGVICGroupDependentResourcesForGroupSetLocked(companyID string, affectedGroupIDs map[string]bool) []ProjectionDelta {
+	keys := r.gvicResourceKeysForGroupSetLocked(companyID, affectedGroupIDs)
+	return r.syncGVICResourceKeysLocked(companyID, keys)
+}
+
+func (r *MemoryRepo) gvicResourceKeysForGroupSetLocked(companyID string, affectedGroupIDs map[string]bool) []resourceGVICKey {
 	seen := map[resourceGVICKey]bool{}
 	for _, assignment := range r.gvicAssignments {
 		if assignment.CompanyID != companyID || assignment.PrincipalType != EntityPermissionSubjectGroup {
@@ -407,5 +406,40 @@ func (r *MemoryRepo) syncGVICGroupDependentResourcesForGroupSetLocked(companyID 
 		}
 		return keys[i].resourceID < keys[j].resourceID
 	})
-	return r.syncResourceGVICEffectiveAssignmentsLocked(keys)
+	return keys
+}
+
+func (r *MemoryRepo) syncGVICResourceKeysLocked(companyID string, keys []resourceGVICKey) []ProjectionDelta {
+	companyID = strings.TrimSpace(companyID)
+	seen := map[resourceGVICKey]bool{}
+	for _, keyValue := range keys {
+		keyValue.companyID = strings.TrimSpace(keyValue.companyID)
+		keyValue.resourceType = strings.TrimSpace(keyValue.resourceType)
+		keyValue.resourceID = strings.TrimSpace(keyValue.resourceID)
+		if companyID == "" || keyValue.companyID != companyID || keyValue.resourceType == "" || keyValue.resourceID == "" {
+			continue
+		}
+		seen[keyValue] = true
+	}
+	ordered := make([]resourceGVICKey, 0, len(seen))
+	for keyValue := range seen {
+		ordered = append(ordered, keyValue)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].resourceType != ordered[j].resourceType {
+			return ordered[i].resourceType < ordered[j].resourceType
+		}
+		return ordered[i].resourceID < ordered[j].resourceID
+	})
+
+	deltas := r.syncResourceGVICEffectiveAssignmentsLocked(ordered)
+	for _, keyValue := range ordered {
+		switch keyValue.resourceType {
+		case EntityTypeNode:
+			deltas = append(deltas, r.syncGVICMatrixProjectionForNodeDeltasLocked(keyValue.companyID, keyValue.resourceID)...)
+		case EntityTypeLogicGate:
+			deltas = append(deltas, r.syncGVICMatrixProjectionForLogicGateAssignmentsDeltasLocked(keyValue.companyID, keyValue.resourceID, nil, nil)...)
+		}
+	}
+	return deltas
 }

@@ -112,6 +112,11 @@ func TestGVICMatrixProjectionSchemaAndPostgresReadsUseTargetedProjection(t *test
 		"drop column if exists assignee_user_id",
 		"drop column if exists status_color",
 		"insert into gvic_matrix_projection_table",
+		"insert into company_projection_sequences",
+		"where projection_name = 'racio_matrix'",
+		"'gvic_matrix'",
+		"greatest(company_projection_sequences.sequence, excluded.sequence)",
+		"delete from company_projection_sequences where projection_name = 'racio_matrix'",
 	} {
 		if !strings.Contains(migration, needle) {
 			t.Fatalf("GVICMatrix migration missing %q", needle)

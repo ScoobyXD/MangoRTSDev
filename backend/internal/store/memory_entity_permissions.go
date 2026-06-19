@@ -73,9 +73,6 @@ func (r *MemoryRepo) UpdateCompanyUserGroup(companyID, groupID string, parentGro
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	userGroupsSnapshot := cloneMemoryMap(r.userGroups)
-	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
-	gvicEffectiveSnapshot := cloneMemoryMap(r.gvicEffectiveAssignments)
 	group, ok := r.userGroups[userGroupKey(companyID, groupID)]
 	if !ok {
 		return domain.CompanyUserGroup{}, ErrNotFound
@@ -111,15 +108,18 @@ func (r *MemoryRepo) UpdateCompanyUserGroup(companyID, groupID string, parentGro
 	} else if parentChanged {
 		group.Position = nextCompanyUserGroupPositionLocked(r.userGroups, companyID, targetParentID)
 	}
+	oldAffectedGroupIDs := map[string]bool(nil)
+	if parentChanged {
+		oldAffectedGroupIDs = companyUserGroupAncestorIDsLocked(r.userGroups, companyID, []string{groupID})
+	}
 	group.UpdatedTimestamp = time.Now().UTC()
 	r.userGroups[userGroupKey(companyID, group.GroupID)] = group
 	if parentChanged {
-		if err := r.recomputeGroupDependentEffectiveAccessForCompanyLocked(companyID); err != nil {
-			r.userGroups = userGroupsSnapshot
-			r.effectiveAccess = effectiveAccessSnapshot
-			r.gvicEffectiveAssignments = gvicEffectiveSnapshot
-			return domain.CompanyUserGroup{}, err
+		newAffectedGroupIDs := companyUserGroupAncestorIDsLocked(r.userGroups, companyID, []string{groupID})
+		for affectedGroupID := range newAffectedGroupIDs {
+			oldAffectedGroupIDs[affectedGroupID] = true
 		}
+		r.syncGVICGroupDependentResourcesForGroupSetLocked(companyID, oldAffectedGroupIDs)
 	}
 	return cloneCompanyUserGroup(group), nil
 }
@@ -134,17 +134,12 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	userGroupsSnapshot := cloneMemoryMap(r.userGroups)
-	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
-	entityPermissionsSnapshot := cloneMemoryMap(r.entityPermissions)
-	sharedInboxGVICSnapshot := cloneMemorySliceMap(r.sharedInboxGVIC)
-	gvicAssignmentsSnapshot := cloneMemoryMap(r.gvicAssignments)
-	gvicEffectiveSnapshot := cloneMemoryMap(r.gvicEffectiveAssignments)
-	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	if _, ok := r.userGroups[userGroupKey(companyID, groupID)]; !ok {
 		return ErrNotFound
 	}
 	groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, companyID, groupID)
+	affectedGroupIDs := companyUserGroupAncestorIDsLocked(r.userGroups, companyID, mapKeys(groupIDs))
+	affectedGVICKeys := r.gvicResourceKeysForGroupSetLocked(companyID, affectedGroupIDs)
 	for descendantID := range groupIDs {
 		delete(r.userGroups, userGroupKey(companyID, descendantID))
 	}
@@ -217,16 +212,7 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 			delete(r.gvicAssignments, assignmentKey)
 		}
 	}
-	if err := r.recomputeGroupDependentEffectiveAccessForCompanyLocked(companyID); err != nil {
-		r.userGroups = userGroupsSnapshot
-		r.userGroupMembers = userGroupMembersSnapshot
-		r.entityPermissions = entityPermissionsSnapshot
-		r.sharedInboxGVIC = sharedInboxGVICSnapshot
-		r.gvicAssignments = gvicAssignmentsSnapshot
-		r.gvicEffectiveAssignments = gvicEffectiveSnapshot
-		r.effectiveAccess = effectiveAccessSnapshot
-		return err
-	}
+	r.syncGVICResourceKeysLocked(companyID, affectedGVICKeys)
 	return nil
 }
 
@@ -265,6 +251,7 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	gvicEffectiveSnapshot := cloneMemoryMap(r.gvicEffectiveAssignments)
+	GVICMatrixProjectionRowsSnapshot := cloneMemoryMap(r.GVICMatrixProjectionRows)
 	if _, ok := r.userGroups[userGroupKey(companyID, groupID)]; !ok {
 		return nil, ErrNotFound
 	}
@@ -303,6 +290,7 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 		r.userGroupMembers = userGroupMembersSnapshot
 		r.effectiveAccess = effectiveAccessSnapshot
 		r.gvicEffectiveAssignments = gvicEffectiveSnapshot
+		r.GVICMatrixProjectionRows = GVICMatrixProjectionRowsSnapshot
 		return nil, err
 	}
 	sortCompanyUserGroupMembers(items)
