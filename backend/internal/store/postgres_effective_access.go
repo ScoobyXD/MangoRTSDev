@@ -144,7 +144,14 @@ func recomputeGroupDependentEffectiveAccessForCompanyTx(ctx context.Context, tx 
 	if ctx == nil || tx == nil || cleanUUIDText(companyID) == "" {
 		return ErrInvalid
 	}
-	return syncPostgresGVICForGroupAssignmentsTx(ctx, tx, companyID)
+	return syncPostgresGVICForAllGroupAssignmentsTx(ctx, tx, companyID)
+}
+
+func recomputeGroupDependentEffectiveAccessForGroupsTx(ctx context.Context, tx *sql.Tx, companyID string, groupIDs []string) error {
+	if ctx == nil || tx == nil || cleanUUIDText(companyID) == "" {
+		return ErrInvalid
+	}
+	return syncPostgresGVICForAffectedGroupsTx(ctx, tx, companyID, groupIDs)
 }
 
 func nodeIDsAssignedToLogicGatesTx(ctx context.Context, tx *sql.Tx, companyID string, logicGateIDs []string) ([]string, error) {

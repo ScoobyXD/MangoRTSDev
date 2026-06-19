@@ -2,6 +2,7 @@ package store
 
 import (
 	"miraeopus/backend/internal/domain"
+	"sort"
 	"strings"
 	"time"
 )
@@ -368,18 +369,43 @@ func (r *MemoryRepo) deriveResourceGVICEffectiveAssignmentsLocked(keyValue resou
 }
 
 func (r *MemoryRepo) syncGVICGroupDependentResourcesLocked(companyID string) []ProjectionDelta {
+	return r.syncGVICGroupDependentResourcesForGroupSetLocked(companyID, nil)
+}
+
+func (r *MemoryRepo) syncGVICGroupDependentResourcesForGroupsLocked(companyID string, groupIDs []string) []ProjectionDelta {
+	affectedGroupIDs := companyUserGroupAncestorIDsLocked(r.userGroups, companyID, groupIDs)
+	if len(affectedGroupIDs) == 0 {
+		return nil
+	}
+	return r.syncGVICGroupDependentResourcesForGroupSetLocked(companyID, affectedGroupIDs)
+}
+
+func (r *MemoryRepo) syncGVICGroupDependentResourcesForGroupSetLocked(companyID string, affectedGroupIDs map[string]bool) []ProjectionDelta {
 	seen := map[resourceGVICKey]bool{}
 	for _, assignment := range r.gvicAssignments {
-		if assignment.CompanyID == companyID && assignment.PrincipalType == EntityPermissionSubjectGroup {
-			seen[resourceGVICKey{companyID: assignment.CompanyID, resourceType: assignment.ResourceType, resourceID: assignment.ResourceID}] = true
+		if assignment.CompanyID != companyID || assignment.PrincipalType != EntityPermissionSubjectGroup {
+			continue
+		}
+		if affectedGroupIDs != nil && !affectedGroupIDs[assignment.PrincipalID] {
+			continue
+		}
+		keyValue := resourceGVICKey{companyID: assignment.CompanyID, resourceType: assignment.ResourceType, resourceID: assignment.ResourceID}
+		seen[keyValue] = true
+		if keyValue.resourceType == EntityTypeLogicGate {
+			for _, affected := range r.affectedGVICResourceKeysLocked(keyValue) {
+				seen[affected] = true
+			}
 		}
 	}
 	keys := make([]resourceGVICKey, 0, len(seen))
 	for keyValue := range seen {
 		keys = append(keys, keyValue)
-		if keyValue.resourceType == EntityTypeLogicGate {
-			keys = append(keys, r.affectedGVICResourceKeysLocked(keyValue)...)
-		}
 	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].resourceType != keys[j].resourceType {
+			return keys[i].resourceType < keys[j].resourceType
+		}
+		return keys[i].resourceID < keys[j].resourceID
+	})
 	return r.syncResourceGVICEffectiveAssignmentsLocked(keys)
 }

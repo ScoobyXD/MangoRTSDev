@@ -456,7 +456,7 @@ set updated_timestamp=now()`, companyID, groupID, cleanUserIDs); err != nil {
 			return nil, err
 		}
 	}
-	if err := recomputeGroupDependentEffectiveAccessForCompanyTx(ctx, tx, companyID); err != nil {
+	if err := recomputeGroupDependentEffectiveAccessForGroupsTx(ctx, tx, companyID, []string{groupID}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

@@ -115,6 +115,14 @@ func (r *MemoryRepo) recomputeGroupDependentEffectiveAccessForCompanyLocked(comp
 	return nil
 }
 
+func (r *MemoryRepo) recomputeGroupDependentEffectiveAccessForGroupsLocked(companyID string, groupIDs []string) error {
+	if strings.TrimSpace(companyID) == "" {
+		return ErrInvalid
+	}
+	r.syncGVICGroupDependentResourcesForGroupsLocked(companyID, groupIDs)
+	return nil
+}
+
 func (r *MemoryRepo) recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, resourceType, resourceID string) error {
 	return validateEffectiveAccessCompatibilityScope(companyID, resourceType, resourceID)
 }

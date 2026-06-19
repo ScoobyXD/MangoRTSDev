@@ -673,7 +673,66 @@ do update set depth=excluded.depth`, companyID)
 	return err
 }
 
-func gvicResourceKeysForGroupAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID string) ([]resourceGVICKey, error) {
+func gvicResourceKeysForAffectedGroupsTx(ctx context.Context, tx *sql.Tx, companyID string, groupIDs []string) ([]resourceGVICKey, error) {
+	companyID = cleanUUIDText(companyID)
+	groupIDs = cleanUUIDTextSlice(groupIDs)
+	if ctx == nil || tx == nil || companyID == "" {
+		return nil, ErrInvalid
+	}
+	if len(groupIDs) == 0 {
+		return []resourceGVICKey{}, nil
+	}
+	rows, err := tx.QueryContext(ctx, `
+with input_groups(group_id) as (
+  select distinct unnest($2::text[])::uuid
+),
+affected_groups as (
+  select distinct closure.ancestor_group_id as group_id
+  from company_user_group_closure closure
+  join input_groups input_group
+    on closure.descendant_group_id=input_group.group_id
+  where closure.company_id=$1::uuid
+),
+direct_keys as (
+  select distinct assignment.company_id, assignment.resource_type, assignment.resource_id
+  from resource_gvic_assignments assignment
+  join affected_groups affected_group
+    on assignment.principal_id=affected_group.group_id
+  where assignment.company_id=$1::uuid
+    and assignment.principal_type='group'
+),
+affected_keys as (
+  select company_id, resource_type, resource_id
+  from direct_keys
+  union
+  select link.company_id, 'node'::text as resource_type, link.node_id as resource_id
+  from direct_keys direct_key
+  join node_logic_gate_assignments link
+    on direct_key.resource_type='logic_gate'
+   and link.company_id=direct_key.company_id
+   and link.logic_gate_id=direct_key.resource_id
+)
+select company_id::text, resource_type, resource_id::text
+from affected_keys
+order by resource_type asc, resource_id::text asc`, companyID, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]resourceGVICKey, 0)
+	for rows.Next() {
+		var keyValue resourceGVICKey
+		if err := rows.Scan(&keyValue.companyID, &keyValue.resourceType, &keyValue.resourceID); err != nil {
+			return nil, err
+		}
+		out = append(out, keyValue)
+	}
+	return out, rows.Err()
+}
+
+// gvicResourceKeysForAllGroupAssignmentsTx is a broad repair/backfill helper. Normal
+// group membership writes should use gvicResourceKeysForAffectedGroupsTx instead.
+func gvicResourceKeysForAllGroupAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID string) ([]resourceGVICKey, error) {
 	rows, err := tx.QueryContext(ctx, `
 select distinct company_id::text, resource_type, resource_id::text
 from resource_gvic_assignments
@@ -716,11 +775,26 @@ where company_id=$1::uuid
 	return out, nil
 }
 
-func syncPostgresGVICForGroupAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID string) error {
+func syncPostgresGVICForAffectedGroupsTx(ctx context.Context, tx *sql.Tx, companyID string, groupIDs []string) error {
 	if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
 		return err
 	}
-	keys, err := gvicResourceKeysForGroupAssignmentsTx(ctx, tx, companyID)
+	keys, err := gvicResourceKeysForAffectedGroupsTx(ctx, tx, companyID, groupIDs)
+	if err != nil {
+		return err
+	}
+	_, err = syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, keys)
+	return err
+}
+
+// syncPostgresGVICForAllGroupAssignmentsTx is intentionally company-wide and is
+// reserved for repair/backfill paths where every group-principal GVIC assignment
+// may need to be refreshed.
+func syncPostgresGVICForAllGroupAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID string) error {
+	if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
+		return err
+	}
+	keys, err := gvicResourceKeysForAllGroupAssignmentsTx(ctx, tx, companyID)
 	if err != nil {
 		return err
 	}
