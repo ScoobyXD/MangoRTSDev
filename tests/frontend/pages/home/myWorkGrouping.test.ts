@@ -43,33 +43,36 @@ test("normalizes My Work selected scope and grouping stack", () => {
     subject_id: "user-1",
   });
   assert.deepEqual(normalizeMyWorkGroupingStack([
-    { field: "priority", direction: "desc" },
+    { field: "project", direction: "desc" },
+    { field: "project", direction: "asc" },
+    { field: "status", direction: "sideways" },
     { field: "priority", direction: "asc" },
-    { field: "project", direction: "sideways" },
     { field: "unknown", direction: "asc" },
   ]), [
-    { field: "priority", direction: "desc" },
-    { field: "project", direction: "asc" },
+    { field: "project", direction: "desc" },
+    { field: "status", direction: "asc" },
   ]);
 });
 
-test("groups My Work rows by GVIC, priority, and project with missing fallbacks", () => {
+test("groups My Work rows by project, person, and status with missing fallbacks", () => {
   const rows = [
-    row({ id: "node-1", title: "Project node", priority: 1, projectLabels: ["Project A"], gvicRoles: ["generated"] }),
-    row({ id: "node-2", title: "Missing project", priority: 2, gvicRoles: ["generated"] }),
-    row({ id: "node-3", title: "Others", priority: null }),
+    row({ id: "node-1", title: "Project node", projectLabels: ["Project A"], people: [{ userID: "user-1", label: "Person 1" }], status: "Review" }),
+    row({ id: "node-2", title: "Missing project", people: [{ userID: "user-1", label: "Person 1" }], status: "" }),
+    row({ id: "node-3", title: "Unassigned", projectLabels: ["Project B"], status: "Pending" }),
   ];
   const groups = buildNestedGroups(rows, [
-    { field: "gvic", direction: "asc" },
-    { field: "priority", direction: "asc" },
     { field: "project", direction: "asc" },
+    { field: "person", direction: "asc" },
+    { field: "status", direction: "asc" },
   ]);
 
-  assert.equal(groups[0].label, "Generated");
-  assert.equal(groups[0].groups[0].label, "1 URGENT(<1hr)");
-  assert.equal(groups[0].groups[0].groups[0].label, "Project A");
-  assert.equal(groups[0].groups[1].groups[0].label, "No project");
-  assert.equal(groups[1].label, "Others");
+  assert.equal(groups[0].label, "Project A");
+  assert.equal(groups[0].groups[0].label, "Person 1");
+  assert.equal(groups[0].groups[0].groups[0].label, "Review");
+  assert.equal(groups[1].label, "Project B");
+  assert.equal(groups[1].groups[0].label, "Unassigned");
+  assert.equal(groups[2].label, "No project");
+  assert.equal(groups[2].groups[0].groups[0].label, "No status");
   assert.equal(getMyWorkGroupValues(row({ id: "empty", title: "Empty" }), "account")[0].label, "No account");
   assert.equal(getMyWorkGroupValues(row({ id: "empty", title: "Empty" }), "person")[0].label, "Unassigned");
   assert.equal(getMyWorkGroupValues(row({ id: "empty", title: "Empty" }), "status")[0].label, "Pending");
