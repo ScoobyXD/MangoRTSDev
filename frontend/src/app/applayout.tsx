@@ -414,6 +414,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const appSidebarResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const appRootRef = useRef<HTMLDivElement | null>(null);
   const routeManagedExplorerNodePopupRef = useRef(deepLink?.kind === "node");
+  const homeManagedNodeRouteRef = useRef("");
   const copiedFrameRef = useRef<FrameDataModel | null>(null);
   const undoStackRef = useRef<DashboardSnapshot[]>([]);
   const redoStackRef = useRef<DashboardSnapshot[]>([]);
@@ -1024,6 +1025,12 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const deepLinkNodeID = deepLink?.kind === "node" ? deepLink.nodeID : "";
   useEffect(() => {
     if (deepLinkNodeID) {
+      if (activePrimaryPage === "home" && homeManagedNodeRouteRef.current === deepLinkNodeID) {
+        routeManagedExplorerNodePopupRef.current = false;
+        setActiveDockTabID(null);
+        setExplorerNodePopup(null);
+        return;
+      }
       routeManagedExplorerNodePopupRef.current = true;
       setActiveDockTabID(null);
       setExplorerNodePopup((current) => (
@@ -1033,11 +1040,12 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       ));
       return;
     }
+    homeManagedNodeRouteRef.current = "";
     if (!routeManagedExplorerNodePopupRef.current) return;
     routeManagedExplorerNodePopupRef.current = false;
     setExplorerNodePopup(null);
     setActiveDockTabID(null);
-  }, [deepLinkNodeID]);
+  }, [activePrimaryPage, deepLinkNodeID]);
 
   const deepLinkProjectID = deepLink?.kind === "project" ? deepLink.projectID : "";
   useEffect(() => {
@@ -1239,9 +1247,16 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   }, [onNavigate]);
 
   const openHomeNodeRoute = useCallback((nodeID: string) => {
-    if (!onNavigate) return;
+    const cleanNodeID = nodeID.trim();
+    if (!cleanNodeID || !onNavigate) return;
     const role = gvicRoleForViewID(homeViewID);
-    onNavigate(role ? buildGvicRoute(role, nodeID) : buildNodeRoute(nodeID));
+    if (role) {
+      homeManagedNodeRouteRef.current = "";
+      onNavigate(buildGvicRoute(role, cleanNodeID));
+      return;
+    }
+    homeManagedNodeRouteRef.current = cleanNodeID;
+    onNavigate(buildNodeRoute(cleanNodeID));
   }, [homeViewID, onNavigate]);
 
   const openProjectManagementNodeOverlay = useCallback((nodeID: string) => {
@@ -1321,7 +1336,13 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const closeHomeNodeRoute = useCallback(() => {
     if (!onNavigate) return;
     const role = (gvicDeepLink as GvicDeepLinkRoute | null)?.role ?? gvicRoleForViewID(homeViewID);
-    onNavigate(role ? buildGvicRoute(role) : "/", { replace: true });
+    if (role) {
+      onNavigate(buildGvicRoute(role), { replace: true });
+      return;
+    }
+    if (!homeManagedNodeRouteRef.current) return;
+    homeManagedNodeRouteRef.current = "";
+    onNavigate(routeForPage("home"), { replace: true });
   }, [homeViewID, onNavigate, gvicDeepLink]);
 
   const openSidebarPin = useCallback((pin: SidebarPin) => {
