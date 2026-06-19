@@ -37,7 +37,6 @@ import {
   persistKanbanColumnLayoutCommand,
   reorderKanbanCardsCommand,
   reorderKanbanColumnsCommand,
-  toggleKanbanCardIssueCommand,
   type KanbanCommandContext,
 } from "./kanbanCommands";
 import { KanbanArenaGroupedBoard, KanbanArenaGroupingControls, type ArenaGroupMenuID, type KanbanArenaGroupedCellContext } from "./KanbanArenaGrouping";
@@ -186,6 +185,7 @@ import {
   cardDropPlacement,
   clampNodeEditorOverlayRatio,
   contextMenuButtonStyle,
+  contextMenuDividerStyle,
   contextMenuHoverHandlers,
   dataTransferIncludes,
   formatKanbanLoadError,
@@ -1841,22 +1841,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
   }, [apiBase, boardID, cards, companyID, requestJSON]);
 
-  const toggleCardIssue = useCallback(async (card: KanbanCard, isIssue: boolean) => {
-    const previousCards = cards;
-    setCards((current) => current.map((item) => (item.card_id === card.card_id ? { ...item, is_issue: isIssue } : item)));
-    setCardContextMenu(null);
-    setArenaCellContextMenu(null);
-    setError("");
-    try {
-      const saved = await toggleKanbanCardIssueCommand({ context: kanbanCommandContext, card, isIssue });
-      setCards((current) => current.map((item) => (item.card_id === saved.card_id ? saved : item)));
-      syncNodeStatusesFromCards([saved]);
-    } catch {
-      setError("Issue status update failed");
-      setCards(previousCards);
-    }
-  }, [cards, kanbanCommandContext, syncNodeStatusesFromCards]);
-
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (selectedCardIDs.size === 0 || isEditableKeyboardTarget(event.target)) return;
@@ -2285,18 +2269,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     ? selectedCardsByID.get(arenaCellContextSelectionIDs.includes(selectionAnchorCardID) ? selectionAnchorCardID : arenaCellContextSelectionIDs[0]) ?? null
     : null;
 
-  const openAccountAssignment = useCallback((card: KanbanCard) => {
-    const node = arenaNodeByID.get(card.node_id);
-    setCardContextMenu(null);
-    setArenaCellContextMenu(null);
-    setAccountAssignmentModal({
-      cardID: card.card_id,
-      nodeID: card.node_id,
-      nodeTitle: card.node_title,
-      accountIDs: (card.accounts?.length ? card.accounts : node?.accounts ?? []).map((account) => account.account_id),
-    });
-  }, [arenaNodeByID]);
-
   const saveAccountAssignment = useCallback(async () => {
     const modal = accountAssignmentModal;
     if (!modal || accountAssignmentBusy) return;
@@ -2493,7 +2465,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         columnContextMenu={columnContextMenu}
         contextCard={contextCard ?? null}
         cardContextMenu={cardContextMenu}
-        arenaMode={arenaMode}
         contextCardSelectionIDs={contextCardSelectionIDs}
         onCloseColumnMenu={() => setColumnContextMenu(null)}
         onCloseCardMenu={() => setCardContextMenu(null)}
@@ -2501,8 +2472,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           setColumnContextMenu(null);
           requestCreateNodeInColumn(columnID, anchor);
         }}
-        onToggleCardIssue={(card, isIssue) => void toggleCardIssue(card, isIssue)}
-        onAssignAccounts={openAccountAssignment}
         onRenameNode={requestNodeRename}
         onOpenNodeInNewTab={(card) => openKanbanNodeInNewTab(card.node_id, card)}
         onRequestNodeDeleteFromCards={requestNodeDeleteFromCards}
@@ -2510,6 +2479,33 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       />
       {arenaCellContextMenu && (
         <FrameRightClickMenu x={arenaCellContextMenu.x} y={arenaCellContextMenu.y} onClose={() => setArenaCellContextMenu(null)}>
+          {arenaCellContextCard && (
+            <>
+              <button
+                type="button"
+                style={contextMenuButtonStyle}
+                onClick={() => {
+                  openKanbanNodeInNewTab(arenaCellContextCard.node_id, arenaCellContextCard);
+                  setArenaCellContextMenu(null);
+                }}
+                {...contextMenuHoverHandlers}
+              >
+                Open in new browser tab
+              </button>
+              <button
+                type="button"
+                style={contextMenuButtonStyle}
+                onClick={() => {
+                  requestAppSidebarPin({ kind: "node", id: arenaCellContextCard.node_id, label: arenaCellContextCard.node_title });
+                  setArenaCellContextMenu(null);
+                }}
+                {...contextMenuHoverHandlers}
+              >
+                Pin
+              </button>
+              <div aria-hidden="true" style={contextMenuDividerStyle} />
+            </>
+          )}
           <button
             type="button"
             style={contextMenuButtonStyle}
@@ -2524,28 +2520,15 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           </button>
           {arenaCellContextCard && (
             <>
-              <button
-                type="button"
-                style={contextMenuButtonStyle}
-                onClick={() => {
-                  requestAppSidebarPin({ kind: "node", id: arenaCellContextCard.node_id, label: arenaCellContextCard.node_title });
-                  setArenaCellContextMenu(null);
-                }}
-                {...contextMenuHoverHandlers}
-              >
-                Pin Node
-              </button>
+              <div aria-hidden="true" style={contextMenuDividerStyle} />
               <button type="button" style={contextMenuButtonStyle} onClick={() => requestNodeRename(arenaCellContextCard)} {...contextMenuHoverHandlers}>
                 Rename node
               </button>
-              <button type="button" style={contextMenuButtonStyle} onClick={() => openAccountAssignment(arenaCellContextCard)} {...contextMenuHoverHandlers}>
-                Assign accounts
-              </button>
-              <button type="button" style={{ ...contextMenuButtonStyle, color: "#334155" }} onClick={() => requestNodeDeleteFromCards(arenaCellContextSelectionIDs)} {...contextMenuHoverHandlers}>
-                {arenaCellContextSelectionIDs.length > 1 ? "Delete nodes" : "Delete node"}
-              </button>
               <button type="button" style={contextMenuButtonStyle} onClick={() => requestCardDelete(arenaCellContextSelectionIDs)} {...contextMenuHoverHandlers}>
                 {arenaCellContextSelectionIDs.length > 1 ? "Remove nodes from Kanban Board" : "Remove node from Kanban Board"}
+              </button>
+              <button type="button" style={{ ...contextMenuButtonStyle, color: "#dc2626" }} onClick={() => requestNodeDeleteFromCards(arenaCellContextSelectionIDs)} {...contextMenuHoverHandlers}>
+                {arenaCellContextSelectionIDs.length > 1 ? "Delete nodes" : "Delete node"}
               </button>
             </>
           )}

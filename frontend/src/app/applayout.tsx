@@ -395,7 +395,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     });
   }, []);
   const [activeDockTabID, setActiveDockTabID] = useState<string | null>(null);
-  const [taskbarExpanded, setTaskbarExpanded] = useState(false);
+  const [taskbarExpanded] = useState(false);
   const [logicGateArenaTarget, setLogicGateArenaTarget] = useState<LogicGateArenaTarget | null>(() => logicGateTargetFromRoute(deepLink));
   const [projectManagementTarget, setProjectManagementTarget] = useState<ProjectManagementTarget | null>(() => projectTargetFromRoute(deepLink));
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
@@ -1161,6 +1161,20 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     setActiveDockTabID(tab.id);
   }, [activatePrimaryPage, closeMenus, onNavigate]);
 
+  const openDockTabInNewBrowserTab = useCallback((tab: AppDockTab) => {
+    const entityID = tab.entityID.trim();
+    if (!entityID) return;
+    if (tab.kind === "node") {
+      openAppPathInNewTab(buildNodeRoute(entityID));
+      return;
+    }
+    if (tab.kind === "project") {
+      openAppPathInNewTab(buildProjectRoute(entityID));
+      return;
+    }
+    openAppPathInNewTab(buildLogicGateRoute(entityID));
+  }, []);
+
   const reorderDockTab = useCallback((movingTabID: string, targetTabID: string, placement: "before" | "after") => {
     setDockTabs((previous) => {
       const from = previous.findIndex((tab) => tab.id === movingTabID);
@@ -1495,11 +1509,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     boxShadow: isHomeView ? "none" : "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(15, 23, 42, 0.18)",
   };
   const dockTabMenuTab = dockTabMenu ? dockTabs.find((tab) => tab.id === dockTabMenu.id) ?? null : null;
-  const dockTabMenuSidebarKind = dockTabMenuTab?.kind === "logic_gate_arena"
-    ? "logic_gate"
-    : dockTabMenuTab?.kind === "node"
-      ? "node"
-      : null;
 
   return (
     <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: isHomeView ? "#ffffff" : "#f1f5f9" }}>
@@ -1873,7 +1882,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         leftInset={taskbarLeftInset}
         timelineCenterX={viewSize.w / 2}
         viewportWidth={viewSize.w}
-        onExpandedChange={setTaskbarExpanded}
         onOpenTab={openDockTab}
         onReorderTab={reorderDockTab}
         onTabContextMenu={(event, tab) => {
@@ -1892,28 +1900,14 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
 
       {dockTabMenu && (
         <FrameRightClickMenu x={dockTabMenu.x} y={dockTabMenu.y} onClose={closeMenus}>
-          <button style={menuBtnBase} onClick={() => { toggleDockTabPinned(dockTabMenu.id); closeMenus(); }} {...hoverHandlers}>
-            {dockTabs.find((tab) => tab.id === dockTabMenu.id)?.pinned ? "Unpin tab" : "Pin tab"}
+          <button style={menuBtnBase} onClick={() => { if (dockTabMenuTab) openDockTabInNewBrowserTab(dockTabMenuTab); closeMenus(); }} {...hoverHandlers}>
+            Open in new browser tab
           </button>
-          {dockTabMenuTab && dockTabMenuSidebarKind && (
-            <button
-              style={menuBtnBase}
-              onClick={() => {
-                addSidebarPins([{
-                  id: dockTabMenuTab.entityID,
-                  kind: dockTabMenuSidebarKind,
-                  label: dockTabMenuTab.label,
-                  addedAt: Date.now(),
-                }]);
-                closeMenus();
-              }}
-              {...hoverHandlers}
-            >
-              Send to pin section
-            </button>
-          )}
+          <button style={menuBtnBase} onClick={() => { toggleDockTabPinned(dockTabMenu.id); closeMenus(); }} {...hoverHandlers}>
+            {dockTabMenuTab?.pinned ? "Unpin" : "Pin"}
+          </button>
           <button style={{ ...menuBtnBase, color: "#334155" }} onClick={() => { deleteDockTab(dockTabMenu.id); closeMenus(); }} {...hoverHandlers}>
-            Delete tab
+            Remove from tab
           </button>
         </FrameRightClickMenu>
       )}

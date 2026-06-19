@@ -127,13 +127,15 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
 
   if (compactArenaHeader) {
     return onCollapseToTab || onOpenInNewTab ? (
-      <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, right: 10, zIndex: 7, display: "flex", alignItems: "center", gap: 6, pointerEvents: "auto" }}>
+      <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, right: 10, zIndex: 32, display: "flex", alignItems: "center", gap: 6, pointerEvents: "auto" }}>
         {onOpenInNewTab && (
           <button
             className="mango-elevated-action"
             type="button"
             title="Open Logic Gate in new browser tab"
             aria-label="Open Logic Gate in new browser tab"
+            data-frame-interactive="true"
+            onMouseDown={(event) => event.stopPropagation()}
             onClick={onOpenInNewTab}
             style={headerButtonStyle}
           >
@@ -146,6 +148,8 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
             type="button"
             title="Minimize Logic Gate Arena to app tab"
             aria-label="Minimize Logic Gate Arena to app tab"
+            data-frame-interactive="true"
+            onMouseDown={(event) => event.stopPropagation()}
             onClick={onCollapseToTab}
             style={headerButtonStyle}
           >
@@ -158,7 +162,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
 
   return (
   <>
-    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 3, left: 10, right: 10, display: "grid", gridTemplateColumns: headerGridTemplateColumns, alignItems: "center", gap: 8, padding: `3px 6px 3px ${Math.max(6, headerLeftPaddingPx)}px`, zIndex: 6, pointerEvents: "auto", border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 12, background: isDark ? "rgba(17,22,27,0.82)" : "linear-gradient(90deg, rgba(255,241,242,0.70), rgba(254,249,195,0.46) 34%, rgba(236,253,245,0.50) 66%, rgba(239,246,255,0.70))", boxShadow: isDark ? "none" : "0 10px 24px rgba(15, 23, 42, 0.08), inset 1px 1px 0 rgba(255,255,255,0.88)" }}>
+    <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 3, left: 10, right: 10, display: "grid", gridTemplateColumns: headerGridTemplateColumns, alignItems: "center", gap: 8, padding: `3px 6px 3px ${Math.max(6, headerLeftPaddingPx)}px`, zIndex: 32, pointerEvents: "auto", border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 12, background: isDark ? "rgba(17,22,27,0.82)" : "linear-gradient(90deg, rgba(255,241,242,0.70), rgba(254,249,195,0.46) 34%, rgba(236,253,245,0.50) 66%, rgba(239,246,255,0.70))", boxShadow: isDark ? "none" : "0 10px 24px rgba(15, 23, 42, 0.08), inset 1px 1px 0 rgba(255,255,255,0.88)" }}>
       {editingBoardTitle ? (
         <input
           value={boardTitleDraft}
@@ -233,6 +237,8 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
           type="button"
           title="Open Logic Gate in new browser tab"
           aria-label="Open Logic Gate in new browser tab"
+          data-frame-interactive="true"
+          onMouseDown={(event) => event.stopPropagation()}
           onClick={onOpenInNewTab}
           style={headerButtonStyle}
         >
@@ -245,6 +251,8 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
           type="button"
           title="Minimize Logic Gate Arena to app tab"
           aria-label="Minimize Logic Gate Arena to app tab"
+          data-frame-interactive="true"
+          onMouseDown={(event) => event.stopPropagation()}
           onClick={onCollapseToTab}
           style={headerButtonStyle}
         >
@@ -253,7 +261,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
       )}
     </div>
     {boardPickerOpen && (
-      <section ref={popoverRef} data-frame-interactive="true" style={{ position: "absolute", top: topClearancePx + 2, right: 12, width: "min(360px, calc(100% - 24px))", maxHeight: "min(360px, calc(100% - 52px))", display: "grid", gridTemplateRows: "minmax(0, 1fr)", border: isDark ? "1px solid rgba(255,255,255,0.16)" : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 14, background: isDark ? "rgba(17,22,27,0.98)" : KANBAN_PANEL_BACKGROUND, boxShadow: isDark ? "0 12px 28px rgba(0,0,0,0.42)" : KANBAN_PANEL_SHADOW, padding: "5px 0", zIndex: 8, overflow: "hidden" }}>
+      <section ref={popoverRef} data-frame-interactive="true" style={{ position: "absolute", top: topClearancePx + 2, right: 12, width: "min(360px, calc(100% - 24px))", maxHeight: "min(360px, calc(100% - 52px))", display: "grid", gridTemplateRows: "minmax(0, 1fr)", border: isDark ? "1px solid rgba(255,255,255,0.16)" : `1px solid ${KANBAN_SOFT_BORDER}`, borderRadius: 14, background: isDark ? "rgba(17,22,27,0.98)" : KANBAN_PANEL_BACKGROUND, boxShadow: isDark ? "0 12px 28px rgba(0,0,0,0.42)" : KANBAN_PANEL_SHADOW, padding: "5px 0", zIndex: 34, overflow: "hidden" }}>
         <div className="company-explorer-scroll" style={{ overflowY: "auto", overflowX: "hidden", minHeight: 0, ["--company-explorer-scroll-accent" as string]: theme === "light" ? "rgb(71, 85, 105)" : accent, ["--company-explorer-scroll-track" as string]: "transparent" }}>
           {!boardsLoading && filteredBoardRowsLength === 0 && <div style={{ padding: "8px 10px", color: subtext, fontSize: 11 }}>No saved boards</div>}
           {filteredBoardGroups.map((group) => (
@@ -292,6 +300,8 @@ function compactHeaderButtonStyle(isDark: boolean, line: string, text: string): 
   return {
     width: 25,
     height: 25,
+    position: "relative",
+    zIndex: 33,
     display: "grid",
     placeItems: "center",
     border: isDark ? `1px solid ${line}` : `1px solid ${KANBAN_SOFT_BORDER}`,
