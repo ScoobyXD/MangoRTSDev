@@ -498,6 +498,98 @@ func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatri
 	return items, nil
 }
 
+func (r *MemoryRepo) ListMyWorkMatrix(query WorkItemInboxQuery) (MyWorkMatrixResponse, error) {
+	query = NormalizeWorkItemInboxQuery(query)
+	if query.CompanyID == "" || query.UserID == "" || query.ViewerUserID == "" {
+		return MyWorkMatrixResponse{}, ErrInvalid
+	}
+	rows, err := r.ListMyWorkMatrixRows(query)
+	if err != nil {
+		return MyWorkMatrixResponse{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	flatRows := make([]myWorkMatrixFlatRow, 0, len(rows))
+	for _, row := range rows {
+		logicGateID := ""
+		logicGateTitle := ""
+		if row.LogicGateID != nil {
+			logicGateID = strings.TrimSpace(*row.LogicGateID)
+		}
+		if logicGateID != "" {
+			if gate, ok := r.logicGates[key(query.CompanyID, logicGateID)]; ok {
+				logicGateTitle = gate.Header
+			}
+		}
+		if row.ResourceType == EntityTypeLogicGate {
+			logicGateID = row.ResourceID
+			if gate, ok := r.logicGates[key(query.CompanyID, row.ResourceID)]; ok {
+				logicGateTitle = gate.Header
+			}
+		}
+		flatRows = append(flatRows, myWorkMatrixFlatRow{
+			CompanyID:                row.CompanyID,
+			UserID:                   row.UserID,
+			Role:                     row.Role,
+			ResourceType:             row.ResourceType,
+			ResourceID:               row.ResourceID,
+			DisplayTitle:             row.DisplayTitle,
+			Status:                   cloneStringPointer(row.Status),
+			DueDate:                  cloneStringPointer(row.DueDate),
+			Priority:                 cloneIntPointer(row.Priority),
+			Accounts:                 cloneAccountSnapshots(row.Accounts),
+			ResourceCreatedTimestamp: row.ResourceCreatedTimestamp,
+			ProjectID:                row.ProjectID,
+			ProjectName:              row.ProjectName,
+			LogicGateID:              logicGateID,
+			LogicGateTitle:           logicGateTitle,
+		})
+	}
+	seenProjectRoles := map[string]bool{}
+	for _, assignment := range r.gvicEffectiveAssignments {
+		if assignment.CompanyID != query.CompanyID ||
+			assignment.UserID != query.UserID ||
+			assignment.ResourceType != EntityTypeProject ||
+			!isMyWorkGVICRole(assignment.Role) {
+			continue
+		}
+		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, EntityTypeProject, assignment.ResourceID, EntityPermissionEdit) {
+			continue
+		}
+		project, ok := r.projects[key(query.CompanyID, assignment.ResourceID)]
+		if !ok || workItemStatusDone(&project.Status) {
+			continue
+		}
+		seenKey := assignment.Role + ":" + assignment.ResourceID
+		if seenProjectRoles[seenKey] {
+			continue
+		}
+		seenProjectRoles[seenKey] = true
+		flatRows = append(flatRows, myWorkMatrixFlatRow{
+			CompanyID:                query.CompanyID,
+			UserID:                   query.UserID,
+			Role:                     assignment.Role,
+			ResourceType:             EntityTypeProject,
+			ResourceID:               project.ProjectID,
+			DisplayTitle:             project.Name,
+			Status:                   cloneStringPointer(&project.Status),
+			ResourceCreatedTimestamp: project.CreatedTimestamp,
+			ProjectID:                project.ProjectID,
+			ProjectName:              project.Name,
+		})
+	}
+	return buildMyWorkMatrixResponse(query, flatRows), nil
+}
+
+func isMyWorkGVICRole(role string) bool {
+	switch role {
+	case domain.GVICRoleGenerated, domain.GVICRoleVerified, domain.GVICRoleConsulted, domain.GVICRoleInformed:
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *MemoryRepo) ListGVICMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]GVICMatrixProjectionRow, error) {
 	companyID = strings.TrimSpace(companyID)
 	logicGateID = strings.TrimSpace(logicGateID)

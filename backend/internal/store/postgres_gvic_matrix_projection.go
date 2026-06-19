@@ -648,6 +648,141 @@ order by
 	return items, rows.Err()
 }
 
+func (r *PostgresRepo) ListMyWorkMatrix(query WorkItemInboxQuery) (MyWorkMatrixResponse, error) {
+	query = NormalizeWorkItemInboxQuery(query)
+	companyID := cleanUUIDText(query.CompanyID)
+	userID := cleanUUIDText(query.UserID)
+	viewerUserID := cleanUUIDText(query.ViewerUserID)
+	if companyID == "" || userID == "" || viewerUserID == "" {
+		return MyWorkMatrixResponse{}, ErrInvalid
+	}
+	rows, err := r.ListMyWorkMatrixRows(query)
+	if err != nil {
+		return MyWorkMatrixResponse{}, err
+	}
+	projectRows, err := r.listPostgresMyWorkProjectRows(query)
+	if err != nil {
+		return MyWorkMatrixResponse{}, err
+	}
+	gateIDs := map[string]bool{}
+	for _, row := range rows {
+		if row.LogicGateID != nil && strings.TrimSpace(*row.LogicGateID) != "" {
+			gateIDs[strings.TrimSpace(*row.LogicGateID)] = true
+		}
+		if row.ResourceType == EntityTypeLogicGate && strings.TrimSpace(row.ResourceID) != "" {
+			gateIDs[strings.TrimSpace(row.ResourceID)] = true
+		}
+	}
+	gateTitles, err := r.postgresMyWorkLogicGateTitles(companyID, mapKeys(gateIDs))
+	if err != nil {
+		return MyWorkMatrixResponse{}, err
+	}
+	flatRows := make([]myWorkMatrixFlatRow, 0, len(rows)+len(projectRows))
+	for _, row := range rows {
+		logicGateID := ""
+		if row.LogicGateID != nil {
+			logicGateID = strings.TrimSpace(*row.LogicGateID)
+		}
+		flatRows = append(flatRows, myWorkMatrixFlatRow{
+			CompanyID:                row.CompanyID,
+			UserID:                   row.UserID,
+			Role:                     row.Role,
+			ResourceType:             row.ResourceType,
+			ResourceID:               row.ResourceID,
+			DisplayTitle:             row.DisplayTitle,
+			Status:                   cloneStringPointer(row.Status),
+			DueDate:                  cloneStringPointer(row.DueDate),
+			Priority:                 cloneIntPointer(row.Priority),
+			Accounts:                 cloneAccountSnapshots(row.Accounts),
+			ResourceCreatedTimestamp: row.ResourceCreatedTimestamp,
+			ProjectID:                row.ProjectID,
+			ProjectName:              row.ProjectName,
+			LogicGateID:              logicGateID,
+			LogicGateTitle:           gateTitles[firstNonEmpty(logicGateID, row.ResourceID)],
+		})
+	}
+	flatRows = append(flatRows, projectRows...)
+	return buildMyWorkMatrixResponse(query, flatRows), nil
+}
+
+func (r *PostgresRepo) listPostgresMyWorkProjectRows(query WorkItemInboxQuery) ([]myWorkMatrixFlatRow, error) {
+	rows, err := r.db.QueryContext(context.Background(), `
+select distinct
+  project.company_id::text,
+  effective.user_id::text,
+  effective.role,
+  project.project_id::text,
+  project.name,
+  project.status,
+  project.created_timestamp
+from resource_gvic_effective_assignments effective
+join projects project
+  on project.company_id=effective.company_id
+ and project.project_id=effective.resource_id
+where effective.company_id=$1::uuid
+  and effective.user_id=$2::uuid
+  and effective.resource_type='project'
+  and effective.role in ('generated', 'verified', 'consulted', 'informed')
+  and lower(regexp_replace(coalesce(project.status, ''), '[\s_-]+', '_', 'g')) not in ('done', 'complete', 'completed', 'closed', 'archived')
+  and mangorts_user_can_access_resource(project.company_id, 'project', project.project_id, $3::uuid, 'edit')
+order by
+  case effective.role
+    when 'generated' then 1
+    when 'verified' then 2
+    when 'consulted' then 3
+    when 'informed' then 4
+    else 5
+  end,
+  lower(project.name),
+  project.project_id::text`, query.CompanyID, query.UserID, query.ViewerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]myWorkMatrixFlatRow, 0)
+	for rows.Next() {
+		var item myWorkMatrixFlatRow
+		var status sql.NullString
+		if err := rows.Scan(&item.CompanyID, &item.UserID, &item.Role, &item.ResourceID, &item.DisplayTitle, &status, &item.ResourceCreatedTimestamp); err != nil {
+			return nil, err
+		}
+		item.ResourceType = EntityTypeProject
+		item.ProjectID = item.ResourceID
+		item.ProjectName = item.DisplayTitle
+		if status.Valid {
+			item.Status = &status.String
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) postgresMyWorkLogicGateTitles(companyID string, logicGateIDs []string) (map[string]string, error) {
+	out := map[string]string{}
+	companyID = cleanUUIDText(companyID)
+	logicGateIDs = cleanUUIDTextSlice(logicGateIDs)
+	if companyID == "" || len(logicGateIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.QueryContext(context.Background(), `
+select logic_gate_id::text, header
+from logic_gates
+where company_id=$1::uuid
+  and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, strings.Join(logicGateIDs, ","))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, title string
+		if err := rows.Scan(&id, &title); err != nil {
+			return nil, err
+		}
+		out[strings.TrimSpace(id)] = strings.TrimSpace(title)
+	}
+	return out, rows.Err()
+}
+
 func postgresGVICMatrixProjectionRowsForResourcesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs, logicGateIDs []string) ([]GVICMatrixProjectionRow, error) {
 	companyID = cleanUUIDText(companyID)
 	nodeIDs = cleanUUIDTextSlice(nodeIDs)

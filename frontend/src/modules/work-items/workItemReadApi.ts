@@ -57,11 +57,31 @@ export type MyWorkMatrixRow = GVICMatrixProjectionRow & {
   project_name?: string;
 };
 
+export type MyWorkResourceTree = {
+  kind: "project" | "logic_gate" | "node";
+  resource_id: string;
+  project_id?: string;
+  logic_gate_id?: string;
+  node_id?: string;
+  name: string;
+  status?: string | null;
+  due_date?: string | null;
+  priority?: number | null;
+  accounts?: GVICMatrixProjectionRow["accounts"];
+  resource_created_timestamp?: string;
+  children: MyWorkResourceTree[];
+};
+
+export type MyWorkMatrixCell = {
+  priority: number | null;
+  role: LogicGateGVICRole;
+  roots: MyWorkResourceTree[];
+};
+
 export type MyWorkMatrixResponse = {
   company_id: string;
   user_id: string;
-  limit: number;
-  rows: MyWorkMatrixRow[];
+  cells: MyWorkMatrixCell[];
 };
 
 export async function listGeneratedInboxNodes(params: WorkItemInboxReadParams): Promise<GeneratedInboxNodesResponse> {
