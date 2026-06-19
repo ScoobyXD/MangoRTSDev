@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildLogicGateRoute, buildNodeRoute } from "../../app/deepLinkRoutes";
-import { openAppPathInNewTab } from "../../app/resourceLinks";
+import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
+import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks";
 import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl";
 import { entityMatchesAccountFilter, setNodeAccountAssignments } from "../accounts/accountsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
@@ -533,6 +533,15 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     requestAppDockTab({ kind: "node", entityID: nodeEditorOverlay.nodeID, label: nodeEditorOverlay.nodeTitle });
     closeNodeEditorOverlay();
   }, [closeNodeEditorOverlay, nodeEditorOverlay]);
+
+  const openKanbanNodeInNewTab = useCallback((nodeID: string, card?: Pick<KanbanCard, "board_id" | "logic_gate_id"> | null) => {
+    const cleanNodeID = nodeID.trim();
+    if (!cleanNodeID) return;
+    const routeLogicGateID = activeLogicGateID.trim()
+      || card?.logic_gate_id?.trim()
+      || logicGateIDFromKanbanBoardID(card?.board_id?.trim() || activeBoardID.trim());
+    openAppPathInNewTab(routeLogicGateID ? buildLogicGateRoute(routeLogicGateID, cleanNodeID) : buildContextualNodeRoute(cleanNodeID));
+  }, [activeBoardID, activeLogicGateID]);
 
   useEffect(() => {
     if (!arenaGroupMenuOpen) return undefined;
@@ -2495,7 +2504,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onToggleCardIssue={(card, isIssue) => void toggleCardIssue(card, isIssue)}
         onAssignAccounts={openAccountAssignment}
         onRenameNode={requestNodeRename}
-        onOpenNodeInNewTab={(nodeID) => openAppPathInNewTab(buildNodeRoute(nodeID))}
+        onOpenNodeInNewTab={(card) => openKanbanNodeInNewTab(card.node_id, card)}
         onRequestNodeDeleteFromCards={requestNodeDeleteFromCards}
         onRequestCardDelete={requestCardDelete}
       />
@@ -2576,7 +2585,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           theme={theme}
           onClose={() => closeNodeEditorOverlay()}
           onCollapseToTab={collapseNodeEditorOverlayToTab}
-          onOpenInNewTab={() => openAppPathInNewTab(buildNodeRoute(nodeEditorOverlay.nodeID))}
+          onOpenInNewTab={() => openKanbanNodeInNewTab(nodeEditorOverlay.nodeID)}
         />
       )}
       {accountAssignmentModal && (

@@ -61,7 +61,7 @@ export function KanbanContextMenus({
   onToggleCardIssue: (card: KanbanCard, isIssue: boolean) => void;
   onAssignAccounts: (card: KanbanCard) => void;
   onRenameNode: (card: KanbanCard) => void;
-  onOpenNodeInNewTab: (nodeID: string) => void;
+  onOpenNodeInNewTab: (card: KanbanCard) => void;
   onRequestNodeDeleteFromCards: (cardIDs: string[]) => void;
   onRequestCardDelete: (cardIDs: string[]) => void;
 }) {
@@ -96,7 +96,7 @@ export function KanbanContextMenus({
             type="button"
             style={contextMenuButtonStyle}
             onClick={() => {
-              onOpenNodeInNewTab(contextCard.node_id);
+              onOpenNodeInNewTab(contextCard);
               onCloseCardMenu();
             }}
             {...contextMenuHoverHandlers}

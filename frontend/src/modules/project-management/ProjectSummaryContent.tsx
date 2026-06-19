@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildLogicGateRoute, buildNodeRoute } from "../../app/deepLinkRoutes.js";
-import { openAppPathInNewTab } from "../../app/resourceLinks.js";
+import { buildLogicGateRoute } from "../../app/deepLinkRoutes.js";
+import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks.js";
 import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { useCompanyAccounts } from "../accounts/AccountFilterControl.js";
@@ -800,7 +800,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const openRelationshipResourceInNewTab = (target: RelationshipContextTarget) => {
     const path = target.resourceType === "logic_gate"
       ? buildLogicGateRoute(target.resourceID)
-      : buildNodeRoute(target.resourceID);
+      : buildContextualNodeRoute(target.resourceID);
     openAppPathInNewTab(path);
     setRelationshipContextMenu(null);
   };

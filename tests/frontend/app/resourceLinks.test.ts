@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildAbsoluteAppURL } from "../../../frontend/src/app/resourceLinks.js";
+import { buildAbsoluteAppURL, buildContextualNodeRoute } from "../../../frontend/src/app/resourceLinks.js";
 
 describe("resourceLinks", () => {
   it("builds absolute URLs from canonical app paths", () => {
@@ -18,6 +18,21 @@ describe("resourceLinks", () => {
     assert.equal(
       buildAbsoluteAppURL("https://app.example.com", "/logic-gates/lg-1/nodes/node-1?ignored=true"),
       "https://app.example.com/logic-gates/lg-1/nodes/node-1",
+    );
+  });
+
+  it("builds node routes inside the current GVIC or Logic Gate context", () => {
+    assert.equal(
+      buildContextualNodeRoute("node 2", "/gvic/generated"),
+      "/gvic/generated/nodes/node%202",
+    );
+    assert.equal(
+      buildContextualNodeRoute("node 2", "/logic-gates/lg-1"),
+      "/logic-gates/lg-1/nodes/node%202",
+    );
+    assert.equal(
+      buildContextualNodeRoute("node 2", "/home"),
+      "/nodes/node%202",
     );
   });
 });

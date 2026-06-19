@@ -4,7 +4,6 @@ import { normalizeGVICInboxStatus, gvicStatusColor } from "./homeUtils";
 
 export const HOME_CYAN = "rgb(71, 85, 105)";
 const HOME_CYAN_FAINT = "rgba(71, 85, 105, 0.10)";
-const HOME_CYAN_SOFT = "rgba(71, 85, 105, 0.16)";
 const HOME_CYAN_MEDIUM = "rgba(71, 85, 105, 0.28)";
 const HOME_CYAN_BORDER = "rgba(71, 85, 105, 0.72)";
 const HOME_BLACK = "#000000";
@@ -388,8 +387,8 @@ export function navButtonStyle(active: boolean): React.CSSProperties {
     gap: 8,
     border: `1px solid ${active ? HOME_CYAN_BORDER : HOME_BLACK_SOFT}`,
     borderRadius: 6,
-    background: active ? HOME_CYAN_SOFT : "#ffffff",
-    color: "#111827",
+    background: active ? "linear-gradient(135deg, #38bdf8 0%, #7dd3fc 100%)" : "#ffffff",
+    color: active ? "#082f49" : "#111827",
     cursor: "pointer",
     font: "inherit",
     fontSize: 12,
@@ -475,6 +474,7 @@ export const panelStyle: React.CSSProperties = {
 export function mailViewerPanelStyle(attached: boolean): React.CSSProperties {
   return {
     ...panelStyle,
+    gridTemplateRows: "minmax(0, 1fr)",
     marginLeft: attached ? -HOME_COLUMN_RESIZER_WIDTH : 0,
     borderRadius: attached ? `0 ${HOME_KEY_COLUMN_RADIUS}px ${HOME_KEY_COLUMN_RADIUS}px 0` : HOME_KEY_COLUMN_RADIUS,
   };
@@ -1734,10 +1734,10 @@ export function mailArchiveActionButtonStyle(active: boolean): React.CSSProperti
     overflow: "hidden",
     whiteSpace: "nowrap",
     fontWeight: 700,
-    border: `1px solid ${active ? "transparent" : HOME_KEY_SOFT_BORDER}`,
-    background: active ? `${HOME_KEY_ACTIVE_SURFACE} padding-box, ${HOME_KEY_EDGE_FRAME_GRADIENT} border-box` : HOME_KEY_SURFACE,
-    color: "#111111",
-    boxShadow: active ? `${HOME_KEY_ACTIVE_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}` : HOME_KEY_SHADOW,
+    border: `1px solid ${active ? "rgba(14, 165, 233, 0.92)" : HOME_KEY_SOFT_BORDER}`,
+    background: active ? "linear-gradient(135deg, #38bdf8 0%, #7dd3fc 100%)" : HOME_KEY_SURFACE,
+    color: active ? "#082f49" : "#111111",
+    boxShadow: active ? "0 10px 24px rgba(14, 165, 233, 0.24), inset 1px 1px 0 rgba(255, 255, 255, 0.58)" : HOME_KEY_SHADOW,
   };
 }
 

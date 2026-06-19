@@ -415,7 +415,7 @@ export function HomeMailWorkspace({
               <div style={mailListTitleStackStyle}>
                 <h2 style={panelTitleStyle}>{listViewLabel}</h2>
               </div>
-              <button style={mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
+              <button style={compose.open ? mailArchiveActionButtonStyle(true) : mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
             </div>
           )}
           {error && <div style={inlineErrorStyle}>{error}</div>}
@@ -483,7 +483,7 @@ export function HomeMailWorkspace({
           )}
           {isArchivableListView && (
             <div style={mailComposeSentActionsStyle}>
-              <button className="mango-elevated-action" style={mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
+              <button className="mango-elevated-action" style={compose.open ? mailArchiveActionButtonStyle(true) : mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
               <button
                 className="mango-elevated-action"
                 type="button"
