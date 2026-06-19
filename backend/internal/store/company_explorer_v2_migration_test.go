@@ -8,8 +8,9 @@ import (
 )
 
 const companyExplorerV2Migration = "20260617_company_explorer_v2_tables.sql"
+const companyExplorerSingleTreeSubscriptionsMigration = "20260619_company_explorer_single_tree_subscriptions.sql"
 
-func TestCompanyExplorerV2SchemaDefinesGraphTables(t *testing.T) {
+func TestCompanyExplorerV2SchemaDefinesSingleTreeTables(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "db", "schema.sql"))
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
@@ -28,25 +29,46 @@ func TestCompanyExplorerV2SchemaDefinesGraphTables(t *testing.T) {
 		"create table if not exists company_explorer_edges",
 		"constraint company_explorer_edges_not_self_chk check (parent_entity_id <> child_entity_id)",
 		"unique (company_id, parent_entity_id, child_entity_id)",
+		"unique (company_id, child_entity_id)",
 		"foreign key (company_id, parent_entity_id) references company_explorer_entities",
 		"foreign key (company_id, child_entity_id) references company_explorer_entities",
+		"create table if not exists company_explorer_subscriptions",
+		"constraint company_explorer_subscriptions_owner_type_chk check (owner_type in ('user', 'team'))",
+		"unique (company_id, owner_type, owner_id, anchor_entity_id)",
+		"create unique index if not exists idx_project_relationships_one_project_per_resource",
+		"on project_relationships(company_id, resource_type, resource_id)",
 	} {
 		if !strings.Contains(normalized, want) {
 			t.Fatalf("schema missing %q", want)
 		}
 	}
+}
 
-	edgesBlock := normalizeSQLForCompanyExplorerV2Test(sqlBlockAfter(t, schema, "create table if not exists company_explorer_edges ("))
-	for _, forbidden := range []string{
-		"unique (company_id, child_entity_id)",
-		"primary key (company_id, child_entity_id)",
+func TestCompanyExplorerSingleTreeSubscriptionsMigrationConvertsScopedRoots(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", companyExplorerSingleTreeSubscriptionsMigration))
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	normalized := normalizeSQLForCompanyExplorerV2Test(string(raw))
+
+	for _, want := range []string{
+		"create table if not exists company_explorer_subscriptions",
+		"owner_type in ('user', 'team')",
+		"unique (company_id, owner_type, owner_id, anchor_entity_id)",
+		"insert into company_explorer_subscriptions",
+		"when parent.entity_type = 'user' then 'user'",
+		"when parent.entity_type = 'user_group' then 'team'",
+		"delete from company_explorer_edges edge using scoped_edges scoped",
+		"create unique index if not exists idx_company_explorer_edges_one_parent_per_child",
+		"on company_explorer_edges(company_id, child_entity_id)",
+		"create unique index if not exists idx_project_relationships_one_project_per_resource",
+		"on project_relationships(company_id, resource_type, resource_id)",
 	} {
-		if strings.Contains(edgesBlock, forbidden) {
-			t.Fatalf("edges table prevents multi-parent placement with %q:\n%s", forbidden, edgesBlock)
+		if !strings.Contains(normalized, want) {
+			t.Fatalf("single-tree migration missing marker %q", want)
 		}
 	}
 }
-
 func TestCompanyExplorerV2MigrationIsAdditiveAndBackfillsLegacyData(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", companyExplorerV2Migration))
 	if err != nil {

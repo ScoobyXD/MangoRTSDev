@@ -65,12 +65,12 @@ run("company explorer context menu keeps fixed sections with disabled unavailabl
   });
 
   assert.deepEqual(sections.map((section) => section.map((action) => action.label)), [
-    ["Folder Permissions"],
+    ["Add to Me", "Add to Team", "Folder Permissions"],
     ["Create New Folder", "Create Node", "Create Logic Gate", "Create Project"],
     ["Rename", "Delete"],
   ]);
   assert.deepEqual(sections.map((section) => section.map((action) => action.enabled)), [
-    [true],
+    [false, false, true],
     [true, false, true, true],
     [false, true],
   ]);

@@ -156,8 +156,8 @@ func TestUpdateGroupsLoadRootsAndBranches(t *testing.T) {
 	if err := json.NewDecoder(rootsRR.Body).Decode(&rootsPayload); err != nil {
 		t.Fatalf("decode roots: %v", err)
 	}
-	if len(rootsPayload.Groups) != 2 || rootsPayload.Groups[0].Label != "Alpha Updates" || rootsPayload.Groups[1].Label != "Bravo Updates" {
-		t.Fatalf("roots = %+v, want Alpha and Bravo project roots", rootsPayload.Groups)
+	if len(rootsPayload.Groups) != 1 || rootsPayload.Groups[0].Label != "Bravo Updates" {
+		t.Fatalf("roots = %+v, want Bravo project root", rootsPayload.Groups)
 	}
 	if len(rootsPayload.Groups[0].Groups) != 0 || len(rootsPayload.Groups[0].Notifications) != 0 {
 		t.Fatalf("root payload should be unloaded branch only: %+v", rootsPayload.Groups[0])
@@ -176,8 +176,8 @@ func TestUpdateGroupsLoadRootsAndBranches(t *testing.T) {
 	if err := json.NewDecoder(branchRR.Body).Decode(&branchPayload); err != nil {
 		t.Fatalf("decode branch: %v", err)
 	}
-	if branchPayload.Group.Label != "Alpha Updates" || updateGroupNotificationCount(branchPayload.Group) != 1 {
-		t.Fatalf("branch = %+v, want Alpha update branch with one non-mention notification", branchPayload.Group)
+	if branchPayload.Group.Label != "Bravo Updates" || updateGroupNotificationCount(branchPayload.Group) != 1 {
+		t.Fatalf("branch = %+v, want Bravo update branch with one non-mention notification", branchPayload.Group)
 	}
 	if !updateGroupHasResource(branchPayload.Group, store.EntityTypeLogicGate, logicGate.LogicGateID) || !updateGroupHasResource(branchPayload.Group, store.EntityTypeNode, node.NodeID) {
 		t.Fatalf("branch hierarchy = %+v, want logic gate and node layers", branchPayload.Group)

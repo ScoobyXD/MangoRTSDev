@@ -74,7 +74,7 @@ import {
   shouldRefreshKanbanBoardsAfterUpdate,
   type CompanyExplorerWorkspaceStreamEnvelope,
 } from "./companyExplorerStore";
-import { fetchCompanyExplorerChildren, fetchCompanyExplorerRoots, type CompanyExplorerLazyScope, type CompanyExplorerV2Row } from "./companyExplorerLazyApi";
+import { fetchCompanyExplorerChildren, fetchCompanyExplorerRoots, subscribeCompanyExplorerEntity, type CompanyExplorerLazyScope, type CompanyExplorerV2Row, type CompanyExplorerV2SubscriptionOwnerType } from "./companyExplorerLazyApi";
 import { shouldIncludeGVICCustomRootFolder, shouldShowGVICCompanyScopedFolderShell } from "./companyExplorerGVICVisibility";
 
 const scopedRootCreationKeys = new Set<string>();
@@ -1568,6 +1568,85 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     }
   }, [apiBase, companyExplorerLazyScope, companyID]);
 
+  const refreshCompanyExplorerBranch = useCallback(async (parentEntityID: string) => {
+    const cleanParentEntityID = cleanExplorerID(parentEntityID);
+    const branchKey = cleanParentEntityID ? `${companyExplorerLazyScope}:entity:${cleanParentEntityID}` : `roots:${companyExplorerLazyScope}`;
+    if (inflightCompanyExplorerBranchesRef.current.has(branchKey)) return;
+    inflightCompanyExplorerBranchesRef.current.add(branchKey);
+    try {
+      const snapshot = cleanParentEntityID
+        ? await fetchCompanyExplorerChildren(apiBase, companyID, companyExplorerLazyScope, cleanParentEntityID)
+        : await fetchCompanyExplorerRoots(apiBase, companyID, companyExplorerLazyScope);
+      dispatchExplorerStore({ type: "replaceV2Children", parentEntityID: cleanParentEntityID, rows: snapshot?.rows ?? [] });
+      loadedCompanyExplorerBranchesRef.current.add(branchKey);
+      setError("");
+    } catch {
+      // Realtime branch refresh is best effort; explicit expansion reloads the same bounded branch.
+    } finally {
+      inflightCompanyExplorerBranchesRef.current.delete(branchKey);
+    }
+  }, [apiBase, companyExplorerLazyScope, companyID]);
+
+  const refreshLoadedCompanyExplorerBranches = useCallback(() => {
+    const parentEntityIDs = new Set<string>();
+    for (const branchKey of loadedCompanyExplorerBranchesRef.current) {
+      if (branchKey === `roots:${companyExplorerLazyScope}`) {
+        parentEntityIDs.add("");
+        continue;
+      }
+      const prefix = `${companyExplorerLazyScope}:entity:`;
+      if (branchKey.startsWith(prefix)) parentEntityIDs.add(branchKey.slice(prefix.length));
+    }
+    for (const parentEntityID of parentEntityIDs) {
+      void refreshCompanyExplorerBranch(parentEntityID);
+    }
+  }, [companyExplorerLazyScope, refreshCompanyExplorerBranch]);
+
+  const refreshCompanyExplorerBranchesForEnvelope = useCallback((envelope: CompanyExplorerWorkspaceStreamEnvelope) => {
+    if (envelope.company_id !== companyID) return;
+    const type = envelope.type?.trim() ?? "";
+    const data = envelope.data ?? {};
+    if (type === "company_explorer_v2_subscription_upserted" || type === "company_explorer_v2_subscription_deleted") {
+      if (companyExplorerLazyScope !== "all") refreshLoadedCompanyExplorerBranches();
+      return;
+    }
+    const refreshAllLoadedBranchTypes = new Set([
+      "company_explorer_v2_edge_deleted",
+      "company_explorer_v2_entity_deleted",
+      "project_relationship_upserted",
+      "project_relationship_deleted",
+      "work_item.logic_gate_assignment_saved",
+      "work_item.logic_gate_assignment_moved",
+      "work_item.logic_gate_assignment_removed",
+      "node_created",
+      "node_updated",
+      "node_deleted",
+      "logic_gate_created",
+      "logic_gate_updated",
+      "logic_gate_deleted",
+      "project_created",
+      "project_updated",
+      "project_deleted",
+    ]);
+    if (refreshAllLoadedBranchTypes.has(type)) {
+      refreshLoadedCompanyExplorerBranches();
+      return;
+    }
+    if (
+      type !== "company_explorer_v2_entity_created"
+      && type !== "company_explorer_v2_entity_updated"
+      && type !== "company_explorer_v2_edge_upserted"
+      && type !== "company_explorer_v2_edge_moved"
+    ) {
+      return;
+    }
+    const parentEntityID = typeof data.parent_entity_id === "string"
+      ? cleanExplorerID(data.parent_entity_id)
+      : typeof data.entity === "object" && data.entity && typeof (data.entity as { parent_entity_id?: unknown }).parent_entity_id === "string"
+        ? cleanExplorerID((data.entity as { parent_entity_id: string }).parent_entity_id)
+        : "";
+    void refreshCompanyExplorerBranch(parentEntityID);
+  }, [companyExplorerLazyScope, companyID, refreshCompanyExplorerBranch, refreshLoadedCompanyExplorerBranches]);
   const reconcileCompanyExplorerGap = useCallback((gap: WorkspaceStreamGapSignal) => {
     if (!shouldRefreshCompanyExplorerSnapshotForGap(gap, companyID)) return;
     void refreshCompanyExplorerSnapshot().catch(() => {
@@ -1634,13 +1713,14 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
             invalidateKanbanBoardListCache(apiBase, companyID);
           }
           dispatchExplorerStore({ type: "applyWorkspaceEnvelope", companyID, envelope });
+          refreshCompanyExplorerBranchesForEnvelope(envelope);
           if (shouldRefreshGVICExplorerProjectionForEnvelope(companyID, envelope)) requestGVICExplorerProjectionRefreshRef.current();
         } catch {
           // The stream is best-effort UI sync; the explicit refresh path remains available.
         }
       },
     });
-  }, [apiBase, companyID, reconcileCompanyExplorerGap]);
+  }, [apiBase, companyID, reconcileCompanyExplorerGap, refreshCompanyExplorerBranchesForEnvelope]);
   useEffect(() => {
     if (!scopeViewsEnabled) return undefined;
     let cancelled = false;
@@ -2820,6 +2900,28 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     setDeleteConfirmation({ targets, position: position ?? null });
   }, [folders]);
 
+  const subscribeExplorerEntity = useCallback(async (ownerType: CompanyExplorerV2SubscriptionOwnerType, anchorEntityID: string) => {
+    const cleanAnchorEntityID = cleanExplorerID(anchorEntityID);
+    const ownerID = ownerType === "team" ? cleanExplorerID(currentTeamScopeID) : cleanExplorerID(currentUserID);
+    if (!cleanAnchorEntityID || !ownerID) {
+      setError(ownerType === "team" ? "team_subscription_target_missing" : "user_subscription_target_missing");
+      return;
+    }
+    setError("");
+    try {
+      await subscribeCompanyExplorerEntity(apiBase, {
+        companyID,
+        ownerType,
+        ownerID,
+        anchorEntityID: cleanAnchorEntityID,
+      });
+      if ((ownerType === "user" && companyExplorerLazyScope === "me") || (ownerType === "team" && companyExplorerLazyScope === "team")) {
+        refreshLoadedCompanyExplorerBranches();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_subscribe_company_explorer_entity");
+    }
+  }, [apiBase, companyExplorerLazyScope, companyID, currentTeamScopeID, currentUserID, refreshLoadedCompanyExplorerBranches]);
   const requestDeleteSelection = useCallback(() => {
     if (deleteConfirmation) return;
     const selectedRows = treeRows.filter((row) => selectedTreeIDs.has(row.id));
@@ -3516,6 +3618,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         permissionsPath: row.entityType === "folder" ? `/v2/company-explorer/entities/${encodeURIComponent(row.folderID)}/permissions` : undefined,
       }
       : null;
+    const subscriptionAnchorEntityID = !protectedGVICRow && row?.entityID && (
+      row.entityType === "folder"
+      || row.entityType === "project"
+      || row.entityType === "logic_gate"
+      || row.entityType === "node"
+    ) ? row.entityID : "";
     setExplorerContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -3525,6 +3633,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       renameTarget: protectedGVICRow ? null : resolveExplorerRenameTarget(row ?? null),
       permissionsTarget,
       openInNewTabTarget: protectedGVICRow ? null : getOpenInNewTabTargetForExplorerRow(row),
+      subscriptionAnchorEntityID,
+      canSubscribeToMe: Boolean(subscriptionAnchorEntityID && cleanExplorerID(currentUserID)),
+      canSubscribeToTeam: Boolean(subscriptionAnchorEntityID && cleanExplorerID(currentTeamScopeID)),
       renameTreeID: row?.id ?? "",
       renameLabel: row?.label ?? "",
       contextKind,
@@ -3539,7 +3650,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       canCreateLogicGate: canCreateForContext && (scopedKind ? scopedKind === "logic_gate" && Boolean(scopedRootFolder) : true),
       canCreateProject: canCreateForContext && (scopedKind ? scopedKind === "project" && Boolean(scopedRootFolder) : true),
     });
-  }, [focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, GVICExplorerActive, resolveCreateFolderScope, scopedKind, scopedRootFolder, scopedRootRow, selectTreeRow, selectedTreeIDs, teamCompanyExplorerActive, treeRows]);
+  }, [currentTeamScopeID, currentUserID, focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, GVICExplorerActive, resolveCreateFolderScope, scopedKind, scopedRootFolder, scopedRootRow, selectTreeRow, selectedTreeIDs, teamCompanyExplorerActive, treeRows]);
 
   // Kanban accepts node cards only. A mixed Explorer selection is still valid
   // for navigation, but the drag payload intentionally exports node rows only.
@@ -3751,6 +3862,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         onOpenInNewTab={(target) => {
           setExplorerContextMenu(null);
           openCompanyExplorerTargetInNewTab(target);
+        }}
+        onSubscribeEntity={(ownerType, anchorEntityID) => {
+          setExplorerContextMenu(null);
+          void subscribeExplorerEntity(ownerType, anchorEntityID);
         }}
         onRenameTarget={(treeID, target, value) => {
           setExplorerContextMenu(null);

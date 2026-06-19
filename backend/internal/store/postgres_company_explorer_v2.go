@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"sort"
 	"strings"
 )
 
@@ -24,7 +23,7 @@ func companyExplorerV2Args(query CompanyExplorerV2RowsQuery) []any {
 	}
 }
 
-const companyExplorerV2TypedArgsCTE = `with v2_args as (
+const companyExplorerV2TypedArgsCTE = `with recursive v2_args as (
   select $2::text as view,
          $3::uuid as scope_user_id,
          $5::uuid as parent_entity_id,
@@ -33,6 +32,122 @@ const companyExplorerV2TypedArgsCTE = `with v2_args as (
 `
 
 const companyExplorerV2TypedArgsJoin = `cross join v2_args
+`
+
+const companyExplorerV2DirectTreeEdgesCTE = `
+, stored_tree_edges as (
+  select edge.company_id,
+         edge.parent_entity_id,
+         edge.child_entity_id,
+         edge.edge_id,
+         edge.position,
+         edge.created_timestamp,
+         edge.updated_timestamp,
+         30 as source_priority
+  from company_explorer_edges edge
+  where edge.company_id=$1::uuid
+), native_project_tree_edges as (
+  select projection.company_id,
+         parent.entity_id as parent_entity_id,
+         child.entity_id as child_entity_id,
+         null::uuid as edge_id,
+         projection.position,
+         projection.relationship_created_timestamp as created_timestamp,
+         projection.relationship_updated_timestamp as updated_timestamp,
+         20 as source_priority
+  from project_relationship_projection projection
+  join company_explorer_entities parent
+    on parent.company_id=projection.company_id
+   and parent.entity_type='project'
+   and parent.resource_id=projection.project_id
+  join company_explorer_entities child
+    on child.company_id=projection.company_id
+   and child.entity_type=projection.resource_type
+   and child.resource_id=projection.resource_id
+  where projection.company_id=$1::uuid
+), native_logic_gate_tree_edges as (
+  select assignment.company_id,
+         parent.entity_id as parent_entity_id,
+         child.entity_id as child_entity_id,
+         null::uuid as edge_id,
+         assignment.position,
+         assignment.created_timestamp,
+         assignment.updated_timestamp,
+         10 as source_priority
+  from node_logic_gate_assignments assignment
+  join company_explorer_entities parent
+    on parent.company_id=assignment.company_id
+   and parent.entity_type='logic_gate'
+   and parent.resource_id=assignment.logic_gate_id
+  join company_explorer_entities child
+    on child.company_id=assignment.company_id
+   and child.entity_type='node'
+   and child.resource_id=assignment.node_id
+  where assignment.company_id=$1::uuid
+), direct_tree_edges as (
+  select distinct on (candidate.company_id, candidate.child_entity_id)
+         candidate.company_id,
+         candidate.parent_entity_id,
+         candidate.child_entity_id,
+         candidate.edge_id,
+         candidate.position,
+         candidate.created_timestamp,
+         candidate.updated_timestamp
+  from (
+    select * from native_logic_gate_tree_edges
+    union all
+    select * from native_project_tree_edges
+    union all
+    select * from stored_tree_edges
+  ) candidate
+  order by candidate.company_id,
+           candidate.child_entity_id,
+           candidate.source_priority asc,
+           candidate.created_timestamp asc,
+           candidate.position asc,
+           coalesce(candidate.edge_id, candidate.child_entity_id) asc
+)
+`
+
+const companyExplorerV2SubscriptionTreeCTE = `
+, subscription_anchors as (
+  select subscription.anchor_entity_id as entity_id
+  from company_explorer_subscriptions subscription
+  cross join v2_args
+  where subscription.company_id=$1::uuid
+    and (
+      (v2_args.view='me' and subscription.owner_type='user' and subscription.owner_id=v2_args.scope_user_id)
+      or (
+        v2_args.view='team'
+        and subscription.owner_type='team'
+        and exists (
+          select 1
+          from company_user_group_members member
+          where member.company_id=subscription.company_id
+            and member.group_id=subscription.owner_id
+            and member.user_id=v2_args.scope_user_id
+        )
+      )
+    )
+), subscription_ancestors(entity_id) as (
+  select entity_id from subscription_anchors
+  union
+  select edge.parent_entity_id
+  from direct_tree_edges edge
+  join subscription_ancestors ancestor
+    on ancestor.entity_id=edge.child_entity_id
+), subscription_descendants(entity_id) as (
+  select entity_id from subscription_anchors
+  union
+  select edge.child_entity_id
+  from direct_tree_edges edge
+  join subscription_descendants descendant
+    on descendant.entity_id=edge.parent_entity_id
+), subscription_entities as (
+  select entity_id from subscription_ancestors
+  union
+  select entity_id from subscription_descendants
+)
 `
 
 func companyExplorerV2AccessPredicate(alias string) string {
@@ -103,29 +218,6 @@ func companyExplorerV2HasChildrenExpr(alias string) string {
       from company_explorer_edges child_edge
       where child_edge.company_id=` + alias + `.company_id
         and child_edge.parent_entity_id=` + alias + `.entity_id
-    )
-    or (
-      ` + alias + `.entity_type='company'
-      and exists (
-        select 1 from company_user_groups child_group
-        where child_group.company_id=` + alias + `.company_id
-          and child_group.parent_group_id is null
-      )
-    )
-    or (
-      ` + alias + `.entity_type='user_group'
-      and (
-        exists (
-          select 1 from company_user_groups child_group
-          where child_group.company_id=` + alias + `.company_id
-            and child_group.parent_group_id=` + alias + `.resource_id
-        )
-        or exists (
-          select 1 from company_user_group_members child_member
-          where child_member.company_id=` + alias + `.company_id
-            and child_member.group_id=` + alias + `.resource_id
-        )
-      )
     )
     or (
       ` + alias + `.entity_type='project'
@@ -300,29 +392,18 @@ func (r *PostgresRepo) ListCompanyExplorerV2RootRows(query CompanyExplorerV2Rows
 	if err := r.ensureCompanyExplorerV2NativeEntities(ctx, query.CompanyID); err != nil {
 		return CompanyExplorerV2Rows{}, err
 	}
-
-	whereClause := "entity.entity_type='company' and entity.resource_id=$1::uuid"
-	positionExpr := "1000"
-	if query.View == CompanyExplorerLazyScopeMe {
-		whereClause = "entity.entity_type='user' and entity.resource_id=$3::uuid"
-	} else if query.View == CompanyExplorerLazyScopeTeam {
-		whereClause = `entity.entity_type='user_group'
-      and exists (
-        select 1
-        from company_user_group_members member
-        where member.company_id=entity.company_id
-          and member.group_id=entity.resource_id
-          and member.user_id=$3::uuid
-      )`
-		positionExpr = "coalesce(user_group.position, 1000)"
+	if query.View == CompanyExplorerLazyScopeMe || query.View == CompanyExplorerLazyScopeTeam {
+		return r.queryCompanyExplorerV2SubscriptionRootRows(ctx, query)
 	}
+
 	rows, err := r.db.QueryContext(ctx, companyExplorerV2TypedArgsCTE+`
-select `+companyExplorerV2RowSelect("entity", "null::uuid", "null::uuid", positionExpr, "entity.created_timestamp", "entity.updated_timestamp")+`
+select `+companyExplorerV2RowSelect("entity", "null::uuid", "null::uuid", "1000", "entity.created_timestamp", "entity.updated_timestamp")+`
 from company_explorer_entities entity
 `+companyExplorerV2TypedArgsJoin+`
 `+companyExplorerV2Joins("entity")+`
 where entity.company_id=$1::uuid
-  and `+whereClause+`
+  and entity.entity_type='company'
+  and entity.resource_id=$1::uuid
   and `+companyExplorerV2AccessPredicate("entity")+`
 order by position asc, created_timestamp asc, name asc, entity_id asc`, companyExplorerV2Args(query)...)
 	if err != nil {
@@ -344,32 +425,68 @@ func (r *PostgresRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2Row
 	if err := r.ensureCompanyExplorerV2NativeEntities(ctx, query.CompanyID); err != nil {
 		return CompanyExplorerV2Rows{}, err
 	}
-	parent, err := r.getCompanyExplorerV2Parent(ctx, query)
+	if _, err := r.getCompanyExplorerV2Parent(ctx, query); err != nil {
+		return CompanyExplorerV2Rows{}, err
+	}
+	items, err := r.queryCompanyExplorerV2DirectChildren(ctx, query)
 	if err != nil {
 		return CompanyExplorerV2Rows{}, err
 	}
-	items, err := r.queryCompanyExplorerV2StoredChildren(ctx, query)
-	if err != nil {
-		return CompanyExplorerV2Rows{}, err
-	}
-	derived, err := r.queryCompanyExplorerV2DerivedChildren(ctx, query, parent)
-	if err != nil {
-		return CompanyExplorerV2Rows{}, err
-	}
-	items = append(items, derived...)
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Position != items[j].Position {
-			return items[i].Position < items[j].Position
-		}
-		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
-			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
-		}
-		if items[i].Name != items[j].Name {
-			return items[i].Name < items[j].Name
-		}
-		return items[i].EntityID < items[j].EntityID
-	})
 	return CompanyExplorerV2Rows{Rows: items}, nil
+}
+
+func (r *PostgresRepo) queryCompanyExplorerV2SubscriptionRootRows(ctx context.Context, query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error) {
+	rows, err := r.db.QueryContext(ctx, companyExplorerV2TypedArgsCTE+companyExplorerV2DirectTreeEdgesCTE+companyExplorerV2SubscriptionTreeCTE+`
+select `+companyExplorerV2RowSelect("entity", "null::uuid", "tree_edge.edge_id", "tree_edge.position", "tree_edge.created_timestamp", "tree_edge.updated_timestamp")+`
+from company_explorer_entities company_root
+join direct_tree_edges tree_edge
+  on tree_edge.company_id=company_root.company_id
+ and tree_edge.parent_entity_id=company_root.entity_id
+join company_explorer_entities entity
+  on entity.company_id=tree_edge.company_id
+ and entity.entity_id=tree_edge.child_entity_id
+`+companyExplorerV2TypedArgsJoin+`
+`+companyExplorerV2Joins("entity")+`
+where company_root.company_id=$1::uuid
+  and company_root.entity_type='company'
+  and company_root.resource_id=$1::uuid
+  and entity.entity_id in (select entity_id from subscription_entities)
+  and `+companyExplorerV2AccessPredicate("entity")+`
+order by tree_edge.position asc, tree_edge.created_timestamp asc, name asc, entity.entity_id asc`, companyExplorerV2Args(query)...)
+	if err != nil {
+		return CompanyExplorerV2Rows{}, err
+	}
+	items, err := scanCompanyExplorerV2Rows(rows)
+	if err != nil {
+		return CompanyExplorerV2Rows{}, err
+	}
+	return CompanyExplorerV2Rows{Rows: items}, nil
+}
+
+func (r *PostgresRepo) queryCompanyExplorerV2DirectChildren(ctx context.Context, query CompanyExplorerV2RowsQuery) ([]CompanyExplorerV2Row, error) {
+	subscriptionPredicate := ""
+	cte := companyExplorerV2TypedArgsCTE + companyExplorerV2DirectTreeEdgesCTE
+	if query.View == CompanyExplorerLazyScopeMe || query.View == CompanyExplorerLazyScopeTeam {
+		cte += companyExplorerV2SubscriptionTreeCTE
+		subscriptionPredicate = " and entity.entity_id in (select entity_id from subscription_entities)"
+	}
+	rows, err := r.db.QueryContext(ctx, cte+`
+select `+companyExplorerV2RowSelect("entity", "tree_edge.parent_entity_id", "tree_edge.edge_id", "tree_edge.position", "tree_edge.created_timestamp", "tree_edge.updated_timestamp")+`
+from direct_tree_edges tree_edge
+join company_explorer_entities entity
+  on entity.company_id=tree_edge.company_id
+ and entity.entity_id=tree_edge.child_entity_id
+`+companyExplorerV2TypedArgsJoin+`
+`+companyExplorerV2Joins("entity")+`
+where tree_edge.company_id=$1::uuid
+  and tree_edge.parent_entity_id=$5::uuid
+  `+subscriptionPredicate+`
+  and `+companyExplorerV2AccessPredicate("entity")+`
+order by tree_edge.position asc, tree_edge.created_timestamp asc, name asc, entity.entity_id asc`, companyExplorerV2Args(query)...)
+	if err != nil {
+		return nil, err
+	}
+	return scanCompanyExplorerV2Rows(rows)
 }
 
 func (r *PostgresRepo) GetCompanyExplorerV2FolderDefaultAccess(companyID, entityID string) (string, error) {
@@ -694,7 +811,9 @@ select exists (
 	if _, err := tx.ExecContext(ctx, `
 insert into company_explorer_edges (company_id, edge_id, parent_entity_id, child_entity_id, position, created_timestamp, updated_timestamp)
 values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, now(), now())
-on conflict (company_id, parent_entity_id, child_entity_id) do update set
+on conflict (company_id, child_entity_id) do update set
+  edge_id=excluded.edge_id,
+  parent_entity_id=excluded.parent_entity_id,
   position=excluded.position,
   updated_timestamp=now()`, input.CompanyID, edgeID, input.ParentEntityID, childEntityID, position); err != nil {
 		return CompanyExplorerV2Row{}, err
@@ -958,6 +1077,158 @@ limit 1`, append(companyExplorerV2Args(query), edgeID)...))
 	return item, err
 }
 
+func scanCompanyExplorerV2Subscription(row companyExplorerV2RowScanner) (CompanyExplorerV2Subscription, error) {
+	var item CompanyExplorerV2Subscription
+	err := row.Scan(
+		&item.CompanyID,
+		&item.SubscriptionID,
+		&item.OwnerType,
+		&item.OwnerID,
+		&item.AnchorEntityID,
+		&item.Position,
+		&item.CreatedByUserID,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	)
+	return item, err
+}
+
+func (r *PostgresRepo) UpsertCompanyExplorerV2Subscription(input CompanyExplorerV2SubscriptionInput) (CompanyExplorerV2Subscription, error) {
+	input, err := normalizeCompanyExplorerV2SubscriptionInput(input)
+	if err != nil {
+		return CompanyExplorerV2Subscription{}, err
+	}
+	ctx := context.Background()
+	if err := r.ensureCompanyExplorerV2NativeEntities(ctx, input.CompanyID); err != nil {
+		return CompanyExplorerV2Subscription{}, err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CompanyExplorerV2Subscription{}, err
+	}
+	defer tx.Rollback()
+	if err := postgresCompanyExplorerV2SubscriptionOwnerCanEdit(ctx, tx, input.CompanyID, input.OwnerType, input.OwnerID, input.ActorUserID); err != nil {
+		return CompanyExplorerV2Subscription{}, err
+	}
+	anchorQuery := CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, View: CompanyExplorerLazyScopeAll, ParentEntityID: input.AnchorEntityID, PermissionUserID: input.PermissionUserID}
+	var visible bool
+	if err := tx.QueryRowContext(ctx, companyExplorerV2TypedArgsCTE+`
+select exists (
+  select 1
+  from company_explorer_entities entity
+  `+companyExplorerV2TypedArgsJoin+`
+  where entity.company_id=$1::uuid
+    and entity.entity_id=$5::uuid
+    and `+companyExplorerV2AccessPredicate("entity")+`
+)`, companyExplorerV2Args(anchorQuery)...).Scan(&visible); err != nil {
+		return CompanyExplorerV2Subscription{}, err
+	}
+	if !visible {
+		return CompanyExplorerV2Subscription{}, ErrNotFound
+	}
+	position := input.Position
+	if position <= 0 {
+		if err := tx.QueryRowContext(ctx, `
+select coalesce(max(position), 0) + 1000
+from company_explorer_subscriptions
+where company_id=$1::uuid
+  and owner_type=$2
+  and owner_id=$3::uuid`, input.CompanyID, input.OwnerType, input.OwnerID).Scan(&position); err != nil {
+			return CompanyExplorerV2Subscription{}, err
+		}
+	}
+	subscriptionID := newUUIDv7String()
+	item, err := scanCompanyExplorerV2Subscription(tx.QueryRowContext(ctx, `
+insert into company_explorer_subscriptions (company_id, subscription_id, owner_type, owner_id, anchor_entity_id, position, created_by_user_id, created_timestamp, updated_timestamp)
+values ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, $6, $7::uuid, now(), now())
+on conflict (company_id, owner_type, owner_id, anchor_entity_id) do update set
+  position=excluded.position,
+  updated_timestamp=now()
+returning company_id::text,
+          subscription_id::text,
+          owner_type,
+          owner_id::text,
+          anchor_entity_id::text,
+          position,
+          coalesce(created_by_user_id::text, ''),
+          created_timestamp,
+          updated_timestamp`, input.CompanyID, subscriptionID, input.OwnerType, input.OwnerID, input.AnchorEntityID, position, input.ActorUserID))
+	if err != nil {
+		return CompanyExplorerV2Subscription{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CompanyExplorerV2Subscription{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) DeleteCompanyExplorerV2Subscription(companyID, subscriptionID, actorUserID string) error {
+	companyID = cleanUUIDText(companyID)
+	subscriptionID = cleanUUIDText(subscriptionID)
+	actorUserID = cleanUUIDText(actorUserID)
+	if companyID == "" || subscriptionID == "" || actorUserID == "" {
+		return ErrInvalid
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var ownerType, ownerID string
+	if err := tx.QueryRowContext(ctx, `
+select owner_type, owner_id::text
+from company_explorer_subscriptions
+where company_id=$1::uuid and subscription_id=$2::uuid`, companyID, subscriptionID).Scan(&ownerType, &ownerID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if err := postgresCompanyExplorerV2SubscriptionOwnerCanEdit(ctx, tx, companyID, ownerType, ownerID, actorUserID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `delete from company_explorer_subscriptions where company_id=$1::uuid and subscription_id=$2::uuid`, companyID, subscriptionID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
+func postgresCompanyExplorerV2SubscriptionOwnerCanEdit(ctx context.Context, tx *sql.Tx, companyID, ownerType, ownerID, actorUserID string) error {
+	var ok bool
+	err := tx.QueryRowContext(ctx, `
+select exists (
+  select 1
+  from company_memberships membership
+  where membership.user_id=$4::uuid
+    and (
+      membership.role='dev_admin'
+      or (membership.company_id=$1::uuid and membership.role='company_admin')
+    )
+)
+or ($2='user' and $3::uuid=$4::uuid)
+or (
+  $2='team'
+  and exists (
+    select 1
+    from company_user_group_members member
+    where member.company_id=$1::uuid
+      and member.group_id=$3::uuid
+      and member.user_id=$4::uuid
+  )
+)`, companyID, ownerType, ownerID, actorUserID).Scan(&ok)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	return nil
+}
 func postgresCompanyExplorerV2ParentCanEdit(ctx context.Context, tx *sql.Tx, companyID, parentEntityID, userID string) error {
 	if userID == "" {
 		return nil

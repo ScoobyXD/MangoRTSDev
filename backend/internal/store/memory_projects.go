@@ -350,7 +350,6 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 	relationshipKey := projectRelationshipKey(input.CompanyID, input.RelationshipID)
 	for keyValue, relationship := range r.projectRelationships {
 		if relationship.CompanyID == input.CompanyID &&
-			relationship.ProjectID == input.ProjectID &&
 			relationship.ResourceType == input.ResourceType &&
 			relationship.ResourceID == input.ResourceID {
 			relationshipKey = keyValue

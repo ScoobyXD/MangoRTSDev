@@ -7,7 +7,7 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func TestMemoryCompanyExplorerV2RootsAndNativeChildren(t *testing.T) {
+func TestMemoryCompanyExplorerV2SubscriptionsUseRealTreeShape(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000001"
 	repo.EnsureCompany(companyID, "V2 Explorer Co")
@@ -16,7 +16,7 @@ func TestMemoryCompanyExplorerV2RootsAndNativeChildren(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertAuthUser: %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("v2-roots-user", companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("v2-roots-user", companyID, domain.RoleCompanyAdmin); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
 	group, err := repo.CreateCompanyUserGroup(companyID, "", "Operations")
@@ -25,34 +25,6 @@ func TestMemoryCompanyExplorerV2RootsAndNativeChildren(t *testing.T) {
 	}
 	if _, err := repo.SetCompanyUserGroupMembers(companyID, group.GroupID, []string{user.UserID}); err != nil {
 		t.Fatalf("SetCompanyUserGroupMembers: %v", err)
-	}
-
-	meRoots, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
-		CompanyID:        companyID,
-		View:             CompanyExplorerLazyScopeMe,
-		ScopeUserID:      user.UserID,
-		PermissionUserID: user.UserID,
-	})
-	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2RootRows me: %v", err)
-	}
-	meRoot := requireCompanyExplorerV2Row(t, meRoots.Rows, CompanyExplorerV2EntityUser, user.UserID)
-	if meRoot.ParentEntityID != "" {
-		t.Fatalf("me root ParentEntityID = %q, want empty", meRoot.ParentEntityID)
-	}
-
-	teamRoots, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
-		CompanyID:        companyID,
-		View:             CompanyExplorerLazyScopeTeam,
-		ScopeUserID:      user.UserID,
-		PermissionUserID: user.UserID,
-	})
-	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2RootRows team: %v", err)
-	}
-	teamRoot := requireCompanyExplorerV2Row(t, teamRoots.Rows, CompanyExplorerV2EntityUserGroup, group.GroupID)
-	if teamRoot.EdgeID != "" {
-		t.Fatalf("team native root EdgeID = %q, want empty derived row", teamRoot.EdgeID)
 	}
 
 	allRoots, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
@@ -64,39 +36,233 @@ func TestMemoryCompanyExplorerV2RootsAndNativeChildren(t *testing.T) {
 		t.Fatalf("ListCompanyExplorerV2RootRows all: %v", err)
 	}
 	companyRoot := requireCompanyExplorerV2Row(t, allRoots.Rows, CompanyExplorerV2EntityCompany, companyID)
-	if !companyRoot.HasChildren {
-		t.Fatalf("company root HasChildren = false, want true from native group child")
+	if len(allRoots.Rows) != 1 || companyRoot.ParentEntityID != "" {
+		t.Fatalf("all roots = %+v, want only company root", allRoots.Rows)
 	}
 
-	companyChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+	meRoots, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
-		View:             CompanyExplorerLazyScopeAll,
+		View:             CompanyExplorerLazyScopeMe,
+		ScopeUserID:      user.UserID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2RootRows me before subscription: %v", err)
+	}
+	if len(meRoots.Rows) != 0 {
+		t.Fatalf("me roots before subscription = %+v, want empty tag view", meRoots.Rows)
+	}
+
+	folder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
+		CompanyID:        companyID,
 		ParentEntityID:   companyRoot.EntityID,
+		Name:             "Customer Work",
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2ChildRows company: %v", err)
+		t.Fatalf("CreateCompanyExplorerV2Folder: %v", err)
 	}
-	groupRow := requireCompanyExplorerV2Row(t, companyChildren.Rows, CompanyExplorerV2EntityUserGroup, group.GroupID)
-	if groupRow.EdgeID != "" {
-		t.Fatalf("native group child EdgeID = %q, want empty derived row", groupRow.EdgeID)
+	projectResult, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Customer Project", Status: "Active", ActorUserID: user.UserID})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	project := projectResult.Project
+	if project == nil {
+		t.Fatalf("CreateProject returned nil project")
+	}
+	projectRow, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:        companyID,
+		ParentEntityID:   folder.EntityID,
+		ChildEntityType:  CompanyExplorerV2EntityProject,
+		ChildResourceID:  project.ProjectID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge project: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Launch Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID:    companyID,
+		ProjectID:    project.ProjectID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+		ActorUserID:  user.UserID,
+	}); err != nil {
+		t.Fatalf("UpsertProjectRelationship: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Launch Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	assignmentPriority := 3
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:      companyID,
+		LogicGateID:    logicGate.LogicGateID,
+		NodeID:         node.NodeID,
+		Priority:       &assignmentPriority,
+		PrioritySet:    true,
+		MutationOrigin: "test",
+		ActorUserID:    user.UserID,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
 
-	groupChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+	nodeEntityID := companyExplorerV2NativeEntityID(companyID, CompanyExplorerV2EntityNode, node.NodeID)
+	if _, err := repo.UpsertCompanyExplorerV2Subscription(CompanyExplorerV2SubscriptionInput{
 		CompanyID:        companyID,
-		View:             CompanyExplorerLazyScopeAll,
-		ParentEntityID:   groupRow.EntityID,
+		OwnerType:        CompanyExplorerV2SubscriptionOwnerUser,
+		OwnerID:          user.UserID,
+		AnchorEntityID:   nodeEntityID,
+		ActorUserID:      user.UserID,
+		PermissionUserID: user.UserID,
+	}); err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Subscription node: %v", err)
+	}
+
+	meRoots, err = repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeMe,
+		ScopeUserID:      user.UserID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2ChildRows group: %v", err)
+		t.Fatalf("ListCompanyExplorerV2RootRows me after subscription: %v", err)
 	}
-	userRow := requireCompanyExplorerV2Row(t, groupChildren.Rows, CompanyExplorerV2EntityUser, user.UserID)
-	if userRow.EdgeID != "" {
-		t.Fatalf("native user child EdgeID = %q, want empty derived row", userRow.EdgeID)
+	meFolder := requireCompanyExplorerV2Row(t, meRoots.Rows, CompanyExplorerV2EntityFolder, folder.EntityID)
+	if meFolder.ParentEntityID != "" {
+		t.Fatalf("subscribed ancestor root parent = %q, want empty tag root", meFolder.ParentEntityID)
+	}
+	folderChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeMe,
+		ScopeUserID:      user.UserID,
+		ParentEntityID:   folder.EntityID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows subscribed folder: %v", err)
+	}
+	requireCompanyExplorerV2Row(t, folderChildren.Rows, CompanyExplorerV2EntityProject, project.ProjectID)
+	projectChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeMe,
+		ScopeUserID:      user.UserID,
+		ParentEntityID:   projectRow.EntityID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows subscribed project: %v", err)
+	}
+	logicGateRow := requireCompanyExplorerV2Row(t, projectChildren.Rows, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID)
+	logicGateChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeMe,
+		ScopeUserID:      user.UserID,
+		ParentEntityID:   logicGateRow.EntityID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows subscribed logic gate: %v", err)
+	}
+	requireCompanyExplorerV2Row(t, logicGateChildren.Rows, CompanyExplorerV2EntityNode, node.NodeID)
+
+	logicGateEntityID := companyExplorerV2NativeEntityID(companyID, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID)
+	if _, err := repo.UpsertCompanyExplorerV2Subscription(CompanyExplorerV2SubscriptionInput{
+		CompanyID:        companyID,
+		OwnerType:        CompanyExplorerV2SubscriptionOwnerTeam,
+		OwnerID:          group.GroupID,
+		AnchorEntityID:   logicGateEntityID,
+		ActorUserID:      user.UserID,
+		PermissionUserID: user.UserID,
+	}); err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Subscription team logic gate: %v", err)
+	}
+	teamGateChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeTeam,
+		ScopeUserID:      user.UserID,
+		ParentEntityID:   logicGateEntityID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows team logic gate: %v", err)
+	}
+	requireCompanyExplorerV2Row(t, teamGateChildren.Rows, CompanyExplorerV2EntityNode, node.NodeID)
+}
+func TestMemoryProjectRelationshipMovesResourceBetweenProjects(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-220000000003"
+	repo.EnsureCompany(companyID, "Project Relationship Move Co")
+
+	user, err := repo.UpsertAuthUser("project-move-user", "project-move@example.com", "Project Move User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("project-move-user", companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	alpha, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Alpha", Status: "Active", ActorUserID: user.UserID})
+	if err != nil {
+		t.Fatalf("CreateProject alpha: %v", err)
+	}
+	bravo, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Bravo", Status: "Active", ActorUserID: user.UserID})
+	if err != nil {
+		t.Fatalf("CreateProject bravo: %v", err)
+	}
+	if alpha.Project == nil || bravo.Project == nil {
+		t.Fatalf("created projects missing")
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Single Parent Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	first, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID:    companyID,
+		ProjectID:    alpha.Project.ProjectID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+		ActorUserID:  user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("UpsertProjectRelationship first: %v", err)
+	}
+	second, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID:    companyID,
+		ProjectID:    bravo.Project.ProjectID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+		ActorUserID:  user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("UpsertProjectRelationship move: %v", err)
+	}
+	if first.Relationship == nil || second.Relationship == nil {
+		t.Fatalf("relationship mutation missing projection")
+	}
+	if second.Relationship.RelationshipID != first.Relationship.RelationshipID {
+		t.Fatalf("move created a new relationship id %s, want existing %s", second.Relationship.RelationshipID, first.Relationship.RelationshipID)
+	}
+	if second.Relationship.ProjectID != bravo.Project.ProjectID {
+		t.Fatalf("moved relationship ProjectID = %s, want %s", second.Relationship.ProjectID, bravo.Project.ProjectID)
+	}
+	alphaRows, err := repo.ListProjectRelationshipProjections(companyID, alpha.Project.ProjectID)
+	if err != nil {
+		t.Fatalf("ListProjectRelationshipProjections alpha: %v", err)
+	}
+	if len(alphaRows) != 0 {
+		t.Fatalf("alpha relationships after move = %+v, want empty", alphaRows)
+	}
+	bravoRows, err := repo.ListProjectRelationshipProjections(companyID, bravo.Project.ProjectID)
+	if err != nil {
+		t.Fatalf("ListProjectRelationshipProjections bravo: %v", err)
+	}
+	if len(bravoRows) != 1 || bravoRows[0].RelationshipID != first.Relationship.RelationshipID {
+		t.Fatalf("bravo relationships after move = %+v, want moved relationship", bravoRows)
 	}
 }
-
 func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000002"
