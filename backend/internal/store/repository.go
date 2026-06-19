@@ -453,6 +453,8 @@ type NotificationRepository interface {
 	SaveNotificationDomainEventCheckpoint(checkpoint NotificationDomainEventCheckpoint) error
 	CreateNotifications(input CreateNotificationsInput) ([]domain.Notification, error)
 	ListNotifications(input NotificationListInput) ([]domain.Notification, error)
+	ListUpdateRootGroups(input UpdatesQuery) ([]UpdatesNestedGroup, error)
+	ListUpdateBranch(input UpdatesQuery) (UpdatesNestedGroup, error)
 	GetNotificationSummary(input NotificationSummaryInput) (domain.NotificationSummary, error)
 	CountUnreadNotifications(userID, companyID string) (int, error)
 	MarkNotificationRead(userID, notificationID string, read bool) (domain.Notification, error)
@@ -1483,6 +1485,25 @@ type NotificationListInput struct {
 	NotificationType string
 	UnreadOnly       bool
 	Limit            int
+}
+
+type UpdatesQuery struct {
+	UserID    string
+	CompanyID string
+	Filter    string
+	RootID    string
+}
+
+type UpdatesNestedGroup struct {
+	ID            string                `json:"id"`
+	Key           string                `json:"key"`
+	Field         string                `json:"field"`
+	Label         string                `json:"label"`
+	ResourceType  string                `json:"resource_type,omitempty"`
+	ResourceID    string                `json:"resource_id,omitempty"`
+	Depth         int                   `json:"depth"`
+	Groups        []UpdatesNestedGroup  `json:"groups"`
+	Notifications []domain.Notification `json:"notifications,omitempty"`
 }
 
 type NotificationMarkReadInput struct {

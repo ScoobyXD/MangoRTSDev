@@ -262,6 +262,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/notifications/unread-count", s.handleNotificationUnreadCount)
 	mux.HandleFunc("/v1/notifications/read-all", s.handleNotificationReadAll)
 	mux.HandleFunc("/v1/notifications/", s.handleNotificationByID)
+	mux.HandleFunc("/v1/updates/groups/roots", s.handleUpdateRootGroups)
+	mux.HandleFunc("/v1/updates/groups/branch", s.handleUpdateBranch)
 	mux.HandleFunc("/nylas/oauth/callback", s.handleNylasOAuthCallback)
 	mux.HandleFunc("/nylas/webhook", s.handleNylasWebhook)
 	mux.HandleFunc("/v1/accounts", s.handleAccounts)

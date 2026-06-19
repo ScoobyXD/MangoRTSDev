@@ -444,17 +444,24 @@ func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatri
 			continue
 		}
 		dto := memoryGVICMatrixProjectionRowToDTO(row)
-		projectID, projectName, hasProject, hasActiveProject := r.myWorkProjectContextLocked(row)
-		if hasProject {
-			if !hasActiveProject {
-				continue
-			}
-			dto.ProjectID = projectID
-			dto.ProjectName = projectName
-		} else if row.ResourceType == GVICMatrixProjectionResourceNode && workItemStatusDone(dto.Status) {
+		projectContexts, hasProject := r.myWorkProjectContextsLocked(row)
+		if hasProject && len(projectContexts) == 0 {
 			continue
 		}
 		for _, role := range r.myWorkRolesForProjectionRowLocked(row) {
+			if len(projectContexts) > 0 {
+				for _, project := range projectContexts {
+					item := dto
+					item.Role = role
+					item.ProjectID = project.projectID
+					item.ProjectName = project.projectName
+					items = append(items, item)
+				}
+				continue
+			}
+			if row.ResourceType == GVICMatrixProjectionResourceNode && workItemStatusDone(dto.Status) {
+				continue
+			}
 			item := dto
 			item.Role = role
 			items = append(items, item)
@@ -488,9 +495,6 @@ func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatri
 		}
 		return items[i].ResourceID < items[j].ResourceID
 	})
-	if len(items) > query.Limit {
-		items = items[:query.Limit]
-	}
 	return items, nil
 }
 
@@ -580,16 +584,18 @@ func (r *MemoryRepo) myWorkRolesForProjectionRowLocked(row memoryGVICMatrixProje
 	return out
 }
 
-func (r *MemoryRepo) myWorkProjectContextLocked(row memoryGVICMatrixProjectionRow) (projectID, projectName string, hasProject, hasActiveProject bool) {
-	type candidate struct {
-		projectID   string
-		projectName string
-		done        bool
-		position    int
-		created     time.Time
-		id          string
-	}
-	candidates := make([]candidate, 0)
+type myWorkProjectContext struct {
+	projectID   string
+	projectName string
+	position    int
+	created     time.Time
+	id          string
+}
+
+func (r *MemoryRepo) myWorkProjectContextsLocked(row memoryGVICMatrixProjectionRow) ([]myWorkProjectContext, bool) {
+	candidates := make([]myWorkProjectContext, 0)
+	hasProject := false
+	seen := map[string]bool{}
 	for _, projection := range r.projectRelationshipProjection {
 		if projection.CompanyID != row.CompanyID {
 			continue
@@ -606,6 +612,7 @@ func (r *MemoryRepo) myWorkProjectContextLocked(row memoryGVICMatrixProjectionRo
 		if !related {
 			continue
 		}
+		hasProject = true
 		project, ok := r.projects[key(row.CompanyID, projection.ProjectID)]
 		projectStatus := ""
 		name := strings.TrimSpace(projection.ProjectName)
@@ -616,26 +623,26 @@ func (r *MemoryRepo) myWorkProjectContextLocked(row memoryGVICMatrixProjectionRo
 			}
 		}
 		done := workItemStatusDone(&projectStatus)
-		hasProject = true
-		if !done {
-			hasActiveProject = true
+		if done {
+			continue
 		}
-		candidates = append(candidates, candidate{
+		keyValue := projection.ProjectID + "\x00" + projection.RelationshipID
+		if seen[keyValue] {
+			continue
+		}
+		seen[keyValue] = true
+		candidates = append(candidates, myWorkProjectContext{
 			projectID:   projection.ProjectID,
 			projectName: name,
-			done:        done,
 			position:    projection.Position,
 			created:     projection.RelationshipCreatedTimestamp,
 			id:          projection.RelationshipID,
 		})
 	}
 	if len(candidates) == 0 {
-		return "", "", false, false
+		return nil, hasProject
 	}
 	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].done != candidates[j].done {
-			return !candidates[i].done
-		}
 		if candidates[i].position != candidates[j].position {
 			return candidates[i].position < candidates[j].position
 		}
@@ -647,7 +654,7 @@ func (r *MemoryRepo) myWorkProjectContextLocked(row memoryGVICMatrixProjectionRo
 		}
 		return candidates[i].id < candidates[j].id
 	})
-	return candidates[0].projectID, candidates[0].projectName, hasProject, hasActiveProject
+	return candidates, hasProject
 }
 
 func workItemStatusDone(status *string) bool {
