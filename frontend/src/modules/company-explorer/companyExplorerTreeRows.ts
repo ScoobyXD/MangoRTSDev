@@ -447,21 +447,22 @@ export function buildCompanyExplorerV2TreeRows({
 
   const toTreeRow = (row: CompanyExplorerV2Row, depth: number): ExplorerTreeNode => {
     const kind = rowKindForEntity(row);
-    const resourceID = row.resource_id || row.entity_id;
+    const displayID = row.resource_id || row.entity_id;
+    const resourceID = row.resource_id || "";
     const folderKind = folderKindForRow(row);
     return {
       id: treeIDForRow(row),
-      label: row.name || resourceID,
+      label: row.name || displayID,
       depth,
       kind,
       entityID: row.entity_id,
       entityType: row.entity_type,
       edgeID: row.edge_id,
       parentEntityID: row.parent_entity_id ?? "",
-      resourceID,
-      nodeID: row.entity_type === "node" ? resourceID : undefined,
-      logicGateID: row.entity_type === "logic_gate" ? resourceID : undefined,
-      projectID: row.entity_type === "project" ? resourceID : undefined,
+      resourceID: resourceID || undefined,
+      nodeID: row.entity_type === "node" && resourceID ? resourceID : undefined,
+      logicGateID: row.entity_type === "logic_gate" && resourceID ? resourceID : undefined,
+      projectID: row.entity_type === "project" && resourceID ? resourceID : undefined,
       folderID: kind === "folder" ? row.entity_id : row.parent_entity_id,
       parentFolderID: row.parent_entity_id ?? "",
       folderKind,

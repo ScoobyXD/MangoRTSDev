@@ -1168,6 +1168,15 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 		}
 		projectionDeltas = append(projectionDeltas, deltas...)
 	}
+	if err := postgresDeleteCompanyExplorerV2NativeEntitiesTx(ctx, tx, companyID, CompanyExplorerV2EntityLogicGate, logicGateIDs); err != nil {
+		return CompanyExplorerDeleteResult{}, err
+	}
+	if err := postgresDeleteCompanyExplorerV2NativeEntitiesTx(ctx, tx, companyID, CompanyExplorerV2EntityProject, projectIDs); err != nil {
+		return CompanyExplorerDeleteResult{}, err
+	}
+	if err := postgresDeleteCompanyExplorerV2NativeEntitiesTx(ctx, tx, companyID, CompanyExplorerV2EntityNode, nodeIDs); err != nil {
+		return CompanyExplorerDeleteResult{}, err
+	}
 	if len(folderIDs) > 0 {
 		grantFolderIDs := make([]string, 0, len(folderIDs))
 		for folderID := range folderIDs {
@@ -1205,6 +1214,23 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 		return CompanyExplorerDeleteResult{}, err
 	}
 	return result, nil
+}
+
+func postgresDeleteCompanyExplorerV2NativeEntitiesTx(ctx context.Context, tx *sql.Tx, companyID, entityType string, ids map[string]bool) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(ids))
+	for id := range ids {
+		values = append(values, id)
+	}
+	sort.Strings(values)
+	_, err := tx.ExecContext(ctx, `
+delete from company_explorer_entities
+where company_id=$1::uuid
+  and entity_type=$2
+  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, entityType, strings.Join(values, ","))
+	return err
 }
 
 func postgresTxExists(ctx context.Context, tx *sql.Tx, query string, args ...any) (bool, error) {
