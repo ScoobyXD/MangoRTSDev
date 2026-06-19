@@ -137,7 +137,7 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 	userGroupsSnapshot := cloneMemoryMap(r.userGroups)
 	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
 	entityPermissionsSnapshot := cloneMemoryMap(r.entityPermissions)
-	sharedInboxRaciSnapshot := cloneMemorySliceMap(r.sharedInboxRaci)
+	sharedInboxGVICSnapshot := cloneMemorySliceMap(r.sharedInboxGVIC)
 	gvicAssignmentsSnapshot := cloneMemoryMap(r.gvicAssignments)
 	gvicEffectiveSnapshot := cloneMemoryMap(r.gvicEffectiveAssignments)
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
@@ -198,18 +198,18 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 			r.folders[key(companyID, resource.entityID)] = folder
 		}
 	}
-	for raciKey, assignments := range r.sharedInboxRaci {
+	for GVICKey, assignments := range r.sharedInboxGVIC {
 		next := assignments[:0]
 		for _, assignment := range assignments {
-			if assignment.CompanyID == companyID && assignment.SubjectType == EntityPermissionSubjectGroup && groupIDs[assignment.SubjectID] {
+			if assignment.CompanyID == companyID && assignment.PrincipalType == EntityPermissionSubjectGroup && groupIDs[assignment.PrincipalID] {
 				continue
 			}
 			next = append(next, assignment)
 		}
 		if len(next) == 0 {
-			delete(r.sharedInboxRaci, raciKey)
+			delete(r.sharedInboxGVIC, GVICKey)
 		} else {
-			r.sharedInboxRaci[raciKey] = next
+			r.sharedInboxGVIC[GVICKey] = next
 		}
 	}
 	for assignmentKey, assignment := range r.gvicAssignments {
@@ -221,7 +221,7 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 		r.userGroups = userGroupsSnapshot
 		r.userGroupMembers = userGroupMembersSnapshot
 		r.entityPermissions = entityPermissionsSnapshot
-		r.sharedInboxRaci = sharedInboxRaciSnapshot
+		r.sharedInboxGVIC = sharedInboxGVICSnapshot
 		r.gvicAssignments = gvicAssignmentsSnapshot
 		r.gvicEffectiveAssignments = gvicEffectiveSnapshot
 		r.effectiveAccess = effectiveAccessSnapshot
@@ -276,7 +276,7 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 			continue
 		}
 		if _, ok := r.memberships[membershipKey(companyID, userID)]; !ok {
-			return nil, ErrAssigneeNotInCompany
+			return nil, ErrPrincipalNotInCompany
 		}
 		seen[userID] = true
 		cleanUserIDs = append(cleanUserIDs, userID)
@@ -399,7 +399,7 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 		if subjectType == EntityPermissionSubjectUser {
 			membership, ok := r.memberships[membershipKey(companyID, subjectID)]
 			if !ok {
-				return nil, ErrAssigneeNotInCompany
+				return nil, ErrPrincipalNotInCompany
 			}
 			if (entityType == EntityTypeNode || entityType == EntityTypeLogicGate) && permission == EntityPermissionNoAccess && domain.CanManageCompany(membership.Role) {
 				continue
@@ -583,7 +583,7 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 		}
 		membership, ok := r.memberships[membershipKey(companyID, userID)]
 		if !ok {
-			return ErrAssigneeNotInCompany
+			return ErrPrincipalNotInCompany
 		}
 		if domain.CanManageCompany(membership.Role) {
 			return nil

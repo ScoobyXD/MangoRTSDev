@@ -1,6 +1,6 @@
 import { requestJSON } from "../api/requestJSON.js";
-import type { RacioMatrixProjectionRow } from "../kanban/kanbanApi.js";
-import type { LogicGateRaciRole, LogicGateRecord } from "../logic-gate-map/shared.js";
+import type { GVICMatrixProjectionRow } from "../kanban/kanbanApi.js";
+import type { LogicGateGVICRole, LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
 
 export type WorkItemInboxReadParams = {
@@ -11,10 +11,10 @@ export type WorkItemInboxReadParams = {
 };
 
 export type WorkItemLogicGateInboxItem = LogicGateRecord & {
-  roles: LogicGateRaciRole[];
+  roles: LogicGateGVICRole[];
 };
 
-export type ResponsibleInboxNodesResponse = {
+export type GeneratedInboxNodesResponse = {
   company_id: string;
   user_id: string;
   limit: number;
@@ -42,17 +42,17 @@ export type MyLogicGatesResponse = {
   logic_gates: WorkItemLogicGateInboxItem[];
 };
 
-export type RacioMatrixProjectionResponse = {
+export type GVICMatrixProjectionResponse = {
   company_id: string;
   user_id: string;
   limit: number;
   projection?: "gvic_matrix";
   projection_sequence?: number | string;
-  rows: RacioMatrixProjectionRow[];
+  rows: GVICMatrixProjectionRow[];
 };
 
-export async function listResponsibleInboxNodes(params: WorkItemInboxReadParams): Promise<ResponsibleInboxNodesResponse> {
-  return fetchWorkItemInboxRead<ResponsibleInboxNodesResponse>(params, "/v1/work-items/generated-inbox");
+export async function listGeneratedInboxNodes(params: WorkItemInboxReadParams): Promise<GeneratedInboxNodesResponse> {
+  return fetchWorkItemInboxRead<GeneratedInboxNodesResponse>(params, "/v1/work-items/generated-inbox");
 }
 
 export async function listACIInboxLogicGates(params: WorkItemInboxReadParams): Promise<ACIInboxLogicGatesResponse> {
@@ -67,8 +67,8 @@ export async function listMyLogicGates(params: WorkItemInboxReadParams): Promise
   return fetchWorkItemInboxRead<MyLogicGatesResponse>(params, "/v1/work-items/my-logic-gates");
 }
 
-export async function listRacioMatrixProjectionRows(params: WorkItemInboxReadParams): Promise<RacioMatrixProjectionResponse> {
-  return fetchWorkItemInboxRead<RacioMatrixProjectionResponse>(params, "/v1/work-items/gvic-matrix-projection");
+export async function listGVICMatrixProjectionRows(params: WorkItemInboxReadParams): Promise<GVICMatrixProjectionResponse> {
+  return fetchWorkItemInboxRead<GVICMatrixProjectionResponse>(params, "/v1/work-items/gvic-matrix-projection");
 }
 
 async function fetchWorkItemInboxRead<T>(params: WorkItemInboxReadParams, path: string): Promise<T> {

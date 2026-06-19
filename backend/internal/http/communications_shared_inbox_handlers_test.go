@@ -111,17 +111,17 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	}
 }
 
-func TestCommunicationsSharedInboxAccessRouteDoesNotConvertRaciAssignmentsToPermissions(t *testing.T) {
+func TestCommunicationsSharedInboxAccessRouteDoesNotConvertGVICAssignmentsToPermissions(t *testing.T) {
 	t.Parallel()
 
 	backing := store.NewMemoryRepo()
 	repo := backing
 	server := NewServer(repo)
-	companyID := "company-shared-inbox-access-no-raci-compat"
+	companyID := "company-shared-inbox-access-no-GVIC-compat"
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
-	repo.EnsureCompany(companyID, "Shared Inbox No RACI Compat")
+	repo.EnsureCompany(companyID, "Shared Inbox No GVIC Compat")
 
-	user, err := repo.UpsertAuthUser("subject-shared-access-no-raci-compat", "no-raci-compat@example.com", "No RACI Compat")
+	user, err := repo.UpsertAuthUser("subject-shared-access-no-GVIC-compat", "no-GVIC-compat@example.com", "No GVIC Compat")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser error = %v", err)
 	}

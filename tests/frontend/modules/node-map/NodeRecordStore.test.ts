@@ -46,7 +46,7 @@ function nodeViewPayload(item: NodeProjectionItem, editorSequence: number) {
     node: {
       company_id: "company-1",
       node_id: "node-1",
-      title: "Node",
+      name: "Node",
       created_timestamp: "2026-06-18T01:00:00.000Z",
     },
     information: [],

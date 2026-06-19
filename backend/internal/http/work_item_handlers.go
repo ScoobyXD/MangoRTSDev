@@ -147,11 +147,9 @@ func (s *Server) handleWorkItemLogicGateAssignments(w http.ResponseWriter, r *ht
 	} else if set && description != nil {
 		input.DescriptionSnapshot = *description
 	}
-	if assigneePolicy, set, ok := parseOptionalStringField(fields, "assignee_policy"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_assignee_policy")
+	if _, present := fields["assignee_policy"]; present {
+		writeError(w, http.StatusBadRequest, "unsupported_assignee_policy")
 		return
-	} else if set && assigneePolicy != nil {
-		input.AssigneePolicy = *assigneePolicy
 	}
 	if priority, set, ok := parseOptionalPriorityField(fields); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_priority")
@@ -258,12 +256,9 @@ func (s *Server) handleWorkItemLogicGateAssignmentMove(w http.ResponseWriter, r 
 	} else if set && columnID != nil {
 		input.ColumnID = *columnID
 	}
-	if assigneePolicy, set, ok := parseOptionalStringField(fields, "assignee_policy"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_assignee_policy")
+	if _, present := fields["assignee_policy"]; present {
+		writeError(w, http.StatusBadRequest, "unsupported_assignee_policy")
 		return
-	} else if set && assigneePolicy != nil && strings.TrimSpace(*assigneePolicy) != "" {
-		input.AssigneePolicy = *assigneePolicy
-		input.AssigneePolicySet = true
 	}
 	if priority, set, ok := parseOptionalPriorityField(fields); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_priority")

@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGVICMatrixNodesV2(w http.ResponseWriter, r *http.Request) {
 	timedWriter, timings := startTimedRequest(w)
 	w = timedWriter
 	defer func() {
@@ -56,7 +56,7 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 	}
 	stop()
 
-	input := store.RacioMatrixNodeCreateInput{CompanyID: companyID, ActorUserID: strings.TrimSpace(actor.User.UserID), MutationOrigin: store.MutationOriginMatrix}
+	input := store.GVICMatrixNodeCreateInput{CompanyID: companyID, ActorUserID: strings.TrimSpace(actor.User.UserID), MutationOrigin: store.MutationOriginMatrix}
 	stop = timings.observeAccounted("request.validate")
 	if nodeID, set, ok := parseOptionalStringField(fields, "node_id"); !ok {
 		stop()
@@ -127,7 +127,7 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 	}
 	stop()
 	stop = timings.observeAccounted("request.validate")
-	if !parseRacioMatrixNodeCreateMutationFields(w, fields, &input) {
+	if !parseGVICMatrixNodeCreateMutationFields(w, fields, &input) {
 		stop()
 		return
 	}
@@ -136,9 +136,9 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 	input.IdempotencyKey = r.Header.Get("Idempotency-Key")
 	input.TimingRecorder = timings
 	stop = timings.observeAccounted("source.transaction")
-	result, err := s.repo.CreateRacioMatrixNode(input)
+	result, err := s.repo.CreateGVICMatrixNode(input)
 	stop()
-	if !writeRacioMatrixNodeCreateError(w, err) {
+	if !writeGVICMatrixNodeCreateError(w, err) {
 		return
 	}
 	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
@@ -148,17 +148,17 @@ func (s *Server) handleRacioMatrixNodesV2(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusCreated, result)
 }
 
-func (s *Server) handleRacioMatrixNodeByIDV2(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGVICMatrixNodeByIDV2(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v2/gvic-matrix/nodes/"), "/")
 	parts := strings.Split(trimmed, "/")
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || parts[1] != "move" {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	s.handleRacioMatrixNodeMoveV2(w, r, strings.TrimSpace(parts[0]))
+	s.handleGVICMatrixNodeMoveV2(w, r, strings.TrimSpace(parts[0]))
 }
 
-func (s *Server) handleRacioMatrixNodeMoveV2(w http.ResponseWriter, r *http.Request, nodeID string) {
+func (s *Server) handleGVICMatrixNodeMoveV2(w http.ResponseWriter, r *http.Request, nodeID string) {
 	timedWriter, timings := startTimedRequest(w)
 	w = timedWriter
 	defer func() {
@@ -262,7 +262,7 @@ func (s *Server) handleRacioMatrixNodeMoveV2(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, logicGateWorkAssignmentResultPayload(result))
 }
 
-func parseRacioMatrixNodeCreateMutationFields(w http.ResponseWriter, fields map[string]json.RawMessage, input *store.RacioMatrixNodeCreateInput) bool {
+func parseGVICMatrixNodeCreateMutationFields(w http.ResponseWriter, fields map[string]json.RawMessage, input *store.GVICMatrixNodeCreateInput) bool {
 	if status, set, ok := parseOptionalStringField(fields, "status"); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_status")
 		return false
@@ -288,11 +288,9 @@ func parseRacioMatrixNodeCreateMutationFields(w http.ResponseWriter, fields map[
 	} else if set && description != nil {
 		input.DescriptionSnapshot = *description
 	}
-	if assigneePolicy, set, ok := parseOptionalStringField(fields, "assignee_policy"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_assignee_policy")
+	if _, present := fields["assignee_policy"]; present {
+		writeError(w, http.StatusBadRequest, "unsupported_assignee_policy")
 		return false
-	} else if set && assigneePolicy != nil {
-		input.AssigneePolicy = *assigneePolicy
 	}
 	if priority, set, ok := parseOptionalPriorityField(fields); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_priority")
@@ -317,7 +315,7 @@ func parseRacioMatrixNodeCreateMutationFields(w http.ResponseWriter, fields map[
 	return true
 }
 
-func writeRacioMatrixNodeCreateError(w http.ResponseWriter, err error) bool {
+func writeGVICMatrixNodeCreateError(w http.ResponseWriter, err error) bool {
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_gvic_matrix_node")
 		return false
@@ -326,7 +324,7 @@ func writeRacioMatrixNodeCreateError(w http.ResponseWriter, err error) bool {
 		writeError(w, http.StatusBadRequest, "priority_required")
 		return false
 	}
-	if errors.Is(err, store.ErrAssigneeNotInCompany) {
+	if errors.Is(err, store.ErrPrincipalNotInCompany) {
 		writeError(w, http.StatusBadRequest, "assignee_user_not_in_company")
 		return false
 	}
@@ -335,7 +333,7 @@ func writeRacioMatrixNodeCreateError(w http.ResponseWriter, err error) bool {
 		return false
 	}
 	if err != nil {
-		log.Printf("failed to create racio matrix node: %v", err)
+		log.Printf("failed to create GVICMatrix matrix node: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed_to_create_gvic_matrix_node")
 		return false
 	}

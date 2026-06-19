@@ -19,8 +19,8 @@ var (
 	ErrInvitationAlreadyAccepted     = errors.New("invitation already accepted")
 	ErrInvitationReplaced            = errors.New("invitation replaced")
 	ErrInvitationEmailMismatch       = errors.New("invitation email mismatch")
-	ErrAssigneeNotInCompany          = errors.New("assignee not in company")
-	ErrRaciStorageUnavailable        = errors.New("raci storage unavailable")
+	ErrPrincipalNotInCompany         = errors.New("principal not in company")
+	ErrGVICStorageUnavailable        = errors.New("GVIC storage unavailable")
 	ErrSharedInboxStorageUnavailable = errors.New("shared inbox storage unavailable")
 	ErrEmailAccountUnavailable       = errors.New("email account unavailable")
 )
@@ -112,8 +112,7 @@ type CommunicationsRepository interface {
 
 type WorkGraphRepository interface {
 	CreateNode(companyID, title string) (domain.Node, error)
-	CreateNodeWithAssignee(companyID, title, assigneeUserID string) (domain.Node, error)
-	CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title, assigneeUserID string) (domain.Node, domain.DomainEvent, error)
+	CreateNodeWithWorkspaceEvent(companyID, title string) (domain.Node, domain.DomainEvent, error)
 	UpdateNode(input UpdateNodeInput) (domain.Node, error)
 	UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.Node, domain.DomainEvent, error)
 	UpdateNodeTitle(companyID, nodeID, title string) (domain.Node, error)
@@ -152,9 +151,9 @@ type LogicGateRepository interface {
 	ListLogicGateMapWindow(query LogicGateMapWindowQuery) (LogicGateMapWindowResult, error)
 	QueryLogicGates(companyID string, query LogicGateQuery) ([]domain.LogicGate, error)
 	QueryVisibleLogicGates(companyID, userID string, query LogicGateQuery) ([]domain.LogicGate, error)
-	SetLogicGateRaciAssignments(input LogicGateRaciAssignmentUpdateInput) ([]domain.LogicGateRaciAssignment, error)
-	AddLogicGateRaciAssignments(input LogicGateRaciAssignmentCommandInput) (LogicGateRaciAssignmentCommandResult, error)
-	RemoveLogicGateRaciAssignments(input LogicGateRaciAssignmentCommandInput) (LogicGateRaciAssignmentCommandResult, error)
+	SetLogicGateGVICAssignments(input LogicGateGVICAssignmentUpdateInput) ([]domain.LogicGateGVICAssignment, error)
+	AddLogicGateGVICAssignments(input LogicGateGVICAssignmentCommandInput) (LogicGateGVICAssignmentCommandResult, error)
+	RemoveLogicGateGVICAssignments(input LogicGateGVICAssignmentCommandInput) (LogicGateGVICAssignmentCommandResult, error)
 	ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error)
 	ListLogicGateRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateRelationship, error)
 	DeleteLogicGateRelationship(companyID, relationshipID string) error
@@ -219,17 +218,17 @@ type LogicGateWorkRepository interface {
 }
 
 type WorkItemReadRepository interface {
-	ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error)
-	ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
+	ListGeneratedInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error)
+	ListGeneratedInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
 	ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error)
 	ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error)
 	ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
-	ListRacioMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RacioMatrixProjectionRow, error)
-	ListRacioMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RacioMatrixProjectionRow, error)
-	ListRacioMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RacioMatrixProjectionRow, error)
+	ListGVICMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error)
+	ListGVICMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]GVICMatrixProjectionRow, error)
+	ListGVICMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]GVICMatrixProjectionRow, error)
 	ListKanbanBoardProjectionRows(companyID, logicGateID string, query KanbanCardQuery) ([]KanbanBoardProjectionRow, error)
 	ListKanbanBoardProjectionRowsForNode(companyID, nodeID string) ([]KanbanBoardProjectionRow, error)
 	ListKanbanBoardProjectionRowsForLogicGate(companyID, logicGateID string) ([]KanbanBoardProjectionRow, error)
@@ -278,7 +277,7 @@ type CompanyExplorerRepository interface {
 	RenameCommunicationsSharedInboxFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
 	DeleteCommunicationsSharedInboxFolder(companyID, folderID string) error
 	SetCommunicationsSharedInboxAccountEmail(companyID, folderID, accountEmail string) (domain.CompanyExplorerFolder, error)
-	SetCommunicationsSharedInboxRaciAssignments(input SharedInboxRaciAssignmentUpdateInput) ([]domain.SharedInboxRaciAssignment, error)
+	SetCommunicationsSharedInboxGVICAssignments(input SharedInboxGVICAssignmentUpdateInput) ([]domain.SharedInboxGVICAssignment, error)
 	ListCompanyExplorerFolderShares(companyID, folderID string) ([]domain.CompanyExplorerFolderShare, error)
 	UpsertCompanyExplorerFolderShare(input CompanyExplorerFolderShareInput) (domain.CompanyExplorerFolderShare, error)
 	DeleteCompanyExplorerFolderShare(companyID, folderID, email string) error
@@ -414,7 +413,7 @@ type MapLayoutRepository interface {
 
 type WorkspaceEntityCommandRepository interface {
 	CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (WorkspaceEntityBatchResult, error)
-	CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (RacioMatrixNodeCreateResult, error)
+	CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVICMatrixNodeCreateResult, error)
 }
 
 type KanbanRepository interface {
@@ -529,7 +528,7 @@ type WorkItemLogicGateInboxItem struct {
 	LogicGateID      string                           `json:"logic_gate_id"`
 	Header           string                           `json:"header"`
 	Roles            []string                         `json:"roles"`
-	RaciAssignments  []domain.LogicGateRaciAssignment `json:"gvic_assignments,omitempty"`
+	GVICAssignments  []domain.LogicGateGVICAssignment `json:"gvic_assignments,omitempty"`
 	CreatedTimestamp time.Time                        `json:"created_timestamp"`
 }
 
@@ -553,12 +552,8 @@ type ProjectionRow struct {
 	LogicGateID                  *string          `json:"logic_gate_id,omitempty"`
 	DisplayTitle                 string           `json:"display_title,omitempty"`
 	Status                       *string          `json:"status,omitempty"`
-	StatusColor                  *string          `json:"status_color,omitempty"`
 	DueDate                      *string          `json:"due_date,omitempty"`
 	Priority                     *int             `json:"priority,omitempty"`
-	AssigneeUserID               *string          `json:"assignee_user_id,omitempty"`
-	AssigneeDisplayName          *string          `json:"assignee_display_name,omitempty"`
-	AssigneeEmail                *string          `json:"assignee_email,omitempty"`
 	ResourceCreatedTimestamp     time.Time        `json:"resource_created_timestamp,omitempty"`
 	RelationshipCreatedTimestamp time.Time        `json:"relationship_created_timestamp,omitempty"`
 	RelationshipUpdatedTimestamp time.Time        `json:"relationship_updated_timestamp,omitempty"`
@@ -584,7 +579,7 @@ type ProjectionRow struct {
 	Accounts                     []domain.Account `json:"accounts,omitempty"`
 }
 
-type RacioMatrixProjectionRow = ProjectionRow
+type GVICMatrixProjectionRow = ProjectionRow
 
 type GVICEffectiveAssignmentProjectionRow = ProjectionRow
 
@@ -777,7 +772,6 @@ type ProjectScopedNodeCreateInput struct {
 	ProjectID          string
 	NodeID             string
 	Title              string
-	AssigneeUserID     string
 	Position           int
 	InitialInformation *ProjectScopedInitialInformationInput
 	InitialAssignment  *ProjectScopedNodeLogicGateAssignmentInput
@@ -1043,7 +1037,7 @@ type WorkspaceEntityBatchResult struct {
 	DeferredLogicGateMapPositions []domain.LogicGateMapPosition                 `json:"-"`
 }
 
-type RacioMatrixNodeCreateInput struct {
+type GVICMatrixNodeCreateInput struct {
 	CompanyID                string
 	NodeID                   string
 	Title                    string
@@ -1059,21 +1053,20 @@ type RacioMatrixNodeCreateInput struct {
 	PrioritySet              bool
 	IsIssue                  bool
 	IsIssueSet               bool
-	AssigneePolicy           string
 	ActorUserID              string
 	IdempotencyKey           string
 	TimingRecorder           TimingRecorder
 }
 
-type RacioMatrixNodeCreateResult struct {
-	Node                domain.Node                        `json:"node"`
-	LogicGate           *domain.LogicGate                  `json:"logic_gate,omitempty"`
-	Assignment          *domain.NodeLogicGateAssignment    `json:"assignment,omitempty"`
-	Card                *domain.KanbanCard                 `json:"card,omitempty"`
-	FolderItems         []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
-	RacioProjectionRows []RacioMatrixProjectionRow         `json:"gvic_projection_rows,omitempty"`
-	ProjectionDeltas    []ProjectionDelta                  `json:"-"`
-	Events              []domain.DomainEvent               `json:"-"`
+type GVICMatrixNodeCreateResult struct {
+	Node                     domain.Node                        `json:"node"`
+	LogicGate                *domain.LogicGate                  `json:"logic_gate,omitempty"`
+	Assignment               *domain.NodeLogicGateAssignment    `json:"assignment,omitempty"`
+	Card                     *domain.KanbanCard                 `json:"card,omitempty"`
+	FolderItems              []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
+	GVICMatrixProjectionRows []GVICMatrixProjectionRow          `json:"gvic_projection_rows,omitempty"`
+	ProjectionDeltas         []ProjectionDelta                  `json:"-"`
+	Events                   []domain.DomainEvent               `json:"-"`
 }
 type NodeMapWindowBounds struct {
 	MinX float64 `json:"min_x"`
@@ -1181,17 +1174,17 @@ type CompanyExplorerFolderShareInput struct {
 	InvitedByUserID string
 }
 
-type SharedInboxRaciAssignmentInput struct {
-	Role        string `json:"role"`
-	SubjectType string `json:"subject_type"`
-	SubjectID   string `json:"subject_id"`
-	UserID      string `json:"user_id"`
+type SharedInboxGVICAssignmentInput struct {
+	Role          string `json:"role"`
+	PrincipalType string `json:"principal_type"`
+	PrincipalID   string `json:"principal_id"`
+	UserID        string `json:"user_id"`
 }
 
-type SharedInboxRaciAssignmentUpdateInput struct {
+type SharedInboxGVICAssignmentUpdateInput struct {
 	CompanyID   string
 	FolderID    string
-	Assignments []SharedInboxRaciAssignmentInput
+	Assignments []SharedInboxGVICAssignmentInput
 }
 
 type CompanyExplorerDeleteTargetInput struct {
@@ -1379,38 +1372,34 @@ type LogicGateNodeAssignmentInput struct {
 	PrioritySet         bool
 	IsIssue             bool
 	IsIssueSet          bool
-	AssigneePolicy      string
 	ActorUserID         string
 	IdempotencyKey      string
 	TimingRecorder      TimingRecorder
 }
 
 type LogicGateNodeAssignmentMoveInput struct {
-	CompanyID         string
-	LogicGateID       string
-	FromLogicGateID   string
-	NodeID            string
-	Status            string
-	ColumnID          string
-	MutationOrigin    string
-	Position          int
-	Priority          *int
-	PrioritySet       bool
-	AssigneePolicy    string
-	AssigneePolicySet bool
-	ActorUserID       string
-	IdempotencyKey    string
-	TimingRecorder    TimingRecorder
+	CompanyID       string
+	LogicGateID     string
+	FromLogicGateID string
+	NodeID          string
+	Status          string
+	ColumnID        string
+	MutationOrigin  string
+	Position        int
+	Priority        *int
+	PrioritySet     bool
+	ActorUserID     string
+	IdempotencyKey  string
+	TimingRecorder  TimingRecorder
 }
 
 type LogicGateNodeAssignmentRemoveInput struct {
-	CompanyID           string
-	LogicGateID         string
-	NodeID              string
-	FallbackStatus      *string
-	FallbackStatusColor *string
-	ActorUserID         string
-	IdempotencyKey      string
+	CompanyID      string
+	LogicGateID    string
+	NodeID         string
+	FallbackStatus *string
+	ActorUserID    string
+	IdempotencyKey string
 }
 
 type LogicGateNodeAssignmentIssueInput struct {
@@ -1423,21 +1412,21 @@ type LogicGateNodeAssignmentIssueInput struct {
 }
 
 type LogicGateNodeAssignmentResult struct {
-	Card                domain.KanbanCard              `json:"card"`
-	Node                domain.Node                    `json:"node"`
-	Assignment          domain.NodeLogicGateAssignment `json:"-"`
-	RacioProjectionRows []RacioMatrixProjectionRow     `json:"gvic_projection_rows,omitempty"`
-	ProjectionDeltas    []ProjectionDelta              `json:"-"`
-	Events              []domain.DomainEvent           `json:"-"`
+	Card                     domain.KanbanCard              `json:"card"`
+	Node                     domain.Node                    `json:"node"`
+	Assignment               domain.NodeLogicGateAssignment `json:"-"`
+	GVICMatrixProjectionRows []GVICMatrixProjectionRow      `json:"gvic_projection_rows,omitempty"`
+	ProjectionDeltas         []ProjectionDelta              `json:"-"`
+	Events                   []domain.DomainEvent           `json:"-"`
 }
 
 type LogicGateNodeAssignmentRemoveResult struct {
-	Card                domain.KanbanCard              `json:"card"`
-	Node                domain.Node                    `json:"node"`
-	Assignment          domain.NodeLogicGateAssignment `json:"-"`
-	RacioProjectionRows []RacioMatrixProjectionRow     `json:"gvic_projection_rows,omitempty"`
-	ProjectionDeltas    []ProjectionDelta              `json:"-"`
-	Events              []domain.DomainEvent           `json:"-"`
+	Card                     domain.KanbanCard              `json:"card"`
+	Node                     domain.Node                    `json:"node"`
+	Assignment               domain.NodeLogicGateAssignment `json:"-"`
+	GVICMatrixProjectionRows []GVICMatrixProjectionRow      `json:"gvic_projection_rows,omitempty"`
+	ProjectionDeltas         []ProjectionDelta              `json:"-"`
+	Events                   []domain.DomainEvent           `json:"-"`
 }
 
 type KanbanWorkspaceEventResult struct {
@@ -1556,22 +1545,18 @@ func NormalizeNotificationRetentionDuration(retention time.Duration) time.Durati
 }
 
 type UpdateNodeInput struct {
-	CompanyID         string
-	NodeID            string
-	Title             string
-	TitleSet          bool
-	Status            *string
-	StatusSet         bool
-	StatusColor       *string
-	StatusColorSet    bool
-	DueDate           *string
-	DueDateSet        bool
-	Priority          *int
-	PrioritySet       bool
-	AssigneeUserID    *string
-	AssigneeUserIDSet bool
-	ActorUserID       string
-	ActorDisplayName  string
+	CompanyID        string
+	NodeID           string
+	Title            string
+	TitleSet         bool
+	Status           *string
+	StatusSet        bool
+	DueDate          *string
+	DueDateSet       bool
+	Priority         *int
+	PrioritySet      bool
+	ActorUserID      string
+	ActorDisplayName string
 }
 
 type NodeInformationInput struct {
@@ -1611,39 +1596,39 @@ type NodeViewInput struct {
 	UserID    string
 }
 
-type LogicGateRaciAssignmentInput struct {
-	Role        string `json:"role"`
-	SubjectType string `json:"subject_type"`
-	SubjectID   string `json:"subject_id"`
-	UserID      string `json:"user_id"`
+type LogicGateGVICAssignmentInput struct {
+	Role          string `json:"role"`
+	PrincipalType string `json:"principal_type"`
+	PrincipalID   string `json:"principal_id"`
+	UserID        string `json:"user_id"`
 }
 
-type LogicGateRaciAssignmentUpdateInput struct {
+type LogicGateGVICAssignmentUpdateInput struct {
 	CompanyID   string
 	LogicGateID string
-	Assignments []LogicGateRaciAssignmentInput
+	Assignments []LogicGateGVICAssignmentInput
 }
 
 const (
-	LogicGateRaciCommandAdd    = "add"
-	LogicGateRaciCommandRemove = "remove"
+	LogicGateGVICCommandAdd    = "add"
+	LogicGateGVICCommandRemove = "remove"
 )
 
-type LogicGateRaciAssignmentCommandInput struct {
+type LogicGateGVICAssignmentCommandInput struct {
 	CompanyID      string
 	LogicGateID    string
-	Assignments    []LogicGateRaciAssignmentInput
+	Assignments    []LogicGateGVICAssignmentInput
 	ActorUserID    string
 	IdempotencyKey string
 }
 
-type LogicGateRaciAssignmentCommandResult struct {
+type LogicGateGVICAssignmentCommandResult struct {
 	CompanyID         string                           `json:"company_id"`
 	LogicGateID       string                           `json:"logic_gate_id"`
 	Operation         string                           `json:"operation"`
 	Changed           bool                             `json:"changed"`
-	RaciAssignments   []domain.LogicGateRaciAssignment `json:"gvic_assignments"`
-	BeforeAssignments []domain.LogicGateRaciAssignment `json:"-"`
+	GVICAssignments   []domain.LogicGateGVICAssignment `json:"gvic_assignments"`
+	BeforeAssignments []domain.LogicGateGVICAssignment `json:"-"`
 	ProjectionDeltas  []ProjectionDelta                `json:"-"`
 	Events            []domain.DomainEvent             `json:"-"`
 }

@@ -645,7 +645,7 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	if err = optionalCleanup("delete company resource permissions for user", "resource_permissions", `delete from resource_permissions where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if err = optionalCleanup("delete company racio matrix projection rows for user", "racio_matrix_projection_table", `delete from racio_matrix_projection_table where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
+	if err = optionalCleanup("delete company GVICMatrix matrix projection rows for user", "gvic_matrix_projection_table", `delete from gvic_matrix_projection_table where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
 	if _, err = tx.Exec(`delete from company_memberships where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
@@ -717,13 +717,7 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	if err = optionalCleanup("delete all effective gvic assignments for user", "resource_gvic_effective_assignments", `delete from resource_gvic_effective_assignments where user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if err = optionalCleanup("clear kanban projection assignees for user", "kanban_board_projection", `update kanban_board_projection set assignee_user_id = null where assignee_user_id = $1::uuid`, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
-	}
 	if err = optionalCleanup("clear project timeline created-by references for user", "project_management_timeline_items", `update project_management_timeline_items set created_by_user_id = null where created_by_user_id = $1::uuid`, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
-	}
-	if err = optionalCleanup("clear project timeline projection assignees for user", "project_management_timeline_projection", `update project_management_timeline_projection set assignee_user_id = null where assignee_user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
 	if err = optionalCleanup("delete all resource access grants for user", "resource_access_grants", `delete from resource_access_grants where principal_type = 'user' and principal_id = $1::uuid`, userID); err != nil {
@@ -735,7 +729,7 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	if err = optionalCleanup("delete resource permissions assigned by user", "resource_permissions", `delete from resource_permissions where assigned_by_user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if err = optionalCleanup("delete all racio matrix projection rows for user", "racio_matrix_projection_table", `delete from racio_matrix_projection_table where user_id = $1::uuid`, userID); err != nil {
+	if err = optionalCleanup("delete all GVICMatrix matrix projection rows for user", "gvic_matrix_projection_table", `delete from gvic_matrix_projection_table where user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
 	if err = optionalCleanup("delete all entity access permissions for user", "entity_access_permissions", `delete from entity_access_permissions where subject_type = 'user' and subject_id = $1::uuid`, userID); err != nil {

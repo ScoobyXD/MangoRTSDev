@@ -32,7 +32,7 @@ func (s *Server) handleCommunicationsSharedInboxes(w http.ResponseWriter, r *htt
 		}
 		if err != nil {
 			log.Printf("communications shared inboxes: failed to list company_id=%s: %v", companyID, err)
-			if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrRaciStorageUnavailable) {
+			if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrGVICStorageUnavailable) {
 				writeError(w, http.StatusServiceUnavailable, "shared_inbox_storage_unavailable")
 				return
 			}
@@ -300,7 +300,7 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			writeError(w, http.StatusNotFound, "shared_inbox_not_found")
 			return
 		}
-		if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrRaciStorageUnavailable) {
+		if errors.Is(err, store.ErrSharedInboxStorageUnavailable) || errors.Is(err, store.ErrGVICStorageUnavailable) {
 			writeError(w, http.StatusServiceUnavailable, "shared_inbox_storage_unavailable")
 			return
 		}
@@ -385,7 +385,7 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			writeError(w, http.StatusBadRequest, "invalid_shared_inbox_access_grants")
 			return
 		}
-		if errors.Is(err, store.ErrAssigneeNotInCompany) {
+		if errors.Is(err, store.ErrPrincipalNotInCompany) {
 			writeError(w, http.StatusBadRequest, "shared_inbox_access_user_not_in_company")
 			return
 		}

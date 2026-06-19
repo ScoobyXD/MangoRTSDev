@@ -405,24 +405,6 @@ create table if not exists logic_gates (
   primary key (company_id, logic_gate_id)
 );
 
-create table if not exists logic_gate_raci_assignments (
-  company_id uuid not null,
-  logic_gate_id uuid not null,
-  role text not null,
-  user_id uuid not null,
-  created_timestamp timestamptz not null default now(),
-  constraint logic_gate_raci_assignments_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
-  primary key (company_id, logic_gate_id, role, user_id),
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade,
-  foreign key (company_id, user_id) references company_memberships (company_id, user_id) on delete cascade
-);
-
-create index if not exists idx_logic_gate_raci_user_role_gate
-  on logic_gate_raci_assignments(company_id, user_id, role, logic_gate_id);
-
-create index if not exists idx_logic_gate_raci_gate_role_user
-  on logic_gate_raci_assignments(company_id, logic_gate_id, role, user_id);
-
 create table if not exists projects (
   company_id uuid not null,
   project_id uuid not null,
@@ -531,7 +513,6 @@ create table if not exists project_relationship_projection (
   assignment_id uuid,
   display_title text not null,
   status text,
-  status_color text,
   position integer not null default 0,
   resource_created_timestamp timestamptz not null,
   relationship_created_timestamp timestamptz not null,
@@ -567,27 +548,6 @@ create index if not exists idx_project_relationship_projection_logic_gate
 
 create index if not exists idx_project_relationship_projection_assignment
   on project_relationship_projection(company_id, assignment_id);
-
-create table if not exists resource_raci_assignments (
-  company_id uuid not null,
-  resource_type text not null,
-  resource_id uuid not null,
-  role text not null,
-  subject_type text not null,
-  subject_id uuid not null,
-  created_timestamp timestamptz not null default now(),
-  constraint resource_raci_assignments_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'shared_inbox')),
-  constraint resource_raci_assignments_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
-  constraint resource_raci_assignments_subject_type_chk check (subject_type in ('user', 'group')),
-  primary key (company_id, resource_type, resource_id, role, subject_type, subject_id),
-  foreign key (company_id) references companies (company_id) on delete cascade
-);
-
-create index if not exists idx_resource_raci_assignments_subject_role_resource
-  on resource_raci_assignments(company_id, subject_type, subject_id, role, resource_type, resource_id);
-
-create index if not exists idx_resource_raci_assignments_resource_role_subject
-  on resource_raci_assignments(company_id, resource_type, resource_id, role, subject_type, subject_id);
 
 create table if not exists resource_gvic_assignments (
   company_id uuid not null,
@@ -1076,7 +1036,7 @@ for each row
 execute function enforce_node_logic_gate_assignment_priority();
 
 -- Disposable Logic Gate Kanban read model. Source truth remains nodes,
--- logic_gates, node_logic_gate_assignments, and access/RACI tables.
+-- logic_gates, node_logic_gate_assignments, and access/GVIC tables.
 create table if not exists kanban_board_projection (
   company_id uuid not null,
   logic_gate_id uuid not null,
@@ -1085,7 +1045,6 @@ create table if not exists kanban_board_projection (
   column_id text not null,
   position integer not null,
   title text not null,
-  assignee_user_id uuid,
   priority smallint,
   is_issue boolean not null default false,
   due_date date,
@@ -1104,8 +1063,7 @@ create table if not exists kanban_board_projection (
   constraint kanban_board_projection_accounts_array_chk check (jsonb_typeof(accounts) = 'array'),
   primary key (company_id, logic_gate_id, node_id),
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade,
-  foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
-  foreign key (assignee_user_id) references users (user_id)
+  foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade
 );
 
 insert into kanban_board_projection (
@@ -1116,7 +1074,6 @@ insert into kanban_board_projection (
   column_id,
   position,
   title,
-  assignee_user_id,
   priority,
   is_issue,
   due_date,
@@ -1138,7 +1095,6 @@ select
   assignment.column_id,
   assignment.position,
   node_row.name,
-  null::uuid,
   node_row.priority,
   assignment.is_issue,
   node_row.due_date,
@@ -1181,7 +1137,6 @@ do update set
   column_id = excluded.column_id,
   position = excluded.position,
   title = excluded.title,
-  assignee_user_id = null,
   priority = excluded.priority,
   is_issue = excluded.is_issue,
   due_date = excluded.due_date,
@@ -1208,12 +1163,12 @@ create table if not exists company_projection_sequences (
   constraint company_projection_sequences_sequence_nonnegative_chk check (sequence >= 0)
 );
 
--- Targeted read model for RACIO matrix and work-item inbox endpoints.
+-- Targeted read model for GVIC matrix and work-item inbox endpoints.
 -- Source of truth remains nodes, node_logic_gate_assignments, logic_gates,
--- logic_gate_raci_assignments, users, and company_memberships. Application writes
--- maintain only affected rows; there are intentionally no whole-table rebuild
--- triggers or database-side rebuild functions for this projection.
-create table if not exists racio_matrix_projection_table (
+-- resource_gvic_effective_assignments, users, and company_memberships.
+-- Application writes maintain only affected rows; there are intentionally no
+-- whole-table rebuild triggers or database-side rebuild functions for this projection.
+create table if not exists gvic_matrix_projection_table (
   company_id uuid not null,
   user_id uuid not null,
   resource_type text not null,
@@ -1221,18 +1176,14 @@ create table if not exists racio_matrix_projection_table (
   logic_gate_id uuid,
   display_title text not null default '',
   status text,
-  status_color text,
   due_date date,
   priority smallint,
-  assignee_user_id uuid,
-  assignee_display_name text,
-  assignee_email text,
   accounts jsonb not null default '[]'::jsonb,
   resource_created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint racio_matrix_projection_resource_type_chk check (resource_type in ('node', 'logic_gate')),
-  constraint racio_matrix_projection_accounts_array_chk check (jsonb_typeof(accounts) = 'array'),
-  constraint racio_matrix_projection_shape_chk check (
+  constraint gvic_matrix_projection_resource_type_chk check (resource_type in ('node', 'logic_gate')),
+  constraint gvic_matrix_projection_accounts_array_chk check (jsonb_typeof(accounts) = 'array'),
+  constraint gvic_matrix_projection_shape_chk check (
     (resource_type = 'node')
     or (resource_type = 'logic_gate' and logic_gate_id = resource_id)
   ),
@@ -1241,19 +1192,19 @@ create table if not exists racio_matrix_projection_table (
   foreign key (user_id) references users (user_id) on delete cascade
 );
 
-create index if not exists idx_racio_projection_node_read
-  on racio_matrix_projection_table(company_id, user_id, resource_type, logic_gate_id, resource_created_timestamp, resource_id)
+create index if not exists idx_gvic_matrix_projection_node_read
+  on gvic_matrix_projection_table(company_id, user_id, resource_type, logic_gate_id, resource_created_timestamp, resource_id)
   where resource_type = 'node';
 
-create index if not exists idx_racio_projection_logic_gate_read
-  on racio_matrix_projection_table(company_id, user_id, resource_type, lower(display_title), resource_id)
+create index if not exists idx_gvic_matrix_projection_logic_gate_read
+  on gvic_matrix_projection_table(company_id, user_id, resource_type, lower(display_title), resource_id)
   where resource_type = 'logic_gate';
 
-create index if not exists idx_racio_projection_logic_gate_user
-  on racio_matrix_projection_table(company_id, logic_gate_id, user_id);
+create index if not exists idx_gvic_matrix_projection_logic_gate_user
+  on gvic_matrix_projection_table(company_id, logic_gate_id, user_id);
 
-create index if not exists idx_racio_projection_resource
-  on racio_matrix_projection_table(company_id, resource_type, resource_id);
+create index if not exists idx_gvic_matrix_projection_resource
+  on gvic_matrix_projection_table(company_id, resource_type, resource_id);
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
 create index if not exists idx_node_projection_table_node_updated on node_projection_table(company_id, node_id, updated_timestamp desc);
 drop index if exists idx_node_projection_table_one_text_box;
@@ -1401,42 +1352,6 @@ create index if not exists idx_shared_inboxes_parent
 
 create index if not exists idx_shared_inboxes_account_email
   on shared_inboxes(company_id, account_email);
-
-create table if not exists shared_inbox_raci_assignments (
-  company_id uuid not null,
-  shared_inbox_id uuid not null,
-  role text not null,
-  user_id uuid not null,
-  created_timestamp timestamptz not null default now(),
-  constraint shared_inbox_raci_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
-  primary key (company_id, shared_inbox_id, role, user_id),
-  foreign key (company_id, shared_inbox_id) references shared_inboxes (company_id, shared_inbox_id) on delete cascade,
-  foreign key (company_id, user_id) references company_memberships (company_id, user_id) on delete cascade
-);
-
-create index if not exists idx_shared_inbox_raci_user_role_inbox
-  on shared_inbox_raci_assignments(company_id, user_id, role, shared_inbox_id);
-
-create index if not exists idx_shared_inbox_raci_inbox_role_user
-  on shared_inbox_raci_assignments(company_id, shared_inbox_id, role, user_id);
-
-create table if not exists shared_inbox_raci_group_assignments (
-  company_id uuid not null,
-  shared_inbox_id uuid not null,
-  role text not null,
-  group_id uuid not null,
-  created_timestamp timestamptz not null default now(),
-  constraint shared_inbox_raci_group_role_chk check (role in ('responsible', 'accountable', 'consulted', 'informed')),
-  primary key (company_id, shared_inbox_id, role, group_id),
-  foreign key (company_id, shared_inbox_id) references shared_inboxes (company_id, shared_inbox_id) on delete cascade,
-  foreign key (company_id, group_id) references company_user_groups (company_id, group_id) on delete cascade
-);
-
-create index if not exists idx_shared_inbox_raci_group_role_inbox
-  on shared_inbox_raci_group_assignments(company_id, group_id, role, shared_inbox_id);
-
-create index if not exists idx_shared_inbox_raci_inbox_role_group
-  on shared_inbox_raci_group_assignments(company_id, shared_inbox_id, role, group_id);
 
 create table if not exists company_explorer_default_folder_seeds (
   company_id uuid not null,
@@ -2042,7 +1957,7 @@ begin
     ) as v(scope, resource_key);
   end if;
 
-  if p_event_type = any(array['logic_gate_created', 'logic_gate_updated', 'logic_gate_deleted', 'logic_gate_raci_updated', 'logic_gate_permissions_updated']::text[]) then
+  if p_event_type = any(array['logic_gate_created', 'logic_gate_updated', 'logic_gate_deleted', 'logic_gate_gvic_updated', 'logic_gate_permissions_updated']::text[]) then
     return query select v.scope, v.resource_key from (values
       ('logic-gates', ''),
       ('workspace-snapshot:logic_gate_map', ''),
@@ -2112,7 +2027,7 @@ begin
     'company_explorer_folder_updated',
     'company_explorer_folder_deleted',
     'company_explorer_folder_permissions_updated',
-    'communications_shared_inbox_raci_updated',
+    'communications_shared_inbox_gvic_updated',
     'shared_triage_access_updated'
   ]::text[]) then
     if folder_kind = 'node' then
@@ -2319,7 +2234,7 @@ create table if not exists notifications (
   constraint notifications_entity_id_nonblank_chk check (btrim(entity_id) <> ''),
   constraint notifications_title_nonblank_chk check (btrim(title) <> ''),
   constraint notifications_surface_chk check (surface = '' or surface in ('r_inbox', 'aci_inbox', 'my_triage', 'shared_triage')),
-  constraint notifications_role_chk check (role = '' or role in ('responsible', 'accountable', 'consulted', 'informed', 'other')),
+  constraint notifications_role_chk check (role = '' or role in ('generated', 'verified', 'consulted', 'informed', 'other')),
   primary key (notification_id),
   foreign key (recipient_user_id) references users (user_id) on delete cascade,
   foreign key (actor_user_id) references users (user_id) on delete set null

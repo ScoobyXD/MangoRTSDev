@@ -18,7 +18,7 @@ export const TREE_TOGGLE_SLOT_PX = 14;
 export const TREE_ROW_POSITION_STEP = 1000;
 
 export function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPayload | null {
-  if (row.syntheticKind === "raci_folder" || row.syntheticKind === "default_scope_folder") return null;
+  if (row.syntheticKind === "GVIC_folder" || row.syntheticKind === "default_scope_folder") return null;
   if (row.kind === "folder" && row.folderID && (row.folderKind || row.entityType === "folder")) {
     return { kind: "folder", folderID: row.folderID, folderKind: row.folderKind ?? "logic_gate" };
   }

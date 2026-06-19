@@ -20,7 +20,7 @@ function run(name: string, fn: () => void): void {
 const node = (id: string, title = id) => ({
   company_id: "c",
   node_id: id,
-  title,
+  name: title,
   created_timestamp: id,
 });
 
@@ -75,7 +75,7 @@ run("snapshot reducer replaces explorer snapshot and preserves board list", () =
   });
 
   assert.equal(state.folderSnapshotLoaded, true);
-  assert.deepEqual(state.nodes.map((item) => item.title), ["Alpha"]);
+  assert.deepEqual(state.nodes.map((item) => item.name), ["Alpha"]);
   assert.deepEqual(state.logicGates.map((item) => [item.logic_gate_id, item.node_id, item.title]), [["gate-a", "gate-a", "Gate A"]]);
   assert.deepEqual(state.folders.map((item) => item.folder_id), ["folder-a"]);
   assert.deepEqual(state.folderItems.map((item) => `${item.item_type}:${item.item_id}`), ["node:node-a"]);
@@ -101,7 +101,7 @@ run("workspace stream reducer upserts and removes explorer entities", () => {
     companyID: "c",
     envelope: { company_id: "c", type: "node_updated", data: { node: node("node-a", "New") } },
   });
-  assert.equal(state.nodes[0]?.title, "New");
+  assert.equal(state.nodes[0]?.name, "New");
 
   state = reduceCompanyExplorerStore(state, {
     type: "applyWorkspaceEnvelope",

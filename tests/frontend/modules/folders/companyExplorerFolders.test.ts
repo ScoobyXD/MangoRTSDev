@@ -20,9 +20,9 @@ test("folder subtree traversal supports mixed node and logic-gate folders", () =
 test("node folder scope keeps only nodes in selected folder subtree and their internal relationships", () => {
   const scoped = filterNodeGraphToFolderScope({
     nodes: [
-      { company_id: "c", node_id: "node-a", title: "A", created_timestamp: "1" },
-      { company_id: "c", node_id: "node-b", title: "B", created_timestamp: "2" },
-      { company_id: "c", node_id: "node-outside", title: "Outside", created_timestamp: "3" },
+      { company_id: "c", node_id: "node-a", name: "A", created_timestamp: "1" },
+      { company_id: "c", node_id: "node-b", name: "B", created_timestamp: "2" },
+      { company_id: "c", node_id: "node-outside", name: "Outside", created_timestamp: "3" },
     ],
     relationships: [
       { company_id: "c", node_relationship_id: "rel-inside", node_id_a: "node-a", node_id_b: "node-b", a_position: "Parent", b_position: "Child", created_timestamp: "4" },

@@ -9,9 +9,9 @@ func TestMemoryNodeGraphWorkspaceEventsAreDurableAndReplayable(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"
 
-	node, event, err := repo.CreateNodeWithAssigneeAndWorkspaceEvent(companyID, "Alpha", "")
+	node, event, err := repo.CreateNodeWithWorkspaceEvent(companyID, "Alpha")
 	if err != nil {
-		t.Fatalf("CreateNodeWithAssigneeAndWorkspaceEvent: %v", err)
+		t.Fatalf("CreateNodeWithWorkspaceEvent: %v", err)
 	}
 	if event.Type != "node_created" || event.Sequence != 1 || event.Payload["node_id"] != node.NodeID {
 		t.Fatalf("node create event = %+v, node_id payload=%v", event, event.Payload["node_id"])
@@ -83,7 +83,7 @@ func TestMemoryNodeGraphWorkspaceEventAppendFailureRollsBackState(t *testing.T) 
 	t.Run("node create", func(t *testing.T) {
 		repo := NewMemoryRepo()
 		repo.domainEventAppendErr = errAppend
-		_, _, err := repo.CreateNodeWithAssigneeAndWorkspaceEvent(companyID, "No commit", "")
+		_, _, err := repo.CreateNodeWithWorkspaceEvent(companyID, "No commit")
 		if !errors.Is(err, errAppend) {
 			t.Fatalf("err = %v, want append failure", err)
 		}

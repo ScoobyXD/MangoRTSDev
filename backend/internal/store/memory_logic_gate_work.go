@@ -19,7 +19,7 @@ func (r *MemoryRepo) GetLogicGateWork(companyID, logicGateID string) (domain.Log
 	if !ok {
 		return domain.LogicGateWorkView{}, ErrNotFound
 	}
-	logicGate = r.withLogicGateRaciLocked(logicGate)
+	logicGate = r.withLogicGateGVICLocked(logicGate)
 
 	assignments := make([]domain.LogicGateWorkAssignment, 0)
 	for _, assignment := range r.nodeLogicGateAssignments {

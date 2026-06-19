@@ -22,7 +22,7 @@ type MemoryRepo struct {
 	logicGateInfo                 map[string][]domain.LogicGateInformation
 	logicGateText                 map[string]map[string]domain.LogicGateProjection
 	logicGateRels                 map[string][]domain.LogicGateRelationship
-	logicGateRaci                 map[string][]domain.LogicGateRaciAssignment
+	logicGateGVIC                 map[string][]domain.LogicGateGVICAssignment
 	gvicAssignments               map[string]domain.ResourceGVICAssignment
 	gvicEffectiveAssignments      map[string]domain.ResourceGVICEffectiveAssignment
 	projects                      map[string]domain.Project
@@ -32,7 +32,7 @@ type MemoryRepo struct {
 	projectText                   map[string]map[string]domain.ProjectProjection
 	projectRelationships          map[string]domain.ProjectRelationship
 	projectRelationshipProjection map[string]domain.ProjectRelationshipProjection
-	sharedInboxRaci               map[string][]domain.SharedInboxRaciAssignment
+	sharedInboxGVIC               map[string][]domain.SharedInboxGVICAssignment
 	folders                       map[string]domain.CompanyExplorerFolder
 	folderItems                   map[string]domain.CompanyExplorerFolderItem
 	companyExplorerV2Entities     map[string]memoryCompanyExplorerV2Entity
@@ -45,7 +45,7 @@ type MemoryRepo struct {
 	kanbanColumns                 map[string][]domain.KanbanColumn
 	kanbanCards                   map[string][]domain.KanbanCard
 	nodeLogicGateAssignments      map[string]domain.NodeLogicGateAssignment
-	racioProjectionRows           map[string]memoryRacioProjectionRow
+	GVICMatrixProjectionRows      map[string]memoryGVICMatrixProjectionRow
 	projectTimelineItems          map[string]memoryProjectManagementTimelineItem
 	projectTimelineProjection     map[string]ProjectManagementTimelineProjectionRow
 	users                         map[string]domain.User
@@ -89,7 +89,7 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateInfo:                 map[string][]domain.LogicGateInformation{},
 		logicGateText:                 map[string]map[string]domain.LogicGateProjection{},
 		logicGateRels:                 map[string][]domain.LogicGateRelationship{},
-		logicGateRaci:                 map[string][]domain.LogicGateRaciAssignment{},
+		logicGateGVIC:                 map[string][]domain.LogicGateGVICAssignment{},
 		gvicAssignments:               map[string]domain.ResourceGVICAssignment{},
 		gvicEffectiveAssignments:      map[string]domain.ResourceGVICEffectiveAssignment{},
 		projects:                      map[string]domain.Project{},
@@ -99,7 +99,7 @@ func NewMemoryRepo() *MemoryRepo {
 		projectText:                   map[string]map[string]domain.ProjectProjection{},
 		projectRelationships:          map[string]domain.ProjectRelationship{},
 		projectRelationshipProjection: map[string]domain.ProjectRelationshipProjection{},
-		sharedInboxRaci:               map[string][]domain.SharedInboxRaciAssignment{},
+		sharedInboxGVIC:               map[string][]domain.SharedInboxGVICAssignment{},
 		folders:                       map[string]domain.CompanyExplorerFolder{},
 		folderItems:                   map[string]domain.CompanyExplorerFolderItem{},
 		companyExplorerV2Entities:     map[string]memoryCompanyExplorerV2Entity{},
@@ -112,7 +112,7 @@ func NewMemoryRepo() *MemoryRepo {
 		kanbanColumns:                 map[string][]domain.KanbanColumn{},
 		kanbanCards:                   map[string][]domain.KanbanCard{},
 		nodeLogicGateAssignments:      map[string]domain.NodeLogicGateAssignment{},
-		racioProjectionRows:           map[string]memoryRacioProjectionRow{},
+		GVICMatrixProjectionRows:      map[string]memoryGVICMatrixProjectionRow{},
 		projectTimelineItems:          map[string]memoryProjectManagementTimelineItem{},
 		projectTimelineProjection:     map[string]ProjectManagementTimelineProjectionRow{},
 		users:                         map[string]domain.User{},
@@ -207,7 +207,7 @@ func logicGateShortcutKey(userID, companyID, logicGateID string) string {
 	return userID + ":" + companyID + ":" + logicGateID
 }
 
-func sharedInboxRaciKey(companyID, folderID string) string {
+func sharedInboxGVICKey(companyID, folderID string) string {
 	return companyID + ":" + folderID
 }
 

@@ -18,8 +18,7 @@ export type ResourceAccessFields = {
 export type NodeRecord = ResourceAccessFields & {
   company_id: string;
   node_id: string;
-  name?: string;
-  title?: string;
+  name: string;
   status?: string | null;
   due_date?: string | null;
   priority?: number | null;
@@ -29,8 +28,8 @@ export type NodeRecord = ResourceAccessFields & {
 };
 
 // Runtime-safe node label resolver for hot-path module rendering.
-export function getNodeTitle(node: { name?: string; title?: string }): string {
-  return trimOrEmpty(node.name || node.title || "");
+export function getNodeTitle(node: { name?: string }): string {
+  return trimOrEmpty(node.name || "");
 }
 
 // Relationship row payload (a/b sides preserve directional parent/child semantics).

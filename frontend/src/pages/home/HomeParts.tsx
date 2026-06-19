@@ -5,20 +5,20 @@ import { requestAppSidebarPin, type SidebarPinKind } from "../../app/sidebarPins
 import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "../../app/nodeEditorPopupControls";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { BoundRequestJSON } from "../../modules/api/requestJSON";
-import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxRaciRole, type CommunicationsSharedInboxRaciSubjectType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage } from "../../modules/communications/communicationsApi";
+import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage } from "../../modules/communications/communicationsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
 import { buildNodeRelationshipHierarchyRows } from "../../modules/node-map/nodeRelationshipStructure";
-import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
-import { deleteNotification, fetchNotifications, type NotificationItem, type NotificationRaciRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
+import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import { deleteNotification, fetchNotifications, type NotificationItem, type NotificationGVICRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
-import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, GVIC_INBOX_SECTIONS, RACI_STATUS_COLUMNS } from "./homeConstants";
-import type { ComposeAttachment, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes";
-import { buildRaciRoleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, raciRoleCellKey, readTriageMessageIDs, responsibleStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateRaciCellStyle, logicGateRaciColumnHeaderStyle, logicGateRaciColumnLabelStyle, logicGateRaciColumnLetterStyle, logicGateRaciCornerStyle, logicGateRaciHeaderStyle, logicGateRaciMatrixSurfaceStyle, logicGateRaciMetaStyle, logicGateRaciPanelStyle, logicGateRaciPriorityHeaderStyle, logicGateRaciScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, GVIC_INBOX_SECTIONS, GVIC_STATUS_COLUMNS } from "./homeConstants";
+import type { ComposeAttachment, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, GVICInboxRole, GVICInboxStatus } from "./homeTypes";
+import { buildGVICRoleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
@@ -123,7 +123,7 @@ function HomePinContextMenu({ menu, onClose, onDelete }: {
   );
 }
 
-export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, busy, onClose, onApplyNodePatch, onApplyLogicGateRaci, onAddNodesToLogicGate, onRequestDelete }: {
+export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, busy, onClose, onApplyNodePatch, onApplyLogicGateGVIC, onAddNodesToLogicGate, onRequestDelete }: {
   menu: { x: number; y: number; kind: "node" | "logic_gate"; ids: string[] } | null;
   companyUsers: CompanyUser[];
   logicGates: LogicGateRecord[];
@@ -131,7 +131,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
   busy: boolean;
   onClose: () => void;
   onApplyNodePatch: (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "priority" | "status" | "due_date">>) => void;
-  onApplyLogicGateRaci: (logicGateIDs: string[], role: CommunicationsSharedInboxRaciRole, userID: string, action: "add" | "remove") => void;
+  onApplyLogicGateGVIC: (logicGateIDs: string[], role: CommunicationsSharedInboxGVICRole, userID: string, action: "add" | "remove") => void;
   onAddNodesToLogicGate: (nodeIDs: string[], logicGateID: string) => void;
   onRequestDelete: (kind: "node" | "logic_gate", ids: string[]) => void;
 }) {
@@ -140,9 +140,9 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
   const [dueDateMode, setDueDateMode] = useState<"no_change" | "set" | "clear">("no_change");
   const [dueDate, setDueDate] = useState("");
   const [targetLogicGateID, setTargetLogicGateID] = useState("");
-  const [raciRole, setRaciRole] = useState<CommunicationsSharedInboxRaciRole>("generated");
-  const [raciUserID, setRaciUserID] = useState("");
-  const [raciAction, setRaciAction] = useState<"add" | "remove">("add");
+  const [GVICRole, setGVICRole] = useState<CommunicationsSharedInboxGVICRole>("generated");
+  const [GVICUserID, setGVICUserID] = useState("");
+  const [GVICAction, setGVICAction] = useState<"add" | "remove">("add");
   const sortedLogicGates = useMemo(() => [...logicGates].sort((a, b) => (
     logicGateTitle(a).localeCompare(logicGateTitle(b), undefined, { numeric: true, sensitivity: "base" })
     || a.logic_gate_id.localeCompare(b.logic_gate_id)
@@ -155,9 +155,9 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
     setDueDateMode("no_change");
     setDueDate("");
     setTargetLogicGateID(sortedLogicGates[0]?.logic_gate_id ?? "");
-    setRaciRole("generated");
-    setRaciUserID(companyUsers[0]?.user_id ?? "");
-    setRaciAction("add");
+    setGVICRole("generated");
+    setGVICUserID(companyUsers[0]?.user_id ?? "");
+    setGVICAction("add");
   }, [companyUsers, menu?.kind, menu?.ids.join("\u001f"), sortedLogicGates]);
 
   if (!menu) return null;
@@ -223,7 +223,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
             else onClose();
             return;
           }
-          onApplyLogicGateRaci(menu.ids, raciRole, raciUserID, raciAction);
+          onApplyLogicGateGVIC(menu.ids, GVICRole, GVICUserID, GVICAction);
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
@@ -297,14 +297,14 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
           <>
             <label style={labelStyle}>
               Assignment Action
-              <select value={raciAction} onChange={(event) => setRaciAction(event.target.value as "add" | "remove")} style={fieldStyle}>
+              <select value={GVICAction} onChange={(event) => setGVICAction(event.target.value as "add" | "remove")} style={fieldStyle}>
                 <option value="add">Add person</option>
                 <option value="remove">Remove person</option>
               </select>
             </label>
             <label style={labelStyle}>
               Role
-              <select value={raciRole} onChange={(event) => setRaciRole(event.target.value as CommunicationsSharedInboxRaciRole)} style={fieldStyle}>
+              <select value={GVICRole} onChange={(event) => setGVICRole(event.target.value as CommunicationsSharedInboxGVICRole)} style={fieldStyle}>
                 <option value="generated">Generated</option>
                 <option value="verified">Verified</option>
                 <option value="consulted">Consulted</option>
@@ -313,7 +313,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
             </label>
             <label style={labelStyle}>
               Person
-              <select value={raciUserID} onChange={(event) => setRaciUserID(event.target.value)} style={fieldStyle}>
+              <select value={GVICUserID} onChange={(event) => setGVICUserID(event.target.value)} style={fieldStyle}>
                 {companyUsers.map((user) => (
                   <option key={user.user_id} value={user.user_id}>{user.display_name || user.email || user.user_id}</option>
                 ))}
@@ -321,7 +321,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
             </label>
           </>
         )}
-        <button type="submit" disabled={busy || (menu.kind === "logic_gate" && !raciUserID)} style={actionButtonStyle}>
+        <button type="submit" disabled={busy || (menu.kind === "logic_gate" && !GVICUserID)} style={actionButtonStyle}>
           {busy ? "Applying" : "Apply"}
         </button>
         <button
@@ -346,14 +346,14 @@ type InboxNodeDropInput = {
   logicGateID: string;
   nodeIDs: string[];
   priority: InboxPriority;
-  status?: ResponsibleInboxStatus;
+  status?: GVICInboxStatus;
   fromLogicGateID?: string;
 };
 
 type InboxCellCreateInput = {
   priority: InboxPriority;
-  status?: ResponsibleInboxStatus;
-  creatorRaciRole?: LogicGateRaciRole;
+  status?: GVICInboxStatus;
+  creatorGVICRole?: LogicGateGVICRole;
 };
 
 type InboxCellNodeDropInput = InboxCellCreateInput & {
@@ -964,7 +964,7 @@ export function HomeSidebar({
   const cleanConnectedAccountEmail = connectedAccountEmail?.trim().toLowerCase() ?? "";
   const sharedRows = useMemo(() => sharedRootOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [], [expandedSharedFolderIDs, sharedInboxes, sharedRootOpen]);
   const sharedBusy = busy === "shared-inbox";
-  const raciInboxNotificationCount = (role: RaciInboxRole): number => (
+  const GVICInboxNotificationCount = (role: GVICInboxRole): number => (
     notificationCountForRole(notificationSummary, role === "generated" ? "r_inbox" : "aci_inbox", role)
   );
 
@@ -1393,7 +1393,7 @@ export function HomeSidebar({
           )}
         </section>
         {GVIC_INBOX_SECTIONS.map((section) => {
-          const changedNodeCount = raciInboxNotificationCount(section.role);
+          const changedNodeCount = GVICInboxNotificationCount(section.role);
           const active = activeViewID === section.viewID;
           return (
             <HomeNavButton
@@ -1670,7 +1670,7 @@ type CompanyUserGroupMember = {
   user_email?: string;
 };
 
-const SHARED_INBOX_RACI_ROLES: ReadonlyArray<{ role: CommunicationsSharedInboxRaciRole; label: string }> = [
+const SHARED_INBOX_GVIC_ROLES: ReadonlyArray<{ role: CommunicationsSharedInboxGVICRole; label: string }> = [
   { role: "generated", label: "Generated" },
   { role: "verified", label: "Verified" },
   { role: "consulted", label: "Consulted" },
@@ -1685,34 +1685,34 @@ function companyGroupLabel(group: Pick<CompanyUserGroup, "group_id" | "name">): 
   return group.name?.trim() || group.group_id;
 }
 
-function sharedInboxRaciAssignmentSubjectKey(assignment: { subject_type?: string; subject_id?: string; user_id: string }): string {
-  const subjectType = assignment.subject_type?.trim() || "user";
-  const subjectID = assignment.subject_id?.trim() || assignment.user_id.trim();
-  return `${subjectType}:${subjectID}`;
+function sharedInboxGVICAssignmentPrincipalKey(assignment: { principal_type?: string; principal_id?: string; user_id: string }): string {
+  const principalType = assignment.principal_type?.trim() || "user";
+  const principalID = assignment.principal_id?.trim() || assignment.user_id.trim();
+  return `${principalType}:${principalID}`;
 }
 
-function sharedInboxRaciAssignmentLabel(
-  assignment: { subject_type?: string; subject_id?: string; subject_name?: string; user_id: string; user_display_name?: string; user_email?: string },
+function sharedInboxGVICAssignmentLabel(
+  assignment: { principal_type?: string; principal_id?: string; principal_name?: string; user_id: string; user_display_name?: string; user_email?: string },
   userByID: Map<string, CompanyUser>,
   groupByID: Map<string, CompanyUserGroup>,
 ): string {
-  if ((assignment.subject_type ?? "user") === "group") {
-    const groupID = assignment.subject_id?.trim() ?? "";
+  if ((assignment.principal_type ?? "user") === "group") {
+    const groupID = assignment.principal_id?.trim() ?? "";
     const group = groupByID.get(groupID);
-    return assignment.subject_name?.trim() || (group ? companyGroupLabel(group) : groupID || "Group");
+    return assignment.principal_name?.trim() || (group ? companyGroupLabel(group) : groupID || "Group");
   }
   const user = userByID.get(assignment.user_id);
   return assignment.user_display_name?.trim() || assignment.user_email?.trim() || (user ? companyUserLabel(user) : assignment.user_id);
 }
 
-export function SharedInboxRaciSettingsModal({
+export function SharedInboxGVICSettingsModal({
   requestJSON,
   companyID,
   folder,
   companyUsers,
   busy,
-  onAddSubject,
-  onRemoveSubject,
+  onAddPrincipal,
+  onRemovePrincipal,
   onClose,
 }: {
   requestJSON: BoundRequestJSON;
@@ -1720,17 +1720,17 @@ export function SharedInboxRaciSettingsModal({
   folder: CommunicationsSharedInbox;
   companyUsers: CompanyUser[];
   busy: boolean;
-  onAddSubject: (folderID: string, role: CommunicationsSharedInboxRaciRole, subjectType: CommunicationsSharedInboxRaciSubjectType, subjectID: string, subjectName?: string) => void;
-  onRemoveSubject: (folderID: string, role: CommunicationsSharedInboxRaciRole, subjectType: CommunicationsSharedInboxRaciSubjectType, subjectID: string) => void;
+  onAddPrincipal: (folderID: string, role: CommunicationsSharedInboxGVICRole, principalType: CommunicationsSharedInboxGVICPrincipalType, principalID: string, principalName?: string) => void;
+  onRemovePrincipal: (folderID: string, role: CommunicationsSharedInboxGVICRole, principalType: CommunicationsSharedInboxGVICPrincipalType, principalID: string) => void;
   onClose: () => void;
 }) {
-  const [userDraftByRole, setUserDraftByRole] = useState<Record<CommunicationsSharedInboxRaciRole, string>>({
+  const [userDraftByRole, setUserDraftByRole] = useState<Record<CommunicationsSharedInboxGVICRole, string>>({
     generated: "",
     verified: "",
     consulted: "",
     informed: "",
   });
-  const [groupDraftByRole, setGroupDraftByRole] = useState<Record<CommunicationsSharedInboxRaciRole, string>>({
+  const [groupDraftByRole, setGroupDraftByRole] = useState<Record<CommunicationsSharedInboxGVICRole, string>>({
     generated: "",
     verified: "",
     consulted: "",
@@ -1743,10 +1743,10 @@ export function SharedInboxRaciSettingsModal({
   const userByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id, user])), [companyUsers]);
   const groupByID = useMemo(() => new Map(groups.map((group) => [group.group_id, group])), [groups]);
   const assignments = folder.gvic_assignments ?? [];
-  const updateUserDraft = (role: CommunicationsSharedInboxRaciRole, value: string) => {
+  const updateUserDraft = (role: CommunicationsSharedInboxGVICRole, value: string) => {
     setUserDraftByRole((previous) => ({ ...previous, [role]: value }));
   };
-  const updateGroupDraft = (role: CommunicationsSharedInboxRaciRole, value: string) => {
+  const updateGroupDraft = (role: CommunicationsSharedInboxGVICRole, value: string) => {
     setGroupDraftByRole((previous) => ({ ...previous, [role]: value }));
   };
 
@@ -1807,8 +1807,8 @@ export function SharedInboxRaciSettingsModal({
   };
 
   return (
-    <div style={sharedRaciBackdropStyle}>
-      <section style={sharedRaciModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} GVIC assignments`}>
+    <div style={sharedGVICBackdropStyle}>
+      <section style={sharedGVICModalStyle} aria-modal="true" role="dialog" aria-label={`${folder.name} GVIC assignments`}>
         <div style={panelHeaderStyle}>
           <div style={{ minWidth: 0 }}>
             <h2 style={panelTitleStyle}>{folder.name} GVIC assignments</h2>
@@ -1816,30 +1816,30 @@ export function SharedInboxRaciSettingsModal({
           </div>
           <button type="button" style={smallButtonStyle} disabled={busy} onClick={onClose}>Close</button>
         </div>
-        <div style={sharedRaciRoleGridStyle}>
-          {SHARED_INBOX_RACI_ROLES.map(({ role, label }) => {
+        <div style={sharedGVICRoleGridStyle}>
+          {SHARED_INBOX_GVIC_ROLES.map(({ role, label }) => {
             const roleAssignments = assignments.filter((assignment) => assignment.role === role);
-            const assignedSubjectKeys = new Set(roleAssignments.map(sharedInboxRaciAssignmentSubjectKey));
-            const selectableUsers = companyUsers.filter((user) => !assignedSubjectKeys.has(`user:${user.user_id}`));
-            const selectableGroups = groups.filter((group) => !assignedSubjectKeys.has(`group:${group.group_id}`));
+            const assignedPrincipalKeys = new Set(roleAssignments.map(sharedInboxGVICAssignmentPrincipalKey));
+            const selectableUsers = companyUsers.filter((user) => !assignedPrincipalKeys.has(`user:${user.user_id}`));
+            const selectableGroups = groups.filter((group) => !assignedPrincipalKeys.has(`group:${group.group_id}`));
             const selectableGroupIDs = new Set(selectableGroups.map((group) => group.group_id));
             const userDraft = userDraftByRole[role];
             const groupDraft = groupDraftByRole[role];
             return (
-              <section key={role} style={sharedRaciRoleColumnStyle}>
+              <section key={role} style={sharedGVICRoleColumnStyle}>
                 <div style={{ display: "grid", gap: 2 }}>
                   <strong style={{ fontSize: 12 }}>{label}</strong>
                 </div>
-                <div style={sharedRaciChipListStyle}>
+                <div style={sharedGVICChipListStyle}>
                   {roleAssignments.length === 0 ? (
                     <span style={mutedSmallStyle}>No one assigned</span>
                   ) : roleAssignments.map((assignment) => {
                     const inherited = assignment.folder_id !== folder.folder_id;
-                    const subjectType = (assignment.subject_type ?? "user") as CommunicationsSharedInboxRaciSubjectType;
-                    const subjectID = assignment.subject_id?.trim() || assignment.user_id.trim();
-                    const labelText = sharedInboxRaciAssignmentLabel(assignment, userByID, groupByID);
+                    const principalType = (assignment.principal_type ?? "user") as CommunicationsSharedInboxGVICPrincipalType;
+                    const principalID = assignment.principal_id?.trim() || assignment.user_id.trim();
+                    const labelText = sharedInboxGVICAssignmentLabel(assignment, userByID, groupByID);
                     return (
-                      <span key={`${role}:${assignment.folder_id}:${subjectType}:${subjectID}`} style={sharedRaciChipStyle}>
+                      <span key={`${role}:${assignment.folder_id}:${principalType}:${principalID}`} style={sharedGVICChipStyle}>
                         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {labelText}
                         </span>
@@ -1851,7 +1851,7 @@ export function SharedInboxRaciSettingsModal({
                             aria-label={`Remove ${labelText} from ${label}`}
                             style={shortcutRemoveStyle}
                             disabled={busy}
-                            onClick={() => onRemoveSubject(folder.folder_id, role, subjectType, subjectID)}
+                            onClick={() => onRemovePrincipal(folder.folder_id, role, principalType, principalID)}
                           >
                             X
                           </button>
@@ -1860,10 +1860,10 @@ export function SharedInboxRaciSettingsModal({
                     );
                   })}
                 </div>
-                <div style={sharedRaciControlStackStyle}>
-                  <div style={sharedRaciAddRowStyle}>
+                <div style={sharedGVICControlStackStyle}>
+                  <div style={sharedGVICAddRowStyle}>
                     <select
-                      style={sharedRaciSelectStyle}
+                      style={sharedGVICSelectStyle}
                       value={userDraft}
                       disabled={busy || selectableUsers.length === 0}
                       onChange={(event) => updateUserDraft(role, event.target.value)}
@@ -1879,16 +1879,16 @@ export function SharedInboxRaciSettingsModal({
                       disabled={busy || !userDraft}
                       onClick={() => {
                         const user = userByID.get(userDraft);
-                        onAddSubject(folder.folder_id, role, "user", userDraft, user ? companyUserLabel(user) : userDraft);
+                        onAddPrincipal(folder.folder_id, role, "user", userDraft, user ? companyUserLabel(user) : userDraft);
                         updateUserDraft(role, "");
                       }}
                     >
                       Add
                     </button>
                   </div>
-                  <div style={sharedRaciAddRowStyle}>
+                  <div style={sharedGVICAddRowStyle}>
                     <select
-                      style={sharedRaciSelectStyle}
+                      style={sharedGVICSelectStyle}
                       value={groupDraft}
                       disabled={busy || loadingGroups || selectableGroups.length === 0}
                       onChange={(event) => updateGroupDraft(role, event.target.value)}
@@ -1902,7 +1902,7 @@ export function SharedInboxRaciSettingsModal({
                       disabled={busy || !groupDraft}
                       onClick={() => {
                         const group = groupByID.get(groupDraft);
-                        onAddSubject(folder.folder_id, role, "group", groupDraft, group ? companyGroupLabel(group) : groupDraft);
+                        onAddPrincipal(folder.folder_id, role, "group", groupDraft, group ? companyGroupLabel(group) : groupDraft);
                         updateGroupDraft(role, "");
                       }}
                     >
@@ -1919,7 +1919,7 @@ export function SharedInboxRaciSettingsModal({
   );
 }
 
-const sharedRaciBackdropStyle: React.CSSProperties = {
+const sharedGVICBackdropStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
   zIndex: 80,
@@ -1929,7 +1929,7 @@ const sharedRaciBackdropStyle: React.CSSProperties = {
   background: "rgba(15, 23, 42, 0.22)",
 };
 
-const sharedRaciModalStyle: React.CSSProperties = {
+const sharedGVICModalStyle: React.CSSProperties = {
   width: "min(920px, calc(100vw - 40px))",
   maxHeight: "min(620px, calc(100vh - 40px))",
   minHeight: 0,
@@ -1944,7 +1944,7 @@ const sharedRaciModalStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
-const sharedRaciRoleGridStyle: React.CSSProperties = {
+const sharedGVICRoleGridStyle: React.CSSProperties = {
   minHeight: 0,
   display: "grid",
   gridTemplateColumns: "repeat(4, minmax(170px, 1fr))",
@@ -1952,7 +1952,7 @@ const sharedRaciRoleGridStyle: React.CSSProperties = {
   overflow: "auto",
 };
 
-const sharedRaciRoleColumnStyle: React.CSSProperties = {
+const sharedGVICRoleColumnStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 240,
   display: "grid",
@@ -1964,13 +1964,13 @@ const sharedRaciRoleColumnStyle: React.CSSProperties = {
   background: "#f8fafc",
 };
 
-const sharedRaciControlStackStyle: React.CSSProperties = {
+const sharedGVICControlStackStyle: React.CSSProperties = {
   display: "grid",
   gap: 6,
   minWidth: 0,
 };
 
-const sharedRaciChipListStyle: React.CSSProperties = {
+const sharedGVICChipListStyle: React.CSSProperties = {
   minHeight: 0,
   display: "grid",
   alignContent: "start",
@@ -1978,7 +1978,7 @@ const sharedRaciChipListStyle: React.CSSProperties = {
   overflow: "auto",
 };
 
-const sharedRaciChipStyle: React.CSSProperties = {
+const sharedGVICChipStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 28,
   display: "grid",
@@ -1993,14 +1993,14 @@ const sharedRaciChipStyle: React.CSSProperties = {
   fontWeight: 600,
 };
 
-const sharedRaciAddRowStyle: React.CSSProperties = {
+const sharedGVICAddRowStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) auto",
   gap: 6,
   minWidth: 0,
 };
 
-const sharedRaciSelectStyle: React.CSSProperties = {
+const sharedGVICSelectStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
   height: 30,
@@ -2166,21 +2166,21 @@ export function LogicGateRail({
   onAddShortcuts: (payload: ExplorerDragPayload | null) => void;
   onRemoveShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[], priority: number) => void;
-  onCreateLogicGate: (options?: { creatorRaciRole?: LogicGateRaciRole }) => void;
+  onCreateLogicGate: (options?: { creatorGVICRole?: LogicGateGVICRole }) => void;
   onRequestDeleteLogicGate: (logicGateID: string) => void;
 }) {
   const railSplit = useRailTopResize(HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, 240);
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
-  const [createContextMenu, setCreateContextMenu] = useState<{ x: number; y: number; creatorRaciRole?: LogicGateRaciRole } | null>(null);
+  const [createContextMenu, setCreateContextMenu] = useState<{ x: number; y: number; creatorGVICRole?: LogicGateGVICRole } | null>(null);
   const [triagePriorityMenu, setTriagePriorityMenu] = useState<TriageConversionPriorityMenuState | null>(null);
   const [logicGateDropTargetRowID, setLogicGateDropTargetRowID] = useState("");
-  const openCreateLogicGateMenu = useCallback((event: React.MouseEvent, creatorRaciRole?: LogicGateRaciRole) => {
+  const openCreateLogicGateMenu = useCallback((event: React.MouseEvent, creatorGVICRole?: LogicGateGVICRole) => {
     event.preventDefault();
     event.stopPropagation();
     setPinContextMenu(null);
     setLogicGateDropTargetRowID("");
     setTriagePriorityMenu(null);
-    setCreateContextMenu({ x: event.clientX, y: event.clientY, creatorRaciRole });
+    setCreateContextMenu({ x: event.clientX, y: event.clientY, creatorGVICRole });
   }, []);
   const requestTriageConversionPriority = useCallback((event: React.DragEvent<HTMLElement>, logicGateID: string, messageIDs: string[]) => {
     const ids = cleanIDList(messageIDs);
@@ -2350,9 +2350,9 @@ export function LogicGateRail({
           type="button"
           style={sharedInboxContextMenuButtonStyle}
           onClick={() => {
-            const creatorRaciRole = createContextMenu.creatorRaciRole;
+            const creatorGVICRole = createContextMenu.creatorGVICRole;
             setCreateContextMenu(null);
-            onCreateLogicGate({ creatorRaciRole });
+            onCreateLogicGate({ creatorGVICRole });
           }}
         >
           Create Logic Gate
@@ -2497,7 +2497,7 @@ export function NodeInboxRail({
   myNodeGroups: MyNodeGroup[];
   otherNodes: NodeRecord[];
   myLogicGateGroups: MyLogicGateGroup[];
-  inboxRole: RaciInboxRole;
+  inboxRole: GVICInboxRole;
   selectedRowIDs: Set<string>;
   selectedLogicGateRowIDs: Set<string>;
   expandedRowIDs: Set<string>;
@@ -2778,7 +2778,7 @@ export function MyNodeTile({
   );
 }
 
-function notificationCountForInboxGroup(summary: NotificationSummary, role: NotificationRaciRole, group: InboxLogicGateNodeGroup): number {
+function notificationCountForInboxGroup(summary: NotificationSummary, role: NotificationGVICRole, group: InboxLogicGateNodeGroup): number {
   if (!group.logicGateID || group.logicGateID === INBOX_NO_LOGIC_GATE_ID) return 0;
   const groupNodeIDs = new Set(group.nodeIDs);
   return (summary.logic_gate_counts ?? []).reduce((count, item) => {
@@ -2789,7 +2789,7 @@ function notificationCountForInboxGroup(summary: NotificationSummary, role: Noti
   }, 0);
 }
 
-function notificationCountForInboxNode(summary: NotificationSummary | undefined, group: InboxLogicGateNodeGroup, nodeID: string, role?: NotificationRaciRole): number {
+function notificationCountForInboxNode(summary: NotificationSummary | undefined, group: InboxLogicGateNodeGroup, nodeID: string, role?: NotificationGVICRole): number {
   const cleanNodeID = nodeID.trim();
   if (!summary || !cleanNodeID || !group.logicGateID || group.logicGateID === INBOX_NO_LOGIC_GATE_ID) return 0;
   return (summary.logic_gate_counts ?? []).reduce((count, item) => {
@@ -2799,7 +2799,7 @@ function notificationCountForInboxNode(summary: NotificationSummary | undefined,
   }, 0);
 }
 
-function filterInboxGroupsForUnread(groups: InboxLogicGateNodeGroup[], summary: NotificationSummary, role: NotificationRaciRole): InboxLogicGateNodeGroup[] {
+function filterInboxGroupsForUnread(groups: InboxLogicGateNodeGroup[], summary: NotificationSummary, role: NotificationGVICRole): InboxLogicGateNodeGroup[] {
   return groups.reduce<InboxLogicGateNodeGroup[]>((out, group) => {
     const groupUnread = notificationCountForInboxGroup(summary, role, group);
     if (groupUnread <= 0) return out;
@@ -2811,7 +2811,7 @@ function filterInboxGroupsForUnread(groups: InboxLogicGateNodeGroup[], summary: 
   }, []);
 }
 
-function filterInboxGroupMapForUnread(groupsByCell: Map<string, InboxLogicGateNodeGroup[]>, summary: NotificationSummary, role: NotificationRaciRole, unreadOnly: boolean): Map<string, InboxLogicGateNodeGroup[]> {
+function filterInboxGroupMapForUnread(groupsByCell: Map<string, InboxLogicGateNodeGroup[]>, summary: NotificationSummary, role: NotificationGVICRole, unreadOnly: boolean): Map<string, InboxLogicGateNodeGroup[]> {
   if (!unreadOnly) return groupsByCell;
   const filtered = new Map<string, InboxLogicGateNodeGroup[]>();
   for (const [cellKey, groups] of groupsByCell.entries()) {
@@ -2891,16 +2891,16 @@ const inboxMatrixHeaderControlsStyle: React.CSSProperties = {
 };
 
 const inboxMatrixHeaderMetaStyle: React.CSSProperties = {
-  ...logicGateRaciMetaStyle,
+  ...logicGateGVICMetaStyle,
   minWidth: 72,
 };
 
-export type RacioMatrixViewerListEntry = {
+export type GVICMatrixViewerListEntry = {
   kind: "group" | "user";
   id: string;
 };
 
-type RacioMatrixViewerGroup = {
+type GVICMatrixViewerGroup = {
   company_id: string;
   group_id: string;
   parent_group_id?: string;
@@ -2908,7 +2908,7 @@ type RacioMatrixViewerGroup = {
   position: number;
 };
 
-type RacioMatrixViewerGroupMember = {
+type GVICMatrixViewerGroupMember = {
   company_id: string;
   group_id: string;
   user_id: string;
@@ -2916,24 +2916,24 @@ type RacioMatrixViewerGroupMember = {
   user_email?: string;
 };
 
-function racioViewerUserLabel(user: Pick<CompanyUser, "user_id" | "display_name" | "email"> | null | undefined, fallbackUserID: string): string {
+function GVICMatrixViewerUserLabel(user: Pick<CompanyUser, "user_id" | "display_name" | "email"> | null | undefined, fallbackUserID: string): string {
   return user?.display_name?.trim() || user?.email?.trim() || fallbackUserID;
 }
 
-function racioViewerSearchText(user: Pick<CompanyUser, "user_id" | "display_name" | "email">): string {
+function GVICMatrixViewerSearchText(user: Pick<CompanyUser, "user_id" | "display_name" | "email">): string {
   return `${user.display_name ?? ""} ${user.email ?? ""} ${user.user_id}`.trim().toLowerCase();
 }
 
-function racioViewerGroupLabel(group: Pick<RacioMatrixViewerGroup, "group_id" | "name"> | null | undefined, fallbackGroupID: string): string {
+function GVICMatrixViewerGroupLabel(group: Pick<GVICMatrixViewerGroup, "group_id" | "name"> | null | undefined, fallbackGroupID: string): string {
   return group?.name?.trim() || fallbackGroupID;
 }
 
-function racioViewerEntryKey(entry: RacioMatrixViewerListEntry): string {
+function GVICMatrixViewerEntryKey(entry: GVICMatrixViewerListEntry): string {
   return `${entry.kind}:${entry.id.trim()}`;
 }
 
-function normalizeRacioViewerEntries(entries: RacioMatrixViewerListEntry[]): RacioMatrixViewerListEntry[] {
-  const out: RacioMatrixViewerListEntry[] = [];
+function normalizeGVICMatrixViewerEntries(entries: GVICMatrixViewerListEntry[]): GVICMatrixViewerListEntry[] {
+  const out: GVICMatrixViewerListEntry[] = [];
   const seen = new Set<string>();
   for (const entry of entries) {
     const kind = entry.kind === "group" ? "group" : entry.kind === "user" ? "user" : "";
@@ -2947,7 +2947,7 @@ function normalizeRacioViewerEntries(entries: RacioMatrixViewerListEntry[]): Rac
   return out;
 }
 
-function firstRacioViewerDefaultGroupID(groups: RacioMatrixViewerGroup[], members: RacioMatrixViewerGroupMember[], currentUserID: string): string {
+function firstGVICMatrixViewerDefaultGroupID(groups: GVICMatrixViewerGroup[], members: GVICMatrixViewerGroupMember[], currentUserID: string): string {
   const cleanCurrentUserID = currentUserID.trim();
   if (!cleanCurrentUserID) return "";
   const ownGroupIDs = new Set(members.filter((member) => member.user_id.trim() === cleanCurrentUserID).map((member) => member.group_id.trim()).filter(Boolean));
@@ -2955,12 +2955,12 @@ function firstRacioViewerDefaultGroupID(groups: RacioMatrixViewerGroup[], member
     .filter((group) => ownGroupIDs.has(group.group_id))
     .sort((left, right) => (
       left.position - right.position ||
-      racioViewerGroupLabel(left, left.group_id).localeCompare(racioViewerGroupLabel(right, right.group_id), undefined, { numeric: true, sensitivity: "base" }) ||
+      GVICMatrixViewerGroupLabel(left, left.group_id).localeCompare(GVICMatrixViewerGroupLabel(right, right.group_id), undefined, { numeric: true, sensitivity: "base" }) ||
       left.group_id.localeCompare(right.group_id)
     ))[0]?.group_id ?? "";
 }
 
-export function RacioMatrixViewerSelector({
+export function GVICMatrixViewerSelector({
   companyUsers,
   groups,
   groupMembers,
@@ -2971,12 +2971,12 @@ export function RacioMatrixViewerSelector({
   onSelectUser,
 }: {
   companyUsers: CompanyUser[];
-  groups: RacioMatrixViewerGroup[];
-  groupMembers: RacioMatrixViewerGroupMember[];
+  groups: GVICMatrixViewerGroup[];
+  groupMembers: GVICMatrixViewerGroupMember[];
   currentUserID: string;
   selectedUserID: string;
-  entries: RacioMatrixViewerListEntry[];
-  onEntriesChange: (entries: RacioMatrixViewerListEntry[]) => void;
+  entries: GVICMatrixViewerListEntry[];
+  onEntriesChange: (entries: GVICMatrixViewerListEntry[]) => void;
   onSelectUser: (userID: string) => void;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -2986,11 +2986,11 @@ export function RacioMatrixViewerSelector({
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(() => new Set());
-  const cleanEntries = useMemo(() => normalizeRacioViewerEntries(entries), [entries]);
+  const cleanEntries = useMemo(() => normalizeGVICMatrixViewerEntries(entries), [entries]);
   const userByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id.trim(), user])), [companyUsers]);
   const groupByID = useMemo(() => new Map(groups.map((group) => [group.group_id.trim(), group])), [groups]);
   const membersByGroupID = useMemo(() => {
-    const grouped = new Map<string, RacioMatrixViewerGroupMember[]>();
+    const grouped = new Map<string, GVICMatrixViewerGroupMember[]>();
     for (const member of groupMembers) {
       const groupID = member.group_id.trim();
       if (!groupID) continue;
@@ -3000,8 +3000,8 @@ export function RacioMatrixViewerSelector({
     }
     for (const [groupID, list] of grouped) {
       list.sort((left, right) => (
-        racioViewerUserLabel(userByID.get(left.user_id.trim()), left.user_id).localeCompare(
-          racioViewerUserLabel(userByID.get(right.user_id.trim()), right.user_id),
+        GVICMatrixViewerUserLabel(userByID.get(left.user_id.trim()), left.user_id).localeCompare(
+          GVICMatrixViewerUserLabel(userByID.get(right.user_id.trim()), right.user_id),
           undefined,
           { numeric: true, sensitivity: "base" },
         ) ||
@@ -3011,14 +3011,14 @@ export function RacioMatrixViewerSelector({
     }
     return grouped;
   }, [groupMembers, userByID]);
-  const defaultGroupID = useMemo(() => firstRacioViewerDefaultGroupID(groups, groupMembers, currentUserID), [currentUserID, groupMembers, groups]);
+  const defaultGroupID = useMemo(() => firstGVICMatrixViewerDefaultGroupID(groups, groupMembers, currentUserID), [currentUserID, groupMembers, groups]);
   const effectiveEntries = cleanEntries.length > 0
     ? cleanEntries
     : defaultGroupID
       ? [{ kind: "group" as const, id: defaultGroupID }]
       : [];
   const selectedUser = userByID.get(selectedUserID.trim()) ?? null;
-  const selectedLabel = racioViewerUserLabel(selectedUser, selectedUserID.trim() || currentUserID.trim() || "User");
+  const selectedLabel = GVICMatrixViewerUserLabel(selectedUser, selectedUserID.trim() || currentUserID.trim() || "User");
   const selectedInList = useMemo(() => {
     const selected = selectedUserID.trim();
     if (!selected) return false;
@@ -3032,9 +3032,9 @@ export function RacioMatrixViewerSelector({
     const query = searchQuery.trim().toLowerCase();
     if (!query) return [];
     return companyUsers
-      .filter((user) => racioViewerSearchText(user).includes(query))
+      .filter((user) => GVICMatrixViewerSearchText(user).includes(query))
       .sort((left, right) => (
-        racioViewerUserLabel(left, left.user_id).localeCompare(racioViewerUserLabel(right, right.user_id), undefined, { numeric: true, sensitivity: "base" }) ||
+        GVICMatrixViewerUserLabel(left, left.user_id).localeCompare(GVICMatrixViewerUserLabel(right, right.user_id), undefined, { numeric: true, sensitivity: "base" }) ||
         left.user_id.localeCompare(right.user_id)
       ))
       .slice(0, 8);
@@ -3069,22 +3069,22 @@ export function RacioMatrixViewerSelector({
     onSelectUser(cleanUserID);
     setSearchOpen(false);
   };
-  const addEntry = (entry: RacioMatrixViewerListEntry) => {
+  const addEntry = (entry: GVICMatrixViewerListEntry) => {
     const baseEntries = cleanEntries.length > 0 ? cleanEntries : effectiveEntries;
-    const next = normalizeRacioViewerEntries([...baseEntries, entry]);
+    const next = normalizeGVICMatrixViewerEntries([...baseEntries, entry]);
     onEntriesChange(next);
   };
-  const chooseAddEntry = (entry: RacioMatrixViewerListEntry) => {
+  const chooseAddEntry = (entry: GVICMatrixViewerListEntry) => {
     addEntry(entry);
     setAddMenuOpen(false);
   };
-  const entryAlreadyIncluded = (entry: RacioMatrixViewerListEntry) => {
-    const key = racioViewerEntryKey(entry);
-    return effectiveEntries.some((item) => racioViewerEntryKey(item) === key);
+  const entryAlreadyIncluded = (entry: GVICMatrixViewerListEntry) => {
+    const key = GVICMatrixViewerEntryKey(entry);
+    return effectiveEntries.some((item) => GVICMatrixViewerEntryKey(item) === key);
   };
-  const deleteEntry = (entry: RacioMatrixViewerListEntry) => {
-    const key = racioViewerEntryKey(entry);
-    onEntriesChange(cleanEntries.filter((item) => racioViewerEntryKey(item) !== key));
+  const deleteEntry = (entry: GVICMatrixViewerListEntry) => {
+    const key = GVICMatrixViewerEntryKey(entry);
+    onEntriesChange(cleanEntries.filter((item) => GVICMatrixViewerEntryKey(item) !== key));
   };
   const moveEntry = (fromIndex: number, toIndex: number) => {
     if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= cleanEntries.length || toIndex >= cleanEntries.length) return;
@@ -3102,11 +3102,11 @@ export function RacioMatrixViewerSelector({
     });
   };
   const renderCheck = (userID: string) => (
-    userID.trim() === selectedUserID.trim() ? <span aria-hidden="true" style={racioViewerCheckStyle}>{"\u2713"}</span> : <span style={racioViewerCheckSpacerStyle} />
+    userID.trim() === selectedUserID.trim() ? <span aria-hidden="true" style={GVICMatrixViewerCheckStyle}>{"\u2713"}</span> : <span style={GVICMatrixViewerCheckSpacerStyle} />
   );
-  const renderUserRow = (userID: string, options: { key: string; entry?: RacioMatrixViewerListEntry; draggableIndex?: number; compact?: boolean }) => {
+  const renderUserRow = (userID: string, options: { key: string; entry?: GVICMatrixViewerListEntry; draggableIndex?: number; compact?: boolean }) => {
     const user = userByID.get(userID.trim()) ?? null;
-    const label = racioViewerUserLabel(user, userID);
+    const label = GVICMatrixViewerUserLabel(user, userID);
     return (
       <div
         key={options.key}
@@ -3135,12 +3135,12 @@ export function RacioMatrixViewerSelector({
           event.preventDefault();
           selectUser(userID);
         }}
-        style={racioViewerUserRowStyle(userID.trim() === selectedUserID.trim(), options.compact)}
+        style={GVICMatrixViewerUserRowStyle(userID.trim() === selectedUserID.trim(), options.compact)}
       >
-        {options.draggableIndex !== undefined && <span aria-hidden="true" style={racioViewerDragGripStyle}>::</span>}
-        <span style={racioViewerUserTextStyle}>
-          <span style={racioViewerUserLabelStyle}>{label}</span>
-          {user?.email?.trim() && user.email.trim() !== label && <span style={racioViewerUserEmailStyle}>{user.email}</span>}
+        {options.draggableIndex !== undefined && <span aria-hidden="true" style={GVICMatrixViewerDragGripStyle}>::</span>}
+        <span style={GVICMatrixViewerUserTextStyle}>
+          <span style={GVICMatrixViewerUserLabelStyle}>{label}</span>
+          {user?.email?.trim() && user.email.trim() !== label && <span style={GVICMatrixViewerUserEmailStyle}>{user.email}</span>}
         </span>
         {options.entry && (
           <span
@@ -3158,7 +3158,7 @@ export function RacioMatrixViewerSelector({
               event.stopPropagation();
               deleteEntry(options.entry!);
             }}
-            style={racioViewerDeleteButtonStyle}
+            style={GVICMatrixViewerDeleteButtonStyle}
           >
             x
           </span>
@@ -3167,13 +3167,13 @@ export function RacioMatrixViewerSelector({
       </div>
     );
   };
-  const renderEntry = (entry: RacioMatrixViewerListEntry, index: number) => {
+  const renderEntry = (entry: GVICMatrixViewerListEntry, index: number) => {
     if (entry.kind === "user") {
-      return renderUserRow(entry.id, { key: racioViewerEntryKey(entry), entry, draggableIndex: index });
+      return renderUserRow(entry.id, { key: GVICMatrixViewerEntryKey(entry), entry, draggableIndex: index });
     }
     const group = groupByID.get(entry.id) ?? null;
     const members = membersByGroupID.get(entry.id) ?? [];
-    const groupKey = racioViewerEntryKey(entry);
+    const groupKey = GVICMatrixViewerEntryKey(entry);
     const collapsed = collapsedGroupKeys.has(groupKey);
     return (
       <div
@@ -3194,38 +3194,38 @@ export function RacioMatrixViewerSelector({
           moveEntry(dragIndex, index);
           setDragIndex(null);
         }}
-        style={racioViewerGroupBlockStyle(entry.id)}
+        style={GVICMatrixViewerGroupBlockStyle(entry.id)}
       >
-        <div style={racioViewerGroupHeaderStyle}>
+        <div style={GVICMatrixViewerGroupHeaderStyle}>
           <button
             type="button"
-            aria-label={`${collapsed ? "Expand" : "Collapse"} ${racioViewerGroupLabel(group, entry.id)}`}
+            aria-label={`${collapsed ? "Expand" : "Collapse"} ${GVICMatrixViewerGroupLabel(group, entry.id)}`}
             onClick={(event) => {
               event.stopPropagation();
               toggleCollapsedGroup(groupKey);
             }}
-            style={racioViewerCollapseButtonStyle}
+            style={GVICMatrixViewerCollapseButtonStyle}
           >
             {collapsed ? "\u25b8" : "\u25be"}
           </button>
-          {cleanEntries.length > 0 && <span aria-hidden="true" style={racioViewerDragGripStyle}>::</span>}
-          <span style={racioViewerGroupTitleStyle}>{racioViewerGroupLabel(group, entry.id)}</span>
+          {cleanEntries.length > 0 && <span aria-hidden="true" style={GVICMatrixViewerDragGripStyle}>::</span>}
+          <span style={GVICMatrixViewerGroupTitleStyle}>{GVICMatrixViewerGroupLabel(group, entry.id)}</span>
           {cleanEntries.length > 0 && (
             <button
               type="button"
-              aria-label={`Remove ${racioViewerGroupLabel(group, entry.id)}`}
+              aria-label={`Remove ${GVICMatrixViewerGroupLabel(group, entry.id)}`}
               onClick={() => deleteEntry(entry)}
-              style={racioViewerSmallIconButtonStyle}
+              style={GVICMatrixViewerSmallIconButtonStyle}
             >
               x
             </button>
           )}
         </div>
         {!collapsed && (
-          <div style={racioViewerGroupUsersStyle}>
+          <div style={GVICMatrixViewerGroupUsersStyle}>
             {members.length > 0
               ? members.map((member) => renderUserRow(member.user_id, { key: `${entry.id}:${member.user_id}`, compact: true }))
-              : <div style={racioViewerEmptyStyle}>No users</div>}
+              : <div style={GVICMatrixViewerEmptyStyle}>No users</div>}
           </div>
         )}
       </div>
@@ -3233,50 +3233,50 @@ export function RacioMatrixViewerSelector({
   };
 
   return (
-    <div ref={rootRef} style={racioViewerSelectorRootStyle}>
+    <div ref={rootRef} style={GVICMatrixViewerSelectorRootStyle}>
       <button
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        style={racioViewerDropdownButtonStyle(open)}
+        style={GVICMatrixViewerDropdownButtonStyle(open)}
       >
-        <span style={racioViewerDropdownLabelStyle}>{selectedLabel}</span>
-        <span aria-hidden="true" style={racioViewerChevronStyle}>v</span>
+        <span style={GVICMatrixViewerDropdownLabelStyle}>{selectedLabel}</span>
+        <span aria-hidden="true" style={GVICMatrixViewerChevronStyle}>v</span>
       </button>
       {open && (
-        <div className="kanban-board-scroll" style={racioViewerDropdownStyle}>
-          <div style={racioViewerCustomizeStyle}>
-            <div style={racioViewerAddRowStyle}>
-              <div style={racioViewerAddMenuRootStyle}>
+        <div className="kanban-board-scroll" style={GVICMatrixViewerDropdownStyle}>
+          <div style={GVICMatrixViewerCustomizeStyle}>
+            <div style={GVICMatrixViewerAddRowStyle}>
+              <div style={GVICMatrixViewerAddMenuRootStyle}>
                 <button
                   type="button"
                   aria-haspopup="menu"
                   aria-expanded={addMenuOpen}
                   onClick={() => setAddMenuOpen((value) => !value)}
-                  style={racioViewerAddMenuButtonStyle(addMenuOpen)}
+                  style={GVICMatrixViewerAddMenuButtonStyle(addMenuOpen)}
                 >
-                  <span style={racioViewerDropdownLabelStyle}>Add users</span>
-                  <span aria-hidden="true" style={racioViewerChevronStyle}>v</span>
+                  <span style={GVICMatrixViewerDropdownLabelStyle}>Add users</span>
+                  <span aria-hidden="true" style={GVICMatrixViewerChevronStyle}>v</span>
                 </button>
                 {addMenuOpen && (
-                  <div style={racioViewerAddMenuStyle}>
+                  <div style={GVICMatrixViewerAddMenuStyle}>
                     {groups.map((group) => {
                       const groupID = group.group_id.trim();
                       const members = membersByGroupID.get(groupID) ?? [];
                       const selectedGroup = entryAlreadyIncluded({ kind: "group", id: groupID });
                       return (
-                        <div key={groupID} style={racioViewerAddGroupBlockStyle(groupID)}>
+                        <div key={groupID} style={GVICMatrixViewerAddGroupBlockStyle(groupID)}>
                           <button
                             type="button"
                             onClick={() => chooseAddEntry({ kind: "group", id: groupID })}
-                            style={racioViewerAddGroupRowStyle(groupID, selectedGroup)}
+                            style={GVICMatrixViewerAddGroupRowStyle(groupID, selectedGroup)}
                           >
-                            <span style={racioViewerAddGroupDotStyle(groupID)} />
-                            <span style={racioViewerAddGroupTextStyle}>{racioViewerGroupLabel(group, groupID)}</span>
-                            {selectedGroup && <span aria-hidden="true" style={racioViewerAddSelectedStyle}>{"\u2713"}</span>}
+                            <span style={GVICMatrixViewerAddGroupDotStyle(groupID)} />
+                            <span style={GVICMatrixViewerAddGroupTextStyle}>{GVICMatrixViewerGroupLabel(group, groupID)}</span>
+                            {selectedGroup && <span aria-hidden="true" style={GVICMatrixViewerAddSelectedStyle}>{"\u2713"}</span>}
                           </button>
-                          <div style={racioViewerAddNestedUsersStyle}>
+                          <div style={GVICMatrixViewerAddNestedUsersStyle}>
                             {members.map((member) => {
                               const userID = member.user_id.trim();
                               const user = userByID.get(userID) ?? null;
@@ -3286,10 +3286,10 @@ export function RacioMatrixViewerSelector({
                                   key={`${groupID}:${userID}`}
                                   type="button"
                                   onClick={() => chooseAddEntry({ kind: "user", id: userID })}
-                                  style={racioViewerAddUserRowStyle(selectedUser)}
+                                  style={GVICMatrixViewerAddUserRowStyle(selectedUser)}
                                 >
-                                  <span style={racioViewerAddUserTextStyle}>{racioViewerUserLabel(user, userID)}</span>
-                                  {selectedUser && <span aria-hidden="true" style={racioViewerAddSelectedStyle}>{"\u2713"}</span>}
+                                  <span style={GVICMatrixViewerAddUserTextStyle}>{GVICMatrixViewerUserLabel(user, userID)}</span>
+                                  {selectedUser && <span aria-hidden="true" style={GVICMatrixViewerAddSelectedStyle}>{"\u2713"}</span>}
                                 </button>
                               );
                             })}
@@ -3298,12 +3298,12 @@ export function RacioMatrixViewerSelector({
                       );
                     })}
                     {ungroupedUsers.length > 0 && (
-                      <div style={racioViewerAddGroupBlockStyle("users")}>
-                        <div style={racioViewerAddGroupRowStyle("users", false)}>
-                          <span style={racioViewerAddGroupDotStyle("users")} />
-                          <span style={racioViewerAddGroupTextStyle}>Users</span>
+                      <div style={GVICMatrixViewerAddGroupBlockStyle("users")}>
+                        <div style={GVICMatrixViewerAddGroupRowStyle("users", false)}>
+                          <span style={GVICMatrixViewerAddGroupDotStyle("users")} />
+                          <span style={GVICMatrixViewerAddGroupTextStyle}>Users</span>
                         </div>
-                        <div style={racioViewerAddNestedUsersStyle}>
+                        <div style={GVICMatrixViewerAddNestedUsersStyle}>
                           {ungroupedUsers.map((user) => {
                             const userID = user.user_id.trim();
                             const selectedUser = entryAlreadyIncluded({ kind: "user", id: userID });
@@ -3312,10 +3312,10 @@ export function RacioMatrixViewerSelector({
                                 key={user.user_id}
                                 type="button"
                                 onClick={() => chooseAddEntry({ kind: "user", id: userID })}
-                                style={racioViewerAddUserRowStyle(selectedUser)}
+                                style={GVICMatrixViewerAddUserRowStyle(selectedUser)}
                               >
-                                <span style={racioViewerAddUserTextStyle}>{racioViewerUserLabel(user, userID)}</span>
-                                {selectedUser && <span aria-hidden="true" style={racioViewerAddSelectedStyle}>{"\u2713"}</span>}
+                                <span style={GVICMatrixViewerAddUserTextStyle}>{GVICMatrixViewerUserLabel(user, userID)}</span>
+                                {selectedUser && <span aria-hidden="true" style={GVICMatrixViewerAddSelectedStyle}>{"\u2713"}</span>}
                               </button>
                             );
                           })}
@@ -3328,29 +3328,29 @@ export function RacioMatrixViewerSelector({
             </div>
           </div>
           {!selectedInList && selectedUserID.trim() && (
-            <div style={racioViewerCurrentBlockStyle}>
-              <div style={racioViewerGroupTitleStyle}>Current view</div>
+            <div style={GVICMatrixViewerCurrentBlockStyle}>
+              <div style={GVICMatrixViewerGroupTitleStyle}>Current view</div>
               {renderUserRow(selectedUserID, { key: `current:${selectedUserID}`, compact: true })}
             </div>
           )}
-          <div style={racioViewerEntriesStyle}>
+          <div style={GVICMatrixViewerEntriesStyle}>
             {effectiveEntries.length > 0
               ? effectiveEntries.map(renderEntry)
               : (
-                <div style={racioViewerGroupBlockStyle("company")}>
-                  <div style={racioViewerGroupHeaderStyle}>
+                <div style={GVICMatrixViewerGroupBlockStyle("company")}>
+                  <div style={GVICMatrixViewerGroupHeaderStyle}>
                     <button
                       type="button"
                       aria-label={`${collapsedGroupKeys.has("company") ? "Expand" : "Collapse"} Company`}
                       onClick={() => toggleCollapsedGroup("company")}
-                      style={racioViewerCollapseButtonStyle}
+                      style={GVICMatrixViewerCollapseButtonStyle}
                     >
                       {collapsedGroupKeys.has("company") ? "\u25b8" : "\u25be"}
                     </button>
-                    <span style={racioViewerGroupTitleStyle}>Company</span>
+                    <span style={GVICMatrixViewerGroupTitleStyle}>Company</span>
                   </div>
                   {!collapsedGroupKeys.has("company") && (
-                    <div style={racioViewerGroupUsersStyle}>
+                    <div style={GVICMatrixViewerGroupUsersStyle}>
                       {companyUsers.map((user) => renderUserRow(user.user_id, { key: `company:${user.user_id}`, compact: true }))}
                     </div>
                   )}
@@ -3359,7 +3359,7 @@ export function RacioMatrixViewerSelector({
           </div>
         </div>
       )}
-      <div style={racioViewerSearchWrapStyle}>
+      <div style={GVICMatrixViewerSearchWrapStyle}>
         <input
           value={searchQuery}
           onFocus={() => setSearchOpen(true)}
@@ -3377,13 +3377,13 @@ export function RacioMatrixViewerSelector({
           placeholder="Search people"
           aria-label="Search GVIC matrix people"
           spellCheck={false}
-          style={racioViewerSearchInputStyle}
+          style={GVICMatrixViewerSearchInputStyle}
         />
         {searchOpen && searchQuery.trim() && (
-          <div style={racioViewerSearchResultsStyle}>
+          <div style={GVICMatrixViewerSearchResultsStyle}>
             {searchResults.length > 0
               ? searchResults.map((user) => renderUserRow(user.user_id, { key: `search:${user.user_id}`, compact: true }))
-              : <div style={racioViewerEmptyStyle}>No matches</div>}
+              : <div style={GVICMatrixViewerEmptyStyle}>No matches</div>}
           </div>
         )}
       </div>
@@ -3391,7 +3391,7 @@ export function RacioMatrixViewerSelector({
   );
 }
 
-const racioViewerSelectorRootStyle: React.CSSProperties = {
+const GVICMatrixViewerSelectorRootStyle: React.CSSProperties = {
   position: "relative",
   zIndex: 6,
   display: "flex",
@@ -3402,7 +3402,7 @@ const racioViewerSelectorRootStyle: React.CSSProperties = {
   flexWrap: "nowrap",
 };
 
-function racioViewerDropdownButtonStyle(open: boolean): React.CSSProperties {
+function GVICMatrixViewerDropdownButtonStyle(open: boolean): React.CSSProperties {
   return {
     height: 28,
     minWidth: 142,
@@ -3423,7 +3423,7 @@ function racioViewerDropdownButtonStyle(open: boolean): React.CSSProperties {
   };
 }
 
-const racioViewerDropdownLabelStyle: React.CSSProperties = {
+const GVICMatrixViewerDropdownLabelStyle: React.CSSProperties = {
   minWidth: 0,
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -3432,14 +3432,14 @@ const racioViewerDropdownLabelStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
-const racioViewerChevronStyle: React.CSSProperties = {
+const GVICMatrixViewerChevronStyle: React.CSSProperties = {
   flex: "0 0 auto",
   fontSize: 10,
   fontWeight: 900,
   color: "#64748b",
 };
 
-const racioViewerDropdownStyle: React.CSSProperties = {
+const GVICMatrixViewerDropdownStyle: React.CSSProperties = {
   position: "absolute",
   left: 0,
   top: 34,
@@ -3455,12 +3455,12 @@ const racioViewerDropdownStyle: React.CSSProperties = {
   zIndex: 30,
 };
 
-const racioViewerEntriesStyle: React.CSSProperties = {
+const GVICMatrixViewerEntriesStyle: React.CSSProperties = {
   display: "grid",
   gap: 9,
 };
 
-const racioViewerColorPalette = [
+const GVICMatrixViewerColorPalette = [
   { accent: "#f97316", border: "rgba(249, 115, 22, 0.34)", tint: "rgba(255, 237, 213, 0.68)", soft: "rgba(249, 115, 22, 0.10)", text: "#9a3412" },
   { accent: "#06b6d4", border: "rgba(6, 182, 212, 0.34)", tint: "rgba(207, 250, 254, 0.66)", soft: "rgba(6, 182, 212, 0.10)", text: "#155e75" },
   { accent: "#22c55e", border: "rgba(34, 197, 94, 0.34)", tint: "rgba(220, 252, 231, 0.68)", soft: "rgba(34, 197, 94, 0.10)", text: "#166534" },
@@ -3469,16 +3469,16 @@ const racioViewerColorPalette = [
   { accent: "#ec4899", border: "rgba(236, 72, 153, 0.30)", tint: "rgba(252, 231, 243, 0.64)", soft: "rgba(236, 72, 153, 0.09)", text: "#9d174d" },
 ];
 
-function racioViewerColorForID(id: string): (typeof racioViewerColorPalette)[number] {
+function GVICMatrixViewerColorForID(id: string): (typeof GVICMatrixViewerColorPalette)[number] {
   const clean = id.trim() || "default";
   let hash = 0;
   for (let index = 0; index < clean.length; index++) {
     hash = ((hash * 31) + clean.charCodeAt(index)) >>> 0;
   }
-  return racioViewerColorPalette[hash % racioViewerColorPalette.length];
+  return GVICMatrixViewerColorPalette[hash % GVICMatrixViewerColorPalette.length];
 }
 
-const racioViewerCurrentBlockStyle: React.CSSProperties = {
+const GVICMatrixViewerCurrentBlockStyle: React.CSSProperties = {
   display: "grid",
   gap: 6,
   padding: 8,
@@ -3489,8 +3489,8 @@ const racioViewerCurrentBlockStyle: React.CSSProperties = {
   boxShadow: "0 5px 14px rgba(15, 23, 42, 0.08), inset 1px 1px 0 rgba(255, 255, 255, 0.92)",
 };
 
-function racioViewerGroupBlockStyle(groupID: string): React.CSSProperties {
-  const color = racioViewerColorForID(groupID);
+function GVICMatrixViewerGroupBlockStyle(groupID: string): React.CSSProperties {
+  const color = GVICMatrixViewerColorForID(groupID);
   return {
     display: "grid",
     gap: 7,
@@ -3503,7 +3503,7 @@ function racioViewerGroupBlockStyle(groupID: string): React.CSSProperties {
   };
 }
 
-const racioViewerGroupHeaderStyle: React.CSSProperties = {
+const GVICMatrixViewerGroupHeaderStyle: React.CSSProperties = {
   height: 30,
   display: "flex",
   alignItems: "center",
@@ -3516,7 +3516,7 @@ const racioViewerGroupHeaderStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
-const racioViewerCollapseButtonStyle: React.CSSProperties = {
+const GVICMatrixViewerCollapseButtonStyle: React.CSSProperties = {
   width: 22,
   height: 22,
   flex: "0 0 22px",
@@ -3534,7 +3534,7 @@ const racioViewerCollapseButtonStyle: React.CSSProperties = {
   boxShadow: "0 2px 5px rgba(15, 23, 42, 0.06)",
 };
 
-const racioViewerDragGripStyle: React.CSSProperties = {
+const GVICMatrixViewerDragGripStyle: React.CSSProperties = {
   flex: "0 0 auto",
   width: 12,
   color: "#94a3b8",
@@ -3543,7 +3543,7 @@ const racioViewerDragGripStyle: React.CSSProperties = {
   letterSpacing: 0,
 };
 
-const racioViewerGroupTitleStyle: React.CSSProperties = {
+const GVICMatrixViewerGroupTitleStyle: React.CSSProperties = {
   flex: "1 1 auto",
   minWidth: 0,
   overflow: "hidden",
@@ -3553,7 +3553,7 @@ const racioViewerGroupTitleStyle: React.CSSProperties = {
   fontWeight: 900,
 };
 
-const racioViewerSmallIconButtonStyle: React.CSSProperties = {
+const GVICMatrixViewerSmallIconButtonStyle: React.CSSProperties = {
   width: 22,
   height: 22,
   display: "inline-grid",
@@ -3569,12 +3569,12 @@ const racioViewerSmallIconButtonStyle: React.CSSProperties = {
   padding: 0,
 };
 
-const racioViewerGroupUsersStyle: React.CSSProperties = {
+const GVICMatrixViewerGroupUsersStyle: React.CSSProperties = {
   display: "grid",
   gap: 6,
 };
 
-function racioViewerUserRowStyle(selected: boolean, compact?: boolean): React.CSSProperties {
+function GVICMatrixViewerUserRowStyle(selected: boolean, compact?: boolean): React.CSSProperties {
   return {
     width: "100%",
     minHeight: compact ? 34 : 36,
@@ -3594,14 +3594,14 @@ function racioViewerUserRowStyle(selected: boolean, compact?: boolean): React.CS
   };
 }
 
-const racioViewerUserTextStyle: React.CSSProperties = {
+const GVICMatrixViewerUserTextStyle: React.CSSProperties = {
   minWidth: 0,
   flex: "1 1 auto",
   display: "grid",
   gap: 1,
 };
 
-const racioViewerUserLabelStyle: React.CSSProperties = {
+const GVICMatrixViewerUserLabelStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
@@ -3609,7 +3609,7 @@ const racioViewerUserLabelStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
-const racioViewerUserEmailStyle: React.CSSProperties = {
+const GVICMatrixViewerUserEmailStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
@@ -3618,7 +3618,7 @@ const racioViewerUserEmailStyle: React.CSSProperties = {
   color: "#64748b",
 };
 
-const racioViewerDeleteButtonStyle: React.CSSProperties = {
+const GVICMatrixViewerDeleteButtonStyle: React.CSSProperties = {
   width: 22,
   height: 22,
   flex: "0 0 auto",
@@ -3631,7 +3631,7 @@ const racioViewerDeleteButtonStyle: React.CSSProperties = {
   fontWeight: 900,
 };
 
-const racioViewerCheckStyle: React.CSSProperties = {
+const GVICMatrixViewerCheckStyle: React.CSSProperties = {
   width: 18,
   flex: "0 0 18px",
   color: "#2563eb",
@@ -3640,12 +3640,12 @@ const racioViewerCheckStyle: React.CSSProperties = {
   textAlign: "center",
 };
 
-const racioViewerCheckSpacerStyle: React.CSSProperties = {
+const GVICMatrixViewerCheckSpacerStyle: React.CSSProperties = {
   width: 18,
   flex: "0 0 18px",
 };
 
-const racioViewerCustomizeStyle: React.CSSProperties = {
+const GVICMatrixViewerCustomizeStyle: React.CSSProperties = {
   display: "grid",
   gap: 6,
   marginBottom: 8,
@@ -3653,17 +3653,17 @@ const racioViewerCustomizeStyle: React.CSSProperties = {
   borderBottom: "1px solid rgba(100, 116, 139, 0.14)",
 };
 
-const racioViewerAddRowStyle: React.CSSProperties = {
+const GVICMatrixViewerAddRowStyle: React.CSSProperties = {
   display: "block",
   position: "relative",
 };
 
-const racioViewerAddMenuRootStyle: React.CSSProperties = {
+const GVICMatrixViewerAddMenuRootStyle: React.CSSProperties = {
   position: "relative",
   minWidth: 0,
 };
 
-function racioViewerAddMenuButtonStyle(open: boolean): React.CSSProperties {
+function GVICMatrixViewerAddMenuButtonStyle(open: boolean): React.CSSProperties {
   return {
     width: "100%",
     height: 28,
@@ -3686,7 +3686,7 @@ function racioViewerAddMenuButtonStyle(open: boolean): React.CSSProperties {
   };
 }
 
-const racioViewerAddMenuStyle: React.CSSProperties = {
+const GVICMatrixViewerAddMenuStyle: React.CSSProperties = {
   position: "absolute",
   left: 0,
   top: 32,
@@ -3704,8 +3704,8 @@ const racioViewerAddMenuStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
-function racioViewerAddGroupBlockStyle(groupID: string): React.CSSProperties {
-  const color = racioViewerColorForID(groupID);
+function GVICMatrixViewerAddGroupBlockStyle(groupID: string): React.CSSProperties {
+  const color = GVICMatrixViewerColorForID(groupID);
   return {
     display: "grid",
     gap: 4,
@@ -3717,8 +3717,8 @@ function racioViewerAddGroupBlockStyle(groupID: string): React.CSSProperties {
   };
 }
 
-function racioViewerAddGroupRowStyle(groupID: string, selected: boolean): React.CSSProperties {
-  const color = racioViewerColorForID(groupID);
+function GVICMatrixViewerAddGroupRowStyle(groupID: string, selected: boolean): React.CSSProperties {
+  const color = GVICMatrixViewerColorForID(groupID);
   return {
     minHeight: 28,
     display: "flex",
@@ -3738,8 +3738,8 @@ function racioViewerAddGroupRowStyle(groupID: string, selected: boolean): React.
   };
 }
 
-function racioViewerAddGroupDotStyle(groupID: string): React.CSSProperties {
-  const color = racioViewerColorForID(groupID);
+function GVICMatrixViewerAddGroupDotStyle(groupID: string): React.CSSProperties {
+  const color = GVICMatrixViewerColorForID(groupID);
   return {
     width: 8,
     height: 8,
@@ -3750,7 +3750,7 @@ function racioViewerAddGroupDotStyle(groupID: string): React.CSSProperties {
   };
 }
 
-const racioViewerAddGroupTextStyle: React.CSSProperties = {
+const GVICMatrixViewerAddGroupTextStyle: React.CSSProperties = {
   minWidth: 0,
   flex: "1 1 auto",
   overflow: "hidden",
@@ -3758,13 +3758,13 @@ const racioViewerAddGroupTextStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-const racioViewerAddNestedUsersStyle: React.CSSProperties = {
+const GVICMatrixViewerAddNestedUsersStyle: React.CSSProperties = {
   display: "grid",
   gap: 3,
   paddingLeft: 20,
 };
 
-function racioViewerAddUserRowStyle(selected: boolean): React.CSSProperties {
+function GVICMatrixViewerAddUserRowStyle(selected: boolean): React.CSSProperties {
   return {
     minHeight: 25,
     display: "flex",
@@ -3784,7 +3784,7 @@ function racioViewerAddUserRowStyle(selected: boolean): React.CSSProperties {
   };
 }
 
-const racioViewerAddUserTextStyle: React.CSSProperties = {
+const GVICMatrixViewerAddUserTextStyle: React.CSSProperties = {
   minWidth: 0,
   flex: "1 1 auto",
   overflow: "hidden",
@@ -3792,21 +3792,21 @@ const racioViewerAddUserTextStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-const racioViewerAddSelectedStyle: React.CSSProperties = {
+const GVICMatrixViewerAddSelectedStyle: React.CSSProperties = {
   flex: "0 0 auto",
   color: "#2563eb",
   fontSize: 12,
   fontWeight: 900,
 };
 
-const racioViewerSearchWrapStyle: React.CSSProperties = {
+const GVICMatrixViewerSearchWrapStyle: React.CSSProperties = {
   position: "relative",
   width: 190,
   minWidth: 150,
   flex: "0 0 190px",
 };
 
-const racioViewerSearchInputStyle: React.CSSProperties = {
+const GVICMatrixViewerSearchInputStyle: React.CSSProperties = {
   width: "100%",
   height: 28,
   border: "1px solid rgba(100, 116, 139, 0.20)",
@@ -3821,7 +3821,7 @@ const racioViewerSearchInputStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
-const racioViewerSearchResultsStyle: React.CSSProperties = {
+const GVICMatrixViewerSearchResultsStyle: React.CSSProperties = {
   position: "absolute",
   left: 0,
   top: 34,
@@ -3838,14 +3838,14 @@ const racioViewerSearchResultsStyle: React.CSSProperties = {
   zIndex: 31,
 };
 
-const racioViewerEmptyStyle: React.CSSProperties = {
+const GVICMatrixViewerEmptyStyle: React.CSSProperties = {
   padding: "8px 10px",
   color: "#64748b",
   fontSize: 11,
   fontWeight: 700,
 };
 
-const racioMatrixHeaderLeftStyle: React.CSSProperties = {
+const GVICMatrixHeaderLeftStyle: React.CSSProperties = {
   flex: "1 1 auto",
   minWidth: 0,
   display: "flex",
@@ -3854,7 +3854,7 @@ const racioMatrixHeaderLeftStyle: React.CSSProperties = {
   overflow: "visible",
 };
 
-const racioMatrixHeaderTitleStyle: React.CSSProperties = {
+const GVICMatrixHeaderTitleStyle: React.CSSProperties = {
   ...panelTitleStyle,
   flex: "0 0 auto",
   minWidth: 78,
@@ -3863,7 +3863,7 @@ const racioMatrixHeaderTitleStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-function notificationCountForRole(summary: NotificationSummary, surface: string, role: NotificationRaciRole): number {
+function notificationCountForRole(summary: NotificationSummary, surface: string, role: NotificationGVICRole): number {
   return (summary.role_counts ?? []).reduce((count, item) => {
     if (item.surface !== surface || item.role !== role) return count;
     return count + (typeof item.count === "number" && Number.isFinite(item.count) ? Math.max(0, Math.floor(item.count)) : 0);
@@ -3875,7 +3875,7 @@ function formatInboxNotificationCount(count: number): string {
   return normalized > 99 ? "99+" : String(normalized);
 }
 
-function logicGateInboxGroupNotificationButtonStyle(role: NotificationRaciRole): React.CSSProperties {
+function logicGateInboxGroupNotificationButtonStyle(role: NotificationGVICRole): React.CSSProperties {
   return {
     ...logicGateInboxGroupNotificationStyle(role),
     border: logicGateInboxGroupNotificationStyle(role).border,
@@ -3904,13 +3904,13 @@ type InboxNotificationMenuState = {
   seenNotificationIDs: string[];
 };
 
-function inboxNotificationMatchesGroup(item: NotificationItem, role: NotificationRaciRole, group: InboxLogicGateNodeGroup): boolean {
+function inboxNotificationMatchesGroup(item: NotificationItem, role: NotificationGVICRole, group: InboxLogicGateNodeGroup): boolean {
   if (item.role !== role || item.logic_gate_id !== group.logicGateID) return false;
   const nodeID = item.node_id?.trim() ?? "";
   return !nodeID || group.nodeIDs.includes(nodeID);
 }
 
-function inboxNotificationMatchesNode(item: NotificationItem, role: NotificationRaciRole, group: InboxLogicGateNodeGroup, nodeID: string): boolean {
+function inboxNotificationMatchesNode(item: NotificationItem, role: NotificationGVICRole, group: InboxLogicGateNodeGroup, nodeID: string): boolean {
   const cleanNodeID = nodeID.trim();
   return cleanNodeID !== "" && inboxNotificationMatchesGroup(item, role, group) && item.node_id?.trim() === cleanNodeID;
 }
@@ -3957,7 +3957,7 @@ const mentionNotificationBadgeStyle: React.CSSProperties = {
   padding: "0 6px",
 };
 
-export function RaciRoleInboxMatrix({
+export function GVICRoleInboxMatrix({
   section,
   loading,
   nodes,
@@ -4020,7 +4020,7 @@ export function RaciRoleInboxMatrix({
   onDropNodesInCell: (input: InboxCellNodeDropInput) => void;
   onDropLogicGates: (input: InboxCellLogicGateDropInput) => void;
 }) {
-  const allCellLogicGateGroups = useMemo(() => buildRaciRoleInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID, section.role), [currentUserID, logicGateByID, nodeByID, nodes, section.role]);
+  const allCellLogicGateGroups = useMemo(() => buildGVICRoleInboxGroupsByCell(nodes, nodeByID, logicGateByID, currentUserID, section.role), [currentUserID, logicGateByID, nodeByID, nodes, section.role]);
   const { groupHeights, startGroupResize } = useInboxGroupCardHeights(section.viewID);
   const { collapsedGroupKeys, toggleCollapsedGroup } = useInboxGroupCollapsedState(section.viewID);
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -4028,14 +4028,14 @@ export function RaciRoleInboxMatrix({
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
   const [notificationMenu, setNotificationMenu] = useState<InboxNotificationMenuState | null>(null);
   const [cellContextMenu, setCellContextMenu] = useState<(InboxCellCreateInput & { x: number; y: number }) | null>(null);
-  const creatorRaciRole = section.role === "other" ? undefined : section.role;
-  const notificationRole: NotificationRaciRole = section.role;
+  const creatorGVICRole = section.role === "other" ? undefined : section.role;
+  const notificationRole: NotificationGVICRole = section.role;
   const cellLogicGateGroups = useMemo(() => filterInboxGroupMapForUnread(allCellLogicGateGroups, notificationSummary, notificationRole, unreadOnly), [allCellLogicGateGroups, notificationRole, notificationSummary, unreadOnly]);
   const orderedRowIDs = useMemo(() => {
     const ids: string[] = [];
     for (const priority of INBOX_PRIORITIES) {
-      for (const column of RACI_STATUS_COLUMNS) {
-        const groups = cellLogicGateGroups.get(raciRoleCellKey(section.role, column.status, priority.value)) ?? [];
+      for (const column of GVIC_STATUS_COLUMNS) {
+        const groups = cellLogicGateGroups.get(GVICRoleCellKey(section.role, column.status, priority.value)) ?? [];
         for (const group of groups) ids.push(...group.nodeIDs);
       }
     }
@@ -4044,15 +4044,15 @@ export function RaciRoleInboxMatrix({
   const orderedLogicGateRowIDs = useMemo(() => {
     const ids: string[] = [];
     for (const priority of INBOX_PRIORITIES) {
-      for (const column of RACI_STATUS_COLUMNS) {
-        const groups = cellLogicGateGroups.get(raciRoleCellKey(section.role, column.status, priority.value)) ?? [];
+      for (const column of GVIC_STATUS_COLUMNS) {
+        const groups = cellLogicGateGroups.get(GVICRoleCellKey(section.role, column.status, priority.value)) ?? [];
         for (const group of groups) ids.push(group.logicGateID);
       }
     }
     return cleanIDList(ids).filter((id) => id !== INBOX_NO_LOGIC_GATE_ID).map(logicGateTreeID);
   }, [cellLogicGateGroups, section.role]);
   const placedCount = orderedRowIDs.length;
-  const openGroupNotifications = useCallback((event: React.MouseEvent, role: NotificationRaciRole, group: InboxLogicGateNodeGroup) => {
+  const openGroupNotifications = useCallback((event: React.MouseEvent, role: NotificationGVICRole, group: InboxLogicGateNodeGroup) => {
     event.preventDefault();
     event.stopPropagation();
     const nextMenu: InboxNotificationMenuState = {
@@ -4082,7 +4082,7 @@ export function RaciRoleInboxMatrix({
         ));
       });
   }, []);
-  const openNodeNotifications = useCallback((event: React.MouseEvent, role: NotificationRaciRole, group: InboxLogicGateNodeGroup, nodeID: string) => {
+  const openNodeNotifications = useCallback((event: React.MouseEvent, role: NotificationGVICRole, group: InboxLogicGateNodeGroup, nodeID: string) => {
     event.preventDefault();
     event.stopPropagation();
     const node = nodeByID.get(nodeID);
@@ -4172,11 +4172,11 @@ export function RaciRoleInboxMatrix({
 
   return (
     <>
-    <section style={logicGateRaciPanelStyle}>
-      <div style={logicGateRaciMatrixSurfaceStyle}>
-        <div style={logicGateRaciHeaderStyle}>
-          <div style={racioMatrixHeaderLeftStyle}>
-            <h2 style={racioMatrixHeaderTitleStyle}>{section.title}</h2>
+    <section style={logicGateGVICPanelStyle}>
+      <div style={logicGateGVICMatrixSurfaceStyle}>
+        <div style={logicGateGVICHeaderStyle}>
+          <div style={GVICMatrixHeaderLeftStyle}>
+            <h2 style={GVICMatrixHeaderTitleStyle}>{section.title}</h2>
             {viewerSelector}
           </div>
           <div style={inboxMatrixHeaderControlsStyle}>
@@ -4188,19 +4188,19 @@ export function RaciRoleInboxMatrix({
             </div>
           </div>
         </div>
-        <div className="kanban-board-scroll" style={logicGateRaciScrollStyle}>
-          <div style={inboxMatrixGridStyle(RACI_STATUS_COLUMNS.length)}>
-            <div className="mango-inbox-matrix-cell" data-rail-right="true" data-rail-bottom="true" style={logicGateRaciCornerStyle} />
-            {RACI_STATUS_COLUMNS.map((column, columnIndex) => (
+        <div className="kanban-board-scroll" style={logicGateGVICScrollStyle}>
+          <div style={inboxMatrixGridStyle(GVIC_STATUS_COLUMNS.length)}>
+            <div className="mango-inbox-matrix-cell" data-rail-right="true" data-rail-bottom="true" style={logicGateGVICCornerStyle} />
+            {GVIC_STATUS_COLUMNS.map((column, columnIndex) => (
               <div
                 key={column.status}
                 className="mango-inbox-matrix-cell"
-                data-rail-right={columnIndex === RACI_STATUS_COLUMNS.length - 1 ? undefined : "true"}
+                data-rail-right={columnIndex === GVIC_STATUS_COLUMNS.length - 1 ? undefined : "true"}
                 data-rail-bottom="true"
-                style={logicGateRaciColumnHeaderStyle(column.status)}
+                style={logicGateGVICColumnHeaderStyle(column.status)}
               >
-                <strong style={logicGateRaciColumnLetterStyle(column.status)}>{column.letter}</strong>
-                <span style={logicGateRaciColumnLabelStyle(column.status)}>{column.label}</span>
+                <strong style={logicGateGVICColumnLetterStyle(column.status)}>{column.letter}</strong>
+                <span style={logicGateGVICColumnLabelStyle(column.status)}>{column.label}</span>
               </div>
             ))}
             {INBOX_PRIORITIES.map((priority, priorityIndex) => (
@@ -4209,27 +4209,27 @@ export function RaciRoleInboxMatrix({
                   className="mango-inbox-matrix-cell"
                   data-rail-right="true"
                   data-rail-bottom={priorityIndex === INBOX_PRIORITIES.length - 1 ? undefined : "true"}
-                  style={logicGateRaciPriorityHeaderStyle(priority.value)}
+                  style={logicGateGVICPriorityHeaderStyle(priority.value)}
                 >
                   {priority.label}
                 </div>
-                {RACI_STATUS_COLUMNS.map((column, columnIndex) => {
-                  const cellKey = raciRoleCellKey(section.role, column.status, priority.value);
+                {GVIC_STATUS_COLUMNS.map((column, columnIndex) => {
+                  const cellKey = GVICRoleCellKey(section.role, column.status, priority.value);
                   const logicGateGroups = cellLogicGateGroups.get(cellKey) ?? [];
-                  const statusColor = responsibleStatusColor(column.status);
+                  const statusColor = gvicStatusColor(column.status);
                   const cellDropKey = `cell:${cellKey}`;
-                  const cellStyle = logicGateRaciCellStyle(activeDropKey === cellDropKey);
+                  const cellStyle = logicGateGVICCellStyle(activeDropKey === cellDropKey);
                   return (
                     <div
                       key={cellKey}
                       className="mango-inbox-matrix-cell"
-                      data-rail-right={columnIndex === RACI_STATUS_COLUMNS.length - 1 ? undefined : "true"}
+                      data-rail-right={columnIndex === GVIC_STATUS_COLUMNS.length - 1 ? undefined : "true"}
                       data-rail-bottom={priorityIndex === INBOX_PRIORITIES.length - 1 ? undefined : "true"}
                       style={cellStyle}
                       onContextMenu={(event) => openCellCreateMenu(event, {
                         priority: priority.value,
                         status: column.status,
-                        creatorRaciRole,
+                        creatorGVICRole,
                       })}
                       onDragOver={(event) => {
                         const drop = readCellDropPayload(event.dataTransfer);
@@ -4254,7 +4254,7 @@ export function RaciRoleInboxMatrix({
                             logicGateIDs: drop.logicGateIDs,
                             priority: priority.value,
                             status: column.status,
-                            creatorRaciRole,
+                            creatorGVICRole,
                             nodeIDsByLogicGateID: drop.nodeIDsByLogicGateID,
                           });
                         }
@@ -4263,7 +4263,7 @@ export function RaciRoleInboxMatrix({
                             nodeIDs: drop.nodeIDs,
                             priority: priority.value,
                             status: column.status,
-                            creatorRaciRole,
+                            creatorGVICRole,
                             fromLogicGateID: drop.fromLogicGateID,
                           });
                         }
@@ -4295,7 +4295,7 @@ export function RaciRoleInboxMatrix({
                             onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
                             onOpenLogicGateBulkMenuAt={onOpenLogicGateBulkMenuAt}
                             onRequestDeleteLogicGate={onRequestDeleteLogicGate}
-                            onCreateLogicGate={() => onCreateLogicGateInCell({ priority: priority.value, status: column.status, creatorRaciRole })}
+                            onCreateLogicGate={() => onCreateLogicGateInCell({ priority: priority.value, status: column.status, creatorGVICRole })}
                             onCreateNode={() => onCreateNodeInLogicGate({ logicGateID: group.logicGateID, nodeIDs: [], priority: priority.value, status: column.status })}
                             onDropNodes={(nodeIDs, fromLogicGateID) => onDropNodes({ logicGateID: group.logicGateID, nodeIDs, priority: priority.value, status: column.status, fromLogicGateID })}
                             dropActive={activeDropKey === resizeKey}
@@ -4331,7 +4331,7 @@ export function RaciRoleInboxMatrix({
           type="button"
           style={sharedInboxContextMenuButtonStyle}
           onClick={() => {
-            const input = { priority: cellContextMenu.priority, status: cellContextMenu.status, creatorRaciRole: cellContextMenu.creatorRaciRole };
+            const input = { priority: cellContextMenu.priority, status: cellContextMenu.status, creatorGVICRole: cellContextMenu.creatorGVICRole };
             setCellContextMenu(null);
             onCreateLogicGateInCell(input);
           }}
@@ -4342,7 +4342,7 @@ export function RaciRoleInboxMatrix({
           type="button"
           style={sharedInboxContextMenuButtonStyle}
           onClick={() => {
-            const input = { priority: cellContextMenu.priority, status: cellContextMenu.status, creatorRaciRole: cellContextMenu.creatorRaciRole };
+            const input = { priority: cellContextMenu.priority, status: cellContextMenu.status, creatorGVICRole: cellContextMenu.creatorGVICRole };
             setCellContextMenu(null);
             onCreateNodeInCell(input);
           }}
@@ -4426,7 +4426,7 @@ export function LogicGateInboxNodeGroupCard({
   onDropActiveChange?: (active: boolean) => void;
   notificationSummary?: NotificationSummary;
   notificationCount?: number;
-  notificationRole?: NotificationRaciRole;
+  notificationRole?: NotificationGVICRole;
   onOpenNotifications?: (event: React.MouseEvent) => void;
   onOpenNodeNotifications?: (event: React.MouseEvent, nodeID: string) => void;
   groupColor?: string;
@@ -4722,7 +4722,7 @@ export function LogicGateInboxNodeRow({
   onRemovePlacement?: (nodeID: string) => void;
   hasUnreadNotification?: boolean;
   notificationCount?: number;
-  notificationRole?: NotificationRaciRole;
+  notificationRole?: NotificationGVICRole;
   onOpenNotifications?: (event: React.MouseEvent, nodeID: string) => void;
 }) {
   const nodeID = node.node_id;

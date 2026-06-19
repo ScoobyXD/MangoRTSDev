@@ -69,14 +69,7 @@ func recomputeCompanyMemberDefaultEffectiveAccessForUserTx(ctx context.Context, 
 	return nil
 }
 
-func recomputeNodeAssigneeEffectiveAccessTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
-	if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
-		return err
-	}
-	return syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID)
-}
-
-func recomputeLogicGateRaciEffectiveAccessTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+func recomputeLogicGateGVICEffectiveAccessTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
 	affected, err := postgresAffectedGVICResourceKeysTx(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID})
 	if err != nil {
 		return err
@@ -84,10 +77,10 @@ func recomputeLogicGateRaciEffectiveAccessTx(ctx context.Context, tx *sql.Tx, co
 	if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, affected); err != nil {
 		return err
 	}
-	return syncPostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID)
+	return syncPostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID)
 }
 
-func recomputeSharedTriageRaciEffectiveAccessForResourceTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
+func recomputeSharedTriageGVICEffectiveAccessForResourceTx(ctx context.Context, tx *sql.Tx, companyID, folderID string) error {
 	return validatePostgresCompatibilityResourceScope(ctx, tx, companyID, EntityTypeSharedTriageFolder, folderID)
 }
 
@@ -118,7 +111,7 @@ where company_id=$1::uuid
 		if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
 			return err
 		}
-		if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+		if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return err
 		}
 	}
@@ -140,7 +133,7 @@ func recomputeLogicGateAssignedNodeVisibilityTx(ctx context.Context, tx *sql.Tx,
 		if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
 			return err
 		}
-		if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+		if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return err
 		}
 	}

@@ -10,7 +10,7 @@ type memoryWorkItemAssignmentEventSnapshot struct {
 	emailNodeLinks           map[string]communicationsEmailNodeLink
 	entityPermissions        map[string]domain.EntityPermission
 	effectiveAccess          map[string]domain.EffectiveResourceAccess
-	racioProjectionRows      map[string]memoryRacioProjectionRow
+	GVICMatrixProjectionRows map[string]memoryGVICMatrixProjectionRow
 	domainEvents             map[string]domain.DomainEvent
 	eventRows                map[string]EventRow
 }
@@ -24,7 +24,7 @@ func (r *MemoryRepo) snapshotWorkItemAssignmentEventStateLocked() memoryWorkItem
 		emailNodeLinks:           cloneMemoryMap(r.emailNodeLinks),
 		entityPermissions:        cloneMemoryMap(r.entityPermissions),
 		effectiveAccess:          cloneMemoryMap(r.effectiveAccess),
-		racioProjectionRows:      cloneMemoryMap(r.racioProjectionRows),
+		GVICMatrixProjectionRows: cloneMemoryMap(r.GVICMatrixProjectionRows),
 		domainEvents:             cloneMemoryMap(r.domainEvents),
 		eventRows:                cloneMemoryMap(r.eventRows),
 	}
@@ -38,7 +38,7 @@ func (r *MemoryRepo) restoreWorkItemAssignmentEventStateLocked(snapshot memoryWo
 	r.emailNodeLinks = snapshot.emailNodeLinks
 	r.entityPermissions = snapshot.entityPermissions
 	r.effectiveAccess = snapshot.effectiveAccess
-	r.racioProjectionRows = snapshot.racioProjectionRows
+	r.GVICMatrixProjectionRows = snapshot.GVICMatrixProjectionRows
 	r.domainEvents = snapshot.domainEvents
 	r.eventRows = snapshot.eventRows
 }

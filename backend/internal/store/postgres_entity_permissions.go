@@ -439,7 +439,7 @@ select exists(
 			return nil, err
 		}
 		if missing {
-			return nil, ErrAssigneeNotInCompany
+			return nil, ErrPrincipalNotInCompany
 		}
 	}
 
@@ -657,7 +657,7 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 			var role string
 			err := tx.QueryRowContext(ctx, `select role from company_memberships where company_id=$1::uuid and user_id=$2::uuid`, companyID, item.subjectID).Scan(&role)
 			if errors.Is(err, sql.ErrNoRows) {
-				return nil, ErrAssigneeNotInCompany
+				return nil, ErrPrincipalNotInCompany
 			}
 			if err != nil {
 				return nil, err

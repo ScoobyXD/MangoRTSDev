@@ -395,15 +395,15 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{
+		Assignments: []store.LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
 			UserID: responsible.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}
 
 	server := NewServer(repo)
@@ -437,7 +437,7 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 
 	viewerNotifications := listLogicGateWorkNotificationsForTest(t, handler, companyID, viewer)
 	if len(viewerNotifications) != 0 {
-		t.Fatalf("viewer notifications = %+v, want none without RACI role", viewerNotifications)
+		t.Fatalf("viewer notifications = %+v, want none without GVIC role", viewerNotifications)
 	}
 	if got := listLogicGateWorkNotificationsForTest(t, handler, companyID, editor); len(got) != 0 {
 		t.Fatalf("actor self notifications = %+v, want none", got)
@@ -532,10 +532,10 @@ func (r *countingLogicGateWorkRepo) GetLogicGateWork(companyID, logicGateID stri
 }
 
 type logicGateWorkMutationPayloadForTest struct {
-	Assignment          domain.NodeLogicGateAssignment   `json:"assignment"`
-	Node                domain.Node                      `json:"node"`
-	Card                domain.KanbanCard                `json:"card"`
-	RacioProjectionRows []store.RacioMatrixProjectionRow `json:"gvic_projection_rows"`
+	Assignment               domain.NodeLogicGateAssignment  `json:"assignment"`
+	Node                     domain.Node                     `json:"node"`
+	Card                     domain.KanbanCard               `json:"card"`
+	GVICMatrixProjectionRows []store.GVICMatrixProjectionRow `json:"gvic_projection_rows"`
 }
 
 func decodeLogicGateWorkMutationPayloadForTest(t *testing.T, rr *httptest.ResponseRecorder) logicGateWorkMutationPayloadForTest {

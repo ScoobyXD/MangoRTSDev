@@ -79,10 +79,10 @@ func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{
+		Assignments: []store.LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
 			UserID: responsible.UserID,
 		}},
@@ -103,10 +103,10 @@ func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {
 	if _, err := repo.AddCompanyMembership("blocked-no-access-subject", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	assignments, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+	assignments, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{
+		Assignments: []store.LogicGateGVICAssignmentInput{
 			{Role: domain.GVICRoleGenerated, UserID: responsible.UserID},
 			{Role: domain.GVICRoleConsulted, UserID: consultedNoAccess.UserID},
 		},
@@ -115,7 +115,7 @@ func TestLegacyKanbanCardMoveCreatesNoNotification(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(assignments) != 2 {
-		t.Fatalf("raci assignments = %+v, want responsible and consulted", assignments)
+		t.Fatalf("GVIC assignments = %+v, want responsible and consulted", assignments)
 	}
 	board, err := repo.EnsureLogicGateKanbanBoard(companyID, logicGate.LogicGateID, logicGate.Header)
 	if err != nil {
@@ -258,8 +258,8 @@ func TestOldLogicGateAssignmentRoutesAreNotFound(t *testing.T) {
 		}
 	}
 
-	assertNotFound(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci")
-	assertNotFound(http.MethodPost, "/v1/logic-gates/"+logicGate.LogicGateID+"/raci/add")
+	assertNotFound(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/GVIC")
+	assertNotFound(http.MethodPost, "/v1/logic-gates/"+logicGate.LogicGateID+"/GVIC/add")
 }
 
 func TestNotificationSummaryCountsChangedTargetsForRoleBadges(t *testing.T) {
@@ -357,14 +357,6 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	}
 	node, err := repo.CreateNode(companyID, "Review packet")
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpdateNode(store.UpdateNodeInput{
-		CompanyID:         companyID,
-		NodeID:            node.NodeID,
-		AssigneeUserID:    &mentioned.UserID,
-		AssigneeUserIDSet: true,
-	}); err != nil {
 		t.Fatal(err)
 	}
 	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, mentioned.UserID)
@@ -505,10 +497,10 @@ func TestLogicGateTextBoxMentionCreatesMentionNotification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{
+		Assignments: []store.LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleVerified,
 			UserID: mentioned.UserID,
 		}},
@@ -712,7 +704,7 @@ func TestNotificationReadAllCanClearOneNotificationType(t *testing.T) {
 			Title:           "Node updated",
 			BodyPreview:     "Fields changed",
 			Surface:         domain.NotificationSurfaceRInbox,
-			Role:            "responsible",
+			Role:            domain.GVICRoleGenerated,
 			NodeID:          node.NodeID,
 		},
 	}})
@@ -1064,15 +1056,6 @@ func TestNodeChatWithoutMentionDoesNotNotifyAssignee(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpdateNode(store.UpdateNodeInput{
-		CompanyID:         companyID,
-		NodeID:            node.NodeID,
-		AssigneeUserID:    &assignee.UserID,
-		AssigneeUserIDSet: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
 	commentBody, _ := json.Marshal(map[string]any{
 		"company_id":  companyID,
 		"type":        "Text block chat",

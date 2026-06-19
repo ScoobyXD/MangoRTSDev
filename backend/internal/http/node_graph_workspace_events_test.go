@@ -17,7 +17,7 @@ type failingNodeCreateWorkspaceEventRepo struct {
 	err error
 }
 
-func (r *failingNodeCreateWorkspaceEventRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title, assigneeUserID string) (domain.Node, domain.DomainEvent, error) {
+func (r *failingNodeCreateWorkspaceEventRepo) CreateNodeWithWorkspaceEvent(companyID, title string) (domain.Node, domain.DomainEvent, error) {
 	return domain.Node{}, domain.DomainEvent{}, r.err
 }
 

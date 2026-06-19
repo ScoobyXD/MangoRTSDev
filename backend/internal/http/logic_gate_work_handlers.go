@@ -355,11 +355,9 @@ func parseLogicGateWorkAssignmentCreateFields(w http.ResponseWriter, fields map[
 	} else if set && description != nil {
 		input.DescriptionSnapshot = *description
 	}
-	if assigneePolicy, set, ok := parseOptionalStringField(fields, "assignee_policy"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_assignee_policy")
+	if _, present := fields["assignee_policy"]; present {
+		writeError(w, http.StatusBadRequest, "unsupported_assignee_policy")
 		return false
-	} else if set && assigneePolicy != nil {
-		input.AssigneePolicy = *assigneePolicy
 	}
 	if priority, set, ok := parseOptionalPriorityField(fields); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_priority")
@@ -412,13 +410,9 @@ func parseLogicGateWorkAssignmentMoveFields(w http.ResponseWriter, fields map[st
 		input.ColumnID = *columnID
 		*changed = true
 	}
-	if assigneePolicy, set, ok := parseOptionalStringField(fields, "assignee_policy"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_assignee_policy")
+	if _, present := fields["assignee_policy"]; present {
+		writeError(w, http.StatusBadRequest, "unsupported_assignee_policy")
 		return false
-	} else if set && assigneePolicy != nil && strings.TrimSpace(*assigneePolicy) != "" {
-		input.AssigneePolicy = *assigneePolicy
-		input.AssigneePolicySet = true
-		*changed = true
 	}
 	if priority, set, ok := parseOptionalPriorityField(fields); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_priority")
@@ -546,7 +540,7 @@ func logicGateWorkAssignmentResultPayload(result store.LogicGateNodeAssignmentRe
 		"assignment":           assignment,
 		"node":                 result.Node,
 		"card":                 card,
-		"gvic_projection_rows": result.RacioProjectionRows,
+		"gvic_projection_rows": result.GVICMatrixProjectionRows,
 	}
 }
 
@@ -557,7 +551,7 @@ func logicGateWorkAssignmentRemoveResultPayload(result store.LogicGateNodeAssign
 		"assignment":           assignment,
 		"node":                 result.Node,
 		"card":                 card,
-		"gvic_projection_rows": result.RacioProjectionRows,
+		"gvic_projection_rows": result.GVICMatrixProjectionRows,
 	}
 }
 

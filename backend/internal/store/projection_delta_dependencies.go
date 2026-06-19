@@ -58,7 +58,7 @@ func applyNodeProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, inp
 	if err != nil {
 		return nil, err
 	}
-	racioBefore, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+	GVICMatrixBefore, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func applyNodeProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, inp
 		if err := deleteKanbanBoardProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return nil, err
 		}
-		if err := deletePostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+		if err := deletePostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -103,7 +103,7 @@ where company_id=$1::uuid
 		if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
 			return nil, err
 		}
-		if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+		if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return nil, err
 		}
 		if err := syncProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
@@ -125,7 +125,7 @@ where company_id=$1::uuid
 	if err != nil {
 		return nil, err
 	}
-	racioAfter, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+	GVICMatrixAfter, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ where company_id=$1::uuid
 	}
 
 	deltas := diffKanbanProjectionRows(kanbanBefore, kanbanAfter)
-	deltas = append(deltas, diffRacioProjectionRows(racioBefore, racioAfter)...)
+	deltas = append(deltas, diffGVICMatrixProjectionRows(GVICMatrixBefore, GVICMatrixAfter)...)
 	deltas = append(deltas, diffGVICEffectiveProjectionRows(gvicBefore, gvicAfter)...)
 	deltas = append(deltas, diffProjectManagementProjectionRows(projectManagementBefore, projectManagementAfter)...)
 	deltas = append(deltas, projectRelationshipDeltas...)
@@ -175,7 +175,7 @@ func applyLogicGateProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx
 	if err != nil {
 		return nil, err
 	}
-	racioBefore, err := postgresRacioProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	GVICMatrixBefore, err := postgresGVICMatrixProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func applyLogicGateProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx
 		if err := deleteKanbanBoardProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return nil, err
 		}
-		if err := deletePostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+		if err := deletePostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -221,7 +221,7 @@ where company_id=$1::uuid
 		if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, affected); err != nil {
 			return nil, err
 		}
-		if err := syncPostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+		if err := syncPostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return nil, err
 		}
 		if err := syncProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
@@ -243,7 +243,7 @@ where company_id=$1::uuid
 	if err != nil {
 		return nil, err
 	}
-	racioAfter, err := postgresRacioProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	GVICMatrixAfter, err := postgresGVICMatrixProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +261,7 @@ where company_id=$1::uuid
 	}
 
 	deltas := diffKanbanProjectionRows(kanbanBefore, kanbanAfter)
-	deltas = append(deltas, diffRacioProjectionRows(racioBefore, racioAfter)...)
+	deltas = append(deltas, diffGVICMatrixProjectionRows(GVICMatrixBefore, GVICMatrixAfter)...)
 	deltas = append(deltas, diffGVICEffectiveProjectionRows(gvicBefore, gvicAfter)...)
 	deltas = append(deltas, diffProjectManagementProjectionRows(projectManagementBefore, projectManagementAfter)...)
 	deltas = append(deltas, projectRelationshipDeltas...)
@@ -543,7 +543,6 @@ with source as (
     case when relationship.resource_type='node' then node_assignment.assignment_id end as assignment_id,
     coalesce(nullif(gate.header, ''), nullif(node_row.name, ''), relationship.resource_id::text) as display_title,
     case when relationship.resource_type='logic_gate' then 'Logic Gate' else nullif(node_row.status, '') end as status,
-    case when relationship.resource_type='logic_gate' then '#8b5cf6' else null::text end as status_color,
     relationship.position,
     coalesce(gate.created_timestamp, node_row.created_timestamp) as resource_created_timestamp,
     relationship.created_timestamp as relationship_created_timestamp,
@@ -593,7 +592,6 @@ insert into project_relationship_projection (
   assignment_id,
   display_title,
   status,
-  status_color,
   position,
   resource_created_timestamp,
   relationship_created_timestamp,
@@ -611,7 +609,6 @@ select
   assignment_id,
   display_title,
   status,
-  status_color,
   position,
   resource_created_timestamp,
   relationship_created_timestamp,
@@ -628,7 +625,6 @@ do update set
   assignment_id=excluded.assignment_id,
   display_title=excluded.display_title,
   status=excluded.status,
-  status_color=excluded.status_color,
   position=excluded.position,
   resource_created_timestamp=excluded.resource_created_timestamp,
   relationship_created_timestamp=excluded.relationship_created_timestamp,

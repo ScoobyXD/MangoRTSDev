@@ -80,6 +80,55 @@ func cloneResourceGVICAssignments(items []domain.ResourceGVICAssignment) []domai
 	return append([]domain.ResourceGVICAssignment{}, items...)
 }
 
+func logicGateGVICAssignmentFromResource(item domain.ResourceGVICAssignment) domain.LogicGateGVICAssignment {
+	return domain.LogicGateGVICAssignment{
+		CompanyID:        item.CompanyID,
+		LogicGateID:      item.ResourceID,
+		Role:             item.Role,
+		PrincipalType:    item.PrincipalType,
+		PrincipalID:      item.PrincipalID,
+		PrincipalName:    item.PrincipalName,
+		UserID:           item.UserID,
+		UserDisplayName:  item.UserDisplayName,
+		UserEmail:        item.UserEmail,
+		CreatedTimestamp: item.CreatedTimestamp,
+	}
+}
+
+func logicGateGVICAssignmentsFromResources(items []domain.ResourceGVICAssignment) []domain.LogicGateGVICAssignment {
+	out := make([]domain.LogicGateGVICAssignment, 0, len(items))
+	for _, item := range items {
+		out = append(out, logicGateGVICAssignmentFromResource(item))
+	}
+	sortLogicGateGVICAssignments(out)
+	return out
+}
+
+func sharedInboxGVICAssignmentFromResource(item domain.ResourceGVICAssignment, folderID string) domain.SharedInboxGVICAssignment {
+	return domain.SharedInboxGVICAssignment{
+		CompanyID:        item.CompanyID,
+		FolderID:         folderID,
+		SharedInboxID:    item.ResourceID,
+		Role:             item.Role,
+		PrincipalType:    item.PrincipalType,
+		PrincipalID:      item.PrincipalID,
+		PrincipalName:    item.PrincipalName,
+		UserID:           item.UserID,
+		UserDisplayName:  item.UserDisplayName,
+		UserEmail:        item.UserEmail,
+		CreatedTimestamp: item.CreatedTimestamp,
+	}
+}
+
+func sharedInboxGVICAssignmentsFromResources(items []domain.ResourceGVICAssignment, folderID string) []domain.SharedInboxGVICAssignment {
+	out := make([]domain.SharedInboxGVICAssignment, 0, len(items))
+	for _, item := range items {
+		out = append(out, sharedInboxGVICAssignmentFromResource(item, folderID))
+	}
+	sortSharedInboxGVICAssignments(out)
+	return out
+}
+
 func cloneResourceGVICEffectiveAssignments(items []domain.ResourceGVICEffectiveAssignment) []domain.ResourceGVICEffectiveAssignment {
 	if len(items) == 0 {
 		return []domain.ResourceGVICEffectiveAssignment{}

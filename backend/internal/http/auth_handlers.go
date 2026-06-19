@@ -336,7 +336,7 @@ func (s *Server) handleCompanyUserGroupsSubresource(w http.ResponseWriter, r *ht
 			writeError(w, http.StatusNotFound, "user_group_not_found")
 			return
 		}
-		if errors.Is(err, store.ErrAssigneeNotInCompany) {
+		if errors.Is(err, store.ErrPrincipalNotInCompany) {
 			writeError(w, http.StatusBadRequest, "user_group_member_not_in_company")
 			return
 		}

@@ -47,19 +47,7 @@ func (r *MemoryRepo) deleteEffectiveFactsForSourceLocked(companyID, sourceType, 
 	return nil
 }
 
-func (r *MemoryRepo) recomputeNodeAssigneeEffectiveAccessLocked(companyID, nodeID string) error {
-	companyID = strings.TrimSpace(companyID)
-	nodeID = strings.TrimSpace(nodeID)
-	if companyID == "" || nodeID == "" {
-		return ErrInvalid
-	}
-	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *MemoryRepo) recomputeLogicGateRaciEffectiveAccessLocked(companyID, logicGateID string) error {
+func (r *MemoryRepo) recomputeLogicGateGVICEffectiveAccessLocked(companyID, logicGateID string) error {
 	companyID = strings.TrimSpace(companyID)
 	logicGateID = strings.TrimSpace(logicGateID)
 	if companyID == "" || logicGateID == "" {
@@ -71,7 +59,7 @@ func (r *MemoryRepo) recomputeLogicGateRaciEffectiveAccessLocked(companyID, logi
 	return nil
 }
 
-func (r *MemoryRepo) recomputeSharedTriageRaciEffectiveAccessForResourceLocked(companyID, folderID string) error {
+func (r *MemoryRepo) recomputeSharedTriageGVICEffectiveAccessForResourceLocked(companyID, folderID string) error {
 	companyID = strings.TrimSpace(companyID)
 	folderID = strings.TrimSpace(folderID)
 	if companyID == "" || folderID == "" {

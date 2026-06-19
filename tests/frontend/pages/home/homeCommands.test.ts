@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { CompanyUser, CommunicationsSharedInbox, CommunicationsSharedInboxRaciAssignment, CommunicationsSharedInboxRaciRole, EmailMessage, SendEmailInput, UserLogicGateShortcut } from "../../../../frontend/src/modules/communications/communicationsApi.js";
+import type { CompanyUser, CommunicationsSharedInbox, CommunicationsSharedInboxGVICAssignment, CommunicationsSharedInboxGVICRole, EmailMessage, SendEmailInput, UserLogicGateShortcut } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
-import type { LogicGateAssignmentCommandResult, RacioMatrixProjectionRow } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
+import type { LogicGateAssignmentCommandResult, GVICMatrixProjectionRow } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "../../../../frontend/src/pages/home/homeConstants.js";
-import { addMyLogicGateShortcutsCommand, addSharedInboxRaciSubjectCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRaciSubjectCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateRacioMatrixNode, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxRaciAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { addMyLogicGateShortcutsCommand, addSharedInboxGVICPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxGVICPrincipalCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateGVICMatrixNode, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxGVICAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 
 const timestamp = "2026-01-01T00:00:00Z";
 
@@ -14,7 +14,7 @@ function node(id: string, overrides: Partial<NodeRecord> = {}): NodeRecord {
   return {
     company_id: "company-1",
     node_id: id,
-    title: `Node ${id}`,
+    name: `Node ${id}`,
     created_timestamp: timestamp,
     ...overrides,
   };
@@ -36,7 +36,7 @@ function card(input: { nodeID: string; boardID?: string; columnID?: string }): K
   };
 }
 
-function projectionRow(resourceID: string, overrides: Partial<RacioMatrixProjectionRow> = {}): RacioMatrixProjectionRow {
+function projectionRow(resourceID: string, overrides: Partial<GVICMatrixProjectionRow> = {}): GVICMatrixProjectionRow {
   return {
     company_id: "company-1",
     user_id: "user-1",
@@ -120,11 +120,13 @@ function sharedInbox(id: string, overrides: Partial<CommunicationsSharedInbox> =
   };
 }
 
-function sharedRaci(folderID: string, role: CommunicationsSharedInboxRaciRole, userID: string): CommunicationsSharedInboxRaciAssignment {
+function sharedGVIC(folderID: string, role: CommunicationsSharedInboxGVICRole, userID: string): CommunicationsSharedInboxGVICAssignment {
   return {
     company_id: "company-1",
     folder_id: folderID,
     role,
+    principal_type: "user",
+    principal_id: userID,
     user_id: userID,
     created_timestamp: timestamp,
   };
@@ -140,7 +142,7 @@ function companyUser(userID: string): CompanyUser {
 }
 test("Home node drop uses one work-item assignment command for status and priority placement", async () => {
   const nodes = new Map([
-    ["node-1", node("node-1", { title: "Launch checklist", status: "pending" })],
+    ["node-1", node("node-1", { name: "Launch checklist", status: "pending" })],
   ]);
   const calls: Array<Parameters<HomeDropAssignNodeToLogicGateStatus>[0]> = [];
   const invalidatedBoards: string[] = [];
@@ -181,7 +183,7 @@ test("Home node drop uses one work-item assignment command for status and priori
 
 test("Home matrix node drop moves into a different Logic Gate with the move command", async () => {
   const nodes = new Map([
-    ["node-1", node("node-1", { title: "Cross gate node", status: "pending", logic_gate_ids: ["source-gate"] })],
+    ["node-1", node("node-1", { name: "Cross gate node", status: "pending", logic_gate_ids: ["source-gate"] })],
   ]);
   const assignCalls: Array<Parameters<HomeDropAssignNodeToLogicGateStatus>[0]> = [];
   const moveCalls: Array<Parameters<HomeBulkMoveLogicGateAssignment>[0]> = [];
@@ -238,7 +240,7 @@ test("Home matrix node drop moves into a different Logic Gate with the move comm
 
 test("Home matrix node drop from the no-Logic-Gate group assigns instead of moving", async () => {
   const nodes = new Map([
-    ["node-1", node("node-1", { title: "Unplaced node", status: "pending", logic_gate_ids: [] })],
+    ["node-1", node("node-1", { name: "Unplaced node", status: "pending", logic_gate_ids: [] })],
   ]);
   const assignCalls: Array<Parameters<HomeDropAssignNodeToLogicGateStatus>[0]> = [];
   const moveCalls: Array<Parameters<HomeBulkMoveLogicGateAssignment>[0]> = [];
@@ -278,7 +280,7 @@ test("Home matrix node drop from the no-Logic-Gate group assigns instead of movi
 
 test("Home matrix node drop keeps same Logic Gate status moves on the move endpoint", async () => {
   const nodes = new Map([
-    ["node-1", node("node-1", { title: "Same gate node", status: "pending", logic_gate_ids: ["gate-1"] })],
+    ["node-1", node("node-1", { name: "Same gate node", status: "pending", logic_gate_ids: ["gate-1"] })],
   ]);
   const assignCalls: Array<Parameters<HomeDropAssignNodeToLogicGateStatus>[0]> = [];
   const moveCalls: Array<Parameters<HomeBulkMoveLogicGateAssignment>[0]> = [];
@@ -359,7 +361,7 @@ test("Home logic gate creation sends creator GVIC role through batch create", as
   const result = await createHomeLogicGateCommand({
     apiBase: "https://api.example.test",
     companyID: "company-1",
-    creatorRaciRole: "generated",
+    creatorGVICRole: "generated",
     requestJSON: async <T>(_apiBase: string, path: string, init?: RequestInit): Promise<T> => {
       calls.push({
         apiBase: _apiBase,
@@ -387,18 +389,18 @@ test("Home logic gate creation sends creator GVIC role through batch create", as
 
 test("Home GVIC matrix node create preserves projection rows", async () => {
   const rows = [projectionRow("node-1", { logic_gate_id: "gate-1" })];
-  const createRacioMatrixNode: HomeCreateRacioMatrixNode = async () => ({
+  const createGVICMatrixNode: HomeCreateGVICMatrixNode = async () => ({
     node: node("node-1", { logic_gate_ids: ["gate-1"] }),
     folder_items: [explorerFolderItem("folder-1", "node-1", "node")],
     gvic_projection_rows: rows,
   });
 
-  const result = await createHomeRacioMatrixNodeCommand({
+  const result = await createHomeGVICMatrixNodeCommand({
     apiBase: "https://api.example.test",
     companyID: "company-1",
     priority: 3,
     status: "pending",
-    createRacioMatrixNode,
+    createGVICMatrixNode,
   });
 
   assert.deepEqual(result.gvic_projection_rows, rows);
@@ -750,38 +752,38 @@ test("Home shared inbox commands normalize folder operations", async () => {
 });
 
 test("Home shared inbox GVIC commands build direct replacement payloads", async () => {
-  type SharedInboxRaciUpdatePayload = Parameters<HomeUpdateSharedInboxRaciAssignments>[2][number];
-  const updateCalls: Array<{ companyID: string; folderID: string; assignments: SharedInboxRaciUpdatePayload[] }> = [];
-  const updateSharedInboxRaciAssignments: HomeUpdateSharedInboxRaciAssignments = async (companyID, folderID, assignments) => {
+  type SharedInboxGVICUpdatePayload = Parameters<HomeUpdateSharedInboxGVICAssignments>[2][number];
+  const updateCalls: Array<{ companyID: string; folderID: string; assignments: SharedInboxGVICUpdatePayload[] }> = [];
+  const updateSharedInboxGVICAssignments: HomeUpdateSharedInboxGVICAssignments = async (companyID, folderID, assignments) => {
     updateCalls.push({ companyID, folderID, assignments });
-    return assignments.map((assignment): CommunicationsSharedInboxRaciAssignment => ({
-      ...sharedRaci(folderID, assignment.role, assignment.user_id ?? assignment.subject_id ?? ""),
-      subject_type: assignment.subject_type,
-      subject_id: assignment.subject_id,
+    return assignments.map((assignment): CommunicationsSharedInboxGVICAssignment => ({
+      ...sharedGVIC(folderID, assignment.role, assignment.user_id ?? assignment.principal_id ?? ""),
+      principal_type: assignment.principal_type,
+      principal_id: assignment.principal_id,
     }));
   };
-  const existing = sharedRaci("inbox-1", "generated", "user-1");
+  const existing = sharedGVIC("inbox-1", "generated", "user-1");
   const inboxes = [sharedInbox("inbox-1", { gvic_assignments: [existing] })];
 
-  const added = await addSharedInboxRaciSubjectCommand({
+  const added = await addSharedInboxGVICPrincipalCommand({
     companyID: "company-1",
     folderID: " inbox-1 ",
     role: "verified",
-    subjectType: "user",
-    subjectID: " user-2 ",
+    principalType: "user",
+    principalID: " user-2 ",
     sharedInboxes: inboxes,
     companyUsers: [companyUser("user-2")],
     now: () => timestamp,
-    updateSharedInboxRaciAssignments,
+    updateSharedInboxGVICAssignments,
   });
-  const removed = await removeSharedInboxRaciSubjectCommand({
+  const removed = await removeSharedInboxGVICPrincipalCommand({
     companyID: "company-1",
     folderID: "inbox-1",
     role: "generated",
-    subjectType: "user",
-    subjectID: "user-1",
+    principalType: "user",
+    principalID: "user-1",
     sharedInboxes: inboxes,
-    updateSharedInboxRaciAssignments,
+    updateSharedInboxGVICAssignments,
   });
 
   assert.deepEqual(updateCalls, [
@@ -789,12 +791,12 @@ test("Home shared inbox GVIC commands build direct replacement payloads", async 
       companyID: "company-1",
       folderID: "inbox-1",
       assignments: [
-        { role: "generated", subject_type: "user", subject_id: "user-1", user_id: "user-1" },
-        { role: "verified", subject_type: "user", subject_id: "user-2", user_id: "user-2" },
+        { role: "generated", principal_type: "user", principal_id: "user-1", user_id: "user-1" },
+        { role: "verified", principal_type: "user", principal_id: "user-2", user_id: "user-2" },
       ],
     },
     { companyID: "company-1", folderID: "inbox-1", assignments: [] },
   ]);
-  assert.deepEqual(added?.assignments.map((assignment) => [assignment.role, assignment.subject_type, assignment.subject_id, assignment.user_id]), [["generated", "user", "user-1", "user-1"], ["verified", "user", "user-2", "user-2"]]);
+  assert.deepEqual(added?.assignments.map((assignment) => [assignment.role, assignment.principal_type, assignment.principal_id, assignment.user_id]), [["generated", "user", "user-1", "user-1"], ["verified", "user", "user-2", "user-2"]]);
   assert.deepEqual(removed?.assignments, []);
 });

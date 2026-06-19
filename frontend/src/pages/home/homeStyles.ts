@@ -1,6 +1,6 @@
 import React from "react";
 import { HOME_COLUMN_RESIZER_WIDTH, HOME_ROW_RESIZER_HEIGHT, INBOX_PRIORITIES } from "./homeConstants";
-import { normalizeResponsibleInboxStatus, responsibleStatusColor } from "./homeUtils";
+import { normalizeGVICInboxStatus, gvicStatusColor } from "./homeUtils";
 
 export const HOME_CYAN = "rgb(71, 85, 105)";
 const HOME_CYAN_FAINT = "rgba(71, 85, 105, 0.10)";
@@ -37,7 +37,7 @@ const HOME_LOGIC_GATE_GREEN = "#19f07a";
 const HOME_LOGIC_GATE_GREEN_SOFT = "rgba(25, 240, 122, 0.12)";
 const HOME_LOGIC_GATE_GREEN_BORDER = "rgba(25, 240, 122, 0.72)";
 
-type RaciHeaderPalette = {
+type GVICHeaderPalette = {
   surface: string;
   edge: string;
   letterBackground: string;
@@ -46,7 +46,7 @@ type RaciHeaderPalette = {
   glow: string;
 };
 
-const DEFAULT_RACI_HEADER_PALETTE: RaciHeaderPalette = {
+const DEFAULT_GVIC_HEADER_PALETTE: GVICHeaderPalette = {
   surface: "linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(241, 245, 249, 0.72))",
   edge: "rgba(100, 116, 139, 0.26)",
   letterBackground: "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(241,245,249,0.82))",
@@ -55,7 +55,7 @@ const DEFAULT_RACI_HEADER_PALETTE: RaciHeaderPalette = {
   glow: "0 8px 18px rgba(15, 23, 42, 0.06)",
 };
 
-const LOGIC_GATE_RACI_HEADER_PALETTES: Record<string, RaciHeaderPalette> = {
+const LOGIC_GATE_GVIC_HEADER_PALETTES: Record<string, GVICHeaderPalette> = {
   verified: {
     surface: "linear-gradient(135deg, rgba(255, 241, 242, 0.94), rgba(254, 249, 195, 0.72))",
     edge: "rgba(225, 29, 72, 0.40)",
@@ -146,9 +146,9 @@ const LOGIC_GATE_RACI_HEADER_PALETTES: Record<string, RaciHeaderPalette> = {
   },
 };
 
-function raciHeaderPalette(tone?: string | number): RaciHeaderPalette {
+function GVICHeaderPalette(tone?: string | number): GVICHeaderPalette {
   const key = typeof tone === "number" ? `priority-${tone}` : tone?.trim();
-  return key ? (LOGIC_GATE_RACI_HEADER_PALETTES[key] ?? DEFAULT_RACI_HEADER_PALETTE) : DEFAULT_RACI_HEADER_PALETTE;
+  return key ? (LOGIC_GATE_GVIC_HEADER_PALETTES[key] ?? DEFAULT_GVIC_HEADER_PALETTE) : DEFAULT_GVIC_HEADER_PALETTE;
 }
 
 export function homeColorWithAlpha(color: string, alpha: number): string {
@@ -889,7 +889,7 @@ export const logicGateTreeRowTextStyle: React.CSSProperties = {
   fontWeight: 600,
 };
 
-export const logicGateRaciPanelStyle: React.CSSProperties = {
+export const logicGateGVICPanelStyle: React.CSSProperties = {
   height: "100%",
   minHeight: 0,
   minWidth: 0,
@@ -900,7 +900,7 @@ export const logicGateRaciPanelStyle: React.CSSProperties = {
   overflow: "visible",
 };
 
-export const logicGateRaciMatrixSurfaceStyle: React.CSSProperties = {
+export const logicGateGVICMatrixSurfaceStyle: React.CSSProperties = {
   width: "100%",
   height: "100%",
   minHeight: 0,
@@ -918,7 +918,7 @@ export const logicGateRaciMatrixSurfaceStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
-export const logicGateRaciHeaderStyle: React.CSSProperties = {
+export const logicGateGVICHeaderStyle: React.CSSProperties = {
   minWidth: 0,
   display: "flex",
   justifyContent: "space-between",
@@ -931,7 +931,7 @@ export const logicGateRaciHeaderStyle: React.CSSProperties = {
   boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08), inset 1px 1px 0 rgba(255, 255, 255, 0.88)",
 };
 
-export const logicGateRaciMetaStyle: React.CSSProperties = {
+export const logicGateGVICMetaStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
@@ -941,7 +941,7 @@ export const logicGateRaciMetaStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-export const logicGateRaciScrollStyle: React.CSSProperties = {
+export const logicGateGVICScrollStyle: React.CSSProperties = {
   minHeight: 0,
   height: "100%",
   overflow: "auto",
@@ -962,14 +962,14 @@ export function inboxMatrixGridStyle(columnCount: number): React.CSSProperties {
   };
 }
 
-export const logicGateRaciCornerStyle: React.CSSProperties = {
+export const logicGateGVICCornerStyle: React.CSSProperties = {
   gridColumn: 1,
   gridRow: 1,
   background: "linear-gradient(135deg, rgba(255, 241, 242, 0.82), rgba(254, 249, 195, 0.58) 42%, rgba(224, 242, 254, 0.72))",
 };
 
-export function logicGateRaciColumnHeaderStyle(tone?: string | number): React.CSSProperties {
-  const palette = raciHeaderPalette(tone);
+export function logicGateGVICColumnHeaderStyle(tone?: string | number): React.CSSProperties {
+  const palette = GVICHeaderPalette(tone);
   return {
     minWidth: 0,
     display: "flex",
@@ -981,8 +981,8 @@ export function logicGateRaciColumnHeaderStyle(tone?: string | number): React.CS
   };
 }
 
-export function logicGateRaciColumnLetterStyle(tone?: string | number): React.CSSProperties {
-  const palette = raciHeaderPalette(tone);
+export function logicGateGVICColumnLetterStyle(tone?: string | number): React.CSSProperties {
+  const palette = GVICHeaderPalette(tone);
   return {
     width: 24,
     height: 24,
@@ -999,8 +999,8 @@ export function logicGateRaciColumnLetterStyle(tone?: string | number): React.CS
   };
 }
 
-export function logicGateRaciColumnLabelStyle(tone?: string | number): React.CSSProperties {
-  const palette = raciHeaderPalette(tone);
+export function logicGateGVICColumnLabelStyle(tone?: string | number): React.CSSProperties {
+  const palette = GVICHeaderPalette(tone);
   return {
     minWidth: 0,
     overflow: "hidden",
@@ -1012,8 +1012,8 @@ export function logicGateRaciColumnLabelStyle(tone?: string | number): React.CSS
   };
 }
 
-export function logicGateRaciPriorityHeaderStyle(priority?: number): React.CSSProperties {
-  const palette = raciHeaderPalette(priority);
+export function logicGateGVICPriorityHeaderStyle(priority?: number): React.CSSProperties {
+  const palette = GVICHeaderPalette(priority);
   return {
     minWidth: 0,
     display: "grid",
@@ -1030,7 +1030,7 @@ export function logicGateRaciPriorityHeaderStyle(priority?: number): React.CSSPr
   };
 }
 
-export function logicGateRaciCellStyle(activeDrop: boolean): React.CSSProperties {
+export function logicGateGVICCellStyle(activeDrop: boolean): React.CSSProperties {
   return {
     minHeight: 112,
     minWidth: 0,
@@ -1270,8 +1270,8 @@ export const logicGateInboxNodeRemoveStyle: React.CSSProperties = {
 };
 
 export function logicGateInboxNodeStatusStyle(value: unknown): React.CSSProperties {
-  const status = normalizeResponsibleInboxStatus(value);
-  const color = status ? responsibleStatusColor(status) : "rgba(15, 23, 42, 0.48)";
+  const status = normalizeGVICInboxStatus(value);
+  const color = status ? gvicStatusColor(status) : "rgba(15, 23, 42, 0.48)";
   return {
     minWidth: 21,
     height: 18,

@@ -26,13 +26,13 @@ type memoryRecycleBinSnapshot struct {
 	logicGateInfo                 map[string][]domain.LogicGateInformation
 	logicGateText                 map[string]map[string]domain.LogicGateProjection
 	logicGateRels                 map[string][]domain.LogicGateRelationship
-	logicGateRaci                 map[string][]domain.LogicGateRaciAssignment
+	logicGateGVIC                 map[string][]domain.LogicGateGVICAssignment
 	projects                      map[string]domain.Project
 	projectInfo                   map[string][]domain.ProjectInformation
 	projectText                   map[string]map[string]domain.ProjectProjection
 	projectRelationships          map[string]domain.ProjectRelationship
 	projectRelationshipProjection map[string]domain.ProjectRelationshipProjection
-	sharedInboxRaci               map[string][]domain.SharedInboxRaciAssignment
+	sharedInboxGVIC               map[string][]domain.SharedInboxGVICAssignment
 	folders                       map[string]domain.CompanyExplorerFolder
 	folderItems                   map[string]domain.CompanyExplorerFolderItem
 	folderShares                  map[string]domain.CompanyExplorerFolderShare
@@ -42,7 +42,7 @@ type memoryRecycleBinSnapshot struct {
 	kanbanColumns                 map[string][]domain.KanbanColumn
 	kanbanCards                   map[string][]domain.KanbanCard
 	nodeLogicGateAssignments      map[string]domain.NodeLogicGateAssignment
-	racioProjectionRows           map[string]memoryRacioProjectionRow
+	GVICMatrixProjectionRows      map[string]memoryGVICMatrixProjectionRow
 	projectTimelineItems          map[string]memoryProjectManagementTimelineItem
 	projectTimelineProjection     map[string]ProjectManagementTimelineProjectionRow
 	entityPermissions             map[string]domain.EntityPermission
@@ -194,13 +194,13 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		logicGateInfo:                 cloneSliceMap(r.logicGateInfo),
 		logicGateText:                 cloneNestedMap(r.logicGateText),
 		logicGateRels:                 cloneSliceMap(r.logicGateRels),
-		logicGateRaci:                 cloneSliceMap(r.logicGateRaci),
+		logicGateGVIC:                 cloneSliceMap(r.logicGateGVIC),
 		projects:                      cloneMap(r.projects),
 		projectInfo:                   cloneSliceMap(r.projectInfo),
 		projectText:                   cloneNestedMap(r.projectText),
 		projectRelationships:          cloneMap(r.projectRelationships),
 		projectRelationshipProjection: cloneMap(r.projectRelationshipProjection),
-		sharedInboxRaci:               cloneSliceMap(r.sharedInboxRaci),
+		sharedInboxGVIC:               cloneSliceMap(r.sharedInboxGVIC),
 		folders:                       cloneMap(r.folders),
 		folderItems:                   cloneMap(r.folderItems),
 		folderShares:                  cloneMap(r.folderShares),
@@ -210,7 +210,7 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		kanbanColumns:                 cloneSliceMap(r.kanbanColumns),
 		kanbanCards:                   cloneSliceMap(r.kanbanCards),
 		nodeLogicGateAssignments:      cloneMap(r.nodeLogicGateAssignments),
-		racioProjectionRows:           cloneMap(r.racioProjectionRows),
+		GVICMatrixProjectionRows:      cloneMap(r.GVICMatrixProjectionRows),
 		projectTimelineItems:          cloneMap(r.projectTimelineItems),
 		projectTimelineProjection:     cloneMap(r.projectTimelineProjection),
 		entityPermissions:             cloneMap(r.entityPermissions),
@@ -233,13 +233,13 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.logicGateInfo = cloneSliceMap(snapshot.logicGateInfo)
 	r.logicGateText = cloneNestedMap(snapshot.logicGateText)
 	r.logicGateRels = cloneSliceMap(snapshot.logicGateRels)
-	r.logicGateRaci = cloneSliceMap(snapshot.logicGateRaci)
+	r.logicGateGVIC = cloneSliceMap(snapshot.logicGateGVIC)
 	r.projects = cloneMap(snapshot.projects)
 	r.projectInfo = cloneSliceMap(snapshot.projectInfo)
 	r.projectText = cloneNestedMap(snapshot.projectText)
 	r.projectRelationships = cloneMap(snapshot.projectRelationships)
 	r.projectRelationshipProjection = cloneMap(snapshot.projectRelationshipProjection)
-	r.sharedInboxRaci = cloneSliceMap(snapshot.sharedInboxRaci)
+	r.sharedInboxGVIC = cloneSliceMap(snapshot.sharedInboxGVIC)
 	r.folders = cloneMap(snapshot.folders)
 	r.folderItems = cloneMap(snapshot.folderItems)
 	r.folderShares = cloneMap(snapshot.folderShares)
@@ -249,7 +249,7 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.kanbanColumns = cloneSliceMap(snapshot.kanbanColumns)
 	r.kanbanCards = cloneSliceMap(snapshot.kanbanCards)
 	r.nodeLogicGateAssignments = cloneMap(snapshot.nodeLogicGateAssignments)
-	r.racioProjectionRows = cloneMap(snapshot.racioProjectionRows)
+	r.GVICMatrixProjectionRows = cloneMap(snapshot.GVICMatrixProjectionRows)
 	r.projectTimelineItems = cloneMap(snapshot.projectTimelineItems)
 	r.projectTimelineProjection = cloneMap(snapshot.projectTimelineProjection)
 	r.entityPermissions = cloneMap(snapshot.entityPermissions)

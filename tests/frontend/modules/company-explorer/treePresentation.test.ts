@@ -97,7 +97,7 @@ run("tree rows render a blank root when the workspace is empty", () => {
 run("tree rows render root content without a synthetic Company folder", () => {
   const rows = buildCompanyExplorerTreeRows({
     expanded: new Set(),
-    nodes: [{ company_id: "c", node_id: "node-a", title: "Alpha", created_timestamp: "1" }],
+    nodes: [{ company_id: "c", node_id: "node-a", name: "Alpha", created_timestamp: "1" }],
     logicGates: [],
     projects: [],
     kanbanBoards: [],
@@ -182,9 +182,9 @@ run("automatic folders hold active node placements and due-date history", () => 
   const rows = buildCompanyExplorerTreeRows({
     expanded: new Set(["workspace-folder-system-active", "workspace-folder-system-history"]),
     nodes: [
-      { company_id: "c", node_id: "future", title: "Future", due_date: "2026-05-08", created_timestamp: "1" },
-      { company_id: "c", node_id: "past", title: "Past", due_date: "2026-05-06", created_timestamp: "2" },
-      { company_id: "c", node_id: "today", title: "Today", due_date: "2026-05-07", created_timestamp: "3" },
+      { company_id: "c", node_id: "future", name: "Future", due_date: "2026-05-08", created_timestamp: "1" },
+      { company_id: "c", node_id: "past", name: "Past", due_date: "2026-05-06", created_timestamp: "2" },
+      { company_id: "c", node_id: "today", name: "Today", due_date: "2026-05-07", created_timestamp: "3" },
     ],
     logicGates: [],
     projects: [],
@@ -229,8 +229,8 @@ run("root folders from different domains can be locally ordered together", () =>
 
 run("custom top-level rows exclude default roots and keep custom branches", () => {
   const rows = [
-    { id: "raci-default-folders", label: "Default Folders", depth: 0, kind: "folder" as const, folderKind: "logic_gate" as const, scopeLevel: 0, position: 1000, createdTimestamp: "", syntheticKind: "default_scope_folder" as const },
-    { id: "raci-folder-generated", label: "Generated", depth: 1, kind: "folder" as const, folderKind: "logic_gate" as const, scopeLevel: 1, position: 1000, createdTimestamp: "", syntheticKind: "raci_folder" as const },
+    { id: "GVIC-default-folders", label: "Default Folders", depth: 0, kind: "folder" as const, folderKind: "logic_gate" as const, scopeLevel: 0, position: 1000, createdTimestamp: "", syntheticKind: "default_scope_folder" as const },
+    { id: "GVIC-folder-generated", label: "Generated", depth: 1, kind: "folder" as const, folderKind: "logic_gate" as const, scopeLevel: 1, position: 1000, createdTimestamp: "", syntheticKind: "GVIC_folder" as const },
     { id: "workspace-folder-system-active", label: "Active Nodes", depth: 0, kind: "folder" as const, folderID: "system-active", folderKind: "node" as const, systemKey: "active_nodes" as const, scopeLevel: 0, position: 200, createdTimestamp: "0" },
     { id: "node-system", label: "System Node", depth: 1, kind: "node" as const, nodeID: "system", folderID: "system-active", folderKind: "node" as const, scopeLevel: 1, position: 1000, createdTimestamp: "1" },
     { id: "workspace-folder-function-root", label: "Logic Gates by Function", depth: 0, kind: "folder" as const, folderID: "function-root", folderKind: "logic_gate" as const, scopeLevel: 0, position: 300, createdTimestamp: "0" },
@@ -316,7 +316,7 @@ run("raw scoped tree rows keep custom folders under default-named parents", () =
 run("custom logic gate rows render assigned nodes when expanded", () => {
   const rows = buildCompanyExplorerTreeRows({
     expanded: new Set(["workspace-folder-custom", "logic-gate-gate-a"]),
-    nodes: [{ company_id: "c", node_id: "node-a", title: "Nested node", logic_gate_ids: ["gate-a"], created_timestamp: "5" }],
+    nodes: [{ company_id: "c", node_id: "node-a", name: "Nested node", logic_gate_ids: ["gate-a"], created_timestamp: "5" }],
     logicGates: [
       { company_id: "c", logic_gate_id: "gate-a", node_id: "gate-a", header: "Gate A", title: "Gate A", created_timestamp: "4" },
     ],

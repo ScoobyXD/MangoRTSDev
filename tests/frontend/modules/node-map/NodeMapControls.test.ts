@@ -14,8 +14,8 @@ const defaultLayout = {
 test("computeNodeMapMultiSelectResult selects nodes and relationship lines inside the multi-select box", () => {
   const selection = computeNodeMapMultiSelectResult({
     nodes: [
-      { node_id: "node-a", title: "Node A", created_timestamp: "" },
-      { node_id: "node-b", title: "Node B", created_timestamp: "" },
+      { node_id: "node-a", name: "Node A", created_timestamp: "" },
+      { node_id: "node-b", name: "Node B", created_timestamp: "" },
     ],
     nodePositions: {
       "node-a": { x: 20, y: 20 },

@@ -274,13 +274,12 @@ function collectDeletedFolderIDs(folders: CompanyExplorerFolder[], rootFolderID:
 function asNodeRecord(candidate: unknown): NodeRecord | null {
   if (!candidate || typeof candidate !== "object") return null;
   const value = candidate as Partial<NodeRecord>;
-  const name = typeof value.name === "string" ? value.name : typeof value.title === "string" ? value.title : "";
+  const name = typeof value.name === "string" ? value.name : "";
   if (typeof value.company_id !== "string" || typeof value.node_id !== "string" || !name.trim()) return null;
   return {
     company_id: value.company_id,
     node_id: value.node_id,
     name,
-    title: value.title,
     status: typeof value.status === "string" || value.status === null ? value.status : undefined,
     due_date: typeof value.due_date === "string" || value.due_date === null ? value.due_date : undefined,
     priority: typeof value.priority === "number" || value.priority === null ? value.priority : undefined,

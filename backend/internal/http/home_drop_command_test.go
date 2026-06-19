@@ -33,12 +33,12 @@ func TestHomeDropAssignmentCommandKeepsSourceProjectionNodeAndEventsConsistent(t
 	if _, err := repo.AddCompanyMembership("home-drop-responsible", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: responsible.UserID}},
+		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: responsible.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}
 
 	stream := server.workspaceEvents.subscribe(companyID)
@@ -67,9 +67,6 @@ func TestHomeDropAssignmentCommandKeepsSourceProjectionNodeAndEventsConsistent(t
 	}
 	if payload.Node.Priority == nil || *payload.Node.Priority != 1 {
 		t.Fatalf("node priority = %+v, want 1", payload.Node.Priority)
-	}
-	if payload.Node.AssigneeUserID != nil {
-		t.Fatalf("node assignee = %+v, want nil after GVIC migration", payload.Node.AssigneeUserID)
 	}
 	if len(payload.Node.LogicGateIDs) != 1 || payload.Node.LogicGateIDs[0] != logicGate.LogicGateID {
 		t.Fatalf("node logic_gate_ids = %+v, want assignment-derived Logic Gate", payload.Node.LogicGateIDs)
@@ -176,7 +173,7 @@ func TestHomeDropAssignmentCommandFailureDoesNotPartiallyUpdateOrPublish(t *test
 	if err != nil {
 		t.Fatalf("GetNode after failed Home drop: %v", err)
 	}
-	if loaded.Status == nil || *loaded.Status != status || loaded.StatusColor != nil || loaded.Priority == nil || *loaded.Priority != priority {
+	if loaded.Status == nil || *loaded.Status != status || loaded.Priority == nil || *loaded.Priority != priority {
 		t.Fatalf("node after failed Home drop = %+v, want original fallback state", loaded)
 	}
 	durable, err := repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: 0, Limit: 10})

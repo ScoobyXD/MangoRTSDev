@@ -250,7 +250,7 @@ var recycleSnapshotTables = map[string]bool{
 	"project_relationship_projection":        true,
 	"node_logic_gate_assignments":            true,
 	"kanban_board_projection":                true,
-	"racio_matrix_projection_table":          true,
+	"gvic_matrix_projection_table":           true,
 	"project_management_timeline_items":      true,
 	"project_management_timeline_projection": true,
 	"resource_gvic_assignments":              true,
@@ -294,7 +294,7 @@ var recycleRestoreTableOrder = []string{
 	"project_management_timeline_items",
 	"project_management_timeline_projection",
 	"kanban_board_projection",
-	"racio_matrix_projection_table",
+	"gvic_matrix_projection_table",
 	"company_explorer_folder_items",
 }
 
@@ -468,9 +468,9 @@ func postgresSnapshotRecyclePayloadTx(ctx context.Context, tx *sql.Tx, companyID
 				return nil, err
 			}
 		}
-		racioWhere, racioArgs := recycleRacioProjectionWhere(companyID, nodeIDs, logicGateIDs)
-		if racioWhere != "" {
-			if err := addTable("racio_matrix_projection_table", racioWhere, racioArgs...); err != nil {
+		GVICMatrixWhere, GVICMatrixArgs := recycleGVICMatrixProjectionWhere(companyID, nodeIDs, logicGateIDs)
+		if GVICMatrixWhere != "" {
+			if err := addTable("gvic_matrix_projection_table", GVICMatrixWhere, GVICMatrixArgs...); err != nil {
 				return nil, err
 			}
 		}
@@ -617,7 +617,7 @@ func recycleProjectRelationshipWhere(companyID string, nodeIDs, logicGateIDs, pr
 	return "company_id=$1::uuid and (" + strings.Join(clauses, " or ") + ")", args
 }
 
-func recycleRacioProjectionWhere(companyID string, nodeIDs, logicGateIDs []string) (string, []any) {
+func recycleGVICMatrixProjectionWhere(companyID string, nodeIDs, logicGateIDs []string) (string, []any) {
 	clauses := []string{}
 	args := []any{companyID}
 	if len(nodeIDs) > 0 {

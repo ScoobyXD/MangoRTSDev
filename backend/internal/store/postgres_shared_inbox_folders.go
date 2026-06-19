@@ -190,7 +190,7 @@ where company_id=$1 and folder_id=$2`, companyID, folderID, ResourceDefaultAcces
 		}
 		return domain.CompanyExplorerFolder{}, err
 	}
-	items, err := r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, []domain.CompanyExplorerFolder{item})
+	items, err := r.attachCommunicationsSharedInboxGVICAssignments(ctx, companyID, []domain.CompanyExplorerFolder{item})
 	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
@@ -351,7 +351,7 @@ order by position asc, created_timestamp asc`, companyID, ResourceDefaultAccessE
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	items, err = r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
+	items, err = r.attachCommunicationsSharedInboxGVICAssignments(ctx, companyID, items)
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +474,7 @@ order by item.position asc, item.created_timestamp asc`, companyID, userID, Reso
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	items, err = r.attachCommunicationsSharedInboxRaciAssignments(ctx, companyID, items)
+	items, err = r.attachCommunicationsSharedInboxGVICAssignments(ctx, companyID, items)
 	if err != nil {
 		return nil, err
 	}

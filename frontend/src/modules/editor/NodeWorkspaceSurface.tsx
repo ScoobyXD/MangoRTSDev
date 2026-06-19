@@ -688,7 +688,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       : {
         company_id: companyID,
         node_id: cleanNodeID,
-        title: relationshipNodeTitle,
+        name: relationshipNodeTitle,
         created_timestamp: "",
       };
     const nodes = fallbackNode ? [...relationshipGraph.nodes, fallbackNode] : relationshipGraph.nodes;

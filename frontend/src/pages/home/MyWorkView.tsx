@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../../modules/communications/communicationsApi";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
-import type { LogicGateRaciAssignment, LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import { cleanIDList, logicGateTitle, nodeTitle } from "./homeUtils";
 import {
@@ -777,7 +777,7 @@ function userIDsForGroupSubtree(
   return out;
 }
 
-function peopleFromAssignments(assignments: LogicGateRaciAssignment[], userByID: Map<string, CompanyUser>) {
+function peopleFromAssignments(assignments: LogicGateGVICAssignment[], userByID: Map<string, CompanyUser>) {
   const people = new Map<string, { userID: string; label: string }>();
   for (const assignment of assignments) {
     const userID = assignment.user_id.trim();
@@ -807,8 +807,8 @@ function teamsForUsers(userIDs: string[], groupIDsByUserID: Map<string, string[]
   return Array.from(teams.values()).sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }));
 }
 
-function uniqueGVICRoles(roles: LogicGateRaciRole[]): LogicGateRaciRole[] {
-  const order: LogicGateRaciRole[] = ["generated", "verified", "consulted", "informed"];
+function uniqueGVICRoles(roles: LogicGateGVICRole[]): LogicGateGVICRole[] {
+  const order: LogicGateGVICRole[] = ["generated", "verified", "consulted", "informed"];
   const seen = new Set(roles);
   return order.filter((role) => seen.has(role));
 }

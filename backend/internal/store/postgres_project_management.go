@@ -23,12 +23,8 @@ projection.logic_gate_id::text,
 projection.node_id::text,
 projection.display_title,
 projection.status,
-projection.status_color,
 projection.due_date::text,
 projection.priority,
-projection.assignee_user_id::text,
-projection.assignee_display_name,
-projection.assignee_email,
 projection.start_date::text,
 projection.end_date::text,
 projection.duration_days,
@@ -44,12 +40,8 @@ func scanProjectManagementTimelineProjectionRow(row interface{ Scan(dest ...any)
 	var logicGateID sql.NullString
 	var nodeID sql.NullString
 	var status sql.NullString
-	var statusColor sql.NullString
 	var dueDate sql.NullString
 	var priority sql.NullInt64
-	var assigneeUserID sql.NullString
-	var assigneeDisplayName sql.NullString
-	var assigneeEmail sql.NullString
 	var accountsJSON sql.NullString
 	err := row.Scan(
 		&item.CompanyID,
@@ -61,12 +53,8 @@ func scanProjectManagementTimelineProjectionRow(row interface{ Scan(dest ...any)
 		&nodeID,
 		&item.DisplayTitle,
 		&status,
-		&statusColor,
 		&dueDate,
 		&priority,
-		&assigneeUserID,
-		&assigneeDisplayName,
-		&assigneeEmail,
 		&item.StartDate,
 		&item.EndDate,
 		&item.DurationDays,
@@ -101,10 +89,6 @@ func scanProjectManagementTimelineProjectionRow(row interface{ Scan(dest ...any)
 		item.NodeTitle = item.DisplayTitle
 	}
 	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
-	_ = statusColor
-	_ = assigneeUserID
-	_ = assigneeDisplayName
-	_ = assigneeEmail
 	return item, nil
 }
 
@@ -180,12 +164,8 @@ with source as (
     item.logic_gate_id,
     coalesce(nullif(node_row.name, ''), nullif(gate.header, ''), coalesce(item.node_id::text, item.logic_gate_id::text)) as display_title,
     case when item.node_id is not null then nullif(node_row.status, '') else 'Logic Gate' end as status,
-    case when item.node_id is not null then null::text else '#8b5cf6' end as status_color,
     node_row.due_date,
     node_row.priority,
-    null::uuid as assignee_user_id,
-    null::text as assignee_display_name,
-    null::text as assignee_email,
     item.start_date,
     (item.start_date + (item.duration_days - 1) * interval '1 day')::date as end_date,
     item.duration_days,
@@ -225,12 +205,8 @@ insert into project_management_timeline_projection (
   logic_gate_id,
   display_title,
   status,
-  status_color,
   due_date,
   priority,
-  assignee_user_id,
-  assignee_display_name,
-  assignee_email,
   start_date,
   end_date,
   duration_days,
@@ -251,12 +227,8 @@ select
   logic_gate_id,
   display_title,
   status,
-  status_color,
   due_date,
   priority,
-  assignee_user_id,
-  assignee_display_name,
-  assignee_email,
   start_date,
   end_date,
   duration_days,
@@ -275,12 +247,8 @@ do update set
   logic_gate_id=excluded.logic_gate_id,
   display_title=excluded.display_title,
   status=excluded.status,
-  status_color=excluded.status_color,
   due_date=excluded.due_date,
   priority=excluded.priority,
-  assignee_user_id=excluded.assignee_user_id,
-  assignee_display_name=excluded.assignee_display_name,
-  assignee_email=excluded.assignee_email,
   start_date=excluded.start_date,
   end_date=excluded.end_date,
   duration_days=excluded.duration_days,

@@ -154,7 +154,6 @@ func scanProjectRelationshipProjection(row interface{ Scan(dest ...any) error })
 	var nodeID sql.NullString
 	var assignmentID sql.NullString
 	var status sql.NullString
-	var statusColor sql.NullString
 	err := row.Scan(
 		&item.CompanyID,
 		&item.ProjectID,
@@ -167,7 +166,6 @@ func scanProjectRelationshipProjection(row interface{ Scan(dest ...any) error })
 		&assignmentID,
 		&item.DisplayTitle,
 		&status,
-		&statusColor,
 		&item.Position,
 		&item.ResourceCreatedTimestamp,
 		&item.RelationshipCreatedTimestamp,
@@ -189,10 +187,6 @@ func scanProjectRelationshipProjection(row interface{ Scan(dest ...any) error })
 	if status.Valid {
 		value := status.String
 		item.Status = &value
-	}
-	if statusColor.Valid {
-		value := statusColor.String
-		item.StatusColor = &value
 	}
 	return item, err
 }
@@ -813,7 +807,6 @@ select
   projection.assignment_id::text,
   projection.display_title,
   projection.status,
-  projection.status_color,
   projection.position,
   projection.resource_created_timestamp,
   projection.relationship_created_timestamp,

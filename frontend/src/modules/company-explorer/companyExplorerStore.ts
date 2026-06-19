@@ -416,7 +416,7 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 
 function asNodeRecord(value: unknown): NodeRecord | null {
   if (!isObjectRecord(value) || typeof value.node_id !== "string" || typeof value.created_timestamp !== "string") return null;
-  const name = typeof value.name === "string" ? value.name : typeof value.title === "string" ? value.title : "";
+  const name = typeof value.name === "string" ? value.name : "";
   if (!name.trim()) return null;
   return { ...(value as NodeRecord), name };
 }

@@ -8,12 +8,12 @@ import (
 	"strings"
 )
 
-func (r *PostgresRepo) ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.ListResponsibleInboxNodesContext(context.Background(), query)
+func (r *PostgresRepo) ListGeneratedInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
+	return r.ListGeneratedInboxNodesContext(context.Background(), query)
 }
 
-func (r *PostgresRepo) ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listRacioProjectedNodes(ctx, query, true)
+func (r *PostgresRepo) ListGeneratedInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
+	return r.listGVICMatrixProjectedNodes(ctx, query, true)
 }
 
 func (r *PostgresRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
@@ -21,20 +21,20 @@ func (r *PostgresRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, err
 }
 
 func (r *PostgresRepo) ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listRacioProjectedNodes(ctx, query, false)
+	return r.listGVICMatrixProjectedNodes(ctx, query, false)
 }
 
-func (r *PostgresRepo) listRacioProjectedNodes(ctx context.Context, query WorkItemInboxQuery, responsibleOnly bool) ([]domain.Node, error) {
+func (r *PostgresRepo) listGVICMatrixProjectedNodes(ctx context.Context, query WorkItemInboxQuery, generatedOnly bool) ([]domain.Node, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	query = NormalizeWorkItemInboxQuery(query)
 	roleFilter := "and entry.logic_gate_id is null"
-	if responsibleOnly {
+	if generatedOnly {
 		roleFilter = `and entry.logic_gate_id is not null
   and exists (
     select 1
-    from logic_gate_raci_users assignment
+    from logic_gate_GVIC_users assignment
     where assignment.company_id=entry.company_id
       and assignment.logic_gate_id=entry.logic_gate_id
       and assignment.user_id=entry.user_id
@@ -42,24 +42,20 @@ func (r *PostgresRepo) listRacioProjectedNodes(ctx context.Context, query WorkIt
   )`
 	}
 	rows, err := r.db.QueryContext(ctx, `
-with recursive `+postgresLogicGateRaciUsersCTE+`
+with recursive `+postgresLogicGateGVICUsersCTE+`
 select
   entry.company_id::text,
   entry.resource_id::text,
   entry.display_title,
   entry.status,
-  null::text as status_color,
   entry.due_date::text,
   entry.priority,
-  null::text as assignee_user_id,
-  null::text as assignee_display_name,
-  null::text as assignee_email,
   entry.resource_created_timestamp,
   case
     when entry.logic_gate_id is null then '[]'::jsonb
     else jsonb_build_array(entry.logic_gate_id::text)
   end::text as logic_gate_ids_json
-from racio_matrix_projection_table entry
+from gvic_matrix_projection_table entry
 where entry.resource_type='node'
   and entry.company_id=$1::uuid
   and entry.user_id=$2::uuid
@@ -88,7 +84,7 @@ func (r *PostgresRepo) ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkI
 }
 
 func (r *PostgresRepo) ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.listRacioProjectedLogicGates(ctx, query, true)
+	return r.listGVICMatrixProjectedLogicGates(ctx, query, true)
 }
 
 func (r *PostgresRepo) ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
@@ -96,10 +92,10 @@ func (r *PostgresRepo) ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLog
 }
 
 func (r *PostgresRepo) ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.listRacioProjectedLogicGates(ctx, query, false)
+	return r.listGVICMatrixProjectedLogicGates(ctx, query, false)
 }
 
-func (r *PostgresRepo) listRacioProjectedLogicGates(ctx context.Context, query WorkItemInboxQuery, aciOnly bool) ([]WorkItemLogicGateInboxItem, error) {
+func (r *PostgresRepo) listGVICMatrixProjectedLogicGates(ctx context.Context, query WorkItemInboxQuery, aciOnly bool) ([]WorkItemLogicGateInboxItem, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -109,7 +105,7 @@ func (r *PostgresRepo) listRacioProjectedLogicGates(ctx context.Context, query W
 		roleFilter = "\n  and assignment.role in ('verified', 'consulted', 'informed')"
 	}
 	rows, err := r.db.QueryContext(ctx, `
-with recursive `+postgresLogicGateRaciUsersCTE+`
+with recursive `+postgresLogicGateGVICUsersCTE+`
 select
   entry.company_id::text,
   entry.resource_id::text,
@@ -124,8 +120,8 @@ select
       else 5
     end
   ), '[]'::jsonb)::text as roles_json
-from racio_matrix_projection_table entry
-join logic_gate_raci_users assignment
+from gvic_matrix_projection_table entry
+join logic_gate_GVIC_users assignment
   on assignment.company_id=entry.company_id
  and assignment.logic_gate_id=entry.resource_id
  and assignment.user_id=entry.user_id
@@ -164,19 +160,19 @@ limit $3`, query.CompanyID, query.UserID, query.Limit, query.ViewerUserID)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	assignmentsByGate, err := r.listProjectedLogicGateRaciAssignments(ctx, query.CompanyID, ids)
+	assignmentsByGate, err := r.listProjectedLogicGateGVICAssignments(ctx, query.CompanyID, ids)
 	if err != nil {
 		return nil, err
 	}
 	for index := range items {
-		items[index].RaciAssignments = assignmentsByGate[strings.TrimSpace(items[index].LogicGateID)]
-		if items[index].RaciAssignments == nil {
-			items[index].RaciAssignments = []domain.LogicGateRaciAssignment{}
+		items[index].GVICAssignments = assignmentsByGate[strings.TrimSpace(items[index].LogicGateID)]
+		if items[index].GVICAssignments == nil {
+			items[index].GVICAssignments = []domain.LogicGateGVICAssignment{}
 		}
 	}
 	return items, nil
 }
 
-func (r *PostgresRepo) listProjectedLogicGateRaciAssignments(ctx context.Context, companyID string, logicGateIDs []string) (map[string][]domain.LogicGateRaciAssignment, error) {
-	return r.listLogicGateRaciAssignments(ctx, companyID, logicGateIDs)
+func (r *PostgresRepo) listProjectedLogicGateGVICAssignments(ctx context.Context, companyID string, logicGateIDs []string) (map[string][]domain.LogicGateGVICAssignment, error) {
+	return r.listLogicGateGVICAssignments(ctx, companyID, logicGateIDs)
 }

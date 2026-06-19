@@ -169,13 +169,13 @@ where company_id=$1::uuid
 	for _, affectedKey := range affected {
 		switch affectedKey.resourceType {
 		case EntityTypeNode:
-			nodeDeltas, err := syncPostgresRacioProjectionForNodeDeltasTx(ctx, tx, affectedKey.companyID, affectedKey.resourceID)
+			nodeDeltas, err := syncPostgresGVICMatrixProjectionForNodeDeltasTx(ctx, tx, affectedKey.companyID, affectedKey.resourceID)
 			if err != nil {
 				return ResourceGVICAssignmentMutationResult{}, err
 			}
 			deltas = append(deltas, nodeDeltas...)
 		case EntityTypeLogicGate:
-			logicGateDeltas, err := syncPostgresRacioProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, affectedKey.companyID, affectedKey.resourceID, nil, nil)
+			logicGateDeltas, err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, affectedKey.companyID, affectedKey.resourceID, nil, nil)
 			if err != nil {
 				return ResourceGVICAssignmentMutationResult{}, err
 			}
@@ -264,7 +264,7 @@ func validatePostgresGVICPrincipalTx(ctx context.Context, tx *sql.Tx, companyID,
 		return err
 	}
 	if !exists {
-		return ErrAssigneeNotInCompany
+		return ErrPrincipalNotInCompany
 	}
 	return nil
 }

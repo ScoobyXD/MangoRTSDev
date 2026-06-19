@@ -915,15 +915,15 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	if _, err := repo.AddCompanyMembership("placement-responsible-subject", companyID, "company_user"); err != nil {
 		t.Fatalf("AddCompanyMembership responsible failed: %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: firstGate.LogicGateID,
-		Assignments: []LogicGateRaciAssignmentInput{{
+		Assignments: []LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
 			UserID: responsibleUser.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments failed: %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments failed: %v", err)
 	}
 
 	firstBoardID := LogicGateKanbanBoardID(firstGate.LogicGateID)
@@ -956,10 +956,6 @@ func TestMemoryRepo_LogicGateKanbanPlacementStatusIssueAndNodeMetadata(t *testin
 	if assignment.StatusKey != "pending" {
 		t.Fatalf("assignment status_key = %q, want pending", assignment.StatusKey)
 	}
-	if loadedNode.AssigneeUserID != nil {
-		t.Fatalf("assignee_user_id = %+v, want nil after GVIC migration", loadedNode.AssigneeUserID)
-	}
-
 	issue := true
 	moved, err := repo.MoveKanbanCard(KanbanCardMoveInput{
 		CompanyID: companyID,
@@ -1090,8 +1086,8 @@ func TestMemoryRepo_LogicGateKanbanRawDeleteRemovesAssignmentSourceAndColumnDele
 	if err != nil {
 		t.Fatalf("GetNode after card delete failed: %v", err)
 	}
-	if loaded.Status != nil || loaded.StatusColor != nil || len(loaded.LogicGateIDs) != 0 {
-		t.Fatalf("node after raw assignment delete = status %+v color %+v gates %+v, want cleared", loaded.Status, loaded.StatusColor, loaded.LogicGateIDs)
+	if loaded.Status != nil || len(loaded.LogicGateIDs) != 0 {
+		t.Fatalf("node after raw assignment delete = status %+v gates %+v, want cleared", loaded.Status, loaded.LogicGateIDs)
 	}
 }
 func TestMemoryRepoUserEmailConnectionLifecycle(t *testing.T) {

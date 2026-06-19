@@ -1,7 +1,7 @@
 export type WorkspaceEntityCommandRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 export type WorkspaceEntityBatchKind = "node" | "logic_gate";
-export type WorkspaceEntityBatchCreatorLogicGateRaciRole = "generated" | "verified" | "consulted" | "informed";
+export type WorkspaceEntityBatchCreatorLogicGateGVICRole = "generated" | "verified" | "consulted" | "informed";
 export type WorkspaceEntityBatchMutationOrigin = "company_explorer" | "node_map" | "logic_gate_map" | "matrix" | "kanban" | "editor";
 
 export type WorkspaceEntityBatchItem = {
@@ -32,7 +32,7 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
   entityKind: WorkspaceEntityBatchKind;
   folderID?: string;
   mutationOrigin?: WorkspaceEntityBatchMutationOrigin;
-  creatorLogicGateRaciRole?: WorkspaceEntityBatchCreatorLogicGateRaciRole;
+  creatorLogicGateGVICRole?: WorkspaceEntityBatchCreatorLogicGateGVICRole;
   items: WorkspaceEntityBatchItem[];
   relationships?: WorkspaceEntityBatchRelationship[];
   requestJSON: WorkspaceEntityCommandRequest;
@@ -42,7 +42,7 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
     entity_kind: WorkspaceEntityBatchKind;
     folder_id: string;
     mutation_origin?: WorkspaceEntityBatchMutationOrigin;
-    creator_logic_gate_gvic_role?: WorkspaceEntityBatchCreatorLogicGateRaciRole;
+    creator_logic_gate_gvic_role?: WorkspaceEntityBatchCreatorLogicGateGVICRole;
     items: WorkspaceEntityBatchItem[];
     relationships: WorkspaceEntityBatchRelationship[];
   } = {
@@ -52,8 +52,8 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
     items: args.items,
     relationships: args.relationships ?? [],
   };
-  if (args.entityKind === "logic_gate" && args.creatorLogicGateRaciRole) {
-    body.creator_logic_gate_gvic_role = args.creatorLogicGateRaciRole;
+  if (args.entityKind === "logic_gate" && args.creatorLogicGateGVICRole) {
+    body.creator_logic_gate_gvic_role = args.creatorLogicGateGVICRole;
   }
   if (args.mutationOrigin) {
     body.mutation_origin = args.mutationOrigin;

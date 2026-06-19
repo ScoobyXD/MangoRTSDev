@@ -348,7 +348,7 @@ func TestPhase2MutationPathsUseProjectionDependencyHelpers(t *testing.T) {
 		"postgres_logic_gates.go",
 		"postgres_kanban.go",
 		"accounts.go",
-		"postgres_logic_gate_raci_commands.go",
+		"postgres_logic_gate_GVIC_commands.go",
 		"postgres_entity_permissions.go",
 		"postgres_projects.go",
 		"postgres_project_scoped_creates.go",
@@ -374,7 +374,7 @@ func TestPhase2MutationPathsUseProjectionDependencyHelpers(t *testing.T) {
 			},
 		},
 		{
-			name: "logic gate create update delete and raci set",
+			name: "logic gate create update delete and GVIC set",
 			path: "postgres_logic_gates.go",
 			required: []string{
 				"applylogicgateprojectiondeltadependenciestx",
@@ -403,8 +403,8 @@ func TestPhase2MutationPathsUseProjectionDependencyHelpers(t *testing.T) {
 			},
 		},
 		{
-			name: "racio assignment commands",
-			path: "postgres_logic_gate_raci_commands.go",
+			name: "GVICMatrix assignment commands",
+			path: "postgres_logic_gate_GVIC_commands.go",
 			required: []string{
 				"applylogicgateprojectiondeltadependenciestx",
 				"projectiondeltaeventinputs",

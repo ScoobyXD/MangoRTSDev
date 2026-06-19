@@ -4,11 +4,11 @@ import { collectFolderSubtreeIDs, EXPLORER_DRAG_MIME } from "../../modules/compa
 import { getExplorerDropPayloadItems } from "../../modules/company-explorer/treePresentation.js";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes.js";
 import { humanLabelOrFallback } from "../../modules/entityLabels.js";
-import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
+import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared.js";
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_REVIEW_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../../modules/kanban/shared.js";
 import { HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, INBOX_NO_LOGIC_GATE_ID, MAILBOX_OPTIONS, GVIC_INBOX_SECTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
-import type { HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, MyNodeGroup, RaciInboxRole, ResponsibleInboxStatus } from "./homeTypes.js";
+import type { HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, MyNodeGroup, GVICInboxRole, GVICInboxStatus } from "./homeTypes.js";
 export function readHomeColumnWidths(): HomeColumnWidths {
   try {
     const parsed = JSON.parse(localStorage.getItem(HOME_COLUMN_WIDTHS_STORAGE_KEY) ?? "null") as unknown;
@@ -294,7 +294,7 @@ export function nodeIDFromTreeID(treeID: string): string {
   return "";
 }
 
-export function nodeTitle(node?: Pick<NodeRecord, "title" | "node_id">): string {
+export function nodeTitle(node?: Pick<NodeRecord, "name" | "node_id">): string {
   return node ? getNodeTitle(node) || node.node_id : "Node";
 }
 
@@ -316,19 +316,19 @@ export function missingLogicGateRecordIDs(nodes: Pick<NodeRecord, "logic_gate_id
   return missing;
 }
 
-export function logicGateHasRaciRole(logicGate: LogicGateRecord | undefined, role: LogicGateRaciRole, userID: string): boolean {
+export function logicGateHasGVICRole(logicGate: LogicGateRecord | undefined, role: LogicGateGVICRole, userID: string): boolean {
   const cleanUserID = userID.trim();
   if (!logicGate || !cleanUserID) return false;
   return (logicGate.gvic_assignments ?? []).some((assignment) => assignment.role === role && assignment.user_id?.trim() === cleanUserID);
 }
 
-export function logicGateHasAnyRaciRole(logicGate: LogicGateRecord | undefined, userID: string): boolean {
+export function logicGateHasAnyGVICRole(logicGate: LogicGateRecord | undefined, userID: string): boolean {
   const cleanUserID = userID.trim();
   if (!logicGate || !cleanUserID) return false;
   return (logicGate.gvic_assignments ?? []).some((assignment) => assignment.user_id?.trim() === cleanUserID);
 }
 
-export function addRaciInboxGroupNode(byCell: Map<string, Map<string, Set<string>>>, cellKey: string, logicGateID: string, nodeID: string): void {
+export function addGVICInboxGroupNode(byCell: Map<string, Map<string, Set<string>>>, cellKey: string, logicGateID: string, nodeID: string): void {
   const byLogicGate = byCell.get(cellKey) ?? new Map<string, Set<string>>();
   const nodeIDs = byLogicGate.get(logicGateID) ?? new Set<string>();
   nodeIDs.add(nodeID);
@@ -336,7 +336,7 @@ export function addRaciInboxGroupNode(byCell: Map<string, Map<string, Set<string
   byCell.set(cellKey, byLogicGate);
 }
 
-export function materializeRaciInboxGroupsByCell(
+export function materializeGVICInboxGroupsByCell(
   byCell: Map<string, Map<string, Set<string>>>,
   nodeByID: Map<string, NodeRecord>,
   logicGateByID: Map<string, LogicGateRecord>,
@@ -355,40 +355,40 @@ export function materializeRaciInboxGroupsByCell(
   return out;
 }
 
-export function buildRaciRoleInboxGroupsByCell(
+export function buildGVICRoleInboxGroupsByCell(
   nodes: NodeRecord[],
   nodeByID: Map<string, NodeRecord>,
   logicGateByID: Map<string, LogicGateRecord>,
   currentUserID: string,
-  role: RaciInboxRole,
+  role: GVICInboxRole,
 ): Map<string, InboxLogicGateNodeGroup[]> {
   const cleanUserID = currentUserID.trim();
   const byCell = new Map<string, Map<string, Set<string>>>();
-  if (!cleanUserID) return materializeRaciInboxGroupsByCell(byCell, nodeByID, logicGateByID);
+  if (!cleanUserID) return materializeGVICInboxGroupsByCell(byCell, nodeByID, logicGateByID);
   for (const node of nodes) {
     const priority = normalizeInboxPriority(node.priority);
-    const status = normalizeResponsibleInboxStatus(node.status);
+    const status = normalizeGVICInboxStatus(node.status);
     if (priority === null || !status || status === "done") continue;
     if (role === "other") {
       const logicGateIDs = cleanIDList(node.logic_gate_ids ?? []);
       if (logicGateIDs.length === 0) {
-        addRaciInboxGroupNode(byCell, raciRoleCellKey(role, status, priority), INBOX_NO_LOGIC_GATE_ID, node.node_id);
+        addGVICInboxGroupNode(byCell, GVICRoleCellKey(role, status, priority), INBOX_NO_LOGIC_GATE_ID, node.node_id);
         continue;
       }
       for (const logicGateID of logicGateIDs) {
         const logicGate = logicGateByID.get(logicGateID);
-        if (logicGateHasAnyRaciRole(logicGate, cleanUserID)) continue;
-        addRaciInboxGroupNode(byCell, raciRoleCellKey(role, status, priority), logicGateID, node.node_id);
+        if (logicGateHasAnyGVICRole(logicGate, cleanUserID)) continue;
+        addGVICInboxGroupNode(byCell, GVICRoleCellKey(role, status, priority), logicGateID, node.node_id);
       }
       continue;
     }
     for (const logicGateID of cleanIDList(node.logic_gate_ids ?? [])) {
       const logicGate = logicGateByID.get(logicGateID);
-      if (!logicGateHasRaciRole(logicGate, role, cleanUserID)) continue;
-      addRaciInboxGroupNode(byCell, raciRoleCellKey(role, status, priority), logicGateID, node.node_id);
+      if (!logicGateHasGVICRole(logicGate, role, cleanUserID)) continue;
+      addGVICInboxGroupNode(byCell, GVICRoleCellKey(role, status, priority), logicGateID, node.node_id);
     }
   }
-  return materializeRaciInboxGroupsByCell(byCell, nodeByID, logicGateByID);
+  return materializeGVICInboxGroupsByCell(byCell, nodeByID, logicGateByID);
 }
 
 export function sortNodesForInbox(nodes: NodeRecord[]): NodeRecord[] {
@@ -488,7 +488,7 @@ export function setNodeDragData(dataTransfer: DataTransfer, nodeIDs: string[], n
   );
 }
 
-export function raciRoleCellKey(role: RaciInboxRole, status: ResponsibleInboxStatus, priority: InboxPriority): string {
+export function GVICRoleCellKey(role: GVICInboxRole, status: GVICInboxStatus, priority: InboxPriority): string {
   return `${role}:${status}:${priority}`;
 }
 
@@ -501,7 +501,7 @@ export function normalizeInboxPriority(value: unknown): InboxPriority | null {
   return rounded >= 0 && rounded <= 5 ? rounded as InboxPriority : null;
 }
 
-export function normalizeResponsibleInboxStatus(value: unknown): ResponsibleInboxStatus | null {
+export function normalizeGVICInboxStatus(value: unknown): GVICInboxStatus | null {
   const status = typeof value === "string" ? value.trim().toLowerCase().replace(/[\s_-]+/g, " ") : "";
   if (status === "pending" || status === "p") return "pending";
   if (status === "in progress" || status === "ip") return "in_progress";
@@ -510,7 +510,7 @@ export function normalizeResponsibleInboxStatus(value: unknown): ResponsibleInbo
   return null;
 }
 
-export function responsibleStatusColor(status: ResponsibleInboxStatus): string {
+export function gvicStatusColor(status: GVICInboxStatus): string {
   if (status === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
   if (status === "in_progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
   if (status === "review") return KANBAN_LOGIC_GATE_REVIEW_COLOR;
@@ -851,8 +851,8 @@ export function getHomeViewLabel(viewID: HomeViewID, sharedInboxes: Communicatio
   if (viewID === "primary") return "Primary";
   if (viewID === "my-triage") return "My Triage";
   if (viewID === "shared-root") return "Shared Triage";
-  const raciSection = gvicInboxSectionForView(viewID);
-  if (raciSection) return raciSection.title;
+  const GVICSection = gvicInboxSectionForView(viewID);
+  if (GVICSection) return GVICSection.title;
   if (viewID === "custom-matrix") return "Custom View";
   if (viewID === "my-work") return "My Work";
   if (viewID === "my-nodes") return "My Nodes";

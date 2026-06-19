@@ -75,19 +75,19 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateLogicGate aci: %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: responsibleGate.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
+		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments responsible: %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments responsible: %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: aciGate.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}},
+		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments aci: %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments aci: %v", err)
 	}
 	aciNode, err := repo.CreateNode(companyID, "Read API ACI node")
 	if err != nil {
@@ -379,12 +379,12 @@ func (r *contextRecordingWorkItemReadRepo) recordWorkItemReadContext(ctx context
 	return nil
 }
 
-func (r *contextRecordingWorkItemReadRepo) ListResponsibleInboxNodes(store.WorkItemInboxQuery) ([]domain.Node, error) {
+func (r *contextRecordingWorkItemReadRepo) ListGeneratedInboxNodes(store.WorkItemInboxQuery) ([]domain.Node, error) {
 	r.legacyCalled = true
 	return nil, errLegacyWorkItemRead
 }
 
-func (r *contextRecordingWorkItemReadRepo) ListResponsibleInboxNodesContext(ctx context.Context, query store.WorkItemInboxQuery) ([]domain.Node, error) {
+func (r *contextRecordingWorkItemReadRepo) ListGeneratedInboxNodesContext(ctx context.Context, query store.WorkItemInboxQuery) ([]domain.Node, error) {
 	if err := r.recordWorkItemReadContext(ctx, "responsible"); err != nil {
 		return nil, err
 	}

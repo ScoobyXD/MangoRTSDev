@@ -398,7 +398,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         <ExplorerRowIcon
           kind={row.kind}
           systemKey={row.systemKey}
-          mangoDefaultFolder={row.kind === "folder" && (Boolean(row.systemKey) || row.syntheticKind === "raci_folder" || row.syntheticKind === "default_scope_folder")}
+          mangoDefaultFolder={row.kind === "folder" && (Boolean(row.systemKey) || row.syntheticKind === "GVIC_folder" || row.syntheticKind === "default_scope_folder")}
         />
         {renaming?.treeID === row.id ? (
           <input

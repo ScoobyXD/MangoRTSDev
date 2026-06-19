@@ -20,7 +20,7 @@ export type ExplorerCreationContextRow = {
   folderScopeID?: string;
   systemKey?: CompanyExplorerSystemFolderKey;
   syntheticKind?: string;
-  raciRole?: string;
+  GVICRole?: string;
 };
 
 export type ExplorerDropPayload = {
@@ -159,7 +159,7 @@ export function getExplorerDropPayloadItemType(payload?: ExplorerDropPayload | n
 export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | null, payload?: ExplorerDropPayload | null): ExplorerDropTarget | null {
   if (!row || !payload || !row.folderID) return null;
   if (row.syntheticKind === "default_scope_folder") return null;
-  const isRaciScopedRow = row.syntheticKind === "raci_folder" || Boolean(row.raciRole);
+  const isGVICScopedRow = row.syntheticKind === "GVIC_folder" || Boolean(row.GVICRole);
   const genericV2Container = Boolean(row.entityID) && (row.entityType === "company" || row.entityType === "user_group" || row.entityType === "user" || row.entityType === "folder");
 
   // Drag events fire on the row under the pointer. A file row already carries
@@ -167,7 +167,7 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
   // folder section without us scanning the DOM or the full tree on every hover.
   if (payload.kind === "folder") {
     if (!payload.folderID || payload.folderID === row.folderID) return null;
-    if (isRaciScopedRow && payload.folderKind !== row.folderKind) return null;
+    if (isGVICScopedRow && payload.folderKind !== row.folderKind) return null;
     const folderKind = row.folderKind ?? payload.folderKind ?? "logic_gate";
     return { folderID: row.folderID, folderKind, treeID: row.id ?? `workspace-folder-${row.folderID}` };
   }

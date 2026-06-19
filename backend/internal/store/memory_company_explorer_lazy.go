@@ -147,7 +147,7 @@ func (r *MemoryRepo) companyExplorerLazyAppendRootEntitiesLocked(query CompanyEx
 		if !r.companyExplorerLazyLogicGateMatchesScopeLocked(query, gate.LogicGateID) {
 			continue
 		}
-		rows.LogicGates = append(rows.LogicGates, companyExplorerLogicGateSummary(r.withLogicGateRaciLocked(gate)))
+		rows.LogicGates = append(rows.LogicGates, companyExplorerLogicGateSummary(r.withLogicGateGVICLocked(gate)))
 	}
 
 	for _, project := range r.projects {
@@ -175,7 +175,7 @@ func (r *MemoryRepo) companyExplorerLazyAppendFolderItemSummaryLocked(query Comp
 	case EntityTypeLogicGate:
 		gate, ok := r.logicGates[key(query.CompanyID, item.ItemID)]
 		if ok {
-			rows.LogicGates = append(rows.LogicGates, companyExplorerLogicGateSummary(r.withLogicGateRaciLocked(gate)))
+			rows.LogicGates = append(rows.LogicGates, companyExplorerLogicGateSummary(r.withLogicGateGVICLocked(gate)))
 		}
 	case EntityTypeProject:
 		project, ok := r.projects[key(query.CompanyID, item.ItemID)]
@@ -290,7 +290,7 @@ func (r *MemoryRepo) companyExplorerLazyLogicGateMatchesScopeLocked(query Compan
 	case CompanyExplorerLazyScopeAll:
 		return true
 	case CompanyExplorerLazyScopeMe:
-		for _, assignment := range r.logicGateRaci[key(query.CompanyID, logicGateID)] {
+		for _, assignment := range r.logicGateGVIC[key(query.CompanyID, logicGateID)] {
 			if assignment.UserID == query.ScopeUserID {
 				return true
 			}
@@ -298,7 +298,7 @@ func (r *MemoryRepo) companyExplorerLazyLogicGateMatchesScopeLocked(query Compan
 		return false
 	case CompanyExplorerLazyScopeTeam:
 		teamUsers, _ := r.companyExplorerLazyTeamScopeLocked(query.CompanyID, query.ScopeUserID)
-		for _, assignment := range r.logicGateRaci[key(query.CompanyID, logicGateID)] {
+		for _, assignment := range r.logicGateGVIC[key(query.CompanyID, logicGateID)] {
 			if teamUsers[assignment.UserID] {
 				return true
 			}

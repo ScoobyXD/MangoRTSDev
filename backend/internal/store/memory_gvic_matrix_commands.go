@@ -1,12 +1,12 @@
 package store
 
-func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (RacioMatrixNodeCreateResult, error) {
-	input, err := NormalizeRacioMatrixNodeCreateInput(input)
+func (r *MemoryRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVICMatrixNodeCreateResult, error) {
+	input, err := NormalizeGVICMatrixNodeCreateInput(input)
 	if err != nil {
-		return RacioMatrixNodeCreateResult{}, err
+		return GVICMatrixNodeCreateResult{}, err
 	}
 
-	result := RacioMatrixNodeCreateResult{}
+	result := GVICMatrixNodeCreateResult{}
 	ownedProjectionDeltas := []ProjectionDelta{}
 	logicGateID := input.LogicGateID
 	if input.CreateLogicGateHeader != "" {
@@ -16,22 +16,22 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 			CreatorUserID:            input.ActorUserID,
 			CreatorLogicGateGVICRole: input.CreatorLogicGateGVICRole,
 			Items: []WorkspaceEntityBatchItemInput{{
-				ClientID: "racio-matrix-logic-gate",
+				ClientID: "GVICMatrix-matrix-logic-gate",
 				Title:    input.CreateLogicGateHeader,
 			}},
 		})
 		if err != nil {
-			return RacioMatrixNodeCreateResult{}, err
+			return GVICMatrixNodeCreateResult{}, err
 		}
 		if len(batch.LogicGates) == 0 {
-			return RacioMatrixNodeCreateResult{}, ErrNotFound
+			return GVICMatrixNodeCreateResult{}, ErrNotFound
 		}
 		logicGate := batch.LogicGates[0]
 		logicGateID = logicGate.LogicGateID
 		result.LogicGate = &logicGate
 		result.FolderItems = append(result.FolderItems, batch.FolderItems...)
 		r.mu.Lock()
-		deltas := r.syncRacioProjectionForLogicGateAssignmentsDeltasLocked(input.CompanyID, logicGateID, nil, nil)
+		deltas := r.syncGVICMatrixProjectionForLogicGateAssignmentsDeltasLocked(input.CompanyID, logicGateID, nil, nil)
 		result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
 		ownedProjectionDeltas = append(ownedProjectionDeltas, deltas...)
 		r.mu.Unlock()
@@ -43,11 +43,11 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 		}
 		events, err := r.AppendDomainEvents(eventInputs)
 		if err != nil {
-			return RacioMatrixNodeCreateResult{}, err
+			return GVICMatrixNodeCreateResult{}, err
 		}
 		result.Events = append(result.Events, events...)
 		if _, err := r.AppendEventRows(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, ownedProjectionDeltas)); err != nil {
-			return RacioMatrixNodeCreateResult{}, err
+			return GVICMatrixNodeCreateResult{}, err
 		}
 	}
 
@@ -66,12 +66,11 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 			PrioritySet:         input.PrioritySet,
 			IsIssue:             input.IsIssue,
 			IsIssueSet:          input.IsIssueSet,
-			AssigneePolicy:      input.AssigneePolicy,
 			ActorUserID:         input.ActorUserID,
 			IdempotencyKey:      input.IdempotencyKey,
 		})
 		if err != nil {
-			return RacioMatrixNodeCreateResult{}, err
+			return GVICMatrixNodeCreateResult{}, err
 		}
 		assignment := assignmentResult.Assignment
 		card := assignmentResult.Card
@@ -91,25 +90,25 @@ func (r *MemoryRepo) CreateRacioMatrixNode(input RacioMatrixNodeCreateInput) (Ra
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	snapshot := r.snapshotNodeGraphEventStateLocked()
-	node, err := r.createNodeWithAssigneeIDLocked(input.CompanyID, input.NodeID, input.Title, "")
+	node, err := r.createNodeWithIDLocked(input.CompanyID, input.NodeID, input.Title)
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
-		return RacioMatrixNodeCreateResult{}, err
+		return GVICMatrixNodeCreateResult{}, err
 	}
 	result.Node = node
 	if folderItem, ok := r.folderItems[folderItemKey(input.CompanyID, "node", node.NodeID)]; ok {
 		result.FolderItems = append(result.FolderItems, folderItem)
 	}
-	result.ProjectionDeltas = diffRacioProjectionRows(nil, r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{node.NodeID}, nil))
+	result.ProjectionDeltas = diffGVICMatrixProjectionRows(nil, r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, []string{node.NodeID}, nil))
 	event, err := r.appendDomainEventLocked(nodeCreatedWorkspaceEventInputWithMetadata(result.Node, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
-		return RacioMatrixNodeCreateResult{}, err
+		return GVICMatrixNodeCreateResult{}, err
 	}
 	result.Events = append(result.Events, event)
 	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
-		return RacioMatrixNodeCreateResult{}, err
+		return GVICMatrixNodeCreateResult{}, err
 	}
 	return result, nil
 }

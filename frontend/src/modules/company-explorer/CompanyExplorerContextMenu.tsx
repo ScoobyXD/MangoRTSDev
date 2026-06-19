@@ -16,7 +16,7 @@ type CompanyExplorerContextMenuProps = {
   onClose: () => void;
   onCreateFolder: (folderKind: CompanyExplorerFolderKind, parentFolderID: string, position?: number, scopeType?: CompanyExplorerFolderScopeType, scopeID?: string) => void;
   onCreateNode: (parentFolderID: string, position?: number, logicGateID?: string, logicGateTreeID?: string, priority?: number) => void;
-  onCreateLogicGate: (parentFolderID: string, position?: number, raciRole?: string) => void;
+  onCreateLogicGate: (parentFolderID: string, position?: number, GVICRole?: string) => void;
   onCreateProject: (parentFolderID: string, position?: number) => void;
   onOpenFolderPermissions: (target: CompanyExplorerFolderPermissionsTarget) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
@@ -196,7 +196,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
           {...menuItemEvents(action.enabled, closePrioritySubmenu)}
           onClick={() => {
             if (!menu.canCreateLogicGate) return;
-            onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition, menu.createLogicGateRaciRole);
+            onCreateLogicGate(menu.targets.logicGateParentFolderID, menu.createPosition, menu.createLogicGateGVICRole);
           }}
         >
           {action.label}

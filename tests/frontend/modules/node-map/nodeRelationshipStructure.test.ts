@@ -13,7 +13,7 @@ function node(id: string, title = id): NodeRecord {
   return {
     company_id: "company-1",
     node_id: id,
-    title,
+    name: title,
     created_timestamp: "2026-05-17T00:00:00.000Z",
   };
 }

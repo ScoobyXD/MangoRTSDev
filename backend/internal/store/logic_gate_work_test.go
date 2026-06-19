@@ -148,12 +148,18 @@ func TestPostgresKanbanProjectionCardListSelectsCardMetadata(t *testing.T) {
 	for _, required := range []string{
 		"due_date",
 		"priority",
+	} {
+		if !strings.Contains(outerSelect, required) {
+			t.Fatalf("postgres kanban projection card list outer select missing %s", required)
+		}
+	}
+	for _, removed := range []string{
 		"assignee_user_id",
 		"assignee_display_name",
 		"assignee_email",
 	} {
-		if !strings.Contains(outerSelect, required) {
-			t.Fatalf("postgres kanban projection card list outer select missing %s", required)
+		if strings.Contains(outerSelect, removed) {
+			t.Fatalf("postgres kanban projection card list outer select still contains removed %s", removed)
 		}
 	}
 }

@@ -4,7 +4,7 @@ import type { LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import { logicGateTitle, nodeTitle } from "./homeUtils";
 
-type CustomMatrixAxisField = "priority" | "logicGate" | "status" | "assignee" | "dueDate";
+type CustomMatrixAxisField = "priority" | "logicGate" | "status" | "dueDate";
 
 type AxisGroup = {
   key: string;
@@ -22,7 +22,6 @@ const CUSTOM_MATRIX_AXIS_OPTIONS: ReadonlyArray<{ value: CustomMatrixAxisField; 
   { value: "priority", label: "Priority" },
   { value: "logicGate", label: "Logic Gate" },
   { value: "status", label: "Status" },
-  { value: "assignee", label: "Assignee" },
   { value: "dueDate", label: "Due Date" },
 ];
 
@@ -53,12 +52,6 @@ const DUE_DATE_GROUPS: AxisGroup[] = [
 
 const UNASSIGNED_LOGIC_GATE_GROUP: AxisGroup = {
   key: "logicGate:none",
-  label: "Unassigned",
-  sort: 999_999,
-};
-
-const UNASSIGNED_USER_GROUP: AxisGroup = {
-  key: "assignee:none",
   label: "Unassigned",
   sort: 999_999,
 };
@@ -117,10 +110,6 @@ function nodeAxisGroups(
 
   if (field === "dueDate") return [dueDateGroup(node.due_date)];
 
-  if (field === "assignee") {
-    return [UNASSIGNED_USER_GROUP];
-  }
-
   const logicGateIDs = Array.from(new Set((node.logic_gate_ids ?? []).map((id) => id.trim()).filter(Boolean)));
   if (logicGateIDs.length === 0) return [UNASSIGNED_LOGIC_GATE_GROUP];
   return logicGateIDs.map((logicGateID) => ({
@@ -151,7 +140,7 @@ function buildAxisGroups(
   for (const node of nodes) {
     for (const group of nodeAxisGroups(node, field, logicGateByID, userByID)) groups.set(group.key, group);
   }
-  if (groups.size === 0) groups.set(field === "logicGate" ? UNASSIGNED_LOGIC_GATE_GROUP.key : UNASSIGNED_USER_GROUP.key, field === "logicGate" ? UNASSIGNED_LOGIC_GATE_GROUP : UNASSIGNED_USER_GROUP);
+  if (groups.size === 0) groups.set(UNASSIGNED_LOGIC_GATE_GROUP.key, UNASSIGNED_LOGIC_GATE_GROUP);
   return Array.from(groups.values()).sort(sortAxisGroups);
 }
 

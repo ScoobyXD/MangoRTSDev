@@ -1,5 +1,5 @@
 import { GVIC_INBOX_SECTIONS } from "../pages/home/homeConstants.js";
-import type { RaciInboxRole, RaciInboxViewID } from "../pages/home/homeTypes.js";
+import type { GVICInboxRole, GVICInboxViewID } from "../pages/home/homeTypes.js";
 
 export type LogicGateDeepLinkRoute = {
   kind: "logic_gate";
@@ -19,8 +19,8 @@ export type ProjectDeepLinkRoute = {
 
 export type GvicDeepLinkRoute = {
   kind: "gvic";
-  role: RaciInboxRole;
-  viewID: RaciInboxViewID;
+  role: GVICInboxRole;
+  viewID: GVICInboxViewID;
   nodeID?: string;
 };
 
@@ -50,11 +50,11 @@ export function gvicSectionForRoleOrView(value: string): (typeof GVIC_INBOX_SECT
   return GVIC_INBOX_SECTIONS.find((section) => section.role === token || section.viewID === token) ?? null;
 }
 
-export function gvicRoleForViewID(viewID: string): RaciInboxRole | null {
+export function gvicRoleForViewID(viewID: string): GVICInboxRole | null {
   return GVIC_INBOX_SECTIONS.find((section) => section.viewID === viewID)?.role ?? null;
 }
 
-export function gvicViewIDForRole(role: string): RaciInboxViewID | null {
+export function gvicViewIDForRole(role: string): GVICInboxViewID | null {
   return GVIC_INBOX_SECTIONS.find((section) => section.role === role)?.viewID ?? null;
 }
 
@@ -107,7 +107,7 @@ export function buildProjectRoute(projectID: string): string {
   return `/projects/${encodeSegment(projectID)}`;
 }
 
-export function buildGvicRoute(role: RaciInboxRole, nodeID?: string): string {
+export function buildGvicRoute(role: GVICInboxRole, nodeID?: string): string {
   const cleanRole = encodeSegment(role);
   const cleanNodeID = nodeID?.trim() ? encodeSegment(nodeID) : "";
   return cleanNodeID ? `/gvic/${cleanRole}/nodes/${cleanNodeID}` : `/gvic/${cleanRole}`;

@@ -219,7 +219,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 	}
 	addLogicGateRecipients := func(logicGateID, nodeID string) error {
 		stop := observeNotificationTiming(recorder, "notifications.recipient_load")
-		roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
+		roles, err := s.logicGateGVICRecipientRoles(event.CompanyID, logicGateID)
 		stop()
 		if err != nil {
 			return err
@@ -231,7 +231,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 	}
 	addLogicGateWorkRecipients := func(logicGateID, nodeID string) error {
 		stop := observeNotificationTiming(recorder, "notifications.recipient_load")
-		roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
+		roles, err := s.logicGateGVICRecipientRoles(event.CompanyID, logicGateID)
 		stop()
 		if err != nil {
 			return err
@@ -243,7 +243,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 	}
 	addSharedTriageFolderRecipients := func(folderID string) error {
 		stop := observeNotificationTiming(recorder, "notifications.recipient_load")
-		roles, err := s.sharedInboxRaciRecipientRoles(event.CompanyID, folderID)
+		roles, err := s.sharedInboxGVICRecipientRoles(event.CompanyID, folderID)
 		stop()
 		if err != nil {
 			return err
@@ -314,13 +314,13 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 				body = nodeTitle + " issue state changed."
 			}
 		}
-	case domain.NotificationEventLogicGateRaciUpdated:
+	case domain.NotificationEventLogicGateGVICUpdated:
 		logicGateID := payloadString(payload, "logic_gate_id")
 		if logicGateID == "" {
 			logicGateID = event.EntityID
 		}
 		assignmentUserIDs := payloadStringSlice(payload, "assignment_user_ids")
-		roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
+		roles, err := s.logicGateGVICRecipientRoles(event.CompanyID, logicGateID)
 		if err != nil {
 			return nil, err
 		}
@@ -413,7 +413,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		entityTitle := ""
 		switch event.EntityType {
 		case "logic_gate":
-			roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, event.EntityID)
+			roles, err := s.logicGateGVICRecipientRoles(event.CompanyID, event.EntityID)
 			if err != nil {
 				return nil, err
 			}
@@ -443,7 +443,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 			}
 			logicGateRolesByID := map[string]map[string]string{}
 			for _, logicGateID := range cleanStrings(node.LogicGateIDs) {
-				roles, err := s.logicGateRaciRecipientRoles(event.CompanyID, logicGateID)
+				roles, err := s.logicGateGVICRecipientRoles(event.CompanyID, logicGateID)
 				if err != nil {
 					return nil, err
 				}
@@ -485,7 +485,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		}
 		title = "Shared inbox access updated"
 		body = "Shared inbox access changed."
-	case domain.NotificationEventACIInboxRaciUpdated:
+	case domain.NotificationEventACIInboxGVICUpdated:
 		folderID := payloadString(payload, "folder_id")
 		if folderID == "" {
 			folderID = event.EntityID
@@ -551,8 +551,8 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationPro
 		if entityID == "" {
 			entityID = payloadString(payload, "entity_id")
 		}
-	case store.LogicGateRaciUpdatedEventType:
-		notificationType = domain.NotificationEventLogicGateRaciUpdated
+	case store.LogicGateGVICUpdatedEventType:
+		notificationType = domain.NotificationEventLogicGateGVICUpdated
 		entityType = store.EntityTypeLogicGate
 		entityID = payloadString(payload, "logic_gate_id")
 	case "node_updated":
@@ -565,7 +565,7 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationPro
 			return notificationProjectionEvent{}, false
 		}
 	case "communications_shared_inbox_gvic_updated":
-		notificationType = domain.NotificationEventACIInboxRaciUpdated
+		notificationType = domain.NotificationEventACIInboxGVICUpdated
 		entityType = store.EntityTypeSharedInbox
 		entityID = payloadString(payload, "shared_inbox_id")
 		if entityID == "" {
@@ -794,7 +794,7 @@ func mentionAliasOccurrenceStarts(text string, aliases []string) []int {
 	return out
 }
 
-func (s *Service) logicGateRaciRecipientIDs(companyID, logicGateID string) ([]string, error) {
+func (s *Service) logicGateGVICRecipientIDs(companyID, logicGateID string) ([]string, error) {
 	companyID = strings.TrimSpace(companyID)
 	logicGateID = strings.TrimSpace(logicGateID)
 	if companyID == "" || logicGateID == "" {
@@ -803,7 +803,7 @@ func (s *Service) logicGateRaciRecipientIDs(companyID, logicGateID string) ([]st
 	return s.gvicRecipientIDs(companyID, store.EntityTypeLogicGate, logicGateID)
 }
 
-func (s *Service) sharedInboxRaciRecipientIDs(companyID, folderID string) ([]string, error) {
+func (s *Service) sharedInboxGVICRecipientIDs(companyID, folderID string) ([]string, error) {
 	companyID = strings.TrimSpace(companyID)
 	folderID = strings.TrimSpace(folderID)
 	if companyID == "" || folderID == "" {
@@ -812,7 +812,7 @@ func (s *Service) sharedInboxRaciRecipientIDs(companyID, folderID string) ([]str
 	return s.gvicRecipientIDsWithSharedTriageFallback(companyID, folderID)
 }
 
-func (s *Service) logicGateRaciRecipientRoles(companyID, logicGateID string) (map[string]string, error) {
+func (s *Service) logicGateGVICRecipientRoles(companyID, logicGateID string) (map[string]string, error) {
 	companyID = strings.TrimSpace(companyID)
 	logicGateID = strings.TrimSpace(logicGateID)
 	if companyID == "" || logicGateID == "" {
@@ -821,7 +821,7 @@ func (s *Service) logicGateRaciRecipientRoles(companyID, logicGateID string) (ma
 	return s.gvicRecipientRoles(companyID, store.EntityTypeLogicGate, logicGateID)
 }
 
-func (s *Service) sharedInboxRaciRecipientRoles(companyID, folderID string) (map[string]string, error) {
+func (s *Service) sharedInboxGVICRecipientRoles(companyID, folderID string) (map[string]string, error) {
 	companyID = strings.TrimSpace(companyID)
 	folderID = strings.TrimSpace(folderID)
 	if companyID == "" || folderID == "" {
@@ -866,7 +866,7 @@ func (s *Service) gvicRecipientRoles(companyID, resourceType, resourceID string)
 		if userID == "" {
 			continue
 		}
-		out[userID] = mergeRaciRole(out[userID], assignment.Role)
+		out[userID] = mergeGVICRole(out[userID], assignment.Role)
 	}
 	return out, nil
 }
@@ -1044,7 +1044,7 @@ func mergeNotificationRecipientMeta(current, next notificationRecipientMeta) not
 		return next
 	}
 	roleChanged := false
-	if raciRoleRank(next.Role) > raciRoleRank(current.Role) {
+	if GVICRoleRank(next.Role) > GVICRoleRank(current.Role) {
 		current.Role = next.Role
 		roleChanged = true
 	}
@@ -1063,10 +1063,10 @@ func mergeNotificationRecipientMeta(current, next notificationRecipientMeta) not
 	return current
 }
 
-func mergeRaciRole(current, next string) string {
+func mergeGVICRole(current, next string) string {
 	current = normalizeNotificationRole(current)
 	next = normalizeNotificationRole(next)
-	if raciRoleRank(next) > raciRoleRank(current) {
+	if GVICRoleRank(next) > GVICRoleRank(current) {
 		return next
 	}
 	return current
@@ -1089,7 +1089,7 @@ func normalizeNotificationRole(role string) string {
 	}
 }
 
-func raciRoleRank(role string) int {
+func GVICRoleRank(role string) int {
 	switch normalizeNotificationRole(role) {
 	case domain.GVICRoleGenerated:
 		return 5

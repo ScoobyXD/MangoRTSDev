@@ -8,15 +8,15 @@ import (
 	"strings"
 )
 
-const postgresLogicGateRaciUsersCTE = `
-logic_gate_raci_users as (
+const postgresLogicGateGVICUsersCTE = `
+logic_gate_GVIC_users as (
   select effective.company_id, effective.resource_id as logic_gate_id, effective.role, effective.user_id
   from resource_gvic_effective_assignments effective
   where effective.resource_type='logic_gate'
 )`
 
-var postgresRacioNodeProjectionCTE = `
-with recursive ` + postgresLogicGateRaciUsersCTE + `,
+var postgresGVICMatrixNodeProjectionCTE = `
+with recursive ` + postgresLogicGateGVICUsersCTE + `,
 node_row as (
   select
     n.company_id,
@@ -29,16 +29,8 @@ node_row as (
       end,
       nullif(n.status, '')
     ) as status,
-    case
-      when assignment.is_issue then '#ffd400'
-      when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusColorSQL + `
-      else null::text
-    end as status_color,
     n.due_date,
     n.priority,
-    null::uuid as assignee_user_id,
-    null::text as assignee_display_name,
-    null::text as assignee_email,
     n.created_timestamp as resource_created_timestamp,
     assignment.logic_gate_id,
     coalesce(account_snapshot.accounts_json, '[]'::jsonb) as accounts
@@ -63,12 +55,8 @@ node_row as (
     node_row.logic_gate_id,
     node_row.title as display_title,
     node_row.status,
-    node_row.status_color,
     node_row.due_date,
     node_row.priority,
-    node_row.assignee_user_id,
-    node_row.assignee_display_name,
-    node_row.assignee_email,
     node_row.resource_created_timestamp,
     node_row.accounts
   from node_row
@@ -76,43 +64,20 @@ node_row as (
     on gvic.company_id=node_row.company_id
    and gvic.resource_type='node'
    and gvic.resource_id=node_row.node_id
-  union all
-  select
-    node_row.company_id,
-    node_row.assignee_user_id as user_id,
-    'node'::text as resource_type,
-    node_row.node_id as resource_id,
-    null::uuid as logic_gate_id,
-    node_row.title as display_title,
-    node_row.status,
-    node_row.status_color,
-    node_row.due_date,
-    node_row.priority,
-    node_row.assignee_user_id,
-    node_row.assignee_display_name,
-    node_row.assignee_email,
-    node_row.resource_created_timestamp,
-    node_row.accounts
-  from node_row
-  join company_memberships membership
-    on membership.company_id=node_row.company_id
-   and membership.user_id=node_row.assignee_user_id
-  where node_row.logic_gate_id is null
-    and node_row.assignee_user_id is not null
 )`
 
-var postgresRacioLogicGateUserProjectionCTE = `
-with recursive ` + postgresLogicGateRaciUsersCTE + `,
-user_raci as (
+var postgresGVICMatrixLogicGateUserProjectionCTE = `
+with recursive ` + postgresLogicGateGVICUsersCTE + `,
+user_GVIC as (
   select distinct assignment.user_id
-  from logic_gate_raci_users assignment
+  from logic_gate_GVIC_users assignment
   where assignment.company_id=$1::uuid
     and assignment.logic_gate_id=$2::uuid
     and assignment.user_id=$3::uuid
 ), gate_row as (
   select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
   from logic_gates gate
-  join user_raci on true
+  join user_GVIC on true
   where gate.company_id=$1::uuid
     and gate.logic_gate_id=$2::uuid
 ), node_rows as (
@@ -127,16 +92,8 @@ user_raci as (
       end,
       nullif(n.status, '')
     ) as status,
-    case
-      when assignment.is_issue then '#ffd400'
-      when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusColorSQL + `
-      else null::text
-    end as status_color,
     n.due_date,
     n.priority,
-    null::uuid as assignee_user_id,
-    null::text as assignee_display_name,
-    null::text as assignee_email,
     n.created_timestamp as resource_created_timestamp,
     assignment.logic_gate_id,
     coalesce(account_snapshot.accounts_json, '[]'::jsonb) as accounts
@@ -150,53 +107,45 @@ user_raci as (
 ), projected as (
   select
     gate_row.company_id,
-    user_raci.user_id,
+    user_GVIC.user_id,
     'logic_gate'::text as resource_type,
     gate_row.logic_gate_id as resource_id,
     gate_row.logic_gate_id,
     gate_row.header as display_title,
     null::text as status,
-    null::text as status_color,
     null::date as due_date,
     null::smallint as priority,
-    null::uuid as assignee_user_id,
-    null::text as assignee_display_name,
-    null::text as assignee_email,
     gate_row.created_timestamp as resource_created_timestamp,
     '[]'::jsonb as accounts
   from gate_row
-  join user_raci on true
+  join user_GVIC on true
   union all
   select
     node_rows.company_id,
-    user_raci.user_id,
+    user_GVIC.user_id,
     'node'::text as resource_type,
     node_rows.node_id as resource_id,
     node_rows.logic_gate_id,
     node_rows.title as display_title,
     node_rows.status,
-    node_rows.status_color,
     node_rows.due_date,
     node_rows.priority,
-    node_rows.assignee_user_id,
-    node_rows.assignee_display_name,
-    node_rows.assignee_email,
     node_rows.resource_created_timestamp,
     node_rows.accounts
   from node_rows
-  join user_raci on true
+  join user_GVIC on true
 )`
 
-func syncPostgresRacioProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
-	defer observeTiming(ctx, "repo.syncPostgresRacioProjectionForNodeTx.total")()
+func syncPostgresGVICMatrixProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	defer observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForNodeTx.total")()
 	companyID = cleanUUIDText(companyID)
 	nodeID = cleanUUIDText(nodeID)
 	if ctx == nil || tx == nil || companyID == "" || nodeID == "" {
 		return ErrInvalid
 	}
-	stop := observeTiming(ctx, "repo.syncPostgresRacioProjectionForNodeTx.delete_stale")
-	if _, err := tx.ExecContext(ctx, postgresRacioNodeProjectionCTE+`
-delete from racio_matrix_projection_table entry
+	stop := observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForNodeTx.delete_stale")
+	if _, err := tx.ExecContext(ctx, postgresGVICMatrixNodeProjectionCTE+`
+delete from gvic_matrix_projection_table entry
 where entry.company_id=$1::uuid
   and entry.resource_type='node'
   and entry.resource_id=$2::uuid
@@ -212,53 +161,53 @@ where entry.company_id=$1::uuid
 		return err
 	}
 	stop()
-	return upsertPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID)
+	return upsertPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID)
 }
 
-func syncPostgresRacioProjectionForNodeDeltasTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectionDelta, error) {
-	before, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+func syncPostgresGVICMatrixProjectionForNodeDeltasTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectionDelta, error) {
+	before, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
 	if err != nil {
 		return nil, err
 	}
-	if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+	if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 		return nil, err
 	}
-	after, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+	after, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
 	if err != nil {
 		return nil, err
 	}
-	return diffRacioProjectionRows(before, after), nil
+	return diffGVICMatrixProjectionRows(before, after), nil
 }
 
-func syncPostgresRacioProjectionForNewNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
-	defer observeTiming(ctx, "repo.syncPostgresRacioProjectionForNodeTx.total")()
+func syncPostgresGVICMatrixProjectionForNewNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	defer observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForNodeTx.total")()
 	companyID = cleanUUIDText(companyID)
 	nodeID = cleanUUIDText(nodeID)
 	if ctx == nil || tx == nil || companyID == "" || nodeID == "" {
 		return ErrInvalid
 	}
-	return upsertPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID)
+	return upsertPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID)
 }
 
-func syncPostgresRacioProjectionForNewNodeDeltasTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectionDelta, error) {
-	before, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+func syncPostgresGVICMatrixProjectionForNewNodeDeltasTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectionDelta, error) {
+	before, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
 	if err != nil {
 		return nil, err
 	}
-	if err := syncPostgresRacioProjectionForNewNodeTx(ctx, tx, companyID, nodeID); err != nil {
+	if err := syncPostgresGVICMatrixProjectionForNewNodeTx(ctx, tx, companyID, nodeID); err != nil {
 		return nil, err
 	}
-	after, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+	after, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
 	if err != nil {
 		return nil, err
 	}
-	return diffRacioProjectionRows(before, after), nil
+	return diffGVICMatrixProjectionRows(before, after), nil
 }
 
-func upsertPostgresRacioProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
-	stop := observeTiming(ctx, "repo.syncPostgresRacioProjectionForNodeTx.upsert")
-	_, err := tx.ExecContext(ctx, postgresRacioNodeProjectionCTE+`
-insert into racio_matrix_projection_table (
+func upsertPostgresGVICMatrixProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	stop := observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForNodeTx.upsert")
+	_, err := tx.ExecContext(ctx, postgresGVICMatrixNodeProjectionCTE+`
+insert into gvic_matrix_projection_table (
   company_id,
   user_id,
   resource_type,
@@ -266,12 +215,8 @@ insert into racio_matrix_projection_table (
   logic_gate_id,
   display_title,
   status,
-  status_color,
   due_date,
   priority,
-  assignee_user_id,
-  assignee_display_name,
-  assignee_email,
   resource_created_timestamp,
   accounts,
   updated_timestamp
@@ -284,12 +229,8 @@ select
   logic_gate_id,
   display_title,
   status,
-  status_color,
   due_date,
   priority,
-  assignee_user_id,
-  assignee_display_name,
-  assignee_email,
   resource_created_timestamp,
   accounts,
   now()
@@ -299,12 +240,8 @@ do update set
   logic_gate_id=excluded.logic_gate_id,
   display_title=excluded.display_title,
   status=excluded.status,
-  status_color=excluded.status_color,
   due_date=excluded.due_date,
   priority=excluded.priority,
-  assignee_user_id=excluded.assignee_user_id,
-  assignee_display_name=excluded.assignee_display_name,
-  assignee_email=excluded.assignee_email,
   resource_created_timestamp=excluded.resource_created_timestamp,
   accounts=excluded.accounts,
   updated_timestamp=now()`, companyID, nodeID)
@@ -312,42 +249,42 @@ do update set
 	return err
 }
 
-func syncPostgresRacioProjectionForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
-	users, err := postgresRacioProjectionUsersForLogicGateTx(ctx, tx, companyID, logicGateID)
+func syncPostgresGVICMatrixProjectionForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+	users, err := postgresGVICMatrixProjectionUsersForLogicGateTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return err
 	}
-	current, err := postgresRacioAssignmentUserIDsTx(ctx, tx, companyID, logicGateID)
+	current, err := postgresGVICMatrixAssignmentUserIDsTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return err
 	}
 	for userID := range current {
 		users[userID] = true
 	}
-	return syncPostgresRacioProjectionForLogicGateUsersTx(ctx, tx, companyID, logicGateID, mapKeys(users))
+	return syncPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx, tx, companyID, logicGateID, mapKeys(users))
 }
 
-func syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) error {
-	return syncPostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID)
+func syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateGVICAssignment) error {
+	return syncPostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID)
 }
 
-func syncPostgresRacioProjectionForLogicGateAssignmentsDeltasTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) ([]ProjectionDelta, error) {
-	beforeRows, err := postgresRacioProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+func syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateGVICAssignment) ([]ProjectionDelta, error) {
+	beforeRows, err := postgresGVICMatrixProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return nil, err
 	}
-	if err := syncPostgresRacioProjectionForLogicGateAssignmentsTx(ctx, tx, companyID, logicGateID, before, after); err != nil {
+	if err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx(ctx, tx, companyID, logicGateID, before, after); err != nil {
 		return nil, err
 	}
-	afterRows, err := postgresRacioProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	afterRows, err := postgresGVICMatrixProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return nil, err
 	}
-	return diffRacioProjectionRows(beforeRows, afterRows), nil
+	return diffGVICMatrixProjectionRows(beforeRows, afterRows), nil
 }
 
-func syncPostgresRacioProjectionForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) error {
-	defer observeTiming(ctx, "repo.syncPostgresRacioProjectionForLogicGateUsersTx.total")()
+func syncPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) error {
+	defer observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForLogicGateUsersTx.total")()
 	companyID = cleanUUIDText(companyID)
 	logicGateID = cleanUUIDText(logicGateID)
 	if ctx == nil || tx == nil || companyID == "" || logicGateID == "" {
@@ -356,20 +293,20 @@ func syncPostgresRacioProjectionForLogicGateUsersTx(ctx context.Context, tx *sql
 	userIDs = cleanUUIDTextSlice(userIDs)
 	sort.Strings(userIDs)
 	for _, userID := range userIDs {
-		if err := deleteStalePostgresRacioProjectionForLogicGateUserTx(ctx, tx, companyID, logicGateID, userID); err != nil {
+		if err := deleteStalePostgresGVICMatrixProjectionForLogicGateUserTx(ctx, tx, companyID, logicGateID, userID); err != nil {
 			return err
 		}
-		if err := upsertPostgresRacioProjectionForLogicGateUserTx(ctx, tx, companyID, logicGateID, userID); err != nil {
+		if err := upsertPostgresGVICMatrixProjectionForLogicGateUserTx(ctx, tx, companyID, logicGateID, userID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func deleteStalePostgresRacioProjectionForLogicGateUserTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID, userID string) error {
-	defer observeTiming(ctx, "repo.deleteStalePostgresRacioProjectionForLogicGateUserTx")()
-	_, err := tx.ExecContext(ctx, postgresRacioLogicGateUserProjectionCTE+`
-delete from racio_matrix_projection_table entry
+func deleteStalePostgresGVICMatrixProjectionForLogicGateUserTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID, userID string) error {
+	defer observeTiming(ctx, "repo.deleteStalePostgresGVICMatrixProjectionForLogicGateUserTx")()
+	_, err := tx.ExecContext(ctx, postgresGVICMatrixLogicGateUserProjectionCTE+`
+delete from gvic_matrix_projection_table entry
 where entry.company_id=$1::uuid
   and entry.logic_gate_id=$2::uuid
   and entry.user_id=$3::uuid
@@ -385,10 +322,10 @@ where entry.company_id=$1::uuid
 	return err
 }
 
-func upsertPostgresRacioProjectionForLogicGateUserTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID, userID string) error {
-	defer observeTiming(ctx, "repo.upsertPostgresRacioProjectionForLogicGateUserTx")()
-	_, err := tx.ExecContext(ctx, postgresRacioLogicGateUserProjectionCTE+`
-insert into racio_matrix_projection_table (
+func upsertPostgresGVICMatrixProjectionForLogicGateUserTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID, userID string) error {
+	defer observeTiming(ctx, "repo.upsertPostgresGVICMatrixProjectionForLogicGateUserTx")()
+	_, err := tx.ExecContext(ctx, postgresGVICMatrixLogicGateUserProjectionCTE+`
+insert into gvic_matrix_projection_table (
   company_id,
   user_id,
   resource_type,
@@ -396,12 +333,8 @@ insert into racio_matrix_projection_table (
   logic_gate_id,
   display_title,
   status,
-  status_color,
   due_date,
   priority,
-  assignee_user_id,
-  assignee_display_name,
-  assignee_email,
   resource_created_timestamp,
   accounts,
   updated_timestamp
@@ -414,12 +347,8 @@ select
   logic_gate_id,
   display_title,
   status,
-  status_color,
   due_date,
   priority,
-  assignee_user_id,
-  assignee_display_name,
-  assignee_email,
   resource_created_timestamp,
   accounts,
   now()
@@ -429,64 +358,60 @@ do update set
   logic_gate_id=excluded.logic_gate_id,
   display_title=excluded.display_title,
   status=excluded.status,
-  status_color=excluded.status_color,
   due_date=excluded.due_date,
   priority=excluded.priority,
-  assignee_user_id=excluded.assignee_user_id,
-  assignee_display_name=excluded.assignee_display_name,
-  assignee_email=excluded.assignee_email,
   resource_created_timestamp=excluded.resource_created_timestamp,
   accounts=excluded.accounts,
   updated_timestamp=now()`, companyID, logicGateID, userID)
 	return err
 }
 
-func deletePostgresRacioProjectionForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+func deletePostgresGVICMatrixProjectionForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
 	_, err := tx.ExecContext(ctx, `
-delete from racio_matrix_projection_table
+delete from gvic_matrix_projection_table
 where company_id=$1::uuid
   and logic_gate_id=$2::uuid`, companyID, logicGateID)
 	return err
 }
 
-func deletePostgresRacioProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+func deletePostgresGVICMatrixProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
 	_, err := tx.ExecContext(ctx, `
-delete from racio_matrix_projection_table
+delete from gvic_matrix_projection_table
 where company_id=$1::uuid
   and resource_type='node'
   and resource_id=$2::uuid`, companyID, nodeID)
 	return err
 }
 
-func (r *PostgresRepo) ListRacioMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RacioMatrixProjectionRow, error) {
+func (r *PostgresRepo) ListGVICMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]GVICMatrixProjectionRow, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, nodeIDs, logicGateIDs)
+	rows, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, nodeIDs, logicGateIDs)
 	if err != nil {
 		return nil, err
 	}
 	return rows, tx.Commit()
 }
 
-func (r *PostgresRepo) ListRacioMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RacioMatrixProjectionRow, error) {
+func (r *PostgresRepo) ListGVICMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]GVICMatrixProjectionRow, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := postgresRacioProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	rows, err := postgresGVICMatrixProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return nil, err
 	}
 	return rows, tx.Commit()
 }
 
-func (r *PostgresRepo) ListRacioMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RacioMatrixProjectionRow, error) {
+func (r *PostgresRepo) ListGVICMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error) {
 	query = NormalizeWorkItemInboxQuery(query)
 	companyID := cleanUUIDText(query.CompanyID)
 	userID := cleanUUIDText(query.UserID)
@@ -502,16 +427,12 @@ select entry.company_id::text,
        entry.logic_gate_id::text,
        entry.display_title,
        entry.status,
-       entry.status_color,
        entry.due_date::text,
        entry.priority,
-       entry.assignee_user_id::text,
-       entry.assignee_display_name,
-       entry.assignee_email,
        entry.accounts::text,
        entry.resource_created_timestamp,
        entry.updated_timestamp
-from racio_matrix_projection_table entry
+from gvic_matrix_projection_table entry
 where entry.company_id=$1::uuid
   and entry.user_id=$2::uuid
   and entry.resource_type in ('node', 'logic_gate')
@@ -522,9 +443,9 @@ limit $3`, companyID, userID, query.Limit, viewerUserID)
 		return nil, err
 	}
 	defer rows.Close()
-	items := make([]RacioMatrixProjectionRow, 0)
+	items := make([]GVICMatrixProjectionRow, 0)
 	for rows.Next() {
-		item, err := scanRacioMatrixProjectionRow(rows)
+		item, err := scanGVICMatrixProjectionRow(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -533,7 +454,7 @@ limit $3`, companyID, userID, query.Limit, viewerUserID)
 	return items, rows.Err()
 }
 
-func postgresRacioProjectionRowsForResourcesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs, logicGateIDs []string) ([]RacioMatrixProjectionRow, error) {
+func postgresGVICMatrixProjectionRowsForResourcesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs, logicGateIDs []string) ([]GVICMatrixProjectionRow, error) {
 	companyID = cleanUUIDText(companyID)
 	nodeIDs = cleanUUIDTextSlice(nodeIDs)
 	logicGateIDs = cleanUUIDTextSlice(logicGateIDs)
@@ -541,7 +462,7 @@ func postgresRacioProjectionRowsForResourcesTx(ctx context.Context, tx *sql.Tx, 
 		return nil, ErrInvalid
 	}
 	if len(nodeIDs) == 0 && len(logicGateIDs) == 0 {
-		return []RacioMatrixProjectionRow{}, nil
+		return []GVICMatrixProjectionRow{}, nil
 	}
 	rows, err := tx.QueryContext(ctx, `
 select company_id::text,
@@ -551,16 +472,12 @@ select company_id::text,
        logic_gate_id::text,
        display_title,
        status,
-       status_color,
        due_date::text,
        priority,
-       assignee_user_id::text,
-       assignee_display_name,
-       assignee_email,
        accounts::text,
        resource_created_timestamp,
        updated_timestamp
-from racio_matrix_projection_table
+from gvic_matrix_projection_table
 where company_id=$1::uuid
   and (
     ($2 <> '' and resource_type='node' and resource_id = any(string_to_array($2, ',')::uuid[]))
@@ -572,9 +489,9 @@ order by resource_type asc, resource_id::text asc, user_id::text asc`,
 		return nil, err
 	}
 	defer rows.Close()
-	items := make([]RacioMatrixProjectionRow, 0)
+	items := make([]GVICMatrixProjectionRow, 0)
 	for rows.Next() {
-		item, err := scanRacioMatrixProjectionRow(rows)
+		item, err := scanGVICMatrixProjectionRow(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -583,7 +500,7 @@ order by resource_type asc, resource_id::text asc, user_id::text asc`,
 	return items, rows.Err()
 }
 
-func postgresRacioProjectionRowsForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) ([]RacioMatrixProjectionRow, error) {
+func postgresGVICMatrixProjectionRowsForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) ([]GVICMatrixProjectionRow, error) {
 	companyID = cleanUUIDText(companyID)
 	logicGateID = cleanUUIDText(logicGateID)
 	if ctx == nil || tx == nil || companyID == "" || logicGateID == "" {
@@ -597,16 +514,12 @@ select company_id::text,
        logic_gate_id::text,
        display_title,
        status,
-       status_color,
        due_date::text,
        priority,
-       assignee_user_id::text,
-       assignee_display_name,
-       assignee_email,
        accounts::text,
        resource_created_timestamp,
        updated_timestamp
-from racio_matrix_projection_table
+from gvic_matrix_projection_table
 where company_id=$1::uuid
   and logic_gate_id=$2::uuid
 order by resource_type asc, resource_id::text asc, user_id::text asc`, companyID, logicGateID)
@@ -614,9 +527,9 @@ order by resource_type asc, resource_id::text asc, user_id::text asc`, companyID
 		return nil, err
 	}
 	defer rows.Close()
-	items := make([]RacioMatrixProjectionRow, 0)
+	items := make([]GVICMatrixProjectionRow, 0)
 	for rows.Next() {
-		item, err := scanRacioMatrixProjectionRow(rows)
+		item, err := scanGVICMatrixProjectionRow(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -625,16 +538,12 @@ order by resource_type asc, resource_id::text asc, user_id::text asc`, companyID
 	return items, rows.Err()
 }
 
-func scanRacioMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (RacioMatrixProjectionRow, error) {
-	var item RacioMatrixProjectionRow
+func scanGVICMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (GVICMatrixProjectionRow, error) {
+	var item GVICMatrixProjectionRow
 	var logicGateID sql.NullString
 	var status sql.NullString
-	var statusColor sql.NullString
 	var dueDate sql.NullString
 	var priority sql.NullInt64
-	var assigneeUserID sql.NullString
-	var assigneeDisplayName sql.NullString
-	var assigneeEmail sql.NullString
 	var accountsJSON sql.NullString
 	err := row.Scan(
 		&item.CompanyID,
@@ -644,12 +553,8 @@ func scanRacioMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (Rac
 		&logicGateID,
 		&item.DisplayTitle,
 		&status,
-		&statusColor,
 		&dueDate,
 		&priority,
-		&assigneeUserID,
-		&assigneeDisplayName,
-		&assigneeEmail,
 		&accountsJSON,
 		&item.ResourceCreatedTimestamp,
 		&item.UpdatedTimestamp,
@@ -668,10 +573,6 @@ func scanRacioMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (Rac
 		item.Priority = &value
 	}
 	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
-	_ = statusColor
-	_ = assigneeUserID
-	_ = assigneeDisplayName
-	_ = assigneeEmail
 	return item, err
 }
 
@@ -712,10 +613,10 @@ returning sequence`, companyID, projectionName, projectionScope).Scan(&sequence)
 	return sequence, err
 }
 
-func postgresRacioProjectionUsersForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) (map[string]bool, error) {
+func postgresGVICMatrixProjectionUsersForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) (map[string]bool, error) {
 	rows, err := tx.QueryContext(ctx, `
 select distinct user_id::text
-from racio_matrix_projection_table
+from gvic_matrix_projection_table
 where company_id=$1::uuid
   and logic_gate_id=$2::uuid`, companyID, logicGateID)
 	if err != nil {
@@ -736,11 +637,11 @@ where company_id=$1::uuid
 	return users, rows.Err()
 }
 
-func postgresRacioAssignmentUserIDsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) (map[string]bool, error) {
+func postgresGVICMatrixAssignmentUserIDsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) (map[string]bool, error) {
 	rows, err := tx.QueryContext(ctx, `
-with recursive `+postgresLogicGateRaciUsersCTE+`
+with recursive `+postgresLogicGateGVICUsersCTE+`
 select distinct assignment.user_id::text
-from logic_gate_raci_users assignment
+from logic_gate_GVIC_users assignment
 where assignment.company_id=$1::uuid
   and assignment.logic_gate_id=$2::uuid`, companyID, logicGateID)
 	if err != nil {

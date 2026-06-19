@@ -40,9 +40,6 @@ func TestInboxPriorityMoveCommandKeepsSourceProjectionReadsAndEventsConsistent(t
 	if payload.Node.Priority == nil || *payload.Node.Priority != 2 {
 		t.Fatalf("moved node priority = %+v, want 2", payload.Node.Priority)
 	}
-	if payload.Node.AssigneeUserID != nil {
-		t.Fatalf("moved node assignee = %+v, want nil after GVIC migration", payload.Node.AssigneeUserID)
-	}
 	if len(payload.Node.LogicGateIDs) != 1 || payload.Node.LogicGateIDs[0] != logicGate.LogicGateID {
 		t.Fatalf("moved node logic_gate_ids = %+v, want assignment source", payload.Node.LogicGateIDs)
 	}
@@ -165,12 +162,12 @@ func setupInboxCommandAssignedNode(t *testing.T, repo *store.MemoryRepo, company
 	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: responsible.UserID}},
+		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: responsible.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}
 	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
 		CompanyID:   companyID,
