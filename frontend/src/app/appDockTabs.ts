@@ -1,5 +1,5 @@
 import { humanLabelOrFallback } from "../modules/entityLabels.js";
-export type AppDockTabKind = "node" | "logic_gate_arena";
+export type AppDockTabKind = "node" | "logic_gate_arena" | "project";
 
 export type AppDockTab = {
   id: string;
@@ -23,6 +23,7 @@ const APP_DOCK_TABS_STORAGE_PREFIX = "mangorts.app-taskbar.tabs.v1";
 const DEFAULT_TAB_LABEL: Record<AppDockTabKind, string> = {
   node: "Node",
   logic_gate_arena: "Logic Gate Arena",
+  project: "Project",
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -53,7 +54,7 @@ export function appDockTabID(kind: AppDockTabKind, entityID: string): string {
 
 function coerceAppDockTab(value: unknown): AppDockTab | null {
   if (!isObject(value)) return null;
-  const kind = value.kind === "node" || value.kind === "logic_gate_arena" ? value.kind : null;
+  const kind = value.kind === "node" || value.kind === "logic_gate_arena" || value.kind === "project" ? value.kind : null;
   if (!kind) return null;
   const entityID = typeof value.entityID === "string" ? value.entityID.trim() : "";
   const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : appDockTabID(kind, entityID);
