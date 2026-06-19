@@ -1071,14 +1071,20 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   useEffect(() => {
     if (!projectContextMenu) return undefined;
     const close = () => setProjectContextMenu(null);
+    const closeUnlessConfirming = () => {
+      if (document.querySelector("[data-mango-confirm-action-menu='true']")) return;
+      close();
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
     };
-    window.addEventListener("pointerdown", close);
+    window.addEventListener("pointerdown", closeUnlessConfirming);
+    window.addEventListener("mango:confirm-action-complete", close);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("scroll", close, true);
     return () => {
-      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("pointerdown", closeUnlessConfirming);
+      window.removeEventListener("mango:confirm-action-complete", close);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("scroll", close, true);
     };
@@ -1469,7 +1475,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
                 project: projectContextMenu.project,
                 position: confirmMenuPositionFromElement(event.currentTarget),
               });
-              setProjectContextMenu(null);
             }}
           >
             Delete project

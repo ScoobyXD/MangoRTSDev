@@ -263,14 +263,20 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   useEffect(() => {
     if (!relationshipContextMenu) return undefined;
     const close = () => setRelationshipContextMenu(null);
+    const closeUnlessConfirming = () => {
+      if (document.querySelector("[data-mango-confirm-action-menu='true']")) return;
+      close();
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
     };
-    window.addEventListener("pointerdown", close);
+    window.addEventListener("pointerdown", closeUnlessConfirming);
+    window.addEventListener("mango:confirm-action-complete", close);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("scroll", close, true);
     return () => {
-      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("pointerdown", closeUnlessConfirming);
+      window.removeEventListener("mango:confirm-action-complete", close);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("scroll", close, true);
     };
@@ -709,7 +715,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const label = isLogicGate
       ? "logic gate"
       : `${uniqueResourceIDs.length} node${uniqueResourceIDs.length === 1 ? "" : "s"}`;
-    setRelationshipContextMenu(null);
     setRelationshipDeleteConfirmation({ isLogicGate, resourceIDs: uniqueResourceIDs, label, position: position ?? null });
   }, [relationshipContextMenu?.relationship, relationships, selectedRelationshipNodeIDs]);
 

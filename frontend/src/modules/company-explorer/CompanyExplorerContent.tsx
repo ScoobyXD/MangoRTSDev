@@ -2816,7 +2816,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       setDeleteBlockedMessage(`We can't delete this folder because it contains the special folder: ${protectedFolder.name}`);
       return;
     }
-    setExplorerContextMenu(null);
     setDeleteFolderAcknowledged(false);
     setDeleteConfirmation({ targets, position: position ?? null });
   }, [folders]);

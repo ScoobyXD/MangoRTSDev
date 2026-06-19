@@ -114,7 +114,6 @@ function HomePinContextMenu({ menu, onClose, onDelete }: {
           style={{ ...sharedInboxContextMenuButtonStyle, color: "#dc2626" }}
           onClick={(event) => {
             onDelete(menu, confirmMenuPositionFromElement(event.currentTarget));
-            onClose();
           }}
         >
           Delete
@@ -1084,7 +1083,6 @@ export function HomeSidebar({
   }, [setSharedFolderAccountEmail, sharedBusy, sharedEmailDialog]);
 
   const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox, position?: ConfirmActionMenuPosition) => {
-    setSharedContextMenu(null);
     const label = folder.name.trim() || "this folder";
     if (folder.entry_type === "shared_inbox") {
       setSharedDeleteDialog({
@@ -4635,7 +4633,6 @@ export function LogicGateInboxNodeGroupCard({
               type="button"
               style={{ ...sharedInboxContextMenuButtonStyle, color: "#dc2626" }}
               onClick={(event) => {
-                setGroupContextMenu(null);
                 onRequestDeleteLogicGate(group.logicGateID, confirmMenuPositionFromElement(event.currentTarget));
               }}
             >

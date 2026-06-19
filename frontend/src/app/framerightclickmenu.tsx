@@ -7,6 +7,7 @@ export interface FrameRightClickMenuProps {
   y: number;
   onClose: () => void;
   closeOnOutside?: boolean;
+  isConfirmActionMenu?: boolean;
   width?: React.CSSProperties["width"];
   minWidth?: React.CSSProperties["minWidth"];
   maxWidth?: React.CSSProperties["maxWidth"];
@@ -14,7 +15,7 @@ export interface FrameRightClickMenuProps {
 }
 
 // Floating context-menu shell used by header/canvas/frame menus throughout the dashboard.
-const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, y, onClose, closeOnOutside = true, width, minWidth = 190, maxWidth, overflow = "hidden" }) => {
+const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, y, onClose, closeOnOutside = true, isConfirmActionMenu = false, width, minWidth = 190, maxWidth, overflow = "hidden" }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
 
@@ -32,6 +33,8 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
   useEffect(() => {
     if (!closeOnOutside) return;
     const handler = (e: MouseEvent) => {
+      const confirmMenuActive = document.querySelector("[data-mango-confirm-action-menu='true']");
+      if (!isConfirmActionMenu && confirmMenuActive) return;
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
     };
     const timer = setTimeout(() => window.addEventListener("mousedown", handler, true), 0);
@@ -39,10 +42,18 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
       clearTimeout(timer);
       window.removeEventListener("mousedown", handler, true);
     };
-  }, [closeOnOutside, onClose]);
+  }, [closeOnOutside, isConfirmActionMenu, onClose]);
+
+  useEffect(() => {
+    if (isConfirmActionMenu) return;
+    const handler = () => onClose();
+    window.addEventListener("mango:confirm-action-complete", handler);
+    return () => window.removeEventListener("mango:confirm-action-complete", handler);
+  }, [isConfirmActionMenu, onClose]);
 
   return createPortal(
     <div
+      data-mango-confirm-action-menu={isConfirmActionMenu ? "true" : undefined}
       className="mango-liquid-context-menu"
       ref={menuRef}
       style={{

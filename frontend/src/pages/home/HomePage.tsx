@@ -2593,7 +2593,6 @@ export function HomePage({
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
-    setMessageContextMenu(null);
     setDeleteConfirmation({ messageIDs: ids, position: position ?? null });
   }, [canMutateCurrentMailView]);
   const deleteDraftMessages = useCallback((messageIDs: string[]) => {
@@ -3385,7 +3384,6 @@ export function HomePage({
       return true;
     }).map((target) => ({ ...target, id: target.id.trim(), label: target.label.trim() || target.id.trim() }));
     if (normalizedTargets.length === 0) return;
-    setBulkEditMenu(null);
     setEntityDeleteConfirmation({ targets: normalizedTargets, position: position ?? null });
   }, []);
   const requestDeleteSelectedHomeEntities = useCallback(() => {
@@ -3962,10 +3960,11 @@ export function HomePage({
             messageContextMenu={messageContextMenu}
             deleteConfirmation={deleteConfirmation}
             onArchiveMessages={(ids) => { void archiveMessages(ids); }}
-            onCancelDelete={() => setDeleteConfirmation(null)}
+            onCancelDelete={() => { setDeleteConfirmation(null); setMessageContextMenu(null); }}
             onCloseContextMenu={() => setMessageContextMenu(null)}
             onConfirmDelete={(ids) => {
               setDeleteConfirmation(null);
+              setMessageContextMenu(null);
               void deleteMessages(ids);
             }}
             onRequestDeleteDrafts={deleteDraftMessages}

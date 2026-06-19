@@ -763,7 +763,7 @@ export function HomeMailOverlays({
       {messageContextMenu && (
         <div
           style={{ ...messageContextMenuStyle, left: messageContextMenu.x, top: messageContextMenu.y }}
-          onMouseLeave={onCloseContextMenu}
+          onMouseLeave={deleteConfirmation ? undefined : onCloseContextMenu}
         >
           {isDraftMailbox ? (
             <button

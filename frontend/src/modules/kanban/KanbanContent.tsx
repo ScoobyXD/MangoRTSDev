@@ -1723,9 +1723,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const existingCardIDs = new Set(cards.map((card) => card.card_id));
     const uniqueCardIDs = Array.from(new Set(cardIDs)).filter((cardID) => existingCardIDs.has(cardID));
     if (uniqueCardIDs.length === 0) return;
-    setCardContextMenu(null);
-    setColumnContextMenu(null);
-    setArenaCellContextMenu(null);
     setDeleteCardConfirmation({ cardIDs: uniqueCardIDs, position: position ?? null });
   }, [cards]);
 
@@ -1737,9 +1734,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       .filter(Boolean);
     const uniqueNodeIDs = Array.from(new Set(nodeIDs));
     if (uniqueNodeIDs.length === 0) return;
-    setCardContextMenu(null);
-    setColumnContextMenu(null);
-    setArenaCellContextMenu(null);
     setDeleteNodeConfirmation({ nodeIDs: uniqueNodeIDs, position: position ?? null });
   }, [cards]);
 
