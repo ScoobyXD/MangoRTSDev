@@ -13,6 +13,7 @@ export type ExplorerCreationContextRow = {
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
   entityID?: string;
+  resourceID?: string;
   entityType?: CompanyExplorerV2EntityType;
   edgeID?: string;
   parentEntityID?: string;
@@ -373,19 +374,36 @@ export function buildExplorerSearchViewRows<T extends ExplorerSearchRow & { id: 
   return input.rows.filter((row) => includedIDs.has(row.id));
 }
 
-export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | null):
-  | { kind: "folder"; id: string; folderKind: CompanyExplorerFolderKind }
-  | { kind: "node"; id: string }
-  | { kind: "logic_gate"; id: string }
-  | { kind: "project"; id: string }
-  | { kind: "kanban"; id: string }
-  | null {
+type ExplorerDeleteTargetV2Metadata = { entityID?: string; entityType?: CompanyExplorerV2EntityType };
+
+export type ExplorerDeleteTarget =
+  | ({ kind: "folder"; id: string; folderKind: CompanyExplorerFolderKind } & ExplorerDeleteTargetV2Metadata)
+  | ({ kind: "node"; id: string } & ExplorerDeleteTargetV2Metadata)
+  | ({ kind: "logic_gate"; id: string } & ExplorerDeleteTargetV2Metadata)
+  | ({ kind: "project"; id: string } & ExplorerDeleteTargetV2Metadata)
+  | ({ kind: "kanban"; id: string } & ExplorerDeleteTargetV2Metadata);
+
+export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | null): ExplorerDeleteTarget | null {
   if (!row) return null;
   if (row.systemKey) return null;
-  if (row.kind === "folder" && row.folderID && row.folderKind && (!row.entityType || row.entityType === "folder")) return { kind: "folder", id: row.folderID, folderKind: row.folderKind };
-  if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
-  if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
-  if (row.kind === "project" && row.projectID) return { kind: "project", id: row.projectID };
+  const entityID = row.entityID?.trim() ?? "";
+  const entityType = row.entityType;
+  const v2Metadata = entityID && entityType ? { entityID, entityType } : {};
+  if (row.kind === "folder" && row.folderID && row.folderKind && (!entityType || entityType === "folder")) {
+    return { kind: "folder", id: entityType === "folder" ? entityID : row.folderID, folderKind: row.folderKind, ...v2Metadata };
+  }
+  if (row.kind === "node") {
+    const id = entityType === "node" ? row.resourceID : row.nodeID;
+    return id ? { kind: "node", id, ...v2Metadata } : null;
+  }
+  if (row.kind === "logic_gate") {
+    const id = entityType === "logic_gate" ? row.resourceID : row.logicGateID;
+    return id ? { kind: "logic_gate", id, ...v2Metadata } : null;
+  }
+  if (row.kind === "project") {
+    const id = entityType === "project" ? row.resourceID : row.projectID;
+    return id ? { kind: "project", id, ...v2Metadata } : null;
+  }
   if (row.kind === "kanban" && row.kanbanBoardID) return { kind: "kanban", id: row.kanbanBoardID };
   return null;
 }

@@ -891,6 +891,29 @@ func (r *MemoryRepo) companyExplorerV2RowLocked(query CompanyExplorerV2RowsQuery
 	return row
 }
 
+func (r *MemoryRepo) deleteCompanyExplorerV2NativeEntityProjectionLocked(companyID, entityType, resourceID string) {
+	for _, entity := range r.companyExplorerV2Entities {
+		if entity.CompanyID == companyID && entity.EntityType == entityType && entity.ResourceID == resourceID {
+			r.deleteCompanyExplorerV2EntityProjectionLocked(companyID, entity.EntityID)
+			return
+		}
+	}
+}
+
+func (r *MemoryRepo) deleteCompanyExplorerV2EntityProjectionLocked(companyID, entityID string) {
+	delete(r.companyExplorerV2Entities, key(companyID, entityID))
+	for subscriptionKey, subscription := range r.companyExplorerV2Subscriptions {
+		if subscription.CompanyID == companyID && subscription.AnchorEntityID == entityID {
+			delete(r.companyExplorerV2Subscriptions, subscriptionKey)
+		}
+	}
+	for edgeKey, edge := range r.companyExplorerV2Edges {
+		if edge.CompanyID == companyID && (edge.ParentEntityID == entityID || edge.ChildEntityID == entityID) {
+			delete(r.companyExplorerV2Edges, edgeKey)
+		}
+	}
+}
+
 func (r *MemoryRepo) companyExplorerV2EntityNameLocked(entity memoryCompanyExplorerV2Entity) string {
 	switch entity.EntityType {
 	case CompanyExplorerV2EntityCompany:

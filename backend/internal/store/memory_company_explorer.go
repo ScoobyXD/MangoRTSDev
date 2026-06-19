@@ -910,6 +910,15 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 			return CompanyExplorerDeleteResult{}, err
 		}
 	}
+	for logicGateID := range logicGateIDs {
+		r.deleteCompanyExplorerV2NativeEntityProjectionLocked(companyID, CompanyExplorerV2EntityLogicGate, logicGateID)
+	}
+	for projectID := range projectIDs {
+		r.deleteCompanyExplorerV2NativeEntityProjectionLocked(companyID, CompanyExplorerV2EntityProject, projectID)
+	}
+	for nodeID := range nodeIDs {
+		r.deleteCompanyExplorerV2NativeEntityProjectionLocked(companyID, CompanyExplorerV2EntityNode, nodeID)
+	}
 	for folderID := range folderIDs {
 		delete(r.folders, key(companyID, folderID))
 		delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, folderID))

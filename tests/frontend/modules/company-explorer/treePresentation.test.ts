@@ -178,6 +178,74 @@ run("v2 tree rows preserve the existing tree shell ids and metadata", () => {
   assert.equal(rows[3]?.parentEntityID, "gate-entity");
 });
 
+run("v2 delete targets keep explorer entity identity separate from source ids", () => {
+  const rows = buildCompanyExplorerV2TreeRows({
+    expanded: new Set(["folder-root", "workspace-folder-folder-a", "logic-gate-gate-a"]),
+    rows: [
+      {
+        company_id: "c",
+        entity_id: "company-entity",
+        entity_type: "company",
+        resource_id: "c",
+        name: "Company",
+        position: 1000,
+        has_children: true,
+        created_timestamp: "1",
+        updated_timestamp: "1",
+      },
+      {
+        company_id: "c",
+        entity_id: "folder-a",
+        entity_type: "folder",
+        name: "Folder A",
+        parent_entity_id: "company-entity",
+        edge_id: "edge-folder-a",
+        position: 1000,
+        has_children: true,
+        created_timestamp: "2",
+        updated_timestamp: "2",
+      },
+      {
+        company_id: "c",
+        entity_id: "gate-entity",
+        entity_type: "logic_gate",
+        resource_id: "gate-a",
+        name: "Gate A",
+        parent_entity_id: "folder-a",
+        edge_id: "edge-gate-a",
+        position: 1000,
+        has_children: true,
+        created_timestamp: "3",
+        updated_timestamp: "3",
+      },
+      {
+        company_id: "c",
+        entity_id: "node-entity",
+        entity_type: "node",
+        resource_id: "node-a",
+        name: "Node A",
+        parent_entity_id: "gate-entity",
+        position: 1000,
+        has_children: false,
+        created_timestamp: "4",
+        updated_timestamp: "4",
+      },
+    ],
+  });
+
+  assert.deepEqual(resolveExplorerDeleteTarget(rows[1]), { kind: "folder", id: "folder-a", folderKind: "logic_gate", entityID: "folder-a", entityType: "folder" });
+  assert.deepEqual(resolveExplorerDeleteTarget(rows[2]), { kind: "logic_gate", id: "gate-a", entityID: "gate-entity", entityType: "logic_gate" });
+  assert.deepEqual(resolveExplorerDeleteTarget(rows[3]), { kind: "node", id: "node-a", entityID: "node-entity", entityType: "node" });
+});
+
+run("v2 native rows without source resource ids are not deletable as source records", () => {
+  assert.equal(resolveExplorerDeleteTarget({
+    id: "node-node-entity",
+    kind: "node",
+    entityID: "node-entity",
+    entityType: "node",
+  }), null);
+});
 run("automatic folders hold active node placements and due-date history", () => {
   const rows = buildCompanyExplorerTreeRows({
     expanded: new Set(["workspace-folder-system-active", "workspace-folder-system-history"]),

@@ -2728,7 +2728,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     );
     const normalizedTargets = targets.filter((target) => {
       if (target.kind === "kanban" && selectedLogicGateBoardIDs.has(target.id)) return false;
-      const key = `${target.kind}:${target.id}`;
+      const key = target.entityID ? `${target.entityType}:${target.entityID}` : `${target.kind}:${target.id}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -2805,9 +2805,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       deletedKanbanBoardIDs,
     });
     try {
-      const v2FolderTargets = normalizedTargets.filter((target) => target.kind === "folder" && v2FolderEntityIDs.has(target.id));
-      const legacyTargets = normalizedTargets.filter((target) => !(target.kind === "folder" && v2FolderEntityIDs.has(target.id)));
-      await Promise.all(v2FolderTargets.map((target) => requestJSON(`/v2/company-explorer/entities/${target.id}?company_id=${encodeURIComponent(companyID)}`, {
+      const v2Targets = normalizedTargets.filter((target) => Boolean(target.entityID && target.entityType && target.entityType !== "company" && target.entityType !== "user_group" && target.entityType !== "user"));
+      const legacyTargets = normalizedTargets.filter((target) => !v2Targets.includes(target));
+      await Promise.all(v2Targets.map((target) => requestJSON(`/v2/company-explorer/entities/${encodeURIComponent(target.entityID ?? target.id)}?company_id=${encodeURIComponent(companyID)}`, {
         method: "DELETE",
       })));
       if (legacyTargets.length > 0) {
@@ -2857,7 +2857,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [apiBase, companyExplorerV2Rows, companyID, explorerStore, folderItems, folders, kanbanBoards, requestJSON]);
 
   const getDeleteTargetsForRows = useCallback((rows: ExplorerTreeNode[]): ExplorerDeleteTargetWithLabel[] => {
-    const selectedFolderIDs = new Set(rows.filter((row) => row.kind === "folder" && row.folderID && !isProtectedGVICRoleRow(row)).map((row) => row.folderID!));
+    const selectedFolderIDs = new Set(rows.filter((row) => row.kind === "folder" && row.folderID && !row.entityID && !isProtectedGVICRoleRow(row)).map((row) => row.folderID!));
+    const selectedV2FolderEntityIDs = new Set(rows.filter((row) => row.kind === "folder" && row.entityType === "folder" && row.entityID && !isProtectedGVICRoleRow(row)).map((row) => row.entityID!));
+    const v2ParentByEntityID = new Map(companyExplorerV2Rows.map((row) => [row.entity_id, row.parent_entity_id ?? ""]));
     const isFolderCoveredBySelectedAncestor = (folderID: string): boolean => {
       let currentFolderID = folderID;
       const seen = new Set<string>();
@@ -2868,7 +2870,18 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       }
       return false;
     };
+    const isV2EntityCoveredBySelectedAncestor = (parentEntityID: string): boolean => {
+      let currentEntityID = parentEntityID;
+      const seen = new Set<string>();
+      while (currentEntityID && !seen.has(currentEntityID)) {
+        if (selectedV2FolderEntityIDs.has(currentEntityID)) return true;
+        seen.add(currentEntityID);
+        currentEntityID = v2ParentByEntityID.get(currentEntityID) ?? "";
+      }
+      return false;
+    };
     const isCoveredBySelectedAncestor = (row: ExplorerTreeNode): boolean => {
+      if (row.entityID && row.entityType) return isV2EntityCoveredBySelectedAncestor(row.parentEntityID ?? v2ParentByEntityID.get(row.entityID) ?? "");
       if (row.kind === "folder") return Boolean(row.parentFolderID && isFolderCoveredBySelectedAncestor(row.parentFolderID));
       return Boolean(row.folderID && isFolderCoveredBySelectedAncestor(row.folderID));
     };
@@ -2885,7 +2898,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       targets.push({ ...target, label: row.label, treeID: row.id });
     }
     return targets;
-  }, [folders]);
+  }, [companyExplorerV2Rows, folders]);
 
   const requestDeleteTargets = useCallback((targets: ExplorerDeleteTargetWithLabel[]) => {
     if (targets.length === 0) return;
