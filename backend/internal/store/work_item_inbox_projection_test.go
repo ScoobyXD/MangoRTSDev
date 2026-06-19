@@ -170,6 +170,39 @@ func TestGVICMatrixProjectionSchemaAndPostgresReadsUseTargetedProjection(t *test
 	}
 }
 
+func TestPostgresMyWorkProjectRowsDistinctQueryOrdersOutsideDistinct(t *testing.T) {
+	sql := normalizeProjectionSource(postgresMyWorkProjectRowsSQL)
+	for _, needle := range []string{
+		"from ( select distinct",
+		"case effective.role when 'generated' then 1 when 'verified' then 2 when 'consulted' then 3 when 'informed' then 4 else 5 end as role_sort",
+		"lower(project.name) as project_name_sort",
+		") project_rows order by project_rows.role_sort, project_rows.project_name_sort, project_rows.project_id",
+		"mangorts_user_can_access_resource(project.company_id, 'project', project.project_id, $3::uuid, 'edit')",
+	} {
+		if !strings.Contains(sql, needle) {
+			t.Fatalf("Postgres My Work project query missing %q in %s", needle, sql)
+		}
+	}
+
+	distinctStart := strings.Index(sql, "select distinct")
+	distinctEnd := strings.Index(sql, ") project_rows")
+	if distinctStart < 0 || distinctEnd < 0 || distinctEnd <= distinctStart {
+		t.Fatalf("could not isolate SELECT DISTINCT subquery in %s", sql)
+	}
+	distinctQuery := sql[distinctStart:distinctEnd]
+	if strings.Contains(distinctQuery, " order by ") {
+		t.Fatalf("SELECT DISTINCT subquery must not ORDER BY expressions outside its select list: %s", distinctQuery)
+	}
+	for _, forbidden := range []string{
+		"order by case effective.role",
+		"order by lower(project.name)",
+	} {
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("Postgres My Work project query reintroduced invalid DISTINCT ordering %q in %s", forbidden, sql)
+		}
+	}
+}
+
 func assertMemoryGVICMatrixProjectionCounts(t *testing.T, repo *MemoryRepo, companyID string, wantNodeRows, wantLogicGateRows int) {
 	t.Helper()
 	repo.mu.RLock()

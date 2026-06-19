@@ -1,11 +1,14 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
@@ -179,6 +182,52 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	}
 	if !inboxReadHTTPMyWorkHasNode(myWorkPayload.Cells, responsibleNode.NodeID) {
 		t.Fatalf("my work cells missing responsible node %s: %+v", responsibleNode.NodeID, myWorkPayload.Cells)
+	}
+}
+
+func TestWorkItemMyWorkMatrixLogsRepoError(t *testing.T) {
+	companyID := "11111111-1111-4111-8111-999999999999"
+	userID := "22222222-2222-4222-8222-999999999999"
+	repoErr := errors.New("ERROR: for SELECT DISTINCT, ORDER BY expressions must appear in select list (SQLSTATE 42P10)")
+	repo := myWorkMatrixErrorRepo{Repository: store.NewMemoryRepo(), err: repoErr}
+	handler := NewServer(repo).Routes()
+
+	var logs bytes.Buffer
+	previousWriter := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(previousWriter)
+		log.SetFlags(previousFlags)
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/work-items/my-work-matrix?company_id="+companyID, nil)
+	req = workItemInboxReadRequestWithActor(req, userID, companyID, domain.RoleCompanyUser, false)
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusInternalServerError, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "failed_to_list_my_work_matrix") {
+		t.Fatalf("response body = %s, want public error code", body)
+	}
+	if strings.Contains(body, "SQLSTATE") {
+		t.Fatalf("response body leaked backend error: %s", body)
+	}
+	logged := logs.String()
+	for _, needle := range []string{
+		"failed_to_list_my_work_matrix",
+		"user_id=" + userID,
+		"viewer_user_id=" + userID,
+		"company_id=" + companyID,
+		"SQLSTATE 42P10",
+	} {
+		if !strings.Contains(logged, needle) {
+			t.Fatalf("log output missing %q: %s", needle, logged)
+		}
 	}
 }
 
@@ -449,6 +498,15 @@ var (
 	errLegacyWorkItemRead                = errors.New("legacy work item read called")
 	errMissingWorkItemReadRequestContext = errors.New("missing work item read request context")
 )
+
+type myWorkMatrixErrorRepo struct {
+	store.Repository
+	err error
+}
+
+func (r myWorkMatrixErrorRepo) ListMyWorkMatrix(store.WorkItemInboxQuery) (store.MyWorkMatrixResponse, error) {
+	return store.MyWorkMatrixResponse{}, r.err
+}
 
 func getWorkItemInboxRead(t *testing.T, handler http.Handler, path, userID, companyID, role string) *httptest.ResponseRecorder {
 	t.Helper()
