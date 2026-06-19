@@ -7,6 +7,7 @@ import type { Account } from "../accounts/accountsApi";
 import { type KanbanCard, type KanbanColumn } from "./shared";
 import {
   contextMenuButtonStyle,
+  contextMenuDividerStyle,
   contextMenuHoverHandlers,
   getNodeEditorOverlayMinLeftPx,
   KANBAN_EDGE_FRAME,
@@ -37,13 +38,10 @@ export function KanbanContextMenus({
   columnContextMenu,
   contextCard,
   cardContextMenu,
-  arenaMode,
   contextCardSelectionIDs,
   onCloseColumnMenu,
   onCloseCardMenu,
   onCreateNodeInColumn,
-  onToggleCardIssue,
-  onAssignAccounts,
   onRenameNode,
   onOpenNodeInNewTab,
   onRequestNodeDeleteFromCards,
@@ -53,13 +51,10 @@ export function KanbanContextMenus({
   columnContextMenu: { x: number; y: number; columnID: string } | null;
   contextCard: KanbanCard | null;
   cardContextMenu: { x: number; y: number; cardID: string } | null;
-  arenaMode: boolean;
   contextCardSelectionIDs: string[];
   onCloseColumnMenu: () => void;
   onCloseCardMenu: () => void;
   onCreateNodeInColumn: (columnID: string, anchor: { x: number; y: number }) => void;
-  onToggleCardIssue: (card: KanbanCard, isIssue: boolean) => void;
-  onAssignAccounts: (card: KanbanCard) => void;
   onRenameNode: (card: KanbanCard) => void;
   onOpenNodeInNewTab: (card: KanbanCard) => void;
   onRequestNodeDeleteFromCards: (cardIDs: string[]) => void;
@@ -76,22 +71,6 @@ export function KanbanContextMenus({
       )}
       {contextCard && cardContextMenu && (
         <FrameRightClickMenu x={cardContextMenu.x} y={cardContextMenu.y} onClose={onCloseCardMenu}>
-          {!arenaMode && (
-            <button type="button" style={contextMenuButtonStyle} onClick={() => onToggleCardIssue(contextCard, !contextCard.is_issue)} {...contextMenuHoverHandlers}>
-              {contextCard.is_issue ? "Clear Issue" : "Mark Issue"}
-            </button>
-          )}
-          <button
-            type="button"
-            style={contextMenuButtonStyle}
-            onClick={() => {
-              requestAppSidebarPin({ kind: "node", id: contextCard.node_id, label: contextCard.node_title });
-              onCloseCardMenu();
-            }}
-            {...contextMenuHoverHandlers}
-          >
-            Pin Node
-          </button>
           <button
             type="button"
             style={contextMenuButtonStyle}
@@ -101,19 +80,40 @@ export function KanbanContextMenus({
             }}
             {...contextMenuHoverHandlers}
           >
-            Open node in new browser tab
+            Open in new browser tab
           </button>
-          <button type="button" style={contextMenuButtonStyle} onClick={() => onAssignAccounts(contextCard)} {...contextMenuHoverHandlers}>
-            Assign accounts
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => {
+              requestAppSidebarPin({ kind: "node", id: contextCard.node_id, label: contextCard.node_title });
+              onCloseCardMenu();
+            }}
+            {...contextMenuHoverHandlers}
+          >
+            Pin
           </button>
+          <div aria-hidden="true" style={contextMenuDividerStyle} />
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => {
+              onCreateNodeInColumn(contextCard.column_id, { x: cardContextMenu.x, y: cardContextMenu.y });
+              onCloseCardMenu();
+            }}
+            {...contextMenuHoverHandlers}
+          >
+            Create new node
+          </button>
+          <div aria-hidden="true" style={contextMenuDividerStyle} />
           <button type="button" style={contextMenuButtonStyle} onClick={() => onRenameNode(contextCard)} {...contextMenuHoverHandlers}>
             Rename node
           </button>
-          <button type="button" style={{ ...contextMenuButtonStyle, color: "#334155" }} onClick={() => onRequestNodeDeleteFromCards(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
-            Delete node
-          </button>
           <button type="button" style={contextMenuButtonStyle} onClick={() => onRequestCardDelete(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
-            Remove node from Kanban Board
+            {contextCardSelectionIDs.length > 1 ? "Remove nodes from Kanban Board" : "Remove node from Kanban Board"}
+          </button>
+          <button type="button" style={{ ...contextMenuButtonStyle, color: "#dc2626" }} onClick={() => onRequestNodeDeleteFromCards(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
+            {contextCardSelectionIDs.length > 1 ? "Delete nodes" : "Delete node"}
           </button>
         </FrameRightClickMenu>
       )}

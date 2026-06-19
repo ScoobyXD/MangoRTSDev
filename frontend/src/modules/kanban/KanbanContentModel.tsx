@@ -196,6 +196,12 @@ export const contextMenuButtonStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
+export const contextMenuDividerStyle: React.CSSProperties = {
+  height: 1,
+  margin: "4px 8px",
+  background: "rgba(148, 163, 184, 0.28)",
+};
+
 export const contextMenuHoverHandlers = {
   onMouseEnter: (event: React.MouseEvent) => {
     const target = event.currentTarget as HTMLElement;
