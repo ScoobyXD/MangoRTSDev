@@ -26,6 +26,7 @@ const TASKBAR_EXPANDED_HEIGHT = 330;
 const TASKBAR_MINIMIZED_HEIGHT = 8;
 const TASKBAR_MINIMIZED_WIDTH = 300;
 const TASKBAR_FLOATING_GAP = 18;
+const TASKBAR_BOTTOM_GAP = TASKBAR_FLOATING_GAP / 2;
 const TASKBAR_TIMELINE_MIN_WIDTH = 520;
 const TASKBAR_DOCK_BUTTON_WIDTH = 176;
 const TASKBAR_DOCK_BUTTON_GAP = 0;
@@ -347,7 +348,7 @@ function taskbarShellStyle(expanded: boolean, layout: TaskbarLayout, timelineVis
     position: "fixed",
     left: layout.left,
     width: layout.width,
-    bottom: TASKBAR_FLOATING_GAP + (timelineVisible && !expanded ? collapsedBottomRise : 0),
+    bottom: TASKBAR_BOTTOM_GAP + (timelineVisible && !expanded ? collapsedBottomRise : 0),
     height: timelineVisible
       ? expanded ? TASKBAR_EXPANDED_HEIGHT : TASKBAR_COLLAPSED_HEIGHT
       : dockVisible ? TASKBAR_COLLAPSED_HEIGHT : TASKBAR_MINIMIZED_HEIGHT,
@@ -407,7 +408,7 @@ function minimizedDockStripStyle(viewportWidth: number): React.CSSProperties {
   return {
     position: "fixed",
     left,
-    bottom: TASKBAR_FLOATING_GAP,
+    bottom: TASKBAR_BOTTOM_GAP,
     maxWidth: Math.max(240, viewportWidth - left - TASKBAR_FLOATING_GAP),
     minWidth: 0,
     height: 44,
