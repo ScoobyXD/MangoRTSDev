@@ -11,7 +11,7 @@ import { NODE_MAP_CLIPBOARD_STORAGE_KEY, beginNodeMapMultiSelectSession, buildNo
 import { filterLogicGateGraphToFolderScope, resolveMapSelectionAfterGraphLoad, resolveScopedMapSelectionFallback, type CompanyExplorerFolder, type CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
-import { LogicGateMapContextMenus } from "./LogicGateMapContextMenus";
+import { LogicGateMapContextMenus, type LogicGateMapDeleteConfirmationState } from "./LogicGateMapContextMenus";
 import { LogicGateMapNodeCard } from "./LogicGateMapNodeCard";
 import { LogicGateMapRelationshipHitLines } from "./LogicGateMapRelationshipHitLines";
 import { RelationshipColorLegend } from "../node-map/RelationshipColorLegend";
@@ -80,7 +80,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number } | null>(null);
   const [nodeContextMenu, setNodeContextMenu] = useState<{ x: number; y: number; nodeID: string } | null>(null);
   const [relationshipContextMenu, setRelationshipContextMenu] = useState<{ x: number; y: number; relationshipID: string } | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<{ nodeIDs: string[]; relationshipIDs: string[] } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<LogicGateMapDeleteConfirmationState | null>(null);
   const [permissionsLogicGateID, setPermissionsLogicGateID] = useState("");
   const [canvasActive, setCanvasActive] = useState(false);
 
@@ -135,10 +135,7 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   const panelSubtleSurface = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.8)";
   const panelText = isDarkTheme ? "#f3f7fb" : "#111111";
   const panelMutedText = isDarkTheme ? "rgba(243,247,251,0.72)" : "#2e2e2e";
-  const panelDangerText = isDarkTheme ? "#cbd5e1" : "#334155";
-  const dialogButtonBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "#ffffff";
-  const dialogPrimaryButtonText = isDarkTheme ? panelText : "#111111";
-  const dialogCancelButtonText = isDarkTheme ? "#cbd5e1" : "#334155";
+  const panelDangerText = "#dc2626";
   const contextMenuButtonStyle: React.CSSProperties = {
     border: "none",
     background: "transparent",
@@ -1513,9 +1510,6 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           panelSubtleSurface={panelSubtleSurface}
           panelText={panelText}
           panelMutedText={panelMutedText}
-          dialogButtonBackground={dialogButtonBackground}
-          dialogPrimaryButtonText={dialogPrimaryButtonText}
-          dialogCancelButtonText={dialogCancelButtonText}
           relationshipColorsEnabled={relationshipColorsEnabled}
           relationshipRoleColors={relationshipRoleColors}
           selectedNodeIDs={selectedNodeIDs}
@@ -1563,13 +1557,14 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
             setPermissionsLogicGateID(nodeID);
             setNodeContextMenu(null);
           }}
-          onRequestDeleteNodes={(nodeIDs) => {
+          onRequestDeleteNodes={(nodeIDs, position) => {
             const editableIDs = nodeIDs.filter((nodeID) => editableNodeIDs.has(nodeID));
-            if (editableIDs.length > 0) setConfirmDelete({ nodeIDs: editableIDs, relationshipIDs: [] });
+            if (editableIDs.length > 0) setConfirmDelete({ nodeIDs: editableIDs, relationshipIDs: [], position: position ?? null });
             setNodeContextMenu(null);
           }}
-          onDeleteRelationships={(relationshipIDs) => {
-            void deleteRelationships(relationshipIDs);
+          onDeleteRelationships={(relationshipIDs, position) => {
+            const editableIDs = relationshipIDs.filter((relationshipID) => editableRelationshipIDs.has(relationshipID));
+            if (editableIDs.length > 0) setConfirmDelete({ nodeIDs: [], relationshipIDs: editableIDs, position: position ?? null });
             setRelationshipContextMenu(null);
           }}
           onConfirmDelete={() => {

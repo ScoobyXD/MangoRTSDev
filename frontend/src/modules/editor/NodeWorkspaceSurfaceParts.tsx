@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ConfirmActionMenu } from "../../app/ConfirmActionMenu.js";
 import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
@@ -175,7 +176,7 @@ export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
               setOpen(false);
               onDelete();
             }}
-            style={{ ...menuItemStyle, color: "#334155" }}
+            style={{ ...menuItemStyle, color: "#dc2626" }}
           >
             Delete
           </button>
@@ -199,31 +200,17 @@ type DeleteTextBlockConfirmationModalProps = {
 export const DeleteTextBlockConfirmationModal: React.FC<DeleteTextBlockConfirmationModalProps> = ({
   title,
   chatCount,
-  accent,
   surfaceText,
-  panelBackground,
-  ruleColor,
   onConfirm,
   onCancel,
 }) => (
-  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-    <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: `1px solid ${ruleColor}`, background: panelBackground, color: surfaceText, padding: 12, display: "grid", gap: 10, boxShadow: "0 18px 44px rgba(0,0,0,0.20)" }}>
-      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0 }}>
-        Are you sure you want to delete this?
-      </div>
-      <div style={{ fontSize: 11, lineHeight: 1.35, color: surfaceText, opacity: 0.72 }}>
-        This removes "{title}" from the middle column{chatCount > 0 ? ` and deletes ${chatCount} chat repl${chatCount === 1 ? "y" : "ies"} attached to it` : ""}.
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <button type="button" onClick={onConfirm} style={{ minHeight: 28, border: `1px solid ${accent}`, background: "#ffffff", color: "#111111", cursor: "pointer", fontWeight: 700 }}>
-          Yes
-        </button>
-        <button type="button" onClick={onCancel} style={{ minHeight: 28, border: "1px solid #64748b", boxShadow: "inset 0 0 0 1px rgba(100,116,139,0.25), 0 0 10px rgba(100,116,139,0.18)", color: "#334155", background: "#ffffff", cursor: "pointer", fontWeight: 700 }}>
-          No
-        </button>
-      </div>
-    </div>
-  </div>
+  <ConfirmActionMenu
+    title="Are you sure you want to delete this?"
+    detail={`This removes "${title}" from the middle column${chatCount > 0 ? ` and deletes ${chatCount} chat repl${chatCount === 1 ? "y" : "ies"} attached to it` : ""}.`}
+    isDarkTheme={surfaceText !== "#111111"}
+    onConfirm={onConfirm}
+    onCancel={onCancel}
+  />
 );
 
 type NodeTextBlockEditorProps = {

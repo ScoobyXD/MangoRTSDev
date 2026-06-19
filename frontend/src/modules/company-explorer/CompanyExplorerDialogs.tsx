@@ -1,4 +1,5 @@
 import React from "react";
+import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import type {
   CompanyExplorerDeleteConfirmationSummary,
   CompanyExplorerFolderShare,
@@ -143,6 +144,7 @@ type CompanyExplorerDeleteConfirmationDialogProps = {
   summary: CompanyExplorerDeleteConfirmationSummary;
   acknowledged: boolean;
   isDarkTheme: boolean;
+  position?: ConfirmActionMenuPosition | null;
   onAcknowledgedChange: (acknowledged: boolean) => void;
   onConfirm: (targets: ExplorerDeleteTargetWithLabel[]) => void;
   onCancel: () => void;
@@ -153,52 +155,38 @@ export function CompanyExplorerDeleteConfirmationDialog({
   summary,
   acknowledged,
   isDarkTheme,
+  position,
   onAcknowledgedChange,
   onConfirm,
   onCancel,
 }: CompanyExplorerDeleteConfirmationDialogProps): React.ReactElement {
   const confirmationDisabled = summary.requiresFolderAcknowledgement && !acknowledged;
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-      <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(100,116,139,0.45)", background: isDarkTheme ? "#11161b" : "rgba(255,255,255,0.95)", color: isDarkTheme ? "#f6f8fb" : "#111111", padding: 12, display: "grid", gap: 10 }}>
-        <div style={{ fontSize: 12, fontWeight: 700 }}>
-          {summary.title}
-        </div>
-        <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#b8c4cc" : "#2e2e2e" }}>
-          {summary.detail}
-        </div>
-        <div style={{ fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#d6e0e6" : "#222222" }}>
-          Selected: {summary.targetList}
-        </div>
-        {summary.requiresFolderAcknowledgement && (
-          <label style={{ display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", gap: 7, alignItems: "start", fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#f6f8fb" : "#111111" }}>
-            <input
-              type="checkbox"
-              checked={acknowledged}
-              onChange={(event) => onAcknowledgedChange(event.currentTarget.checked)}
-              style={{ marginTop: 1 }}
-            />
-            <span>I understand that deleting this folder deletes all contents inside of this folder.</span>
-          </label>
-        )}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => onConfirm(targets)}
-            disabled={confirmationDisabled}
-            style={{ border: "1px solid rgba(100,116,139,0.45)", background: "#fff", color: "#111111", cursor: confirmationDisabled ? "not-allowed" : "pointer", fontWeight: 700, opacity: confirmationDisabled ? 0.55 : 1 }}
-          >
-            Yes
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            style={{ border: "1px solid #64748b", boxShadow: "inset 0 0 0 1px rgba(100,116,139,0.25), 0 0 10px rgba(100,116,139,0.18)", color: "#334155", background: "#fff", cursor: "pointer", fontWeight: 700 }}
-          >
-            No
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConfirmActionMenu
+      title={summary.title}
+      detail={(
+        <>
+          <div>{summary.detail}</div>
+          <div style={{ marginTop: 5 }}>Selected: {summary.targetList}</div>
+        </>
+      )}
+      position={position}
+      isDarkTheme={isDarkTheme}
+      confirmDisabled={confirmationDisabled}
+      onConfirm={() => onConfirm(targets)}
+      onCancel={onCancel}
+    >
+      {summary.requiresFolderAcknowledgement && (
+        <label style={{ display: "grid", gridTemplateColumns: "18px minmax(0, 1fr)", gap: 7, alignItems: "start", fontSize: 11, lineHeight: 1.35, color: isDarkTheme ? "#f6f8fb" : "#111111" }}>
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            onChange={(event) => onAcknowledgedChange(event.currentTarget.checked)}
+            style={{ marginTop: 1 }}
+          />
+          <span>I understand that deleting this folder deletes all contents inside of this folder.</span>
+        </label>
+      )}
+    </ConfirmActionMenu>
   );
 }

@@ -1,4 +1,5 @@
 import React from "react";
+import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import type { CompanyUser, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
 import { canDragTriageMessageFromMailbox, formatAddressList, formatMessageDate, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle } from "./homeUtils";
@@ -748,13 +749,13 @@ export function HomeMailOverlays({
   mailboxActionBusy: boolean;
   mailMutationAvailable: boolean;
   messageContextMenu: { x: number; y: number; messageIDs: string[] } | null;
-  deleteConfirmation: { messageIDs: string[] } | null;
+  deleteConfirmation: { messageIDs: string[]; position?: ConfirmActionMenuPosition | null } | null;
   onArchiveMessages: (ids: string[]) => void;
   onCancelDelete: () => void;
   onCloseContextMenu: () => void;
   onConfirmDelete: (ids: string[]) => void;
   onRequestDeleteDrafts: (ids: string[]) => void;
-  onRequestDeleteMessages: (ids: string[]) => void;
+  onRequestDeleteMessages: (ids: string[], position?: ConfirmActionMenuPosition) => void;
   onUnarchiveMessages: (ids: string[]) => void;
 }) {
   return (
@@ -766,7 +767,7 @@ export function HomeMailOverlays({
         >
           {isDraftMailbox ? (
             <button
-              style={{ ...contextMenuActionStyle, color: "#334155" }}
+              style={{ ...contextMenuActionStyle, color: "#dc2626" }}
               disabled={busy === "delete"}
               onClick={() => onRequestDeleteDrafts(messageContextMenu.messageIDs)}
             >
@@ -786,9 +787,9 @@ export function HomeMailOverlays({
                 {isArchiveMailbox ? "Unarchive" : "Archive"}
               </button>
               <button
-                style={{ ...contextMenuActionStyle, color: "#334155" }}
+                style={{ ...contextMenuActionStyle, color: "#dc2626" }}
                 disabled={busy === "delete" || !mailMutationAvailable}
-                onClick={() => onRequestDeleteMessages(messageContextMenu.messageIDs)}
+                onClick={(event) => onRequestDeleteMessages(messageContextMenu.messageIDs, confirmMenuPositionFromElement(event.currentTarget))}
               >
                 Delete
               </button>
@@ -799,6 +800,7 @@ export function HomeMailOverlays({
       {deleteConfirmation && (
         <DeleteMessagesConfirmationModal
           count={deleteConfirmation.messageIDs.length}
+          position={deleteConfirmation.position}
           busy={busy === "delete"}
           onConfirm={() => onConfirmDelete(deleteConfirmation.messageIDs)}
           onCancel={onCancelDelete}

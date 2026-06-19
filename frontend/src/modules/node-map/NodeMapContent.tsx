@@ -160,10 +160,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
   const panelSubtleSurface = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.8)";
   const panelText = isDarkTheme ? "#f3f7fb" : "#111111";
   const panelMutedText = isDarkTheme ? "rgba(243,247,251,0.72)" : "#2e2e2e";
-  const panelDangerText = isDarkTheme ? "#cbd5e1" : "#334155";
-  const dialogButtonBackground = isDarkTheme ? "rgba(255,255,255,0.08)" : "#ffffff";
-  const dialogPrimaryButtonText = isDarkTheme ? panelText : "#111111";
-  const dialogCancelButtonText = isDarkTheme ? "#cbd5e1" : "#334155";
+  const panelDangerText = "#dc2626";
   const contextMenuButtonStyle: React.CSSProperties = {
     border: "none",
     background: "transparent",
@@ -1589,9 +1586,6 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
           panelSubtleSurface={panelSubtleSurface}
           panelText={panelText}
           panelMutedText={panelMutedText}
-          dialogButtonBackground={dialogButtonBackground}
-          dialogPrimaryButtonText={dialogPrimaryButtonText}
-          dialogCancelButtonText={dialogCancelButtonText}
           relationshipColorsEnabled={relationshipColorsEnabled}
           relationshipRoleColors={relationshipRoleColors}
           selectedNodeIDs={selectedNodeIDs}
@@ -1639,13 +1633,14 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
             setPermissionsNodeID(nodeID);
             setNodeContextMenu(null);
           }}
-          onRequestDeleteNodes={(nodeIDs) => {
+          onRequestDeleteNodes={(nodeIDs, position) => {
             const editableIDs = nodeIDs.filter((nodeID) => editableNodeIDs.has(nodeID));
-            if (editableIDs.length > 0) setConfirmDelete({ nodeIDs: editableIDs, relationshipIDs: [] });
+            if (editableIDs.length > 0) setConfirmDelete({ nodeIDs: editableIDs, relationshipIDs: [], position: position ?? null });
             setNodeContextMenu(null);
           }}
-          onDeleteRelationships={(relationshipIDs) => {
-            void deleteRelationships(relationshipIDs);
+          onDeleteRelationships={(relationshipIDs, position) => {
+            const editableIDs = relationshipIDs.filter((relationshipID) => editableRelationshipIDs.has(relationshipID));
+            if (editableIDs.length > 0) setConfirmDelete({ nodeIDs: [], relationshipIDs: editableIDs, position: position ?? null });
             setRelationshipContextMenu(null);
           }}
           onConfirmDelete={() => {

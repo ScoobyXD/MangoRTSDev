@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks";
 import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl";
@@ -314,8 +315,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [arenaCellContextMenu, setArenaCellContextMenu] = useState<KanbanArenaCellContextMenuState | null>(null);
   const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
   const [nodeEditorOverlayRatio, setNodeEditorOverlayRatio] = useState<NodeEditorOverlayRatio>(() => readNodeEditorOverlayRatio(companyID, frameID));
-  const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[] } | null>(null);
-  const [deleteNodeConfirmation, setDeleteNodeConfirmation] = useState<{ nodeIDs: string[] } | null>(null);
+  const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[]; position?: ConfirmActionMenuPosition | null } | null>(null);
+  const [deleteNodeConfirmation, setDeleteNodeConfirmation] = useState<{ nodeIDs: string[]; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [renameNodeDraft, setRenameNodeDraft] = useState<{ cardID: string; nodeID: string; title: string } | null>(null);
   const [accountAssignmentModal, setAccountAssignmentModal] = useState<KanbanAccountAssignmentState | null>(null);
   const [accountAssignmentBusy, setAccountAssignmentBusy] = useState(false);
@@ -1718,17 +1719,17 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     clearCardSelection();
   }, [clearCardSelection]);
 
-  const requestCardDelete = useCallback((cardIDs: string[]) => {
+  const requestCardDelete = useCallback((cardIDs: string[], position?: ConfirmActionMenuPosition) => {
     const existingCardIDs = new Set(cards.map((card) => card.card_id));
     const uniqueCardIDs = Array.from(new Set(cardIDs)).filter((cardID) => existingCardIDs.has(cardID));
     if (uniqueCardIDs.length === 0) return;
     setCardContextMenu(null);
     setColumnContextMenu(null);
     setArenaCellContextMenu(null);
-    setDeleteCardConfirmation({ cardIDs: uniqueCardIDs });
+    setDeleteCardConfirmation({ cardIDs: uniqueCardIDs, position: position ?? null });
   }, [cards]);
 
-  const requestNodeDeleteFromCards = useCallback((cardIDs: string[]) => {
+  const requestNodeDeleteFromCards = useCallback((cardIDs: string[], position?: ConfirmActionMenuPosition) => {
     const selectedCardIDSet = new Set(cardIDs);
     const nodeIDs = cards
       .filter((card) => selectedCardIDSet.has(card.card_id))
@@ -1739,7 +1740,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setCardContextMenu(null);
     setColumnContextMenu(null);
     setArenaCellContextMenu(null);
-    setDeleteNodeConfirmation({ nodeIDs: uniqueNodeIDs });
+    setDeleteNodeConfirmation({ nodeIDs: uniqueNodeIDs, position: position ?? null });
   }, [cards]);
 
   const requestNodeRename = useCallback((card: KanbanCard) => {
@@ -2524,10 +2525,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
               <button type="button" style={contextMenuButtonStyle} onClick={() => requestNodeRename(arenaCellContextCard)} {...contextMenuHoverHandlers}>
                 Rename node
               </button>
-              <button type="button" style={contextMenuButtonStyle} onClick={() => requestCardDelete(arenaCellContextSelectionIDs)} {...contextMenuHoverHandlers}>
+              <button type="button" style={contextMenuButtonStyle} onClick={(event) => requestCardDelete(arenaCellContextSelectionIDs, confirmMenuPositionFromElement(event.currentTarget))} {...contextMenuHoverHandlers}>
                 {arenaCellContextSelectionIDs.length > 1 ? "Remove nodes from Kanban Board" : "Remove node from Kanban Board"}
               </button>
-              <button type="button" style={{ ...contextMenuButtonStyle, color: "#dc2626" }} onClick={() => requestNodeDeleteFromCards(arenaCellContextSelectionIDs)} {...contextMenuHoverHandlers}>
+              <button type="button" style={{ ...contextMenuButtonStyle, color: "#dc2626" }} onClick={(event) => requestNodeDeleteFromCards(arenaCellContextSelectionIDs, confirmMenuPositionFromElement(event.currentTarget))} {...contextMenuHoverHandlers}>
                 {arenaCellContextSelectionIDs.length > 1 ? "Delete nodes" : "Delete node"}
               </button>
             </>

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import {
   createAccount,
@@ -52,6 +53,7 @@ export const AccountManagerContent: React.FC<AccountManagerContentProps> = ({
   const [accountDraft, setAccountDraft] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
   const [moveTargetFolderID, setMoveTargetFolderID] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ selection: Selection; name: string; position?: ConfirmActionMenuPosition | null } | null>(null);
 
   const reloadFolders = useCallback(() => {
     const cleanCompanyID = companyID.trim();
@@ -240,19 +242,23 @@ export const AccountManagerContent: React.FC<AccountManagerContentProps> = ({
     }
   }, [accountByID, busy, companyID, folderByID, moveTargetFolderID, selection, setAccounts]);
 
-  const deleteSelected = useCallback(async () => {
+  const requestDeleteSelected = useCallback((position?: ConfirmActionMenuPosition) => {
     if (selection.kind === "root" || busy) return;
-    const name = selectedEntityName || selection.id;
-    if (!window.confirm(`Delete ${name}?`)) return;
+    setDeleteConfirmation({ selection, name: selectedEntityName || selection.id, position: position ?? null });
+  }, [busy, selectedEntityName, selection]);
+
+  const deleteSelected = useCallback(async (target: Selection) => {
+    if (target.kind === "root" || busy) return;
+    setDeleteConfirmation(null);
     setBusy("delete");
     setError("");
     try {
-      if (selection.kind === "account") {
-        await deleteAccount(companyID, selection.id);
-        setAccounts((current) => current.filter((account) => account.account_id !== selection.id));
+      if (target.kind === "account") {
+        await deleteAccount(companyID, target.id);
+        setAccounts((current) => current.filter((account) => account.account_id !== target.id));
       } else {
-        await deleteAccountFolder(companyID, selection.id);
-        const deletedIDs = collectFolderSubtreeIDs(selection.id, folders);
+        await deleteAccountFolder(companyID, target.id);
+        const deletedIDs = collectFolderSubtreeIDs(target.id, folders);
         setFolders((current) => current.filter((folder) => !deletedIDs.has(folder.folder_id)));
         setAccounts((current) => current.filter((account) => !deletedIDs.has(account.folder_id ?? "")));
       }
@@ -264,7 +270,7 @@ export const AccountManagerContent: React.FC<AccountManagerContentProps> = ({
     } finally {
       setBusy("");
     }
-  }, [busy, companyID, folders, reloadAccounts, reloadFolders, selectedEntityName, selection, setAccounts]);
+  }, [busy, companyID, folders, reloadAccounts, reloadFolders, setAccounts]);
 
   const loading = accountsLoading || foldersLoading;
   const combinedError = error || accountsError;
@@ -351,7 +357,7 @@ export const AccountManagerContent: React.FC<AccountManagerContentProps> = ({
                     <button type="button" style={smallButtonStyle} disabled={!!busy} onClick={() => void moveSelected()}>Move</button>
                   </span>
                 </label>
-                <button type="button" style={dangerButtonStyle} disabled={!!busy} onClick={() => void deleteSelected()}>Delete</button>
+                <button type="button" style={dangerButtonStyle} disabled={!!busy} onClick={(event) => requestDeleteSelected(confirmMenuPositionFromElement(event.currentTarget))}>Delete</button>
               </div>
             )}
 
@@ -372,6 +378,18 @@ export const AccountManagerContent: React.FC<AccountManagerContentProps> = ({
           </div>
         </div>
       </section>
+      {deleteConfirmation && (
+        <ConfirmActionMenu
+          title={`Delete ${deleteConfirmation.name}?`}
+          detail={`This deletes the selected ${deleteConfirmation.selection.kind}.`}
+          position={deleteConfirmation.position}
+          confirmLabel={busy === "delete" ? "Deleting" : "Yes"}
+          cancelLabel="No"
+          confirmDisabled={busy === "delete"}
+          onConfirm={() => void deleteSelected(deleteConfirmation.selection)}
+          onCancel={() => setDeleteConfirmation(null)}
+        />
+      )}
     </div>
   );
 };

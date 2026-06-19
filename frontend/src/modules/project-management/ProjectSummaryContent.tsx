@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes.js";
 import { MinimizeToLineIcon } from "../../app/nodeEditorPopupControls.js";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks.js";
@@ -195,6 +196,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [assignmentTeamIDs, setAssignmentTeamIDs] = useState<string[]>([]);
   const [assignmentsSaving, setAssignmentsSaving] = useState(false);
   const [relationshipContextMenu, setRelationshipContextMenu] = useState<RelationshipCanvasContextMenuState | null>(null);
+  const [relationshipDeleteConfirmation, setRelationshipDeleteConfirmation] = useState<{ isLogicGate: boolean; resourceIDs: string[]; label: string; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [relationshipDropActive, setRelationshipDropActive] = useState(false);
   const [collapsedGateRelationshipIDs, setCollapsedGateRelationshipIDs] = useState<Set<string>>(() => new Set());
   const [hoveredRelationshipNodeID, setHoveredRelationshipNodeID] = useState("");
@@ -696,7 +698,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [companyID, projectID, relationshipContextMenu?.relationship, relationships, selectedRelationshipNodeIDs]);
 
-  const deleteRelationshipResource = useCallback(async () => {
+  const requestDeleteRelationshipResource = useCallback((position?: ConfirmActionMenuPosition) => {
     const target = relationshipContextMenu?.relationship;
     if (!target) return;
     const targets = relationshipTargetsForContext(target, relationships, selectedRelationshipNodeIDs);
@@ -707,14 +709,19 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const label = isLogicGate
       ? "logic gate"
       : `${uniqueResourceIDs.length} node${uniqueResourceIDs.length === 1 ? "" : "s"}`;
-    if (!window.confirm(`Delete ${label}? This moves the underlying ${label} to the recycle bin.`)) return;
     setRelationshipContextMenu(null);
+    setRelationshipDeleteConfirmation({ isLogicGate, resourceIDs: uniqueResourceIDs, label, position: position ?? null });
+  }, [relationshipContextMenu?.relationship, relationships, selectedRelationshipNodeIDs]);
+
+  const deleteRelationshipResource = useCallback(async (confirmation: { isLogicGate: boolean; resourceIDs: string[]; label: string }) => {
+    const { isLogicGate, resourceIDs } = confirmation;
+    setRelationshipDeleteConfirmation(null);
     setError("");
     try {
       if (isLogicGate) {
-        await deleteProjectManagementLogicGate(companyID, uniqueResourceIDs[0]);
+        await deleteProjectManagementLogicGate(companyID, resourceIDs[0]);
       } else {
-        await Promise.all(uniqueResourceIDs.map((nodeID) => deleteProjectManagementNode(companyID, nodeID)));
+        await Promise.all(resourceIDs.map((nodeID) => deleteProjectManagementNode(companyID, nodeID)));
       }
       setSelectedRelationshipNodeIDs(new Set());
       setSelectionAnchorRelationshipNodeID("");
@@ -722,7 +729,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : `Failed to delete ${isLogicGate ? "logic gate" : "node"}`);
     }
-  }, [companyID, loadProject, relationshipContextMenu?.relationship, relationships, selectedRelationshipNodeIDs]);
+  }, [companyID, loadProject]);
 
   const saveProjectTitle = useCallback(async () => {
     if (!project) return;
@@ -1309,7 +1316,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 </button>
               ) : null}
               {relationshipContextMenu.relationship ? (
-                <button type="button" role="menuitem" style={relationshipContextMenuDangerButtonStyle} onClick={() => void deleteRelationshipResource()}>
+                <button type="button" role="menuitem" style={relationshipContextMenuDangerButtonStyle} onClick={(event) => requestDeleteRelationshipResource(confirmMenuPositionFromElement(event.currentTarget))}>
                   {relationshipContextMenu.relationship.resourceType === "logic_gate"
                     ? "Delete logic gate"
                     : selectedRelationshipNodeIDs.has(relationshipContextMenu.relationship.relationshipID) && selectedRelationshipNodeIDs.size > 1
@@ -1318,6 +1325,17 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 </button>
               ) : null}
             </div>
+          ) : null}
+          {relationshipDeleteConfirmation ? (
+            <ConfirmActionMenu
+              title={`Delete ${relationshipDeleteConfirmation.label}?`}
+              detail={`This moves the underlying ${relationshipDeleteConfirmation.label} to the recycle bin.`}
+              position={relationshipDeleteConfirmation.position}
+              confirmLabel="Yes"
+              cancelLabel="No"
+              onConfirm={() => void deleteRelationshipResource(relationshipDeleteConfirmation)}
+              onCancel={() => setRelationshipDeleteConfirmation(null)}
+            />
           ) : null}
         </aside>
       </div>
@@ -2273,7 +2291,7 @@ const relationshipContextMenuButtonStyle: React.CSSProperties = {
 
 const relationshipContextMenuDangerButtonStyle: React.CSSProperties = {
   ...relationshipContextMenuButtonStyle,
-  color: "#b91c1c",
+  color: "#dc2626",
 };
 
 const gateGroupStyle = (collapsed: boolean): React.CSSProperties => ({

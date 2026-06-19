@@ -2367,8 +2367,8 @@ export function useEditorDocumentSurfaceHandlers({
           React.createElement("button", { key: "row-above", type: "button", role: "menuitem", onClick: () => runTableContextCommand("insert-row-before"), style: tableContextMenuButtonStyle }, "Create row above"),
           React.createElement("button", { key: "row-below", type: "button", role: "menuitem", onClick: () => runTableContextCommand("insert-row-after"), style: tableContextMenuButtonStyle }, "Create row below"),
           React.createElement("div", { key: "divider", role: "separator", style: { height: 1, margin: "3px 4px", background: "rgba(100,116,139,0.18)" } satisfies React.CSSProperties }),
-          React.createElement("button", { key: "delete-row", type: "button", role: "menuitem", onClick: () => runTableContextCommand("delete-row"), style: tableContextMenuButtonStyle }, activeTableContextMenu.rows <= 1 ? "Delete table" : "Delete row"),
-          React.createElement("button", { key: "delete-column", type: "button", role: "menuitem", onClick: () => runTableContextCommand("delete-column"), style: tableContextMenuButtonStyle }, activeTableContextMenu.columns <= 1 ? "Delete table" : "Delete column"),
+          React.createElement("button", { key: "delete-row", type: "button", role: "menuitem", onClick: () => runTableContextCommand("delete-row"), style: { ...tableContextMenuButtonStyle, color: "#dc2626" } satisfies React.CSSProperties }, activeTableContextMenu.rows <= 1 ? "Delete table" : "Delete row"),
+          React.createElement("button", { key: "delete-column", type: "button", role: "menuitem", onClick: () => runTableContextCommand("delete-column"), style: { ...tableContextMenuButtonStyle, color: "#dc2626" } satisfies React.CSSProperties }, activeTableContextMenu.columns <= 1 ? "Delete table" : "Delete column"),
           React.createElement("button", {
             key: "delete-table",
             type: "button",
@@ -2376,7 +2376,7 @@ export function useEditorDocumentSurfaceHandlers({
             onClick: () => runTableContextCommand("delete-table"),
             style: {
               ...tableContextMenuButtonStyle,
-              color: "#991b1b",
+              color: "#dc2626",
               background: "rgba(254,242,242,0.96)",
             } satisfies React.CSSProperties,
           }, "Delete table"),

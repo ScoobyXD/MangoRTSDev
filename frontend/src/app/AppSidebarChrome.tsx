@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { getActiveCompanyID } from "../auth/currentCompany";
 import { readAuthConfig } from "../auth/cognitoAuth";
 import { WORKTREE_VERSION } from "./worktreeVersion";
+import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { HeaderAccountManagerIcon, HeaderMapIcon, HeaderProjectManagementIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
@@ -173,6 +174,7 @@ type SidebarSharedInboxDeleteDialogState = {
   label: string;
   confirmLabel: string;
   subtreeIDs: Set<string>;
+  position?: ConfirmActionMenuPosition | null;
 };
 
 function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
@@ -865,7 +867,7 @@ export function AppSidebar({
     }
   }, [canDropSharedFolder, companyID, replaceSharedFolder, sharedBusy, sharedInboxes]);
 
-  const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox) => {
+  const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox, position?: ConfirmActionMenuPosition) => {
     if (!companyID || sharedBusy) return;
     setSharedContextMenu(null);
     const subtreeIDs = collectSharedInboxSubtreeIDs(sharedInboxes, folder.folder_id);
@@ -879,12 +881,13 @@ export function AppSidebar({
         label,
         confirmLabel: "Delete email",
         subtreeIDs,
+        position: position ?? null,
       });
       return;
     }
     const count = subtreeIDs.size || 1;
     const detail = count === 1 ? "this folder" : `this folder and ${count - 1} child folder${count === 2 ? "" : "s"}`;
-    setSharedDeleteDialog({ folder, title: "Delete folder", detail, label, confirmLabel: "Delete", subtreeIDs });
+    setSharedDeleteDialog({ folder, title: "Delete folder", detail, label, confirmLabel: "Delete", subtreeIDs, position: position ?? null });
   }, [companyID, sharedBusy, sharedInboxes]);
 
   const confirmDeleteSharedFolder = useCallback(async () => {
@@ -1441,9 +1444,9 @@ export function AppSidebar({
                 </button>
                 <button
                   type="button"
-                  style={{ ...appSidebarContextMenuButtonStyle, color: "#334155" }}
+                  style={{ ...appSidebarContextMenuButtonStyle, color: "#dc2626" }}
                   disabled={sharedBusy}
-                  onClick={() => void requestDeleteSharedFolder(contextFolder)}
+                  onClick={(event) => void requestDeleteSharedFolder(contextFolder, confirmMenuPositionFromElement(event.currentTarget))}
                 >
                   {contextFolder.entry_type === "shared_inbox" ? "Delete email" : "Delete"}
                 </button>
@@ -1485,6 +1488,7 @@ export function AppSidebar({
           label={sharedDeleteDialog.label}
           detail={sharedDeleteDialog.detail}
           confirmLabel={sharedDeleteDialog.confirmLabel}
+          position={sharedDeleteDialog.position}
           busy={sharedBusy}
           onCancel={() => setSharedDeleteDialog(null)}
           onConfirm={() => { void confirmDeleteSharedFolder(); }}
@@ -1875,32 +1879,27 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, account
   );
 }
 
-function SharedInboxDeleteDialog({ title, label, detail, confirmLabel, busy, onConfirm, onCancel }: {
+function SharedInboxDeleteDialog({ title, label, detail, confirmLabel, position, busy, onConfirm, onCancel }: {
   title: string;
   label: string;
   detail: string;
   confirmLabel: string;
+  position?: ConfirmActionMenuPosition | null;
   busy: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }): React.ReactElement {
   return (
-    <div style={sharedInboxEmailModalBackdropStyle} onPointerDown={onCancel}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Delete shared inbox"
-        style={sharedInboxEmailModalStyle}
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        <div style={sharedInboxEmailModalTitleStyle}>{title}</div>
-        <div style={sharedInboxEmailModalDetailStyle}>Delete {detail}: {label}?</div>
-        <div style={sharedInboxEmailModalActionsStyle}>
-          <button type="button" disabled={busy} onClick={onCancel} style={sharedInboxEmailModalSecondaryButtonStyle}>Cancel</button>
-          <button type="button" disabled={busy} onClick={onConfirm} style={{ ...sharedInboxEmailModalPrimaryButtonStyle, borderColor: "#be123c", background: "#be123c" }}>{busy ? "Deleting" : confirmLabel}</button>
-        </div>
-      </div>
-    </div>
+    <ConfirmActionMenu
+      title={title}
+      detail={`Delete ${detail}: ${label}?`}
+      position={position}
+      confirmLabel={busy ? "Deleting" : confirmLabel}
+      cancelLabel="No"
+      confirmDisabled={busy}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   );
 }
 

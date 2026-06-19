@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../app/ConfirmActionMenu";
 import { preloadAccountManagerSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProjectManagementSurface } from "../app/preloadDashboardModules";
 import { HeaderRecycleBinIcon, HeaderSettingsIcon } from "../app/HeaderIcons";
 import { MangoWordmark } from "../app/MangoLogo";
@@ -1136,7 +1137,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   const [passwordMessage, setPasswordMessage] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [passwordBusy, setPasswordBusy] = useState(false);
-  const [deleteConfirmation, setDeleteConfirmation] = useState<CompanyUser | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ user: CompanyUser; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1565,10 +1566,10 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
                 type="button"
                 style={{ ...smallButtonStyle, ...dangerButtonStyle }}
                 disabled={user.user_id === me.user.user_id}
-                onClick={() => {
+                onClick={(event) => {
                   setError("");
                   setDeleteAcknowledged(false);
-                  setDeleteConfirmation(user);
+                  setDeleteConfirmation({ user, position: confirmMenuPositionFromElement(event.currentTarget) });
                 }}
               >
                 Delete
@@ -1639,61 +1640,44 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
         </div>
       </section>}
       {deleteConfirmation && (
-        <div style={modalBackdropStyle}>
-          <div style={modalStyle}>
-            <div style={{ fontSize: 12, fontWeight: 760, color: SETTINGS_TEXT }}>
-              Are you sure you want to delete this user?
-            </div>
-            <div style={{ fontSize: 11, lineHeight: 1.4, color: SETTINGS_MUTED, overflowWrap: "anywhere" }}>
-              {me.is_dev_admin
-                ? <>This deletes {companyUserLabel(deleteConfirmation)} from Cognito and removes their Mango user, memberships, and invitation rows.</>
-                : <>This removes {companyUserLabel(deleteConfirmation)} from {activeCompanyLabel}. If this is their last company, Mango also deletes their Cognito identity.</>}
-            </div>
-            <label style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 8, alignItems: "start", fontSize: 11, lineHeight: 1.35 }}>
-              <input type="checkbox" checked={deleteAcknowledged} onChange={(event) => setDeleteAcknowledged(event.target.checked)} />
-              <span>Yes I know what I'm doing I want to delete this user.</span>
-            </label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <button
-                className="mango-settings-action"
-                type="button"
-                disabled={!deleteAcknowledged || deleteBusy}
-                onClick={async () => {
-                  if (!companyID || !deleteConfirmation) return;
-                  setDeleteBusy(true);
-                  setError("");
-                  try {
-                    await apiFetchJSON(`/v1/companies/${encodeURIComponent(companyID)}/users/${encodeURIComponent(deleteConfirmation.user_id)}`, { method: "DELETE" });
-                    markCommunicationsWorkspacePanelStale(companyID, { companyUsers: true });
-                    setUsers((previous) => previous.filter((user) => user.user_id !== deleteConfirmation.user_id));
-                    setDeleteConfirmation(null);
-                    setDeleteAcknowledged(false);
-                    await load();
-                  } catch (deleteError) {
-                    console.error("Delete user failed", deleteError);
-                    setError(formatAuthError(deleteError, "Delete user failed"));
-                  } finally {
-                    setDeleteBusy(false);
-                  }
-                }}
-                style={{ ...smallButtonStyle, minHeight: 34, fontWeight: 600 }}
-              >
-                {deleteBusy ? "Deleting" : "Yes"}
-              </button>
-              <button
-                className="mango-settings-action"
-                type="button"
-                onClick={() => {
-                  setDeleteConfirmation(null);
-                  setDeleteAcknowledged(false);
-                }}
-                style={{ ...smallButtonStyle, minHeight: 34, ...dangerButtonStyle }}
-              >
-                No
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmActionMenu
+          title="Are you sure you want to delete this user?"
+          detail={me.is_dev_admin
+            ? <>This deletes {companyUserLabel(deleteConfirmation.user)} from Cognito and removes their Mango user, memberships, and invitation rows.</>
+            : <>This removes {companyUserLabel(deleteConfirmation.user)} from {activeCompanyLabel}. If this is their last company, Mango also deletes their Cognito identity.</>}
+          position={deleteConfirmation.position}
+          confirmLabel={deleteBusy ? "Deleting" : "Yes"}
+          cancelLabel="No"
+          confirmDisabled={!deleteAcknowledged || deleteBusy}
+          onConfirm={async () => {
+            if (!companyID || !deleteConfirmation) return;
+            const targetUser = deleteConfirmation.user;
+            setDeleteBusy(true);
+            setError("");
+            try {
+              await apiFetchJSON(`/v1/companies/${encodeURIComponent(companyID)}/users/${encodeURIComponent(targetUser.user_id)}`, { method: "DELETE" });
+              markCommunicationsWorkspacePanelStale(companyID, { companyUsers: true });
+              setUsers((previous) => previous.filter((user) => user.user_id !== targetUser.user_id));
+              setDeleteConfirmation(null);
+              setDeleteAcknowledged(false);
+              await load();
+            } catch (deleteError) {
+              console.error("Delete user failed", deleteError);
+              setError(formatAuthError(deleteError, "Delete user failed"));
+            } finally {
+              setDeleteBusy(false);
+            }
+          }}
+          onCancel={() => {
+            setDeleteConfirmation(null);
+            setDeleteAcknowledged(false);
+          }}
+        >
+          <label style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 8, alignItems: "start", fontSize: 11, lineHeight: 1.35 }}>
+            <input type="checkbox" checked={deleteAcknowledged} onChange={(event) => setDeleteAcknowledged(event.target.checked)} />
+            <span>Yes I know what I'm doing I want to delete this user.</span>
+          </label>
+        </ConfirmActionMenu>
       )}
     </div>
   );
@@ -2177,30 +2161,6 @@ const profileValueStyle: React.CSSProperties = {
   overflowWrap: "anywhere",
   color: SETTINGS_TEXT,
   fontWeight: 560,
-};
-
-const modalBackdropStyle: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(248, 250, 252, 0.74)",
-  zIndex: 120,
-  display: "grid",
-  placeItems: "center",
-  padding: 16,
-  backdropFilter: "blur(10px)",
-  WebkitBackdropFilter: "blur(10px)",
-};
-
-const modalStyle: React.CSSProperties = {
-  width: "min(420px, 100%)",
-  borderRadius: 8,
-  border: "1px solid rgba(255, 255, 255, 0.78)",
-  background: SETTINGS_PANEL_SURFACE,
-  color: SETTINGS_TEXT,
-  padding: 14,
-  display: "grid",
-  gap: 10,
-  boxShadow: "14px 14px 36px rgba(174, 174, 192, 0.30), -10px -10px 24px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
 };
 
 function companyUserLabel(user: CompanyUser): string {
