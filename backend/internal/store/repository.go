@@ -254,6 +254,7 @@ type CompanyExplorerRepository interface {
 	ListVisibleCompanyExplorerFolders(companyID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error)
 	ListCompanyExplorerV2RootRows(query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error)
 	ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error)
+	GetCompanyExplorerV2Entity(companyID, entityID, permissionUserID string) (CompanyExplorerV2Row, error)
 	GetCompanyExplorerV2FolderDefaultAccess(companyID, entityID string) (string, error)
 	CreateCompanyExplorerV2Folder(input CompanyExplorerV2FolderInput) (CompanyExplorerV2Row, error)
 	UpdateCompanyExplorerV2Folder(input CompanyExplorerV2FolderUpdateInput) (CompanyExplorerV2Row, error)

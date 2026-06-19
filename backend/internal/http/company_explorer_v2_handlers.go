@@ -237,21 +237,60 @@ func (s *Server) handleCompanyExplorerV2EntityDelete(w http.ResponseWriter, r *h
 	if !requireCompanyAccess(w, r, companyID) {
 		return
 	}
-	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeCompanyExplorerFolder, entityID, "company_explorer_folder_not_found") {
-		return
-	}
-	if err := s.repo.DeleteCompanyExplorerV2Folder(companyID, entityID); errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_company_explorer_v2_folder")
+	row, err := s.repo.GetCompanyExplorerV2Entity(companyID, entityID, s.entityPermissionActorUserID(r, companyID))
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_v2_entity")
 		return
 	} else if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+		writeAccessResourceNotFound(w)
 		return
 	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_v2_folder")
+		writeError(w, http.StatusInternalServerError, "failed_to_read_company_explorer_v2_entity")
 		return
 	}
-	s.publishWorkspaceEvent(companyID, "company_explorer_v2_entity_deleted", map[string]any{"entity_id": entityID, "entity_type": store.CompanyExplorerV2EntityFolder})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+
+	if row.EntityType == store.CompanyExplorerV2EntityFolder {
+		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeCompanyExplorerFolder, entityID, "company_explorer_folder_not_found") {
+			return
+		}
+		if err := s.repo.DeleteCompanyExplorerV2Folder(companyID, entityID); errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_company_explorer_v2_folder")
+			return
+		} else if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_v2_folder")
+			return
+		}
+		s.publishWorkspaceEvent(companyID, "company_explorer_v2_entity_deleted", map[string]any{"entity_id": entityID, "entity_type": row.EntityType})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+		return
+	}
+
+	resourceID := strings.TrimSpace(row.ResourceID)
+	resourceType, ok := companyExplorerEntityType(row.EntityType)
+	if !ok || resourceID == "" {
+		writeError(w, http.StatusBadRequest, "unsupported_company_explorer_v2_delete_target")
+		return
+	}
+	if !s.requireEntityEdit(w, r, companyID, resourceType, resourceID, companyExplorerEntityNotFoundCode(row.EntityType)) {
+		return
+	}
+	result, err := s.repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{Kind: row.EntityType, ID: resourceID}})
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "company_explorer_delete_target_not_found")
+		return
+	} else if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusConflict, "company_explorer_delete_target_invalid")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_v2_entity")
+		return
+	}
+	s.publishCompanyExplorerDeletedTargets(companyID, result.Targets)
+	s.publishWorkspaceEvent(companyID, "company_explorer_v2_entity_deleted", map[string]any{"entity_id": entityID, "entity_type": row.EntityType, "resource_id": resourceID})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 }
 
 func (s *Server) handleCompanyExplorerV2Subscriptions(w http.ResponseWriter, r *http.Request) {
