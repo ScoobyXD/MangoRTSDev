@@ -1937,7 +1937,7 @@ function storeNodeEditorPopupSize(size: { width: number; height: number }) {
 }
 
 function defaultNodeEditorPopupSize(): { width: number; height: number } {
-  return readStoredNodeEditorPopupSize() ?? clampNodeEditorPopupSize({ width: 1180, height: 820 });
+  return readStoredNodeEditorPopupSize() ?? nodeEditorPopupMaxSize();
 }
 
 function defaultNodeEditorPopupRect(): NodeEditorPopupRect {

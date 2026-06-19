@@ -686,7 +686,7 @@ function storeNodeEditorPopupSize(size: { width: number; height: number }) {
 }
 
 function defaultNodeEditorPopupSize(): { width: number; height: number } {
-  return readStoredNodeEditorPopupSize() ?? clampNodeEditorPopupSize({ width: 1180, height: 820 });
+  return readStoredNodeEditorPopupSize() ?? nodeEditorPopupMaxSize();
 }
 
 function defaultNodeEditorPopupRect(): NodeEditorPopupRect {
@@ -4898,12 +4898,12 @@ function attachmentAccent(contentType: string): { background: string; color: str
   return { background: "linear-gradient(145deg, #ffffff, #f1f5f9)", color: "#475569", stripe: "#94a3b8" };
 }
 
-function attachmentTileStyle(interactive: boolean, highlighted: boolean): React.CSSProperties {
+function attachmentTileStyle(_interactive: boolean, highlighted: boolean): React.CSSProperties {
   return {
     ...mailAttachmentTileStyle,
     position: "relative",
     gap: 7,
-    cursor: interactive ? "zoom-in" : "default",
+    cursor: "default",
     borderColor: highlighted ? "rgba(14, 165, 233, 0.34)" : mailAttachmentTileStyle.borderColor,
     boxShadow: highlighted ? "0 14px 30px rgba(15, 23, 42, 0.12), inset 1px 1px 0 rgba(255, 255, 255, 0.9)" : mailAttachmentTileStyle.boxShadow,
   };
@@ -4919,23 +4919,31 @@ function attachmentActionButtonStyle(visible: boolean): React.CSSProperties {
     position: "absolute",
     right: 7,
     bottom: 7,
-    minHeight: 26,
+    width: 28,
+    height: 28,
+    display: "grid",
+    placeItems: "center",
     border: "1px solid rgba(255, 255, 255, 0.82)",
     borderRadius: 7,
     background: "rgba(15, 23, 42, 0.86)",
     color: "#ffffff",
     boxShadow: "0 8px 18px rgba(15, 23, 42, 0.22)",
     cursor: "pointer",
-    fontSize: 10.5,
-    fontWeight: 760,
-    lineHeight: 1,
-    padding: "0 9px",
+    padding: 0,
     opacity: visible ? 1 : 0,
     pointerEvents: visible ? "auto" : "none",
     transition: "opacity 140ms ease, transform 140ms ease",
     transform: visible ? "translateY(0)" : "translateY(3px)",
   };
 }
+
+const DownloadAttachmentIcon: React.FC = () => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" style={{ display: "block" }}>
+    <path d="M8 2.5v7.2" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" />
+    <path d="m4.8 6.7 3.2 3.2 3.2-3.2" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M3.1 12.8h9.8" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" />
+  </svg>
+);
 
 function attachmentRemoveButtonStyle(visible: boolean): React.CSSProperties {
   return {
@@ -5133,7 +5141,7 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
             handleDownload();
           }}
         >
-          Download
+          <DownloadAttachmentIcon />
         </button>
       </div>
       <div style={mailAttachmentNameStyle} title={filename}>{filename}</div>
@@ -5364,6 +5372,53 @@ const composeMessageLinkStyle: React.CSSProperties = {
   textDecorationThickness: 1.5,
   textUnderlineOffset: 2,
   fontWeight: 650,
+};
+
+function composePanelStyle(replyMode: boolean): React.CSSProperties {
+  if (!replyMode) return composeStyle;
+  return {
+    ...composeStyle,
+    height: "100%",
+    gridTemplateRows: "auto minmax(0, 1fr) auto",
+    alignContent: "stretch",
+    overflow: "hidden",
+  };
+}
+
+const composeReplyOriginalStyle: React.CSSProperties = {
+  ...mailComposeOriginalStyle,
+  minHeight: 0,
+  display: "grid",
+  gridTemplateRows: "auto minmax(0, 1fr)",
+  overflow: "hidden",
+  paddingBottom: 0,
+};
+
+const composeReplyOriginalFrameStyle: React.CSSProperties = {
+  ...mailComposeOriginalFrameStyle,
+  minHeight: 0,
+  height: "100%",
+};
+
+const composeReplyDockStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: "grid",
+  gap: 8,
+  alignContent: "end",
+};
+
+const composeReplyMessagePreviewStyle: React.CSSProperties = {
+  ...composeMessagePreviewStyle,
+  height: 112,
+  minHeight: 92,
+  maxHeight: "20vh",
+};
+
+const composeReplyMessageTextareaStyle: React.CSSProperties = {
+  ...composeMessageTextareaStyle,
+  height: 112,
+  minHeight: 92,
+  maxHeight: "20vh",
 };
 
 function recipientQuery(value: string): string {
@@ -5646,8 +5701,11 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     if (body.endsWith(signature)) return;
     update({ body: body ? `${body}\n\n\n${signature}` : `\n\n\n${signature}` });
   };
+  const isReplyMode = !!replyMessage;
+  const messagePreviewStyle = isReplyMode ? composeReplyMessagePreviewStyle : composeMessagePreviewStyle;
+  const messageTextareaStyle = isReplyMode ? composeReplyMessageTextareaStyle : composeMessageTextareaStyle;
   return (
-    <form style={composeStyle} onSubmit={onSubmit}>
+    <form style={composePanelStyle(isReplyMode)} onSubmit={onSubmit}>
       <div style={panelHeaderStyle}>
         <h2 style={panelTitleStyle}>{compose.replyToMessageID ? "Reply" : compose.draftID ? "Draft" : "New Message"}</h2>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -5656,73 +5714,75 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
         </div>
       </div>
       {replyMessage && (
-        <div style={mailComposeOriginalStyle}>
+        <div style={composeReplyOriginalStyle}>
           <div style={mutedSmallStyle}>
             Original from {formatAddressList(replyMessage.from) || "Unknown sender"} to {formatAddressList(replyMessage.to) || "me"}
           </div>
-          <iframe title="Original email" sandbox="" srcDoc={messageDocument(replyMessage.body || replyMessage.snippet || "")} style={mailComposeOriginalFrameStyle} />
+          <iframe title="Original email" sandbox="" srcDoc={messageDocument(replyMessage.body || replyMessage.snippet || "")} style={composeReplyOriginalFrameStyle} />
         </div>
       )}
-      {renderRecipientInput("to", "To")}
-      {renderRecipientInput("cc", "Cc")}
-      <input style={mailPanelInputStyle} value={compose.subject} onChange={(event) => update({ subject: event.target.value })} placeholder="Subject" />
-      <div style={composeMessageEditorShellStyle}>
-        <div ref={bodyPreviewRef} aria-hidden="true" style={composeMessagePreviewStyle}>
-          {renderComposeMessagePreview(compose.body)}
-        </div>
-        <textarea
-          aria-label="Message"
-          style={composeMessageTextareaStyle}
-          value={compose.body}
-          onChange={(event) => update({ body: event.target.value })}
-          onScroll={(event) => {
-            if (!bodyPreviewRef.current) return;
-            bodyPreviewRef.current.scrollTop = event.currentTarget.scrollTop;
-            bodyPreviewRef.current.scrollLeft = event.currentTarget.scrollLeft;
-          }}
-        />
-      </div>
-      <div style={mailComposeAttachmentRowStyle}>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          style={{ display: "none" }}
-          onChange={(event) => {
-            void attachFiles(event.currentTarget.files);
-            event.currentTarget.value = "";
-          }}
-        />
-        <button type="button" style={mailPanelSmallButtonStyle} onClick={() => fileInputRef.current?.click()}>Attach files</button>
-        <button type="button" style={mailPanelSmallButtonStyle} onClick={() => setSignatureEditorOpen((current) => !current)}>
-          {signatureEditorOpen ? "Hide Signature" : "Edit Signature"}
-        </button>
-        {attachmentError && <span style={mutedSmallStyle}>{attachmentError}</span>}
-        {compose.draftID && <span style={mutedSmallStyle}>Saved in My Drafts</span>}
-        <span aria-hidden="true" style={{ flex: "1 1 160px" }} />
-        <button type="submit" style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : "Send"}</button>
-      </div>
-      {compose.attachments.length > 0 && (
-        <div style={mailAttachmentGridStyle}>
-          {compose.attachments.map((attachment) => (
-            <ComposeAttachmentTile key={attachment.id} attachment={attachment} onRemove={removeAttachment} />
-          ))}
-        </div>
-      )}
-      {signatureEditorOpen && (
-        <div style={mailComposeSignatureBoxStyle}>
-          <textarea
-            style={mailComposeSignatureTextareaStyle}
-            value={emailSignature}
-            onChange={(event) => onEmailSignatureChange(event.target.value)}
-            placeholder="Email signature"
-          />
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" style={mailPanelSmallButtonStyle} onClick={onSaveEmailSignature}>Save signature</button>
-            <button type="button" style={mailPanelSmallButtonStyle} onClick={insertSignature} disabled={!emailSignature.trim()}>Insert signature</button>
+      <div style={isReplyMode ? composeReplyDockStyle : undefined}>
+        {renderRecipientInput("to", "To")}
+        {renderRecipientInput("cc", "Cc")}
+        <input style={mailPanelInputStyle} value={compose.subject} onChange={(event) => update({ subject: event.target.value })} placeholder="Subject" />
+        <div style={composeMessageEditorShellStyle}>
+          <div ref={bodyPreviewRef} aria-hidden="true" style={messagePreviewStyle}>
+            {renderComposeMessagePreview(compose.body)}
           </div>
+          <textarea
+            aria-label="Message"
+            style={messageTextareaStyle}
+            value={compose.body}
+            onChange={(event) => update({ body: event.target.value })}
+            onScroll={(event) => {
+              if (!bodyPreviewRef.current) return;
+              bodyPreviewRef.current.scrollTop = event.currentTarget.scrollTop;
+              bodyPreviewRef.current.scrollLeft = event.currentTarget.scrollLeft;
+            }}
+          />
         </div>
-      )}
+        <div style={mailComposeAttachmentRowStyle}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            style={{ display: "none" }}
+            onChange={(event) => {
+              void attachFiles(event.currentTarget.files);
+              event.currentTarget.value = "";
+            }}
+          />
+          <button type="button" style={mailPanelSmallButtonStyle} onClick={() => fileInputRef.current?.click()}>Attach files</button>
+          <button type="button" style={mailPanelSmallButtonStyle} onClick={() => setSignatureEditorOpen((current) => !current)}>
+            {signatureEditorOpen ? "Hide Signature" : "Edit Signature"}
+          </button>
+          {attachmentError && <span style={mutedSmallStyle}>{attachmentError}</span>}
+          {compose.draftID && <span style={mutedSmallStyle}>Saved in My Drafts</span>}
+          <span aria-hidden="true" style={{ flex: "1 1 160px" }} />
+          <button type="submit" style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : "Send"}</button>
+        </div>
+        {compose.attachments.length > 0 && (
+          <div style={mailAttachmentGridStyle}>
+            {compose.attachments.map((attachment) => (
+              <ComposeAttachmentTile key={attachment.id} attachment={attachment} onRemove={removeAttachment} />
+            ))}
+          </div>
+        )}
+        {signatureEditorOpen && (
+          <div style={mailComposeSignatureBoxStyle}>
+            <textarea
+              style={mailComposeSignatureTextareaStyle}
+              value={emailSignature}
+              onChange={(event) => onEmailSignatureChange(event.target.value)}
+              placeholder="Email signature"
+            />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" style={mailPanelSmallButtonStyle} onClick={onSaveEmailSignature}>Save signature</button>
+              <button type="button" style={mailPanelSmallButtonStyle} onClick={insertSignature} disabled={!emailSignature.trim()}>Insert signature</button>
+            </div>
+          </div>
+        )}
+      </div>
     </form>
   );
 }
