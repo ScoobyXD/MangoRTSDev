@@ -171,9 +171,11 @@ export function NotificationPopover({
 }
 
 function NotificationPopoverTitle({ notification }: { notification: NotificationItem }): React.ReactElement {
-  const showEntityIcon = notification.type === "mention.created"
+  const showEntityIcon = (notification.type === "mention.created" || notification.type === "mention.urgent_created")
     && (notification.entity_type === "node" || notification.entity_type === "logic_gate");
-  const mentionMarker = " has mentioned you in ";
+  const mentionMarker = notification.title.includes(" has mentioned you in ")
+    ? " has mentioned you in "
+    : " mentioned you in ";
   const mentionMarkerIndex = showEntityIcon ? notification.title.indexOf(mentionMarker) : -1;
   if (showEntityIcon && mentionMarkerIndex > 0) {
     const prefix = notification.title.slice(0, mentionMarkerIndex + mentionMarker.length);

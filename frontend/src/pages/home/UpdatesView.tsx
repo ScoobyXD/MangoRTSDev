@@ -16,12 +16,12 @@ import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNes
 type UpdatesViewProps = {
   companyID: string;
   currentUserID: string;
-  onOpenNode: (nodeID: string) => void;
+  onOpenNode: (nodeID: string, informationID?: string) => void;
   onOpenLogicGate: (logicGateID: string, label: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
 };
 
-type UpdateGroupingField = "type" | "date" | "read_state" | "gvic";
+type UpdateGroupingField = "type" | "date" | "gvic";
 type UpdateResourceGroupingField = "project" | "logic_gate" | "node";
 type UpdateDisplayGroupingField = UpdateGroupingField | UpdateResourceGroupingField;
 type UpdateGroupingDirection = "asc" | "desc";
@@ -71,7 +71,6 @@ const UPDATE_FILTERS: ReadonlyArray<{ value: UpdateFeedFilter; label: string; ti
 const UPDATE_GROUPING_FIELDS: ReadonlyArray<{ value: UpdateGroupingField; label: string }> = [
   { value: "type", label: "Update Type" },
   { value: "date", label: "Date" },
-  { value: "read_state", label: "Read State" },
   { value: "gvic", label: "GVIC" },
 ];
 
@@ -83,7 +82,13 @@ const UPDATE_RESOURCE_GROUPINGS: UpdateDisplayGroupingSetting[] = [
 const DEFAULT_UPDATE_GROUPINGS: UpdateGroupingSetting[] = [];
 
 const UPDATE_GROUPING_FIELD_SET = new Set<UpdateGroupingField>(UPDATE_GROUPING_FIELDS.map((field) => field.value));
-const SAVED_UPDATE_GROUPING_SETTINGS_STORAGE_PREFIX = "mangorts.updates.grouping_settings.v2";
+const SAVED_UPDATE_GROUPING_SETTINGS_STORAGE_PREFIX = "mangorts.updates.grouping_settings.v3";
+const NOTIFICATION_TYPE_NODE_ASSIGNED = "node.assigned";
+const NOTIFICATION_TYPE_NODE_FIELDS_CHANGED = "node.fields_changed";
+const NOTIFICATION_TYPE_NODE_COMMENT_CREATED = "node.comment_created";
+const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_SAVED = "work_item.logic_gate_assignment_saved";
+const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_MOVED = "work_item.logic_gate_assignment_moved";
+const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_REMOVED = "work_item.logic_gate_assignment_removed";
 
 export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicGate, onOpenProject }: UpdatesViewProps) {
   const [rootGroups, setRootGroups] = useState<UpdateGroup[]>([]);
@@ -99,6 +104,9 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
   const [selectedSettingID, setSelectedSettingID] = useState(settings[0]?.setting_id ?? "");
   const [addGroupingOpen, setAddGroupingOpen] = useState(false);
   const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
+  const [hiddenNotificationIDs, setHiddenNotificationIDs] = useState<Set<string>>(new Set());
+  const [selectedNotificationKey, setSelectedNotificationKey] = useState("");
+  const [hoveredNotificationKey, setHoveredNotificationKey] = useState("");
 
   useEffect(() => {
     const next = readSavedUpdateGroupingSettings(storageKey, fallbackSetting);
@@ -116,6 +124,17 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
   }, [selectedSettingID, settings]);
 
   const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
+
+  useEffect(() => {
+    setHiddenNotificationIDs(new Set());
+    setSelectedNotificationKey("");
+    setHoveredNotificationKey("");
+  }, [companyID]);
+
+  useEffect(() => {
+    setSelectedNotificationKey("");
+    setHoveredNotificationKey("");
+  }, [filter]);
 
   const updateSelectedSetting = useCallback((updater: (setting: UpdateSavedGroupingSetting) => UpdateSavedGroupingSetting) => {
     setSettings((current) => current.map((setting) => {
@@ -235,8 +254,9 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
   }, [companyID, filter]);
 
   const sourceGroups = useMemo(() => rootGroups.map((root) => branchByRootID[root.id] ?? root), [branchByRootID, rootGroups]);
-  const updateRows = useMemo(() => flattenUpdateRows(sourceGroups), [sourceGroups]);
+  const updateRows = useMemo(() => flattenUpdateRows(sourceGroups, hiddenNotificationIDs), [hiddenNotificationIDs, sourceGroups]);
   const displayGroups = useMemo(() => buildUpdateDisplayGroups(updateRows, selectedSetting.groupings), [selectedSetting.groupings, updateRows]);
+  const visibleNotifications = useMemo(() => flattenDisplayNotifications(displayGroups), [displayGroups]);
   const groupingSignature = useMemo(() => JSON.stringify({
     setting: selectedSetting.setting_id,
     groupings: selectedSetting.groupings,
@@ -253,6 +273,12 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
     setExpandedGroupIDs(nextExpanded);
   }, [displayGroups, groupingSignature]);
 
+  useEffect(() => {
+    if (!selectedNotificationKey) return;
+    if (visibleNotifications.some((item) => updateNotificationSelectionKey(item) === selectedNotificationKey)) return;
+    setSelectedNotificationKey("");
+  }, [selectedNotificationKey, visibleNotifications]);
+
   const toggleGroup = useCallback((groupID: string) => {
     const isRoot = rootGroups.some((group) => group.id === groupID);
     const willOpen = !expandedGroupIDs.has(groupID);
@@ -265,21 +291,42 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
     });
   }, [branchByRootID, expandedGroupIDs, loadBranch, rootGroups]);
 
-  const openItem = useCallback((item: NotificationItem) => {
-    if (item.notification_id && !item.read_timestamp) void markNotificationRead(item.notification_id, true).catch(() => undefined);
+  const selectUpdateItem = useCallback((item: NotificationItem) => {
+    setSelectedNotificationKey(updateNotificationSelectionKey(item));
     const nodeID = item.node_id?.trim() || (item.entity_type === "node" ? item.entity_id.trim() : "");
     if (nodeID) {
-      onOpenNode(nodeID);
-      return;
+      onOpenNode(nodeID, item.information_id?.trim() || undefined);
     }
-    const logicGateID = item.logic_gate_id?.trim() || (item.entity_type === "logic_gate" ? item.entity_id.trim() : "");
-    if (logicGateID) {
-      onOpenLogicGate(logicGateID, item.title);
-      return;
-    }
-    const projectID = item.entity_type === "project" ? item.entity_id.trim() : "";
-    if (projectID) onOpenProject(projectID, item.title);
-  }, [onOpenLogicGate, onOpenNode, onOpenProject]);
+  }, [onOpenNode]);
+
+  const selectAdjacentUpdate = useCallback((item: NotificationItem, direction: 1 | -1) => {
+    if (visibleNotifications.length === 0) return;
+    const itemKey = updateNotificationSelectionKey(item);
+    const activeKey = selectedNotificationKey || itemKey;
+    const currentIndex = Math.max(0, visibleNotifications.findIndex((candidate) => updateNotificationSelectionKey(candidate) === activeKey));
+    const nextIndex = Math.min(Math.max(currentIndex + direction, 0), visibleNotifications.length - 1);
+    selectUpdateItem(visibleNotifications[nextIndex]);
+  }, [selectUpdateItem, selectedNotificationKey, visibleNotifications]);
+
+  const markUpdateRead = useCallback((item: NotificationItem) => {
+    const notificationID = item.notification_id?.trim() ?? "";
+    if (!notificationID) return;
+    const selectionKey = updateNotificationSelectionKey(item);
+    setHiddenNotificationIDs((current) => {
+      const next = new Set(current);
+      next.add(notificationID);
+      return next;
+    });
+    if (selectedNotificationKey === selectionKey) setSelectedNotificationKey("");
+    void markNotificationRead(notificationID, true).catch((nextError) => {
+      setHiddenNotificationIDs((current) => {
+        const next = new Set(current);
+        next.delete(notificationID);
+        return next;
+      });
+      setError(nextError instanceof Error ? nextError.message : "Failed to mark update as read");
+    });
+  }, [selectedNotificationKey]);
 
   const openGroupResource = useCallback((group: UpdateGroup) => {
     const resourceID = group.resource_id?.trim() ?? "";
@@ -329,7 +376,12 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
             expandedGroupIDs={expandedGroupIDs}
             branchLoadingIDs={branchLoadingIDs}
             onToggleGroup={toggleGroup}
-            onOpenItem={openItem}
+            onSelectItem={selectUpdateItem}
+            onSelectAdjacent={selectAdjacentUpdate}
+            onMarkRead={markUpdateRead}
+            selectedNotificationKey={selectedNotificationKey}
+            hoveredNotificationKey={hoveredNotificationKey}
+            onHoverNotification={setHoveredNotificationKey}
             onOpenGroupResource={openGroupResource}
           />
         )}
@@ -445,14 +497,24 @@ function UpdateGroupList({
   expandedGroupIDs,
   branchLoadingIDs,
   onToggleGroup,
-  onOpenItem,
+  onSelectItem,
+  onSelectAdjacent,
+  onMarkRead,
+  selectedNotificationKey,
+  hoveredNotificationKey,
+  onHoverNotification,
   onOpenGroupResource,
 }: {
   groups: UpdateGroup[];
   expandedGroupIDs: Set<string>;
   branchLoadingIDs: Set<string>;
   onToggleGroup: (groupID: string) => void;
-  onOpenItem: (item: NotificationItem) => void;
+  onSelectItem: (item: NotificationItem) => void;
+  onSelectAdjacent: (item: NotificationItem, direction: 1 | -1) => void;
+  onMarkRead: (item: NotificationItem) => void;
+  selectedNotificationKey: string;
+  hoveredNotificationKey: string;
+  onHoverNotification: (notificationKey: string) => void;
   onOpenGroupResource: (group: UpdateGroup) => void;
 }) {
   return (
@@ -487,9 +549,32 @@ function UpdateGroupList({
             </div>
             {open && branchLoading && <div style={updatesBranchLoadingStyle}>Loading branch</div>}
             {open && group.groups.length > 0 && (
-              <UpdateGroupList groups={group.groups} expandedGroupIDs={expandedGroupIDs} branchLoadingIDs={branchLoadingIDs} onToggleGroup={onToggleGroup} onOpenItem={onOpenItem} onOpenGroupResource={onOpenGroupResource} />
+              <UpdateGroupList
+                groups={group.groups}
+                expandedGroupIDs={expandedGroupIDs}
+                branchLoadingIDs={branchLoadingIDs}
+                onToggleGroup={onToggleGroup}
+                onSelectItem={onSelectItem}
+                onSelectAdjacent={onSelectAdjacent}
+                onMarkRead={onMarkRead}
+                selectedNotificationKey={selectedNotificationKey}
+                hoveredNotificationKey={hoveredNotificationKey}
+                onHoverNotification={onHoverNotification}
+                onOpenGroupResource={onOpenGroupResource}
+              />
             )}
-            {open && rows.length > 0 && <UpdateRows rows={rows} depth={group.depth + 1} onOpenItem={onOpenItem} />}
+            {open && rows.length > 0 && (
+              <UpdateRows
+                rows={rows}
+                depth={group.depth + 1}
+                onSelectItem={onSelectItem}
+                onSelectAdjacent={onSelectAdjacent}
+                onMarkRead={onMarkRead}
+                selectedNotificationKey={selectedNotificationKey}
+                hoveredNotificationKey={hoveredNotificationKey}
+                onHoverNotification={onHoverNotification}
+              />
+            )}
           </div>
         );
       })}
@@ -508,35 +593,149 @@ function UpdateGroupIcon({ group }: { group: UpdateGroup }) {
   if (group.resource_type === "project" || group.resource_type === "logic_gate" || group.resource_type === "node") {
     return <ExplorerRowIcon kind={group.resource_type} />;
   }
-  return <span style={updateGroupBadgeStyle}>U</span>;
+  const icon = updateGroupIconBadge(group);
+  return <span style={updateGroupBadgeStyle(icon.tone)}>{icon.label}</span>;
 }
 
-function UpdateRows({ rows, depth, onOpenItem }: { rows: NotificationItem[]; depth: number; onOpenItem: (item: NotificationItem) => void }) {
+function updateGroupIconBadge(group: UpdateGroup): { label: string; tone: "urgent" | "mention" | "update" | "generated" | "verified" | "consulted" | "informed" | "other" | "date" } {
+  if (group.key === "type:urgent" || /urgent/i.test(group.label)) return { label: "!", tone: "urgent" };
+  if (group.key === "type:mention" || group.field === "type" && /mention/i.test(group.label)) return { label: "@", tone: "mention" };
+  if (group.key === "type:update" || group.field === "type") return { label: "U", tone: "update" };
+  if (group.key === "gvic:generated" || /^generated$/i.test(group.label)) return { label: "G", tone: "generated" };
+  if (group.key === "gvic:verified" || /^verified$/i.test(group.label)) return { label: "V", tone: "verified" };
+  if (group.key === "gvic:consulted" || /^consulted$/i.test(group.label)) return { label: "C", tone: "consulted" };
+  if (group.key === "gvic:informed" || /^informed$/i.test(group.label)) return { label: "I", tone: "informed" };
+  if (group.field === "date") return { label: "D", tone: "date" };
+  return { label: "O", tone: "other" };
+}
+
+function UpdateRows({
+  rows,
+  depth,
+  onSelectItem,
+  onSelectAdjacent,
+  onMarkRead,
+  selectedNotificationKey,
+  hoveredNotificationKey,
+  onHoverNotification,
+}: {
+  rows: NotificationItem[];
+  depth: number;
+  onSelectItem: (item: NotificationItem) => void;
+  onSelectAdjacent: (item: NotificationItem, direction: 1 | -1) => void;
+  onMarkRead: (item: NotificationItem) => void;
+  selectedNotificationKey: string;
+  hoveredNotificationKey: string;
+  onHoverNotification: (notificationKey: string) => void;
+}) {
   return (
     <div style={updateRowsStyle}>
-      {rows.map((item, index) => (
-        <button key={`${item.notification_id || item.source_event_id}:${index}`} type="button" style={updateRowStyle(depth, !item.read_timestamp, item.type === NOTIFICATION_TYPE_URGENT_MENTION)} onClick={() => onOpenItem(item)}>
-          <span style={updateRowIconStyle(item.type === NOTIFICATION_TYPE_URGENT_MENTION)}>
-            {updateRowIcon(item)}
-          </span>
-          <span style={updateRowTextStyle}>
-            <span style={updateRowTitleStyle}>{item.title}</span>
-            {item.body_preview && <span style={updateRowBodyStyle}>{item.body_preview}</span>}
-          </span>
-          <span style={updateRowTimeStyle}>{formatNotificationTimestamp(item.created_timestamp)}</span>
-        </button>
-      ))}
+      {rows.map((item, index) => {
+        const notificationKey = updateNotificationSelectionKey(item);
+        const rowTone = updateRowTone(item);
+        const rowBody = formatUpdateRowBody(item);
+        return (
+          <div
+            key={`${notificationKey}:${index}`}
+            role="button"
+            tabIndex={0}
+            style={updateRowStyle(depth, !item.read_timestamp, rowTone, selectedNotificationKey === notificationKey, hoveredNotificationKey === notificationKey)}
+            onClick={() => onSelectItem(item)}
+            onMouseEnter={() => onHoverNotification(notificationKey)}
+            onMouseLeave={() => onHoverNotification("")}
+            onKeyDown={(event) => {
+              if ((event.target as HTMLElement).tagName === "BUTTON") return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onSelectItem(item);
+              }
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                onSelectAdjacent(item, 1);
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                onSelectAdjacent(item, -1);
+              }
+            }}
+          >
+            <span style={updateRowIconStyle(rowTone)}>
+              {updateRowIcon(item)}
+            </span>
+            <span style={updateRowTextStyle}>
+              <span style={updateRowTitleStyle}>{formatUpdateRowTitle(item)}</span>
+              {rowBody && <span style={updateRowBodyStyle}>{rowBody}</span>}
+            </span>
+            <span style={updateRowTimeStyle}>{formatNotificationTimestamp(item.created_timestamp)}</span>
+            <button
+              type="button"
+              style={updateMarkReadButtonStyle}
+              disabled={!item.notification_id?.trim()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onMarkRead(item);
+              }}
+            >
+              Mark as read
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 function updateRowIcon(item: NotificationItem): React.ReactNode {
-  if (item.type === NOTIFICATION_TYPE_URGENT_MENTION) return "!";
-  if (item.type === NOTIFICATION_TYPE_MENTION) return "@";
-  if (item.entity_type === "node") return <ExplorerRowIcon kind="node" />;
-  if (item.entity_type === "logic_gate") return <ExplorerRowIcon kind="logic_gate" />;
-  if (item.entity_type === "project") return <ExplorerRowIcon kind="project" />;
+  const tone = updateRowTone(item);
+  if (tone === "urgent") return "!";
+  if (tone === "mention") return "@";
+  if (tone === "new") return "+";
+  if (tone === "deleted") return "x";
+  if (tone === "status") return "S";
+  if (tone === "comment") return "C";
   return "U";
+}
+
+function updateRowTone(item: NotificationItem): "urgent" | "mention" | "new" | "deleted" | "status" | "comment" | "update" {
+  const title = item.title.trim().toLowerCase();
+  const body = (item.body_preview ?? "").trim().toLowerCase();
+  const text = `${item.type} ${title} ${body}`;
+  if (item.type === NOTIFICATION_TYPE_URGENT_MENTION) return "urgent";
+  if (item.type === NOTIFICATION_TYPE_MENTION) return "mention";
+  if (item.type === NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_SAVED || item.type === NOTIFICATION_TYPE_NODE_ASSIGNED || /node added|new node|brand new node/.test(text)) return "new";
+  if (item.type === NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_REMOVED || /\b(deleted|removed)\b/.test(text)) return "deleted";
+  if (item.type === NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_MOVED || item.type === NOTIFICATION_TYPE_NODE_FIELDS_CHANGED || /status changed|moved to/.test(text)) return "status";
+  if (item.type === NOTIFICATION_TYPE_NODE_COMMENT_CREATED || /comment/.test(text)) return "comment";
+  return "update";
+}
+
+function formatUpdateRowTitle(item: NotificationItem): string {
+  const title = item.title.trim();
+  const fallback = title || "Update";
+  if (item.type === NOTIFICATION_TYPE_URGENT_MENTION) {
+    if (/^urgent\b/i.test(fallback)) return fallback.replace(/^urgent\b/i, "URGENT");
+    return `URGENT ${fallback.replace(/\burgently mentioned you\b/i, "mentioned you").replace(/\bhas mentioned you\b/i, "mentioned you")}`;
+  }
+  if (item.type === NOTIFICATION_TYPE_MENTION) {
+    return fallback.replace(/\bhas mentioned you\b/i, "mentioned you");
+  }
+  if (updateRowTone(item) === "new") return "Brand new node";
+  if (updateRowTone(item) === "deleted") {
+    if (/removed/i.test(fallback)) return "Removed from work";
+    return "Deleted";
+  }
+  return fallback;
+}
+
+function formatUpdateRowBody(item: NotificationItem): string {
+  const body = (item.body_preview ?? "").trim();
+  if (!body) return "";
+  if (updateRowTone(item) === "new") {
+    const addedIn = body.match(/\bwas added in ([^.]+)\./i);
+    if (addedIn?.[1]) return `Added in ${addedIn[1].trim()}.`;
+    if (/was added to logic gate work/i.test(body)) return "Added to Logic Gate work.";
+  }
+  return body;
 }
 
 function collectUpdateGroupIDs(group: UpdateGroup): string[] {
@@ -545,12 +744,13 @@ function collectUpdateGroupIDs(group: UpdateGroup): string[] {
   return ids;
 }
 
-function flattenUpdateRows(groups: UpdateGroup[]): UpdateFeedRow[] {
+function flattenUpdateRows(groups: UpdateGroup[], hiddenNotificationIDs: Set<string>): UpdateFeedRow[] {
   const rows: UpdateFeedRow[] = [];
   const visit = (group: UpdateGroup, path: { project?: UpdateRowResource; logicGate?: UpdateRowResource; node?: UpdateRowResource }) => {
     const nextPath = updatePathWithGroup(path, group);
     for (const item of group.notifications ?? []) {
       const notificationKey = item.notification_id?.trim() || item.source_event_id?.trim() || `${item.entity_type}:${item.entity_id}:${item.created_timestamp}`;
+      if (item.read_timestamp || hiddenNotificationIDs.has(notificationKey)) continue;
       const pathKey = [nextPath.project?.id, nextPath.logicGate?.id, nextPath.node?.id].filter(Boolean).join("/");
       rows.push({
         rowKey: `${notificationKey}:${pathKey || "updates"}`,
@@ -562,6 +762,20 @@ function flattenUpdateRows(groups: UpdateGroup[]): UpdateFeedRow[] {
   };
   for (const group of groups) visit(group, {});
   return sortUpdateRows(rows);
+}
+
+function flattenDisplayNotifications(groups: UpdateGroup[]): NotificationItem[] {
+  const rows: NotificationItem[] = [];
+  const visit = (group: UpdateGroup) => {
+    for (const item of group.notifications ?? []) rows.push(item);
+    for (const child of group.groups) visit(child);
+  };
+  for (const group of groups) visit(group);
+  return rows;
+}
+
+function updateNotificationSelectionKey(item: NotificationItem): string {
+  return item.notification_id?.trim() || item.source_event_id?.trim() || `${item.entity_type}:${item.entity_id}:${item.created_timestamp}`;
 }
 
 function updatePathWithGroup(path: { project?: UpdateRowResource; logicGate?: UpdateRowResource; node?: UpdateRowResource }, group: UpdateGroup): { project?: UpdateRowResource; logicGate?: UpdateRowResource; node?: UpdateRowResource } {
@@ -609,10 +823,6 @@ function getUpdateGroupValues(row: UpdateFeedRow, field: UpdateDisplayGroupingFi
   if (field === "node") return [updateResourceGroupValue("node", row.node, "No node")];
   if (field === "type") return [updateTypeGroupValue(row.item)];
   if (field === "date") return [updateDateGroupValue(row.item.created_timestamp)];
-  if (field === "read_state") {
-    const unread = !row.item.read_timestamp;
-    return [{ key: unread ? "read_state:unread" : "read_state:read", label: unread ? "Unread" : "Read", sortValue: unread ? 1 : 2 }];
-  }
   const role = row.item.role?.trim() ?? "";
   return role ? [{ key: `gvic:${role}`, label: updateGVICRoleLabel(role), sortValue: updateGVICRoleSort(role) }] : [{ key: "gvic:none", label: "No GVIC", sortValue: 99, sortLast: true }];
 }
@@ -1045,37 +1255,102 @@ const updateGroupStaticContentStyle: React.CSSProperties = {
   gap: 5,
 };
 
-const updateGroupBadgeStyle: React.CSSProperties = { width: 16, height: 16, display: "grid", placeItems: "center", color: "#64748b", fontSize: 10, fontWeight: 850 };
+function updateGroupBadgeStyle(tone: "urgent" | "mention" | "update" | "generated" | "verified" | "consulted" | "informed" | "other" | "date"): React.CSSProperties {
+  const colors: Record<typeof tone, { color: string; background: string }> = {
+    urgent: { color: "#b91c1c", background: "rgba(248, 113, 113, 0.14)" },
+    mention: { color: "#2563eb", background: "rgba(96, 165, 250, 0.14)" },
+    update: { color: "#475569", background: "rgba(148, 163, 184, 0.14)" },
+    generated: { color: "#047857", background: "rgba(52, 211, 153, 0.14)" },
+    verified: { color: "#7c3aed", background: "rgba(167, 139, 250, 0.14)" },
+    consulted: { color: "#b45309", background: "rgba(251, 191, 36, 0.16)" },
+    informed: { color: "#0891b2", background: "rgba(34, 211, 238, 0.14)" },
+    other: { color: "#64748b", background: "rgba(148, 163, 184, 0.12)" },
+    date: { color: "#334155", background: "rgba(148, 163, 184, 0.14)" },
+  };
+  return {
+    width: 16,
+    height: 16,
+    borderRadius: 4,
+    display: "grid",
+    placeItems: "center",
+    color: colors[tone].color,
+    background: colors[tone].background,
+    fontSize: 10,
+    fontWeight: 900,
+  };
+}
 const updateGroupLabelStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 800 };
 const updatesBranchLoadingStyle: React.CSSProperties = { marginLeft: 42, color: "#64748b", fontSize: 11, fontWeight: 700, padding: "4px 0" };
 const updateRowsStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start" };
 
-function updateRowStyle(depth: number, unread: boolean, urgent: boolean): React.CSSProperties {
+function updateRowStyle(depth: number, unread: boolean, tone: ReturnType<typeof updateRowTone>, selected: boolean, hovered: boolean): React.CSSProperties {
+  const isUrgent = tone === "urgent";
   return {
     width: "min(980px, calc(100% - 16px))",
     minHeight: 38,
     display: "grid",
-    gridTemplateColumns: "18px minmax(220px, 1fr) 100px",
+    gridTemplateColumns: "18px minmax(220px, 1fr) 58px 96px",
     alignItems: "center",
     gap: 9,
     marginLeft: depth * 28 + 42,
-    border: "none",
+    border: selected ? "1px solid rgba(37, 99, 235, 0.55)" : "1px solid transparent",
     borderBottom: "1px solid rgba(148, 163, 184, 0.28)",
-    background: urgent ? "rgba(239, 68, 68, 0.06)" : "#ffffff",
+    borderRadius: selected ? 5 : 0,
+    background: selected
+      ? "rgba(37, 99, 235, 0.08)"
+      : hovered
+        ? "rgba(15, 23, 42, 0.035)"
+        : isUrgent
+          ? "rgba(239, 68, 68, 0.06)"
+          : "#ffffff",
     color: "#111827",
     font: "inherit",
     textAlign: "left",
     cursor: "pointer",
     padding: "0 8px",
     fontWeight: unread ? 800 : 650,
+    outline: "none",
   };
 }
 
-function updateRowIconStyle(urgent: boolean): React.CSSProperties {
-  return { width: 18, display: "grid", placeItems: "center", color: urgent ? "#b91c1c" : "#475569", fontSize: 12, fontWeight: 900 };
+function updateRowIconStyle(tone: ReturnType<typeof updateRowTone>): React.CSSProperties {
+  const colors: Record<ReturnType<typeof updateRowTone>, { color: string; background: string }> = {
+    urgent: { color: "#b91c1c", background: "rgba(248, 113, 113, 0.14)" },
+    mention: { color: "#2563eb", background: "rgba(96, 165, 250, 0.14)" },
+    new: { color: "#047857", background: "rgba(52, 211, 153, 0.14)" },
+    deleted: { color: "#991b1b", background: "rgba(248, 113, 113, 0.14)" },
+    status: { color: "#7c3aed", background: "rgba(167, 139, 250, 0.14)" },
+    comment: { color: "#0891b2", background: "rgba(34, 211, 238, 0.14)" },
+    update: { color: "#475569", background: "rgba(148, 163, 184, 0.14)" },
+  };
+  return {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    display: "grid",
+    placeItems: "center",
+    color: colors[tone].color,
+    background: colors[tone].background,
+    fontSize: 11,
+    fontWeight: 900,
+  };
 }
 
 const updateRowTextStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 2 };
 const updateRowTitleStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 780 };
 const updateRowBodyStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 11, fontWeight: 650 };
 const updateRowTimeStyle: React.CSSProperties = { color: "#64748b", fontSize: 10, fontWeight: 700, textAlign: "right" };
+const updateMarkReadButtonStyle: React.CSSProperties = {
+  height: 24,
+  minWidth: 0,
+  border: "1px solid rgba(15, 23, 42, 0.16)",
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "#334155",
+  font: "inherit",
+  fontSize: 10,
+  fontWeight: 800,
+  cursor: "pointer",
+  padding: "0 7px",
+  whiteSpace: "nowrap",
+};

@@ -37,6 +37,9 @@ func (r *MemoryRepo) listUpdatesForQuery(input UpdatesQuery) ([]domain.Notificat
 		if item.RecipientUserID != input.UserID || item.CompanyID != input.CompanyID {
 			continue
 		}
+		if item.ReadTimestamp != nil {
+			continue
+		}
 		if !updatesNotificationMatchesFilter(item, filter) {
 			continue
 		}

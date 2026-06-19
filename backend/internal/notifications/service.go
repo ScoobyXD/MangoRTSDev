@@ -288,7 +288,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		}
 		switch event.Type {
 		case store.WorkItemLogicGateAssignmentSavedEventType:
-			title = "Node added to Logic Gate work"
+			title = "Brand new node"
 			if status != "" {
 				body = fmt.Sprintf("%s was added in %s.", nodeTitle, status)
 			} else {
@@ -470,12 +470,12 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		}
 		if entityTitle != "" {
 			if urgent {
-				title = fmt.Sprintf("%s urgently mentioned you in %s", actorLabel, entityTitle)
+				title = fmt.Sprintf("URGENT %s mentioned you in %s", actorLabel, entityTitle)
 			} else {
-				title = fmt.Sprintf("%s has mentioned you in %s", actorLabel, entityTitle)
+				title = fmt.Sprintf("%s mentioned you in %s", actorLabel, entityTitle)
 			}
 		} else if urgent {
-			title = actorLabel + " urgently mentioned you"
+			title = "URGENT " + actorLabel + " mentioned you"
 		} else {
 			title = actorLabel + " mentioned you"
 		}
