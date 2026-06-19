@@ -27,9 +27,14 @@ const TASKBAR_MINIMIZED_HEIGHT = 8;
 const TASKBAR_MINIMIZED_WIDTH = 300;
 const TASKBAR_FLOATING_GAP = 18;
 const TASKBAR_BOTTOM_GAP = TASKBAR_FLOATING_GAP / 2;
+const TASKBAR_DOCK_LEFT_GAP = 10;
 const TASKBAR_TIMELINE_MIN_WIDTH = 520;
 const TASKBAR_DOCK_BUTTON_WIDTH = 176;
 const TASKBAR_DOCK_BUTTON_GAP = 0;
+const TASKBAR_DOCK_TOGGLE_GAP = 4;
+const TASKBAR_DOCK_TOGGLE_SIZE = 32;
+const TASKBAR_DOCK_COLLAPSED_WIDTH = 44;
+const APP_TASKBAR_DOCK_COLLAPSED_STORAGE_KEY = "mangorts.app-taskbar.dockCollapsed.v1";
 const APP_TASKBAR_DOCK_TAB_DRAG_MIME = "application/x-mangorts-app-taskbar-dock-tab";
 const TASKBAR_EDGE_FRAME = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
 const TASKBAR_SURFACE = "linear-gradient(145deg, rgba(255,255,255,0.96) 0%, rgba(246,247,251,0.94) 100%)";
@@ -44,6 +49,22 @@ type TaskbarLayout = {
   dockWidth: number;
   timelineWidth: number;
 };
+
+function readDockCollapsed(): boolean {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    return localStorage.getItem(APP_TASKBAR_DOCK_COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function storeDockCollapsed(collapsed: boolean): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(APP_TASKBAR_DOCK_COLLAPSED_STORAGE_KEY, collapsed ? "true" : "false");
+  } catch {}
+}
 
 export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   tabs,
@@ -66,15 +87,17 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   const [movingTabID, setMovingTabID] = useState("");
   const [hoveredDockTabID, setHoveredDockTabID] = useState("");
   const [timelineVisible] = useState(false);
+  const [dockCollapsed, setDockCollapsed] = useState(readDockCollapsed);
   const hasDockTabs = tabs.length > 0;
   const dockVisible = hasDockTabs;
   const layout = taskbarLayout(expanded, 0, leftInset, timelineCenterX, viewportWidth, timelineVisible);
 
   useEffect(() => {
+    if (dockCollapsed) return;
     const rail = railRef.current;
     if (!rail) return;
     rail.scrollLeft = rail.scrollWidth;
-  }, [tabs.length]);
+  }, [dockCollapsed, tabs.length]);
 
   useLayoutEffect(() => {
     const nextRects = new Map<string, DOMRect>();
@@ -99,7 +122,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
       nextRects.set(tab.id, nextRect);
     }
     previousDockRectsRef.current = nextRects;
-  }, [tabs]);
+  }, [dockCollapsed, tabs]);
 
   const reorderDockTabFromDrag = (event: React.DragEvent<HTMLElement>, targetTabID: string, placement: "before" | "after") => {
     if (!movingTabID || movingTabID === targetTabID) return;
@@ -128,7 +151,8 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   };
 
   const dockTabStrip = dockVisible ? (
-    <section style={minimizedDockStripStyle(viewportWidth)} aria-label="Minimized project, node, and Logic Gate tabs">
+    <section style={minimizedDockStripStyle(viewportWidth, tabs.length, dockCollapsed)} aria-label="Minimized project, node, and Logic Gate tabs">
+      {!dockCollapsed && (
         <div ref={railRef} className="mango-home-scroll" style={dockScrollerStyle}>
           <div style={dockRailStyle} onDragOver={reorderDockTabFromRailDrag}>
             {tabs.map((tab) => {
@@ -196,6 +220,23 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
             })}
           </div>
         </div>
+      )}
+      <button
+        type="button"
+        title={dockCollapsed ? "Expand tabs" : "Collapse tabs"}
+        aria-label={dockCollapsed ? "Expand tabs" : "Collapse tabs"}
+        aria-expanded={!dockCollapsed}
+        onClick={() => {
+          setDockCollapsed((current) => {
+            const next = !current;
+            storeDockCollapsed(next);
+            return next;
+          });
+        }}
+        style={dockToggleButtonStyle}
+      >
+        <DockToggleIcon collapsed={dockCollapsed} />
+      </button>
       </section>
   ) : null;
 
@@ -221,6 +262,19 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
 const PinIndicator: React.FC = () => (
   <svg aria-hidden="true" width="11" height="11" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
     <path d="M5.6 1.9h4.8l-.7 3 2.45 2.45v1.4H8.8L8.05 14H6.8l.75-5.25H3.85v-1.4L6.3 4.9z" fill="currentColor" />
+  </svg>
+);
+
+const DockToggleIcon: React.FC<{ collapsed: boolean }> = ({ collapsed }) => (
+  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 20 20" style={{ display: "block" }}>
+    <path
+      d={collapsed ? "M8 5l5 5-5 5" : "M12 5l-5 5 5 5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
   </svg>
 );
 
@@ -403,18 +457,31 @@ function taskbarTimelinePaneStyle(expanded: boolean, timelineVisible: boolean, d
   };
 }
 
-function minimizedDockStripStyle(viewportWidth: number): React.CSSProperties {
-  const left = TASKBAR_FLOATING_GAP;
+function minimizedDockStripStyle(viewportWidth: number, tabCount: number, collapsed: boolean): React.CSSProperties {
+  const maxWidth = Math.max(240, viewportWidth - TASKBAR_DOCK_LEFT_GAP - TASKBAR_FLOATING_GAP);
+  const expandedWidth = Math.min(
+    maxWidth,
+    (2 * 6)
+      + (tabCount * TASKBAR_DOCK_BUTTON_WIDTH)
+      + Math.max(0, tabCount - 1) * TASKBAR_DOCK_BUTTON_GAP
+      + TASKBAR_DOCK_TOGGLE_GAP
+      + TASKBAR_DOCK_TOGGLE_SIZE,
+  );
+  const left = collapsed
+    ? Math.max(TASKBAR_DOCK_LEFT_GAP, TASKBAR_DOCK_LEFT_GAP + expandedWidth - TASKBAR_DOCK_COLLAPSED_WIDTH)
+    : TASKBAR_DOCK_LEFT_GAP;
   return {
     position: "fixed",
     left,
     bottom: TASKBAR_BOTTOM_GAP,
-    maxWidth: Math.max(240, viewportWidth - left - TASKBAR_FLOATING_GAP),
-    minWidth: 0,
+    width: collapsed ? TASKBAR_DOCK_COLLAPSED_WIDTH : undefined,
+    maxWidth,
+    minWidth: collapsed ? TASKBAR_DOCK_COLLAPSED_WIDTH : 0,
     height: 44,
     display: "flex",
     alignItems: "center",
-    padding: "5px 6px",
+    gap: TASKBAR_DOCK_TOGGLE_GAP,
+    padding: collapsed ? 5 : "5px 6px",
     boxSizing: "border-box",
     border: "1px solid transparent",
     borderRadius: 8,
@@ -426,11 +493,13 @@ function minimizedDockStripStyle(viewportWidth: number): React.CSSProperties {
     overflow: "hidden",
     color: "#0f172a",
     fontFamily: "var(--mango-font-family)",
+    transition: "left 160ms ease, width 160ms ease, max-width 160ms ease",
   };
 }
 
 const dockScrollerStyle: React.CSSProperties = {
-  width: "100%",
+  flex: "1 1 auto",
+  width: "auto",
   maxWidth: "100%",
   minWidth: 0,
   display: "flex",
@@ -448,6 +517,21 @@ const dockRailStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "start",
   gap: TASKBAR_DOCK_BUTTON_GAP,
+};
+
+const dockToggleButtonStyle: React.CSSProperties = {
+  flex: `0 0 ${TASKBAR_DOCK_TOGGLE_SIZE}px`,
+  width: TASKBAR_DOCK_TOGGLE_SIZE,
+  height: TASKBAR_DOCK_TOGGLE_SIZE,
+  display: "grid",
+  placeItems: "center",
+  padding: 0,
+  border: "1px solid transparent",
+  borderRadius: 999,
+  background: `${TASKBAR_ACTIVE_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box`,
+  color: "#334155",
+  cursor: "pointer",
+  boxShadow: "4px 4px 10px rgba(174, 174, 192, 0.22), -4px -4px 10px rgba(255, 255, 255, 0.86), inset 1px 1px 0 rgba(255,255,255,0.84)",
 };
 
 function dockButtonStyle(active: boolean, moving: boolean, hovered: boolean): React.CSSProperties {
