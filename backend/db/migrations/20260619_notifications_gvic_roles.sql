@@ -1,3 +1,6 @@
+alter table notifications
+  drop constraint if exists notifications_role_chk;
+
 update notifications
 set role = case role
   when 'responsible' then 'generated'
@@ -5,9 +8,6 @@ set role = case role
   else role
 end
 where role in ('responsible', 'accountable');
-
-alter table notifications
-  drop constraint if exists notifications_role_chk;
 
 alter table notifications
   add constraint notifications_role_chk
