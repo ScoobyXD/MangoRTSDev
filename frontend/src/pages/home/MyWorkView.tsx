@@ -145,6 +145,7 @@ export function MyWorkView({
   const [selectedSettingID, setSelectedSettingID] = useState(settings[0]?.setting_id ?? "");
   const [scopeMenuLevel, setScopeMenuLevel] = useState<MyWorkScopeLevel | null>(null);
   const [addGroupingOpen, setAddGroupingOpen] = useState(false);
+  const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const [matrixCells, setMatrixCells] = useState<MyWorkMatrixCellWithUser[]>([]);
   const [matrixLoading, setMatrixLoading] = useState(false);
@@ -263,6 +264,7 @@ export function MyWorkView({
   }, [updateSelectedSetting]);
 
   const removeGrouping = useCallback((index: number) => {
+    setGroupingFieldMenuIndex(null);
     updateSelectedSetting((setting) => ({
       ...setting,
       groupings: setting.groupings.length <= 1 ? setting.groupings : setting.groupings.filter((_, itemIndex) => itemIndex !== index),
@@ -270,6 +272,7 @@ export function MyWorkView({
   }, [updateSelectedSetting]);
 
   const addGrouping = useCallback((field: MyWorkGroupingField) => {
+    setGroupingFieldMenuIndex(null);
     updateSelectedSetting((setting) => ({
       ...setting,
       groupings: [...setting.groupings, { field, direction: "asc" }],
@@ -330,6 +333,7 @@ export function MyWorkView({
           scopeRows={scopeRows}
           addableFields={addableFields}
           addGroupingOpen={addGroupingOpen}
+          groupingFieldMenuIndex={groupingFieldMenuIndex}
           onSelectSetting={setSelectedSettingID}
           onAddSavedView={addSavedView}
           onDeleteSavedView={deleteSavedView}
@@ -339,6 +343,7 @@ export function MyWorkView({
           onUpdateGrouping={updateGrouping}
           onRemoveGrouping={removeGrouping}
           onSetAddGroupingOpen={setAddGroupingOpen}
+          onSetGroupingFieldMenuIndex={setGroupingFieldMenuIndex}
           onAddGrouping={addGrouping}
         />
       </div>
@@ -386,6 +391,7 @@ function GroupingPanel({
   scopeRows,
   addableFields,
   addGroupingOpen,
+  groupingFieldMenuIndex,
   onSelectSetting,
   onAddSavedView,
   onDeleteSavedView,
@@ -395,6 +401,7 @@ function GroupingPanel({
   onUpdateGrouping,
   onRemoveGrouping,
   onSetAddGroupingOpen,
+  onSetGroupingFieldMenuIndex,
   onAddGrouping,
 }: {
   setting: MyWorkSavedGroupingSetting;
@@ -404,6 +411,7 @@ function GroupingPanel({
   scopeRows: ScopePickerRow[];
   addableFields: ReadonlyArray<{ value: MyWorkGroupingField; label: string }>;
   addGroupingOpen: boolean;
+  groupingFieldMenuIndex: number | null;
   onSelectSetting: (settingID: string) => void;
   onAddSavedView: () => void;
   onDeleteSavedView: (settingID: string) => void;
@@ -413,6 +421,7 @@ function GroupingPanel({
   onUpdateGrouping: (index: number, grouping: MyWorkGroupingSetting) => void;
   onRemoveGrouping: (index: number) => void;
   onSetAddGroupingOpen: (open: boolean) => void;
+  onSetGroupingFieldMenuIndex: (index: number | null) => void;
   onAddGrouping: (field: MyWorkGroupingField) => void;
 }) {
   return (
@@ -473,7 +482,35 @@ function GroupingPanel({
           <div style={groupingStackStyle}>
             {setting.groupings.map((grouping, index) => (
               <div key={`${grouping.field}:${index}`} style={groupingRowStyle(index)}>
-                <span style={groupingFieldLabelStyle}>{myWorkGroupingFieldLabel(grouping.field)}</span>
+                <button
+                  type="button"
+                  style={groupingFieldButtonStyle}
+                  onClick={() => {
+                    onSetAddGroupingOpen(false);
+                    onSetGroupingFieldMenuIndex(groupingFieldMenuIndex === index ? null : index);
+                  }}
+                >
+                  {myWorkGroupingFieldLabel(grouping.field)}
+                </button>
+                {groupingFieldMenuIndex === index && (
+                  <div style={groupingFieldMenuStyle}>
+                    {MY_WORK_GROUPING_FIELDS
+                      .filter((field) => field.value === grouping.field || !setting.groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
+                      .map((field) => (
+                        <button
+                          key={field.value}
+                          type="button"
+                          style={groupingFieldOptionStyle(field.value === grouping.field)}
+                          onClick={() => {
+                            onUpdateGrouping(index, { ...grouping, field: field.value });
+                            onSetGroupingFieldMenuIndex(null);
+                          }}
+                        >
+                          {field.label}
+                        </button>
+                      ))}
+                  </div>
+                )}
                 <button
                   type="button"
                   style={groupingDirectionButtonStyle}
@@ -485,7 +522,15 @@ function GroupingPanel({
               </div>
             ))}
             <div style={{ position: "relative" }}>
-              <button type="button" style={addGroupingButtonStyle} disabled={addableFields.length === 0} onClick={() => onSetAddGroupingOpen(!addGroupingOpen)}>
+              <button
+                type="button"
+                style={addGroupingButtonStyle}
+                disabled={addableFields.length === 0}
+                onClick={() => {
+                  onSetGroupingFieldMenuIndex(null);
+                  onSetAddGroupingOpen(!addGroupingOpen);
+                }}
+              >
                 + Add Grouping
               </button>
               {addGroupingOpen && (
@@ -1347,7 +1392,7 @@ const myWorkShellStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
   gap: 6,
-  padding: 14,
+  padding: "7px 14px 14px",
   background: "#ffffff",
   color: "#111827",
   overflow: "hidden",
@@ -1716,6 +1761,7 @@ const groupingStackStyle: React.CSSProperties = {
 
 function groupingRowStyle(index: number): React.CSSProperties {
   return {
+    position: "relative",
     minWidth: 0,
     minHeight: 30,
     display: "grid",
@@ -1730,13 +1776,22 @@ function groupingRowStyle(index: number): React.CSSProperties {
   };
 }
 
-const groupingFieldLabelStyle: React.CSSProperties = {
+const groupingFieldButtonStyle: React.CSSProperties = {
   minWidth: 0,
+  height: 24,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
+  border: "none",
+  borderRadius: 4,
+  background: "transparent",
+  color: "#111827",
+  font: "inherit",
   fontSize: 12,
   fontWeight: 800,
+  textAlign: "left",
+  cursor: "pointer",
+  padding: "0 4px",
 };
 
 const groupingDirectionButtonStyle: React.CSSProperties = {
@@ -1803,6 +1858,37 @@ const addGroupingOptionStyle: React.CSSProperties = {
   cursor: "pointer",
   padding: "0 7px",
 };
+
+const groupingFieldMenuStyle: React.CSSProperties = {
+  position: "absolute",
+  zIndex: 24,
+  top: "calc(100% + 4px)",
+  left: 0,
+  width: 190,
+  display: "grid",
+  gap: 2,
+  padding: 5,
+  border: "1px solid rgba(15, 23, 42, 0.16)",
+  borderRadius: 6,
+  background: "#ffffff",
+  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.16)",
+};
+
+function groupingFieldOptionStyle(active: boolean): React.CSSProperties {
+  return {
+    minHeight: 27,
+    border: "none",
+    borderRadius: 5,
+    background: active ? "rgba(71, 85, 105, 0.12)" : "transparent",
+    color: "#111827",
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: active ? 800 : 700,
+    textAlign: "left",
+    cursor: "pointer",
+    padding: "0 7px",
+  };
+}
 
 const groupListStyle: React.CSSProperties = {
   minWidth: 0,

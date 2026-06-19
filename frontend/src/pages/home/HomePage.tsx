@@ -3755,6 +3755,7 @@ export function HomePage({
           ) : isUpdatesView ? (
             <UpdatesView
               companyID={companyID}
+              currentUserID={currentUserID}
               onOpenNode={(nodeID) => {
                 const node = nodeByID.get(nodeID);
                 if (node) openNodeEditorOverlay(node);
