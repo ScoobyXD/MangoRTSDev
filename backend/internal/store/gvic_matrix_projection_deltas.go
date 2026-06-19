@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func racioProjectionRowKey(row RacioMatrixProjectionRow) ProjectionRowKey {
+func GVICMatrixProjectionRowKey(row GVICMatrixProjectionRow) ProjectionRowKey {
 	return ProjectionRowKey{
 		UserID:       strings.TrimSpace(row.UserID),
 		ResourceType: strings.TrimSpace(row.ResourceType),
@@ -15,11 +15,11 @@ func racioProjectionRowKey(row RacioMatrixProjectionRow) ProjectionRowKey {
 	}
 }
 
-func racioProjectionRowKeyString(key ProjectionRowKey) string {
+func GVICMatrixProjectionRowKeyString(key ProjectionRowKey) string {
 	return strings.TrimSpace(key.UserID) + ":" + strings.TrimSpace(key.ResourceType) + ":" + strings.TrimSpace(key.ResourceID)
 }
 
-func cloneRacioMatrixProjectionRow(row RacioMatrixProjectionRow) RacioMatrixProjectionRow {
+func cloneGVICMatrixProjectionRow(row GVICMatrixProjectionRow) GVICMatrixProjectionRow {
 	out := row
 	out.LogicGateID = cloneStringPointer(row.LogicGateID)
 	out.Status = cloneStringPointer(row.Status)
@@ -29,32 +29,32 @@ func cloneRacioMatrixProjectionRow(row RacioMatrixProjectionRow) RacioMatrixProj
 	return out
 }
 
-func racioProjectionRowsMeaningfullyEqual(left, right RacioMatrixProjectionRow) bool {
+func GVICMatrixProjectionRowsMeaningfullyEqual(left, right GVICMatrixProjectionRow) bool {
 	left.UpdatedTimestamp = time.Time{}
 	right.UpdatedTimestamp = time.Time{}
 	return reflect.DeepEqual(left, right)
 }
 
-func diffRacioProjectionRows(before, after []RacioMatrixProjectionRow) []ProjectionDelta {
-	beforeByKey := map[string]RacioMatrixProjectionRow{}
-	afterByKey := map[string]RacioMatrixProjectionRow{}
+func diffGVICMatrixProjectionRows(before, after []GVICMatrixProjectionRow) []ProjectionDelta {
+	beforeByKey := map[string]GVICMatrixProjectionRow{}
+	afterByKey := map[string]GVICMatrixProjectionRow{}
 	keys := map[string]ProjectionRowKey{}
 	for _, row := range before {
-		key := racioProjectionRowKey(row)
-		keyString := racioProjectionRowKeyString(key)
+		key := GVICMatrixProjectionRowKey(row)
+		keyString := GVICMatrixProjectionRowKeyString(key)
 		if keyString == "::" {
 			continue
 		}
-		beforeByKey[keyString] = cloneRacioMatrixProjectionRow(row)
+		beforeByKey[keyString] = cloneGVICMatrixProjectionRow(row)
 		keys[keyString] = key
 	}
 	for _, row := range after {
-		key := racioProjectionRowKey(row)
-		keyString := racioProjectionRowKeyString(key)
+		key := GVICMatrixProjectionRowKey(row)
+		keyString := GVICMatrixProjectionRowKeyString(key)
 		if keyString == "::" {
 			continue
 		}
-		afterByKey[keyString] = cloneRacioMatrixProjectionRow(row)
+		afterByKey[keyString] = cloneGVICMatrixProjectionRow(row)
 		keys[keyString] = key
 	}
 
@@ -79,8 +79,8 @@ func diffRacioProjectionRows(before, after []RacioMatrixProjectionRow) []Project
 				RowKey:             key,
 				ProjectedTimestamp: now,
 			})
-		case hasAfter && (!hadBefore || !racioProjectionRowsMeaningfullyEqual(beforeRow, afterRow)):
-			row := cloneRacioMatrixProjectionRow(afterRow)
+		case hasAfter && (!hadBefore || !GVICMatrixProjectionRowsMeaningfullyEqual(beforeRow, afterRow)):
+			row := cloneGVICMatrixProjectionRow(afterRow)
 			projectedAt := row.UpdatedTimestamp
 			if projectedAt.IsZero() {
 				projectedAt = now

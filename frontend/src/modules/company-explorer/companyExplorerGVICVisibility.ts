@@ -4,7 +4,7 @@ function cleanID(value: string | null | undefined): string {
   return value?.trim() ?? "";
 }
 
-export function shouldIncludeRaciCustomRootFolder(input: {
+export function shouldIncludeGVICCustomRootFolder(input: {
   rootScopeType?: CompanyExplorerFolderScopeType;
   rootScopeID?: string | null;
   ownerUserIDs: Iterable<string>;
@@ -24,6 +24,6 @@ export function shouldIncludeRaciCustomRootFolder(input: {
   return Array.from(ownerIDs).some((ownerID) => requestedOwnerIDs.has(ownerID));
 }
 
-export function shouldShowRaciCompanyScopedFolderShell(scopeType?: CompanyExplorerFolderScopeType): boolean {
+export function shouldShowGVICCompanyScopedFolderShell(scopeType?: CompanyExplorerFolderScopeType): boolean {
   return !scopeType || scopeType === "company";
 }

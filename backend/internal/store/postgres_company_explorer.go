@@ -1241,7 +1241,7 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
 		return err
 	}
-	if err := deletePostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+	if err := deletePostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 		return err
 	}
 	if err := deleteProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
@@ -1368,7 +1368,7 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
 		return err
 	}
-	if err := deletePostgresRacioProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+	if err := deletePostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 		return err
 	}
 	if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
@@ -2065,7 +2065,7 @@ order by created_timestamp asc`, companyID)
 	if err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateRaciAssignments(context.Background(), companyID, items)
+	return r.attachLogicGateGVICAssignments(context.Background(), companyID, items)
 }
 
 func (r *PostgresRepo) ListVisibleCompanyExplorerLogicGateSummaries(companyID, userID string) ([]domain.LogicGate, error) {
@@ -2087,7 +2087,7 @@ order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, u
 	if err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateRaciAssignments(context.Background(), companyID, items)
+	return r.attachLogicGateGVICAssignments(context.Background(), companyID, items)
 }
 
 func (r *PostgresRepo) ListCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID string) ([]domain.LogicGate, error) {
@@ -2128,7 +2128,7 @@ order by gate.created_timestamp asc`, companyID, folderID)
 	if err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateRaciAssignments(context.Background(), companyID, items)
+	return r.attachLogicGateGVICAssignments(context.Background(), companyID, items)
 }
 
 func (r *PostgresRepo) ListVisibleCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, folderID, userID string) ([]domain.LogicGate, error) {
@@ -2177,7 +2177,7 @@ order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, f
 	if err != nil {
 		return nil, err
 	}
-	return r.attachLogicGateRaciAssignments(context.Background(), companyID, items)
+	return r.attachLogicGateGVICAssignments(context.Background(), companyID, items)
 }
 
 func (r *PostgresRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error {

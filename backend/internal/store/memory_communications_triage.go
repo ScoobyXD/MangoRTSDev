@@ -219,7 +219,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 	now := time.Now().UTC()
 	result := CommunicationsTriageConversionResult{
 		Target:           input.Target,
-		LogicGate:        r.withLogicGateRaciLocked(logicGate),
+		LogicGate:        r.withLogicGateGVICLocked(logicGate),
 		CreatedLogicGate: createdLogicGate,
 		Board:            board,
 	}
@@ -281,7 +281,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			UpdatedTimestamp:     now,
 		})
 		r.syncNodeStatusFromKanbanCardLocked(card)
-		r.syncRacioProjectionForNodeLocked(input.CompanyID, nodeID)
+		r.syncGVICMatrixProjectionForNodeLocked(input.CompanyID, nodeID)
 		link := communicationsEmailNodeLink{
 			CompanyID:        input.CompanyID,
 			UserID:           input.UserID,
@@ -373,7 +373,7 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input C
 	now := time.Now().UTC()
 	result := CommunicationsTriageConversionResult{
 		Target:    input.Target,
-		LogicGate: r.withLogicGateRaciLocked(logicGate),
+		LogicGate: r.withLogicGateGVICLocked(logicGate),
 		Board:     board,
 	}
 	result.Target.Header = logicGate.Header

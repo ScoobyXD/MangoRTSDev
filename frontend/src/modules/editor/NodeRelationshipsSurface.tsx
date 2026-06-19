@@ -260,7 +260,7 @@ export const NodeRelationshipsSurface: React.FC<NodeRelationshipsSurfaceProps> =
         {
           company_id: companyID,
           node_id: cleanNodeID,
-          title: nodeTitle.trim() || "Current node",
+          name: nodeTitle.trim() || "Current node",
           created_timestamp: "",
         },
       ];

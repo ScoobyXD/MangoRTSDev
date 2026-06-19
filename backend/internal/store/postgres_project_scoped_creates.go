@@ -49,7 +49,7 @@ func (r *PostgresRepo) CreateLogicGateAssociatedWithProject(input ProjectScopedL
 	if err := tx.Commit(); err != nil {
 		return ProjectScopedLogicGateCreateResult{}, err
 	}
-	items, err := r.attachLogicGateRaciAssignments(ctx, input.CompanyID, []domain.LogicGate{result.LogicGate})
+	items, err := r.attachLogicGateGVICAssignments(ctx, input.CompanyID, []domain.LogicGate{result.LogicGate})
 	if err != nil {
 		return ProjectScopedLogicGateCreateResult{}, err
 	}
@@ -61,7 +61,7 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 	if err := ensureProjectExistsForScopedCreateTx(ctx, tx, input.CompanyID, input.ProjectID); err != nil {
 		return ProjectScopedNodeCreateResult{}, err
 	}
-	node, err := r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, "", false, true)
+	node, err := r.createNodeWithIDProjectionAndFolderTx(ctx, tx, input.CompanyID, input.NodeID, input.Title, false, true)
 	if err != nil {
 		return ProjectScopedNodeCreateResult{}, err
 	}
@@ -275,7 +275,7 @@ func createLogicGateAssociatedWithProjectSourceTx(ctx context.Context, tx *sql.T
 		LogicGateID:     logicGateID,
 		Header:          input.Header,
 		DefaultAccess:   ResourceDefaultAccessEdit,
-		RaciAssignments: []domain.LogicGateRaciAssignment{},
+		GVICAssignments: []domain.LogicGateGVICAssignment{},
 	}
 	err := tx.QueryRowContext(ctx,
 		`insert into logic_gates (company_id, logic_gate_id, header, created_timestamp)

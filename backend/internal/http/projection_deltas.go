@@ -244,7 +244,7 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 		case store.ProjectionNameGVICMatrix:
 			userID := projectionDeltaUserID(delta)
 			projectionScope := projectionUserScope(userID)
-			realtimeScope := realtimeRacioScope(userID)
+			realtimeScope := realtimeGVICMatrixScope(userID)
 			if projectionScope == "" || realtimeScope == "" {
 				continue
 			}
@@ -442,7 +442,7 @@ func (s *Server) authorizedProjectionDeltaForUser(delta store.ProjectionDelta, u
 	case store.ProjectionNameGVICEffectiveAssignments:
 		return s.authorizedGVICProjectionDeltaForUser(delta, userID)
 	case store.ProjectionNameGVICMatrix:
-		return s.authorizedRacioProjectionDeltaForUser(delta, userID)
+		return s.authorizedGVICMatrixProjectionDeltaForUser(delta, userID)
 	case store.ProjectionNameKanbanBoard:
 		return s.authorizedKanbanProjectionDeltaForUser(delta, userID)
 	case store.ProjectionNameProjectManagementTimeline:
@@ -478,7 +478,7 @@ func (s *Server) authorizedGVICProjectionDeltaForUser(delta store.ProjectionDelt
 	return delta, true
 }
 
-func (s *Server) authorizedRacioProjectionDeltaForUser(delta store.ProjectionDelta, userID string) (store.ProjectionDelta, bool) {
+func (s *Server) authorizedGVICMatrixProjectionDeltaForUser(delta store.ProjectionDelta, userID string) (store.ProjectionDelta, bool) {
 	userID = strings.TrimSpace(userID)
 	delta = cloneProjectionDelta(delta)
 	delta.RowKey.UserID = userID
@@ -655,29 +655,29 @@ func (s *Server) authorizedProjectRelationshipProjectionDeltaForUser(delta store
 	return delta, true
 }
 
-func (s *Server) publishRacioPermissionProjectionDeltas(companyID, entityType, entityID string) {
+func (s *Server) publishGVICMatrixPermissionProjectionDeltas(companyID, entityType, entityID string) {
 	companyID = strings.TrimSpace(companyID)
 	entityType = strings.TrimSpace(entityType)
 	entityID = strings.TrimSpace(entityID)
 	if companyID == "" || entityID == "" {
 		return
 	}
-	go s.publishRacioPermissionProjectionDeltasAsync(companyID, entityType, entityID)
+	go s.publishGVICMatrixPermissionProjectionDeltasAsync(companyID, entityType, entityID)
 }
 
-func (s *Server) publishRacioPermissionProjectionDeltasAsync(companyID, entityType, entityID string) {
-	var rows []store.RacioMatrixProjectionRow
+func (s *Server) publishGVICMatrixPermissionProjectionDeltasAsync(companyID, entityType, entityID string) {
+	var rows []store.GVICMatrixProjectionRow
 	var err error
 	switch entityType {
 	case store.EntityTypeNode:
-		rows, err = s.repo.ListRacioMatrixProjectionRowsForResources(companyID, []string{entityID}, nil)
+		rows, err = s.repo.ListGVICMatrixProjectionRowsForResources(companyID, []string{entityID}, nil)
 	case store.EntityTypeLogicGate:
-		rows, err = s.repo.ListRacioMatrixProjectionRowsForLogicGate(companyID, entityID)
+		rows, err = s.repo.ListGVICMatrixProjectionRowsForLogicGate(companyID, entityID)
 	default:
 		return
 	}
 	if err != nil {
-		log.Printf("failed to read RACI projection rows for permission delta company_id=%s entity_type=%s entity_id=%s: %v", companyID, entityType, entityID, err)
+		log.Printf("failed to read GVIC projection rows for permission delta company_id=%s entity_type=%s entity_id=%s: %v", companyID, entityType, entityID, err)
 		return
 	}
 	now := time.Now().UTC()

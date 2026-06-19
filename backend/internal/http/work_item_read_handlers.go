@@ -108,7 +108,7 @@ func workItemInboxRequestedUserID(r *http.Request) (string, bool, bool, bool) {
 	return userID, true, true, true
 }
 
-func (s *Server) handleWorkItemResponsibleInbox(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleWorkItemGeneratedInbox(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -117,7 +117,7 @@ func (s *Server) handleWorkItemResponsibleInbox(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	items, err := s.repo.ListResponsibleInboxNodesContext(r.Context(), query)
+	items, err := s.repo.ListGeneratedInboxNodesContext(r.Context(), query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_generated_inbox")
 		return
@@ -196,7 +196,7 @@ func (s *Server) handleWorkItemMyLogicGates(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-func (s *Server) handleWorkItemRacioMatrixProjection(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleWorkItemGVICMatrixProjection(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -205,7 +205,7 @@ func (s *Server) handleWorkItemRacioMatrixProjection(w http.ResponseWriter, r *h
 	if !ok {
 		return
 	}
-	rows, err := s.repo.ListRacioMatrixProjectionRowsForUser(query)
+	rows, err := s.repo.ListGVICMatrixProjectionRowsForUser(query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_gvic_matrix_projection")
 		return

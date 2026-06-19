@@ -331,15 +331,15 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus hidden: %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{
+		Assignments: []store.LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
 			UserID: editor.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:  companyID,
@@ -373,7 +373,7 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 	if !view.CanView || !view.CanEdit || view.CanAdmin {
 		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view/edit", view.CanView, view.CanEdit, view.CanAdmin)
 	}
-	if view.LogicGate.LogicGateID != logicGate.LogicGateID || view.ProjectionCount != 1 || view.RaciAssignmentCount != 1 {
+	if view.LogicGate.LogicGateID != logicGate.LogicGateID || view.ProjectionCount != 1 || view.GVICAssignmentCount != 1 {
 		t.Fatalf("logic gate view = %+v, want details, projection, and GVIC", view)
 	}
 	if strings.Contains(viewBody, `"work"`) || view.NodeCount != 0 || view.AssignmentCount != 0 {

@@ -332,7 +332,7 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 }
 
-func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *http.Request, folderID string) {
+func (s *Server) handleCommunicationsSharedInboxGVIC(w http.ResponseWriter, r *http.Request, folderID string) {
 	if r.Method == http.MethodGet {
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		if companyID == "" {
@@ -352,17 +352,17 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 			return
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_raci")
+			writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_GVIC")
 			return
 		}
 		if store.CommunicationsSharedInboxResourceType(folder) != store.EntityTypeSharedInbox {
-			writeError(w, http.StatusBadRequest, "shared_inbox_raci_requires_mailbox")
+			writeError(w, http.StatusBadRequest, "shared_inbox_GVIC_requires_mailbox")
 			return
 		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 			"company_id":       companyID,
 			"folder_id":        folderID,
-			"gvic_assignments": folder.RaciAssignments,
+			"gvic_assignments": folder.GVICAssignments,
 		})
 		return
 	}
@@ -373,7 +373,7 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 	}
 	var req struct {
 		CompanyID   string                                 `json:"company_id"`
-		Assignments []store.SharedInboxRaciAssignmentInput `json:"assignments"`
+		Assignments []store.SharedInboxGVICAssignmentInput `json:"assignments"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
@@ -397,14 +397,14 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_raci")
+		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_GVIC")
 		return
 	}
 	if store.CommunicationsSharedInboxResourceType(folder) != store.EntityTypeSharedInbox {
-		writeError(w, http.StatusBadRequest, "shared_inbox_raci_requires_mailbox")
+		writeError(w, http.StatusBadRequest, "shared_inbox_GVIC_requires_mailbox")
 		return
 	}
-	assignments, err := s.repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
+	assignments, err := s.repo.SetCommunicationsSharedInboxGVICAssignments(store.SharedInboxGVICAssignmentUpdateInput{
 		CompanyID:   req.CompanyID,
 		FolderID:    folderID,
 		Assignments: req.Assignments,
@@ -413,12 +413,12 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, "invalid_shared_inbox_gvic_assignments")
 		return
 	}
-	if errors.Is(err, store.ErrAssigneeNotInCompany) {
-		writeError(w, http.StatusBadRequest, "shared_inbox_raci_user_not_in_company")
+	if errors.Is(err, store.ErrPrincipalNotInCompany) {
+		writeError(w, http.StatusBadRequest, "shared_inbox_GVIC_user_not_in_company")
 		return
 	}
-	if errors.Is(err, store.ErrRaciStorageUnavailable) {
-		writeError(w, http.StatusServiceUnavailable, "shared_inbox_raci_storage_unavailable")
+	if errors.Is(err, store.ErrGVICStorageUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "shared_inbox_GVIC_storage_unavailable")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
@@ -426,7 +426,7 @@ func (s *Server) handleCommunicationsSharedInboxRaci(w http.ResponseWriter, r *h
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_update_shared_inbox_raci")
+		writeError(w, http.StatusInternalServerError, "failed_to_update_shared_inbox_GVIC")
 		return
 	}
 	actorUserID := ""

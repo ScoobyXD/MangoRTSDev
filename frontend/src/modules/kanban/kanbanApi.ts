@@ -1,7 +1,7 @@
 import { requestJSON } from "../api/requestJSON.js";
 import type { Account } from "../accounts/accountsApi.js";
 import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
-import type { LogicGateRaciRole, LogicGateRecord } from "../logic-gate-map/shared.js";
+import type { LogicGateGVICRole, LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 import { logicGateIDFromKanbanBoardID, logicGateKanbanBoardID } from "./shared.js";
@@ -168,7 +168,7 @@ export async function upsertKanbanCard(args: {
   return card;
 }
 
-export type RacioMatrixProjectionRow = {
+export type GVICMatrixProjectionRow = {
   company_id: string;
   user_id: string;
   resource_type: "node" | "logic_gate";
@@ -183,27 +183,27 @@ export type RacioMatrixProjectionRow = {
   updated_timestamp: string;
 };
 
-export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord; gvic_projection_rows: RacioMatrixProjectionRow[] };
+export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord; gvic_projection_rows: GVICMatrixProjectionRow[] };
 type LogicGateAssignmentMutationOrigin = "kanban" | "matrix";
 
-export type RacioMatrixNodeCreateResult = {
+export type GVICMatrixNodeCreateResult = {
   node: NodeRecord;
   logic_gate?: LogicGateRecord;
   assignment?: unknown;
   card?: KanbanCard;
   folder_items?: CompanyExplorerFolderItem[];
-  gvic_projection_rows: RacioMatrixProjectionRow[];
+  gvic_projection_rows: GVICMatrixProjectionRow[];
 };
 
 type LogicGateAssignmentCommandPayload = Omit<LogicGateAssignmentCommandResult, "gvic_projection_rows"> & {
-  gvic_projection_rows?: RacioMatrixProjectionRow[] | null;
+  gvic_projection_rows?: GVICMatrixProjectionRow[] | null;
 };
 
-type RacioMatrixNodeCreatePayload = Omit<RacioMatrixNodeCreateResult, "gvic_projection_rows"> & {
-  gvic_projection_rows?: RacioMatrixProjectionRow[] | null;
+type GVICMatrixNodeCreatePayload = Omit<GVICMatrixNodeCreateResult, "gvic_projection_rows"> & {
+  gvic_projection_rows?: GVICMatrixProjectionRow[] | null;
 };
 
-function normalizeRacioProjectionRows(rows?: RacioMatrixProjectionRow[] | null): RacioMatrixProjectionRow[] {
+function normalizeGVICMatrixProjectionRows(rows?: GVICMatrixProjectionRow[] | null): GVICMatrixProjectionRow[] {
   return Array.isArray(rows) ? rows : [];
 }
 
@@ -211,31 +211,31 @@ function normalizeLogicGateAssignmentCommandResult(payload: LogicGateAssignmentC
   return {
     card: { ...payload.card },
     node: { ...payload.node },
-    gvic_projection_rows: normalizeRacioProjectionRows(payload.gvic_projection_rows),
+    gvic_projection_rows: normalizeGVICMatrixProjectionRows(payload.gvic_projection_rows),
   };
 }
 
-export async function createRacioMatrixNode(args: {
+export async function createGVICMatrixNode(args: {
   apiBase: string;
   companyID: string;
   name: string;
   logicGateID?: string;
   createLogicGateHeader?: string;
-  creatorLogicGateRaciRole?: LogicGateRaciRole;
+  creatorLogicGateGVICRole?: LogicGateGVICRole;
   status?: string;
   columnID?: string;
   priority?: number | null;
   position?: number;
   isIssue?: boolean;
-}): Promise<RacioMatrixNodeCreateResult> {
-  const payload = await requestJSON<RacioMatrixNodeCreatePayload>(args.apiBase, "/v2/gvic-matrix/nodes", {
+}): Promise<GVICMatrixNodeCreateResult> {
+  const payload = await requestJSON<GVICMatrixNodeCreatePayload>(args.apiBase, "/v2/gvic-matrix/nodes", {
     method: "POST",
     json: {
       company_id: args.companyID,
       name: args.name,
       logic_gate_id: args.logicGateID,
       create_logic_gate_header: args.createLogicGateHeader,
-      creator_logic_gate_gvic_role: args.creatorLogicGateRaciRole,
+      creator_logic_gate_gvic_role: args.creatorLogicGateGVICRole,
       mutation_origin: "matrix",
       status: args.status ?? args.columnID,
       priority: args.priority,
@@ -252,7 +252,7 @@ export async function createRacioMatrixNode(args: {
   markNodeMapWorkspaceSnapshotStale(args.apiBase, args.companyID);
   return {
     ...payload,
-    gvic_projection_rows: normalizeRacioProjectionRows(payload.gvic_projection_rows),
+    gvic_projection_rows: normalizeGVICMatrixProjectionRows(payload.gvic_projection_rows),
   };
 }
 
@@ -299,7 +299,6 @@ export async function moveLogicGateAssignment(args: {
   columnID?: string;
   position?: number;
   priority?: number | null;
-  assigneePolicy?: string;
   mutationOrigin?: LogicGateAssignmentMutationOrigin;
 }): Promise<LogicGateAssignmentCommandResult> {
   if (!args.fromLogicGateID || args.fromLogicGateID === args.logicGateID) {

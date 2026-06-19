@@ -51,20 +51,8 @@ select
     when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then 'Done'
     else 'Pending'
   end as status,
-  case
-    when projection.is_issue then '#ffd400'
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then $3
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then $4
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then $5
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) = 'review' then $6
-    when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then $7
-    else $8
-  end as status_color,
   projection.due_date::text,
   projection.priority,
-  projection.assignee_user_id::text,
-  nullif(assignee.display_name, '') as assignee_name,
-  nullif(assignee.email, '') as assignee_email,
   projection.node_created_timestamp,
   coalesce(node_logic_gates.logic_gate_ids_json, '[]') as logic_gate_ids_json
 from kanban_board_projection projection
@@ -72,11 +60,6 @@ join node_logic_gate_assignments assignment
   on assignment.company_id = projection.company_id
  and assignment.logic_gate_id = projection.logic_gate_id
  and assignment.node_id = projection.node_id
-left join company_memberships assignee_membership
-  on assignee_membership.company_id = projection.company_id
- and assignee_membership.user_id = projection.assignee_user_id
-left join users assignee
-  on assignee.user_id = assignee_membership.user_id
 left join lateral (
   select coalesce(jsonb_agg(gate.logic_gate_id order by gate.logic_gate_id), '[]'::jsonb)::text as logic_gate_ids_json
   from (
@@ -100,7 +83,7 @@ order by
   end asc,
   projection.position asc,
   projection.assignment_created_timestamp asc,
-  assignment.assignment_id asc`, companyID, logicGateID, KanbanDefaultRequestedColor, KanbanDefaultBacklogColor, KanbanDefaultInProgressColor, KanbanDefaultReviewColor, KanbanDefaultDoneColor, KanbanDefaultPendingColor)
+  assignment.assignment_id asc`, companyID, logicGateID)
 	if err != nil {
 		return domain.LogicGateWorkView{}, err
 	}
@@ -123,12 +106,8 @@ order by
 func scanLogicGateWorkAssignment(row interface{ Scan(dest ...any) error }) (domain.LogicGateWorkAssignment, error) {
 	var item domain.LogicGateWorkAssignment
 	var status sql.NullString
-	var statusColor sql.NullString
 	var dueDate sql.NullString
 	var priority sql.NullInt64
-	var assigneeUserID sql.NullString
-	var assigneeName sql.NullString
-	var assigneeEmail sql.NullString
 	var logicGateIDsJSON sql.NullString
 	err := row.Scan(
 		&item.Assignment.AssignmentID,
@@ -148,12 +127,8 @@ func scanLogicGateWorkAssignment(row interface{ Scan(dest ...any) error }) (doma
 		&item.Node.NodeID,
 		&item.Node.Title,
 		&status,
-		&statusColor,
 		&dueDate,
 		&priority,
-		&assigneeUserID,
-		&assigneeName,
-		&assigneeEmail,
 		&item.Node.CreatedTimestamp,
 		&logicGateIDsJSON,
 	)
@@ -176,9 +151,5 @@ func scanLogicGateWorkAssignment(row interface{ Scan(dest ...any) error }) (doma
 			item.Node.LogicGateIDs = cleanStringList(ids)
 		}
 	}
-	_ = statusColor
-	_ = assigneeUserID
-	_ = assigneeName
-	_ = assigneeEmail
 	return item, nil
 }

@@ -1,36 +1,36 @@
-import type { RacioMatrixProjectionRow } from "../kanban/kanbanApi.js";
+import type { GVICMatrixProjectionRow } from "../kanban/kanbanApi.js";
 
-export type RacioProjectionDeltaOperation = "upsert" | "delete" | "patch";
+export type GVICMatrixProjectionDeltaOperation = "upsert" | "delete" | "patch";
 
-export type RacioProjectionRowKey = {
+export type GVICMatrixProjectionRowKey = {
   company_id?: string;
   user_id?: string;
-  resource_type?: RacioMatrixProjectionRow["resource_type"] | string;
+  resource_type?: GVICMatrixProjectionRow["resource_type"] | string;
   resource_id?: string;
 };
 
-export type RacioProjectionDelta = {
+export type GVICMatrixProjectionDelta = {
   company_id?: string;
   projection?: string;
   projection_sequence?: number | string;
-  operation?: RacioProjectionDeltaOperation | string;
-  row_key?: RacioProjectionRowKey | null;
-  row?: RacioMatrixProjectionRow | null;
-  patch?: Partial<RacioMatrixProjectionRow> | null;
+  operation?: GVICMatrixProjectionDeltaOperation | string;
+  row_key?: GVICMatrixProjectionRowKey | null;
+  row?: GVICMatrixProjectionRow | null;
+  patch?: Partial<GVICMatrixProjectionRow> | null;
   projected_timestamp?: string;
 };
 
-export type RacioProjectionDeltaEnvelope = {
+export type GVICMatrixProjectionDeltaEnvelope = {
   company_id?: string;
   projection?: string;
   projection_scope?: string;
   projection_sequence?: number | string;
   sequence?: number | string;
   projected_timestamp?: string;
-  deltas?: RacioProjectionDelta[];
-} & Partial<RacioProjectionDelta>;
+  deltas?: GVICMatrixProjectionDelta[];
+} & Partial<GVICMatrixProjectionDelta>;
 
-export type RacioProjectionFallbackReason =
+export type GVICMatrixProjectionFallbackReason =
   | "wrong_company"
   | "wrong_projection"
   | "sequence_gap"
@@ -42,31 +42,31 @@ export type RacioProjectionFallbackReason =
   | "missing_existing_row"
   | "wrong_user";
 
-export type RacioProjectionApplyResult = {
-  rows: RacioMatrixProjectionRow[];
+export type GVICMatrixProjectionApplyResult = {
+  rows: GVICMatrixProjectionRow[];
   changed: boolean;
   fallback: boolean;
-  fallbackReason?: RacioProjectionFallbackReason;
+  fallbackReason?: GVICMatrixProjectionFallbackReason;
   lastSequence?: number;
-  removedRowKeys: RacioProjectionRowKey[];
-  upsertedRows: RacioMatrixProjectionRow[];
+  removedRowKeys: GVICMatrixProjectionRowKey[];
+  upsertedRows: GVICMatrixProjectionRow[];
 };
 
-export type RacioProjectionApplyInput = {
-  envelope: RacioProjectionDeltaEnvelope;
+export type GVICMatrixProjectionApplyInput = {
+  envelope: GVICMatrixProjectionDeltaEnvelope;
   companyID: string;
   userID: string;
-  rows: RacioMatrixProjectionRow[];
+  rows: GVICMatrixProjectionRow[];
   lastSequence?: number;
 };
 
-export const RACIO_PROJECTION_NAME = "gvic_matrix";
+export const GVIC_MATRIX_PROJECTION_NAME = "gvic_matrix";
 
-export function racioRealtimeScope(userID: string): string {
+export function GVICMatrixRealtimeScope(userID: string): string {
   return `gvic_matrix:user:${userID.trim()}`;
 }
 
-export function parseRacioProjectionSequence(value: unknown): number {
+export function parseGVICMatrixProjectionSequence(value: unknown): number {
   if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
   if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return 0;
   const parsed = Number(value);
@@ -77,7 +77,7 @@ function cleanString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function rowResourceType(value: unknown): RacioMatrixProjectionRow["resource_type"] | "" {
+function rowResourceType(value: unknown): GVICMatrixProjectionRow["resource_type"] | "" {
   const clean = cleanString(value);
   return clean === "node" || clean === "logic_gate" ? clean : "";
 }
@@ -86,23 +86,23 @@ function rowKey(resourceType: string, resourceID: string): string {
   return `${resourceType}\u0000${resourceID}`;
 }
 
-function deltaUserID(delta: RacioProjectionDelta): string {
+function deltaUserID(delta: GVICMatrixProjectionDelta): string {
   return cleanString(delta.row?.user_id) || cleanString(delta.row_key?.user_id);
 }
 
-function deltaResourceType(delta: RacioProjectionDelta): RacioMatrixProjectionRow["resource_type"] | "" {
+function deltaResourceType(delta: GVICMatrixProjectionDelta): GVICMatrixProjectionRow["resource_type"] | "" {
   return rowResourceType(delta.row?.resource_type) || rowResourceType(delta.row_key?.resource_type);
 }
 
-function deltaResourceID(delta: RacioProjectionDelta): string {
+function deltaResourceID(delta: GVICMatrixProjectionDelta): string {
   return cleanString(delta.row?.resource_id) || cleanString(delta.row_key?.resource_id);
 }
 
-function requestFallback(result: RacioProjectionApplyResult, reason: RacioProjectionFallbackReason): RacioProjectionApplyResult {
+function requestFallback(result: GVICMatrixProjectionApplyResult, reason: GVICMatrixProjectionFallbackReason): GVICMatrixProjectionApplyResult {
   return { ...result, fallback: true, fallbackReason: reason };
 }
 
-function applyPatchToRow(row: RacioMatrixProjectionRow, patch: Partial<RacioMatrixProjectionRow>): RacioMatrixProjectionRow {
+function applyPatchToRow(row: GVICMatrixProjectionRow, patch: Partial<GVICMatrixProjectionRow>): GVICMatrixProjectionRow {
   return {
     ...row,
     ...patch,
@@ -120,14 +120,14 @@ function applyPatchToRow(row: RacioMatrixProjectionRow, patch: Partial<RacioMatr
   };
 }
 
-function deltaList(envelope: RacioProjectionDeltaEnvelope): RacioProjectionDelta[] | null {
+function deltaList(envelope: GVICMatrixProjectionDeltaEnvelope): GVICMatrixProjectionDelta[] | null {
   if (Array.isArray(envelope.deltas)) return envelope.deltas;
-  if (envelope.operation && envelope.row_key) return [envelope as RacioProjectionDelta];
+  if (envelope.operation && envelope.row_key) return [envelope as GVICMatrixProjectionDelta];
   return null;
 }
 
-export function applyRacioProjectionEnvelope(input: RacioProjectionApplyInput): RacioProjectionApplyResult {
-  const result: RacioProjectionApplyResult = {
+export function applyGVICMatrixProjectionEnvelope(input: GVICMatrixProjectionApplyInput): GVICMatrixProjectionApplyResult {
+  const result: GVICMatrixProjectionApplyResult = {
     rows: input.rows,
     changed: false,
     fallback: false,
@@ -141,10 +141,10 @@ export function applyRacioProjectionEnvelope(input: RacioProjectionApplyInput): 
   if (!companyID || !userID || !envelopeCompanyID || envelopeCompanyID !== companyID) {
     return requestFallback(result, "wrong_company");
   }
-  if (cleanString(input.envelope.projection) !== RACIO_PROJECTION_NAME) {
+  if (cleanString(input.envelope.projection) !== GVIC_MATRIX_PROJECTION_NAME) {
     return requestFallback(result, "wrong_projection");
   }
-  const sequence = parseRacioProjectionSequence(input.envelope.projection_sequence ?? input.envelope.sequence);
+  const sequence = parseGVICMatrixProjectionSequence(input.envelope.projection_sequence ?? input.envelope.sequence);
   if (sequence > 0) {
     if (input.lastSequence !== undefined && sequence > input.lastSequence + 1) {
       return requestFallback(result, "sequence_gap");
@@ -160,7 +160,7 @@ export function applyRacioProjectionEnvelope(input: RacioProjectionApplyInput): 
     if (cleanString(delta.company_id) && cleanString(delta.company_id) !== companyID) {
       return requestFallback(result, "wrong_company");
     }
-    if (cleanString(delta.projection) && cleanString(delta.projection) !== RACIO_PROJECTION_NAME) {
+    if (cleanString(delta.projection) && cleanString(delta.projection) !== GVIC_MATRIX_PROJECTION_NAME) {
       return requestFallback(result, "wrong_projection");
     }
     if (deltaUserID(delta) !== userID) return requestFallback(result, "wrong_user");

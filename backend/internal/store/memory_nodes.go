@@ -8,14 +8,10 @@ import (
 )
 
 func (r *MemoryRepo) CreateNode(companyID, title string) (domain.Node, error) {
-	return r.CreateNodeWithAssignee(companyID, title, "")
-}
-
-func (r *MemoryRepo) CreateNodeWithAssignee(companyID, title, assigneeUserID string) (domain.Node, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	snapshot := r.snapshotNodeGraphEventStateLocked()
-	item, err := r.createNodeWithAssigneeLocked(companyID, title, assigneeUserID)
+	item, err := r.createNodeLocked(companyID, title)
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.Node{}, err
@@ -23,11 +19,11 @@ func (r *MemoryRepo) CreateNodeWithAssignee(companyID, title, assigneeUserID str
 	return item, nil
 }
 
-func (r *MemoryRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title, assigneeUserID string) (domain.Node, domain.DomainEvent, error) {
+func (r *MemoryRepo) CreateNodeWithWorkspaceEvent(companyID, title string) (domain.Node, domain.DomainEvent, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	snapshot := r.snapshotNodeGraphEventStateLocked()
-	item, err := r.createNodeWithAssigneeLocked(companyID, title, assigneeUserID)
+	item, err := r.createNodeLocked(companyID, title)
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.Node{}, domain.DomainEvent{}, err
@@ -40,13 +36,12 @@ func (r *MemoryRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title, a
 	return item, event, nil
 }
 
-func (r *MemoryRepo) createNodeWithAssigneeLocked(companyID, title, assigneeUserID string) (domain.Node, error) {
-	return r.createNodeWithAssigneeIDLocked(companyID, "", title, assigneeUserID)
+func (r *MemoryRepo) createNodeLocked(companyID, title string) (domain.Node, error) {
+	return r.createNodeWithIDLocked(companyID, "", title)
 }
 
-func (r *MemoryRepo) createNodeWithAssigneeIDLocked(companyID, nodeID, title, assigneeUserID string) (domain.Node, error) {
+func (r *MemoryRepo) createNodeWithIDLocked(companyID, nodeID, title string) (domain.Node, error) {
 	nodeID = strings.TrimSpace(nodeID)
-	_ = strings.TrimSpace(assigneeUserID)
 	if nodeID == "" {
 		nodeID = newUUIDv7String()
 	} else if _, exists := r.nodes[key(companyID, nodeID)]; exists {
@@ -64,37 +59,29 @@ func (r *MemoryRepo) createNodeWithAssigneeIDLocked(companyID, nodeID, title, as
 		delete(r.nodes, key(companyID, n.NodeID))
 		return domain.Node{}, err
 	}
-	r.syncRacioProjectionForNodeLocked(companyID, n.NodeID)
+	r.syncGVICMatrixProjectionForNodeLocked(companyID, n.NodeID)
 	return r.withNodeReadModelLocked(n), nil
 }
 
-func (r *MemoryRepo) deriveNodeStatusLocked(companyID, nodeID string) (*string, *string) {
+func (r *MemoryRepo) deriveNodeStatusLocked(companyID, nodeID string) *string {
 	assignment, ok := r.nodeLogicGateAssignmentLocked(companyID, nodeID, "")
 	if !ok {
-		return nil, nil
+		return nil
 	}
 	status := ""
-	statusColor := ""
 	if assignment.IsIssue {
 		status = "Issue"
-		statusColor = "#ffd400"
 	} else if title, ok := r.kanbanColumnTitleLocked(companyID, assignment.CompatibilityBoardID, assignment.ColumnID); ok {
 		status = title
-		if column, found := r.kanbanColumnLocked(companyID, assignment.CompatibilityBoardID, assignment.ColumnID); found {
-			statusColor = column.ItemColor
-		}
 	}
 	if status == "" {
 		status = "Unknown"
 	}
-	if statusColor == "" {
-		statusColor = "#fbb152"
-	}
-	return &status, &statusColor
+	return &status
 }
 
 func (r *MemoryRepo) withDerivedNodeStatusLocked(node domain.Node) domain.Node {
-	derivedStatus, _ := r.deriveNodeStatusLocked(node.CompanyID, node.NodeID)
+	derivedStatus := r.deriveNodeStatusLocked(node.CompanyID, node.NodeID)
 	if derivedStatus != nil {
 		node.Status = derivedStatus
 	}
@@ -144,7 +131,7 @@ func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.
 	snapshot := r.snapshotNodeGraphEventStateLocked()
 	before, hasBefore := r.nodes[key(input.CompanyID, input.NodeID)]
 	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
-	racioProjectionBefore := r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil)
+	GVICMatrixProjectionBefore := r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil)
 	gvicEffectiveBefore := r.gvicEffectiveAssignmentsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
 	beforeGeneratedUserIDs := gvicEffectiveUserIDsForRole(gvicEffectiveBefore, domain.GVICRoleGenerated)
 	projectManagementProjectionBefore := r.projectManagementTimelineProjectionRowsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
@@ -154,12 +141,12 @@ func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
 	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
-	racioProjectionAfter := r.racioProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil)
+	GVICMatrixProjectionAfter := r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil)
 	gvicEffectiveAfter := r.gvicEffectiveAssignmentsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
 	afterGeneratedUserIDs := gvicEffectiveUserIDsForRole(gvicEffectiveAfter, domain.GVICRoleGenerated)
 	projectManagementProjectionAfter := r.projectManagementTimelineProjectionRowsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
 	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
-	projectionDeltas = append(projectionDeltas, diffRacioProjectionRows(racioProjectionBefore, racioProjectionAfter)...)
+	projectionDeltas = append(projectionDeltas, diffGVICMatrixProjectionRows(GVICMatrixProjectionBefore, GVICMatrixProjectionAfter)...)
 	projectionDeltas = append(projectionDeltas, diffGVICEffectiveProjectionRows(gvicEffectiveProjectionRowsFromDomain(gvicEffectiveBefore), gvicEffectiveProjectionRowsFromDomain(gvicEffectiveAfter))...)
 	projectionDeltas = append(projectionDeltas, diffProjectManagementProjectionRows(projectManagementProjectionBefore, projectManagementProjectionAfter)...)
 	eventInput := nodeUpdatedWorkspaceEventInput(item)
@@ -207,7 +194,7 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 		node.Priority = input.Priority
 	}
 	r.nodes[k] = node
-	r.syncRacioProjectionForNodeLocked(input.CompanyID, input.NodeID)
+	r.syncGVICMatrixProjectionForNodeLocked(input.CompanyID, input.NodeID)
 	r.syncProjectManagementTimelineProjectionForNodeLocked(input.CompanyID, input.NodeID)
 	return r.withNodeReadModelLocked(node), nil
 }
@@ -405,7 +392,7 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	if _, ok := r.nodes[k]; !ok {
 		return ErrNotFound
 	}
-	r.deleteRacioProjectionForNodeLocked(companyID, nodeID)
+	r.deleteGVICMatrixProjectionForNodeLocked(companyID, nodeID)
 	for itemKey, item := range r.projectTimelineItems {
 		if item.CompanyID == companyID && item.EntityType == EntityTypeNode && item.EntityID == nodeID {
 			delete(r.projectTimelineItems, itemKey)
@@ -602,7 +589,7 @@ func (r *MemoryRepo) ListNodeMapWindow(query NodeMapWindowQuery) (NodeMapWindowR
 		if folder.SystemKey != nil && *folder.SystemKey == "kanban_boards" {
 			continue
 		}
-		result.Folders = append(result.Folders, r.withSharedInboxRaciLocked(folder))
+		result.Folders = append(result.Folders, r.withSharedInboxGVICLocked(folder))
 	}
 	sort.Slice(result.Folders, func(i, j int) bool {
 		if result.Folders[i].Position == result.Folders[j].Position {

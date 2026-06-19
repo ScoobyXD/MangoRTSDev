@@ -54,9 +54,6 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	if node.Priority == nil || *node.Priority != CommunicationsTriageConversionDefaultPriority {
 		t.Fatalf("node priority = %+v, want default %d", node.Priority, CommunicationsTriageConversionDefaultPriority)
 	}
-	if node.AssigneeUserID != nil {
-		t.Fatalf("node assignee = %+v, want nil after GVIC migration", node.AssigneeUserID)
-	}
 	if !stringSliceContains(node.LogicGateIDs, logicGate.LogicGateID) {
 		t.Fatalf("node logic_gate_ids = %+v, want %s", node.LogicGateIDs, logicGate.LogicGateID)
 	}
@@ -332,12 +329,12 @@ func setupEmailConversionUserAndGate(t *testing.T, repo *MemoryRepo, companyID s
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
+		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}
 	return user, logicGate
 }

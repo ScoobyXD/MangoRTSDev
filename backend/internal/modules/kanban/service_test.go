@@ -28,15 +28,15 @@ func TestAssignNodeToLogicGateStatusWritesAssignmentSourceAndKanbanProjection(t 
 	if _, err := repo.AddCompanyMembership("assignment-responsible", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{
+		Assignments: []store.LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
 			UserID: responsibleUser.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}
 
 	fallbackStatus := "Direct fallback"
@@ -74,14 +74,8 @@ func TestAssignNodeToLogicGateStatusWritesAssignmentSourceAndKanbanProjection(t 
 	if assigned.Node.Status == nil || *assigned.Node.Status != "In Progress" {
 		t.Fatalf("assigned node status = %+v, want In Progress", assigned.Node.Status)
 	}
-	if assigned.Node.StatusColor != nil {
-		t.Fatalf("assigned node status_color = %+v, want nil after GVIC migration", assigned.Node.StatusColor)
-	}
 	if assigned.Node.Priority == nil || *assigned.Node.Priority != priority {
 		t.Fatalf("assigned node priority = %+v, want %d", assigned.Node.Priority, priority)
-	}
-	if assigned.Node.AssigneeUserID != nil {
-		t.Fatalf("assigned node assignee = %+v, want nil after GVIC migration", assigned.Node.AssigneeUserID)
 	}
 	if len(assigned.Node.LogicGateIDs) != 1 || assigned.Node.LogicGateIDs[0] != logicGate.LogicGateID {
 		t.Fatalf("assigned node logic_gate_ids = %+v, want assignment-derived Logic Gate", assigned.Node.LogicGateIDs)
@@ -122,9 +116,6 @@ func TestAssignNodeToLogicGateStatusWritesAssignmentSourceAndKanbanProjection(t 
 	}
 	if issueResult.Node.Status == nil || *issueResult.Node.Status != "Issue" {
 		t.Fatalf("issue node status = %+v, want Issue", issueResult.Node.Status)
-	}
-	if issueResult.Node.StatusColor != nil {
-		t.Fatalf("issue node status_color = %+v, want nil after GVIC migration", issueResult.Node.StatusColor)
 	}
 	assertLogicGateAssignmentSource(t, repo, companyID, node.NodeID, logicGate.LogicGateID, issueResult.Card, true)
 }
@@ -250,8 +241,8 @@ func TestLogicGateAssignmentMoveIssueAndRemoveCommands(t *testing.T) {
 	if removed.Card.CardID != assigned.Card.CardID {
 		t.Fatalf("removed card_id = %q, want %q", removed.Card.CardID, assigned.Card.CardID)
 	}
-	if removed.Node.Status != nil || removed.Node.StatusColor != nil {
-		t.Fatalf("removed node status = %+v/%+v, want cleared fallback", removed.Node.Status, removed.Node.StatusColor)
+	if removed.Node.Status != nil {
+		t.Fatalf("removed node status = %+v, want cleared fallback", removed.Node.Status)
 	}
 	if len(removed.Node.LogicGateIDs) != 0 {
 		t.Fatalf("removed node logic_gate_ids = %+v, want none", removed.Node.LogicGateIDs)
@@ -466,9 +457,6 @@ func TestLogicGateAssignmentRemoveUsesExplicitFallback(t *testing.T) {
 	}
 	if removed.Node.Status == nil || *removed.Node.Status != fallbackStatus {
 		t.Fatalf("fallback status = %+v, want %q", removed.Node.Status, fallbackStatus)
-	}
-	if removed.Node.StatusColor != nil {
-		t.Fatalf("fallback status color = %+v, want nil after GVIC migration", removed.Node.StatusColor)
 	}
 }
 

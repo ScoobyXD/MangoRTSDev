@@ -610,7 +610,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       nodeByID.set(card.node_id, {
         company_id: existing?.company_id ?? card.company_id,
         node_id: card.node_id,
-        title: existing?.title ?? card.node_title,
+        name: existing?.name ?? card.node_title,
         created_timestamp: existing?.created_timestamp ?? card.created_timestamp,
         ...existing,
         due_date: card.due_date ?? existing?.due_date ?? null,
@@ -640,7 +640,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         card.priority != null ? String(card.priority) : "",
         ...(card.accounts ?? []).flatMap((account) => [account.name, account.account_id]),
         columnTitleByID.get(card.column_id) ?? "",
-        node?.title ?? "",
+        node?.name ?? "",
         node?.status ?? "",
         node?.due_date ?? "",
         node?.priority != null ? String(node.priority) : "",

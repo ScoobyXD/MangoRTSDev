@@ -49,9 +49,6 @@ func scanKanbanCard(row interface {
 	var item domain.KanbanCard
 	var dueDate sql.NullString
 	var priority sql.NullInt64
-	var assigneeUserID sql.NullString
-	var assigneeName sql.NullString
-	var assigneeEmail sql.NullString
 	var accountsJSON sql.NullString
 	err := row.Scan(
 		&item.CompanyID,
@@ -66,9 +63,6 @@ func scanKanbanCard(row interface {
 		&item.Position,
 		&dueDate,
 		&priority,
-		&assigneeUserID,
-		&assigneeName,
-		&assigneeEmail,
 		&item.ProjectionUpdatedTimestamp,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
@@ -82,9 +76,6 @@ func scanKanbanCard(row interface {
 		item.Priority = &value
 	}
 	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
-	_ = assigneeUserID
-	_ = assigneeName
-	_ = assigneeEmail
 	return item, err
 }
 
@@ -402,9 +393,9 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID).Scan(&canoni
 				return LogicGateNodeAssignmentResult{}, ErrNotFound
 			}
 			if deferCreatedNodeFolderItem {
-				createdNode, err = r.createNodeWithAssigneeIDWithoutProjectionOrFolderTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle, input.ActorUserID)
+				createdNode, err = r.createNodeWithIDWithoutProjectionOrFolderTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle)
 			} else {
-				createdNode, err = r.createNodeWithAssigneeIDWithoutProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle, "")
+				createdNode, err = r.createNodeWithIDWithoutProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.CreateNodeTitle)
 			}
 			if err != nil {
 				return LogicGateNodeAssignmentResult{}, err

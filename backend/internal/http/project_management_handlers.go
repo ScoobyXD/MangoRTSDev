@@ -284,7 +284,7 @@ func (s *Server) writeProjectManagementMutationError(w http.ResponseWriter, err 
 		writeError(w, http.StatusBadRequest, "invalid_timeline_item")
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "timeline_item_not_found")
-	case errors.Is(err, store.ErrAssigneeNotInCompany):
+	case errors.Is(err, store.ErrPrincipalNotInCompany):
 		writeError(w, http.StatusBadRequest, "target_user_not_found")
 	default:
 		writeError(w, http.StatusInternalServerError, fallback)

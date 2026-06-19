@@ -1643,7 +1643,7 @@ function expandLogicGateRelationshipTargets(
     const childNodes = workspace.nodes
       .filter((node) => (node.logic_gate_ids ?? []).some((logicGateID) => logicGateID.trim() === gateID))
       .sort((left, right) => (
-        (left.title || left.node_id).localeCompare(right.title || right.node_id, undefined, { numeric: true, sensitivity: "base" })
+        (left.name || left.node_id).localeCompare(right.name || right.node_id, undefined, { numeric: true, sensitivity: "base" })
         || left.node_id.localeCompare(right.node_id)
       ));
     for (const node of childNodes) {

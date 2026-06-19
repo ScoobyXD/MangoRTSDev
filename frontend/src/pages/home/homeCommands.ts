@@ -12,19 +12,19 @@ import {
   sendEmail as defaultSendEmail,
   unarchiveEmailMessage as defaultUnarchiveEmailMessage,
   updateCommunicationsSharedInbox as defaultUpdateCommunicationsSharedInbox,
-  updateCommunicationsSharedInboxRaciAssignments as defaultUpdateCommunicationsSharedInboxRaciAssignments,
+  updateCommunicationsSharedInboxGVICAssignments as defaultUpdateCommunicationsSharedInboxGVICAssignments,
   updateEmailMessage as defaultUpdateEmailMessage,
   updateNode as defaultUpdateNode,
 } from "../../modules/communications/communicationsApi.js";
 import { requestJSON as defaultRequestJSON, type RequestJSONInit } from "../../modules/api/requestJSON.js";
-import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
+import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import type {
   CompanyUser,
   ArchiveEmailMessagesBatchResult,
   CommunicationsSharedInbox,
-  CommunicationsSharedInboxRaciAssignment,
-  CommunicationsSharedInboxRaciRole,
-  CommunicationsSharedInboxRaciSubjectType,
+  CommunicationsSharedInboxGVICAssignment,
+  CommunicationsSharedInboxGVICRole,
+  CommunicationsSharedInboxGVICPrincipalType,
   EmailMessage,
   SendEmailInput,
   UserLogicGateShortcut,
@@ -33,12 +33,12 @@ import type { ExplorerDragPayload } from "../../modules/company-explorer/company
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders.js";
 import {
   assignNodeToLogicGateStatus as defaultAssignNodeToLogicGateStatus,
-  createRacioMatrixNode as defaultCreateRacioMatrixNode,
+  createGVICMatrixNode as defaultCreateGVICMatrixNode,
   invalidateKanbanBoardListCache as defaultInvalidateKanbanBoardListCache,
   invalidateLogicGateArenaViewCache as defaultInvalidateLogicGateArenaViewCache,
   moveLogicGateAssignment as defaultMoveLogicGateAssignment,
 } from "../../modules/kanban/kanbanApi.js";
-import type { LogicGateAssignmentCommandResult, RacioMatrixProjectionRow } from "../../modules/kanban/kanbanApi.js";
+import type { LogicGateAssignmentCommandResult, GVICMatrixProjectionRow } from "../../modules/kanban/kanbanApi.js";
 import {
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
   EVENT_KANBAN_BOARDS_UPDATED,
@@ -53,10 +53,10 @@ import {
   collectSharedInboxSubtreeIDs,
   logicGateIDsFromExplorerPayload,
   nodeTitle,
-  normalizeResponsibleInboxStatus,
+  normalizeGVICInboxStatus,
 } from "./homeUtils.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "./homeConstants.js";
-import type { ComposeState, HomeEntityDeleteKind, HomeViewID, InboxPriority, ResponsibleInboxStatus } from "./homeTypes.js";
+import type { ComposeState, HomeEntityDeleteKind, HomeViewID, InboxPriority, GVICInboxStatus } from "./homeTypes.js";
 
 export type HomeDropAssignNodeToLogicGateStatus = (
   args: Parameters<typeof defaultAssignNodeToLogicGateStatus>[0],
@@ -66,7 +66,7 @@ export type HomeBulkMoveLogicGateAssignment = (
   args: Parameters<typeof defaultMoveLogicGateAssignment>[0],
 ) => Promise<LogicGateAssignmentCommandResult>;
 
-export type HomeCreateRacioMatrixNode = typeof defaultCreateRacioMatrixNode;
+export type HomeCreateGVICMatrixNode = typeof defaultCreateGVICMatrixNode;
 
 export type HomeArchiveEmailMessage = typeof defaultArchiveEmailMessage;
 export type HomeArchiveEmailMessagesBatch = typeof defaultArchiveEmailMessagesBatch;
@@ -81,7 +81,7 @@ export type HomeConvertTriageMessagesToLogicGate = typeof defaultConvertTriageMe
 export type HomeCreateSharedInbox = typeof defaultCreateCommunicationsSharedInbox;
 export type HomeUpdateSharedInbox = typeof defaultUpdateCommunicationsSharedInbox;
 export type HomeDeleteSharedInbox = typeof defaultDeleteCommunicationsSharedInbox;
-export type HomeUpdateSharedInboxRaciAssignments = typeof defaultUpdateCommunicationsSharedInboxRaciAssignments;
+export type HomeUpdateSharedInboxGVICAssignments = typeof defaultUpdateCommunicationsSharedInboxGVICAssignments;
 
 export type HomeBulkNodePatch = Partial<Pick<NodeRecord, "priority" | "status" | "due_date">>;
 export type HomeMailMessageUpdate = { unread?: boolean; starred?: boolean; folders?: string[] };
@@ -153,9 +153,9 @@ export type HomeSharedInboxDeleteCommandResult = {
   deletedFolderIDs: string[];
 };
 
-export type HomeSharedInboxRaciCommandResult = {
+export type HomeSharedInboxGVICCommandResult = {
   folderID: string;
-  assignments: CommunicationsSharedInboxRaciAssignment[];
+  assignments: CommunicationsSharedInboxGVICAssignment[];
 };
 
 export type HomeCreateNodeCommandResult = {
@@ -168,16 +168,16 @@ export type HomeCreateLogicGateCommandResult = {
   folderItems: CompanyExplorerFolderItem[];
 };
 
-export type HomeCreateRacioMatrixNodeCommandResult = {
+export type HomeCreateGVICMatrixNodeCommandResult = {
   node: NodeRecord;
   logicGate?: LogicGateRecord;
   folderItems: CompanyExplorerFolderItem[];
-  gvic_projection_rows: RacioMatrixProjectionRow[];
+  gvic_projection_rows: GVICMatrixProjectionRow[];
 };
 
 export type HomeLogicGateDropCommandResult = {
   nodes: NodeRecord[];
-  gvic_projection_rows: RacioMatrixProjectionRow[];
+  gvic_projection_rows: GVICMatrixProjectionRow[];
 };
 
 type HomeWorkspaceEntityBatchResponse = {
@@ -343,7 +343,7 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
   fromLogicGateID?: string;
   nodeIDs: string[];
   priority: InboxPriority;
-  status?: ResponsibleInboxStatus;
+  status?: GVICInboxStatus;
   nodeByID: Map<string, NodeRecord>;
   assignNodeToLogicGateStatus?: HomeDropAssignNodeToLogicGateStatus;
   moveLogicGateAssignment?: HomeBulkMoveLogicGateAssignment;
@@ -361,7 +361,7 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
   const results = await Promise.all(nodeIDs.map(async (nodeID) => {
     const node = args.nodeByID.get(nodeID);
     if (!node) return null;
-    const status = args.status ?? normalizeResponsibleInboxStatus(node.status) ?? "pending";
+    const status = args.status ?? normalizeGVICInboxStatus(node.status) ?? "pending";
     if (fromLogicGateID) {
       const result = await moveLogicGateAssignment({
         apiBase: args.apiBase,
@@ -417,7 +417,7 @@ export async function addNodesToLogicGateCommand(args: {
     const node = args.nodeByID.get(nodeID);
     if (!node) return null;
     const priority = typeof node.priority === "number" && node.priority >= 1 && node.priority <= 5 ? node.priority : null;
-    const status = normalizeResponsibleInboxStatus(node.status) ?? "pending";
+    const status = normalizeGVICInboxStatus(node.status) ?? "pending";
     const result = await assignNodeToLogicGateStatus({
       apiBase: args.apiBase,
       companyID: args.companyID,
@@ -436,7 +436,7 @@ export async function addNodesToLogicGateCommand(args: {
 export async function createHomeNodeCommand(args: {
   apiBase: string;
   companyID: string;
-  title?: string;
+  name?: string;
   requestJSON?: HomeEntityCreateRequestJSON;
 }): Promise<HomeCreateNodeCommandResult> {
   const requestJSON = args.requestJSON ?? defaultRequestJSON;
@@ -446,7 +446,7 @@ export async function createHomeNodeCommand(args: {
     mutationOrigin: "matrix",
     items: [{
       client_id: createWorkspaceEntityBatchClientID("home-node"),
-      title: args.title?.trim() || "new node",
+      name: args.name?.trim() || "new node",
       x: 120,
       y: 120,
     }],
@@ -461,14 +461,14 @@ export async function createHomeLogicGateCommand(args: {
   apiBase: string;
   companyID: string;
   title?: string;
-  creatorRaciRole?: LogicGateRaciRole;
+  creatorGVICRole?: LogicGateGVICRole;
   requestJSON?: HomeEntityCreateRequestJSON;
 }): Promise<HomeCreateLogicGateCommandResult> {
   const requestJSON = args.requestJSON ?? defaultRequestJSON;
   const response = await createWorkspaceEntityBatchCommand<HomeWorkspaceEntityBatchResponse>({
     companyID: args.companyID,
     entityKind: "logic_gate",
-    creatorLogicGateRaciRole: args.creatorRaciRole,
+    creatorLogicGateGVICRole: args.creatorGVICRole,
     mutationOrigin: "matrix",
     items: [{
       client_id: createWorkspaceEntityBatchClientID("home-logic-gate"),
@@ -483,25 +483,25 @@ export async function createHomeLogicGateCommand(args: {
   return { logicGate, folderItems: response.folder_items ?? [] };
 }
 
-export async function createHomeRacioMatrixNodeCommand(args: {
+export async function createHomeGVICMatrixNodeCommand(args: {
   apiBase: string;
   companyID: string;
   title?: string;
   logicGateID?: string;
   createLogicGateTitle?: string;
-  creatorRaciRole?: LogicGateRaciRole;
+  creatorGVICRole?: LogicGateGVICRole;
   priority: InboxPriority;
-  status?: ResponsibleInboxStatus;
-  createRacioMatrixNode?: HomeCreateRacioMatrixNode;
-}): Promise<HomeCreateRacioMatrixNodeCommandResult> {
-  const createRacioMatrixNode = args.createRacioMatrixNode ?? defaultCreateRacioMatrixNode;
-  const result = await createRacioMatrixNode({
+  status?: GVICInboxStatus;
+  createGVICMatrixNode?: HomeCreateGVICMatrixNode;
+}): Promise<HomeCreateGVICMatrixNodeCommandResult> {
+  const createGVICMatrixNode = args.createGVICMatrixNode ?? defaultCreateGVICMatrixNode;
+  const result = await createGVICMatrixNode({
     apiBase: args.apiBase,
     companyID: args.companyID,
     name: args.title?.trim() || "new node",
     logicGateID: args.logicGateID,
     createLogicGateHeader: args.createLogicGateTitle,
-    creatorLogicGateRaciRole: args.creatorRaciRole,
+    creatorLogicGateGVICRole: args.creatorGVICRole,
     priority: args.priority === 0 ? null : args.priority,
     status: args.status ?? "pending",
     position: 0,
@@ -563,7 +563,7 @@ export async function applyBulkNodePatchCommand(args: {
 
   const moveLogicGateAssignment = args.moveLogicGateAssignment ?? defaultMoveLogicGateAssignment;
   const updateNode = args.updateNode ?? defaultUpdateNode;
-  const status = normalizeResponsibleInboxStatus(args.patch.status);
+  const status = normalizeGVICInboxStatus(args.patch.status);
   const priorityWasSet = Object.prototype.hasOwnProperty.call(args.patch, "priority");
 
   return Promise.all(nodeIDs.map(async (nodeID) => {
@@ -673,55 +673,55 @@ export async function deleteSharedInboxCommand(args: {
   return { deletedFolderIDs: Array.from(deletedIDs) };
 }
 
-export async function saveSharedInboxRaciAssignmentsCommand(args: {
+export async function saveSharedInboxGVICAssignmentsCommand(args: {
   companyID: string;
   folderID: string;
-  assignments: CommunicationsSharedInboxRaciAssignment[];
-  updateSharedInboxRaciAssignments?: HomeUpdateSharedInboxRaciAssignments;
-}): Promise<HomeSharedInboxRaciCommandResult | null> {
+  assignments: CommunicationsSharedInboxGVICAssignment[];
+  updateSharedInboxGVICAssignments?: HomeUpdateSharedInboxGVICAssignments;
+}): Promise<HomeSharedInboxGVICCommandResult | null> {
   const folderID = args.folderID.trim();
   if (!folderID) return null;
   const directAssignments = args.assignments.filter((assignment) => assignment.folder_id === folderID);
-  const updateSharedInboxRaciAssignments = args.updateSharedInboxRaciAssignments ?? defaultUpdateCommunicationsSharedInboxRaciAssignments;
-  const assignments = await updateSharedInboxRaciAssignments(
+  const updateSharedInboxGVICAssignments = args.updateSharedInboxGVICAssignments ?? defaultUpdateCommunicationsSharedInboxGVICAssignments;
+  const assignments = await updateSharedInboxGVICAssignments(
     args.companyID,
     folderID,
     directAssignments.map((assignment) => ({
       role: assignment.role,
-      subject_type: assignment.subject_type ?? "user",
-      subject_id: assignment.subject_id ?? assignment.user_id,
+      principal_type: assignment.principal_type ?? "user",
+      principal_id: assignment.principal_id ?? assignment.user_id,
       user_id: assignment.user_id,
     })),
   );
   return { folderID, assignments };
 }
 
-export async function addSharedInboxRaciSubjectCommand(args: {
+export async function addSharedInboxGVICPrincipalCommand(args: {
   companyID: string;
   folderID: string;
-  role: CommunicationsSharedInboxRaciRole;
-  subjectType: CommunicationsSharedInboxRaciSubjectType;
-  subjectID: string;
-  subjectName?: string;
+  role: CommunicationsSharedInboxGVICRole;
+  principalType: CommunicationsSharedInboxGVICPrincipalType;
+  principalID: string;
+  principalName?: string;
   sharedInboxes: CommunicationsSharedInbox[];
   companyUsers: CompanyUser[];
   now?: () => string;
-  updateSharedInboxRaciAssignments?: HomeUpdateSharedInboxRaciAssignments;
-}): Promise<HomeSharedInboxRaciCommandResult | null> {
+  updateSharedInboxGVICAssignments?: HomeUpdateSharedInboxGVICAssignments;
+}): Promise<HomeSharedInboxGVICCommandResult | null> {
   const folderID = args.folderID.trim();
-  const subjectID = args.subjectID.trim();
-  if (!folderID || !subjectID) return null;
+  const principalID = args.principalID.trim();
+  if (!folderID || !principalID) return null;
   const folder = args.sharedInboxes.find((item) => item.folder_id === folderID);
-  const subjectType = args.subjectType;
+  const principalType = args.principalType;
   if (!folder || (folder.gvic_assignments ?? []).some((assignment) => (
     assignment.role === args.role
-    && (assignment.subject_type ?? "user") === subjectType
-    && (assignment.subject_id ?? assignment.user_id) === subjectID
+    && (assignment.principal_type ?? "user") === principalType
+    && (assignment.principal_id ?? assignment.user_id) === principalID
   ))) {
     return null;
   }
-  const user = subjectType === "user" ? args.companyUsers.find((item) => item.user_id === subjectID) : undefined;
-  return saveSharedInboxRaciAssignmentsCommand({
+  const user = principalType === "user" ? args.companyUsers.find((item) => item.user_id === principalID) : undefined;
+  return saveSharedInboxGVICAssignmentsCommand({
     companyID: args.companyID,
     folderID,
     assignments: [
@@ -730,45 +730,45 @@ export async function addSharedInboxRaciSubjectCommand(args: {
         company_id: args.companyID,
         folder_id: folderID,
         role: args.role,
-        subject_type: subjectType,
-        subject_id: subjectID,
-        subject_name: args.subjectName ?? user?.display_name ?? user?.email,
-        user_id: subjectType === "user" ? subjectID : "",
+        principal_type: principalType,
+        principal_id: principalID,
+        principal_name: args.principalName ?? user?.display_name ?? user?.email,
+        user_id: principalType === "user" ? principalID : "",
         user_display_name: user?.display_name,
         user_email: user?.email,
         created_timestamp: args.now?.() ?? new Date().toISOString(),
       },
     ],
-    updateSharedInboxRaciAssignments: args.updateSharedInboxRaciAssignments,
+    updateSharedInboxGVICAssignments: args.updateSharedInboxGVICAssignments,
   });
 }
 
-export async function removeSharedInboxRaciSubjectCommand(args: {
+export async function removeSharedInboxGVICPrincipalCommand(args: {
   companyID: string;
   folderID: string;
-  role: CommunicationsSharedInboxRaciRole;
-  subjectType: CommunicationsSharedInboxRaciSubjectType;
-  subjectID: string;
+  role: CommunicationsSharedInboxGVICRole;
+  principalType: CommunicationsSharedInboxGVICPrincipalType;
+  principalID: string;
   sharedInboxes: CommunicationsSharedInbox[];
-  updateSharedInboxRaciAssignments?: HomeUpdateSharedInboxRaciAssignments;
-}): Promise<HomeSharedInboxRaciCommandResult | null> {
+  updateSharedInboxGVICAssignments?: HomeUpdateSharedInboxGVICAssignments;
+}): Promise<HomeSharedInboxGVICCommandResult | null> {
   const folderID = args.folderID.trim();
-  const subjectID = args.subjectID.trim();
-  if (!folderID || !subjectID) return null;
+  const principalID = args.principalID.trim();
+  if (!folderID || !principalID) return null;
   const folder = args.sharedInboxes.find((item) => item.folder_id === folderID);
   if (!folder) return null;
   const directAssignments = (folder.gvic_assignments ?? []).filter((assignment) => assignment.folder_id === folderID);
   const assignments = directAssignments.filter((assignment) => !(
     assignment.role === args.role
-    && (assignment.subject_type ?? "user") === args.subjectType
-    && (assignment.subject_id ?? assignment.user_id) === subjectID
+    && (assignment.principal_type ?? "user") === args.principalType
+    && (assignment.principal_id ?? assignment.user_id) === principalID
   ));
   if (assignments.length === directAssignments.length) return null;
-  return saveSharedInboxRaciAssignmentsCommand({
+  return saveSharedInboxGVICAssignmentsCommand({
     companyID: args.companyID,
     folderID,
     assignments,
-    updateSharedInboxRaciAssignments: args.updateSharedInboxRaciAssignments,
+    updateSharedInboxGVICAssignments: args.updateSharedInboxGVICAssignments,
   });
 }
 export async function addMyLogicGateShortcutsCommand(args: {

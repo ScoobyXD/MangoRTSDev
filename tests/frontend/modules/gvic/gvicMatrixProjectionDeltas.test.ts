@@ -2,13 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  applyRacioProjectionEnvelope,
-  racioRealtimeScope,
-  type RacioProjectionDeltaEnvelope,
-} from "../../../../frontend/src/modules/racio/racioProjectionDeltas.js";
-import type { RacioMatrixProjectionRow } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
+  applyGVICMatrixProjectionEnvelope,
+  GVICMatrixRealtimeScope,
+  type GVICMatrixProjectionDeltaEnvelope,
+} from "../../../../frontend/src/modules/GVICMatrix/GVICMatrixProjectionDeltas.js";
+import type { GVICMatrixProjectionRow } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 
-function row(overrides: Partial<RacioMatrixProjectionRow> = {}): RacioMatrixProjectionRow {
+function row(overrides: Partial<GVICMatrixProjectionRow> = {}): GVICMatrixProjectionRow {
   return {
     company_id: "company-1",
     user_id: "user-1",
@@ -17,22 +17,18 @@ function row(overrides: Partial<RacioMatrixProjectionRow> = {}): RacioMatrixProj
     logic_gate_id: "gate-1",
     display_title: "Alpha",
     status: "todo",
-    status_color: "#64748b",
     due_date: "2026-06-03",
     priority: 2,
-    assignee_user_id: "user-1",
-    assignee_display_name: "Casey",
-    assignee_email: "casey@example.com",
     resource_created_timestamp: "2026-06-01T00:00:00.000Z",
     updated_timestamp: "2026-06-02T00:00:00.000Z",
     ...overrides,
   };
 }
 
-function envelope(overrides: Partial<RacioProjectionDeltaEnvelope> = {}): RacioProjectionDeltaEnvelope {
+function envelope(overrides: Partial<GVICMatrixProjectionDeltaEnvelope> = {}): GVICMatrixProjectionDeltaEnvelope {
   return {
     company_id: "company-1",
-    projection: "racio_matrix",
+    projection: "GVICMatrix_matrix",
     projection_scope: "user:user-1",
     projection_sequence: 1,
     projected_timestamp: "2026-06-02T00:00:00.000Z",
@@ -42,11 +38,11 @@ function envelope(overrides: Partial<RacioProjectionDeltaEnvelope> = {}): RacioP
 }
 
 test("builds the GVIC realtime user scope", () => {
-  assert.equal(racioRealtimeScope(" user-1 "), "racio:user:user-1");
+  assert.equal(GVICMatrixRealtimeScope(" user-1 "), "GVICMatrix:user:user-1");
 });
 
 test("applies GVIC upsert and delete projection deltas locally", () => {
-  const upserted = applyRacioProjectionEnvelope({
+  const upserted = applyGVICMatrixProjectionEnvelope({
     envelope: envelope({
       deltas: [{
         operation: "upsert",
@@ -65,7 +61,7 @@ test("applies GVIC upsert and delete projection deltas locally", () => {
   assert.equal(upserted.rows[0].display_title, "Updated node");
   assert.equal(upserted.lastSequence, 1);
 
-  const deleted = applyRacioProjectionEnvelope({
+  const deleted = applyGVICMatrixProjectionEnvelope({
     envelope: envelope({
       projection_sequence: 2,
       deltas: [{
@@ -87,7 +83,7 @@ test("applies GVIC upsert and delete projection deltas locally", () => {
 });
 
 test("applies GVIC patch deltas to an existing row", () => {
-  const patched = applyRacioProjectionEnvelope({
+  const patched = applyGVICMatrixProjectionEnvelope({
     envelope: envelope({
       deltas: [{
         operation: "patch",
@@ -108,7 +104,7 @@ test("applies GVIC patch deltas to an existing row", () => {
 });
 
 test("requests fallback for GVIC projection sequence gaps", () => {
-  const result = applyRacioProjectionEnvelope({
+  const result = applyGVICMatrixProjectionEnvelope({
     envelope: envelope({ projection_sequence: 7, deltas: [] }),
     companyID: "company-1",
     userID: "user-1",
@@ -122,7 +118,7 @@ test("requests fallback for GVIC projection sequence gaps", () => {
 });
 
 test("rejects GVIC deltas for the wrong user", () => {
-  const result = applyRacioProjectionEnvelope({
+  const result = applyGVICMatrixProjectionEnvelope({
     envelope: envelope({
       deltas: [{
         operation: "upsert",

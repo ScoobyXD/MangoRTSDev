@@ -9,11 +9,11 @@ import (
 )
 
 const (
-	racioProjectionResourceNode      = "node"
-	racioProjectionResourceLogicGate = "logic_gate"
+	GVICMatrixProjectionResourceNode      = "node"
+	GVICMatrixProjectionResourceLogicGate = "logic_gate"
 )
 
-type memoryRacioProjectionRow struct {
+type memoryGVICMatrixProjectionRow struct {
 	CompanyID                 string
 	UserID                    string
 	ResourceType              string
@@ -25,12 +25,12 @@ type memoryRacioProjectionRow struct {
 	UpdatedTimestamp          time.Time
 }
 
-func (r *MemoryRepo) ListResponsibleInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.ListResponsibleInboxNodesContext(context.Background(), query)
+func (r *MemoryRepo) ListGeneratedInboxNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
+	return r.ListGeneratedInboxNodesContext(context.Background(), query)
 }
 
-func (r *MemoryRepo) ListResponsibleInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listRacioProjectedNodes(ctx, query, true)
+func (r *MemoryRepo) ListGeneratedInboxNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
+	return r.listGVICMatrixProjectedNodes(ctx, query, true)
 }
 
 func (r *MemoryRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error) {
@@ -38,10 +38,10 @@ func (r *MemoryRepo) ListMyNodes(query WorkItemInboxQuery) ([]domain.Node, error
 }
 
 func (r *MemoryRepo) ListMyNodesContext(ctx context.Context, query WorkItemInboxQuery) ([]domain.Node, error) {
-	return r.listRacioProjectedNodes(ctx, query, false)
+	return r.listGVICMatrixProjectedNodes(ctx, query, false)
 }
 
-func (r *MemoryRepo) listRacioProjectedNodes(ctx context.Context, query WorkItemInboxQuery, responsibleOnly bool) ([]domain.Node, error) {
+func (r *MemoryRepo) listGVICMatrixProjectedNodes(ctx context.Context, query WorkItemInboxQuery, generatedOnly bool) ([]domain.Node, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -53,11 +53,11 @@ func (r *MemoryRepo) listRacioProjectedNodes(ctx context.Context, query WorkItem
 	defer r.mu.RUnlock()
 
 	items := make([]domain.Node, 0)
-	for _, row := range r.racioProjectionRows {
-		if row.CompanyID != query.CompanyID || row.UserID != query.UserID || row.ResourceType != racioProjectionResourceNode {
+	for _, row := range r.GVICMatrixProjectionRows {
+		if row.CompanyID != query.CompanyID || row.UserID != query.UserID || row.ResourceType != GVICMatrixProjectionResourceNode {
 			continue
 		}
-		if responsibleOnly {
+		if generatedOnly {
 			if row.LogicGateID == "" || !r.gvicEffectiveUserHasRoleLocked(query.CompanyID, EntityTypeNode, row.ResourceID, query.UserID, domain.GVICRoleGenerated) {
 				continue
 			}
@@ -86,7 +86,7 @@ func (r *MemoryRepo) ListACIInboxLogicGates(query WorkItemInboxQuery) ([]WorkIte
 }
 
 func (r *MemoryRepo) ListACIInboxLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.listRacioProjectedLogicGates(ctx, query, map[string]bool{
+	return r.listGVICMatrixProjectedLogicGates(ctx, query, map[string]bool{
 		domain.GVICRoleVerified:  true,
 		domain.GVICRoleConsulted: true,
 		domain.GVICRoleInformed:  true,
@@ -98,10 +98,10 @@ func (r *MemoryRepo) ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogic
 }
 
 func (r *MemoryRepo) ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error) {
-	return r.listRacioProjectedLogicGates(ctx, query, nil)
+	return r.listGVICMatrixProjectedLogicGates(ctx, query, nil)
 }
 
-func (r *MemoryRepo) listRacioProjectedLogicGates(ctx context.Context, query WorkItemInboxQuery, allowedRoles map[string]bool) ([]WorkItemLogicGateInboxItem, error) {
+func (r *MemoryRepo) listGVICMatrixProjectedLogicGates(ctx context.Context, query WorkItemInboxQuery, allowedRoles map[string]bool) ([]WorkItemLogicGateInboxItem, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -112,10 +112,10 @@ func (r *MemoryRepo) listRacioProjectedLogicGates(ctx context.Context, query Wor
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	assignmentsByGate := r.logicGateRaciAssignmentsByGateLocked(query.CompanyID)
+	assignmentsByGate := r.logicGateGVICAssignmentsByGateLocked(query.CompanyID)
 	items := make([]WorkItemLogicGateInboxItem, 0)
-	for _, row := range r.racioProjectionRows {
-		if row.CompanyID != query.CompanyID || row.UserID != query.UserID || row.ResourceType != racioProjectionResourceLogicGate {
+	for _, row := range r.GVICMatrixProjectionRows {
+		if row.CompanyID != query.CompanyID || row.UserID != query.UserID || row.ResourceType != GVICMatrixProjectionResourceLogicGate {
 			continue
 		}
 		roles := r.gvicEffectiveRolesForUserLocked(query.CompanyID, EntityTypeLogicGate, row.ResourceID, query.UserID, allowedRoles)
@@ -130,11 +130,11 @@ func (r *MemoryRepo) listRacioProjectedLogicGates(ctx context.Context, query Wor
 			LogicGateID:      row.ResourceID,
 			Header:           row.LogicGateHeader,
 			Roles:            roles,
-			RaciAssignments:  assignmentsByGate[row.ResourceID],
+			GVICAssignments:  assignmentsByGate[row.ResourceID],
 			CreatedTimestamp: row.LogicGateCreatedTimestamp,
 		}
-		if item.RaciAssignments == nil {
-			item.RaciAssignments = []domain.LogicGateRaciAssignment{}
+		if item.GVICAssignments == nil {
+			item.GVICAssignments = []domain.LogicGateGVICAssignment{}
 		}
 		items = append(items, item)
 	}
@@ -152,7 +152,7 @@ func (r *MemoryRepo) listRacioProjectedLogicGates(ctx context.Context, query Wor
 	return items, nil
 }
 
-func (r *MemoryRepo) syncRacioProjectionForNodeLocked(companyID, nodeID string) {
+func (r *MemoryRepo) syncGVICMatrixProjectionForNodeLocked(companyID, nodeID string) {
 	companyID = strings.TrimSpace(companyID)
 	nodeID = strings.TrimSpace(nodeID)
 	if companyID == "" || nodeID == "" {
@@ -170,43 +170,43 @@ func (r *MemoryRepo) syncRacioProjectionForNodeLocked(companyID, nodeID string) 
 		}
 		for userID := range r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeNode, node.NodeID, nil) {
 			if userID != "" {
-				rowKey := racioProjectionKey(companyID, userID, racioProjectionResourceNode, node.NodeID)
+				rowKey := GVICMatrixProjectionKey(companyID, userID, GVICMatrixProjectionResourceNode, node.NodeID)
 				desired[rowKey] = true
-				r.upsertRacioProjectionNodeRowLocked(companyID, node, logicGateID, userID)
+				r.upsertGVICMatrixProjectionNodeRowLocked(companyID, node, logicGateID, userID)
 			}
 		}
 	}
-	r.deleteStaleRacioProjectionForNodeLocked(companyID, nodeID, desired)
+	r.deleteStaleGVICMatrixProjectionForNodeLocked(companyID, nodeID, desired)
 }
 
-func (r *MemoryRepo) syncRacioProjectionForNodeDeltasLocked(companyID, nodeID string) []ProjectionDelta {
-	before := r.racioProjectionRowsForResourcesLocked(companyID, []string{nodeID}, nil)
-	r.syncRacioProjectionForNodeLocked(companyID, nodeID)
-	after := r.racioProjectionRowsForResourcesLocked(companyID, []string{nodeID}, nil)
-	return diffRacioProjectionRows(before, after)
+func (r *MemoryRepo) syncGVICMatrixProjectionForNodeDeltasLocked(companyID, nodeID string) []ProjectionDelta {
+	before := r.GVICMatrixProjectionRowsForResourcesLocked(companyID, []string{nodeID}, nil)
+	r.syncGVICMatrixProjectionForNodeLocked(companyID, nodeID)
+	after := r.GVICMatrixProjectionRowsForResourcesLocked(companyID, []string{nodeID}, nil)
+	return diffGVICMatrixProjectionRows(before, after)
 }
 
-func (r *MemoryRepo) syncRacioProjectionForLogicGateLocked(companyID, logicGateID string) {
+func (r *MemoryRepo) syncGVICMatrixProjectionForLogicGateLocked(companyID, logicGateID string) {
 	r.syncResourceGVICEffectiveAssignmentsLocked(r.affectedGVICResourceKeysLocked(resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}))
-	users := r.racioProjectionUsersForLogicGateLocked(companyID, logicGateID)
+	users := r.GVICMatrixProjectionUsersForLogicGateLocked(companyID, logicGateID)
 	for userID := range r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeLogicGate, logicGateID, nil) {
 		users[userID] = true
 	}
-	r.syncRacioProjectionForLogicGateUsersLocked(companyID, logicGateID, mapKeys(users))
+	r.syncGVICMatrixProjectionForLogicGateUsersLocked(companyID, logicGateID, mapKeys(users))
 }
 
-func (r *MemoryRepo) syncRacioProjectionForLogicGateAssignmentsLocked(companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) {
-	r.syncRacioProjectionForLogicGateLocked(companyID, logicGateID)
+func (r *MemoryRepo) syncGVICMatrixProjectionForLogicGateAssignmentsLocked(companyID, logicGateID string, before, after []domain.LogicGateGVICAssignment) {
+	r.syncGVICMatrixProjectionForLogicGateLocked(companyID, logicGateID)
 }
 
-func (r *MemoryRepo) syncRacioProjectionForLogicGateAssignmentsDeltasLocked(companyID, logicGateID string, before, after []domain.LogicGateRaciAssignment) []ProjectionDelta {
-	beforeRows := r.racioProjectionRowsForLogicGateLocked(companyID, logicGateID)
-	r.syncRacioProjectionForLogicGateAssignmentsLocked(companyID, logicGateID, before, after)
-	afterRows := r.racioProjectionRowsForLogicGateLocked(companyID, logicGateID)
-	return diffRacioProjectionRows(beforeRows, afterRows)
+func (r *MemoryRepo) syncGVICMatrixProjectionForLogicGateAssignmentsDeltasLocked(companyID, logicGateID string, before, after []domain.LogicGateGVICAssignment) []ProjectionDelta {
+	beforeRows := r.GVICMatrixProjectionRowsForLogicGateLocked(companyID, logicGateID)
+	r.syncGVICMatrixProjectionForLogicGateAssignmentsLocked(companyID, logicGateID, before, after)
+	afterRows := r.GVICMatrixProjectionRowsForLogicGateLocked(companyID, logicGateID)
+	return diffGVICMatrixProjectionRows(beforeRows, afterRows)
 }
 
-func (r *MemoryRepo) syncRacioProjectionForLogicGateUsersLocked(companyID, logicGateID string, userIDs []string) {
+func (r *MemoryRepo) syncGVICMatrixProjectionForLogicGateUsersLocked(companyID, logicGateID string, userIDs []string) {
 	companyID = strings.TrimSpace(companyID)
 	logicGateID = strings.TrimSpace(logicGateID)
 	if companyID == "" || logicGateID == "" {
@@ -219,12 +219,12 @@ func (r *MemoryRepo) syncRacioProjectionForLogicGateUsersLocked(companyID, logic
 			continue
 		}
 		desired := map[string]bool{}
-		if !r.logicGateUserHasAnyRaciLocked(companyID, logicGateID, userID) {
-			r.deleteStaleRacioProjectionForLogicGateUserLocked(companyID, logicGateID, userID, desired)
+		if !r.logicGateUserHasAnyGVICLocked(companyID, logicGateID, userID) {
+			r.deleteStaleGVICMatrixProjectionForLogicGateUserLocked(companyID, logicGateID, userID, desired)
 			continue
 		}
-		desired[racioProjectionKey(companyID, userID, racioProjectionResourceLogicGate, logicGateID)] = true
-		r.upsertRacioProjectionLogicGateRowLocked(companyID, logicGateID, userID)
+		desired[GVICMatrixProjectionKey(companyID, userID, GVICMatrixProjectionResourceLogicGate, logicGateID)] = true
+		r.upsertGVICMatrixProjectionLogicGateRowLocked(companyID, logicGateID, userID)
 		for _, nodeID := range r.nodeIDsAssignedToLogicGateLocked(companyID, logicGateID) {
 			if !r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeNode, nodeID, nil)[userID] {
 				continue
@@ -233,88 +233,88 @@ func (r *MemoryRepo) syncRacioProjectionForLogicGateUsersLocked(companyID, logic
 			if !ok {
 				continue
 			}
-			desired[racioProjectionKey(companyID, userID, racioProjectionResourceNode, nodeID)] = true
-			r.upsertRacioProjectionNodeRowLocked(companyID, r.withNodeReadModelLocked(node), logicGateID, userID)
+			desired[GVICMatrixProjectionKey(companyID, userID, GVICMatrixProjectionResourceNode, nodeID)] = true
+			r.upsertGVICMatrixProjectionNodeRowLocked(companyID, r.withNodeReadModelLocked(node), logicGateID, userID)
 		}
-		r.deleteStaleRacioProjectionForLogicGateUserLocked(companyID, logicGateID, userID, desired)
+		r.deleteStaleGVICMatrixProjectionForLogicGateUserLocked(companyID, logicGateID, userID, desired)
 	}
 }
 
-func (r *MemoryRepo) deleteRacioProjectionForNodeLocked(companyID, nodeID string) {
-	r.deleteStaleRacioProjectionForNodeLocked(companyID, nodeID, map[string]bool{})
+func (r *MemoryRepo) deleteGVICMatrixProjectionForNodeLocked(companyID, nodeID string) {
+	r.deleteStaleGVICMatrixProjectionForNodeLocked(companyID, nodeID, map[string]bool{})
 }
 
-func (r *MemoryRepo) deleteStaleRacioProjectionForNodeLocked(companyID, nodeID string, desired map[string]bool) {
-	for rowKey, row := range r.racioProjectionRows {
-		if row.CompanyID == companyID && row.ResourceType == racioProjectionResourceNode && row.ResourceID == nodeID {
+func (r *MemoryRepo) deleteStaleGVICMatrixProjectionForNodeLocked(companyID, nodeID string, desired map[string]bool) {
+	for rowKey, row := range r.GVICMatrixProjectionRows {
+		if row.CompanyID == companyID && row.ResourceType == GVICMatrixProjectionResourceNode && row.ResourceID == nodeID {
 			if !desired[rowKey] {
-				delete(r.racioProjectionRows, rowKey)
+				delete(r.GVICMatrixProjectionRows, rowKey)
 			}
 		}
 	}
 }
 
-func (r *MemoryRepo) deleteRacioProjectionForLogicGateUserLocked(companyID, logicGateID, userID string) {
-	r.deleteStaleRacioProjectionForLogicGateUserLocked(companyID, logicGateID, userID, map[string]bool{})
+func (r *MemoryRepo) deleteGVICMatrixProjectionForLogicGateUserLocked(companyID, logicGateID, userID string) {
+	r.deleteStaleGVICMatrixProjectionForLogicGateUserLocked(companyID, logicGateID, userID, map[string]bool{})
 }
 
-func (r *MemoryRepo) deleteStaleRacioProjectionForLogicGateUserLocked(companyID, logicGateID, userID string, desired map[string]bool) {
-	for rowKey, row := range r.racioProjectionRows {
+func (r *MemoryRepo) deleteStaleGVICMatrixProjectionForLogicGateUserLocked(companyID, logicGateID, userID string, desired map[string]bool) {
+	for rowKey, row := range r.GVICMatrixProjectionRows {
 		if row.CompanyID != companyID || row.UserID != userID || row.LogicGateID != logicGateID {
 			continue
 		}
-		if row.ResourceType == racioProjectionResourceLogicGate || row.ResourceType == racioProjectionResourceNode {
+		if row.ResourceType == GVICMatrixProjectionResourceLogicGate || row.ResourceType == GVICMatrixProjectionResourceNode {
 			if !desired[rowKey] {
-				delete(r.racioProjectionRows, rowKey)
+				delete(r.GVICMatrixProjectionRows, rowKey)
 			}
 		}
 	}
 }
 
-func (r *MemoryRepo) deleteRacioProjectionForLogicGateLocked(companyID, logicGateID string) {
-	for rowKey, row := range r.racioProjectionRows {
+func (r *MemoryRepo) deleteGVICMatrixProjectionForLogicGateLocked(companyID, logicGateID string) {
+	for rowKey, row := range r.GVICMatrixProjectionRows {
 		if row.CompanyID == companyID && row.LogicGateID == logicGateID {
-			delete(r.racioProjectionRows, rowKey)
+			delete(r.GVICMatrixProjectionRows, rowKey)
 		}
 	}
 }
 
-func (r *MemoryRepo) upsertRacioProjectionNodeRowLocked(companyID string, node domain.Node, logicGateID, userID string) {
+func (r *MemoryRepo) upsertGVICMatrixProjectionNodeRowLocked(companyID string, node domain.Node, logicGateID, userID string) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return
 	}
-	row := memoryRacioProjectionRow{
+	row := memoryGVICMatrixProjectionRow{
 		CompanyID:        companyID,
 		UserID:           userID,
-		ResourceType:     racioProjectionResourceNode,
+		ResourceType:     GVICMatrixProjectionResourceNode,
 		ResourceID:       node.NodeID,
 		LogicGateID:      strings.TrimSpace(logicGateID),
 		Node:             node,
 		UpdatedTimestamp: time.Now().UTC(),
 	}
-	r.racioProjectionRows[racioProjectionKey(companyID, userID, racioProjectionResourceNode, node.NodeID)] = row
+	r.GVICMatrixProjectionRows[GVICMatrixProjectionKey(companyID, userID, GVICMatrixProjectionResourceNode, node.NodeID)] = row
 }
 
-func (r *MemoryRepo) upsertRacioProjectionLogicGateRowLocked(companyID, logicGateID, userID string) {
+func (r *MemoryRepo) upsertGVICMatrixProjectionLogicGateRowLocked(companyID, logicGateID, userID string) {
 	gate, ok := r.logicGates[key(companyID, logicGateID)]
 	if !ok || strings.TrimSpace(userID) == "" {
 		return
 	}
-	row := memoryRacioProjectionRow{
+	row := memoryGVICMatrixProjectionRow{
 		CompanyID:                 companyID,
 		UserID:                    userID,
-		ResourceType:              racioProjectionResourceLogicGate,
+		ResourceType:              GVICMatrixProjectionResourceLogicGate,
 		ResourceID:                logicGateID,
 		LogicGateID:               logicGateID,
 		LogicGateHeader:           gate.Header,
 		LogicGateCreatedTimestamp: gate.CreatedTimestamp,
 		UpdatedTimestamp:          time.Now().UTC(),
 	}
-	r.racioProjectionRows[racioProjectionKey(companyID, userID, racioProjectionResourceLogicGate, logicGateID)] = row
+	r.GVICMatrixProjectionRows[GVICMatrixProjectionKey(companyID, userID, GVICMatrixProjectionResourceLogicGate, logicGateID)] = row
 }
 
-func (r *MemoryRepo) racioProjectionRowsForResourcesLocked(companyID string, nodeIDs, logicGateIDs []string) []RacioMatrixProjectionRow {
+func (r *MemoryRepo) GVICMatrixProjectionRowsForResourcesLocked(companyID string, nodeIDs, logicGateIDs []string) []GVICMatrixProjectionRow {
 	nodeSet := map[string]bool{}
 	for _, nodeID := range nodeIDs {
 		nodeID = strings.TrimSpace(nodeID)
@@ -329,21 +329,21 @@ func (r *MemoryRepo) racioProjectionRowsForResourcesLocked(companyID string, nod
 			logicGateSet[logicGateID] = true
 		}
 	}
-	items := make([]RacioMatrixProjectionRow, 0)
-	for _, row := range r.racioProjectionRows {
+	items := make([]GVICMatrixProjectionRow, 0)
+	for _, row := range r.GVICMatrixProjectionRows {
 		if row.CompanyID != companyID {
 			continue
 		}
-		if row.ResourceType == racioProjectionResourceNode && !nodeSet[row.ResourceID] {
+		if row.ResourceType == GVICMatrixProjectionResourceNode && !nodeSet[row.ResourceID] {
 			continue
 		}
-		if row.ResourceType == racioProjectionResourceLogicGate && !logicGateSet[row.ResourceID] {
+		if row.ResourceType == GVICMatrixProjectionResourceLogicGate && !logicGateSet[row.ResourceID] {
 			continue
 		}
-		if row.ResourceType != racioProjectionResourceNode && row.ResourceType != racioProjectionResourceLogicGate {
+		if row.ResourceType != GVICMatrixProjectionResourceNode && row.ResourceType != GVICMatrixProjectionResourceLogicGate {
 			continue
 		}
-		items = append(items, memoryRacioProjectionRowToDTO(row))
+		items = append(items, memoryGVICMatrixProjectionRowToDTO(row))
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].ResourceType != items[j].ResourceType {
@@ -357,16 +357,16 @@ func (r *MemoryRepo) racioProjectionRowsForResourcesLocked(companyID string, nod
 	return items
 }
 
-func (r *MemoryRepo) racioProjectionRowsForLogicGateLocked(companyID, logicGateID string) []RacioMatrixProjectionRow {
-	items := make([]RacioMatrixProjectionRow, 0)
-	for _, row := range r.racioProjectionRows {
+func (r *MemoryRepo) GVICMatrixProjectionRowsForLogicGateLocked(companyID, logicGateID string) []GVICMatrixProjectionRow {
+	items := make([]GVICMatrixProjectionRow, 0)
+	for _, row := range r.GVICMatrixProjectionRows {
 		if row.CompanyID != companyID || row.LogicGateID != logicGateID {
 			continue
 		}
-		if row.ResourceType != racioProjectionResourceNode && row.ResourceType != racioProjectionResourceLogicGate {
+		if row.ResourceType != GVICMatrixProjectionResourceNode && row.ResourceType != GVICMatrixProjectionResourceLogicGate {
 			continue
 		}
-		items = append(items, memoryRacioProjectionRowToDTO(row))
+		items = append(items, memoryGVICMatrixProjectionRowToDTO(row))
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].ResourceType != items[j].ResourceType {
@@ -380,35 +380,35 @@ func (r *MemoryRepo) racioProjectionRowsForLogicGateLocked(companyID, logicGateI
 	return items
 }
 
-func (r *MemoryRepo) ListRacioMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RacioMatrixProjectionRow, error) {
+func (r *MemoryRepo) ListGVICMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]GVICMatrixProjectionRow, error) {
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {
 		return nil, ErrInvalid
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.racioProjectionRowsForResourcesLocked(companyID, nodeIDs, logicGateIDs), nil
+	return r.GVICMatrixProjectionRowsForResourcesLocked(companyID, nodeIDs, logicGateIDs), nil
 }
 
-func (r *MemoryRepo) ListRacioMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RacioMatrixProjectionRow, error) {
+func (r *MemoryRepo) ListGVICMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error) {
 	query = NormalizeWorkItemInboxQuery(query)
 	if query.CompanyID == "" || query.UserID == "" {
 		return nil, ErrInvalid
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	items := make([]RacioMatrixProjectionRow, 0)
-	for _, row := range r.racioProjectionRows {
+	items := make([]GVICMatrixProjectionRow, 0)
+	for _, row := range r.GVICMatrixProjectionRows {
 		if row.CompanyID != query.CompanyID || row.UserID != query.UserID {
 			continue
 		}
-		if row.ResourceType != racioProjectionResourceNode && row.ResourceType != racioProjectionResourceLogicGate {
+		if row.ResourceType != GVICMatrixProjectionResourceNode && row.ResourceType != GVICMatrixProjectionResourceLogicGate {
 			continue
 		}
 		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, row.ResourceType, row.ResourceID, EntityPermissionEdit) {
 			continue
 		}
-		items = append(items, memoryRacioProjectionRowToDTO(row))
+		items = append(items, memoryGVICMatrixProjectionRowToDTO(row))
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].ResourceType != items[j].ResourceType {
@@ -425,7 +425,7 @@ func (r *MemoryRepo) ListRacioMatrixProjectionRowsForUser(query WorkItemInboxQue
 	return items, nil
 }
 
-func (r *MemoryRepo) ListRacioMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RacioMatrixProjectionRow, error) {
+func (r *MemoryRepo) ListGVICMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]GVICMatrixProjectionRow, error) {
 	companyID = strings.TrimSpace(companyID)
 	logicGateID = strings.TrimSpace(logicGateID)
 	if companyID == "" || logicGateID == "" {
@@ -433,7 +433,7 @@ func (r *MemoryRepo) ListRacioMatrixProjectionRowsForLogicGate(companyID, logicG
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.racioProjectionRowsForLogicGateLocked(companyID, logicGateID), nil
+	return r.GVICMatrixProjectionRowsForLogicGateLocked(companyID, logicGateID), nil
 }
 
 func (r *MemoryRepo) CurrentProjectionSequence(companyID, projectionName, projectionScope string) (int64, error) {
@@ -462,8 +462,8 @@ func (r *MemoryRepo) NextProjectionSequence(companyID, projectionName, projectio
 	return r.projectionSequences[key], nil
 }
 
-func memoryRacioProjectionRowToDTO(row memoryRacioProjectionRow) RacioMatrixProjectionRow {
-	item := RacioMatrixProjectionRow{
+func memoryGVICMatrixProjectionRowToDTO(row memoryGVICMatrixProjectionRow) GVICMatrixProjectionRow {
+	item := GVICMatrixProjectionRow{
 		CompanyID:                row.CompanyID,
 		UserID:                   row.UserID,
 		ResourceType:             row.ResourceType,
@@ -475,7 +475,7 @@ func memoryRacioProjectionRowToDTO(row memoryRacioProjectionRow) RacioMatrixProj
 	if row.LogicGateID != "" {
 		item.LogicGateID = stringPointer(row.LogicGateID)
 	}
-	if row.ResourceType == racioProjectionResourceLogicGate {
+	if row.ResourceType == GVICMatrixProjectionResourceLogicGate {
 		item.DisplayTitle = row.LogicGateHeader
 		item.ResourceCreatedTimestamp = row.LogicGateCreatedTimestamp
 		return item
@@ -507,14 +507,14 @@ func cloneIntPointer(value *int) *int {
 	return &copied
 }
 
-func (r *MemoryRepo) logicGateRaciAssignmentsByGateLocked(companyID string) map[string][]domain.LogicGateRaciAssignment {
-	assignmentsByGate := map[string][]domain.LogicGateRaciAssignment{}
+func (r *MemoryRepo) logicGateGVICAssignmentsByGateLocked(companyID string) map[string][]domain.LogicGateGVICAssignment {
+	assignmentsByGate := map[string][]domain.LogicGateGVICAssignment{}
 	for _, gate := range r.logicGates {
 		if gate.CompanyID != companyID {
 			continue
 		}
-		copied := r.logicGateGVICAssignmentsAsLogicGateRaciLocked(companyID, gate.LogicGateID)
-		sortLogicGateRaciAssignments(copied)
+		copied := r.logicGateGVICAssignmentsAsLogicGateGVICLocked(companyID, gate.LogicGateID)
+		sortLogicGateGVICAssignments(copied)
 		if len(copied) == 0 {
 			continue
 		}
@@ -523,7 +523,7 @@ func (r *MemoryRepo) logicGateRaciAssignmentsByGateLocked(companyID string) map[
 	return assignmentsByGate
 }
 
-func (r *MemoryRepo) logicGateRaciUserIDsLocked(companyID, logicGateID string) []string {
+func (r *MemoryRepo) logicGateGVICUserIDsLocked(companyID, logicGateID string) []string {
 	return mapKeys(r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeLogicGate, logicGateID, nil))
 }
 
@@ -531,7 +531,7 @@ func (r *MemoryRepo) logicGateUserHasRoleLocked(companyID, logicGateID, userID, 
 	return r.gvicEffectiveUserHasRoleLocked(companyID, EntityTypeLogicGate, logicGateID, userID, role)
 }
 
-func (r *MemoryRepo) logicGateUserHasAnyRaciLocked(companyID, logicGateID, userID string) bool {
+func (r *MemoryRepo) logicGateUserHasAnyGVICLocked(companyID, logicGateID, userID string) bool {
 	return r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeLogicGate, logicGateID, nil)[strings.TrimSpace(userID)]
 }
 
@@ -549,9 +549,9 @@ func (r *MemoryRepo) nodeIDsAssignedToLogicGateLocked(companyID, logicGateID str
 	return ids
 }
 
-func (r *MemoryRepo) racioProjectionUsersForLogicGateLocked(companyID, logicGateID string) map[string]bool {
+func (r *MemoryRepo) GVICMatrixProjectionUsersForLogicGateLocked(companyID, logicGateID string) map[string]bool {
 	users := map[string]bool{}
-	for _, row := range r.racioProjectionRows {
+	for _, row := range r.GVICMatrixProjectionRows {
 		if row.CompanyID == companyID && row.LogicGateID == logicGateID && strings.TrimSpace(row.UserID) != "" {
 			users[row.UserID] = true
 		}
@@ -559,21 +559,21 @@ func (r *MemoryRepo) racioProjectionUsersForLogicGateLocked(companyID, logicGate
 	return users
 }
 
-func racioProjectionKey(companyID, userID, resourceType, resourceID string) string {
+func GVICMatrixProjectionKey(companyID, userID, resourceType, resourceID string) string {
 	return companyID + ":" + userID + ":" + resourceType + ":" + resourceID
 }
 
-func (r *MemoryRepo) logicGateRaciAssignmentUserSetLocked(companyID string, assignments []domain.LogicGateRaciAssignment) map[string]bool {
+func (r *MemoryRepo) logicGateGVICAssignmentUserSetLocked(companyID string, assignments []domain.LogicGateGVICAssignment) map[string]bool {
 	users := map[string]bool{}
 	for _, assignment := range assignments {
-		subjectType, subjectID := logicGateRaciAssignmentSubject(assignment)
-		switch subjectType {
+		principalType, principalID := logicGateGVICAssignmentPrincipal(assignment)
+		switch principalType {
 		case EntityPermissionSubjectUser:
-			if subjectID != "" {
-				users[subjectID] = true
+			if principalID != "" {
+				users[principalID] = true
 			}
 		case EntityPermissionSubjectGroup:
-			groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, companyID, subjectID)
+			groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, companyID, principalID)
 			for _, member := range r.userGroupMembers {
 				if member.CompanyID == companyID && groupIDs[member.GroupID] && strings.TrimSpace(member.UserID) != "" {
 					users[member.UserID] = true
@@ -584,9 +584,9 @@ func (r *MemoryRepo) logicGateRaciAssignmentUserSetLocked(companyID string, assi
 	return users
 }
 
-func (r *MemoryRepo) racioAssignmentChangedUserSetLocked(companyID string, before, after []domain.LogicGateRaciAssignment) map[string]bool {
-	beforeRoles := r.racioAssignmentRoleSetByUserLocked(companyID, before)
-	afterRoles := r.racioAssignmentRoleSetByUserLocked(companyID, after)
+func (r *MemoryRepo) GVICMatrixAssignmentChangedUserSetLocked(companyID string, before, after []domain.LogicGateGVICAssignment) map[string]bool {
+	beforeRoles := r.GVICMatrixAssignmentRoleSetByUserLocked(companyID, before)
+	afterRoles := r.GVICMatrixAssignmentRoleSetByUserLocked(companyID, after)
 	users := map[string]bool{}
 	for userID, roles := range beforeRoles {
 		if !stringSetEqual(roles, afterRoles[userID]) {
@@ -601,14 +601,14 @@ func (r *MemoryRepo) racioAssignmentChangedUserSetLocked(companyID string, befor
 	return users
 }
 
-func (r *MemoryRepo) racioAssignmentRoleSetByUserLocked(companyID string, assignments []domain.LogicGateRaciAssignment) map[string]map[string]bool {
+func (r *MemoryRepo) GVICMatrixAssignmentRoleSetByUserLocked(companyID string, assignments []domain.LogicGateGVICAssignment) map[string]map[string]bool {
 	out := map[string]map[string]bool{}
 	for _, assignment := range assignments {
 		role := strings.TrimSpace(assignment.Role)
 		if role == "" {
 			continue
 		}
-		for userID := range r.logicGateRaciAssignmentUserSetLocked(companyID, []domain.LogicGateRaciAssignment{assignment}) {
+		for userID := range r.logicGateGVICAssignmentUserSetLocked(companyID, []domain.LogicGateGVICAssignment{assignment}) {
 			if out[userID] == nil {
 				out[userID] = map[string]bool{}
 			}
@@ -630,7 +630,7 @@ func stringSetEqual(left, right map[string]bool) bool {
 	return true
 }
 
-func (r *MemoryRepo) logicGateRaciRolesForUserLocked(companyID string, assignments []domain.LogicGateRaciAssignment, userID string, allowedRoles map[string]bool) []string {
+func (r *MemoryRepo) logicGateGVICRolesForUserLocked(companyID string, assignments []domain.LogicGateGVICAssignment, userID string, allowedRoles map[string]bool) []string {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil
@@ -641,7 +641,7 @@ func (r *MemoryRepo) logicGateRaciRolesForUserLocked(companyID string, assignmen
 		if role == "" || seen[role] {
 			continue
 		}
-		if !r.logicGateRaciAssignmentUserSetLocked(companyID, []domain.LogicGateRaciAssignment{assignment})[userID] {
+		if !r.logicGateGVICAssignmentUserSetLocked(companyID, []domain.LogicGateGVICAssignment{assignment})[userID] {
 			continue
 		}
 		if allowedRoles != nil && !allowedRoles[role] {
@@ -651,8 +651,8 @@ func (r *MemoryRepo) logicGateRaciRolesForUserLocked(companyID string, assignmen
 	}
 	roles := mapKeys(seen)
 	sort.Slice(roles, func(i, j int) bool {
-		if raciRoleSortValue(roles[i]) != raciRoleSortValue(roles[j]) {
-			return raciRoleSortValue(roles[i]) < raciRoleSortValue(roles[j])
+		if GVICRoleSortValue(roles[i]) != GVICRoleSortValue(roles[j]) {
+			return GVICRoleSortValue(roles[i]) < GVICRoleSortValue(roles[j])
 		}
 		return roles[i] < roles[j]
 	})
@@ -707,8 +707,8 @@ func (r *MemoryRepo) gvicEffectiveRolesForUserLocked(companyID, resourceType, re
 	}
 	roles := mapKeys(seen)
 	sort.Slice(roles, func(i, j int) bool {
-		if raciRoleSortValue(roles[i]) != raciRoleSortValue(roles[j]) {
-			return raciRoleSortValue(roles[i]) < raciRoleSortValue(roles[j])
+		if GVICRoleSortValue(roles[i]) != GVICRoleSortValue(roles[j]) {
+			return GVICRoleSortValue(roles[i]) < GVICRoleSortValue(roles[j])
 		}
 		return roles[i] < roles[j]
 	})

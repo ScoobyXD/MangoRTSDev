@@ -9,13 +9,13 @@ import (
 	"miraeopus/backend/internal/store"
 )
 
-func TestRacioProjectionDeltaFanoutIsScopedAndPermissionFiltered(t *testing.T) {
+func TestGVICMatrixProjectionDeltaFanoutIsScopedAndPermissionFiltered(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "77777777-7777-4777-8777-777777777402"
-	repo.EnsureCompany(companyID, "RACIO Projection Fanout Co")
-	viewer := mustLogicGateWorkHTTPUser(t, repo, companyID, "racio-projection-viewer")
-	other := mustLogicGateWorkHTTPUser(t, repo, companyID, "racio-projection-other")
-	blocked := mustLogicGateWorkHTTPUser(t, repo, companyID, "racio-projection-blocked")
+	repo.EnsureCompany(companyID, "GVICMatrix Projection Fanout Co")
+	viewer := mustLogicGateWorkHTTPUser(t, repo, companyID, "GVICMatrix-projection-viewer")
+	other := mustLogicGateWorkHTTPUser(t, repo, companyID, "GVICMatrix-projection-other")
+	blocked := mustLogicGateWorkHTTPUser(t, repo, companyID, "GVICMatrix-projection-blocked")
 
 	visibleNode, err := repo.CreateNode(companyID, "Visible projection node")
 	if err != nil {
@@ -46,7 +46,7 @@ func TestRacioProjectionDeltaFanoutIsScopedAndPermissionFiltered(t *testing.T) {
 	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameGVICMatrix, projectionUserScope(blocked.UserID), blockedCh)
 
 	server.publishProjectionDeltasAsync([]store.ProjectionDelta{
-		racioProjectionDeltaForTest(companyID, viewer.UserID, visibleNode.NodeID, visibleNode.Title, visibleNode.CreatedTimestamp),
+		GVICMatrixProjectionDeltaForTest(companyID, viewer.UserID, visibleNode.NodeID, visibleNode.Title, visibleNode.CreatedTimestamp),
 	})
 	envelope := readProjectionEnvelopeForTest(t, viewerCh)
 	if envelope.ProjectionSequence <= 0 || len(envelope.Deltas) != 1 {
@@ -58,7 +58,7 @@ func TestRacioProjectionDeltaFanoutIsScopedAndPermissionFiltered(t *testing.T) {
 	assertNoProjectionPayloadForTest(t, otherCh)
 
 	server.publishProjectionDeltasAsync([]store.ProjectionDelta{
-		racioProjectionDeltaForTest(companyID, blocked.UserID, hiddenNode.NodeID, hiddenNode.Title, hiddenNode.CreatedTimestamp),
+		GVICMatrixProjectionDeltaForTest(companyID, blocked.UserID, hiddenNode.NodeID, hiddenNode.Title, hiddenNode.CreatedTimestamp),
 	})
 	blockedEnvelope := readProjectionEnvelopeForTest(t, blockedCh)
 	if len(blockedEnvelope.Deltas) != 1 {
@@ -69,14 +69,14 @@ func TestRacioProjectionDeltaFanoutIsScopedAndPermissionFiltered(t *testing.T) {
 	}
 }
 
-func TestRacioProjectionSequencesAreUserScoped(t *testing.T) {
+func TestGVICMatrixProjectionSequencesAreUserScoped(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "77777777-7777-4777-8777-777777777404"
-	repo.EnsureCompany(companyID, "RACIO Projection Sequence Scope Co")
-	viewer := mustLogicGateWorkHTTPUser(t, repo, companyID, "racio-sequence-viewer")
-	other := mustLogicGateWorkHTTPUser(t, repo, companyID, "racio-sequence-other")
+	repo.EnsureCompany(companyID, "GVICMatrix Projection Sequence Scope Co")
+	viewer := mustLogicGateWorkHTTPUser(t, repo, companyID, "GVICMatrix-sequence-viewer")
+	other := mustLogicGateWorkHTTPUser(t, repo, companyID, "GVICMatrix-sequence-other")
 
-	node, err := repo.CreateNode(companyID, "Scoped RACI sequence node")
+	node, err := repo.CreateNode(companyID, "Scoped GVIC sequence node")
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestRacioProjectionSequencesAreUserScoped(t *testing.T) {
 	defer server.projectionHub.unsubscribe(companyID, store.ProjectionNameGVICMatrix, otherScope, otherCh)
 
 	server.publishProjectionDeltasAsync([]store.ProjectionDelta{
-		racioProjectionDeltaForTest(companyID, viewer.UserID, node.NodeID, node.Title, node.CreatedTimestamp),
+		GVICMatrixProjectionDeltaForTest(companyID, viewer.UserID, node.NodeID, node.Title, node.CreatedTimestamp),
 	})
 	firstViewer := readProjectionEnvelopeForTest(t, viewerCh)
 	if firstViewer.ProjectionScope != viewerScope || firstViewer.ProjectionSequence != 1 {
@@ -100,7 +100,7 @@ func TestRacioProjectionSequencesAreUserScoped(t *testing.T) {
 	}
 
 	server.publishProjectionDeltasAsync([]store.ProjectionDelta{
-		racioProjectionDeltaForTest(companyID, other.UserID, node.NodeID, node.Title, node.CreatedTimestamp),
+		GVICMatrixProjectionDeltaForTest(companyID, other.UserID, node.NodeID, node.Title, node.CreatedTimestamp),
 	})
 	firstOther := readProjectionEnvelopeForTest(t, otherCh)
 	if firstOther.ProjectionScope != otherScope || firstOther.ProjectionSequence != 1 {
@@ -108,7 +108,7 @@ func TestRacioProjectionSequencesAreUserScoped(t *testing.T) {
 	}
 
 	server.publishProjectionDeltasAsync([]store.ProjectionDelta{
-		racioProjectionDeltaForTest(companyID, viewer.UserID, node.NodeID, node.Title, node.CreatedTimestamp),
+		GVICMatrixProjectionDeltaForTest(companyID, viewer.UserID, node.NodeID, node.Title, node.CreatedTimestamp),
 	})
 	secondViewer := readProjectionEnvelopeForTest(t, viewerCh)
 	if secondViewer.ProjectionSequence != 2 {
@@ -186,9 +186,6 @@ func TestKanbanProjectionDeltaFanoutIsActiveBoardScopedAndPermissionFiltered(t *
 	}
 	if got := envelope.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.CardID != assigned.Card.CardID || got.Row.BoardID != boardID || got.Row.Priority == nil || *got.Row.Priority != priority {
 		t.Fatalf("viewer delta = %+v, want upsert row for visible Kanban card", got)
-	}
-	if envelope.Deltas[0].Row.AssigneeUserID != nil && *envelope.Deltas[0].Row.AssigneeUserID != viewer.UserID {
-		t.Fatalf("viewer delta assignee = %q, want empty or viewer", *envelope.Deltas[0].Row.AssigneeUserID)
 	}
 	assertNoProjectionPayloadForTest(t, otherCh)
 
@@ -445,8 +442,8 @@ func TestProjectRelationshipProjectionPermissionRevocationPublishesDeleteWithout
 	}
 }
 
-func racioProjectionDeltaForTest(companyID, userID, nodeID, title string, created time.Time) store.ProjectionDelta {
-	row := store.RacioMatrixProjectionRow{
+func GVICMatrixProjectionDeltaForTest(companyID, userID, nodeID, title string, created time.Time) store.ProjectionDelta {
+	row := store.GVICMatrixProjectionRow{
 		CompanyID:                companyID,
 		UserID:                   userID,
 		ResourceType:             store.EntityTypeNode,

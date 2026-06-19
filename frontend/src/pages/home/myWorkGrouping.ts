@@ -1,5 +1,5 @@
 import type { Account } from "../../modules/accounts/accountsApi.js";
-import type { LogicGateRaciRole } from "../../modules/logic-gate-map/shared.js";
+import type { LogicGateGVICRole } from "../../modules/logic-gate-map/shared.js";
 
 export type MyWorkScopeLevel = "me" | "team" | "all";
 export type MyWorkScopeSubjectType = "user" | "group" | "company";
@@ -63,7 +63,7 @@ export type MyWorkResourceRow = {
   projectLabels?: string[];
   people: MyWorkPerson[];
   teams: MyWorkTeam[];
-  gvicRoles: LogicGateRaciRole[];
+  gvicRoles: LogicGateGVICRole[];
   participantUserIDs: string[];
   logicGateLabels: string[];
   logicGateIDs: string[];
@@ -228,7 +228,7 @@ export function getMyWorkGroupValues(row: MyWorkResourceRow, field: MyWorkGroupi
 
   if (field === "gvic") {
     if (row.gvicRoles.length === 0) return [{ key: "gvic:none", label: "Others", sortValue: "", sortLast: true }];
-    return row.gvicRoles.map((role) => ({ key: `gvic:${role}`, label: raciRoleLabel(role), sortValue: raciRoleSort(role) }));
+    return row.gvicRoles.map((role) => ({ key: `gvic:${role}`, label: GVICRoleLabel(role), sortValue: GVICRoleSort(role) }));
   }
 
   if (field === "status") {
@@ -348,7 +348,7 @@ export function priorityLabel(priority: number): string {
   return "No priority";
 }
 
-export function raciRoleLabel(role: LogicGateRaciRole): string {
+export function GVICRoleLabel(role: LogicGateGVICRole): string {
   if (role === "generated") return "Generated";
   if (role === "verified") return "Verified";
   if (role === "consulted") return "Consulted";
@@ -377,7 +377,7 @@ function statusSortValue(value: string): number | string {
   return normalized;
 }
 
-function raciRoleSort(role: LogicGateRaciRole): number {
+function GVICRoleSort(role: LogicGateGVICRole): number {
   if (role === "generated") return 1;
   if (role === "verified") return 2;
   if (role === "consulted") return 3;

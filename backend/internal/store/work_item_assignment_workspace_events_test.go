@@ -182,12 +182,12 @@ func setupWorkItemAssignmentEventTest(t *testing.T, suffix string) (*MemoryRepo,
 	if _, err := repo.AddCompanyMembership("actor-"+suffix, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
+		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}
 	return repo, companyID, logicGate, node, user.UserID
 }

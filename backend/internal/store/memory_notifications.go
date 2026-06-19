@@ -67,7 +67,7 @@ func (r *MemoryRepo) notificationVisibleToUserLocked(item domain.Notification, u
 	if companyID == "" || userID == "" {
 		return true
 	}
-	if logicGateID := strings.TrimSpace(item.LogicGateID); logicGateID != "" && notificationLogicGateRaciRole(item.Role) {
+	if logicGateID := strings.TrimSpace(item.LogicGateID); logicGateID != "" && notificationLogicGateGVICRole(item.Role) {
 		return r.entityExistsLocked(companyID, EntityTypeLogicGate, logicGateID)
 	}
 	target, ok := NotificationPrimaryAccessTarget(item.EntityType, item.EntityID, item.LogicGateID, item.NodeID)
@@ -83,7 +83,7 @@ func (r *MemoryRepo) notificationVisibleToUserLocked(item domain.Notification, u
 	return true
 }
 
-func notificationLogicGateRaciRole(role string) bool {
+func notificationLogicGateGVICRole(role string) bool {
 	switch strings.TrimSpace(role) {
 	case domain.GVICRoleGenerated, domain.GVICRoleVerified, domain.GVICRoleConsulted, domain.GVICRoleInformed:
 		return true

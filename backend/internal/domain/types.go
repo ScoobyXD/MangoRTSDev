@@ -267,12 +267,8 @@ type Node struct {
 	Title            string    `json:"name"`
 	DefaultAccess    string    `json:"default_access"`
 	Status           *string   `json:"status"`
-	StatusColor      *string   `json:"-"`
 	DueDate          *string   `json:"due_date"`
 	Priority         *int      `json:"priority"`
-	AssigneeUserID   *string   `json:"-"`
-	AssigneeName     *string   `json:"-"`
-	AssigneeEmail    *string   `json:"-"`
 	LogicGateIDs     []string  `json:"logic_gate_ids,omitempty"`
 	Accounts         []Account `json:"accounts,omitempty"`
 	EffectiveAccess  string    `json:"effective_access_level,omitempty"`
@@ -360,8 +356,7 @@ type LogicGate struct {
 	LogicGateID      string                    `json:"logic_gate_id"`
 	Header           string                    `json:"header"`
 	DefaultAccess    string                    `json:"default_access"`
-	RaciAssignments  []LogicGateRaciAssignment `json:"-"`
-	GVICAssignments  []ResourceGVICAssignment  `json:"gvic_assignments,omitempty"`
+	GVICAssignments  []LogicGateGVICAssignment `json:"gvic_assignments,omitempty"`
 	EffectiveAccess  string                    `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time                 `json:"created_timestamp"`
 }
@@ -404,13 +399,13 @@ type ResourceGVICEffectiveAssignment struct {
 	UpdatedTimestamp    time.Time `json:"updated_timestamp"`
 }
 
-type LogicGateRaciAssignment struct {
+type LogicGateGVICAssignment struct {
 	CompanyID        string    `json:"company_id"`
 	LogicGateID      string    `json:"logic_gate_id"`
 	Role             string    `json:"role"`
-	SubjectType      string    `json:"subject_type,omitempty"`
-	SubjectID        string    `json:"subject_id,omitempty"`
-	SubjectName      string    `json:"subject_name,omitempty"`
+	PrincipalType    string    `json:"principal_type,omitempty"`
+	PrincipalID      string    `json:"principal_id,omitempty"`
+	PrincipalName    string    `json:"principal_name,omitempty"`
 	UserID           string    `json:"user_id"`
 	UserDisplayName  string    `json:"user_display_name,omitempty"`
 	UserEmail        string    `json:"user_email,omitempty"`
@@ -459,12 +454,12 @@ type LogicGateView struct {
 	LogicGate           LogicGate                 `json:"logic_gate"`
 	Information         []LogicGateInformation    `json:"information"`
 	Projections         []LogicGateProjection     `json:"projections"`
-	RaciAssignments     []LogicGateRaciAssignment `json:"gvic_assignments"`
+	GVICAssignments     []LogicGateGVICAssignment `json:"gvic_assignments"`
 	Relationships       []LogicGateRelationship   `json:"relationships"`
 	Work                LogicGateWorkView         `json:"work"`
 	InformationCount    int                       `json:"information_count"`
 	ProjectionCount     int                       `json:"projection_count"`
-	RaciAssignmentCount int                       `json:"gvic_assignment_count"`
+	GVICAssignmentCount int                       `json:"gvic_assignment_count"`
 	RelationshipsCount  int                       `json:"relationships_count"`
 	AssignmentCount     int                       `json:"assignment_count"`
 	NodeCount           int                       `json:"node_count"`
@@ -527,7 +522,6 @@ type ProjectRelationshipProjection struct {
 	AssignmentID                 *string   `json:"assignment_id,omitempty"`
 	DisplayTitle                 string    `json:"display_title"`
 	Status                       *string   `json:"status,omitempty"`
-	StatusColor                  *string   `json:"status_color,omitempty"`
 	Position                     int       `json:"position"`
 	ResourceCreatedTimestamp     time.Time `json:"resource_created_timestamp"`
 	RelationshipCreatedTimestamp time.Time `json:"relationship_created_timestamp"`
@@ -598,22 +592,21 @@ type CompanyExplorerFolder struct {
 	ScopeType        string                      `json:"scope_type,omitempty"`
 	ScopeID          *string                     `json:"scope_id,omitempty"`
 	Position         int                         `json:"position"`
-	RaciAssignments  []SharedInboxRaciAssignment `json:"-"`
-	GVICAssignments  []ResourceGVICAssignment    `json:"gvic_assignments,omitempty"`
+	GVICAssignments  []SharedInboxGVICAssignment `json:"gvic_assignments,omitempty"`
 	AccessGrants     []EntityPermission          `json:"access_grants,omitempty"`
 	EffectiveAccess  string                      `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time                   `json:"created_timestamp"`
 	UpdatedTimestamp time.Time                   `json:"updated_timestamp"`
 }
 
-type SharedInboxRaciAssignment struct {
+type SharedInboxGVICAssignment struct {
 	CompanyID        string    `json:"company_id"`
 	FolderID         string    `json:"folder_id"`
 	SharedInboxID    string    `json:"shared_inbox_id,omitempty"`
 	Role             string    `json:"role"`
-	SubjectType      string    `json:"subject_type,omitempty"`
-	SubjectID        string    `json:"subject_id,omitempty"`
-	SubjectName      string    `json:"subject_name,omitempty"`
+	PrincipalType    string    `json:"principal_type,omitempty"`
+	PrincipalID      string    `json:"principal_id,omitempty"`
+	PrincipalName    string    `json:"principal_name,omitempty"`
 	UserID           string    `json:"user_id"`
 	UserDisplayName  string    `json:"user_display_name,omitempty"`
 	UserEmail        string    `json:"user_email,omitempty"`
@@ -704,9 +697,6 @@ type KanbanCard struct {
 	Position                   int       `json:"position"`
 	DueDate                    *string   `json:"due_date,omitempty"`
 	Priority                   *int      `json:"priority,omitempty"`
-	AssigneeUserID             *string   `json:"assignee_user_id,omitempty"`
-	AssigneeName               *string   `json:"assignee_name,omitempty"`
-	AssigneeEmail              *string   `json:"assignee_email,omitempty"`
 	ProjectionUpdatedTimestamp time.Time `json:"projection_updated_timestamp,omitempty"`
 	CreatedTimestamp           time.Time `json:"created_timestamp"`
 	UpdatedTimestamp           time.Time `json:"updated_timestamp"`
@@ -738,13 +728,13 @@ type NodeAccountAssignment struct {
 }
 
 const (
-	NotificationEventLogicGateRaciUpdated = "logic_gate.gvic_updated"
+	NotificationEventLogicGateGVICUpdated = "logic_gate.gvic_updated"
 	NotificationEventNodeAssigned         = "node.assigned"
 	NotificationEventNodeFieldsChanged    = "node.fields_changed"
 	NotificationEventNodeCommentCreated   = "node.comment_created"
 	NotificationEventMentionCreated       = "mention.created"
 	NotificationEventACIInboxChanged      = "aci_inbox.changed"
-	NotificationEventACIInboxRaciUpdated  = "aci_inbox.raci_updated"
+	NotificationEventACIInboxGVICUpdated  = "aci_inbox.GVIC_updated"
 )
 
 const (

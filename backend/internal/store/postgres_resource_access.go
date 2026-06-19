@@ -213,7 +213,7 @@ select role
 from company_memberships
 where company_id=$1::uuid and user_id=$2::uuid`, companyID, userID).Scan(&role)
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrAssigneeNotInCompany
+			return ErrPrincipalNotInCompany
 		}
 		if err != nil {
 			return err

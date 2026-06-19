@@ -408,7 +408,7 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return true, "", nil
 	}
-	if userID := realtimeRacioUserIDFromScope(scope); userID != "" {
+	if userID := realtimeGVICMatrixUserIDFromScope(scope); userID != "" {
 		if userID != strings.TrimSpace(actor.User.UserID) && !actorCanManageCompany(actor, companyID) {
 			return false, "access_denied", nil
 		}
@@ -503,8 +503,8 @@ func realtimeCommunicationsUserIDFromScope(scope string) string {
 	return strings.TrimSpace(strings.TrimPrefix(scope, "communications:user:"))
 }
 
-func realtimeRacioScope(userID string) string {
-	return store.RacioRealtimeUserScope(userID)
+func realtimeGVICMatrixScope(userID string) string {
+	return store.GVICMatrixRealtimeUserScope(userID)
 }
 
 func realtimeGVICScope(userID string) string {
@@ -523,7 +523,7 @@ func realtimeGVICUserIDFromScope(scope string) string {
 	return strings.TrimSpace(strings.TrimPrefix(scope, "gvic:user:"))
 }
 
-func realtimeRacioUserIDFromScope(scope string) string {
+func realtimeGVICMatrixUserIDFromScope(scope string) string {
 	scope = strings.TrimSpace(scope)
 	if !strings.HasPrefix(scope, "gvic_matrix:user:") {
 		return ""
@@ -613,7 +613,7 @@ func realtimeScopeType(scope string) string {
 		return "communications"
 	case realtimeWorkspaceDomainEventScopeType(scope) != "":
 		return realtimeWorkspaceDomainEventScopeType(scope)
-	case realtimeRacioUserIDFromScope(scope) != "":
+	case realtimeGVICMatrixUserIDFromScope(scope) != "":
 		return "gvic_matrix"
 	case realtimeProjectManagementUserIDFromScope(scope) != "":
 		return "project_management"
@@ -749,7 +749,7 @@ func (s *Server) currentRealtimeScopeSequence(companyID, scope string) int64 {
 	} else if userID := realtimeGVICUserIDFromScope(scope); userID != "" {
 		projectionName = store.ProjectionNameGVICEffectiveAssignments
 		projectionScope = projectionUserScope(userID)
-	} else if userID := realtimeRacioUserIDFromScope(scope); userID != "" {
+	} else if userID := realtimeGVICMatrixUserIDFromScope(scope); userID != "" {
 		projectionName = store.ProjectionNameGVICMatrix
 		projectionScope = store.GVICMatrixProjectionUserScope(userID)
 	} else if userID := realtimeProjectManagementUserIDFromScope(scope); userID != "" {

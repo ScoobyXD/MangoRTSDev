@@ -173,10 +173,10 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 
 	responsibleGate := mustCreateVisibleQueryGate(t, repo, companyID, "Work item responsible")
 	responsibleNode := mustCreateVisibleQueryNode(t, repo, companyID, "Work item responsible node")
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: viewer.UserID}})
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: viewer.UserID}})
 	mustAssignVisibleQueryNodeToGate(t, repo, companyID, responsibleGate.LogicGateID, responsibleNode.NodeID)
 	aciGate := mustCreateVisibleQueryGate(t, repo, companyID, "Work item ACI")
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, aciGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleVerified, UserID: viewer.UserID}})
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, aciGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerified, UserID: viewer.UserID}})
 
 	sharedFolders, err := repo.ListVisibleCommunicationsSharedInboxFolders(companyID, viewer.UserID)
 	if err != nil {
@@ -207,9 +207,9 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	assertVisibleQueryLogicGatesDoNotContain(t, gateSummaries, hiddenGate.LogicGateID)
 
 	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeNode, responsibleNode.NodeID, ResourceDefaultAccessNoAccess)
-	responsibleNodes, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: viewer.UserID, Limit: 10})
+	responsibleNodes, err := repo.ListGeneratedInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: viewer.UserID, Limit: 10})
 	if err != nil {
-		t.Fatalf("ListResponsibleInboxNodes: %v", err)
+		t.Fatalf("ListGeneratedInboxNodes: %v", err)
 	}
 	assertVisibleQueryNodesDoNotContain(t, responsibleNodes, responsibleNode.NodeID)
 
@@ -412,7 +412,7 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 	}
 	workItemSource := visibleQueryNormalizeSource(string(workItemRaw))
 	for _, needle := range []string{
-		"from racio_matrix_projection_table entry",
+		"from gvic_matrix_projection_table entry",
 		"mangorts_user_can_access_resource(entry.company_id, 'node', entry.resource_id, $4::uuid, 'edit')",
 		"mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.resource_id, $4::uuid, 'edit')",
 	} {

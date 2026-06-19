@@ -25,7 +25,7 @@ import {
   type EmailProvider,
 } from "../modules/communications/communicationsApi";
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
-import { deleteNotification, deleteNotifications, EVENT_NOTIFICATIONS_UPDATED, fetchNotifications, type NotificationItem, type NotificationRaciRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
+import { deleteNotification, deleteNotifications, EVENT_NOTIFICATIONS_UPDATED, fetchNotifications, type NotificationItem, type NotificationGVICRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../modules/node-map/eventbus";
 import { INBOX_PRIORITIES, GVIC_INBOX_SECTIONS } from "../pages/home/homeConstants";
 import { convertMessagesToLogicGateCommand } from "../pages/home/homeCommands";
@@ -107,7 +107,7 @@ const APP_SIDEBAR_GVIC_VIEWS = GVIC_INBOX_SECTIONS.map((section) => {
   };
 }) satisfies ReadonlyArray<{
   viewID: GVICHomeSidebarView;
-  role: NotificationRaciRole;
+  role: NotificationGVICRole;
   label: string;
   notificationTitle: string;
   surface: NotificationSurface;
@@ -138,7 +138,7 @@ type SidebarNotificationMenuFilter = {
   title: string;
   type?: string;
   surface?: NotificationSurface;
-  role?: NotificationRaciRole;
+  role?: NotificationGVICRole;
 };
 
 type SidebarNotificationMenuState = SidebarNotificationMenuFilter & {
@@ -179,7 +179,7 @@ function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
   return dataTransfer.getData(SHARED_TRIAGE_FOLDER_DRAG_MIME).trim();
 }
 
-function homeSidebarViewForRaciNotification(surface: NotificationSurface | undefined, role: NotificationRaciRole | "" | undefined): GVICHomeSidebarView {
+function homeSidebarViewForGVICNotification(surface: NotificationSurface | undefined, role: NotificationGVICRole | "" | undefined): GVICHomeSidebarView {
   const roleView = APP_SIDEBAR_GVIC_VIEWS.find((view) => view.role === role);
   if (roleView) return roleView.viewID;
   return surface === "r_inbox" ? "r-inbox" : "a-inbox";
@@ -301,8 +301,8 @@ export function AppSidebar({
     [expandedSharedFolderIDs, sharedInboxes, sharedTriageOpen],
   );
   const sharedTriageActive = homeActive && (activeHomeView === "shared-root" || activeHomeView.startsWith("shared:"));
-  const raciNotificationCounts = useMemo(
-    () => APP_SIDEBAR_GVIC_VIEWS.reduce<Partial<Record<NotificationRaciRole, number>>>((counts, view) => {
+  const GVICNotificationCounts = useMemo(
+    () => APP_SIDEBAR_GVIC_VIEWS.reduce<Partial<Record<NotificationGVICRole, number>>>((counts, view) => {
       counts[view.role] = notificationSummaryRoleCount(notificationSummary, view.surface, view.role);
       return counts;
     }, {}),
@@ -514,7 +514,7 @@ export function AppSidebar({
     }
     if (notification.surface === "aci_inbox" || notification.surface === "r_inbox") {
       onPageSelect("home");
-      onHomeViewSelect(homeSidebarViewForRaciNotification(notification.surface, notification.role));
+      onHomeViewSelect(homeSidebarViewForGVICNotification(notification.surface, notification.role));
     } else if (notification.surface === "shared_triage") {
       onPageSelect("home");
       onHomeViewSelect("shared-root");
@@ -1191,7 +1191,7 @@ export function AppSidebar({
                   active={homeActive && activeHomeView === view.viewID}
                   trailing={<SidebarNotificationBadges badges={[{
                     key: view.role,
-                    count: raciNotificationCounts[view.role] ?? 0,
+                    count: GVICNotificationCounts[view.role] ?? 0,
                     tone: view.role,
                     title: view.notificationTitle,
                     onClick: (event) => openNotificationMenu(event, { title: view.notificationTitle, surface: view.surface, role: view.role }),
@@ -1541,7 +1541,7 @@ function AppSidebarCompanyExplorerSection({
   );
 }
 
-type SidebarNotificationBadgeTone = NotificationRaciRole | "aci" | "mail";
+type SidebarNotificationBadgeTone = NotificationGVICRole | "aci" | "mail";
 
 type SidebarNotificationBadge = {
   key: string;
@@ -1552,7 +1552,7 @@ type SidebarNotificationBadge = {
   onClick?: (event: React.MouseEvent) => void;
 };
 
-function notificationSummaryRoleCount(summary: NotificationSummary, surface: NotificationSurface, role: NotificationRaciRole): number {
+function notificationSummaryRoleCount(summary: NotificationSummary, surface: NotificationSurface, role: NotificationGVICRole): number {
   return (summary.role_counts ?? []).reduce((count, item) => (
     item.surface === surface && item.role === role ? count + normalizeSidebarNotificationCount(item.count) : count
   ), 0);

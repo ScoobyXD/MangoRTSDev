@@ -181,9 +181,9 @@ order by node_id::text`, companyID, accountID)
 	return nodeIDs, rows.Err()
 }
 
-func postgresProjectionRowsForNodesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs []string) ([]ProjectionDelta, []KanbanBoardProjectionRow, []RacioMatrixProjectionRow, []ProjectManagementTimelineProjectionRow, error) {
+func postgresProjectionRowsForNodesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs []string) ([]ProjectionDelta, []KanbanBoardProjectionRow, []GVICMatrixProjectionRow, []ProjectManagementTimelineProjectionRow, error) {
 	kanbanRows := []KanbanBoardProjectionRow{}
-	racioRows := []RacioMatrixProjectionRow{}
+	GVICMatrixRows := []GVICMatrixProjectionRow{}
 	projectRows := []ProjectManagementTimelineProjectionRow{}
 	for _, nodeID := range cleanAccountIDs(nodeIDs) {
 		rows, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, companyID, nodeID)
@@ -191,18 +191,18 @@ func postgresProjectionRowsForNodesTx(ctx context.Context, tx *sql.Tx, companyID
 			return nil, nil, nil, nil, err
 		}
 		kanbanRows = append(kanbanRows, rows...)
-		rRows, err := postgresRacioProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
+		rRows, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
-		racioRows = append(racioRows, rRows...)
+		GVICMatrixRows = append(GVICMatrixRows, rRows...)
 		pRows, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeNode, nodeID)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
 		projectRows = append(projectRows, pRows...)
 	}
-	return nil, kanbanRows, racioRows, projectRows, nil
+	return nil, kanbanRows, GVICMatrixRows, projectRows, nil
 }
 
 func syncPostgresAccountProjectionRowsForNodesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs []string) error {
@@ -210,7 +210,7 @@ func syncPostgresAccountProjectionRowsForNodesTx(ctx context.Context, tx *sql.Tx
 		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return err
 		}
-		if err := syncPostgresRacioProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+		if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return err
 		}
 		if err := syncProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
@@ -220,9 +220,9 @@ func syncPostgresAccountProjectionRowsForNodesTx(ctx context.Context, tx *sql.Tx
 	return nil
 }
 
-func projectionDeltasForAccountNodeChange(beforeKanban []KanbanBoardProjectionRow, beforeRacio []RacioMatrixProjectionRow, beforeProject []ProjectManagementTimelineProjectionRow, afterKanban []KanbanBoardProjectionRow, afterRacio []RacioMatrixProjectionRow, afterProject []ProjectManagementTimelineProjectionRow) []ProjectionDelta {
+func projectionDeltasForAccountNodeChange(beforeKanban []KanbanBoardProjectionRow, beforeGVICMatrix []GVICMatrixProjectionRow, beforeProject []ProjectManagementTimelineProjectionRow, afterKanban []KanbanBoardProjectionRow, afterGVICMatrix []GVICMatrixProjectionRow, afterProject []ProjectManagementTimelineProjectionRow) []ProjectionDelta {
 	deltas := diffKanbanProjectionRows(beforeKanban, afterKanban)
-	deltas = append(deltas, diffRacioProjectionRows(beforeRacio, afterRacio)...)
+	deltas = append(deltas, diffGVICMatrixProjectionRows(beforeGVICMatrix, afterGVICMatrix)...)
 	deltas = append(deltas, diffProjectManagementProjectionRows(beforeProject, afterProject)...)
 	return deltas
 }

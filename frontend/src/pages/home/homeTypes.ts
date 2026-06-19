@@ -1,5 +1,5 @@
 import type { CurrentUserResponse } from "../../auth/cognitoAuth.js";
-import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
+import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import type { NodeRecord } from "../../modules/node-map/shared.js";
 
 export type HomePageProps = {
@@ -120,9 +120,9 @@ export type HomeColumnResizeDrag = {
   captureTarget: HTMLButtonElement;
 };
 
-export type RaciInboxRole = LogicGateRaciRole | "other";
-export type RaciInboxViewID = Extract<HomeViewID, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
-export type ResponsibleInboxStatus = "pending" | "in_progress" | "review" | "done";
+export type GVICInboxRole = LogicGateGVICRole | "other";
+export type GVICInboxViewID = Extract<HomeViewID, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
+export type GVICInboxStatus = "pending" | "in_progress" | "review" | "done";
 export type InboxPriority = 0 | 1 | 2 | 3 | 4 | 5;
 
 export type InboxLogicGateNodeGroup = {

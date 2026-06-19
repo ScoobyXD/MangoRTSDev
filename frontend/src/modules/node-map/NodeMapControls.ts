@@ -1,6 +1,6 @@
 import { Dispatch, MutableRefObject, SetStateAction, useEffect, useRef } from "react";
 import { shouldDeferToNativeTextEditing } from "../../hooks/keyboardShortcutRouting.js";
-import { NodeDirection, NodePosition, NodeRecord, clamp, snapToGrid } from "./shared.js";
+import { NodeDirection, NodePosition, clamp, snapToGrid } from "./shared.js";
 
 export type NodeMapScreenPoint = { x: number; y: number };
 export type NodeMapScreenRect = { minX: number; maxX: number; minY: number; maxY: number };
@@ -116,7 +116,12 @@ export type NodeMapClipboardPayload = {
   }>;
 };
 
-export function buildNodeMapClipboardPayload<TNode extends { node_id: string; title?: string; header?: string }, TRelationship extends { node_relationship_id: string; node_id_a: string; node_id_b: string; a_position: string; b_position: string }>(input: {
+function nodeMapClipboardLabel(kind: NodeMapClipboardKind, node: { node_id: string; name?: string; title?: string; header?: string }): string {
+  const label = kind === "node" ? node.name : node.header || node.title;
+  return (label || node.node_id).trim() || node.node_id;
+}
+
+export function buildNodeMapClipboardPayload<TNode extends { node_id: string; name?: string; title?: string; header?: string }, TRelationship extends { node_relationship_id: string; node_id_a: string; node_id_b: string; a_position: string; b_position: string }>(input: {
   kind: NodeMapClipboardKind;
   nodes: TNode[];
   relationships: TRelationship[];
@@ -138,7 +143,7 @@ export function buildNodeMapClipboardPayload<TNode extends { node_id: string; ti
       const size = input.nodeSizes[node.node_id] ?? { w: 148, h: 96 };
       return {
         oldID: node.node_id,
-        title: (node.title || node.header || node.node_id).trim() || node.node_id,
+        title: nodeMapClipboardLabel(input.kind, node),
         x: snapToGrid(position.x),
         y: snapToGrid(position.y),
         w: snapToGrid(size.w),
@@ -213,7 +218,7 @@ export function beginNodeMapMultiSelectSession(
 }
 
 export function computeNodeMapMultiSelectResult(input: {
-  nodes: NodeRecord[];
+  nodes: Array<{ node_id: string }>;
   nodePositions: Record<string, NodePosition>;
   relationshipPaths: NodeMapRelationshipPath[];
   multiSelectBox: NodeMapMultiSelectBox;
@@ -351,7 +356,7 @@ export function useNodeMapMultiSelectControls(input: {
   multiSelectBox: NodeMapMultiSelectBox;
   multiSelectBoxRef: MutableRefObject<NodeMapMultiSelectBox>;
   viewportRef: MutableRefObject<HTMLDivElement | null>;
-  nodes: NodeRecord[];
+  nodes: Array<{ node_id: string }>;
   nodePositions: Record<string, NodePosition>;
   relationshipPathsRef: MutableRefObject<NodeMapRelationshipPath[]>;
   zoom: number;

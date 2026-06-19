@@ -10,7 +10,7 @@ import { MangoWordmark } from "../../app/MangoLogo";
 import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules";
 import {
   applyEmailMessageToCachedPages,
-  addLogicGateRaciAssignments,
+  addLogicGateGVICAssignments,
   addLocalReplyToEmailMessage,
   disconnectCommunications,
   emailMessageMatchesListFilters,
@@ -32,17 +32,17 @@ import {
   primeEmailMessageCache,
   reconcileEmailMessageLocalReply,
   reconcileLocalEmailReply,
-  removeLogicGateRaciAssignments,
+  removeLogicGateGVICAssignments,
   removeEmailMessageFromCache,
   sortEmailMessagesByDateDescending,
-  updateCommunicationsSharedInboxRaciAssignments,
+  updateCommunicationsSharedInboxGVICAssignments,
   type CompanyUser,
   type CompanyUserGroup,
   type CompanyUserGroupMember,
   type CommunicationsSharedInbox,
   type CommunicationsSharedInboxCreateIntent,
-  type CommunicationsSharedInboxRaciRole,
-  type CommunicationsSharedInboxRaciSubjectType,
+  type CommunicationsSharedInboxGVICRole,
+  type CommunicationsSharedInboxGVICPrincipalType,
   type EmailFolder,
   type EmailMailbox,
   type EmailMessage,
@@ -57,32 +57,32 @@ import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared
 import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/companyExplorerTreeRows";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
-import type { LogicGateRaciRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
+import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import { toLogicGateCanvasRecord } from "../../modules/logic-gate-map/shared";
 import { invalidateNodeRecordStoreCaches } from "../../modules/node-map/NodeRecordStore";
 import { getLogicGateRecordSingleFlight } from "../../modules/logic-gate-map/LogicGateRecordStore";
 import { removeNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../../modules/node-map/NodeRelationshipGraph";
 import { removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
-import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type RacioMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
-import { applyRacioProjectionEnvelope, parseRacioProjectionSequence, racioRealtimeScope, type RacioProjectionDeltaEnvelope } from "../../modules/racio/racioProjectionDeltas";
+import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type GVICMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
+import { applyGVICMatrixProjectionEnvelope, parseGVICMatrixProjectionSequence, GVICMatrixRealtimeScope, type GVICMatrixProjectionDeltaEnvelope } from "../../modules/gvic/gvicMatrixProjectionDeltas";
 import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../../modules/realtime/realtimeWebSocket";
-import { listMyLogicGates, listRacioMatrixProjectionRows } from "../../modules/work-items/workItemReadApi";
+import { listMyLogicGates, listGVICMatrixProjectionRows } from "../../modules/work-items/workItemReadApi";
 import { subscribeWorkspaceRealtime, workspaceRealtimeScope } from "../../modules/workspace/workspaceRealtime";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
-import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, RacioMatrixViewerSelector, RaciRoleInboxMatrix, SharedInboxRaciSettingsModal, type RacioMatrixViewerListEntry } from "./HomeParts";
+import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, GVICMatrixViewerSelector, GVICRoleInboxMatrix, SharedInboxGVICSettingsModal, type GVICMatrixViewerListEntry } from "./HomeParts";
 import { CustomMatrixView } from "./CustomMatrixView";
 import { MyWorkView } from "./MyWorkView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, MESSAGE_POLL_REFRESH_INTERVAL_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRacioMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isCustomMatrixViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRaciRole, logicGateHasRaciRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isCustomMatrixViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
-import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type ResponsibleInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
+import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
 function sharedInboxIDForHomeView(viewID: HomeViewID): string {
   return viewID.startsWith("shared:") ? viewID.slice("shared:".length).trim() : "";
@@ -126,20 +126,20 @@ type HomeNoticeResourceAction =
   | { kind: "logic_gate"; logicGateID: string }
   | { kind: "node"; nodeID: string };
 
-const RACIO_VIEWER_LIST_STORAGE_KEY_PREFIX = "mangorts.home.gvicViewerList.v1";
+const GVICMatrix_VIEWER_LIST_STORAGE_KEY_PREFIX = "mangorts.home.gvicViewerList.v1";
 
-function racioViewerListStorageKey(companyID: string, userID: string): string {
+function GVICMatrixViewerListStorageKey(companyID: string, userID: string): string {
   const cleanCompanyID = companyID.trim() || "global";
   const cleanUserID = userID.trim() || "anonymous";
-  return `${RACIO_VIEWER_LIST_STORAGE_KEY_PREFIX}:${cleanCompanyID}:${cleanUserID}`;
+  return `${GVICMatrix_VIEWER_LIST_STORAGE_KEY_PREFIX}:${cleanCompanyID}:${cleanUserID}`;
 }
 
-function readRacioViewerListEntries(companyID: string, userID: string): RacioMatrixViewerListEntry[] {
+function readGVICMatrixViewerListEntries(companyID: string, userID: string): GVICMatrixViewerListEntry[] {
   if (typeof localStorage === "undefined" || !companyID.trim() || !userID.trim()) return [];
   try {
-    const parsed = JSON.parse(localStorage.getItem(racioViewerListStorageKey(companyID, userID)) ?? "[]") as unknown;
+    const parsed = JSON.parse(localStorage.getItem(GVICMatrixViewerListStorageKey(companyID, userID)) ?? "[]") as unknown;
     if (!Array.isArray(parsed)) return [];
-    const entries: RacioMatrixViewerListEntry[] = [];
+    const entries: GVICMatrixViewerListEntry[] = [];
     const seen = new Set<string>();
     for (const item of parsed) {
       if (!item || typeof item !== "object") continue;
@@ -158,12 +158,12 @@ function readRacioViewerListEntries(companyID: string, userID: string): RacioMat
   }
 }
 
-function storeRacioViewerListEntries(companyID: string, userID: string, entries: RacioMatrixViewerListEntry[]): void {
+function storeGVICMatrixViewerListEntries(companyID: string, userID: string, entries: GVICMatrixViewerListEntry[]): void {
   if (typeof localStorage === "undefined" || !companyID.trim() || !userID.trim()) return;
   const cleanEntries = entries
     .map((entry) => ({ kind: entry.kind, id: entry.id.trim() }))
     .filter((entry) => (entry.kind === "group" || entry.kind === "user") && entry.id);
-  const key = racioViewerListStorageKey(companyID, userID);
+  const key = GVICMatrixViewerListStorageKey(companyID, userID);
   if (cleanEntries.length === 0) {
     localStorage.removeItem(key);
     return;
@@ -310,8 +310,8 @@ export function HomePage({
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [companyUserGroups, setCompanyUserGroups] = useState<CompanyUserGroup[]>([]);
   const [companyUserGroupMembers, setCompanyUserGroupMembers] = useState<CompanyUserGroupMember[]>([]);
-  const [racioViewerListEntries, setRacioViewerListEntries] = useState<RacioMatrixViewerListEntry[]>([]);
-  const [racioMatrixTargetUserID, setRacioMatrixTargetUserID] = useState("");
+  const [GVICMatrixViewerListEntries, setGVICMatrixViewerListEntries] = useState<GVICMatrixViewerListEntry[]>([]);
+  const [GVICMatrixTargetUserID, setGVICMatrixTargetUserID] = useState("");
   const [matrixAccountFilterIDs, setMatrixAccountFilterIDs] = useState<string[]>([]);
   const [logicGateFolders, setLogicGateFolders] = useState<CompanyExplorerFolder[]>([]);
   const [logicGateFolderItems, setLogicGateFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
@@ -327,7 +327,7 @@ export function HomePage({
   const [logicGateSelectionAnchorID, setLogicGateSelectionAnchorID] = useState("");
   const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
   const [sharedInboxPermissionsFolderID, setSharedInboxPermissionsFolderID] = useState("");
-  const [sharedInboxRaciFolderID, setSharedInboxRaciFolderID] = useState("");
+  const [sharedInboxGVICFolderID, setSharedInboxGVICFolderID] = useState("");
   const [sharedInboxEmailConnectionDialog, setSharedInboxEmailConnectionDialog] = useState<SharedInboxEmailConnectionDialogState | null>(null);
   const [sharedInboxEmailAssignmentDialog, setSharedInboxEmailAssignmentDialog] = useState<SharedInboxEmailAssignmentDialogState | null>(null);
   const [busy, setBusy] = useState("");
@@ -380,14 +380,14 @@ export function HomePage({
   const folderReloadTimerRef = useRef<number | null>(null);
   const workspacePanelReloadTimerRef = useRef<number | null>(null);
   const messageListRefreshTimerRef = useRef<number | null>(null);
-  const racioProjectionSequenceRef = useRef(0);
-  const racioProjectionRefetchInFlightRef = useRef(false);
-  const racioProjectionInitializedRef = useRef(false);
-  const racioProjectionRowsRef = useRef<RacioMatrixProjectionRow[]>([]);
-  const racioProjectionScopeKeyRef = useRef("");
-  const racioProjectedNodeIDsRef = useRef<Set<string>>(new Set());
-  const racioProjectedLogicGateIDsRef = useRef<Set<string>>(new Set());
-  const requestRacioProjectionRefreshRef = useRef<((minimumSequence?: number) => void) | null>(null);
+  const GVICMatrixProjectionSequenceRef = useRef(0);
+  const GVICMatrixProjectionRefetchInFlightRef = useRef(false);
+  const GVICMatrixProjectionInitializedRef = useRef(false);
+  const GVICMatrixProjectionRowsRef = useRef<GVICMatrixProjectionRow[]>([]);
+  const GVICMatrixProjectionScopeKeyRef = useRef("");
+  const GVICMatrixProjectedNodeIDsRef = useRef<Set<string>>(new Set());
+  const GVICMatrixProjectedLogicGateIDsRef = useRef<Set<string>>(new Set());
+  const requestGVICMatrixProjectionRefreshRef = useRef<((minimumSequence?: number) => void) | null>(null);
   const messagesRef = useRef<EmailMessage[]>([]);
   const foldersRef = useRef<EmailFolder[]>([]);
   const locallyReadMessageIDsRef = useRef<Set<string>>(new Set());
@@ -414,7 +414,7 @@ export function HomePage({
       ? viewportWidth < 760
       : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!hideNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
-  const activeRacioMatrixUserID = isInboxMatrixView ? (racioMatrixTargetUserID.trim() || currentUserID) : currentUserID;
+  const activeGVICMatrixUserID = isInboxMatrixView ? (GVICMatrixTargetUserID.trim() || currentUserID) : currentUserID;
   useEffect(() => {
     setMailDrafts(readHomeMailDrafts(companyID, currentUserID));
     setEmailSignature(readHomeMailSignature(companyID, currentUserID));
@@ -427,29 +427,29 @@ export function HomePage({
         .map(homeMailDraftToMessage)
   ), [mailDrafts, searchQuery, unreadOnly]);
   useEffect(() => {
-    setRacioMatrixTargetUserID(currentUserID);
+    setGVICMatrixTargetUserID(currentUserID);
   }, [companyID, currentUserID]);
   useEffect(() => {
     setMatrixAccountFilterIDs((current) => current.filter((accountID) => matrixAccounts.some((account) => account.account_id === accountID)));
   }, [matrixAccounts]);
   useEffect(() => {
-    setRacioViewerListEntries(readRacioViewerListEntries(companyID, currentUserID));
+    setGVICMatrixViewerListEntries(readGVICMatrixViewerListEntries(companyID, currentUserID));
   }, [companyID, currentUserID]);
-  const updateRacioViewerListEntries = useCallback((entries: RacioMatrixViewerListEntry[]) => {
-    setRacioViewerListEntries(entries);
-    storeRacioViewerListEntries(companyID, currentUserID, entries);
+  const updateGVICMatrixViewerListEntries = useCallback((entries: GVICMatrixViewerListEntry[]) => {
+    setGVICMatrixViewerListEntries(entries);
+    storeGVICMatrixViewerListEntries(companyID, currentUserID, entries);
   }, [companyID, currentUserID]);
   useEffect(() => {
-    const scopeKey = companyID && currentUserID && activeRacioMatrixUserID ? `${companyID}\u0000${currentUserID}\u0000${activeRacioMatrixUserID}` : "";
-    if (racioProjectionScopeKeyRef.current === scopeKey) return;
-    racioProjectionScopeKeyRef.current = scopeKey;
-    racioProjectionSequenceRef.current = 0;
-    racioProjectionRefetchInFlightRef.current = false;
-    racioProjectionRowsRef.current = [];
-    racioProjectionInitializedRef.current = false;
-    racioProjectedNodeIDsRef.current = new Set();
-    racioProjectedLogicGateIDsRef.current = new Set();
-  }, [activeRacioMatrixUserID, companyID, currentUserID]);
+    const scopeKey = companyID && currentUserID && activeGVICMatrixUserID ? `${companyID}\u0000${currentUserID}\u0000${activeGVICMatrixUserID}` : "";
+    if (GVICMatrixProjectionScopeKeyRef.current === scopeKey) return;
+    GVICMatrixProjectionScopeKeyRef.current = scopeKey;
+    GVICMatrixProjectionSequenceRef.current = 0;
+    GVICMatrixProjectionRefetchInFlightRef.current = false;
+    GVICMatrixProjectionRowsRef.current = [];
+    GVICMatrixProjectionInitializedRef.current = false;
+    GVICMatrixProjectedNodeIDsRef.current = new Set();
+    GVICMatrixProjectedLogicGateIDsRef.current = new Set();
+  }, [activeGVICMatrixUserID, companyID, currentUserID]);
   const currentUserHasFullSharedInboxAccess = userHasFullSharedInboxAccess(me, companyID);
   const activeSharedInboxFolderID = sharedInboxIDForHomeView(activeViewID);
   const activeMailViewUsesSharedConnection = homeViewUsesSharedEmailConnection(activeViewID);
@@ -475,9 +475,9 @@ export function HomePage({
     () => sharedInboxPermissionsFolderID ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxPermissionsFolderID) ?? null : null,
     [sharedInboxPermissionsFolderID, sharedInboxes],
   );
-  const sharedInboxRaciFolder = useMemo(
-    () => sharedInboxRaciFolderID ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxRaciFolderID) ?? null : null,
-    [sharedInboxRaciFolderID, sharedInboxes],
+  const sharedInboxGVICFolder = useMemo(
+    () => sharedInboxGVICFolderID ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxGVICFolderID) ?? null : null,
+    [sharedInboxGVICFolderID, sharedInboxes],
   );
   const canMutateCurrentMailView = activeViewID === "shared-root"
     ? sharedInboxTreeUserCanManageMail(sharedInboxes, "", currentUserID, currentUserHasFullSharedInboxAccess)
@@ -1546,10 +1546,10 @@ export function HomePage({
           scope.kind === "work_item_assignment" ||
           scope.kind === "workspace"
         ));
-        const touchesRacioMatrix = gap.scopes.some((scope) => scope.kind === "gvic_matrix" || scope.kind === "workspace");
+        const touchesGVICMatrix = gap.scopes.some((scope) => scope.kind === "gvic_matrix" || scope.kind === "workspace");
         if (touchesSharedInbox) void loadSharedInboxes();
         if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
-        if (touchesRacioMatrix) requestRacioProjectionRefreshRef.current?.();
+        if (touchesGVICMatrix) requestGVICMatrixProjectionRefreshRef.current?.();
       },
       onEvent(event, context) {
         if (event.event !== "workspace") return;
@@ -1578,12 +1578,12 @@ export function HomePage({
           scope.kind === "work_item_assignment" ||
           scope.kind === "workspace"
         ));
-        const touchesRacioMatrix = scopes.some((scope) => scope.kind === "gvic_matrix" || scope.kind === "workspace");
+        const touchesGVICMatrix = scopes.some((scope) => scope.kind === "gvic_matrix" || scope.kind === "workspace");
         if (touchesSharedInbox) {
           void loadSharedInboxes();
         }
         if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
-        if (touchesRacioMatrix) requestRacioProjectionRefreshRef.current?.();
+        if (touchesGVICMatrix) requestGVICMatrixProjectionRefreshRef.current?.();
         if (type === "node_created" || type === "node_updated" || type === "node_permissions_updated") {
           const node = data.node && typeof data.node === "object" ? data.node as NodeRecord : null;
           if (node?.node_id) {
@@ -2276,67 +2276,67 @@ export function HomePage({
     }
   }, [companyID, sharedInboxes]);
 
-  const currentDirectSharedInboxRaciAssignments = useCallback((folderID: string): Array<{ role: CommunicationsSharedInboxRaciRole; subject_type: CommunicationsSharedInboxRaciSubjectType; subject_id: string }> => {
+  const currentDirectSharedInboxGVICAssignments = useCallback((folderID: string): Array<{ role: CommunicationsSharedInboxGVICRole; principal_type: CommunicationsSharedInboxGVICPrincipalType; principal_id: string }> => {
     const cleanFolderID = folderID.trim();
     const folder = sharedInboxes.find((item) => item.folder_id === cleanFolderID);
     return (folder?.gvic_assignments ?? [])
       .filter((assignment) => assignment.folder_id === cleanFolderID)
       .map((assignment) => {
-        const subjectType = (assignment.subject_type?.trim() || "user") as CommunicationsSharedInboxRaciSubjectType;
-        const subjectID = assignment.subject_id?.trim() || assignment.user_id.trim();
-        return { role: assignment.role, subject_type: subjectType, subject_id: subjectID };
+        const principalType = (assignment.principal_type?.trim() || "user") as CommunicationsSharedInboxGVICPrincipalType;
+        const principalID = assignment.principal_id?.trim() || assignment.user_id.trim();
+        return { role: assignment.role, principal_type: principalType, principal_id: principalID };
       })
-      .filter((assignment) => assignment.subject_id);
+      .filter((assignment) => assignment.principal_id);
   }, [sharedInboxes]);
 
-  const saveSharedInboxRaciAssignments = useCallback(async (
+  const saveSharedInboxGVICAssignments = useCallback(async (
     folderID: string,
-    assignments: Array<{ role: CommunicationsSharedInboxRaciRole; subject_type: CommunicationsSharedInboxRaciSubjectType; subject_id: string }>,
+    assignments: Array<{ role: CommunicationsSharedInboxGVICRole; principal_type: CommunicationsSharedInboxGVICPrincipalType; principal_id: string }>,
   ): Promise<void> => {
     const cleanFolderID = folderID.trim();
     if (!cleanFolderID) return;
-    setBusy("shared-inbox-raci");
+    setBusy("shared-inbox-GVIC");
     setError("");
     setNotice("");
     try {
-      const nextAssignments = await updateCommunicationsSharedInboxRaciAssignments(companyID, cleanFolderID, assignments);
+      const nextAssignments = await updateCommunicationsSharedInboxGVICAssignments(companyID, cleanFolderID, assignments);
       setSharedInboxes((previous) => previous.map((folder) => (
         folder.folder_id === cleanFolderID ? { ...folder, gvic_assignments: nextAssignments } : folder
       )));
       await loadSharedInboxes();
-    } catch (raciError) {
-      setError(formatError(raciError, "Failed to update Shared Triage GVIC"));
+    } catch (GVICError) {
+      setError(formatError(GVICError, "Failed to update Shared Triage GVIC"));
     } finally {
       setBusy("");
     }
   }, [companyID, loadSharedInboxes]);
 
-  const addSharedInboxRaciSubject = useCallback((
+  const addSharedInboxGVICPrincipal = useCallback((
     folderID: string,
-    role: CommunicationsSharedInboxRaciRole,
-    subjectType: CommunicationsSharedInboxRaciSubjectType,
-    subjectID: string,
+    role: CommunicationsSharedInboxGVICRole,
+    principalType: CommunicationsSharedInboxGVICPrincipalType,
+    principalID: string,
   ) => {
-    const cleanSubjectID = subjectID.trim();
-    if (!cleanSubjectID) return;
-    const direct = currentDirectSharedInboxRaciAssignments(folderID);
-    if (direct.some((assignment) => assignment.role === role && assignment.subject_type === subjectType && assignment.subject_id === cleanSubjectID)) return;
-    void saveSharedInboxRaciAssignments(folderID, [...direct, { role, subject_type: subjectType, subject_id: cleanSubjectID }]);
-  }, [currentDirectSharedInboxRaciAssignments, saveSharedInboxRaciAssignments]);
+    const cleanPrincipalID = principalID.trim();
+    if (!cleanPrincipalID) return;
+    const direct = currentDirectSharedInboxGVICAssignments(folderID);
+    if (direct.some((assignment) => assignment.role === role && assignment.principal_type === principalType && assignment.principal_id === cleanPrincipalID)) return;
+    void saveSharedInboxGVICAssignments(folderID, [...direct, { role, principal_type: principalType, principal_id: cleanPrincipalID }]);
+  }, [currentDirectSharedInboxGVICAssignments, saveSharedInboxGVICAssignments]);
 
-  const removeSharedInboxRaciSubject = useCallback((
+  const removeSharedInboxGVICPrincipal = useCallback((
     folderID: string,
-    role: CommunicationsSharedInboxRaciRole,
-    subjectType: CommunicationsSharedInboxRaciSubjectType,
-    subjectID: string,
+    role: CommunicationsSharedInboxGVICRole,
+    principalType: CommunicationsSharedInboxGVICPrincipalType,
+    principalID: string,
   ) => {
-    const cleanSubjectID = subjectID.trim();
-    if (!cleanSubjectID) return;
-    const direct = currentDirectSharedInboxRaciAssignments(folderID);
-    void saveSharedInboxRaciAssignments(folderID, direct.filter((assignment) => (
-      assignment.role !== role || assignment.subject_type !== subjectType || assignment.subject_id !== cleanSubjectID
+    const cleanPrincipalID = principalID.trim();
+    if (!cleanPrincipalID) return;
+    const direct = currentDirectSharedInboxGVICAssignments(folderID);
+    void saveSharedInboxGVICAssignments(folderID, direct.filter((assignment) => (
+      assignment.role !== role || assignment.principal_type !== principalType || assignment.principal_id !== cleanPrincipalID
     )));
-  }, [currentDirectSharedInboxRaciAssignments, saveSharedInboxRaciAssignments]);
+  }, [currentDirectSharedInboxGVICAssignments, saveSharedInboxGVICAssignments]);
 
   const nodeByID = useMemo(() => new Map(nodes.map((node) => [node.node_id, node])), [nodes]);
   const allNodeRows = useMemo(() => buildCompanyExplorerTreeRows({
@@ -2353,7 +2353,7 @@ export function HomePage({
   const logicGateByID = useMemo(() => new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate])), [logicGates]);
   const logicGateByIDRef = useRef(logicGateByID);
   logicGateByIDRef.current = logicGateByID;
-  const activeRaciInboxSection = gvicInboxSectionForView(activeViewID);
+  const activeGVICInboxSection = gvicInboxSectionForView(activeViewID);
   const matrixFilteredNodes = useMemo(() => (
     (isInboxMatrixView || isCustomMatrixView) && matrixAccountFilterIDs.length > 0
       ? nodes.filter((node) => entityMatchesAccountFilter(node, matrixAccountFilterIDs))
@@ -2369,7 +2369,7 @@ export function HomePage({
       compact
     />
   ), [matrixAccountFilterIDs, matrixAccounts]);
-  const workspacePanelUserID = isInboxMatrixView ? activeRacioMatrixUserID : currentUserID;
+  const workspacePanelUserID = isInboxMatrixView ? activeGVICMatrixUserID : currentUserID;
   useEffect(() => {
     if (!companyID || nodes.length === 0) return undefined;
     const missingIDs = missingLogicGateRecordIDs(nodes, logicGateByID);
@@ -2402,11 +2402,11 @@ export function HomePage({
   }, [apiBase, companyID, logicGateByID, nodes]);
   const myNodes = useMemo(() => {
     if (!workspacePanelUserID) return [];
-    return nodes.filter((node) => cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasAnyRaciRole(logicGateByID.get(logicGateID), workspacePanelUserID)));
+    return nodes.filter((node) => cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasAnyGVICRole(logicGateByID.get(logicGateID), workspacePanelUserID)));
   }, [logicGateByID, nodes, workspacePanelUserID]);
   const assignedMyLogicGates = useMemo(() => {
     if (!workspacePanelUserID) return [];
-    return logicGates.filter((logicGate) => logicGateHasAnyRaciRole(logicGate, workspacePanelUserID));
+    return logicGates.filter((logicGate) => logicGateHasAnyGVICRole(logicGate, workspacePanelUserID));
   }, [logicGates, workspacePanelUserID]);
   const assignedMyLogicGateIDs = useMemo(() => new Set(assignedMyLogicGates.map((logicGate) => logicGate.logic_gate_id)), [assignedMyLogicGates]);
   const myLogicGateNodes = useMemo(() => (
@@ -2451,19 +2451,19 @@ export function HomePage({
   }), [assignedMyLogicGates, logicGateByID, logicGateFolderItems, logicGateFolders, myLogicGateShortcuts]);
   const myLogicGateOrderedRowIDs = useMemo(() => myLogicGateGroups
     .flatMap((group) => group.logicGates.map((logicGate) => logicGateTreeID(logicGate.logic_gate_id))), [myLogicGateGroups]);
-  const activeRaciRoleLogicGates = useMemo(() => {
-    const role = activeRaciInboxSection?.role;
+  const activeGVICRoleLogicGates = useMemo(() => {
+    const role = activeGVICInboxSection?.role;
     if (!workspacePanelUserID || !role || role === "other") return [];
-    return logicGates.filter((logicGate) => logicGateHasRaciRole(logicGate, role, workspacePanelUserID));
-  }, [activeRaciInboxSection?.role, logicGates, workspacePanelUserID]);
-  const activeRaciRoleLogicGateGroups = useMemo(() => buildMyLogicGateGroups({
+    return logicGates.filter((logicGate) => logicGateHasGVICRole(logicGate, role, workspacePanelUserID));
+  }, [activeGVICInboxSection?.role, logicGates, workspacePanelUserID]);
+  const activeGVICRoleLogicGateGroups = useMemo(() => buildMyLogicGateGroups({
     shortcuts: [],
-    assignedLogicGates: activeRaciRoleLogicGates,
+    assignedLogicGates: activeGVICRoleLogicGates,
     logicGateByID,
     folders: logicGateFolders,
     folderItems: logicGateFolderItems,
-  }), [activeRaciRoleLogicGates, logicGateByID, logicGateFolderItems, logicGateFolders]);
-  const racioDirectoryUsers = useMemo(() => {
+  }), [activeGVICRoleLogicGates, logicGateByID, logicGateFolderItems, logicGateFolders]);
+  const GVICMatrixDirectoryUsers = useMemo(() => {
     const users = [...companyUsers];
     if (currentUserID && !users.some((user) => user.user_id.trim() === currentUserID)) {
       users.push({
@@ -2479,16 +2479,16 @@ export function HomePage({
       left.user_id.localeCompare(right.user_id)
     ));
   }, [companyID, companyUsers, currentUserID, me?.user.display_name, me?.user.email]);
-  const racioMatrixViewerSelector = (
-    <RacioMatrixViewerSelector
-      companyUsers={racioDirectoryUsers}
+  const gvicMatrixViewerSelectorElement = (
+    <GVICMatrixViewerSelector
+      companyUsers={GVICMatrixDirectoryUsers}
       groups={companyUserGroups}
       groupMembers={companyUserGroupMembers}
       currentUserID={currentUserID}
-      selectedUserID={activeRacioMatrixUserID}
-      entries={racioViewerListEntries}
-      onEntriesChange={updateRacioViewerListEntries}
-      onSelectUser={setRacioMatrixTargetUserID}
+      selectedUserID={activeGVICMatrixUserID}
+      entries={GVICMatrixViewerListEntries}
+      onEntriesChange={updateGVICMatrixViewerListEntries}
+      onSelectUser={setGVICMatrixTargetUserID}
     />
   );
   const markMessageReadFromListSelection = useCallback((message: EmailMessage) => {
@@ -2858,25 +2858,25 @@ export function HomePage({
     invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
     upsertNodeRelationshipGraphNode(apiBase, companyID, node);
   }, [apiBase, companyID]);
-  const applyRacioProjectionRows = useCallback((rows: RacioMatrixProjectionRow[], options: {
+  const applyGVICMatrixProjectionRows = useCallback((rows: GVICMatrixProjectionRow[], options: {
     mode?: "merge" | "replace";
     logicGates?: LogicGateRecord[];
   } = {}) => {
-    if (!companyID || !activeRacioMatrixUserID) return;
+    if (!companyID || !activeGVICMatrixUserID) return;
     const mode = options.mode ?? "merge";
     const cleanRows = rows.filter((row) => (
       row.company_id?.trim() === companyID &&
-      row.user_id?.trim() === activeRacioMatrixUserID &&
+      row.user_id?.trim() === activeGVICMatrixUserID &&
       (row.resource_type === "node" || row.resource_type === "logic_gate") &&
       row.resource_id?.trim()
     ));
     if (cleanRows.length === 0 && mode !== "replace") return;
     if (mode === "replace") {
-      racioProjectionRowsRef.current = cleanRows;
+      GVICMatrixProjectionRowsRef.current = cleanRows;
     } else {
-      const byKey = new Map(racioProjectionRowsRef.current.map((row) => [`${row.resource_type}\u0000${row.resource_id}`, row]));
+      const byKey = new Map(GVICMatrixProjectionRowsRef.current.map((row) => [`${row.resource_type}\u0000${row.resource_id}`, row]));
       for (const row of cleanRows) byKey.set(`${row.resource_type}\u0000${row.resource_id}`, row);
-      racioProjectionRowsRef.current = Array.from(byKey.values());
+      GVICMatrixProjectionRowsRef.current = Array.from(byKey.values());
     }
     const projectedLogicGateByID = new Map((options.logicGates ?? []).map((logicGate) => [logicGate.logic_gate_id, logicGate]));
     const nodeRows = cleanRows.filter((row) => row.resource_type === "node");
@@ -2887,11 +2887,11 @@ export function HomePage({
     setNodes((previous) => {
       const byID = new Map(previous.map((node) => [node.node_id, node]));
       const removeIDs = mode === "replace"
-        ? racioProjectionInitializedRef.current
-          ? racioProjectedNodeIDsRef.current
+        ? GVICMatrixProjectionInitializedRef.current
+          ? GVICMatrixProjectedNodeIDsRef.current
           : new Set(previous
             .filter((node) => (
-              cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasAnyRaciRole(logicGateByIDRef.current.get(logicGateID), activeRacioMatrixUserID))
+              cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasAnyGVICRole(logicGateByIDRef.current.get(logicGateID), activeGVICMatrixUserID))
             ))
             .map((node) => node.node_id))
         : new Set<string>();
@@ -2905,7 +2905,7 @@ export function HomePage({
           ...previousNode,
           company_id: row.company_id,
           node_id: nodeID,
-          title: row.display_title || previousNode?.title || "Untitled node",
+          name: row.display_title || previousNode?.name || "Untitled node",
           status: row.status ?? null,
           due_date: row.due_date ?? null,
           priority: row.priority ?? null,
@@ -2925,10 +2925,10 @@ export function HomePage({
     setLogicGates((previous) => {
       const byID = new Map(previous.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
       const removeIDs = mode === "replace"
-        ? racioProjectionInitializedRef.current
-          ? racioProjectedLogicGateIDsRef.current
+        ? GVICMatrixProjectionInitializedRef.current
+          ? GVICMatrixProjectedLogicGateIDsRef.current
           : new Set(previous
-            .filter((logicGate) => logicGateHasAnyRaciRole(logicGate, activeRacioMatrixUserID))
+            .filter((logicGate) => logicGateHasAnyGVICRole(logicGate, activeGVICMatrixUserID))
             .map((logicGate) => logicGate.logic_gate_id))
         : new Set<string>();
       for (const logicGateID of removeIDs) {
@@ -2957,98 +2957,98 @@ export function HomePage({
     });
 
     if (mode === "replace") {
-      racioProjectionInitializedRef.current = true;
-      racioProjectedNodeIDsRef.current = nextProjectedNodeIDs;
-      racioProjectedLogicGateIDsRef.current = nextProjectedLogicGateIDs;
+      GVICMatrixProjectionInitializedRef.current = true;
+      GVICMatrixProjectedNodeIDsRef.current = nextProjectedNodeIDs;
+      GVICMatrixProjectedLogicGateIDsRef.current = nextProjectedLogicGateIDs;
     } else {
-      for (const nodeID of nextProjectedNodeIDs) racioProjectedNodeIDsRef.current.add(nodeID);
-      for (const logicGateID of nextProjectedLogicGateIDs) racioProjectedLogicGateIDsRef.current.add(logicGateID);
+      for (const nodeID of nextProjectedNodeIDs) GVICMatrixProjectedNodeIDsRef.current.add(nodeID);
+      for (const logicGateID of nextProjectedLogicGateIDs) GVICMatrixProjectedLogicGateIDsRef.current.add(logicGateID);
     }
-  }, [activeRacioMatrixUserID, apiBase, companyID]);
-  const refreshRacioMatrixProjection = useCallback(async (minimumSequence = 0) => {
-    if (!companyID || !activeRacioMatrixUserID || !isInboxMatrixViewID(activeViewIDRef.current)) return;
-    if (racioProjectionRefetchInFlightRef.current) return;
-    const requestScopeKey = `${companyID}\u0000${currentUserID}\u0000${activeRacioMatrixUserID}`;
-    racioProjectionRefetchInFlightRef.current = true;
+  }, [activeGVICMatrixUserID, apiBase, companyID]);
+  const refreshGVICMatrixProjection = useCallback(async (minimumSequence = 0) => {
+    if (!companyID || !activeGVICMatrixUserID || !isInboxMatrixViewID(activeViewIDRef.current)) return;
+    if (GVICMatrixProjectionRefetchInFlightRef.current) return;
+    const requestScopeKey = `${companyID}\u0000${currentUserID}\u0000${activeGVICMatrixUserID}`;
+    GVICMatrixProjectionRefetchInFlightRef.current = true;
     try {
       const [projection, projectedLogicGates] = await Promise.all([
-        listRacioMatrixProjectionRows({ apiBase, companyID, targetUserID: activeRacioMatrixUserID, limit: 500 }),
-        listMyLogicGates({ apiBase, companyID, targetUserID: activeRacioMatrixUserID, limit: 500 }),
+        listGVICMatrixProjectionRows({ apiBase, companyID, targetUserID: activeGVICMatrixUserID, limit: 500 }),
+        listMyLogicGates({ apiBase, companyID, targetUserID: activeGVICMatrixUserID, limit: 500 }),
       ]);
-      if (racioProjectionScopeKeyRef.current !== requestScopeKey) return;
-      applyRacioProjectionRows(projection.rows ?? [], {
+      if (GVICMatrixProjectionScopeKeyRef.current !== requestScopeKey) return;
+      applyGVICMatrixProjectionRows(projection.rows ?? [], {
         mode: "replace",
         logicGates: projectedLogicGates.logic_gates ?? [],
       });
-      const sequence = Math.max(minimumSequence, parseRacioProjectionSequence(projection.projection_sequence));
-      if (sequence > racioProjectionSequenceRef.current) {
-        racioProjectionSequenceRef.current = sequence;
+      const sequence = Math.max(minimumSequence, parseGVICMatrixProjectionSequence(projection.projection_sequence));
+      if (sequence > GVICMatrixProjectionSequenceRef.current) {
+        GVICMatrixProjectionSequenceRef.current = sequence;
       }
     } catch (projectionError) {
       setError(formatError(projectionError, "Failed to refresh GVIC matrix"));
     } finally {
-      racioProjectionRefetchInFlightRef.current = false;
+      GVICMatrixProjectionRefetchInFlightRef.current = false;
     }
-  }, [activeRacioMatrixUserID, apiBase, applyRacioProjectionRows, companyID, currentUserID]);
-  const removeRacioProjectionNode = useCallback((nodeID: string) => {
+  }, [activeGVICMatrixUserID, apiBase, applyGVICMatrixProjectionRows, companyID, currentUserID]);
+  const removeGVICMatrixProjectionNode = useCallback((nodeID: string) => {
     const cleanNodeID = nodeID.trim();
     if (!cleanNodeID) return;
-    racioProjectionRowsRef.current = racioProjectionRowsRef.current.filter((row) => row.resource_type !== "node" || row.resource_id.trim() !== cleanNodeID);
-    racioProjectedNodeIDsRef.current.delete(cleanNodeID);
+    GVICMatrixProjectionRowsRef.current = GVICMatrixProjectionRowsRef.current.filter((row) => row.resource_type !== "node" || row.resource_id.trim() !== cleanNodeID);
+    GVICMatrixProjectedNodeIDsRef.current.delete(cleanNodeID);
     setNodes((previous) => previous.filter((node) => node.node_id !== cleanNodeID));
     removeNodeRelationshipGraphNode(apiBase, companyID, cleanNodeID);
   }, [apiBase, companyID]);
-  const requestRacioProjectionRefresh = useCallback((minimumSequence = 0) => {
-    void refreshRacioMatrixProjection(minimumSequence);
-  }, [refreshRacioMatrixProjection]);
-  requestRacioProjectionRefreshRef.current = requestRacioProjectionRefresh;
-  const applyRealtimeRacioProjectionDelta = useCallback((message: RealtimeProjectionDeltaMessage) => {
-    if (!companyID || !activeRacioMatrixUserID) return;
-    if (racioProjectionScopeKeyRef.current !== `${companyID}\u0000${currentUserID}\u0000${activeRacioMatrixUserID}`) return;
-    const envelope = message as unknown as RacioProjectionDeltaEnvelope;
-    const result = applyRacioProjectionEnvelope({
+  const requestGVICMatrixProjectionRefresh = useCallback((minimumSequence = 0) => {
+    void refreshGVICMatrixProjection(minimumSequence);
+  }, [refreshGVICMatrixProjection]);
+  requestGVICMatrixProjectionRefreshRef.current = requestGVICMatrixProjectionRefresh;
+  const applyRealtimeGVICMatrixProjectionDelta = useCallback((message: RealtimeProjectionDeltaMessage) => {
+    if (!companyID || !activeGVICMatrixUserID) return;
+    if (GVICMatrixProjectionScopeKeyRef.current !== `${companyID}\u0000${currentUserID}\u0000${activeGVICMatrixUserID}`) return;
+    const envelope = message as unknown as GVICMatrixProjectionDeltaEnvelope;
+    const result = applyGVICMatrixProjectionEnvelope({
       envelope,
       companyID,
-      userID: activeRacioMatrixUserID,
-      rows: racioProjectionRowsRef.current,
-      lastSequence: racioProjectionSequenceRef.current,
+      userID: activeGVICMatrixUserID,
+      rows: GVICMatrixProjectionRowsRef.current,
+      lastSequence: GVICMatrixProjectionSequenceRef.current,
     });
     if (result.fallback) {
-      requestRacioProjectionRefresh(parseRacioProjectionSequence(envelope.projection_sequence ?? envelope.sequence));
+      requestGVICMatrixProjectionRefresh(parseGVICMatrixProjectionSequence(envelope.projection_sequence ?? envelope.sequence));
       return;
     }
-    racioProjectionRowsRef.current = result.rows;
-    racioProjectionSequenceRef.current = result.lastSequence ?? racioProjectionSequenceRef.current;
+    GVICMatrixProjectionRowsRef.current = result.rows;
+    GVICMatrixProjectionSequenceRef.current = result.lastSequence ?? GVICMatrixProjectionSequenceRef.current;
     if (!result.changed) return;
 
     for (const key of result.removedRowKeys) {
-      if (key.resource_type === "node" && key.resource_id) removeRacioProjectionNode(key.resource_id);
+      if (key.resource_type === "node" && key.resource_id) removeGVICMatrixProjectionNode(key.resource_id);
     }
     const upsertedNodeRows = result.upsertedRows.filter((row) => row.resource_type === "node");
     const upsertedLogicGateRows = result.upsertedRows.filter((row) => row.resource_type === "logic_gate");
-    if (upsertedNodeRows.length > 0) applyRacioProjectionRows(upsertedNodeRows);
-    if (upsertedLogicGateRows.length > 0) applyRacioProjectionRows(upsertedLogicGateRows);
+    if (upsertedNodeRows.length > 0) applyGVICMatrixProjectionRows(upsertedNodeRows);
+    if (upsertedLogicGateRows.length > 0) applyGVICMatrixProjectionRows(upsertedLogicGateRows);
     if (upsertedLogicGateRows.length > 0 || result.removedRowKeys.some((key) => key.resource_type === "logic_gate")) {
-      requestRacioProjectionRefresh(result.lastSequence ?? 0);
+      requestGVICMatrixProjectionRefresh(result.lastSequence ?? 0);
     }
-  }, [activeRacioMatrixUserID, applyRacioProjectionRows, companyID, currentUserID, removeRacioProjectionNode, requestRacioProjectionRefresh]);
+  }, [activeGVICMatrixUserID, applyGVICMatrixProjectionRows, companyID, currentUserID, removeGVICMatrixProjectionNode, requestGVICMatrixProjectionRefresh]);
   useEffect(() => {
-    if (!companyID || !activeRacioMatrixUserID || !isInboxMatrixView) return undefined;
-    void refreshRacioMatrixProjection();
+    if (!companyID || !activeGVICMatrixUserID || !isInboxMatrixView) return undefined;
+    void refreshGVICMatrixProjection();
     return undefined;
-  }, [activeRacioMatrixUserID, companyID, isInboxMatrixView, refreshRacioMatrixProjection]);
+  }, [activeGVICMatrixUserID, companyID, isInboxMatrixView, refreshGVICMatrixProjection]);
   useEffect(() => {
-    const canSubscribeRacioTarget = activeRacioMatrixUserID === currentUserID || userHasFullSharedInboxAccess(me, companyID);
-    if (!companyID || !activeRacioMatrixUserID || !isInboxMatrixView || !canSubscribeRacioTarget) return undefined;
-    return subscribeRealtimeScope(apiBase, companyID, racioRealtimeScope(activeRacioMatrixUserID), {
-      getAfterSequence: () => racioProjectionSequenceRef.current,
-      onRejected: () => requestRacioProjectionRefresh(),
-      onRefetch: (message) => requestRacioProjectionRefresh(parseRacioProjectionSequence(message.sequence)),
-      onPermissionRevoked: () => requestRacioProjectionRefresh(),
-      onError: () => requestRacioProjectionRefresh(),
-      onDelta: applyRealtimeRacioProjectionDelta,
+    const canSubscribeGVICMatrixTarget = activeGVICMatrixUserID === currentUserID || userHasFullSharedInboxAccess(me, companyID);
+    if (!companyID || !activeGVICMatrixUserID || !isInboxMatrixView || !canSubscribeGVICMatrixTarget) return undefined;
+    return subscribeRealtimeScope(apiBase, companyID, GVICMatrixRealtimeScope(activeGVICMatrixUserID), {
+      getAfterSequence: () => GVICMatrixProjectionSequenceRef.current,
+      onRejected: () => requestGVICMatrixProjectionRefresh(),
+      onRefetch: (message) => requestGVICMatrixProjectionRefresh(parseGVICMatrixProjectionSequence(message.sequence)),
+      onPermissionRevoked: () => requestGVICMatrixProjectionRefresh(),
+      onError: () => requestGVICMatrixProjectionRefresh(),
+      onDelta: applyRealtimeGVICMatrixProjectionDelta,
     });
-  }, [activeRacioMatrixUserID, apiBase, applyRealtimeRacioProjectionDelta, companyID, currentUserID, isInboxMatrixView, me, requestRacioProjectionRefresh]);
+  }, [activeGVICMatrixUserID, apiBase, applyRealtimeGVICMatrixProjectionDelta, companyID, currentUserID, isInboxMatrixView, me, requestGVICMatrixProjectionRefresh]);
   const mergeCreatedFolderItems = useCallback((items: CompanyExplorerFolderItem[]) => {
     if (items.length === 0) return;
     setNodeFolderItems((previous) => {
@@ -3074,7 +3074,7 @@ export function HomePage({
     mergeCreatedFolderItems(folderItems);
     upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(logicGate));
   }, [apiBase, companyID, mergeCreatedFolderItems]);
-  const createHomeNode = useCallback(async (assignment?: { logicGateID: string; priority: InboxPriority; status?: ResponsibleInboxStatus }) => {
+  const createHomeNode = useCallback(async (assignment?: { logicGateID: string; priority: InboxPriority; status?: GVICInboxStatus }) => {
     setBusy("create-node");
     setError("");
     try {
@@ -3094,7 +3094,7 @@ export function HomePage({
           nodeByID: nodeMap,
           invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
         });
-        applyRacioProjectionRows(dropResult.gvic_projection_rows);
+        applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows);
         for (const node of dropResult.nodes) mergeUpdatedNode(node);
         setNotice("Node created and added to Logic Gate.");
         return;
@@ -3105,16 +3105,16 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyRacioProjectionRows, companyID, mergeCreatedFolderItems, mergeUpdatedNode, nodeByID]);
-  const createHomeLogicGate = useCallback(async (options: { assignCurrentUser?: boolean; creatorRaciRole?: LogicGateRaciRole; openArena?: boolean } = {}) => {
+  }, [apiBase, applyGVICMatrixProjectionRows, companyID, mergeCreatedFolderItems, mergeUpdatedNode, nodeByID]);
+  const createHomeLogicGate = useCallback(async (options: { assignCurrentUser?: boolean; creatorGVICRole?: LogicGateGVICRole; openArena?: boolean } = {}) => {
     setBusy("create-logic-gate");
     setError("");
     try {
-      const creatorRaciRole = options.creatorRaciRole ?? (options.assignCurrentUser ? "generated" : undefined);
-      const result = await createHomeLogicGateCommand({ apiBase, companyID, creatorRaciRole });
+      const creatorGVICRole = options.creatorGVICRole ?? (options.assignCurrentUser ? "generated" : undefined);
+      const result = await createHomeLogicGateCommand({ apiBase, companyID, creatorGVICRole });
       const logicGate = result.logicGate;
       mergeCreatedLogicGate(logicGate, result.folderItems);
-      setNotice(creatorRaciRole ? "Logic Gate created and assigned to you." : "Logic Gate created.");
+      setNotice(creatorGVICRole ? "Logic Gate created and assigned to you." : "Logic Gate created.");
       if (options.openArena ?? true) {
         openLogicGateArena(logicGate.logic_gate_id, logicGate.header || "Logic Gate");
       }
@@ -3126,24 +3126,24 @@ export function HomePage({
       setBusy("");
     }
   }, [apiBase, companyID, mergeCreatedLogicGate, openLogicGateArena]);
-  const createLogicGateInInboxCell = useCallback(async (input: { creatorRaciRole?: LogicGateRaciRole }) => {
-    await createHomeLogicGate({ creatorRaciRole: input.creatorRaciRole, openArena: false });
+  const createLogicGateInInboxCell = useCallback(async (input: { creatorGVICRole?: LogicGateGVICRole }) => {
+    await createHomeLogicGate({ creatorGVICRole: input.creatorGVICRole, openArena: false });
   }, [createHomeLogicGate]);
-  const createNodeInInboxCell = useCallback(async (input: { priority: InboxPriority; status?: ResponsibleInboxStatus; creatorRaciRole?: LogicGateRaciRole }) => {
+  const createNodeInInboxCell = useCallback(async (input: { priority: InboxPriority; status?: GVICInboxStatus; creatorGVICRole?: LogicGateGVICRole }) => {
     setBusy("create-node");
     setError("");
     try {
-      const result = await createHomeRacioMatrixNodeCommand({
+      const result = await createHomeGVICMatrixNodeCommand({
         apiBase,
         companyID,
         priority: input.priority,
         status: input.status,
-        creatorRaciRole: input.creatorRaciRole,
+        creatorGVICRole: input.creatorGVICRole,
         createLogicGateTitle: "new logic gate",
       });
       if (result.logicGate) mergeCreatedLogicGate(result.logicGate, result.folderItems.filter((item) => item.item_type === "logic_gate"));
       mergeCreatedFolderItems(result.folderItems.filter((item) => item.item_type !== "logic_gate"));
-      applyRacioProjectionRows(result.gvic_projection_rows);
+      applyGVICMatrixProjectionRows(result.gvic_projection_rows);
       mergeUpdatedNode(result.node);
       setNotice("Note created in a new Logic Gate.");
     } catch (createError) {
@@ -3151,7 +3151,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyRacioProjectionRows, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode]);
+  }, [apiBase, applyGVICMatrixProjectionRows, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode]);
   const openNodeBulkEditMenu = useCallback((nodeID: string, event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -3187,7 +3187,7 @@ export function HomePage({
     event.stopPropagation();
     openLogicGateBulkEditMenuAt(logicGateID, event.clientX, event.clientY);
   }, [openLogicGateBulkEditMenuAt]);
-  const dropNodesIntoInboxLogicGate = useCallback(async (input: { logicGateID: string; nodeIDs: string[]; priority: InboxPriority; status?: ResponsibleInboxStatus; fromLogicGateID?: string }) => {
+  const dropNodesIntoInboxLogicGate = useCallback(async (input: { logicGateID: string; nodeIDs: string[]; priority: InboxPriority; status?: GVICInboxStatus; fromLogicGateID?: string }) => {
     const logicGateID = input.logicGateID.trim();
     const fromLogicGateID = input.fromLogicGateID?.trim() ?? "";
     const nodeIDs = cleanIDList(input.nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
@@ -3206,7 +3206,7 @@ export function HomePage({
         nodeByID,
         invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
       });
-      applyRacioProjectionRows(dropResult.gvic_projection_rows);
+      applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows);
       for (const node of dropResult.nodes) {
         if (node) mergeUpdatedNode(node);
       }
@@ -3217,14 +3217,14 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyRacioProjectionRows, companyID, mergeUpdatedNode, nodeByID]);
-  const dropNodesIntoNewInboxLogicGate = useCallback(async (input: { nodeIDs: string[]; priority: InboxPriority; status?: ResponsibleInboxStatus; creatorRaciRole?: LogicGateRaciRole; fromLogicGateID?: string }) => {
+  }, [apiBase, applyGVICMatrixProjectionRows, companyID, mergeUpdatedNode, nodeByID]);
+  const dropNodesIntoNewInboxLogicGate = useCallback(async (input: { nodeIDs: string[]; priority: InboxPriority; status?: GVICInboxStatus; creatorGVICRole?: LogicGateGVICRole; fromLogicGateID?: string }) => {
     const nodeIDs = cleanIDList(input.nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
     if (nodeIDs.length === 0) return;
     setBusy("inbox-node-drop");
     setError("");
     try {
-      const logicGateResult = await createHomeLogicGateCommand({ apiBase, companyID, creatorRaciRole: input.creatorRaciRole });
+      const logicGateResult = await createHomeLogicGateCommand({ apiBase, companyID, creatorGVICRole: input.creatorGVICRole });
       const logicGate = logicGateResult.logicGate;
       mergeCreatedLogicGate(logicGate, logicGateResult.folderItems);
       const dropResult = await dropNodesIntoInboxLogicGateCommand({
@@ -3238,7 +3238,7 @@ export function HomePage({
         nodeByID,
         invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
       });
-      applyRacioProjectionRows(dropResult.gvic_projection_rows);
+      applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows);
       for (const node of dropResult.nodes) mergeUpdatedNode(node);
       setNotice(nodeIDs.length === 1 ? "Node moved into a new Logic Gate." : `${nodeIDs.length} nodes moved into a new Logic Gate.`);
     } catch (dropError) {
@@ -3246,29 +3246,29 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyRacioProjectionRows, companyID, mergeCreatedLogicGate, mergeUpdatedNode, nodeByID]);
-  const moveLogicGatesIntoInboxCell = useCallback(async (input: { logicGateIDs: string[]; priority: InboxPriority; status?: ResponsibleInboxStatus; creatorRaciRole?: LogicGateRaciRole; nodeIDsByLogicGateID?: Record<string, string[]> }) => {
+  }, [apiBase, applyGVICMatrixProjectionRows, companyID, mergeCreatedLogicGate, mergeUpdatedNode, nodeByID]);
+  const moveLogicGatesIntoInboxCell = useCallback(async (input: { logicGateIDs: string[]; priority: InboxPriority; status?: GVICInboxStatus; creatorGVICRole?: LogicGateGVICRole; nodeIDsByLogicGateID?: Record<string, string[]> }) => {
     const logicGateIDs = cleanIDList(input.logicGateIDs).filter((logicGateID) => logicGateByID.has(logicGateID));
     if (logicGateIDs.length === 0) return;
     setBusy("inbox-logic-gate-drop");
     setError("");
     try {
-      const targetRole = input.creatorRaciRole;
+      const targetRole = input.creatorGVICRole;
       if (currentUserID && targetRole) {
-        const raciRoles: LogicGateRaciRole[] = ["generated", "verified", "consulted", "informed"];
+        const GVICRoles: LogicGateGVICRole[] = ["generated", "verified", "consulted", "informed"];
         const assignmentUpdates = await Promise.all(logicGateIDs.map(async (logicGateID) => {
           const gate = logicGateByID.get(logicGateID);
           let assignments = gate?.gvic_assignments ?? [];
-          const removalRoles = raciRoles.filter((role) => (
+          const removalRoles = GVICRoles.filter((role) => (
             role !== targetRole
             && assignments.some((assignment) => assignment.role === role && assignment.user_id?.trim() === currentUserID)
           ));
           if (removalRoles.length > 0) {
-            assignments = await removeLogicGateRaciAssignments(companyID, logicGateID, removalRoles.map((role) => ({ role, user_id: currentUserID })));
+            assignments = await removeLogicGateGVICAssignments(companyID, logicGateID, removalRoles.map((role) => ({ role, user_id: currentUserID })));
           }
           const hasTargetRole = assignments.some((assignment) => assignment.role === targetRole && assignment.user_id?.trim() === currentUserID);
           if (!hasTargetRole) {
-            assignments = await addLogicGateRaciAssignments(companyID, logicGateID, [{ role: targetRole, user_id: currentUserID }]);
+            assignments = await addLogicGateGVICAssignments(companyID, logicGateID, [{ role: targetRole, user_id: currentUserID }]);
           }
           return { logicGateID, assignments };
         }));
@@ -3298,7 +3298,7 @@ export function HomePage({
           nodeByID,
           invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
         });
-        applyRacioProjectionRows(dropResult.gvic_projection_rows);
+        applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows);
         movedNodeCount += dropResult.nodes.length;
         for (const node of dropResult.nodes) mergeUpdatedNode(node);
       }
@@ -3310,7 +3310,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyRacioProjectionRows, companyID, currentUserID, logicGateByID, mergeUpdatedNode, nodeByID, nodes]);
+  }, [apiBase, applyGVICMatrixProjectionRows, companyID, currentUserID, logicGateByID, mergeUpdatedNode, nodeByID, nodes]);
   const addNodesToLogicGate = useCallback(async (nodeIDs: string[], logicGateID: string) => {
     const cleanLogicGateID = logicGateID.trim();
     const ids = cleanIDList(nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
@@ -3483,7 +3483,7 @@ export function HomePage({
       setBulkEditMenu(null);
     }
   }, [apiBase, companyID, mergeUpdatedNode, nodeByID]);
-  const applyBulkLogicGateRaci = useCallback(async (logicGateIDs: string[], role: LogicGateRaciRole, userID: string, action: "add" | "remove") => {
+  const applyBulkLogicGateGVIC = useCallback(async (logicGateIDs: string[], role: LogicGateGVICRole, userID: string, action: "add" | "remove") => {
     const ids = cleanIDList(logicGateIDs).filter((logicGateID) => logicGateByID.has(logicGateID));
     const cleanUserID = userID.trim();
     if (ids.length === 0 || !cleanUserID) return;
@@ -3492,8 +3492,8 @@ export function HomePage({
     try {
       const updates = await Promise.all(ids.map(async (logicGateID) => {
         const assignments = action === "add"
-          ? await addLogicGateRaciAssignments(companyID, logicGateID, [{ role, user_id: cleanUserID }])
-          : await removeLogicGateRaciAssignments(companyID, logicGateID, [{ role, user_id: cleanUserID }]);
+          ? await addLogicGateGVICAssignments(companyID, logicGateID, [{ role, user_id: cleanUserID }])
+          : await removeLogicGateGVICAssignments(companyID, logicGateID, [{ role, user_id: cleanUserID }]);
         return { logicGateID, assignments };
       }));
       setLogicGates((previous) => previous.map((logicGate) => {
@@ -3737,9 +3737,9 @@ export function HomePage({
             />
           ) : isInboxMatrixView ? (
             <>
-              {activeRaciInboxSection && (
-                <RaciRoleInboxMatrix
-                  section={activeRaciInboxSection}
+              {activeGVICInboxSection && (
+                <GVICRoleInboxMatrix
+                  section={activeGVICInboxSection}
                   loading={loadingNodes}
                   nodes={matrixFilteredNodes}
                   nodeByID={nodeByID}
@@ -3747,8 +3747,8 @@ export function HomePage({
                   logicGateByID={logicGateByID}
                   nodeFolders={nodeFolders}
                   nodeFolderItems={nodeFolderItems}
-                  currentUserID={activeRacioMatrixUserID}
-                  viewerSelector={racioMatrixViewerSelector}
+                  currentUserID={activeGVICMatrixUserID}
+                  viewerSelector={gvicMatrixViewerSelectorElement}
                   accountFilter={matrixAccountFilterControl}
                   notificationSummary={notificationSummary}
                   selectedRowIDs={selectedNodeRowIDs}
@@ -3780,8 +3780,8 @@ export function HomePage({
                   allRows={visibleNodeRows}
                   myNodeGroups={myNodeGroups}
                   otherNodes={otherAssignedNodes}
-                  myLogicGateGroups={activeRaciRoleLogicGateGroups}
-                  inboxRole={activeRaciInboxSection?.role ?? "other"}
+                  myLogicGateGroups={activeGVICRoleLogicGateGroups}
+                  inboxRole={activeGVICInboxSection?.role ?? "other"}
                   selectedRowIDs={selectedNodeRowIDs}
                   selectedLogicGateRowIDs={selectedLogicGateRowIDs}
                   expandedRowIDs={nodeExpandedIDs}
@@ -3847,7 +3847,7 @@ export function HomePage({
             selectedMessageIDs={selectedMessageIDs}
             sharedInboxSettings={activeSharedInbox ? {
               onOpen: () => setSharedInboxPermissionsFolderID(activeSharedInbox.folder_id),
-              onOpenRaci: activeSharedInbox.entry_type === "shared_inbox" ? () => setSharedInboxRaciFolderID(activeSharedInbox.folder_id) : undefined,
+              onOpenGVIC: activeSharedInbox.entry_type === "shared_inbox" ? () => setSharedInboxGVICFolderID(activeSharedInbox.folder_id) : undefined,
             } : undefined}
             unassignedSharedInbox={activeSharedInboxBlocksEmail && activeSharedInbox
               ? { folderName: activeSharedInbox.name, message: "Parent folders cannot have emails assigned." }
@@ -3958,16 +3958,16 @@ export function HomePage({
           onSaved={() => { void loadSharedInboxes(); }}
         />
       )}
-      {sharedInboxRaciFolder && sharedInboxRaciFolder.entry_type === "shared_inbox" && (
-        <SharedInboxRaciSettingsModal
+      {sharedInboxGVICFolder && sharedInboxGVICFolder.entry_type === "shared_inbox" && (
+        <SharedInboxGVICSettingsModal
           requestJSON={permissionsRequestJSON}
           companyID={companyID}
-          folder={sharedInboxRaciFolder}
+          folder={sharedInboxGVICFolder}
           companyUsers={companyUsers}
-          busy={busy === "shared-inbox-raci"}
-          onAddSubject={addSharedInboxRaciSubject}
-          onRemoveSubject={removeSharedInboxRaciSubject}
-          onClose={() => setSharedInboxRaciFolderID("")}
+          busy={busy === "shared-inbox-GVIC"}
+          onAddPrincipal={addSharedInboxGVICPrincipal}
+          onRemovePrincipal={removeSharedInboxGVICPrincipal}
+          onClose={() => setSharedInboxGVICFolderID("")}
         />
       )}
       <HomeBulkEditMenu
@@ -3978,7 +3978,7 @@ export function HomePage({
         busy={busy === "bulk-node-edit" || busy === "bulk-logic-gate-edit"}
         onClose={() => setBulkEditMenu(null)}
         onApplyNodePatch={(nodeIDs, patch) => { void applyBulkNodePatch(nodeIDs, patch); }}
-        onApplyLogicGateRaci={(logicGateIDs, role, userID, action) => { void applyBulkLogicGateRaci(logicGateIDs, role, userID, action); }}
+        onApplyLogicGateGVIC={(logicGateIDs, role, userID, action) => { void applyBulkLogicGateGVIC(logicGateIDs, role, userID, action); }}
         onAddNodesToLogicGate={(nodeIDs, logicGateID) => { void addNodesToLogicGate(nodeIDs, logicGateID); }}
         onRequestDelete={requestDeleteBulkEditTargets}
       />

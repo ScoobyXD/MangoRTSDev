@@ -18,34 +18,34 @@ func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 	backing := store.NewMemoryRepo()
 	repo := backing
 	server := NewServer(repo)
-	companyID := "company-raci-command-api"
+	companyID := "company-GVIC-command-api"
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
-	otherCompanyID := "company-raci-command-api-other"
-	repo.EnsureCompany(companyID, "RACI Command API Company")
-	repo.EnsureCompany(otherCompanyID, "Other RACI Command API Company")
+	otherCompanyID := "company-GVIC-command-api-other"
+	repo.EnsureCompany(companyID, "GVIC Command API Company")
+	repo.EnsureCompany(otherCompanyID, "Other GVIC Command API Company")
 	logicGate, err := repo.CreateLogicGate(companyID, "API Command Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	responsible, err := repo.UpsertAuthUser("raci-command-api-responsible", "responsible-command-api@example.com", "Responsible API")
+	responsible, err := repo.UpsertAuthUser("GVIC-command-api-responsible", "responsible-command-api@example.com", "Responsible API")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser responsible: %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("raci-command-api-responsible", companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("GVIC-command-api-responsible", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership responsible: %v", err)
 	}
-	accountable, err := repo.UpsertAuthUser("raci-command-api-accountable", "accountable-command-api@example.com", "Accountable API")
+	accountable, err := repo.UpsertAuthUser("GVIC-command-api-accountable", "accountable-command-api@example.com", "Accountable API")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser accountable: %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("raci-command-api-accountable", companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("GVIC-command-api-accountable", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership accountable: %v", err)
 	}
-	outsider, err := repo.UpsertAuthUser("raci-command-api-outsider", "outsider-command-api@example.com", "Outsider API")
+	outsider, err := repo.UpsertAuthUser("GVIC-command-api-outsider", "outsider-command-api@example.com", "Outsider API")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser outsider: %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("raci-command-api-outsider", otherCompanyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("GVIC-command-api-outsider", otherCompanyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership outsider: %v", err)
 	}
 

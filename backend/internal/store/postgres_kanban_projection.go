@@ -34,16 +34,6 @@ case
   else 'Pending'
 end`
 
-const postgresLogicGateAssignmentStatusColorSQL = `
-case
-  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then '` + KanbanDefaultRequestedColor + `'
-  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then '` + KanbanDefaultBacklogColor + `'
-  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then '` + KanbanDefaultInProgressColor + `'
-  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) = 'review' then '` + KanbanDefaultReviewColor + `'
-  when lower(replace(replace(trim(assignment.status_key), '_', ' '), '-', ' ')) in ('done', 'd') then '` + KanbanDefaultDoneColor + `'
-  else '` + KanbanDefaultPendingColor + `'
-end`
-
 const kanbanProjectionStatusRankSQL = `
 case
   when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then 0
@@ -68,9 +58,6 @@ projection.is_issue as is_issue,
 projection.position as position,
 projection.due_date::text as due_date,
 projection.priority as priority,
-projection.assignee_user_id::text as assignee_user_id,
-(select u.display_name from users u where u.user_id = projection.assignee_user_id) as assignee_display_name,
-(select u.email from users u where u.user_id = projection.assignee_user_id) as assignee_email,
 projection.projection_updated_timestamp as projection_updated_timestamp,
 projection.assignment_created_timestamp as assignment_created_timestamp,
 projection.projection_updated_timestamp as projection_updated_timestamp,
@@ -92,7 +79,6 @@ with target_assignment as (
     assignment.column_id,
     assignment.position,
     node_row.name as title,
-    null::uuid as assignee_user_id,
     node_row.priority,
     assignment.is_issue,
     node_row.due_date,
@@ -137,7 +123,6 @@ insert into kanban_board_projection (
   column_id,
   position,
   title,
-  assignee_user_id,
   priority,
   is_issue,
   due_date,
@@ -159,7 +144,6 @@ select
   column_id,
   position,
   title,
-  assignee_user_id,
   priority,
   is_issue,
   due_date,
@@ -179,7 +163,6 @@ do update set
   column_id = excluded.column_id,
   position = excluded.position,
   title = excluded.title,
-  assignee_user_id = excluded.assignee_user_id,
   priority = excluded.priority,
   is_issue = excluded.is_issue,
   due_date = excluded.due_date,
@@ -272,9 +255,6 @@ select
   position,
   due_date,
   priority,
-  assignee_user_id,
-  assignee_display_name,
-  assignee_email,
   projection_updated_timestamp,
   assignment_created_timestamp,
   projection_updated_timestamp,
@@ -314,9 +294,6 @@ projection.is_issue,
 projection.position,
 projection.due_date::text,
 projection.priority,
-projection.assignee_user_id::text,
-(select u.display_name from users u where u.user_id = projection.assignee_user_id) as assignee_display_name,
-(select u.email from users u where u.user_id = projection.assignee_user_id) as assignee_email,
 projection.node_created_timestamp,
 projection.node_updated_timestamp,
 projection.assignment_id::text,
@@ -330,9 +307,6 @@ func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (Kan
 	var logicGateID string
 	var dueDate sql.NullString
 	var priority sql.NullInt64
-	var assigneeUserID sql.NullString
-	var assigneeDisplayName sql.NullString
-	var assigneeEmail sql.NullString
 	var accountsJSON sql.NullString
 	var status string
 	err := row.Scan(
@@ -349,9 +323,6 @@ func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (Kan
 		&item.Position,
 		&dueDate,
 		&priority,
-		&assigneeUserID,
-		&assigneeDisplayName,
-		&assigneeEmail,
 		&item.NodeCreatedTimestamp,
 		&item.NodeUpdatedTimestamp,
 		&item.AssignmentID,
@@ -378,9 +349,6 @@ func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (Kan
 		item.Priority = &value
 	}
 	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
-	_ = assigneeUserID
-	_ = assigneeDisplayName
-	_ = assigneeEmail
 	return item, nil
 }
 
@@ -414,9 +382,6 @@ select
   position,
   due_date,
   priority,
-  assignee_user_id,
-  assignee_display_name,
-  assignee_email,
   node_created_timestamp,
   node_updated_timestamp,
   assignment_id,
@@ -516,7 +481,6 @@ inserted as (
     column_id,
     position,
     title,
-    assignee_user_id,
     priority,
     is_issue,
     due_date,
@@ -538,7 +502,6 @@ inserted as (
     assignment.column_id,
     assignment.position,
     node_row.name,
-    null::uuid,
     node_row.priority,
     assignment.is_issue,
     node_row.due_date,

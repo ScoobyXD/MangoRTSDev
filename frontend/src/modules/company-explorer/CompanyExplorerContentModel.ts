@@ -279,7 +279,7 @@ export function filterExplorerRowsForCustomTopLevel(input: {
     const isDefaultRootFolder = isRootFolder && (
       Boolean(row.systemKey)
       || row.syntheticKind === "default_scope_folder"
-      || row.syntheticKind === "raci_folder"
+      || row.syntheticKind === "GVIC_folder"
       || hiddenRootFolderNames.has(normalizeExplorerRootFolderLabel(row.label))
     );
     if (isDefaultRootFolder) {

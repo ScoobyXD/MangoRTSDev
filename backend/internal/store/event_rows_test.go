@@ -109,33 +109,33 @@ func TestKanbanMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
 	}
 }
 
-func TestRacioMutationInsertsEventRowWithProjectionDelta(t *testing.T) {
+func TestGVICMatrixMutationInsertsEventRowWithProjectionDelta(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "99999999-9999-4999-8999-999999999109"
-	repo.EnsureCompany(companyID, "RACIO Event Rows Co")
-	user, err := repo.UpsertAuthUser("racio-event-user", "racio-event-user@example.com", "RACIO Event User")
+	repo.EnsureCompany(companyID, "GVICMatrix Event Rows Co")
+	user, err := repo.UpsertAuthUser("GVICMatrix-event-user", "GVICMatrix-event-user@example.com", "GVICMatrix Event User")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser: %v", err)
 	}
 	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
-	logicGate, err := repo.CreateLogicGate(companyID, "RACIO event row gate")
+	logicGate, err := repo.CreateLogicGate(companyID, "GVICMatrix event row gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
 
-	if _, err := repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+	if _, err := repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
 		CompanyID:      companyID,
 		LogicGateID:    logicGate.LogicGateID,
 		ActorUserID:    user.UserID,
-		IdempotencyKey: "racio-add-event-row",
-		Assignments: []LogicGateRaciAssignmentInput{{
+		IdempotencyKey: "GVICMatrix-add-event-row",
+		Assignments: []LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
 			UserID: user.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("AddLogicGateRaciAssignments: %v", err)
+		t.Fatalf("AddLogicGateGVICAssignments: %v", err)
 	}
 
 	rows, err := repo.ListEventRows(companyID, 10)
@@ -149,32 +149,32 @@ func TestRacioMutationInsertsEventRowWithProjectionDelta(t *testing.T) {
 			break
 		}
 	}
-	wantScope := RacioRealtimeUserScope(user.UserID)
+	wantScope := GVICMatrixRealtimeUserScope(user.UserID)
 	wantSequenceScope := GVICMatrixProjectionUserScope(user.UserID)
 	if row.EventID == "" || row.PrimaryScope != wantScope || row.SequenceScope != wantSequenceScope || row.Sequence != 1 {
-		t.Fatalf("RACIO event row = %+v, want scope=%s sequence_scope=%s", row, wantScope, wantSequenceScope)
+		t.Fatalf("GVICMatrix event row = %+v, want scope=%s sequence_scope=%s", row, wantScope, wantSequenceScope)
 	}
 	payload, err := DecodeGVICMatrixProjectionDeltaEventPayload(row)
 	if err != nil {
 		t.Fatalf("DecodeGVICMatrixProjectionDeltaEventPayload: %v", err)
 	}
 	if payload.Projection != ProjectionNameGVICMatrix || payload.Scope != wantScope || payload.ProjectionScope != wantSequenceScope || len(payload.Deltas) == 0 {
-		t.Fatalf("payload = %+v, want RACIO projection deltas", payload)
+		t.Fatalf("payload = %+v, want GVICMatrix projection deltas", payload)
 	}
 }
 
-func TestRacioMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
+func TestGVICMatrixMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "99999999-9999-4999-8999-999999999110"
-	repo.EnsureCompany(companyID, "RACIO Rollback Co")
-	user, err := repo.UpsertAuthUser("racio-rollback-user", "racio-rollback-user@example.com", "RACIO Rollback User")
+	repo.EnsureCompany(companyID, "GVICMatrix Rollback Co")
+	user, err := repo.UpsertAuthUser("GVICMatrix-rollback-user", "GVICMatrix-rollback-user@example.com", "GVICMatrix Rollback User")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser: %v", err)
 	}
 	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
-	logicGate, err := repo.CreateLogicGate(companyID, "RACIO rollback gate")
+	logicGate, err := repo.CreateLogicGate(companyID, "GVICMatrix rollback gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
@@ -183,17 +183,17 @@ func TestRacioMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
 		t.Fatalf("ListEventRows before: %v", err)
 	}
 
-	repo.eventRowAppendErr = errors.New("forced racio event row failure")
-	_, err = repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+	repo.eventRowAppendErr = errors.New("forced GVICMatrix event row failure")
+	_, err = repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateRaciAssignmentInput{{
+		Assignments: []LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
 			UserID: user.UserID,
 		}},
 	})
 	if !errors.Is(err, repo.eventRowAppendErr) {
-		t.Fatalf("AddLogicGateRaciAssignments error = %v, want forced event row failure", err)
+		t.Fatalf("AddLogicGateGVICAssignments error = %v, want forced event row failure", err)
 	}
 	repo.eventRowAppendErr = nil
 	afterRows, err := repo.ListEventRows(companyID, 10)
@@ -203,46 +203,46 @@ func TestRacioMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
 	if len(afterRows) != len(beforeRows) {
 		t.Fatalf("event rows after rollback = %d, want %d", len(afterRows), len(beforeRows))
 	}
-	assignments, err := repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+	assignments, err := repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateRaciAssignmentInput{{
+		Assignments: []LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
 			UserID: user.UserID,
 		}},
 	})
 	if err != nil {
-		t.Fatalf("AddLogicGateRaciAssignments after rollback: %v", err)
+		t.Fatalf("AddLogicGateGVICAssignments after rollback: %v", err)
 	}
 	if !assignments.Changed {
-		t.Fatalf("RACIO assignment was not rolled back")
+		t.Fatalf("GVICMatrix assignment was not rolled back")
 	}
 }
 
-func TestRacioMatrixNodeCreateForExistingLogicGateWritesProjectionEventRows(t *testing.T) {
+func TestGVICMatrixNodeCreateForExistingLogicGateWritesProjectionEventRows(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "99999999-9999-4999-8999-999999999114"
-	repo.EnsureCompany(companyID, "RACIO Matrix Existing Gate Event Rows Co")
-	user, err := repo.UpsertAuthUser("racio-matrix-existing-user", "racio-matrix-existing-user@example.com", "RACIO Matrix Existing User")
+	repo.EnsureCompany(companyID, "GVICMatrix Matrix Existing Gate Event Rows Co")
+	user, err := repo.UpsertAuthUser("GVICMatrix-matrix-existing-user", "GVICMatrix-matrix-existing-user@example.com", "GVICMatrix Matrix Existing User")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser: %v", err)
 	}
 	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
-	logicGate, err := repo.CreateLogicGate(companyID, "RACIO matrix existing gate")
+	logicGate, err := repo.CreateLogicGate(companyID, "GVICMatrix matrix existing gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	if _, err := repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+	if _, err := repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
-		Assignments: []LogicGateRaciAssignmentInput{{
+		Assignments: []LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
 			UserID: user.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("AddLogicGateRaciAssignments setup: %v", err)
+		t.Fatalf("AddLogicGateGVICAssignments setup: %v", err)
 	}
 
 	beforeRows, err := repo.ListEventRows(companyID, 20)
@@ -251,35 +251,35 @@ func TestRacioMatrixNodeCreateForExistingLogicGateWritesProjectionEventRows(t *t
 	}
 	priority := 3
 	nodeID := "11111111-1111-4111-8111-111111111115"
-	if _, err := repo.CreateRacioMatrixNode(RacioMatrixNodeCreateInput{
+	if _, err := repo.CreateGVICMatrixNode(GVICMatrixNodeCreateInput{
 		CompanyID:      companyID,
 		LogicGateID:    logicGate.LogicGateID,
 		NodeID:         nodeID,
-		Title:          "RACIO matrix existing gate node",
+		Title:          "GVICMatrix matrix existing gate node",
 		Status:         LogicGateWorkStatusPending,
 		Priority:       &priority,
 		PrioritySet:    true,
 		ActorUserID:    user.UserID,
-		IdempotencyKey: "racio-matrix-existing-event-row",
+		IdempotencyKey: "GVICMatrix-matrix-existing-event-row",
 	}); err != nil {
-		t.Fatalf("CreateRacioMatrixNode existing gate: %v", err)
+		t.Fatalf("CreateGVICMatrixNode existing gate: %v", err)
 	}
 
 	newRows := eventRowsAfterPrefixForTest(t, repo, companyID, len(beforeRows))
 	kanbanRows := eventRowsOfTypeForTest(newRows, EventTypeKanbanProjectionDelta)
-	racioRows := eventRowsOfTypeForTest(newRows, EventTypeGVICMatrixProjectionDelta)
-	if len(kanbanRows) != 1 || len(racioRows) != 1 {
-		t.Fatalf("new event rows = %+v, want exactly one Kanban and one RACIO row", newRows)
+	GVICMatrixRows := eventRowsOfTypeForTest(newRows, EventTypeGVICMatrixProjectionDelta)
+	if len(kanbanRows) != 1 || len(GVICMatrixRows) != 1 {
+		t.Fatalf("new event rows = %+v, want exactly one Kanban and one GVICMatrix row", newRows)
 	}
 	assertKanbanProjectionEventRowForLogicGate(t, kanbanRows[0], logicGate.LogicGateID, 1)
-	assertRacioProjectionEventRowForUser(t, racioRows[0], user.UserID, 2, []string{EntityTypeNode})
+	assertGVICMatrixProjectionEventRowForUser(t, GVICMatrixRows[0], user.UserID, 2, []string{EntityTypeNode})
 }
 
-func TestRacioMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *testing.T) {
+func TestGVICMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "99999999-9999-4999-8999-999999999116"
-	repo.EnsureCompany(companyID, "RACIO Matrix New Gate Event Rows Co")
-	user, err := repo.UpsertAuthUser("racio-matrix-new-user", "racio-matrix-new-user@example.com", "RACIO Matrix New User")
+	repo.EnsureCompany(companyID, "GVICMatrix Matrix New Gate Event Rows Co")
+	user, err := repo.UpsertAuthUser("GVICMatrix-matrix-new-user", "GVICMatrix-matrix-new-user@example.com", "GVICMatrix Matrix New User")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser: %v", err)
 	}
@@ -289,23 +289,23 @@ func TestRacioMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *t
 
 	priority := 4
 	nodeID := "11111111-1111-4111-8111-111111111116"
-	result, err := repo.CreateRacioMatrixNode(RacioMatrixNodeCreateInput{
+	result, err := repo.CreateGVICMatrixNode(GVICMatrixNodeCreateInput{
 		CompanyID:                companyID,
 		NodeID:                   nodeID,
-		Title:                    "RACIO matrix new gate node",
-		CreateLogicGateHeader:    "RACIO matrix new gate",
+		Title:                    "GVICMatrix matrix new gate node",
+		CreateLogicGateHeader:    "GVICMatrix matrix new gate",
 		CreatorLogicGateGVICRole: domain.GVICRoleGenerated,
 		Status:                   LogicGateWorkStatusPending,
 		Priority:                 &priority,
 		PrioritySet:              true,
 		ActorUserID:              user.UserID,
-		IdempotencyKey:           "racio-matrix-new-event-row",
+		IdempotencyKey:           "GVICMatrix-matrix-new-event-row",
 	})
 	if err != nil {
-		t.Fatalf("CreateRacioMatrixNode new gate: %v", err)
+		t.Fatalf("CreateGVICMatrixNode new gate: %v", err)
 	}
 	if result.LogicGate == nil {
-		t.Fatalf("CreateRacioMatrixNode returned no created logic gate")
+		t.Fatalf("CreateGVICMatrixNode returned no created logic gate")
 	}
 
 	rows, err := repo.ListEventRows(companyID, 20)
@@ -313,14 +313,14 @@ func TestRacioMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *t
 		t.Fatalf("ListEventRows: %v", err)
 	}
 	kanbanRows := eventRowsOfTypeForTest(rows, EventTypeKanbanProjectionDelta)
-	racioRows := eventRowsOfTypeForTest(rows, EventTypeGVICMatrixProjectionDelta)
-	if len(kanbanRows) != 1 || len(racioRows) != 1 {
-		t.Fatalf("event rows = %+v, want one Kanban row and one RACIO row for created logic-gate projection", rows)
+	GVICMatrixRows := eventRowsOfTypeForTest(rows, EventTypeGVICMatrixProjectionDelta)
+	if len(kanbanRows) != 1 || len(GVICMatrixRows) != 1 {
+		t.Fatalf("event rows = %+v, want one Kanban row and one GVICMatrix row for created logic-gate projection", rows)
 	}
 	assertKanbanProjectionEventRowForLogicGate(t, kanbanRows[0], result.LogicGate.LogicGateID, 1)
-	assertRacioProjectionEventRowForUser(t, racioRows[0], user.UserID, 1, []string{EntityTypeLogicGate})
+	assertGVICMatrixProjectionEventRowForUser(t, GVICMatrixRows[0], user.UserID, 1, []string{EntityTypeLogicGate})
 	if current, err := repo.CurrentEventRowSequence(companyID, GVICMatrixProjectionUserScope(user.UserID)); err != nil || current != 1 {
-		t.Fatalf("CurrentEventRowSequence RACIO = %d err=%v, want 1", current, err)
+		t.Fatalf("CurrentEventRowSequence GVICMatrix = %d err=%v, want 1", current, err)
 	}
 }
 
@@ -339,16 +339,16 @@ func TestUpdateNodeAndWorkspaceEventWritesProjectionEventRowsForTitleChange(t *t
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	if _, err := repo.AddLogicGateRaciAssignments(LogicGateRaciAssignmentCommandInput{
+	if _, err := repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		ActorUserID: user.UserID,
-		Assignments: []LogicGateRaciAssignmentInput{{
+		Assignments: []LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
 			UserID: user.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("AddLogicGateRaciAssignments: %v", err)
+		t.Fatalf("AddLogicGateGVICAssignments: %v", err)
 	}
 	node, err := repo.CreateNode(companyID, "Old projection title")
 	if err != nil {
@@ -384,9 +384,9 @@ func TestUpdateNodeAndWorkspaceEventWritesProjectionEventRowsForTitleChange(t *t
 
 	newRows := eventRowsAfterPrefixForTest(t, repo, companyID, len(beforeRows))
 	kanbanRows := eventRowsOfTypeForTest(newRows, EventTypeKanbanProjectionDelta)
-	racioRows := eventRowsOfTypeForTest(newRows, EventTypeGVICMatrixProjectionDelta)
-	if len(kanbanRows) != 1 || len(racioRows) != 1 {
-		t.Fatalf("new event rows = %+v, want exactly one Kanban and one RACIO row", newRows)
+	GVICMatrixRows := eventRowsOfTypeForTest(newRows, EventTypeGVICMatrixProjectionDelta)
+	if len(kanbanRows) != 1 || len(GVICMatrixRows) != 1 {
+		t.Fatalf("new event rows = %+v, want exactly one Kanban and one GVICMatrix row", newRows)
 	}
 	kanbanPayload, err := DecodeKanbanProjectionDeltaEventPayload(kanbanRows[0])
 	if err != nil {
@@ -395,12 +395,12 @@ func TestUpdateNodeAndWorkspaceEventWritesProjectionEventRowsForTitleChange(t *t
 	if len(kanbanPayload.Deltas) != 1 || kanbanPayload.Deltas[0].Row == nil || kanbanPayload.Deltas[0].Row.NodeTitle != updatedTitle {
 		t.Fatalf("Kanban title delta = %+v, want node_title %q", kanbanPayload.Deltas, updatedTitle)
 	}
-	racioPayload, err := DecodeGVICMatrixProjectionDeltaEventPayload(racioRows[0])
+	GVICMatrixPayload, err := DecodeGVICMatrixProjectionDeltaEventPayload(GVICMatrixRows[0])
 	if err != nil {
 		t.Fatalf("DecodeGVICMatrixProjectionDeltaEventPayload: %v", err)
 	}
-	if len(racioPayload.Deltas) != 1 || racioPayload.Deltas[0].Row == nil || racioPayload.Deltas[0].Row.DisplayTitle != updatedTitle {
-		t.Fatalf("RACIO title delta = %+v, want display_title %q", racioPayload.Deltas, updatedTitle)
+	if len(GVICMatrixPayload.Deltas) != 1 || GVICMatrixPayload.Deltas[0].Row == nil || GVICMatrixPayload.Deltas[0].Row.DisplayTitle != updatedTitle {
+		t.Fatalf("GVICMatrix title delta = %+v, want display_title %q", GVICMatrixPayload.Deltas, updatedTitle)
 	}
 }
 
@@ -994,26 +994,26 @@ func assertKanbanProjectionEventRowForLogicGate(t *testing.T, row EventRow, logi
 	}
 }
 
-func assertRacioProjectionEventRowForUser(t *testing.T, row EventRow, userID string, wantSequence int64, wantResourceTypes []string) {
+func assertGVICMatrixProjectionEventRowForUser(t *testing.T, row EventRow, userID string, wantSequence int64, wantResourceTypes []string) {
 	t.Helper()
-	wantScope := RacioRealtimeUserScope(userID)
+	wantScope := GVICMatrixRealtimeUserScope(userID)
 	wantSequenceScope := GVICMatrixProjectionUserScope(userID)
 	if row.EventID == "" || row.PrimaryScope != wantScope || row.SequenceScope != wantSequenceScope || row.Sequence != wantSequence {
-		t.Fatalf("RACIO event row = %+v, want scope=%s sequence_scope=%s sequence=%d", row, wantScope, wantSequenceScope, wantSequence)
+		t.Fatalf("GVICMatrix event row = %+v, want scope=%s sequence_scope=%s sequence=%d", row, wantScope, wantSequenceScope, wantSequence)
 	}
 	payload, err := DecodeGVICMatrixProjectionDeltaEventPayload(row)
 	if err != nil {
 		t.Fatalf("DecodeGVICMatrixProjectionDeltaEventPayload: %v", err)
 	}
 	if payload.Projection != ProjectionNameGVICMatrix || payload.Scope != wantScope || payload.ProjectionScope != wantSequenceScope || len(payload.Deltas) == 0 {
-		t.Fatalf("RACIO payload = %+v, want deltas for %s", payload, wantScope)
+		t.Fatalf("GVICMatrix payload = %+v, want deltas for %s", payload, wantScope)
 	}
 	gotResourceTypes := make([]string, 0, len(payload.Deltas))
 	for _, delta := range payload.Deltas {
 		gotResourceTypes = append(gotResourceTypes, delta.RowKey.ResourceType)
 	}
 	if !sameStringSet(gotResourceTypes, wantResourceTypes) {
-		t.Fatalf("RACIO payload resource types = %+v, want %+v", gotResourceTypes, wantResourceTypes)
+		t.Fatalf("GVICMatrix payload resource types = %+v, want %+v", gotResourceTypes, wantResourceTypes)
 	}
 }
 

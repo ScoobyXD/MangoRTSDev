@@ -226,35 +226,35 @@ func TestLogicGateGVICAssignmentsAPIAndReadModel(t *testing.T) {
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	companyID := "company-logic-gate-raci-test"
+	companyID := "company-logic-gate-GVIC-test"
 	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
-	otherCompanyID := "company-logic-gate-raci-other"
-	repo.EnsureCompany(companyID, "RACI Test Company")
+	otherCompanyID := "company-logic-gate-GVIC-other"
+	repo.EnsureCompany(companyID, "GVIC Test Company")
 	repo.EnsureCompany(otherCompanyID, "Other Company")
 
 	logicGate, err := repo.CreateLogicGate(companyID, "approval gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate() error = %v", err)
 	}
-	responsible, err := repo.UpsertAuthUser("raci-responsible", "responsible@example.com", "Responsible User")
+	responsible, err := repo.UpsertAuthUser("GVIC-responsible", "responsible@example.com", "Responsible User")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser responsible error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("raci-responsible", companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("GVIC-responsible", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership responsible error = %v", err)
 	}
-	accountable, err := repo.UpsertAuthUser("raci-accountable", "accountable@example.com", "Accountable User")
+	accountable, err := repo.UpsertAuthUser("GVIC-accountable", "accountable@example.com", "Accountable User")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser accountable error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("raci-accountable", companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("GVIC-accountable", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership accountable error = %v", err)
 	}
-	outsider, err := repo.UpsertAuthUser("raci-outsider", "outsider@example.com", "Outsider User")
+	outsider, err := repo.UpsertAuthUser("GVIC-outsider", "outsider@example.com", "Outsider User")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser outsider error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("raci-outsider", otherCompanyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership("GVIC-outsider", otherCompanyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership outsider error = %v", err)
 	}
 
@@ -762,9 +762,6 @@ func TestCreateNodeAssignsCreator(t *testing.T) {
 	var created domain.Node
 	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
 		t.Fatalf("decode created node: %v", err)
-	}
-	if created.AssigneeUserID != nil || created.AssigneeName != nil || created.AssigneeEmail != nil {
-		t.Fatalf("created node exposes assignee fields = %+v, want hidden assignee fields", created)
 	}
 	configured, err := repo.ListResourceGVICAssignments(companyID, store.EntityTypeNode, created.NodeID)
 	if err != nil {
@@ -2500,9 +2497,6 @@ func TestWorkspaceEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
 		t.Fatalf("batch response counts: nodes=%d relationships=%d, want 1 each", len(payload.Nodes), len(payload.Relationships))
 	}
 	created := payload.Nodes[0]
-	if created.AssigneeUserID != nil || created.AssigneeName != nil || created.AssigneeEmail != nil {
-		t.Fatalf("created batch node exposes assignee fields = %+v, want hidden assignee fields", created)
-	}
 	if payload.Relationships[0].NodeIDA != source.NodeID || payload.Relationships[0].NodeIDB != created.NodeID {
 		t.Fatalf("batch relationship = %+v, want source parent to created child %s", payload.Relationships[0], created.NodeID)
 	}
@@ -2619,18 +2613,18 @@ func TestWorkspaceEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t
 	}
 }
 
-func TestWorkspaceEntityBatchAssignsCreatedLogicGateRaciToCreator(t *testing.T) {
+func TestWorkspaceEntityBatchAssignsCreatedLogicGateGVICToCreator(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	companyID := "company-map-batch-logic-raci-test"
-	repo.EnsureCompany(companyID, "Map Batch Logic RACI Company")
-	creator, err := repo.UpsertAuthUser("map-batch-raci-creator", "raci-creator@example.com", "RACI Creator")
+	companyID := "company-map-batch-logic-GVIC-test"
+	repo.EnsureCompany(companyID, "Map Batch Logic GVIC Company")
+	creator, err := repo.UpsertAuthUser("map-batch-GVIC-creator", "GVIC-creator@example.com", "GVIC Creator")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser creator error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership("map-batch-raci-creator", companyID, "company_user"); err != nil {
+	if _, err := repo.AddCompanyMembership("map-batch-GVIC-creator", companyID, "company_user"); err != nil {
 		t.Fatalf("AddCompanyMembership creator error = %v", err)
 	}
 
@@ -2685,7 +2679,7 @@ func TestWorkspaceEntityBatchAssignsCreatedLogicGateRaciToCreator(t *testing.T) 
 	if len(assignments) != 1 || assignments[0].Role != domain.GVICRoleGenerated || assignments[0].UserID != creator.UserID {
 		t.Fatalf("response GVIC assignments = %+v, want generated creator", assignments)
 	}
-	if assignments[0].UserDisplayName != "RACI Creator" || assignments[0].UserEmail != "raci-creator@example.com" {
+	if assignments[0].UserDisplayName != "GVIC Creator" || assignments[0].UserEmail != "gvic-creator@example.com" {
 		t.Fatalf("response GVIC user read model = %+v, want creator display fields", assignments[0])
 	}
 	stored, err := repo.GetLogicGate(companyID, payload.LogicGates[0].LogicGateID)

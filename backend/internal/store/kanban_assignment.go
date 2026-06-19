@@ -20,12 +20,6 @@ func NormalizeLogicGateNodeAssignmentInput(input LogicGateNodeAssignmentInput) (
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 
-	policy, ok := NormalizeLogicGateAssignmentAssigneePolicy(input.AssigneePolicy)
-	if !ok {
-		return LogicGateNodeAssignmentInput{}, ErrInvalid
-	}
-	input.AssigneePolicy = policy
-
 	if input.CompanyID == "" || input.LogicGateID == "" || input.NodeID == "" {
 		return LogicGateNodeAssignmentInput{}, ErrInvalid
 	}
@@ -61,17 +55,6 @@ func NormalizeLogicGateNodeAssignmentMoveInput(input LogicGateNodeAssignmentMove
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 
-	if input.AssigneePolicySet || strings.TrimSpace(input.AssigneePolicy) != "" {
-		policy, ok := NormalizeLogicGateAssignmentAssigneePolicy(input.AssigneePolicy)
-		if !ok {
-			return LogicGateNodeAssignmentMoveInput{}, ErrInvalid
-		}
-		input.AssigneePolicy = policy
-		input.AssigneePolicySet = true
-	} else {
-		input.AssigneePolicy = ""
-	}
-
 	if input.CompanyID == "" || input.LogicGateID == "" || input.NodeID == "" {
 		return LogicGateNodeAssignmentMoveInput{}, ErrInvalid
 	}
@@ -86,7 +69,6 @@ func NormalizeLogicGateNodeAssignmentRemoveInput(input LogicGateNodeAssignmentRe
 	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
 	input.NodeID = strings.TrimSpace(input.NodeID)
 	input.FallbackStatus = normalizeOptionalStringPointer(input.FallbackStatus)
-	input.FallbackStatusColor = normalizeOptionalStringPointer(input.FallbackStatusColor)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	if input.CompanyID == "" || input.NodeID == "" {
@@ -107,7 +89,7 @@ func NormalizeLogicGateNodeAssignmentIssueInput(input LogicGateNodeAssignmentIss
 	return input, nil
 }
 
-func NormalizeRacioMatrixNodeCreateInput(input RacioMatrixNodeCreateInput) (RacioMatrixNodeCreateInput, error) {
+func NormalizeGVICMatrixNodeCreateInput(input GVICMatrixNodeCreateInput) (GVICMatrixNodeCreateInput, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.NodeID = strings.TrimSpace(input.NodeID)
 	input.Title = strings.TrimSpace(input.Title)
@@ -124,25 +106,20 @@ func NormalizeRacioMatrixNodeCreateInput(input RacioMatrixNodeCreateInput) (Raci
 		input.NodeID = newUUIDv7String()
 	}
 	if input.CompanyID == "" || input.NodeID == "" || input.Title == "" {
-		return RacioMatrixNodeCreateInput{}, ErrInvalid
+		return GVICMatrixNodeCreateInput{}, ErrInvalid
 	}
 	if input.LogicGateID != "" && input.CreateLogicGateHeader != "" {
-		return RacioMatrixNodeCreateInput{}, ErrInvalid
+		return GVICMatrixNodeCreateInput{}, ErrInvalid
 	}
 	if input.CreatorLogicGateGVICRole != "" {
 		role, ok := NormalizeGVICRole(input.CreatorLogicGateGVICRole)
 		if !ok {
-			return RacioMatrixNodeCreateInput{}, ErrInvalid
+			return GVICMatrixNodeCreateInput{}, ErrInvalid
 		}
 		input.CreatorLogicGateGVICRole = role
 	}
-	policy, ok := NormalizeLogicGateAssignmentAssigneePolicy(input.AssigneePolicy)
-	if !ok {
-		return RacioMatrixNodeCreateInput{}, ErrInvalid
-	}
-	input.AssigneePolicy = policy
 	if input.PrioritySet && input.Priority != nil && (*input.Priority < 1 || *input.Priority > 5) {
-		return RacioMatrixNodeCreateInput{}, ErrInvalid
+		return GVICMatrixNodeCreateInput{}, ErrInvalid
 	}
 	return input, nil
 }
@@ -156,15 +133,6 @@ func normalizeOptionalStringPointer(value *string) *string {
 		return nil
 	}
 	return &trimmed
-}
-
-func NormalizeLogicGateAssignmentAssigneePolicy(policy string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(policy)) {
-	case "":
-		return "", true
-	default:
-		return "", false
-	}
 }
 
 func NormalizeLogicGateAssignmentStatusTitle(status string) string {

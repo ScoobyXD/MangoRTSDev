@@ -7,9 +7,9 @@ import (
 )
 
 func TestPostgresSharedInboxGVICUsesGenericResourceTable(t *testing.T) {
-	raw, err := os.ReadFile("postgres_shared_inbox_raci.go")
+	raw, err := os.ReadFile("postgres_shared_inbox_GVIC.go")
 	if err != nil {
-		t.Fatalf("ReadFile postgres_shared_inbox_raci.go: %v", err)
+		t.Fatalf("ReadFile postgres_shared_inbox_GVIC.go: %v", err)
 	}
 	source := string(raw)
 	for _, needle := range []string{
@@ -26,9 +26,9 @@ func TestPostgresSharedInboxGVICUsesGenericResourceTable(t *testing.T) {
 	for _, forbidden := range []string{
 		"with recursive",
 		"child.parent_folder_id",
-		"shared_inbox_raci_assignments",
-		"shared_inbox_raci_group_assignments",
-		"resource_raci_assignments",
+		"shared_inbox_GVIC_assignments",
+		"shared_inbox_GVIC_group_assignments",
+		"resource_GVIC_assignments",
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("shared inbox GVIC source should not use %q", forbidden)

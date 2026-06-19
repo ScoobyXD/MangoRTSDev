@@ -145,7 +145,7 @@ function createClient(): {
         node: {
           company_id: args.companyID,
           node_id: args.nodeID,
-          title: args.nodeTitle ?? args.nodeID,
+          name: args.nodeTitle ?? args.nodeID,
           priority: args.priority,
           created_timestamp: "2026-05-01T00:00:00.000Z",
         },
@@ -165,7 +165,7 @@ function createClient(): {
         node: {
           company_id: args.companyID,
           node_id: args.nodeID,
-          title: args.nodeID,
+          name: args.nodeID,
           priority: args.priority,
           created_timestamp: "2026-05-01T00:00:00.000Z",
         },
@@ -179,7 +179,7 @@ function createClient(): {
         node: {
           company_id: args.companyID,
           node_id: args.nodeID,
-          title: args.nodeID,
+          name: args.nodeID,
           created_timestamp: "2026-05-01T00:00:00.000Z",
         },
         gvic_projection_rows: [],
@@ -192,7 +192,7 @@ function createClient(): {
         node: {
           company_id: args.companyID,
           node_id: args.nodeID,
-          title: args.nodeID,
+          name: args.nodeID,
           created_timestamp: "2026-05-01T00:00:00.000Z",
         },
         gvic_projection_rows: [],

@@ -66,15 +66,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		generatedUserID := ""
-		if actor, ok := authenticatedActor(r); ok && strings.TrimSpace(actor.User.UserID) != "" {
-			generatedUserID = strings.TrimSpace(actor.User.UserID)
-		}
-		item, event, err := s.repo.CreateNodeWithAssigneeAndWorkspaceEvent(strings.TrimSpace(*companyID), strings.TrimSpace(*name), generatedUserID)
-		if errors.Is(err, store.ErrAssigneeNotInCompany) {
-			writeError(w, http.StatusBadRequest, "assignee_user_not_in_company")
-			return
-		}
+		item, event, err := s.repo.CreateNodeWithWorkspaceEvent(strings.TrimSpace(*companyID), strings.TrimSpace(*name))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_create_node")
 			return
@@ -236,8 +228,8 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusNotFound, "node_not_found")
 				return
 			}
-			if errors.Is(err, store.ErrAssigneeNotInCompany) {
-				writeError(w, http.StatusBadRequest, "assignee_user_not_in_company")
+			if errors.Is(err, store.ErrPrincipalNotInCompany) {
+				writeError(w, http.StatusBadRequest, "principal_user_not_in_company")
 				return
 			}
 			if errors.Is(err, store.ErrInvalid) {

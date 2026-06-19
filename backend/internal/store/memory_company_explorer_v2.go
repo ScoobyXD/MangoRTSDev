@@ -372,7 +372,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string) e
 			return err
 		}
 		delete(r.folders, key(companyID, id))
-		delete(r.sharedInboxRaci, sharedInboxRaciKey(companyID, id))
+		delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, id))
 	}
 	for edgeKey, edge := range r.companyExplorerV2Edges {
 		if edge.CompanyID == companyID && (folderIDs[edge.ParentEntityID] || folderIDs[edge.ChildEntityID]) {

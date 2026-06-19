@@ -138,12 +138,12 @@ func TestMemoryResourceAccessPolicyAssignmentMovementRules(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set node default: %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: firstGate.LogicGateID,
-		Assignments: []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: allowed.UserID}},
+		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: allowed.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments: %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
 	}
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
 		CompanyID:   companyID,

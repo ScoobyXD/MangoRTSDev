@@ -142,9 +142,9 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 	for _, affectedKey := range affected {
 		switch affectedKey.resourceType {
 		case EntityTypeNode:
-			deltas = append(deltas, r.syncRacioProjectionForNodeDeltasLocked(affectedKey.companyID, affectedKey.resourceID)...)
+			deltas = append(deltas, r.syncGVICMatrixProjectionForNodeDeltasLocked(affectedKey.companyID, affectedKey.resourceID)...)
 		case EntityTypeLogicGate:
-			deltas = append(deltas, r.syncRacioProjectionForLogicGateAssignmentsDeltasLocked(affectedKey.companyID, affectedKey.resourceID, nil, nil)...)
+			deltas = append(deltas, r.syncGVICMatrixProjectionForLogicGateAssignmentsDeltasLocked(affectedKey.companyID, affectedKey.resourceID, nil, nil)...)
 		}
 	}
 	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(keyValue.companyID, input.ActorUserID, input.IdempotencyKey, deltas)); err != nil {
@@ -183,11 +183,11 @@ func (r *MemoryRepo) validateGVICPrincipalLocked(companyID, principalType, princ
 	switch principalType {
 	case EntityPermissionSubjectUser:
 		if _, ok := r.memberships[membershipKey(companyID, principalID)]; !ok {
-			return ErrAssigneeNotInCompany
+			return ErrPrincipalNotInCompany
 		}
 	case EntityPermissionSubjectGroup:
 		if _, ok := r.userGroups[userGroupKey(companyID, principalID)]; !ok {
-			return ErrAssigneeNotInCompany
+			return ErrPrincipalNotInCompany
 		}
 	default:
 		return ErrInvalid
@@ -334,7 +334,7 @@ func (r *MemoryRepo) deriveResourceGVICEffectiveAssignmentsLocked(keyValue resou
 		case EntityPermissionSubjectUser:
 			userIDs = append(userIDs, assignment.PrincipalID)
 		case EntityPermissionSubjectGroup:
-			userIDs, _ = r.logicGateRaciUserIDsForGroupLocked(keyValue.companyID, assignment.PrincipalID)
+			userIDs, _ = r.logicGateGVICUserIDsForGroupLocked(keyValue.companyID, assignment.PrincipalID)
 		}
 		for _, userID := range userIDs {
 			user, ok := r.companyUserByIDLocked(keyValue.companyID, userID)

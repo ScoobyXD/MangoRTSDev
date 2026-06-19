@@ -22,12 +22,8 @@ coalesce(
   end,
   nullif(n.status, '')
 ) as status,
-null::text as status_color,
 n.due_date::text,
 n.priority,
-null::text as assignee_user_id,
-null::text as assignee_name,
-null::text as assignee_email,
 n.created_timestamp,
 coalesce(node_logic_gates.logic_gate_ids_json, '[]') as logic_gate_ids_json,
 coalesce(account_snapshot.accounts_json, '[]')::text as accounts_json`
@@ -107,12 +103,8 @@ func scanNode(row interface {
 }) (domain.Node, error) {
 	var item domain.Node
 	var status sql.NullString
-	var statusColor sql.NullString
 	var dueDate sql.NullString
 	var priority sql.NullInt64
-	var assigneeUserID sql.NullString
-	var assigneeName sql.NullString
-	var assigneeEmail sql.NullString
 	var logicGateIDsJSON sql.NullString
 	var accountsJSON sql.NullString
 	err := row.Scan(
@@ -120,12 +112,8 @@ func scanNode(row interface {
 		&item.NodeID,
 		&item.Title,
 		&status,
-		&statusColor,
 		&dueDate,
 		&priority,
-		&assigneeUserID,
-		&assigneeName,
-		&assigneeEmail,
 		&item.CreatedTimestamp,
 		&logicGateIDsJSON,
 		&accountsJSON,
@@ -133,24 +121,12 @@ func scanNode(row interface {
 	if status.Valid {
 		item.Status = &status.String
 	}
-	if statusColor.Valid {
-		item.StatusColor = &statusColor.String
-	}
 	if dueDate.Valid {
 		item.DueDate = &dueDate.String
 	}
 	if priority.Valid {
 		value := int(priority.Int64)
 		item.Priority = &value
-	}
-	if assigneeUserID.Valid {
-		item.AssigneeUserID = &assigneeUserID.String
-	}
-	if assigneeName.Valid {
-		item.AssigneeName = &assigneeName.String
-	}
-	if assigneeEmail.Valid {
-		item.AssigneeEmail = &assigneeEmail.String
 	}
 	if logicGateIDsJSON.Valid {
 		var ids []string
@@ -176,18 +152,18 @@ func cleanStringList(values []string) []string {
 	return out
 }
 
-type postgresNodeAssigneeReadModel struct {
+type postgresCompanyMemberReadModel struct {
 	UserID string
 	Name   *string
 	Email  *string
 }
 
-func loadPostgresNodeAssigneeReadModel(ctx context.Context, tx *sql.Tx, companyID, userID string) (postgresNodeAssigneeReadModel, error) {
+func loadPostgresCompanyMemberReadModel(ctx context.Context, tx *sql.Tx, companyID, userID string) (postgresCompanyMemberReadModel, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
-		return postgresNodeAssigneeReadModel{}, nil
+		return postgresCompanyMemberReadModel{}, nil
 	}
-	var item postgresNodeAssigneeReadModel
+	var item postgresCompanyMemberReadModel
 	var name sql.NullString
 	var email sql.NullString
 	err := tx.QueryRowContext(ctx, `
@@ -199,10 +175,10 @@ where membership.company_id=$1 and membership.user_id::text=$2`,
 		companyID, userID,
 	).Scan(&item.UserID, &name, &email)
 	if errors.Is(err, sql.ErrNoRows) {
-		return postgresNodeAssigneeReadModel{}, ErrAssigneeNotInCompany
+		return postgresCompanyMemberReadModel{}, ErrPrincipalNotInCompany
 	}
 	if err != nil {
-		return postgresNodeAssigneeReadModel{}, err
+		return postgresCompanyMemberReadModel{}, err
 	}
 	if name.Valid {
 		item.Name = &name.String
@@ -214,10 +190,6 @@ where membership.company_id=$1 and membership.user_id::text=$2`,
 }
 
 func (r *PostgresRepo) CreateNode(companyID, title string) (domain.Node, error) {
-	return r.CreateNodeWithAssignee(companyID, title, "")
-}
-
-func (r *PostgresRepo) CreateNodeWithAssignee(companyID, title, assigneeUserID string) (domain.Node, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -225,7 +197,7 @@ func (r *PostgresRepo) CreateNodeWithAssignee(companyID, title, assigneeUserID s
 	}
 	defer tx.Rollback()
 
-	item, err := r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, companyID, "", title, assigneeUserID, false, true)
+	item, err := r.createNodeWithIDProjectionAndFolderTx(ctx, tx, companyID, "", title, false, true)
 	if err != nil {
 		return domain.Node{}, err
 	}
@@ -245,7 +217,7 @@ func (r *PostgresRepo) CreateNodeWithAssignee(companyID, title, assigneeUserID s
 	return item, nil
 }
 
-func (r *PostgresRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title, assigneeUserID string) (domain.Node, domain.DomainEvent, error) {
+func (r *PostgresRepo) CreateNodeWithWorkspaceEvent(companyID, title string) (domain.Node, domain.DomainEvent, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -253,7 +225,7 @@ func (r *PostgresRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title,
 	}
 	defer tx.Rollback()
 
-	item, err := r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, companyID, "", title, assigneeUserID, false, true)
+	item, err := r.createNodeWithIDProjectionAndFolderTx(ctx, tx, companyID, "", title, false, true)
 	if err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
@@ -277,25 +249,24 @@ func (r *PostgresRepo) CreateNodeWithAssigneeAndWorkspaceEvent(companyID, title,
 	return item, event, nil
 }
 
-func (r *PostgresRepo) createNodeWithAssigneeTx(ctx context.Context, tx *sql.Tx, companyID, title, assigneeUserID string) (domain.Node, error) {
-	return r.createNodeWithAssigneeIDTx(ctx, tx, companyID, "", title, assigneeUserID)
+func (r *PostgresRepo) createNodeTx(ctx context.Context, tx *sql.Tx, companyID, title string) (domain.Node, error) {
+	return r.createNodeWithIDTx(ctx, tx, companyID, "", title)
 }
 
-func (r *PostgresRepo) createNodeWithAssigneeIDTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string) (domain.Node, error) {
-	return r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, companyID, nodeID, title, assigneeUserID, true, true)
+func (r *PostgresRepo) createNodeWithIDTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title string) (domain.Node, error) {
+	return r.createNodeWithIDProjectionAndFolderTx(ctx, tx, companyID, nodeID, title, true, true)
 }
 
-func (r *PostgresRepo) createNodeWithAssigneeIDWithoutProjectionTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string) (domain.Node, error) {
-	return r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, companyID, nodeID, title, assigneeUserID, false, true)
+func (r *PostgresRepo) createNodeWithIDWithoutProjectionTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title string) (domain.Node, error) {
+	return r.createNodeWithIDProjectionAndFolderTx(ctx, tx, companyID, nodeID, title, false, true)
 }
 
-func (r *PostgresRepo) createNodeWithAssigneeIDWithoutProjectionOrFolderTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string) (domain.Node, error) {
-	return r.createNodeWithAssigneeIDProjectionAndFolderTx(ctx, tx, companyID, nodeID, title, assigneeUserID, false, false)
+func (r *PostgresRepo) createNodeWithIDWithoutProjectionOrFolderTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title string) (domain.Node, error) {
+	return r.createNodeWithIDProjectionAndFolderTx(ctx, tx, companyID, nodeID, title, false, false)
 }
 
-func (r *PostgresRepo) createNodeWithAssigneeIDProjectionAndFolderTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title, assigneeUserID string, syncProjection, syncFolderItem bool) (domain.Node, error) {
+func (r *PostgresRepo) createNodeWithIDProjectionAndFolderTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, title string, syncProjection, syncFolderItem bool) (domain.Node, error) {
 	nodeID = strings.TrimSpace(nodeID)
-	_ = strings.TrimSpace(assigneeUserID)
 	if nodeID == "" {
 		nodeID = newUUIDv7String()
 	}

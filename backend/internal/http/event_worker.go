@@ -235,7 +235,7 @@ func (s *Server) processPermissionChangedEvent(row store.EventRow) error {
 	case store.EntityTypeNode:
 		s.revalidateEditorSubscriptionsForResource(row.CompanyID, entityType, entityID)
 		s.revalidateWorkspaceSubscriptionsForResource(row.CompanyID, entityType, entityID)
-		s.publishRacioPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
+		s.publishGVICMatrixPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishKanbanPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishProjectManagementPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		return nil
@@ -243,7 +243,7 @@ func (s *Server) processPermissionChangedEvent(row store.EventRow) error {
 		s.revalidateEditorSubscriptionsForResource(row.CompanyID, entityType, entityID)
 		s.revalidateKanbanBoardSubscriptionsForLogicGate(row.CompanyID, entityID)
 		s.revalidateWorkspaceSubscriptionsForResource(row.CompanyID, entityType, entityID)
-		s.publishRacioPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
+		s.publishGVICMatrixPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishKanbanPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		s.publishProjectManagementPermissionProjectionDeltasAsync(row.CompanyID, entityType, entityID)
 		return nil

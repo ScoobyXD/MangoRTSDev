@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  addLogicGateRaciAssignments,
+  addLogicGateGVICAssignments,
   archiveEmailMessage,
   archiveEmailMessagesBatch,
   createFolderQuery,
@@ -20,12 +20,12 @@ import {
   markCommunicationsWorkspacePanelStale,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
-  removeLogicGateRaciAssignments,
+  removeLogicGateGVICAssignments,
   sendEmail,
   unarchiveEmailMessage,
   updateEmailMessage,
   updateCommunicationsSharedInbox,
-  updateCommunicationsSharedInboxRaciAssignments,
+  updateCommunicationsSharedInboxGVICAssignments,
   type EmailMessage,
 } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import { logout } from "../../../../frontend/src/auth/cognitoAuth.js";
@@ -86,13 +86,13 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
     const listed = await listCommunicationsSharedInboxes(" company-1 ");
     const created = await createCommunicationsSharedInbox({ companyID: "company-1", name: " Business ", accountEmail: "shared@example.com" });
     const updated = await updateCommunicationsSharedInbox({ companyID: "company-1", folderID: " shared-1 ", name: " Client Facing " });
-    const access = await updateCommunicationsSharedInboxRaciAssignments("company-1", "shared-1", [{ role: "generated", subject_type: "user", subject_id: "user-1", user_id: "user-1" }]);
+    const access = await updateCommunicationsSharedInboxGVICAssignments("company-1", "shared-1", [{ role: "generated", principal_type: "user", principal_id: "user-1", user_id: "user-1" }]);
     await deleteCommunicationsSharedInbox("company-1", "shared-1");
 
     assert.equal(listed[0]?.name, "Business");
     assert.equal(created.folder_id, "shared-2");
     assert.equal(updated.folder_id, "shared-1");
-    assert.deepEqual(access.map((item) => [item.role, item.subject_type, item.subject_id, item.user_id]), [["generated", "user", "user-1", "user-1"]]);
+    assert.deepEqual(access.map((item) => [item.role, item.principal_type, item.principal_id, item.user_id]), [["generated", "user", "user-1", "user-1"]]);
     assert.deepEqual(calls, [
       {
         path: "/v1/communications/shared-inboxes?company_id=company-1",
@@ -154,7 +154,7 @@ test("workspace panel scoped stale refetches only matching resource caches", asy
     const path = input.toString();
     calls.push(path);
     if (path.startsWith("/v1/logic-gates?")) return jsonResponse({ logic_gates: [{ company_id: "company-1", logic_gate_id: "gate-1", header: "Gate 1", created_timestamp: "2026-01-01T00:00:00Z" }] });
-    if (path.startsWith("/v1/nodes?")) return jsonResponse({ nodes: [{ company_id: "company-1", node_id: `node-${calls.filter((call) => call.startsWith("/v1/nodes?")).length}`, title: "Node", created_timestamp: "2026-01-01T00:00:00Z" }] });
+    if (path.startsWith("/v1/nodes?")) return jsonResponse({ nodes: [{ company_id: "company-1", node_id: `node-${calls.filter((call) => call.startsWith("/v1/nodes?")).length}`, name: "Node", created_timestamp: "2026-01-01T00:00:00Z" }] });
     if (path.startsWith("/v1/company-explorer/folder-items?")) return jsonResponse({ folder_items: [{ company_id: "company-1", folder_id: "folder-1", item_type: "node", item_id: "node-1", position: 1000, created_timestamp: "2026-01-01T00:00:00Z", updated_timestamp: "2026-01-01T00:00:00Z" }] });
     return jsonResponse({ folders: [], shortcuts: [], users: [] });
   };
@@ -546,8 +546,8 @@ test("logic gate GVIC helpers call add and remove command endpoints", async () =
     });
   };
   try {
-    const addResult = await addLogicGateRaciAssignments("company-1", "gate 1", [{ role: "generated", user_id: "user-1" }]);
-    const removeResult = await removeLogicGateRaciAssignments("company-1", "gate 1", [{ role: "generated", user_id: "user-1" }]);
+    const addResult = await addLogicGateGVICAssignments("company-1", "gate 1", [{ role: "generated", user_id: "user-1" }]);
+    const removeResult = await removeLogicGateGVICAssignments("company-1", "gate 1", [{ role: "generated", user_id: "user-1" }]);
     assert.deepEqual(calls, [
       {
         path: "/v1/resources/logic_gate/gate%201/gvic/add",

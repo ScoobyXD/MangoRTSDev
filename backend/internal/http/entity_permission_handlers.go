@@ -658,7 +658,7 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusBadRequest, "invalid_entity_permissions")
 		return
 	}
-	if errors.Is(err, store.ErrAssigneeNotInCompany) {
+	if errors.Is(err, store.ErrPrincipalNotInCompany) {
 		writeError(w, http.StatusBadRequest, "permission_user_not_in_company")
 		return
 	}

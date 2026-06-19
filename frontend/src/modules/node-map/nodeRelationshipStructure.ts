@@ -29,8 +29,8 @@ function sortedNodeIDs(ids: Iterable<string>, nodeByID: Map<string, NodeRecord>,
   return Array.from(ids).sort((left, right) => {
     if (left === focusNodeID) return -1;
     if (right === focusNodeID) return 1;
-    const leftLabel = getNodeTitle(nodeByID.get(left) ?? { title: left }).toLowerCase();
-    const rightLabel = getNodeTitle(nodeByID.get(right) ?? { title: right }).toLowerCase();
+    const leftLabel = getNodeTitle(nodeByID.get(left) ?? { name: left }).toLowerCase();
+    const rightLabel = getNodeTitle(nodeByID.get(right) ?? { name: right }).toLowerCase();
     return leftLabel.localeCompare(rightLabel) || left.localeCompare(right);
   });
 }
@@ -141,7 +141,7 @@ export function buildNodeRelationshipTreeRows(input: {
     : {
       company_id: "",
       node_id: focusNodeID,
-      title: input.fallbackTitle?.trim() || "Current node",
+      name: input.fallbackTitle?.trim() || "Current node",
       created_timestamp: "",
     };
   const nodes = fallbackNode ? [...structure.nodes, fallbackNode] : structure.nodes;
@@ -183,7 +183,7 @@ export function buildNodeRelationshipTreeRows(input: {
     const directRole = directRoleByNodeID.get(nodeID);
     return {
       nodeID,
-      title: getNodeTitle(node ?? { title: nodeID }) || nodeID,
+      title: getNodeTitle(node ?? { name: nodeID }) || nodeID,
       depth,
       role: nodeID === focusNodeID ? "Current" : directRole ?? traversalRole ?? "Related",
       direct: nodeID === focusNodeID || directRoleByNodeID.has(nodeID),
@@ -243,7 +243,7 @@ export function buildNodeRelationshipHierarchyRows(input: {
 
   const rowForNode = (nodeID: string, depth: number, role: RelationshipRole | "Related" = "Related"): NodeRelationshipHierarchyRow => ({
     nodeID,
-    title: getNodeTitle(nodeByID.get(nodeID) ?? { title: nodeID }) || nodeID,
+    title: getNodeTitle(nodeByID.get(nodeID) ?? { name: nodeID }) || nodeID,
     depth,
     role,
     hasChildren: (childrenByParent.get(nodeID)?.size ?? 0) > 0,

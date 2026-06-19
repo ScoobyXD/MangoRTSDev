@@ -80,20 +80,20 @@ func (t *requestTimingRecorder) observeAccounted(label string) func() {
 func normalizeTimingLabel(label string) string {
 	switch label {
 	case "repo.CreateWorkspaceEntityBatch.node_writes",
-		"repo.CreateRacioMatrixNode.node_writes",
+		"repo.CreateGVICMatrixNode.node_writes",
 		"repo.assignNodeToLogicGateStatusTx.node_writes",
 		"repo.MoveLogicGateNodeAssignment.node_writes":
 		return "source.node"
 	case "repo.CreateWorkspaceEntityBatch.logic_gate_writes",
-		"repo.CreateRacioMatrixNode.logic_gate_writes",
-		"repo.createRacioMatrixLogicGateTx.logic_gate_insert":
+		"repo.CreateGVICMatrixNode.logic_gate_writes",
+		"repo.createGVICMatrixLogicGateTx.logic_gate_insert":
 		return "source.logic_gate"
-	case "repo.CreateWorkspaceEntityBatch.raci_assignment_writes",
-		"repo.createRacioMatrixLogicGateTx.raci_assignment_writes":
-		return "source.raci_assignment"
+	case "repo.CreateWorkspaceEntityBatch.GVIC_assignment_writes",
+		"repo.createGVICMatrixLogicGateTx.GVIC_assignment_writes":
+		return "source.GVIC_assignment"
 	case "repo.assignNodeToLogicGateStatusTx.assignment_writes",
 		"repo.MoveLogicGateNodeAssignment.assignment_writes",
-		"repo.CreateRacioMatrixNode.assignment_writes":
+		"repo.CreateGVICMatrixNode.assignment_writes":
 		return "source.assignment"
 	case "repo.assignNodeToLogicGateStatusTx.node_assignment_writes",
 		"repo.MoveLogicGateNodeAssignment.node_assignment_writes":
@@ -102,30 +102,30 @@ func normalizeTimingLabel(label string) string {
 		"repo.MoveLogicGateNodeAssignment.access_policy_copy":
 		return "source.access_policy_copy"
 	case "repo.CreateWorkspaceEntityBatch.commit",
-		"repo.CreateRacioMatrixNode.commit",
+		"repo.CreateGVICMatrixNode.commit",
 		"repo.AssignNodeToLogicGateStatus.commit",
 		"repo.MoveLogicGateNodeAssignment.commit":
 		return "source.transaction_commit"
 	case "repo.CreateWorkspaceEntityBatch.relationship_writes":
 		return "source.relationship"
 	case "repo.CreateWorkspaceEntityBatch.transaction",
-		"repo.CreateRacioMatrixNode.transaction",
+		"repo.CreateGVICMatrixNode.transaction",
 		"repo.AssignNodeToLogicGateStatus.transaction",
 		"repo.MoveLogicGateNodeAssignment.transaction":
 		return "source.transaction_repo"
 	case "repo.assignNodeToLogicGateStatusTx.total",
 		"repo.MoveLogicGateNodeAssignmentTx.total":
 		return "source.command_total"
-	case "repo.CreateRacioMatrixNode.normalize_input":
+	case "repo.CreateGVICMatrixNode.normalize_input":
 		return "source.normalize_input"
 	case "repo.CreateWorkspaceEntityBatch.folder_setup":
 		return "explorer.folder_setup"
 	case "repo.ensureCompanyExplorerSystemFolderSQL":
 		return "explorer.folder_setup"
 	case "repo.CreateWorkspaceEntityBatch.folder_item_writes",
-		"repo.createRacioMatrixLogicGateTx.folder_item_writes":
+		"repo.createGVICMatrixLogicGateTx.folder_item_writes":
 		return "explorer.folder_item_write"
-	case "repo.CreateRacioMatrixNode.folder_item_read":
+	case "repo.CreateGVICMatrixNode.folder_item_read":
 		return "explorer.folder_item_read"
 	case "repo.nextCompanyExplorerSQLRowPosition":
 		return "explorer.folder_position_read"
@@ -133,10 +133,10 @@ func normalizeTimingLabel(label string) string {
 		return "map.position_write"
 	case "repo.CreateWorkspaceEntityBatch.creator_assignee_read":
 		return "reread.assignment"
-	case "repo.CreateRacioMatrixNode.projection_reread",
+	case "repo.CreateGVICMatrixNode.projection_reread",
 		"repo.assignNodeToLogicGateStatusTx.projection_reread",
 		"repo.MoveLogicGateNodeAssignment.projection_reread":
-		return "reread.racio_projection"
+		return "reread.GVIC_MATRIX_PROJECTION"
 	case "repo.assignNodeToLogicGateStatusTx.node_reread",
 		"repo.MoveLogicGateNodeAssignment.node_reread",
 		"repo.MoveLogicGateNodeAssignment.node_read":
@@ -149,26 +149,26 @@ func normalizeTimingLabel(label string) string {
 		return "source.assignment_position_read"
 	case "repo.MoveLogicGateNodeAssignment.email_reference_work":
 		return "kanban.email_reference_work"
-	case "repo.assignNodeToLogicGateStatusTx.racio_projection_sync",
-		"repo.MoveLogicGateNodeAssignment.racio_projection_sync",
-		"repo.CreateWorkspaceEntityBatch.racio_projection_sync",
-		"repo.createRacioMatrixLogicGateTx.racio_projection_sync":
-		return "racio_projection.sync_call"
-	case "repo.syncPostgresRacioProjectionForNodeTx.total":
-		return "racio_projection.total"
-	case "repo.syncPostgresRacioProjectionForNodeTx.delete_stale":
-		return "racio_projection.delete_stale"
-	case "repo.syncPostgresRacioProjectionForNodeTx.upsert":
-		return "racio_projection.upsert"
-	case "repo.syncPostgresRacioProjectionForLogicGateUsersTx.total":
-		return "racio_projection.total"
-	case "repo.deleteStalePostgresRacioProjectionForLogicGateUserTx":
-		return "racio_projection.delete_stale"
-	case "repo.upsertPostgresRacioProjectionForLogicGateUserTx":
-		return "racio_projection.upsert"
+	case "repo.assignNodeToLogicGateStatusTx.GVIC_MATRIX_PROJECTION_sync",
+		"repo.MoveLogicGateNodeAssignment.GVIC_MATRIX_PROJECTION_sync",
+		"repo.CreateWorkspaceEntityBatch.GVIC_MATRIX_PROJECTION_sync",
+		"repo.createGVICMatrixLogicGateTx.GVIC_MATRIX_PROJECTION_sync":
+		return "GVIC_MATRIX_PROJECTION.sync_call"
+	case "repo.syncPostgresGVICMatrixProjectionForNodeTx.total":
+		return "GVIC_MATRIX_PROJECTION.total"
+	case "repo.syncPostgresGVICMatrixProjectionForNodeTx.delete_stale":
+		return "GVIC_MATRIX_PROJECTION.delete_stale"
+	case "repo.syncPostgresGVICMatrixProjectionForNodeTx.upsert":
+		return "GVIC_MATRIX_PROJECTION.upsert"
+	case "repo.syncPostgresGVICMatrixProjectionForLogicGateUsersTx.total":
+		return "GVIC_MATRIX_PROJECTION.total"
+	case "repo.deleteStalePostgresGVICMatrixProjectionForLogicGateUserTx":
+		return "GVIC_MATRIX_PROJECTION.delete_stale"
+	case "repo.upsertPostgresGVICMatrixProjectionForLogicGateUserTx":
+		return "GVIC_MATRIX_PROJECTION.upsert"
 	case "repo.assignNodeToLogicGateStatusTx.domain_event_append",
 		"repo.MoveLogicGateNodeAssignment.domain_event_append",
-		"repo.CreateRacioMatrixNode.domain_event_append":
+		"repo.CreateGVICMatrixNode.domain_event_append":
 		return "events.append.total"
 	case "repo.appendDomainEventTx.normalize_payload":
 		return "events.payload_build"

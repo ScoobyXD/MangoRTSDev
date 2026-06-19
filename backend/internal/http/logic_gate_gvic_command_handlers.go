@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func (s *Server) handleLogicGateRaciCommand(w http.ResponseWriter, r *http.Request, logicGateID, operation string) {
+func (s *Server) handleLogicGateGVICCommand(w http.ResponseWriter, r *http.Request, logicGateID, operation string) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
@@ -31,27 +31,27 @@ func (s *Server) handleLogicGateRaciCommand(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	assignments, ok := parseLogicGateRaciCommandAssignments(fields)
+	assignments, ok := parseLogicGateGVICCommandAssignments(fields)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_gvic_assignments")
 		return
 	}
 
 	actorUserID, idempotencyKey := workItemAssignmentRequestEventMetadata(r)
-	input := store.LogicGateRaciAssignmentCommandInput{
+	input := store.LogicGateGVICAssignmentCommandInput{
 		CompanyID:      companyID,
 		LogicGateID:    logicGateID,
 		Assignments:    assignments,
 		ActorUserID:    actorUserID,
 		IdempotencyKey: idempotencyKey,
 	}
-	var result store.LogicGateRaciAssignmentCommandResult
+	var result store.LogicGateGVICAssignmentCommandResult
 	var err error
 	switch operation {
-	case store.LogicGateRaciCommandAdd:
-		result, err = s.repo.AddLogicGateRaciAssignments(input)
-	case store.LogicGateRaciCommandRemove:
-		result, err = s.repo.RemoveLogicGateRaciAssignments(input)
+	case store.LogicGateGVICCommandAdd:
+		result, err = s.repo.AddLogicGateGVICAssignments(input)
+	case store.LogicGateGVICCommandRemove:
+		result, err = s.repo.RemoveLogicGateGVICAssignments(input)
 	default:
 		writeError(w, http.StatusNotFound, "not_found")
 		return
@@ -60,12 +60,12 @@ func (s *Server) handleLogicGateRaciCommand(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid_gvic_assignments")
 		return
 	}
-	if errors.Is(err, store.ErrAssigneeNotInCompany) {
-		writeError(w, http.StatusBadRequest, "raci_user_not_in_company")
+	if errors.Is(err, store.ErrPrincipalNotInCompany) {
+		writeError(w, http.StatusBadRequest, "gvic_principal_not_in_company")
 		return
 	}
-	if errors.Is(err, store.ErrRaciStorageUnavailable) {
-		writeError(w, http.StatusServiceUnavailable, "logic_gate_raci_storage_unavailable")
+	if errors.Is(err, store.ErrGVICStorageUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "logic_gate_GVIC_storage_unavailable")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
@@ -73,7 +73,7 @@ func (s *Server) handleLogicGateRaciCommand(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_update_logic_gate_raci")
+		writeError(w, http.StatusInternalServerError, "failed_to_update_logic_gate_GVIC")
 		return
 	}
 
@@ -83,12 +83,12 @@ func (s *Server) handleLogicGateRaciCommand(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, result)
 }
 
-func parseLogicGateRaciCommandAssignments(fields map[string]json.RawMessage) ([]store.LogicGateRaciAssignmentInput, bool) {
+func parseLogicGateGVICCommandAssignments(fields map[string]json.RawMessage) ([]store.LogicGateGVICAssignmentInput, bool) {
 	if raw, set := fields["assignments"]; set {
 		if strings.TrimSpace(string(raw)) == "" || strings.TrimSpace(string(raw)) == "null" {
 			return nil, false
 		}
-		var assignments []store.LogicGateRaciAssignmentInput
+		var assignments []store.LogicGateGVICAssignmentInput
 		if err := json.Unmarshal(raw, &assignments); err != nil {
 			return nil, false
 		}
@@ -96,19 +96,19 @@ func parseLogicGateRaciCommandAssignments(fields map[string]json.RawMessage) ([]
 	}
 	role, rolePresent, roleOK := parseRequiredStringJSONField(fields, "role")
 	userID, userPresent, userOK := parseRequiredStringJSONField(fields, "user_id")
-	subjectType, subjectTypePresent, subjectTypeOK := parseRequiredStringJSONField(fields, "subject_type")
-	subjectID, subjectIDPresent, subjectIDOK := parseRequiredStringJSONField(fields, "subject_id")
-	if !roleOK || !rolePresent || !userOK || !subjectTypeOK || !subjectIDOK {
+	principalType, principalTypePresent, principalTypeOK := parseRequiredStringJSONField(fields, "principal_type")
+	principalID, principalIDPresent, principalIDOK := parseRequiredStringJSONField(fields, "principal_id")
+	if !roleOK || !rolePresent || !userOK || !principalTypeOK || !principalIDOK {
 		return nil, false
 	}
-	if subjectTypePresent || subjectIDPresent {
-		if !subjectTypePresent || !subjectIDPresent {
+	if principalTypePresent || principalIDPresent {
+		if !principalTypePresent || !principalIDPresent {
 			return nil, false
 		}
-		return []store.LogicGateRaciAssignmentInput{{Role: role, SubjectType: subjectType, SubjectID: subjectID, UserID: userID}}, true
+		return []store.LogicGateGVICAssignmentInput{{Role: role, PrincipalType: principalType, PrincipalID: principalID, UserID: userID}}, true
 	}
 	if !userPresent {
 		return nil, false
 	}
-	return []store.LogicGateRaciAssignmentInput{{Role: role, UserID: userID}}, true
+	return []store.LogicGateGVICAssignmentInput{{Role: role, UserID: userID}}, true
 }

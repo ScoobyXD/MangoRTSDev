@@ -19,7 +19,7 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	}
 	otherUser := mustCreateInboxReadCompanyUser(t, repo, "other-inbox-user-subject", companyID, "other-inbox@example.com", "Other Inbox User")
 
-	responsibleOnly := mustCreateInboxReadLogicGate(t, repo, companyID, "Alpha Responsible")
+	generatedOnly := mustCreateInboxReadLogicGate(t, repo, companyID, "Alpha Responsible")
 	accountableGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Bravo Accountable")
 	consultedGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Charlie Consulted")
 	informedGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Delta Informed")
@@ -27,16 +27,16 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	otherUserGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Foxtrot Other User")
 	otherCompanyGate := mustCreateInboxReadLogicGate(t, repo, otherCompanyID, "Other Company Gate")
 
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, responsibleOnly.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}})
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, accountableGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}})
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, consultedGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleConsulted, UserID: user.UserID}})
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, informedGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleInformed, UserID: user.UserID}})
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, multiRoleGate.LogicGateID, []LogicGateRaciAssignmentInput{
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, generatedOnly.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}})
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, accountableGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}})
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, consultedGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleConsulted, UserID: user.UserID}})
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, informedGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleInformed, UserID: user.UserID}})
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, multiRoleGate.LogicGateID, []LogicGateGVICAssignmentInput{
 		{Role: domain.GVICRoleGenerated, UserID: user.UserID},
 		{Role: domain.GVICRoleVerified, UserID: user.UserID},
 	})
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, otherUserGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleVerified, UserID: otherUser.UserID}})
-	mustSetInboxReadLogicGateRaci(t, repo, otherCompanyID, otherCompanyGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}})
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, otherUserGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerified, UserID: otherUser.UserID}})
+	mustSetInboxReadLogicGateGVIC(t, repo, otherCompanyID, otherCompanyGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}})
 
 	olderNode, err := repo.CreateNode(companyID, "Older assigned node")
 	if err != nil {
@@ -77,7 +77,7 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	responsiblePriority := 4
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
 		CompanyID:   companyID,
-		LogicGateID: responsibleOnly.LogicGateID,
+		LogicGateID: generatedOnly.LogicGateID,
 		NodeID:      responsibleNode.NodeID,
 		Status:      "in progress",
 		Priority:    &responsiblePriority,
@@ -85,9 +85,9 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus responsible: %v", err)
 	}
-	responsibleNodes, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
+	responsibleNodes, err := repo.ListGeneratedInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
 	if err != nil {
-		t.Fatalf("ListResponsibleInboxNodes: %v", err)
+		t.Fatalf("ListGeneratedInboxNodes: %v", err)
 	}
 	if len(responsibleNodes) != 1 || responsibleNodes[0].NodeID != responsibleNode.NodeID {
 		t.Fatalf("responsible nodes = %+v, want responsible Logic Gate node", responsibleNodes)
@@ -99,13 +99,13 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	if responsibleRead.Priority == nil || *responsibleRead.Priority != responsiblePriority {
 		t.Fatalf("responsible node priority = %+v, want %d", responsibleRead.Priority, responsiblePriority)
 	}
-	if len(responsibleRead.LogicGateIDs) != 1 || responsibleRead.LogicGateIDs[0] != responsibleOnly.LogicGateID {
-		t.Fatalf("responsible node logic_gate_ids = %+v, want %q", responsibleRead.LogicGateIDs, responsibleOnly.LogicGateID)
+	if len(responsibleRead.LogicGateIDs) != 1 || responsibleRead.LogicGateIDs[0] != generatedOnly.LogicGateID {
+		t.Fatalf("responsible node logic_gate_ids = %+v, want %q", responsibleRead.LogicGateIDs, generatedOnly.LogicGateID)
 	}
 
-	limitedResponsible, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 1})
+	limitedResponsible, err := repo.ListGeneratedInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 1})
 	if err != nil {
-		t.Fatalf("ListResponsibleInboxNodes limited: %v", err)
+		t.Fatalf("ListGeneratedInboxNodes limited: %v", err)
 	}
 	if len(limitedResponsible) != 1 || limitedResponsible[0].NodeID != responsibleNode.NodeID {
 		t.Fatalf("limited responsible nodes = %+v, want responsible node first", limitedResponsible)
@@ -123,7 +123,7 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListACIInboxLogicGates: %v", err)
 	}
-	if findInboxReadGate(aciGates, responsibleOnly.LogicGateID) != nil {
+	if findInboxReadGate(aciGates, generatedOnly.LogicGateID) != nil {
 		t.Fatalf("ACI inbox returned responsible-only gate: %+v", aciGates)
 	}
 	for _, gateID := range []string{accountableGate.LogicGateID, consultedGate.LogicGateID, informedGate.LogicGateID, multiRoleGate.LogicGateID} {
@@ -150,25 +150,25 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 	if findInboxReadGate(myGates, otherUserGate.LogicGateID) != nil || findInboxReadGate(myGates, otherCompanyGate.LogicGateID) != nil {
 		t.Fatalf("my logic gates leaked another user/company gate: %+v", myGates)
 	}
-	responsibleGateRead := findInboxReadGate(myGates, responsibleOnly.LogicGateID)
+	responsibleGateRead := findInboxReadGate(myGates, generatedOnly.LogicGateID)
 	if responsibleGateRead == nil || !inboxReadRolesContain(responsibleGateRead.Roles, domain.GVICRoleGenerated) {
 		t.Fatalf("my logic gates responsible roles = %+v, want responsible gate", responsibleGateRead)
 	}
 	multiMy := findInboxReadGate(myGates, multiRoleGate.LogicGateID)
 	if multiMy == nil || !inboxReadRolesContain(multiMy.Roles, domain.GVICRoleGenerated) || !inboxReadRolesContain(multiMy.Roles, domain.GVICRoleVerified) {
-		t.Fatalf("my logic gate multi roles = %+v, want all user RACI roles", multiMy)
+		t.Fatalf("my logic gate multi roles = %+v, want all user GVIC roles", multiMy)
 	}
-	if len(multiMy.RaciAssignments) != 2 {
-		t.Fatalf("my logic gate raci_assignments = %+v, want existing assignments", multiMy.RaciAssignments)
+	if len(multiMy.GVICAssignments) != 2 {
+		t.Fatalf("my logic gate GVIC_assignments = %+v, want existing assignments", multiMy.GVICAssignments)
 	}
 }
 
-func TestMemoryRepoLogicGateRaciGroupAssignmentsIncludeSubgroups(t *testing.T) {
+func TestMemoryRepoLogicGateGVICGroupAssignmentsIncludeSubgroups(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "33333333-3333-4333-8333-333333333333"
-	repo.EnsureCompany(companyID, "Group RACI Company")
+	repo.EnsureCompany(companyID, "Group GVIC Company")
 
-	user := mustCreateInboxReadCompanyUser(t, repo, "group-raci-user-subject", companyID, "group-raci@example.com", "Group RACI User")
+	user := mustCreateInboxReadCompanyUser(t, repo, "group-GVIC-user-subject", companyID, "group-GVIC@example.com", "Group GVIC User")
 	parentGroup, err := repo.CreateCompanyUserGroup(companyID, "", "Operations")
 	if err != nil {
 		t.Fatalf("CreateCompanyUserGroup parent: %v", err)
@@ -199,20 +199,20 @@ func TestMemoryRepoLogicGateRaciGroupAssignmentsIncludeSubgroups(t *testing.T) {
 		t.Fatalf("AssignNodeToLogicGateStatus responsible: %v", err)
 	}
 
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateRaciAssignmentInput{{
-		Role:        domain.GVICRoleGenerated,
-		SubjectType: EntityPermissionSubjectGroup,
-		SubjectID:   parentGroup.GroupID,
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateGVICAssignmentInput{{
+		Role:          domain.GVICRoleGenerated,
+		PrincipalType: EntityPermissionSubjectGroup,
+		PrincipalID:   parentGroup.GroupID,
 	}})
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, aciGate.LogicGateID, []LogicGateRaciAssignmentInput{{
-		Role:        domain.GVICRoleVerified,
-		SubjectType: EntityPermissionSubjectGroup,
-		SubjectID:   childGroup.GroupID,
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, aciGate.LogicGateID, []LogicGateGVICAssignmentInput{{
+		Role:          domain.GVICRoleVerified,
+		PrincipalType: EntityPermissionSubjectGroup,
+		PrincipalID:   childGroup.GroupID,
 	}})
 
-	responsibleNodes, err := repo.ListResponsibleInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
+	responsibleNodes, err := repo.ListGeneratedInboxNodes(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
 	if err != nil {
-		t.Fatalf("ListResponsibleInboxNodes: %v", err)
+		t.Fatalf("ListGeneratedInboxNodes: %v", err)
 	}
 	if len(responsibleNodes) != 1 || responsibleNodes[0].NodeID != responsibleNode.NodeID {
 		t.Fatalf("responsible nodes = %+v, want parent-group assigned node", responsibleNodes)
@@ -226,10 +226,10 @@ func TestMemoryRepoLogicGateRaciGroupAssignmentsIncludeSubgroups(t *testing.T) {
 	if responsibleGateRead == nil || !inboxReadRolesContain(responsibleGateRead.Roles, domain.GVICRoleGenerated) {
 		t.Fatalf("my gates = %+v, want parent group responsible gate", myGates)
 	}
-	if len(responsibleGateRead.RaciAssignments) != 1 ||
-		responsibleGateRead.RaciAssignments[0].SubjectType != EntityPermissionSubjectGroup ||
-		responsibleGateRead.RaciAssignments[0].SubjectID != parentGroup.GroupID {
-		t.Fatalf("responsible gate assignments = %+v, want configured group assignment", responsibleGateRead.RaciAssignments)
+	if len(responsibleGateRead.GVICAssignments) != 1 ||
+		responsibleGateRead.GVICAssignments[0].PrincipalType != EntityPermissionSubjectGroup ||
+		responsibleGateRead.GVICAssignments[0].PrincipalID != parentGroup.GroupID {
+		t.Fatalf("responsible gate assignments = %+v, want configured group assignment", responsibleGateRead.GVICAssignments)
 	}
 
 	aciGates, err := repo.ListACIInboxLogicGates(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 10})
@@ -263,10 +263,10 @@ func mustCreateInboxReadLogicGate(t *testing.T, repo *MemoryRepo, companyID, hea
 	return logicGate
 }
 
-func mustSetInboxReadLogicGateRaci(t *testing.T, repo *MemoryRepo, companyID, logicGateID string, assignments []LogicGateRaciAssignmentInput) {
+func mustSetInboxReadLogicGateGVIC(t *testing.T, repo *MemoryRepo, companyID, logicGateID string, assignments []LogicGateGVICAssignmentInput) {
 	t.Helper()
-	if _, err := repo.SetLogicGateRaciAssignments(LogicGateRaciAssignmentUpdateInput{CompanyID: companyID, LogicGateID: logicGateID, Assignments: assignments}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments %s: %v", logicGateID, err)
+	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{CompanyID: companyID, LogicGateID: logicGateID, Assignments: assignments}); err != nil {
+		t.Fatalf("SetLogicGateGVICAssignments %s: %v", logicGateID, err)
 	}
 }
 

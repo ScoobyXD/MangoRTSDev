@@ -107,8 +107,8 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "invalid_workspace_entity_batch")
 		return
 	}
-	if errors.Is(err, store.ErrAssigneeNotInCompany) {
-		writeError(w, http.StatusBadRequest, "assignee_user_not_in_company")
+	if errors.Is(err, store.ErrPrincipalNotInCompany) {
+		writeError(w, http.StatusBadRequest, "principal_user_not_in_company")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
@@ -171,6 +171,9 @@ func buildWorkspaceEntityBatchInput(
 		clientID := strings.TrimSpace(item.ClientID)
 		title := ""
 		if input.EntityKind == "node" {
+			if strings.TrimSpace(item.Title) != "" || strings.TrimSpace(item.Header) != "" {
+				return store.WorkspaceEntityBatchInput{}, false
+			}
 			title = strings.TrimSpace(item.Name)
 		} else {
 			title = strings.TrimSpace(item.Title)

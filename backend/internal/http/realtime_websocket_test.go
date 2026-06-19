@@ -163,13 +163,13 @@ func TestRealtimeWebSocketAuthorizedSubscriptionAcceptedAndStored(t *testing.T) 
 	}
 }
 
-func TestRealtimeWebSocketRacioSubscriptionAuthorizesOwnUserAndRejectsOtherUser(t *testing.T) {
+func TestRealtimeWebSocketGVICMatrixSubscriptionAuthorizesOwnUserAndRejectsOtherUser(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "88888888-8888-4888-8888-888888888011"
-	tokenA := "racio-subscription-a-token"
-	tokenB := "racio-subscription-b-token"
-	userA := mustRealtimeAuthUser(t, repo, companyID, "racio-subscription-a", domain.RoleCompanyUser)
-	userB := mustRealtimeAuthUser(t, repo, companyID, "racio-subscription-b", domain.RoleCompanyUser)
+	tokenA := "GVICMatrix-subscription-a-token"
+	tokenB := "GVICMatrix-subscription-b-token"
+	userA := mustRealtimeAuthUser(t, repo, companyID, "GVICMatrix-subscription-a", domain.RoleCompanyUser)
+	userB := mustRealtimeAuthUser(t, repo, companyID, "GVICMatrix-subscription-b", domain.RoleCompanyUser)
 	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 		tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
 		tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
@@ -180,24 +180,24 @@ func TestRealtimeWebSocketRacioSubscriptionAuthorizesOwnUserAndRejectsOtherUser(
 	defer client.close()
 	ready := client.readJSON(t)
 	connectionID := ready["connection_id"].(string)
-	otherScope := realtimeRacioScope(userB.UserID)
+	otherScope := realtimeGVICMatrixScope(userB.UserID)
 	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": otherScope})
 	rejected := client.readJSON(t)
 	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != otherScope {
-		t.Fatalf("RACIO subscription rejected = %+v, want rejection for %s", rejected, otherScope)
+		t.Fatalf("GVICMatrix subscription rejected = %+v, want rejection for %s", rejected, otherScope)
 	}
 	if server.realtimeRegistry.hasSubscription(connectionID, companyID, otherScope) {
-		t.Fatalf("unauthorized RACIO subscription was stored")
+		t.Fatalf("unauthorized GVICMatrix subscription was stored")
 	}
 
-	ownScope := realtimeRacioScope(userA.UserID)
+	ownScope := realtimeGVICMatrixScope(userA.UserID)
 	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": ownScope})
 	accepted := client.readJSON(t)
 	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != ownScope {
-		t.Fatalf("RACIO subscription accepted = %+v, want accepted for %s", accepted, ownScope)
+		t.Fatalf("GVICMatrix subscription accepted = %+v, want accepted for %s", accepted, ownScope)
 	}
 	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, ownScope) {
-		t.Fatalf("authorized RACIO subscription was not stored")
+		t.Fatalf("authorized GVICMatrix subscription was not stored")
 	}
 }
 

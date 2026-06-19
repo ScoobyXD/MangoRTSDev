@@ -20,7 +20,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 	input.CreatorUserID = strings.TrimSpace(input.CreatorUserID)
 	if input.CreatorUserID != "" {
 		if _, ok := r.memberships[membershipKey(input.CompanyID, input.CreatorUserID)]; !ok {
-			return WorkspaceEntityBatchResult{}, ErrAssigneeNotInCompany
+			return WorkspaceEntityBatchResult{}, ErrPrincipalNotInCompany
 		}
 	}
 
@@ -94,20 +94,19 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 				CreatedTimestamp: now,
 			}
 			if input.CreatorUserID != "" {
-				assignment := domain.ResourceGVICAssignment{
-					CompanyID:        input.CompanyID,
-					ResourceType:     EntityTypeNode,
-					ResourceID:       created.NodeID,
-					Role:             domain.GVICRoleGenerated,
-					PrincipalType:    EntityPermissionSubjectUser,
-					PrincipalID:      input.CreatorUserID,
-					CreatedTimestamp: now,
-					UpdatedTimestamp: now,
+				if _, ok := r.companyUserByIDLocked(input.CompanyID, input.CreatorUserID); !ok {
+					return WorkspaceEntityBatchResult{}, ErrPrincipalNotInCompany
 				}
+				assignment := r.resourceGVICAssignmentForPrincipalLocked(resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: created.NodeID}, normalizedGVICAssignmentInput{
+					role:          domain.GVICRoleGenerated,
+					principalType: EntityPermissionSubjectUser,
+					principalID:   input.CreatorUserID,
+				}, now)
+				assignment.UpdatedTimestamp = now
 				r.gvicAssignments[gvicSourceAssignmentKey(assignment.CompanyID, assignment.ResourceType, assignment.ResourceID, assignment.Role, assignment.PrincipalType, assignment.PrincipalID)] = assignment
 			}
 			r.nodes[key(input.CompanyID, created.NodeID)] = created
-			r.syncRacioProjectionForNodeLocked(input.CompanyID, created.NodeID)
+			r.syncGVICMatrixProjectionForNodeLocked(input.CompanyID, created.NodeID)
 			r.syncResourceGVICEffectiveAssignmentsLocked([]resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: created.NodeID}})
 			if input.CreatorUserID != "" {
 				created.EffectiveAccess = r.effectiveAccessLevelForUserLocked(input.CompanyID, input.CreatorUserID, EntityTypeNode, created.NodeID)
@@ -138,25 +137,17 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		r.logicGates[key(input.CompanyID, created.LogicGateID)] = created
 		r.ensureLogicGateKanbanBoardLocked(input.CompanyID, created.LogicGateID, created.Header)
 		if input.CreatorUserID != "" && input.CreatorLogicGateGVICRole != "" {
-			user, ok := r.companyUserByIDLocked(input.CompanyID, input.CreatorUserID)
-			if !ok {
-				return WorkspaceEntityBatchResult{}, ErrAssigneeNotInCompany
+			if _, ok := r.companyUserByIDLocked(input.CompanyID, input.CreatorUserID); !ok {
+				return WorkspaceEntityBatchResult{}, ErrPrincipalNotInCompany
 			}
-			assignment := domain.ResourceGVICAssignment{
-				CompanyID:        input.CompanyID,
-				ResourceType:     EntityTypeLogicGate,
-				ResourceID:       created.LogicGateID,
-				Role:             input.CreatorLogicGateGVICRole,
-				PrincipalType:    EntityPermissionSubjectUser,
-				PrincipalID:      input.CreatorUserID,
-				UserID:           input.CreatorUserID,
-				UserDisplayName:  strings.TrimSpace(user.DisplayName),
-				UserEmail:        strings.TrimSpace(user.Email),
-				CreatedTimestamp: now,
-				UpdatedTimestamp: now,
-			}
+			assignment := r.resourceGVICAssignmentForPrincipalLocked(resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}, normalizedGVICAssignmentInput{
+				role:          input.CreatorLogicGateGVICRole,
+				principalType: EntityPermissionSubjectUser,
+				principalID:   input.CreatorUserID,
+			}, now)
+			assignment.UpdatedTimestamp = now
 			r.gvicAssignments[gvicSourceAssignmentKey(assignment.CompanyID, assignment.ResourceType, assignment.ResourceID, assignment.Role, assignment.PrincipalType, assignment.PrincipalID)] = assignment
-			created.GVICAssignments = []domain.ResourceGVICAssignment{assignment}
+			created.GVICAssignments = logicGateGVICAssignmentsFromResources([]domain.ResourceGVICAssignment{assignment})
 			r.syncResourceGVICEffectiveAssignmentsLocked([]resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}})
 		}
 		if input.CreatorUserID != "" {

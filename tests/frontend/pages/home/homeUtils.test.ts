@@ -7,7 +7,7 @@ import type { NodeRecord } from "../../../../frontend/src/modules/node-map/share
 import {
   buildMyLogicGateGroups,
   buildMyNodeGroups,
-  buildRaciRoleInboxGroupsByCell,
+  buildGVICRoleInboxGroupsByCell,
   buildSharedInboxRows,
   fitHomeColumnWidthsToAvailableWidth,
   getHomeColumnMinimumTrackWidth,
@@ -23,7 +23,7 @@ import {
   mailboxForHomeView,
   nodeDragItemsFromExplorerRows,
   nodeIDsFromExplorerPayload,
-  raciRoleCellKey,
+  GVICRoleCellKey,
   resizeHomeColumns,
   resizeHomeInboxMatrixColumnsWithoutSidebar,
   setNodeDragData,
@@ -50,7 +50,7 @@ function node(id: string, title: string, overrides: Partial<NodeRecord> = {}): N
   return {
     company_id: "company-1",
     node_id: id,
-    title,
+    name: title,
     created_timestamp: "2026-01-01T00:00:00Z",
     ...overrides,
   };
@@ -169,7 +169,7 @@ test("GVIC inbox group builder classifies work by role, status, and priority", (
     node("node-all", "All roles node", { logic_gate_ids: ["gate-all"], status: "pending", priority: 1 }),
     node("node-r-unassigned", "Generated no priority node", { logic_gate_ids: ["gate-r"], status: "pending" }),
     node("node-assigned-without-r", "No generated role node", { logic_gate_ids: ["gate-no-r"], status: "in_progress", priority: 2 }),
-    node("node-assigned-other-raci", "Other GVIC node", { logic_gate_ids: ["gate-other-user"], status: "pending", priority: 3 }),
+    node("node-assigned-other-GVIC", "Other GVIC node", { logic_gate_ids: ["gate-other-user"], status: "pending", priority: 3 }),
     node("node-other-no-gate", "Without Logic Gate", { status: "pending", priority: 4 }),
     node("node-other-user", "Other user node", { logic_gate_ids: ["gate-other-user"], priority: 3 }),
     node("node-done", "Done node", { logic_gate_ids: ["gate-r"], status: "Done", priority: 1 }),
@@ -183,20 +183,20 @@ test("GVIC inbox group builder classifies work by role, status, and priority", (
     ["i-inbox", "informed"],
     ["o-inbox", "other"],
   ]);
-  const generatedStatusGroups = buildRaciRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "generated");
-  assert.deepEqual(generatedStatusGroups.get(raciRoleCellKey("generated", "in_progress", 2))?.[0]?.nodeIDs, ["node-r"]);
-  assert.deepEqual(generatedStatusGroups.get(raciRoleCellKey("generated", "review", 2))?.[0]?.nodeIDs, ["node-review"]);
-  assert.deepEqual((generatedStatusGroups.get(raciRoleCellKey("generated", "pending", 1)) ?? []).flatMap((group) => group.nodeIDs), ["node-all"]);
-  assert.deepEqual(generatedStatusGroups.get(raciRoleCellKey("generated", "pending", 0))?.[0]?.nodeIDs, ["node-r-unassigned"]);
-  assert.equal(generatedStatusGroups.get(raciRoleCellKey("generated", "pending", 1))?.some((group) => group.nodeIDs.includes("node-a")), false);
-  assert.equal(generatedStatusGroups.get(raciRoleCellKey("generated", "in_progress", 2))?.some((group) => group.nodeIDs.includes("node-assigned-without-r")), false);
-  assert.equal(generatedStatusGroups.has(raciRoleCellKey("generated", "done", 1)), false);
-  const verifiedStatusGroups = buildRaciRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "verified");
-  assert.deepEqual((verifiedStatusGroups.get(raciRoleCellKey("verified", "pending", 1)) ?? []).flatMap((group) => group.nodeIDs).sort(), ["node-a", "node-all"]);
-  assert.equal(verifiedStatusGroups.has(raciRoleCellKey("verified", "in_progress", 2)), false);
-  const otherGroups = buildRaciRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "other");
-  assert.deepEqual(otherGroups.get(raciRoleCellKey("other", "pending", 3))?.[0]?.nodeIDs, ["node-assigned-other-raci"]);
-  assert.deepEqual(otherGroups.get(raciRoleCellKey("other", "pending", 4))?.[0], {
+  const generatedStatusGroups = buildGVICRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "generated");
+  assert.deepEqual(generatedStatusGroups.get(GVICRoleCellKey("generated", "in_progress", 2))?.[0]?.nodeIDs, ["node-r"]);
+  assert.deepEqual(generatedStatusGroups.get(GVICRoleCellKey("generated", "review", 2))?.[0]?.nodeIDs, ["node-review"]);
+  assert.deepEqual((generatedStatusGroups.get(GVICRoleCellKey("generated", "pending", 1)) ?? []).flatMap((group) => group.nodeIDs), ["node-all"]);
+  assert.deepEqual(generatedStatusGroups.get(GVICRoleCellKey("generated", "pending", 0))?.[0]?.nodeIDs, ["node-r-unassigned"]);
+  assert.equal(generatedStatusGroups.get(GVICRoleCellKey("generated", "pending", 1))?.some((group) => group.nodeIDs.includes("node-a")), false);
+  assert.equal(generatedStatusGroups.get(GVICRoleCellKey("generated", "in_progress", 2))?.some((group) => group.nodeIDs.includes("node-assigned-without-r")), false);
+  assert.equal(generatedStatusGroups.has(GVICRoleCellKey("generated", "done", 1)), false);
+  const verifiedStatusGroups = buildGVICRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "verified");
+  assert.deepEqual((verifiedStatusGroups.get(GVICRoleCellKey("verified", "pending", 1)) ?? []).flatMap((group) => group.nodeIDs).sort(), ["node-a", "node-all"]);
+  assert.equal(verifiedStatusGroups.has(GVICRoleCellKey("verified", "in_progress", 2)), false);
+  const otherGroups = buildGVICRoleInboxGroupsByCell(nodes, nodeByID, gates, currentUserID, "other");
+  assert.deepEqual(otherGroups.get(GVICRoleCellKey("other", "pending", 3))?.[0]?.nodeIDs, ["node-assigned-other-GVIC"]);
+  assert.deepEqual(otherGroups.get(GVICRoleCellKey("other", "pending", 4))?.[0], {
     logicGateID: "__mango_inbox_no_logic_gate__",
     label: "No Logic Gate",
     nodeIDs: ["node-other-no-gate"],

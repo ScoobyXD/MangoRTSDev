@@ -308,7 +308,7 @@ func TestCompanyExplorerSnapshotCarriesGVICAndLogicGateMembership(t *testing.T) 
 		t.Fatalf("AddResourceGVICAssignments: %v", err)
 	}
 	priority := 3
-	created, err := repo.CreateRacioMatrixNode(store.RacioMatrixNodeCreateInput{
+	created, err := repo.CreateGVICMatrixNode(store.GVICMatrixNodeCreateInput{
 		CompanyID:      companyID,
 		Title:          "GVIC Snapshot Node",
 		LogicGateID:    logicGate.LogicGateID,
@@ -319,7 +319,7 @@ func TestCompanyExplorerSnapshotCarriesGVICAndLogicGateMembership(t *testing.T) 
 		PrioritySet:    true,
 	})
 	if err != nil {
-		t.Fatalf("CreateRacioMatrixNode: %v", err)
+		t.Fatalf("CreateGVICMatrixNode: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=company_explorer", nil)
@@ -1094,7 +1094,7 @@ func TestCommunicationsSharedInboxVisibleListUsesDefaultAccessOverrides(t *testi
 	}
 }
 
-func TestCompanyExplorerCommunicationsFolderListDoesNotApplyRaciFiltering(t *testing.T) {
+func TestCompanyExplorerCommunicationsFolderListDoesNotApplyGVICFiltering(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -1136,15 +1136,15 @@ func TestCompanyExplorerCommunicationsFolderListDoesNotApplyRaciFiltering(t *tes
 	if err != nil {
 		t.Fatalf("CreateCommunicationsSharedInboxFolder assigned error = %v", err)
 	}
-	if _, err := repo.SetCommunicationsSharedInboxRaciAssignments(store.SharedInboxRaciAssignmentUpdateInput{
+	if _, err := repo.SetCommunicationsSharedInboxGVICAssignments(store.SharedInboxGVICAssignmentUpdateInput{
 		CompanyID: companyID,
 		FolderID:  assigned.FolderID,
-		Assignments: []store.SharedInboxRaciAssignmentInput{{
+		Assignments: []store.SharedInboxGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
 			UserID: assignedUser.UserID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetCommunicationsSharedInboxRaciAssignments assigned error = %v", err)
+		t.Fatalf("SetCommunicationsSharedInboxGVICAssignments assigned error = %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/communications/shared-inboxes?company_id="+companyID, nil)
@@ -1531,19 +1531,19 @@ func TestCompanyExplorerLazyScopesRespectFolderScopeAndVisibility(t *testing.T) 
 	if err != nil {
 		t.Fatalf("CreateLogicGate B error = %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: gateA.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: userA.UserID}},
+		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: userA.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments A error = %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments A error = %v", err)
 	}
-	if _, err := repo.SetLogicGateRaciAssignments(store.LogicGateRaciAssignmentUpdateInput{
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: gateB.LogicGateID,
-		Assignments: []store.LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: userB.UserID}},
+		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: userB.UserID}},
 	}); err != nil {
-		t.Fatalf("SetLogicGateRaciAssignments B error = %v", err)
+		t.Fatalf("SetLogicGateGVICAssignments B error = %v", err)
 	}
 	nodeA, err := repo.CreateNode(companyID, "User A gate node")
 	if err != nil {

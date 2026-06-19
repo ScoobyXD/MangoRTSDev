@@ -27,7 +27,7 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	input.CreatorUserID = strings.TrimSpace(input.CreatorUserID)
 	if input.CreatorUserID != "" {
 		stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.creator_user_read")
-		creatorUser, err := loadPostgresNodeAssigneeReadModel(ctx, tx, input.CompanyID, input.CreatorUserID)
+		creatorUser, err := loadPostgresCompanyMemberReadModel(ctx, tx, input.CompanyID, input.CreatorUserID)
 		stop()
 		if err != nil {
 			return WorkspaceEntityBatchResult{}, err
@@ -118,7 +118,7 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 					return WorkspaceEntityBatchResult{}, err
 				}
 			}
-			if err := syncPostgresRacioProjectionForNewNodeTx(ctx, tx, input.CompanyID, created.NodeID); err != nil {
+			if err := syncPostgresGVICMatrixProjectionForNewNodeTx(ctx, tx, input.CompanyID, created.NodeID); err != nil {
 				return WorkspaceEntityBatchResult{}, err
 			}
 			deltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: created.NodeID}})
@@ -211,7 +211,7 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 			if err != nil {
 				return WorkspaceEntityBatchResult{}, err
 			}
-			created.GVICAssignments = assignments
+			created.GVICAssignments = logicGateGVICAssignmentsFromResources(assignments)
 		}
 		if input.CreatorUserID != "" {
 			created.EffectiveAccess, _ = r.effectiveAccessLevelForUserTx(ctx, tx, input.CompanyID, input.CreatorUserID, EntityTypeLogicGate, created.LogicGateID)

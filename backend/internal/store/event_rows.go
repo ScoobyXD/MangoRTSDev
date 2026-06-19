@@ -489,7 +489,7 @@ func GVICMatrixProjectionDeltaEventInputs(companyID, actorUserID, idempotencyKey
 	inputs := make([]EventRowInput, 0, len(userIDs))
 	for _, userID := range userIDs {
 		item := groups[userID]
-		scope := RacioRealtimeUserScope(userID)
+		scope := GVICMatrixRealtimeUserScope(userID)
 		projectionScope := GVICMatrixProjectionUserScope(userID)
 		if scope == "" || projectionScope == "" {
 			continue
@@ -683,7 +683,7 @@ func ProjectRelationshipProjectionDeltaEventInputs(companyID, actorUserID, idemp
 	return inputs
 }
 
-func RacioRealtimeUserScope(userID string) string {
+func GVICMatrixRealtimeUserScope(userID string) string {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return ""

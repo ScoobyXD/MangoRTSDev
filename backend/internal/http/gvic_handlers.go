@@ -170,7 +170,7 @@ func writeGVICMutationResult(w http.ResponseWriter, err error, result store.Reso
 		writeError(w, http.StatusBadRequest, "invalid_gvic_assignments")
 		return
 	}
-	if errors.Is(err, store.ErrAssigneeNotInCompany) {
+	if errors.Is(err, store.ErrPrincipalNotInCompany) {
 		writeError(w, http.StatusBadRequest, "gvic_principal_not_in_company")
 		return
 	}

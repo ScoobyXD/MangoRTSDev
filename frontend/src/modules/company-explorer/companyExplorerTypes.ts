@@ -1,6 +1,6 @@
 import type { CompanyExplorerFolderKind, CompanyExplorerFolderScopeType, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
 import type { CompanyExplorerV2EntityType } from "./companyExplorerLazyApi.js";
-import type { LogicGateRaciRole } from "../logic-gate-map/shared.js";
+import type { LogicGateGVICRole } from "../logic-gate-map/shared.js";
 import type {
   ExplorerCreationTargets,
   ExplorerDropPayload,
@@ -37,8 +37,8 @@ export type ExplorerTreeNode = {
   createdTimestamp: string;
   hasChildren?: boolean;
   parentLogicGateID?: string;
-  raciRole?: LogicGateRaciRole | "other";
-  syntheticKind?: "raci_folder" | "logic_gate_children" | "default_scope_folder";
+  GVICRole?: LogicGateGVICRole | "other";
+  syntheticKind?: "GVIC_folder" | "logic_gate_children" | "default_scope_folder";
 };
 
 export type ExplorerDragPayload = ExplorerDropPayload;
@@ -70,7 +70,7 @@ export type CompanyExplorerContextMenuState = {
   createPosition: number;
   createNodeLogicGateID: string;
   createNodeLogicGateTreeID: string;
-  createLogicGateRaciRole: LogicGateRaciRole | "";
+  createLogicGateGVICRole: LogicGateGVICRole | "";
   createFolderScopeType?: CompanyExplorerFolderScopeType;
   createFolderScopeID?: string;
   canCreateFolder: boolean;

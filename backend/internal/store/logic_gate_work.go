@@ -72,11 +72,6 @@ func LogicGateWorkStatusTitle(status string) string {
 	return spec.Title
 }
 
-func LogicGateWorkStatusColor(status string) string {
-	spec := logicGateWorkStatusSpecForKey(logicGateWorkStatusKeyOrDefault(status, LogicGateWorkStatusPending))
-	return spec.Color
-}
-
 func logicGateWorkStatusSpecForKey(status string) logicGateWorkStatusSpec {
 	key := logicGateWorkStatusKeyOrDefault(status, LogicGateWorkStatusPending)
 	for _, spec := range logicGateWorkStatusSpecs {

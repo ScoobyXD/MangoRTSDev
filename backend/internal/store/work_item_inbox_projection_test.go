@@ -8,11 +8,11 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func TestMemoryRepoRacioProjectionMaintainedByWrites(t *testing.T) {
+func TestMemoryRepoGVICMatrixProjectionMaintainedByWrites(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "22222222-2222-4222-8222-222222222451"
-	repo.EnsureCompany(companyID, "RACIO Projection Co")
-	user := mustCreateInboxReadCompanyUser(t, repo, "racio-projection-user", companyID, "racio-projection@example.com", "RACIO User")
+	repo.EnsureCompany(companyID, "GVICMatrix Projection Co")
+	user := mustCreateInboxReadCompanyUser(t, repo, "GVICMatrix-projection-user", companyID, "GVICMatrix-projection@example.com", "GVICMatrix User")
 
 	standaloneNode, err := repo.CreateNode(companyID, "Standalone node")
 	if err != nil {
@@ -32,7 +32,7 @@ func TestMemoryRepoRacioProjectionMaintainedByWrites(t *testing.T) {
 	}
 
 	responsibleGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Responsible gate")
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}})
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, responsibleGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}})
 	responsibleNode, err := repo.CreateNode(companyID, "Responsible node")
 	if err != nil {
 		t.Fatalf("CreateNode responsible: %v", err)
@@ -50,9 +50,9 @@ func TestMemoryRepoRacioProjectionMaintainedByWrites(t *testing.T) {
 	}
 
 	aciGate := mustCreateInboxReadLogicGate(t, repo, companyID, "ACI gate")
-	mustSetInboxReadLogicGateRaci(t, repo, companyID, aciGate.LogicGateID, []LogicGateRaciAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}})
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, aciGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleVerified, UserID: user.UserID}})
 
-	assertMemoryRacioProjectionCounts(t, repo, companyID, 2, 2)
+	assertMemoryGVICMatrixProjectionCounts(t, repo, companyID, 2, 2)
 
 	query := WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, Limit: 20}
 	myNodes, err := repo.ListMyNodes(query)
@@ -63,9 +63,9 @@ func TestMemoryRepoRacioProjectionMaintainedByWrites(t *testing.T) {
 		t.Fatalf("my nodes = %+v, want only standalone assignee node", myNodes)
 	}
 
-	responsibleNodes, err := repo.ListResponsibleInboxNodes(query)
+	responsibleNodes, err := repo.ListGeneratedInboxNodes(query)
 	if err != nil {
-		t.Fatalf("ListResponsibleInboxNodes: %v", err)
+		t.Fatalf("ListGeneratedInboxNodes: %v", err)
 	}
 	responsibleRead := mustFindInboxReadNode(t, responsibleNodes, responsibleNode.NodeID)
 	if responsibleRead.Priority == nil || *responsibleRead.Priority != priority {
@@ -93,28 +93,28 @@ func TestMemoryRepoRacioProjectionMaintainedByWrites(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions responsible node no access: %v", err)
 	}
-	responsibleNodes, err = repo.ListResponsibleInboxNodes(query)
+	responsibleNodes, err = repo.ListGeneratedInboxNodes(query)
 	if err != nil {
-		t.Fatalf("ListResponsibleInboxNodes after access change: %v", err)
+		t.Fatalf("ListGeneratedInboxNodes after access change: %v", err)
 	}
 	assertVisibleQueryNodesDoNotContain(t, responsibleNodes, responsibleNode.NodeID)
-	assertMemoryRacioProjectionCounts(t, repo, companyID, 2, 2)
+	assertMemoryGVICMatrixProjectionCounts(t, repo, companyID, 2, 2)
 }
 
-func TestRacioProjectionSchemaAndPostgresReadsUseTargetedProjection(t *testing.T) {
-	migrationRaw, err := os.ReadFile("../../db/migrations/20260530_racio_projection_resource_permissions.sql")
+func TestGVICMatrixProjectionSchemaAndPostgresReadsUseTargetedProjection(t *testing.T) {
+	migrationRaw, err := os.ReadFile("../../db/migrations/20260618_z_gvic_node_phase2_cleanup.sql")
 	if err != nil {
 		t.Fatalf("ReadFile migration: %v", err)
 	}
 	migration := normalizeProjectionSource(string(migrationRaw))
 	for _, needle := range []string{
-		"create table if not exists racio_matrix_projection_table",
-		"create table if not exists resource_permissions",
-		"create or replace function mangorts_user_can_access_resource",
-		"insert into racio_matrix_projection_table",
+		"create table if not exists gvic_matrix_projection_table",
+		"drop column if exists assignee_user_id",
+		"drop column if exists status_color",
+		"insert into gvic_matrix_projection_table",
 	} {
 		if !strings.Contains(migration, needle) {
-			t.Fatalf("RACIO migration missing %q", needle)
+			t.Fatalf("GVICMatrix migration missing %q", needle)
 		}
 	}
 
@@ -124,7 +124,7 @@ func TestRacioProjectionSchemaAndPostgresReadsUseTargetedProjection(t *testing.T
 	}
 	schema := normalizeProjectionSource(string(schemaRaw))
 	for _, needle := range []string{
-		"create table if not exists racio_matrix_projection_table",
+		"create table if not exists gvic_matrix_projection_table",
 		"create table if not exists resource_permissions",
 		"from resource_permissions access",
 	} {
@@ -139,16 +139,16 @@ func TestRacioProjectionSchemaAndPostgresReadsUseTargetedProjection(t *testing.T
 	}
 	postgresReads := normalizeProjectionSource(string(postgresReadRaw))
 	for _, needle := range []string{
-		"from racio_matrix_projection_table entry",
+		"from gvic_matrix_projection_table entry",
 		"mangorts_user_can_access_resource(entry.company_id, 'node', entry.resource_id, $4::uuid, 'edit')",
 		"mangorts_user_can_access_resource(entry.company_id, 'logic_gate', entry.resource_id, $4::uuid, 'edit')",
 	} {
 		if !strings.Contains(postgresReads, needle) {
-			t.Fatalf("Postgres RACIO reads missing %q", needle)
+			t.Fatalf("Postgres GVICMatrix reads missing %q", needle)
 		}
 	}
 
-	postgresProjectionRaw, err := os.ReadFile("postgres_racio_projection.go")
+	postgresProjectionRaw, err := os.ReadFile("postgres_GVIC_MATRIX_PROJECTION.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres projection writes: %v", err)
 	}
@@ -165,25 +165,25 @@ func TestRacioProjectionSchemaAndPostgresReadsUseTargetedProjection(t *testing.T
 	}
 }
 
-func assertMemoryRacioProjectionCounts(t *testing.T, repo *MemoryRepo, companyID string, wantNodeRows, wantLogicGateRows int) {
+func assertMemoryGVICMatrixProjectionCounts(t *testing.T, repo *MemoryRepo, companyID string, wantNodeRows, wantLogicGateRows int) {
 	t.Helper()
 	repo.mu.RLock()
 	defer repo.mu.RUnlock()
 	nodeRows := 0
 	logicGateRows := 0
-	for _, row := range repo.racioProjectionRows {
+	for _, row := range repo.GVICMatrixProjectionRows {
 		if row.CompanyID != companyID {
 			continue
 		}
 		switch row.ResourceType {
-		case racioProjectionResourceNode:
+		case GVICMatrixProjectionResourceNode:
 			nodeRows++
-		case racioProjectionResourceLogicGate:
+		case GVICMatrixProjectionResourceLogicGate:
 			logicGateRows++
 		}
 	}
 	if nodeRows != wantNodeRows || logicGateRows != wantLogicGateRows {
-		t.Fatalf("RACIO projection counts node=%d logic_gate=%d, want node=%d logic_gate=%d", nodeRows, logicGateRows, wantNodeRows, wantLogicGateRows)
+		t.Fatalf("GVICMatrix projection counts node=%d logic_gate=%d, want node=%d logic_gate=%d", nodeRows, logicGateRows, wantNodeRows, wantLogicGateRows)
 	}
 }
 
