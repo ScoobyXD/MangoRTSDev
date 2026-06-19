@@ -38,6 +38,7 @@ type MyWorkViewProps = {
   companyUserGroupMembers: CompanyUserGroupMember[];
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
+  onOpenProject: (projectID: string, label: string) => void;
 };
 
 type ScopePickerRow = {
@@ -65,6 +66,7 @@ export function MyWorkView({
   companyUserGroupMembers,
   onOpenNode,
   onOpenLogicGate,
+  onOpenProject,
 }: MyWorkViewProps) {
   const userByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id.trim(), user])), [companyUsers]);
   const groupByID = useMemo(() => new Map(companyUserGroups.map((group) => [group.group_id.trim(), group])), [companyUserGroups]);
@@ -338,6 +340,7 @@ export function MyWorkView({
             }}
             onOpenNode={onOpenNode}
             onOpenLogicGate={onOpenLogicGate}
+            onOpenProject={onOpenProject}
             nodeByID={new Map(nodes.map((node) => [node.node_id, node]))}
             logicGateByID={new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]))}
           />
@@ -480,6 +483,7 @@ function MyWorkGroupList({
   onToggleGroup,
   onOpenNode,
   onOpenLogicGate,
+  onOpenProject,
   nodeByID,
   logicGateByID,
 }: {
@@ -488,6 +492,7 @@ function MyWorkGroupList({
   onToggleGroup: (groupID: string) => void;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
+  onOpenProject: (projectID: string, label: string) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
 }) {
@@ -496,13 +501,30 @@ function MyWorkGroupList({
       {groups.map((group) => {
         const open = expandedGroupIDs.has(group.id);
         const leafRows = group.groups.length === 0 ? group.rows : [];
+        const resourceTarget = myWorkGroupResourceTarget(group);
         return (
           <div key={group.id} style={groupBlockStyle}>
-            <button type="button" style={groupHeaderStyle(group.depth)} onClick={() => onToggleGroup(group.id)}>
-              <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.66)" />
-              <GroupHeaderIcon field={group.field} />
-              <span style={groupHeaderLabelStyle}>{group.label}</span>
-            </button>
+            <div style={groupHeaderStyle(group.depth)}>
+              <button
+                type="button"
+                aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`}
+                style={disclosureButtonStyle}
+                onClick={() => onToggleGroup(group.id)}
+              >
+                <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.66)" />
+              </button>
+              {resourceTarget ? (
+                <button type="button" style={groupHeaderResourceButtonStyle} onClick={() => onOpenProject(resourceTarget.id, resourceTarget.label)}>
+                  <GroupHeaderIcon field={group.field} />
+                  <span style={groupHeaderLabelStyle}>{group.label}</span>
+                </button>
+              ) : (
+                <span style={groupHeaderStaticContentStyle}>
+                  <GroupHeaderIcon field={group.field} />
+                  <span style={groupHeaderLabelStyle}>{group.label}</span>
+                </span>
+              )}
+            </div>
             {open && group.groups.length > 0 && (
               <MyWorkGroupList
                 groups={group.groups}
@@ -510,6 +532,7 @@ function MyWorkGroupList({
                 onToggleGroup={onToggleGroup}
                 onOpenNode={onOpenNode}
                 onOpenLogicGate={onOpenLogicGate}
+                onOpenProject={onOpenProject}
                 nodeByID={nodeByID}
                 logicGateByID={logicGateByID}
               />
@@ -562,11 +585,27 @@ function MyWorkRows({
         const open = !collapsedSectionKeys.has(section.key);
         return (
           <div key={section.key} style={logicGateSectionBlockStyle}>
-            <button type="button" style={logicGateSectionRowStyle(depth)} onClick={() => toggleSection(section.key)}>
-              <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.66)" />
-              {section.logicGateID ? <ExplorerRowIcon kind="logic_gate" /> : <span style={othersSectionBadgeStyle}>O</span>}
-              <span style={workRowTitleTextStyle}>{section.title}</span>
-            </button>
+            <div style={logicGateSectionRowStyle(depth)}>
+              <button
+                type="button"
+                aria-label={`${open ? "Collapse" : "Expand"} ${section.title}`}
+                style={disclosureButtonStyle}
+                onClick={() => toggleSection(section.key)}
+              >
+                <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.66)" />
+              </button>
+              {section.logicGateID ? (
+                <button type="button" style={logicGateSectionResourceButtonStyle} onClick={() => onOpenLogicGate(section.logicGateID, section.title)}>
+                  <ExplorerRowIcon kind="logic_gate" />
+                  <span style={workRowTitleTextStyle}>{section.title}</span>
+                </button>
+              ) : (
+                <span style={logicGateSectionStaticContentStyle}>
+                  <span style={othersSectionBadgeStyle}>O</span>
+                  <span style={workRowTitleTextStyle}>{section.title}</span>
+                </span>
+              )}
+            </div>
             {open && (
               <div style={logicGateNodeListStyle}>
                 {section.rows.map((row) => {
@@ -575,29 +614,24 @@ function MyWorkRows({
               const priority = Number.isFinite(Number(row.priority)) && Number(row.priority) > 0 ? priorityLabel(Number(row.priority)) : "No priority";
               const dueDate = row.dueDate?.trim() || "No due date";
               return (
-                <button
+                <div
                   key={`${section.key}:${row.rowKey ?? `${row.kind}:${row.id}`}`}
-                  type="button"
                   style={workRowStyle(depth + 1)}
-                  onClick={() => {
-                    if (row.kind === "node") {
-                      const node = nodeByID.get(row.id) ?? nodeRecordFromMyWorkRow(row);
-                      if (node) onOpenNode(node);
-                    } else {
-                      onOpenLogicGate(row.id, logicGateTitle(logicGateByID.get(row.id)));
-                    }
-                  }}
                 >
-                  <span style={workRowTitleCellStyle}>
+                  <button
+                    type="button"
+                    style={workRowTitleCellButtonStyle}
+                    onClick={() => openMyWorkRowResource(row, nodeByID, logicGateByID, onOpenNode, onOpenLogicGate)}
+                  >
                     <ExplorerRowIcon kind={row.kind === "node" ? "node" : "logic_gate"} />
                     <span style={workRowTitleTextStyle}>{row.title}</span>
-                  </span>
+                  </button>
                   <span style={workRowMetaCellStyle}>{row.kind === "node" ? "Node" : "Logic Gate"}</span>
                   <span style={workRowMetaCellStyle}>{primaryPerson}</span>
                   <span style={workRowMetaCellStyle}>{status}</span>
                   <span style={workRowMetaCellStyle}>{priority}</span>
                   <span style={workRowMetaCellStyle}>{dueDate}</span>
-                </button>
+                </div>
               );
                 })}
               </div>
@@ -641,6 +675,51 @@ function buildLogicGateSections(rows: MyWorkResourceRow[], logicGateByID: Map<st
         || left.key.localeCompare(right.key);
     });
 }
+
+type MyWorkGroupResourceTarget = {
+  kind: "project";
+  id: string;
+  label: string;
+};
+
+function myWorkGroupResourceTarget(group: MyWorkNestedGroup): MyWorkGroupResourceTarget | null {
+  if (group.field !== "project") return null;
+  const rows = collectMyWorkGroupRows(group);
+  const projectLabelsByID = new Map<string, string>();
+  for (const row of rows) {
+    const projectID = row.projectID?.trim() ?? "";
+    if (!projectID) continue;
+    const label = row.projectName?.trim() || row.projectLabels?.find((projectLabel) => projectLabel.trim())?.trim() || group.label;
+    projectLabelsByID.set(projectID, label);
+  }
+  if (projectLabelsByID.size !== 1) return null;
+  const [id, label] = projectLabelsByID.entries().next().value as [string, string];
+  return { kind: "project", id, label: label || group.label };
+}
+
+function collectMyWorkGroupRows(group: MyWorkNestedGroup): MyWorkResourceRow[] {
+  const rows = [...group.rows];
+  for (const child of group.groups) rows.push(...collectMyWorkGroupRows(child));
+  return rows;
+}
+
+function openMyWorkRowResource(
+  row: MyWorkResourceRow,
+  nodeByID: Map<string, NodeRecord>,
+  logicGateByID: Map<string, LogicGateRecord>,
+  onOpenNode: (node: NodeRecord) => void,
+  onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void,
+) {
+  if (row.kind === "node") {
+    const node = nodeByID.get(row.id) ?? nodeRecordFromMyWorkRow(row);
+    if (node) onOpenNode(node);
+    return;
+  }
+  const logicGateID = row.id.trim();
+  if (!logicGateID) return;
+  onOpenLogicGate(logicGateID, row.title?.trim() || logicGateTitle(logicGateByID.get(logicGateID)));
+}
+
 function MyWorkMatrix({
   rows,
   groupings,
@@ -648,6 +727,7 @@ function MyWorkMatrix({
   onToggleGroup,
   onOpenNode,
   onOpenLogicGate,
+  onOpenProject,
   nodeByID,
   logicGateByID,
 }: {
@@ -657,6 +737,7 @@ function MyWorkMatrix({
   onToggleGroup: (groupID: string) => void;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
+  onOpenProject: (projectID: string, label: string) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
 }) {
@@ -683,6 +764,7 @@ function MyWorkMatrix({
                     onToggleGroup={onToggleGroup}
                     onOpenNode={onOpenNode}
                     onOpenLogicGate={onOpenLogicGate}
+                    onOpenProject={onOpenProject}
                     nodeByID={nodeByID}
                     logicGateByID={logicGateByID}
                   />
@@ -1000,6 +1082,7 @@ function PeopleIcon({ multiple }: { multiple: boolean }) {
 }
 
 function GroupHeaderIcon({ field }: { field: MyWorkGroupingField }) {
+  if (field === "project") return <ExplorerRowIcon kind="project" />;
   return <span aria-hidden="true" style={groupHeaderBadgeStyle}>{groupHeaderBadgeLabel(field)}</span>;
 }
 
@@ -1495,7 +1578,7 @@ function groupHeaderStyle(depth: number): React.CSSProperties {
     maxWidth: "100%",
     minHeight: 31,
     display: "grid",
-    gridTemplateColumns: "14px 16px minmax(0, auto)",
+    gridTemplateColumns: "14px minmax(0, auto)",
     alignItems: "center",
     gap: 5,
     marginLeft: depth * 28,
@@ -1503,14 +1586,50 @@ function groupHeaderStyle(depth: number): React.CSSProperties {
     borderRadius: 0,
     background: "transparent",
     color: "#111827",
-    font: "inherit",
     textAlign: "left",
-    cursor: "pointer",
-    outline: "none",
-    boxShadow: "none",
     padding: "0 2px",
   };
 }
+
+const disclosureButtonStyle: React.CSSProperties = {
+  width: 14,
+  height: 24,
+  minWidth: 14,
+  border: "none",
+  background: "transparent",
+  color: "inherit",
+  display: "grid",
+  placeItems: "center",
+  padding: 0,
+  cursor: "pointer",
+};
+
+const groupHeaderResourceButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  maxWidth: "100%",
+  minHeight: 28,
+  display: "grid",
+  gridTemplateColumns: "16px minmax(0, auto)",
+  alignItems: "center",
+  gap: 5,
+  border: "none",
+  background: "transparent",
+  color: "#111827",
+  font: "inherit",
+  textAlign: "left",
+  cursor: "pointer",
+  padding: 0,
+};
+
+const groupHeaderStaticContentStyle: React.CSSProperties = {
+  minWidth: 0,
+  maxWidth: "100%",
+  minHeight: 28,
+  display: "grid",
+  gridTemplateColumns: "16px minmax(0, auto)",
+  alignItems: "center",
+  gap: 5,
+};
 
 const groupHeaderLabelStyle: React.CSSProperties = {
   minWidth: 0,
@@ -1539,21 +1658,44 @@ function logicGateSectionRowStyle(depth: number): React.CSSProperties {
     maxWidth: "min(980px, calc(100% - 16px))",
     minHeight: 30,
     display: "grid",
-    gridTemplateColumns: "14px 16px minmax(180px, auto)",
+    gridTemplateColumns: "14px minmax(180px, auto)",
     alignItems: "center",
     gap: 5,
     marginLeft: depth * 28 + 42,
     border: "none",
     background: "transparent",
     color: "#111827",
-    font: "inherit",
     textAlign: "left",
-    cursor: "pointer",
-    outline: "none",
-    boxShadow: "none",
     padding: "0 2px",
   };
 }
+
+const logicGateSectionResourceButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  maxWidth: "100%",
+  minHeight: 28,
+  display: "grid",
+  gridTemplateColumns: "16px minmax(0, auto)",
+  alignItems: "center",
+  gap: 5,
+  border: "none",
+  background: "transparent",
+  color: "#111827",
+  font: "inherit",
+  textAlign: "left",
+  cursor: "pointer",
+  padding: 0,
+};
+
+const logicGateSectionStaticContentStyle: React.CSSProperties = {
+  minWidth: 0,
+  maxWidth: "100%",
+  minHeight: 28,
+  display: "grid",
+  gridTemplateColumns: "16px minmax(0, auto)",
+  alignItems: "center",
+  gap: 5,
+};
 
 const logicGateNodeListStyle: React.CSSProperties = {
   minWidth: 0,
@@ -1590,16 +1732,22 @@ function workRowStyle(depth: number): React.CSSProperties {
     color: "#111827",
     font: "inherit",
     textAlign: "left",
-    cursor: "pointer",
     padding: "0 8px",
   };
 }
 
-const workRowTitleCellStyle: React.CSSProperties = {
+const workRowTitleCellButtonStyle: React.CSSProperties = {
   minWidth: 0,
   display: "flex",
   alignItems: "center",
   gap: 7,
+  border: "none",
+  background: "transparent",
+  color: "#111827",
+  font: "inherit",
+  textAlign: "left",
+  cursor: "pointer",
+  padding: 0,
 };
 
 const workRowTitleTextStyle: React.CSSProperties = {

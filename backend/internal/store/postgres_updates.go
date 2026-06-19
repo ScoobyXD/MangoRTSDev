@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
 	"time"
@@ -53,7 +54,7 @@ where recipient_user_id=$1::uuid
     or ($3 = 'urgent' and notification_type = $4)
     or ($3 = 'mention' and notification_type = $5)
     or ($3 = 'update' and notification_type <> $4 and notification_type <> $5)
-  )`+notificationRecipientVisibilityWhereSQL+`
+  )
 order by created_timestamp desc, notification_id desc`,
 		input.UserID, input.CompanyID, filter, domain.NotificationEventUrgentMentionCreated, domain.NotificationEventMentionCreated)
 	if err != nil {
@@ -69,7 +70,81 @@ order by created_timestamp desc, notification_id desc`,
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return r.filterVisiblePostgresUpdateNotifications(ctx, input, items)
+}
+
+type postgresUpdateAccessTarget struct {
+	ResourceType string
+	ResourceID   string
+}
+
+func postgresUpdateNotificationAccessTarget(item domain.Notification) (postgresUpdateAccessTarget, bool) {
+	for _, candidate := range NotificationAccessTargets(item.EntityType, item.EntityID, item.LogicGateID, item.NodeID) {
+		resourceType, ok := NormalizeEntityType(candidate.EntityType)
+		if !ok {
+			continue
+		}
+		resourceID := cleanUUIDText(candidate.EntityID)
+		if resourceID == "" {
+			continue
+		}
+		return postgresUpdateAccessTarget{ResourceType: resourceType, ResourceID: resourceID}, true
+	}
+	return postgresUpdateAccessTarget{}, false
+}
+
+func (r *PostgresRepo) filterVisiblePostgresUpdateNotifications(ctx context.Context, input UpdatesQuery, items []domain.Notification) ([]domain.Notification, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+
+	targets := make([]postgresUpdateAccessTarget, len(items))
+	targetOK := make([]bool, len(items))
+	resourceIDsByType := map[string][]string{}
+	for index, item := range items {
+		itemCompanyID := cleanUUIDText(item.CompanyID)
+		if itemCompanyID != "" && itemCompanyID != input.CompanyID {
+			continue
+		}
+		target, ok := postgresUpdateNotificationAccessTarget(item)
+		if !ok {
+			continue
+		}
+		targets[index] = target
+		targetOK[index] = true
+		resourceIDsByType[target.ResourceType] = append(resourceIDsByType[target.ResourceType], target.ResourceID)
+	}
+
+	allowedByType := make(map[string]map[string]bool, len(resourceIDsByType))
+	for resourceType, resourceIDs := range resourceIDsByType {
+		allowed, err := r.ListEffectiveResourceIDsForUser(input.CompanyID, input.UserID, resourceType, EntityPermissionView, resourceIDs)
+		if errors.Is(err, ErrInvalid) {
+			allowed = map[string]bool{}
+		} else if err != nil {
+			return nil, err
+		}
+		allowedByType[resourceType] = allowed
+	}
+
+	visible := make([]domain.Notification, 0, len(items))
+	for index, item := range items {
+		itemCompanyID := cleanUUIDText(item.CompanyID)
+		if itemCompanyID != "" && itemCompanyID != input.CompanyID {
+			continue
+		}
+		if !targetOK[index] {
+			visible = append(visible, item)
+			continue
+		}
+		target := targets[index]
+		if allowedByType[target.ResourceType][target.ResourceID] {
+			visible = append(visible, item)
+		}
+	}
+	return visible, nil
 }
 
 func (r *PostgresRepo) postgresUpdatesBuildContext(ctx context.Context, input UpdatesQuery, items []domain.Notification) (updatesBuildContext, error) {
@@ -105,22 +180,27 @@ func collectUpdateResourceIDs(items []domain.Notification) (map[string]bool, map
 	logicGateIDs := map[string]bool{}
 	projectIDs := map[string]bool{}
 	for _, item := range items {
-		nodeID := strings.TrimSpace(item.NodeID)
-		if nodeID == "" && strings.TrimSpace(item.EntityType) == EntityTypeNode {
-			nodeID = strings.TrimSpace(item.EntityID)
+		entityType := strings.TrimSpace(item.EntityType)
+		nodeID := cleanUUIDText(item.NodeID)
+		if nodeID == "" && entityType == EntityTypeNode {
+			nodeID = cleanUUIDText(item.EntityID)
 		}
 		if nodeID != "" {
 			nodeIDs[nodeID] = true
 		}
-		logicGateID := strings.TrimSpace(item.LogicGateID)
-		if logicGateID == "" && strings.TrimSpace(item.EntityType) == EntityTypeLogicGate {
-			logicGateID = strings.TrimSpace(item.EntityID)
+		logicGateID := cleanUUIDText(item.LogicGateID)
+		if logicGateID == "" && entityType == EntityTypeLogicGate {
+			logicGateID = cleanUUIDText(item.EntityID)
 		}
 		if logicGateID != "" {
 			logicGateIDs[logicGateID] = true
 		}
-		if strings.TrimSpace(item.EntityType) == EntityTypeProject && strings.TrimSpace(item.EntityID) != "" {
-			projectIDs[strings.TrimSpace(item.EntityID)] = true
+		projectID := ""
+		if entityType == EntityTypeProject {
+			projectID = cleanUUIDText(item.EntityID)
+		}
+		if projectID != "" {
+			projectIDs[projectID] = true
 		}
 	}
 	return nodeIDs, logicGateIDs, projectIDs

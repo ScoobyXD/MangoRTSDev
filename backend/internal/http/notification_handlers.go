@@ -114,6 +114,7 @@ func (s *Server) handleUpdateRootGroups(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err != nil {
+		log.Printf("failed_to_list_update_groups user_id=%s company_id=%s filter=%s err=%v", actor.User.UserID, strings.TrimSpace(r.URL.Query().Get("company_id")), strings.TrimSpace(r.URL.Query().Get("filter")), err)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_update_groups")
 		return
 	}
@@ -145,6 +146,7 @@ func (s *Server) handleUpdateBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		log.Printf("failed_to_load_update_branch user_id=%s company_id=%s filter=%s root_id=%s err=%v", actor.User.UserID, strings.TrimSpace(r.URL.Query().Get("company_id")), strings.TrimSpace(r.URL.Query().Get("filter")), strings.TrimSpace(r.URL.Query().Get("root_id")), err)
 		writeError(w, http.StatusInternalServerError, "failed_to_load_update_branch")
 		return
 	}

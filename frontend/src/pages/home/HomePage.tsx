@@ -7,7 +7,7 @@ import { EntityPermissionsDialog } from "../../modules/permissions/EntityPermiss
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { requestAppDockTab } from "../../app/appDockTabs";
 import { MangoWordmark } from "../../app/MangoLogo";
-import { preloadLogicGateArenaSurface } from "../../app/preloadDashboardModules";
+import { preloadLogicGateArenaSurface, preloadProjectManagementSurface } from "../../app/preloadDashboardModules";
 import {
   applyEmailMessageToCachedPages,
   addLogicGateGVICAssignments,
@@ -72,7 +72,7 @@ import { subscribeWorkspaceRealtime, workspaceRealtimeScope } from "../../module
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
-import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
+import { buildLogicGateRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, GVICMatrixViewerSelector, GVICRoleInboxMatrix, SharedInboxGVICSettingsModal, type GVICMatrixViewerListEntry } from "./HomeParts";
 import { MyWorkView } from "./MyWorkView";
 import { UpdatesView } from "./UpdatesView";
@@ -2837,6 +2837,24 @@ export function HomePage({
     if (onNavigate) onNavigate(targetPath);
     else window.location.assign(targetPath);
   }, [companyID, isInboxMatrixView, onNavigate]);
+
+  const openProjectManagement = useCallback((projectID: string, label: string) => {
+    const cleanProjectID = projectID.trim();
+    if (!cleanProjectID) return;
+    const cleanLabel = label.trim() || "Project";
+    emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+      companyID,
+      sourceFrameID: "home",
+      kind: "project",
+      id: cleanProjectID,
+      label: cleanLabel,
+      changedAt: Date.now(),
+    });
+    preloadProjectManagementSurface();
+    const targetPath = buildProjectRoute(cleanProjectID);
+    if (onNavigate) onNavigate(targetPath);
+    else window.location.assign(targetPath);
+  }, [companyID, onNavigate]);
   const getLogicGateDragIDs = useCallback((logicGateID: string): string[] => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return [];
@@ -3725,6 +3743,7 @@ export function HomePage({
               companyUserGroupMembers={companyUserGroupMembers}
               onOpenNode={openNodeEditorOverlay}
               onOpenLogicGate={(logicGateID, label, nodeID) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)), nodeID)}
+              onOpenProject={openProjectManagement}
             />
           ) : isUpdatesView ? (
             <UpdatesView
@@ -3734,6 +3753,7 @@ export function HomePage({
                 if (node) openNodeEditorOverlay(node);
               }}
               onOpenLogicGate={(logicGateID, label) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)))}
+              onOpenProject={openProjectManagement}
             />
           ) : isInboxMatrixView ? (
             <>
