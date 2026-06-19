@@ -15,9 +15,7 @@ export type MyWorkGroupingField =
   | "account"
   | "due_date"
   | "person"
-  | "priority"
   | "project"
-  | "gvic"
   | "status"
   | "team";
 
@@ -84,16 +82,12 @@ export const MY_WORK_GROUPING_FIELDS: ReadonlyArray<{ value: MyWorkGroupingField
   { value: "account", label: "Account" },
   { value: "due_date", label: "Date / Due Date" },
   { value: "person", label: "Person" },
-  { value: "priority", label: "Priority" },
   { value: "project", label: "Project" },
-  { value: "gvic", label: "GVIC" },
   { value: "status", label: "Status" },
   { value: "team", label: "Team" },
 ];
 
 export const DEFAULT_MY_WORK_GROUPINGS: MyWorkGroupingSetting[] = [
-  { field: "gvic", direction: "asc" },
-  { field: "priority", direction: "asc" },
   { field: "project", direction: "asc" },
 ];
 
@@ -140,7 +134,7 @@ export function normalizeMyWorkGroupingStack(value: unknown): MyWorkGroupingSett
       direction: candidate.direction === "desc" ? "desc" : "asc",
     });
   }
-  return out.length > 0 ? out : [...DEFAULT_MY_WORK_GROUPINGS];
+  return out;
 }
 
 export function normalizeMyWorkSavedGroupingSetting(
@@ -209,22 +203,10 @@ export function getMyWorkGroupValues(row: MyWorkResourceRow, field: MyWorkGroupi
     }));
   }
 
-  if (field === "priority") {
-    const priority = Number(row.priority);
-    if (!Number.isFinite(priority) || priority <= 0) return [{ key: "priority:none", label: "No priority", sortValue: Number.MAX_SAFE_INTEGER, sortLast: true }];
-    const normalized = Math.max(1, Math.min(5, Math.round(priority)));
-    return [{ key: `priority:${normalized}`, label: priorityLabel(normalized), sortValue: normalized }];
-  }
-
   if (field === "project") {
     const projects = (row.projectLabels ?? []).map((label) => label.trim()).filter(Boolean);
     if (projects.length === 0) return [{ key: "project:none", label: "No project", sortValue: "", sortLast: true }];
     return projects.map((label) => ({ key: `project:${label.toLowerCase()}`, label, sortValue: label.toLowerCase() }));
-  }
-
-  if (field === "gvic") {
-    if (row.gvicRoles.length === 0) return [{ key: "gvic:none", label: "Others", sortValue: "", sortLast: true }];
-    return row.gvicRoles.map((role) => ({ key: `gvic:${role}`, label: GVICRoleLabel(role), sortValue: GVICRoleSort(role) }));
   }
 
   if (field === "status") {
@@ -347,13 +329,6 @@ function statusSortValue(value: string): number | string {
   if (normalized === "review") return 3;
   if (normalized === "done") return 4;
   return normalized;
-}
-
-function GVICRoleSort(role: LogicGateGVICRole): number {
-  if (role === "generated") return 1;
-  if (role === "verified") return 2;
-  if (role === "consulted") return 3;
-  return 4;
 }
 
 function compareGroupValues(left: MyWorkGroupValue, right: MyWorkGroupValue): number {

@@ -21,11 +21,18 @@ type UpdatesViewProps = {
   onOpenProject: (projectID: string, label: string) => void;
 };
 
-type UpdateGroupingField = "project" | "logic_gate" | "node" | "type" | "date" | "read_state" | "gvic";
+type UpdateGroupingField = "type" | "date" | "read_state" | "gvic";
+type UpdateResourceGroupingField = "project" | "logic_gate" | "node";
+type UpdateDisplayGroupingField = UpdateGroupingField | UpdateResourceGroupingField;
 type UpdateGroupingDirection = "asc" | "desc";
 
 type UpdateGroupingSetting = {
   field: UpdateGroupingField;
+  direction: UpdateGroupingDirection;
+};
+
+type UpdateDisplayGroupingSetting = {
+  field: UpdateDisplayGroupingField;
   direction: UpdateGroupingDirection;
 };
 
@@ -62,23 +69,21 @@ const UPDATE_FILTERS: ReadonlyArray<{ value: UpdateFeedFilter; label: string; ti
 ];
 
 const UPDATE_GROUPING_FIELDS: ReadonlyArray<{ value: UpdateGroupingField; label: string }> = [
-  { value: "project", label: "Project" },
-  { value: "logic_gate", label: "Logic Gate" },
-  { value: "node", label: "Node" },
   { value: "type", label: "Update Type" },
   { value: "date", label: "Date" },
   { value: "read_state", label: "Read State" },
   { value: "gvic", label: "GVIC" },
 ];
 
-const DEFAULT_UPDATE_GROUPINGS: UpdateGroupingSetting[] = [
+const UPDATE_RESOURCE_GROUPINGS: UpdateDisplayGroupingSetting[] = [
   { field: "project", direction: "asc" },
   { field: "logic_gate", direction: "asc" },
   { field: "node", direction: "asc" },
 ];
+const DEFAULT_UPDATE_GROUPINGS: UpdateGroupingSetting[] = [];
 
 const UPDATE_GROUPING_FIELD_SET = new Set<UpdateGroupingField>(UPDATE_GROUPING_FIELDS.map((field) => field.value));
-const SAVED_UPDATE_GROUPING_SETTINGS_STORAGE_PREFIX = "mangorts.updates.grouping_settings.v1";
+const SAVED_UPDATE_GROUPING_SETTINGS_STORAGE_PREFIX = "mangorts.updates.grouping_settings.v2";
 
 export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicGate, onOpenProject }: UpdatesViewProps) {
   const [rootGroups, setRootGroups] = useState<UpdateGroup[]>([]);
@@ -124,28 +129,6 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
     }));
   }, [selectedSetting.setting_id]);
 
-  const addSavedView = useCallback(() => {
-    const now = new Date().toISOString();
-    const setting: UpdateSavedGroupingSetting = {
-      ...selectedSetting,
-      setting_id: createLocalID(),
-      name: `View ${settings.length + 1}`,
-      created_timestamp: now,
-      updated_timestamp: now,
-    };
-    setSettings((current) => [...current, setting]);
-    setSelectedSettingID(setting.setting_id);
-  }, [selectedSetting, settings.length]);
-
-  const deleteSavedView = useCallback((settingID: string) => {
-    setSettings((current) => {
-      if (current.length <= 1) return current;
-      const next = current.filter((setting) => setting.setting_id !== settingID);
-      if (selectedSettingID === settingID) setSelectedSettingID(next[0]?.setting_id ?? "");
-      return next;
-    });
-  }, [selectedSettingID]);
-
   const updateGrouping = useCallback((index: number, grouping: UpdateGroupingSetting) => {
     updateSelectedSetting((setting) => ({
       ...setting,
@@ -157,7 +140,7 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
     setGroupingFieldMenuIndex(null);
     updateSelectedSetting((setting) => ({
       ...setting,
-      groupings: setting.groupings.length <= 1 ? setting.groupings : setting.groupings.filter((_, itemIndex) => itemIndex !== index),
+      groupings: setting.groupings.filter((_, itemIndex) => itemIndex !== index),
     }));
   }, [updateSelectedSetting]);
 
@@ -309,29 +292,25 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
   const meta = loadingRoots || branchLoadingIDs.size > 0 ? "Loading" : error;
 
   return (
-    <section style={updatesShellStyle(selectedSetting.panel_collapsed)}>
-      <UpdateGroupingPanel
-        setting={selectedSetting}
-        settings={settings}
-        addableFields={addableFields}
-        addGroupingOpen={addGroupingOpen}
-        groupingFieldMenuIndex={groupingFieldMenuIndex}
-        onSelectSetting={setSelectedSettingID}
-        onAddSavedView={addSavedView}
-        onDeleteSavedView={deleteSavedView}
-        onToggleCollapsed={() => updateSelectedSetting((setting) => ({ ...setting, panel_collapsed: !setting.panel_collapsed }))}
-        onUpdateGrouping={updateGrouping}
-        onRemoveGrouping={removeGrouping}
-        onSetAddGroupingOpen={setAddGroupingOpen}
-        onSetGroupingFieldMenuIndex={setGroupingFieldMenuIndex}
-        onAddGrouping={addGrouping}
-      />
-      <div style={updatesContentStyle}>
-        <div style={updatesHeaderStyle}>
-          <div style={updatesTitleStackStyle}>
-            <h2 style={updatesTitleStyle}>Updates</h2>
-            {meta && <div style={updatesMetaStyle}>{meta}</div>}
-          </div>
+    <section style={updatesShellStyle}>
+      <div style={updatesHeaderStyle}>
+        <div style={updatesTitleStackStyle}>
+          <h2 style={updatesTitleStyle}>Updates</h2>
+          {meta && <div style={updatesMetaStyle}>{meta}</div>}
+        </div>
+        <div style={updatesHeaderControlsStyle}>
+          <UpdateGroupingPanel
+            setting={selectedSetting}
+            addableFields={addableFields}
+            addGroupingOpen={addGroupingOpen}
+            groupingFieldMenuIndex={groupingFieldMenuIndex}
+            onToggleCollapsed={() => updateSelectedSetting((setting) => ({ ...setting, panel_collapsed: !setting.panel_collapsed }))}
+            onUpdateGrouping={updateGrouping}
+            onRemoveGrouping={removeGrouping}
+            onSetAddGroupingOpen={setAddGroupingOpen}
+            onSetGroupingFieldMenuIndex={setGroupingFieldMenuIndex}
+            onAddGrouping={addGrouping}
+          />
           <div style={updatesFilterRowStyle}>
             {UPDATE_FILTERS.map((item) => (
               <button key={item.value} type="button" title={item.title} style={updatesFilterButtonStyle(filter === item.value)} onClick={() => setFilter(item.value)}>
@@ -340,20 +319,20 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
             ))}
           </div>
         </div>
-        <div className="mango-home-scroll" style={updatesListStyle}>
-          {!loadingRoots && !error && displayGroups.length === 0 ? (
-            <div style={updatesEmptyStyle}>No updates</div>
-          ) : (
-            <UpdateGroupList
-              groups={displayGroups}
-              expandedGroupIDs={expandedGroupIDs}
-              branchLoadingIDs={branchLoadingIDs}
-              onToggleGroup={toggleGroup}
-              onOpenItem={openItem}
-              onOpenGroupResource={openGroupResource}
-            />
-          )}
-        </div>
+      </div>
+      <div className="mango-home-scroll" style={updatesListStyle}>
+        {!loadingRoots && !error && displayGroups.length === 0 ? (
+          <div style={updatesEmptyStyle}>No updates</div>
+        ) : (
+          <UpdateGroupList
+            groups={displayGroups}
+            expandedGroupIDs={expandedGroupIDs}
+            branchLoadingIDs={branchLoadingIDs}
+            onToggleGroup={toggleGroup}
+            onOpenItem={openItem}
+            onOpenGroupResource={openGroupResource}
+          />
+        )}
       </div>
     </section>
   );
@@ -361,13 +340,9 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
 
 function UpdateGroupingPanel({
   setting,
-  settings,
   addableFields,
   addGroupingOpen,
   groupingFieldMenuIndex,
-  onSelectSetting,
-  onAddSavedView,
-  onDeleteSavedView,
   onToggleCollapsed,
   onUpdateGrouping,
   onRemoveGrouping,
@@ -376,13 +351,9 @@ function UpdateGroupingPanel({
   onAddGrouping,
 }: {
   setting: UpdateSavedGroupingSetting;
-  settings: UpdateSavedGroupingSetting[];
   addableFields: ReadonlyArray<{ value: UpdateGroupingField; label: string }>;
   addGroupingOpen: boolean;
   groupingFieldMenuIndex: number | null;
-  onSelectSetting: (settingID: string) => void;
-  onAddSavedView: () => void;
-  onDeleteSavedView: (settingID: string) => void;
   onToggleCollapsed: () => void;
   onUpdateGrouping: (index: number, grouping: UpdateGroupingSetting) => void;
   onRemoveGrouping: (index: number) => void;
@@ -391,28 +362,13 @@ function UpdateGroupingPanel({
   onAddGrouping: (field: UpdateGroupingField) => void;
 }) {
   return (
-    <aside style={updatesGroupingPanelStyle(setting.panel_collapsed)}>
-      <div style={updatesGroupingPanelHeaderStyle}>
-        <span style={updatesGroupingPanelTitleStyle}>Grouping Settings</span>
-        <button type="button" title={setting.panel_collapsed ? "Expand grouping settings" : "Collapse grouping settings"} style={updatesGroupingCollapseButtonStyle} onClick={onToggleCollapsed}>
-          <ExplorerDisclosureIcon open={!setting.panel_collapsed} color="currentColor" />
-        </button>
-      </div>
+    <div style={updatesGroupingPanelStyle}>
+      <button type="button" title={setting.panel_collapsed ? "Expand grouping settings" : "Collapse grouping settings"} style={updatesGroupingTriggerStyle} onClick={onToggleCollapsed}>
+        <span style={updatesGroupingPanelTitleStyle}>Grouping</span>
+        <ExplorerDisclosureIcon open={!setting.panel_collapsed} color="currentColor" />
+      </button>
       {!setting.panel_collapsed && (
         <div style={updatesGroupingBodyStyle}>
-          <div style={updatesSavedViewsStyle}>
-            <div style={updatesSavedViewsListStyle}>
-              {settings.map((item) => (
-                <div key={item.setting_id} style={updatesSavedViewRowStyle(item.setting_id === setting.setting_id)}>
-                  <button type="button" style={updatesSavedViewButtonStyle} onClick={() => onSelectSetting(item.setting_id)}>
-                    {item.name}
-                  </button>
-                  <button type="button" title="Delete view" style={updatesSavedViewDeleteStyle} disabled={settings.length <= 1} onClick={() => onDeleteSavedView(item.setting_id)}>x</button>
-                </div>
-              ))}
-            </div>
-            <button type="button" style={updatesNewViewButtonStyle} onClick={onAddSavedView}>+ New View</button>
-          </div>
           <div style={updatesGroupingStackStyle}>
             {setting.groupings.map((grouping, index) => (
               <div key={`${grouping.field}:${index}`} style={updatesGroupingRowStyle(index)}>
@@ -452,7 +408,7 @@ function UpdateGroupingPanel({
                 >
                   {grouping.direction === "asc" ? "Asc" : "Desc"}
                 </button>
-                <button type="button" title="Remove grouping" style={updatesGroupingRemoveButtonStyle} disabled={setting.groupings.length <= 1} onClick={() => onRemoveGrouping(index)}>x</button>
+                <button type="button" title="Remove grouping" style={updatesGroupingRemoveButtonStyle} onClick={() => onRemoveGrouping(index)}>x</button>
               </div>
             ))}
             <div style={{ position: "relative" }}>
@@ -480,7 +436,7 @@ function UpdateGroupingPanel({
           </div>
         </div>
       )}
-    </aside>
+    </div>
   );
 }
 
@@ -619,8 +575,11 @@ function updatePathWithGroup(path: { project?: UpdateRowResource; logicGate?: Up
 }
 
 function buildUpdateDisplayGroups(rows: UpdateFeedRow[], groupings: UpdateGroupingSetting[]): UpdateGroup[] {
-  const cleanGroupings = normalizeUpdateGroupingStack(groupings);
-  const groups = buildUniversalNestedGroups(rows, cleanGroupings, {
+  const displayGroupings: UpdateDisplayGroupingSetting[] = [
+    ...normalizeUpdateGroupingStack(groupings),
+    ...UPDATE_RESOURCE_GROUPINGS,
+  ];
+  const groups = buildUniversalNestedGroups(rows, displayGroupings, {
     rootID: "updates",
     rowKey: (row) => row.rowKey,
     getValues: getUpdateGroupValues,
@@ -629,7 +588,7 @@ function buildUpdateDisplayGroups(rows: UpdateFeedRow[], groupings: UpdateGroupi
   return groups.map(convertUniversalUpdateGroup);
 }
 
-function convertUniversalUpdateGroup(group: UniversalNestedGroup<UpdateFeedRow, UpdateGroupingField>): UpdateGroup {
+function convertUniversalUpdateGroup(group: UniversalNestedGroup<UpdateFeedRow, UpdateDisplayGroupingField>): UpdateGroup {
   const resource = updateGroupResourceFromValue(group.field, group.key);
   return {
     id: group.id,
@@ -644,7 +603,7 @@ function convertUniversalUpdateGroup(group: UniversalNestedGroup<UpdateFeedRow, 
   };
 }
 
-function getUpdateGroupValues(row: UpdateFeedRow, field: UpdateGroupingField): UniversalGroupValue[] {
+function getUpdateGroupValues(row: UpdateFeedRow, field: UpdateDisplayGroupingField): UniversalGroupValue[] {
   if (field === "project") return [updateResourceGroupValue("project", row.project, "No project")];
   if (field === "logic_gate") return [updateResourceGroupValue("logic_gate", row.logicGate, "No logic gate")];
   if (field === "node") return [updateResourceGroupValue("node", row.node, "No node")];
@@ -675,7 +634,7 @@ function updateDateGroupValue(createdTimestamp: string): UniversalGroupValue {
   return { key: `date:${dateKey}`, label: dateKey, sortValue: dateKey };
 }
 
-function updateGroupResourceFromValue(field: UpdateGroupingField, key: string): { type: "project" | "logic_gate" | "node"; id: string } | null {
+function updateGroupResourceFromValue(field: UpdateDisplayGroupingField, key: string): { type: "project" | "logic_gate" | "node"; id: string } | null {
   if (field !== "project" && field !== "logic_gate" && field !== "node") return null;
   const prefix = `${field}:`;
   if (!key.startsWith(prefix)) return null;
@@ -711,7 +670,7 @@ function normalizeUpdateGroupingStack(value: unknown): UpdateGroupingSetting[] {
     seen.add(field);
     out.push({ field, direction: candidate.direction === "desc" ? "desc" : "asc" });
   }
-  return out.length > 0 ? out : [...DEFAULT_UPDATE_GROUPINGS];
+  return out;
 }
 
 function updateGVICRoleLabel(role: string): string {
@@ -741,7 +700,7 @@ function createDefaultUpdateGroupingSetting(companyID: string, currentUserID: st
     surface: "updates",
     name: "Updates",
     groupings: [...DEFAULT_UPDATE_GROUPINGS],
-    panel_collapsed: false,
+    panel_collapsed: true,
     created_timestamp: now,
     updated_timestamp: now,
   };
@@ -794,60 +753,23 @@ function normalizeUpdateSavedGroupingSetting(value: unknown, fallback: UpdateSav
   };
 }
 
-function createLocalID(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function updatesShellStyle(collapsed: boolean): React.CSSProperties {
-  return {
-    minWidth: 0,
-    minHeight: 0,
-    height: "100%",
-    display: "grid",
-    gridTemplateColumns: collapsed ? "180px minmax(0, 1fr)" : "390px minmax(0, 1fr)",
-    gap: 10,
-    padding: "8px 14px 14px",
-    background: "#ffffff",
-    color: "#111827",
-    overflow: "hidden",
-  };
-}
-
-const updatesContentStyle: React.CSSProperties = {
+const updatesShellStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
+  height: "100%",
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
   gap: 8,
+  padding: "8px 14px 14px",
+  background: "#ffffff",
+  color: "#111827",
   overflow: "hidden",
 };
 
-function updatesGroupingPanelStyle(collapsed: boolean): React.CSSProperties {
-  return {
-    minWidth: 0,
-    minHeight: 0,
-    display: "grid",
-    gridTemplateRows: "auto minmax(0, 1fr)",
-    alignContent: "start",
-    gap: collapsed ? 0 : 8,
-    border: "1px solid rgba(15, 23, 42, 0.18)",
-    borderRadius: 6,
-    background: "#ffffff",
-    boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)",
-    overflow: "visible",
-  };
-}
-
-const updatesGroupingPanelHeaderStyle: React.CSSProperties = {
+const updatesGroupingPanelStyle: React.CSSProperties = {
+  position: "relative",
   minWidth: 0,
-  minHeight: 34,
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 28px",
-  alignItems: "center",
-  gap: 6,
-  padding: "6px 7px 6px 10px",
-  borderBottom: "1px solid rgba(15, 23, 42, 0.10)",
+  overflow: "visible",
 };
 
 const updatesGroupingPanelTitleStyle: React.CSSProperties = {
@@ -860,94 +782,36 @@ const updatesGroupingPanelTitleStyle: React.CSSProperties = {
   fontWeight: 850,
 };
 
-const updatesGroupingCollapseButtonStyle: React.CSSProperties = {
-  width: 28,
+const updatesGroupingTriggerStyle: React.CSSProperties = {
+  minWidth: 112,
   height: 28,
-  display: "grid",
-  placeItems: "center",
+  display: "inline-grid",
+  gridTemplateColumns: "minmax(0, 1fr) 16px",
+  alignItems: "center",
+  gap: 6,
   border: "1px solid rgba(15, 23, 42, 0.18)",
   borderRadius: 6,
   background: "#ffffff",
   color: "#334155",
+  font: "inherit",
+  padding: "0 8px",
   cursor: "pointer",
 };
 
 const updatesGroupingBodyStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "calc(100% + 6px)",
+  right: 0,
+  zIndex: 24,
+  width: 330,
   minWidth: 0,
-  minHeight: 0,
   display: "grid",
-  gridTemplateColumns: "112px minmax(0, 1fr)",
   gap: 8,
-  padding: "0 8px 8px",
-};
-
-const updatesSavedViewsStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  gridTemplateRows: "minmax(0, 1fr) auto",
-  gap: 6,
-  borderRight: "1px solid rgba(15, 23, 42, 0.12)",
-  paddingRight: 7,
-};
-
-const updatesSavedViewsListStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  alignContent: "start",
-  gap: 4,
-};
-
-function updatesSavedViewRowStyle(active: boolean): React.CSSProperties {
-  return {
-    minWidth: 0,
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 18px",
-    alignItems: "center",
-    borderRadius: 5,
-    background: active ? "rgba(71, 85, 105, 0.12)" : "transparent",
-  };
-}
-
-const updatesSavedViewButtonStyle: React.CSSProperties = {
-  minWidth: 0,
-  minHeight: 25,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  border: "none",
-  background: "transparent",
-  color: "#111827",
-  font: "inherit",
-  fontSize: 11,
-  fontWeight: 750,
-  textAlign: "left",
-  cursor: "pointer",
-  padding: "0 6px",
-};
-
-const updatesSavedViewDeleteStyle: React.CSSProperties = {
-  width: 18,
-  height: 24,
-  border: "none",
-  background: "transparent",
-  color: "#64748b",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 11,
-  fontWeight: 900,
-  padding: 0,
-};
-
-const updatesNewViewButtonStyle: React.CSSProperties = {
-  minHeight: 26,
-  border: "1px solid rgba(15, 23, 42, 0.16)",
-  borderRadius: 5,
+  padding: 8,
+  border: "1px solid rgba(15, 23, 42, 0.18)",
+  borderRadius: 6,
   background: "#ffffff",
-  color: "#334155",
-  font: "inherit",
-  fontSize: 11,
-  fontWeight: 800,
-  cursor: "pointer",
+  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.14)",
 };
 
 const updatesGroupingStackStyle: React.CSSProperties = {
@@ -1099,6 +963,7 @@ const updatesHeaderStyle: React.CSSProperties = {
 const updatesTitleStackStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 4 };
 const updatesTitleStyle: React.CSSProperties = { margin: 0, color: "#111827", fontSize: 16, lineHeight: 1.2, fontWeight: 800, letterSpacing: 0 };
 const updatesMetaStyle: React.CSSProperties = { color: "#64748b", fontSize: 11, fontWeight: 700 };
+const updatesHeaderControlsStyle: React.CSSProperties = { minWidth: 0, display: "inline-flex", alignItems: "flex-start", justifyContent: "flex-end", gap: 8 };
 const updatesFilterRowStyle: React.CSSProperties = { display: "inline-flex", border: "1px solid rgba(15, 23, 42, 0.18)", borderRadius: 6, overflow: "hidden" };
 
 function updatesFilterButtonStyle(active: boolean): React.CSSProperties {

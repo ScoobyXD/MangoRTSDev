@@ -267,7 +267,7 @@ export function MyWorkView({
     setGroupingFieldMenuIndex(null);
     updateSelectedSetting((setting) => ({
       ...setting,
-      groupings: setting.groupings.length <= 1 ? setting.groupings : setting.groupings.filter((_, itemIndex) => itemIndex !== index),
+      groupings: setting.groupings.filter((_, itemIndex) => itemIndex !== index),
     }));
   }, [updateSelectedSetting]);
 
@@ -518,7 +518,7 @@ function GroupingPanel({
                 >
                   {grouping.direction === "asc" ? "Asc" : "Desc"}
                 </button>
-                <button type="button" title="Remove grouping" style={groupingRemoveButtonStyle} disabled={setting.groupings.length <= 1} onClick={() => onRemoveGrouping(index)}>x</button>
+                <button type="button" title="Remove grouping" style={groupingRemoveButtonStyle} onClick={() => onRemoveGrouping(index)}>x</button>
               </div>
             ))}
             <div style={{ position: "relative" }}>
@@ -1301,7 +1301,7 @@ function createDefaultGroupingSetting(companyID: string, currentUserID: string):
     company_id: companyID,
     user_id: currentUserID,
     surface: "my_work",
-    name: "GVIC Priority Project",
+    name: "Project",
     selected_scope: defaultMyWorkSelectedScope(currentUserID),
     groupings: [...DEFAULT_MY_WORK_GROUPINGS],
     panel_collapsed: false,
@@ -1360,9 +1360,7 @@ function groupHeaderBadgeLabel(field: MyWorkGroupingField): string {
   if (field === "account") return "A";
   if (field === "due_date") return "D";
   if (field === "person") return "P";
-  if (field === "priority") return "#";
   if (field === "project") return "P";
-  if (field === "gvic") return "G";
   if (field === "status") return "S";
   return "T";
 }
