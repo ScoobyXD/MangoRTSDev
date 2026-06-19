@@ -233,7 +233,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
             return next;
           });
         }}
-        style={dockToggleButtonStyle}
+        style={dockToggleButtonStyle(dockCollapsed)}
       >
         <DockToggleIcon collapsed={dockCollapsed} />
       </button>
@@ -465,23 +465,20 @@ function minimizedDockStripStyle(viewportWidth: number, tabCount: number, collap
       + (tabCount * TASKBAR_DOCK_BUTTON_WIDTH)
       + Math.max(0, tabCount - 1) * TASKBAR_DOCK_BUTTON_GAP
       + TASKBAR_DOCK_TOGGLE_GAP
-      + TASKBAR_DOCK_TOGGLE_SIZE,
+      + TASKBAR_DOCK_TOGGLE_SIZE / 2,
   );
-  const left = collapsed
-    ? Math.max(TASKBAR_DOCK_LEFT_GAP, TASKBAR_DOCK_LEFT_GAP + expandedWidth - TASKBAR_DOCK_COLLAPSED_WIDTH)
-    : TASKBAR_DOCK_LEFT_GAP;
   return {
     position: "fixed",
-    left,
+    left: TASKBAR_DOCK_LEFT_GAP,
     bottom: TASKBAR_BOTTOM_GAP,
-    width: collapsed ? TASKBAR_DOCK_COLLAPSED_WIDTH : undefined,
+    width: collapsed ? TASKBAR_DOCK_COLLAPSED_WIDTH : expandedWidth,
     maxWidth,
     minWidth: collapsed ? TASKBAR_DOCK_COLLAPSED_WIDTH : 0,
     height: 44,
     display: "flex",
     alignItems: "center",
     gap: TASKBAR_DOCK_TOGGLE_GAP,
-    padding: collapsed ? 5 : "5px 6px",
+    padding: collapsed ? 5 : `5px ${TASKBAR_DOCK_TOGGLE_SIZE / 2 + TASKBAR_DOCK_TOGGLE_GAP}px 5px 6px`,
     boxSizing: "border-box",
     border: "1px solid transparent",
     borderRadius: 8,
@@ -490,10 +487,10 @@ function minimizedDockStripStyle(viewportWidth: number, tabCount: number, collap
     backdropFilter: "blur(16px)",
     WebkitBackdropFilter: "blur(16px)",
     zIndex: 118,
-    overflow: "hidden",
+    overflow: "visible",
     color: "#0f172a",
     fontFamily: "var(--mango-font-family)",
-    transition: "left 160ms ease, width 160ms ease, max-width 160ms ease",
+    transition: "width 160ms ease, max-width 160ms ease",
   };
 }
 
@@ -519,20 +516,26 @@ const dockRailStyle: React.CSSProperties = {
   gap: TASKBAR_DOCK_BUTTON_GAP,
 };
 
-const dockToggleButtonStyle: React.CSSProperties = {
-  flex: `0 0 ${TASKBAR_DOCK_TOGGLE_SIZE}px`,
-  width: TASKBAR_DOCK_TOGGLE_SIZE,
-  height: TASKBAR_DOCK_TOGGLE_SIZE,
-  display: "grid",
-  placeItems: "center",
-  padding: 0,
-  border: "1px solid transparent",
-  borderRadius: 999,
-  background: `${TASKBAR_ACTIVE_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box`,
-  color: "#334155",
-  cursor: "pointer",
-  boxShadow: "4px 4px 10px rgba(174, 174, 192, 0.22), -4px -4px 10px rgba(255, 255, 255, 0.86), inset 1px 1px 0 rgba(255,255,255,0.84)",
-};
+function dockToggleButtonStyle(collapsed: boolean): React.CSSProperties {
+  return {
+    position: collapsed ? "relative" : "absolute",
+    right: collapsed ? undefined : -(TASKBAR_DOCK_TOGGLE_SIZE / 2),
+    top: collapsed ? undefined : "50%",
+    transform: collapsed ? undefined : "translateY(-50%)",
+    flex: `0 0 ${TASKBAR_DOCK_TOGGLE_SIZE}px`,
+    width: TASKBAR_DOCK_TOGGLE_SIZE,
+    height: TASKBAR_DOCK_TOGGLE_SIZE,
+    display: "grid",
+    placeItems: "center",
+    padding: 0,
+    border: "1px solid transparent",
+    borderRadius: 999,
+    background: `#ffffff padding-box, ${TASKBAR_EDGE_FRAME} border-box`,
+    color: "#334155",
+    cursor: "pointer",
+    boxShadow: "4px 4px 10px rgba(174, 174, 192, 0.22), -4px -4px 10px rgba(255, 255, 255, 0.86), inset 1px 1px 0 rgba(255,255,255,0.84)",
+  };
+}
 
 function dockButtonStyle(active: boolean, moving: boolean, hovered: boolean): React.CSSProperties {
   const lifted = active || hovered;
