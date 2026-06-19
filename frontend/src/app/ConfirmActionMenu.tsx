@@ -47,8 +47,19 @@ export const ConfirmActionMenu: React.FC<ConfirmActionMenuProps> = ({
   const mutedText = isDarkTheme ? "#b8c4cc" : "#334155";
   const buttonSurface = isDarkTheme ? "rgba(255,255,255,0.08)" : "#ffffff";
 
+  const complete = (callback: () => void) => {
+    try {
+      callback();
+    } finally {
+      window.dispatchEvent(new Event("mango:confirm-action-complete"));
+    }
+  };
+
   return (
-    <FrameRightClickMenu x={x} y={y} onClose={onCancel} width="min(340px, calc(100vw - 24px))" minWidth={260}>
+    <FrameRightClickMenu
+      x={x} y={y} onClose={() => complete(onCancel)} closeOnOutside={false} isConfirmActionMenu
+      width="min(340px, calc(100vw - 24px))" minWidth={260}
+    >
       <div style={{ padding: "8px 10px 9px", display: "grid", gap: 8, color: panelText }}>
         <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.35 }}>
           {title}
@@ -63,7 +74,7 @@ export const ConfirmActionMenu: React.FC<ConfirmActionMenuProps> = ({
           <button
             type="button"
             disabled={confirmDisabled}
-            onClick={onConfirm}
+            onClick={() => complete(onConfirm)}
             style={{
               minHeight: 26,
               border: "1px solid rgba(100,116,139,0.45)",
@@ -79,7 +90,7 @@ export const ConfirmActionMenu: React.FC<ConfirmActionMenuProps> = ({
           </button>
           <button
             type="button"
-            onClick={onCancel}
+            onClick={() => complete(onCancel)}
             style={{
               minHeight: 26,
               border: "1px solid #64748b",

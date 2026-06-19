@@ -869,7 +869,6 @@ export function AppSidebar({
 
   const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox, position?: ConfirmActionMenuPosition) => {
     if (!companyID || sharedBusy) return;
-    setSharedContextMenu(null);
     const subtreeIDs = collectSharedInboxSubtreeIDs(sharedInboxes, folder.folder_id);
     const label = folder.name.trim() || "this folder";
     if (folder.entry_type === "shared_inbox") {

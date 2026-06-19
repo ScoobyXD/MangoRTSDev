@@ -1975,7 +1975,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {COLORWAY_LABELS[theme]}
             </button>
           ))}
-          <button style={{ ...menuBtnBase, color: "#dc2626" }} onClick={(event) => { confirmDeleteFrameSelection([frameRightClickMenu.id], confirmMenuPositionFromElement(event.currentTarget)); closeMenus(); }} {...hoverHandlers}>Delete</button>
+          <button style={{ ...menuBtnBase, color: "#dc2626" }} onClick={(event) => { confirmDeleteFrameSelection([frameRightClickMenu.id], confirmMenuPositionFromElement(event.currentTarget)); }} {...hoverHandlers}>Delete</button>
         </FrameRightClickMenu>
       )}
 

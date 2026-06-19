@@ -684,13 +684,21 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
   });
 
   useEffect(() => {
-    const onWindowPointerDown = () => {
+    const closeContextMenus = () => {
       setContextMenu(null);
       setNodeContextMenu(null);
       setRelationshipContextMenu(null);
     };
+    const onWindowPointerDown = () => {
+      if (document.querySelector("[data-mango-confirm-action-menu='true']")) return;
+      closeContextMenus();
+    };
     window.addEventListener("pointerdown", onWindowPointerDown);
-    return () => window.removeEventListener("pointerdown", onWindowPointerDown);
+    window.addEventListener("mango:confirm-action-complete", closeContextMenus);
+    return () => {
+      window.removeEventListener("pointerdown", onWindowPointerDown);
+      window.removeEventListener("mango:confirm-action-complete", closeContextMenus);
+    };
   }, []);
 
   useEffect(() => {
@@ -1560,12 +1568,10 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
           onRequestDeleteNodes={(nodeIDs, position) => {
             const editableIDs = nodeIDs.filter((nodeID) => editableNodeIDs.has(nodeID));
             if (editableIDs.length > 0) setConfirmDelete({ nodeIDs: editableIDs, relationshipIDs: [], position: position ?? null });
-            setNodeContextMenu(null);
           }}
           onDeleteRelationships={(relationshipIDs, position) => {
             const editableIDs = relationshipIDs.filter((relationshipID) => editableRelationshipIDs.has(relationshipID));
             if (editableIDs.length > 0) setConfirmDelete({ nodeIDs: [], relationshipIDs: editableIDs, position: position ?? null });
-            setRelationshipContextMenu(null);
           }}
           onConfirmDelete={() => {
             const relationshipIDs = (confirmDelete?.relationshipIDs ?? []).filter((relationshipID) => editableRelationshipIDs.has(relationshipID));
