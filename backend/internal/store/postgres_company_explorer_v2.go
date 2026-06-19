@@ -435,6 +435,25 @@ func (r *PostgresRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2Row
 	return CompanyExplorerV2Rows{Rows: items}, nil
 }
 
+func (r *PostgresRepo) GetCompanyExplorerV2Entity(companyID, entityID, permissionUserID string) (CompanyExplorerV2Row, error) {
+	companyID = cleanUUIDText(companyID)
+	entityID = cleanUUIDText(entityID)
+	permissionUserID = strings.TrimSpace(permissionUserID)
+	if companyID == "" || entityID == "" {
+		return CompanyExplorerV2Row{}, ErrInvalid
+	}
+	ctx := context.Background()
+	if err := r.ensureCompanyExplorerV2NativeEntities(ctx, companyID); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	return r.getCompanyExplorerV2Parent(ctx, CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeAll,
+		ParentEntityID:   entityID,
+		PermissionUserID: permissionUserID,
+	})
+}
+
 func (r *PostgresRepo) queryCompanyExplorerV2SubscriptionRootRows(ctx context.Context, query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error) {
 	rows, err := r.db.QueryContext(ctx, companyExplorerV2TypedArgsCTE+companyExplorerV2DirectTreeEdgesCTE+companyExplorerV2SubscriptionTreeCTE+`
 select `+companyExplorerV2RowSelect("entity", "null::uuid", "tree_edge.edge_id", "tree_edge.position", "tree_edge.created_timestamp", "tree_edge.updated_timestamp")+`

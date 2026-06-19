@@ -308,6 +308,29 @@ func (r *MemoryRepo) GetCompanyExplorerV2FolderDefaultAccess(companyID, entityID
 	return defaultResourceAccessOrEdit(entity.DefaultAccess), nil
 }
 
+func (r *MemoryRepo) GetCompanyExplorerV2Entity(companyID, entityID, permissionUserID string) (CompanyExplorerV2Row, error) {
+	companyID = cleanUUIDText(companyID)
+	entityID = cleanUUIDText(entityID)
+	permissionUserID = strings.TrimSpace(permissionUserID)
+	if companyID == "" || entityID == "" {
+		return CompanyExplorerV2Row{}, ErrInvalid
+	}
+	query := CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeAll,
+		ParentEntityID:   entityID,
+		PermissionUserID: permissionUserID,
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ensureCompanyExplorerV2CompanyGraphLocked(companyID)
+	entity, ok := r.companyExplorerV2Entities[key(companyID, entityID)]
+	if !ok || !r.companyExplorerV2EntityVisibleLocked(query, entity) {
+		return CompanyExplorerV2Row{}, ErrNotFound
+	}
+	return r.companyExplorerV2RowLocked(query, entity, nil), nil
+}
+
 func (r *MemoryRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2FolderInput) (CompanyExplorerV2Row, error) {
 	input, err := normalizeCompanyExplorerV2FolderInput(input)
 	if err != nil {
