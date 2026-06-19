@@ -153,7 +153,7 @@ func TestGVICMatrixProjectionSchemaAndPostgresReadsUseTargetedProjection(t *test
 		}
 	}
 
-	postgresProjectionRaw, err := os.ReadFile("postgres_GVIC_MATRIX_PROJECTION.go")
+	postgresProjectionRaw, err := os.ReadFile("postgres_gvic_matrix_projection.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres projection writes: %v", err)
 	}

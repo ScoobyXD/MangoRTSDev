@@ -1078,7 +1078,7 @@ func TestPhase6NotificationSourceShape(t *testing.T) {
 		"service.go",
 		"../http/notification_handlers.go",
 		"../http/logic_gate_handlers.go",
-		"../http/logic_gate_GVIC_command_handlers.go",
+		"../http/logic_gate_gvic_command_handlers.go",
 		"../http/kanban_handlers.go",
 		"../store/postgres_notifications.go",
 		"../store/memory_notifications.go",
