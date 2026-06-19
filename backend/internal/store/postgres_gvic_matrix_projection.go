@@ -705,36 +705,50 @@ func (r *PostgresRepo) ListMyWorkMatrix(query WorkItemInboxQuery) (MyWorkMatrixR
 	return buildMyWorkMatrixResponse(query, flatRows), nil
 }
 
-func (r *PostgresRepo) listPostgresMyWorkProjectRows(query WorkItemInboxQuery) ([]myWorkMatrixFlatRow, error) {
-	rows, err := r.db.QueryContext(context.Background(), `
-select distinct
-  project.company_id::text,
-  effective.user_id::text,
-  effective.role,
-  project.project_id::text,
-  project.name,
-  project.status,
-  project.created_timestamp
-from resource_gvic_effective_assignments effective
-join projects project
-  on project.company_id=effective.company_id
- and project.project_id=effective.resource_id
-where effective.company_id=$1::uuid
-  and effective.user_id=$2::uuid
-  and effective.resource_type='project'
-  and effective.role in ('generated', 'verified', 'consulted', 'informed')
-  and lower(regexp_replace(coalesce(project.status, ''), '[\s_-]+', '_', 'g')) not in ('done', 'complete', 'completed', 'closed', 'archived')
-  and mangorts_user_can_access_resource(project.company_id, 'project', project.project_id, $3::uuid, 'edit')
+const postgresMyWorkProjectRowsSQL = `
+select
+  project_rows.company_id,
+  project_rows.user_id,
+  project_rows.role,
+  project_rows.project_id,
+  project_rows.name,
+  project_rows.status,
+  project_rows.created_timestamp
+from (
+  select distinct
+    project.company_id::text as company_id,
+    effective.user_id::text as user_id,
+    effective.role,
+    project.project_id::text as project_id,
+    project.name,
+    project.status,
+    project.created_timestamp,
+    case effective.role
+      when 'generated' then 1
+      when 'verified' then 2
+      when 'consulted' then 3
+      when 'informed' then 4
+      else 5
+    end as role_sort,
+    lower(project.name) as project_name_sort
+  from resource_gvic_effective_assignments effective
+  join projects project
+    on project.company_id=effective.company_id
+   and project.project_id=effective.resource_id
+  where effective.company_id=$1::uuid
+    and effective.user_id=$2::uuid
+    and effective.resource_type='project'
+    and effective.role in ('generated', 'verified', 'consulted', 'informed')
+    and lower(regexp_replace(coalesce(project.status, ''), '[\s_-]+', '_', 'g')) not in ('done', 'complete', 'completed', 'closed', 'archived')
+    and mangorts_user_can_access_resource(project.company_id, 'project', project.project_id, $3::uuid, 'edit')
+) project_rows
 order by
-  case effective.role
-    when 'generated' then 1
-    when 'verified' then 2
-    when 'consulted' then 3
-    when 'informed' then 4
-    else 5
-  end,
-  lower(project.name),
-  project.project_id::text`, query.CompanyID, query.UserID, query.ViewerUserID)
+  project_rows.role_sort,
+  project_rows.project_name_sort,
+  project_rows.project_id`
+
+func (r *PostgresRepo) listPostgresMyWorkProjectRows(query WorkItemInboxQuery) ([]myWorkMatrixFlatRow, error) {
+	rows, err := r.db.QueryContext(context.Background(), postgresMyWorkProjectRowsSQL, query.CompanyID, query.UserID, query.ViewerUserID)
 	if err != nil {
 		return nil, err
 	}
