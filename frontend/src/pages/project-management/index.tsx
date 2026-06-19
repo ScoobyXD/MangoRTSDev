@@ -5,6 +5,7 @@ export type ProjectManagementPageProps = {
   onNodeOpen?: (nodeID: string) => void;
   onLogicGateOpen?: (logicGateID: string) => void;
   onProjectOpen?: (projectID: string) => void;
+  onProjectCollapseToTab?: (target: { projectID: string; label: string }) => void;
   targetProjectID?: string;
   targetProjectRequestID?: number;
 };
@@ -13,6 +14,7 @@ export function ProjectManagementPage({
   onNodeOpen,
   onLogicGateOpen,
   onProjectOpen,
+  onProjectCollapseToTab,
   targetProjectID,
   targetProjectRequestID,
 }: ProjectManagementPageProps) {
@@ -23,6 +25,7 @@ export function ProjectManagementPage({
         onNodeOpen={onNodeOpen}
         onLogicGateOpen={onLogicGateOpen}
         onProjectOpen={onProjectOpen}
+        onProjectCollapseToTab={onProjectCollapseToTab}
         targetProjectID={targetProjectID}
         targetProjectRequestID={targetProjectRequestID}
       />

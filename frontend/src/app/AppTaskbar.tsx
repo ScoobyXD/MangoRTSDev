@@ -28,8 +28,8 @@ const TASKBAR_MINIMIZED_HEIGHT = 8;
 const TASKBAR_MINIMIZED_WIDTH = 300;
 const TASKBAR_FLOATING_GAP = 18;
 const TASKBAR_TIMELINE_MIN_WIDTH = 520;
-const TASKBAR_DOCK_BUTTON_WIDTH = 68;
-const TASKBAR_DOCK_BUTTON_GAP = 10;
+const TASKBAR_DOCK_BUTTON_WIDTH = 176;
+const TASKBAR_DOCK_BUTTON_GAP = 0;
 const APP_TASKBAR_DOCK_TAB_DRAG_MIME = "application/x-mangorts-app-taskbar-dock-tab";
 const TASKBAR_EDGE_FRAME = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
 const TASKBAR_SURFACE = "linear-gradient(145deg, rgba(255,255,255,0.96) 0%, rgba(246,247,251,0.94) 100%)";
@@ -71,7 +71,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   const [leftDockOpen, setLeftDockOpen] = useState(false);
   const hasDockTabs = tabs.length > 0;
   const dockVisible = hasDockTabs && leftDockOpen;
-  const layout = taskbarLayout(expanded, dockVisible ? tabs.length : 0, leftInset, timelineCenterX, viewportWidth, timelineVisible);
+  const layout = taskbarLayout(expanded, 0, leftInset, timelineCenterX, viewportWidth, timelineVisible);
 
   useEffect(() => {
     const rail = railRef.current;
@@ -121,7 +121,6 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
 
   const hideTimeline = () => {
     setTimelineVisible(false);
-    setLeftDockOpen(false);
     onExpandedChange(false);
   };
 
@@ -151,15 +150,14 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
     reorderDockTabFromDrag(event, targetID, placement);
   };
 
-  return (
-    <footer style={taskbarShellStyle(expanded, layout, timelineVisible, dockVisible)} aria-label="Taskbar">
-      <div aria-hidden="true" style={taskbarCenterDividerStyle(layout.dockWidth, dockVisible, timelineVisible)} />
-      <section style={taskbarDockPaneStyle(expanded, dockVisible, !timelineVisible)} aria-label="Collapsed nodes and Logic Gates">
+  const dockTabStrip = dockVisible ? (
+    <section style={minimizedDockStripStyle(leftInset, viewportWidth)} aria-label="Minimized project, node, and Logic Gate tabs">
         <div ref={railRef} className="mango-home-scroll" style={dockScrollerStyle}>
           <div style={dockRailStyle} onDragOver={reorderDockTabFromRailDrag}>
             {tabs.map((tab) => {
               const active = activeTabID === tab.id;
               const shortLabel = shortTaskbarLabel(tab.label);
+              const iconKind = dockTabIconKind(tab);
               return (
                 <button
                   ref={(element) => {
@@ -175,17 +173,13 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
                   draggable={!!tab.entityID}
                   onDragStart={(event) => {
                     const payload = dockTabTimelineDragPayload(tab);
-                    if (!payload) {
-                      event.preventDefault();
-                      return;
-                    }
                     suppressNextClickRef.current = true;
                     setMovingTabID(tab.id);
                     event.dataTransfer.effectAllowed = "copyMove";
                     event.dataTransfer.setData(APP_TASKBAR_DOCK_TAB_DRAG_MIME, tab.id);
-                    event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
+                    if (payload) event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
                     event.dataTransfer.setData("text/plain", tab.label);
-                    attachDottedDockDragPreview(event.dataTransfer, tab.kind === "node" ? "node" : "logic_gate");
+                    attachDottedDockDragPreview(event.dataTransfer, iconKind);
                   }}
                   onDragEnd={() => {
                     setMovingTabID("");
@@ -216,7 +210,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
                   style={dockButtonStyle(active, movingTabID === tab.id, hoveredDockTabID === tab.id)}
                 >
                   <span style={dockIconStyle(active, hoveredDockTabID === tab.id)}>
-                    <ExplorerRowIcon kind={tab.kind === "node" ? "node" : "logic_gate"} />
+                    <ExplorerRowIcon kind={iconKind} />
                   </span>
                   <span style={dockLabelStyle(active, hoveredDockTabID === tab.id)}>{shortLabel}</span>
                   {tab.pinned && <span style={dockPinnedStyle}><PinIndicator /></span>}
@@ -226,7 +220,14 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
           </div>
         </div>
       </section>
-      <section style={taskbarTimelinePaneStyle(expanded, timelineVisible, dockVisible)} aria-label="Timeline">
+  ) : null;
+
+  return (
+    <>
+      {dockTabStrip}
+      <footer style={taskbarShellStyle(expanded, layout, timelineVisible, false)} aria-label="Taskbar">
+      <div aria-hidden="true" style={taskbarCenterDividerStyle(layout.dockWidth, false, timelineVisible)} />
+      <section style={taskbarTimelinePaneStyle(expanded, timelineVisible, false)} aria-label="Timeline">
         {timelineVisible && (
           <AppTimeline
             state={timelineState}
@@ -238,8 +239,8 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
       </section>
       <button
         type="button"
-        title={dockVisible ? "Hide collapsed nodes and Logic Gates" : "Show collapsed nodes and Logic Gates"}
-        aria-label={dockVisible ? "Hide collapsed nodes and Logic Gates" : "Show collapsed nodes and Logic Gates"}
+        title={dockVisible ? "Hide minimized tabs" : "Show minimized tabs"}
+        aria-label={dockVisible ? "Hide minimized tabs" : "Show minimized tabs"}
         aria-pressed={dockVisible}
         onClick={() => setLeftDockOpen((current) => !current)}
         style={taskbarSideToggleStyle(layout, "left", timelineVisible, dockVisible)}
@@ -295,6 +296,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
         )}
       </div>
     </footer>
+    </>
   );
 };
 
@@ -326,14 +328,22 @@ function ArrowIcon({ direction }: { direction: "left" | "right" | "down" }) {
 }
 
 function shortTaskbarLabel(label: string): string {
-  const words = label.trim().replace(/\s+/g, " ").split(" ").filter(Boolean);
-  const fallback = words.length > 0 ? words.slice(0, 2).join(" ") : "Item";
-  return fallback.length > 18 ? `${fallback.slice(0, 15)}...` : fallback;
+  const fallback = label.trim().replace(/\s+/g, " ") || "Item";
+  return fallback.length > 30 ? `${fallback.slice(0, 27)}...` : fallback;
+}
+
+type DockIconKind = "node" | "logic_gate" | "project";
+
+function dockTabIconKind(tab: AppDockTab): DockIconKind {
+  if (tab.kind === "node") return "node";
+  if (tab.kind === "project") return "project";
+  return "logic_gate";
 }
 
 function dockTabTimelineDragPayload(tab: AppDockTab): { kind: "node" | "logic_gate"; itemID: string; itemType: "node" | "logic_gate"; sourceTreeID: string } | null {
   const itemID = tab.entityID.trim();
   if (!itemID) return null;
+  if (tab.kind === "project") return null;
   const kind = tab.kind === "node" ? "node" : "logic_gate";
   return {
     kind,
@@ -343,7 +353,7 @@ function dockTabTimelineDragPayload(tab: AppDockTab): { kind: "node" | "logic_ga
   };
 }
 
-function attachDottedDockDragPreview(dataTransfer: DataTransfer, kind: "node" | "logic_gate"): void {
+function attachDottedDockDragPreview(dataTransfer: DataTransfer, kind: DockIconKind): void {
   if (typeof document === "undefined") return;
   const preview = document.createElement("div");
   preview.style.position = "fixed";
@@ -359,7 +369,11 @@ function attachDottedDockDragPreview(dataTransfer: DataTransfer, kind: "node" | 
   preview.style.color = kind === "logic_gate" ? "rgba(51, 65, 85, 0.8)" : "rgba(51, 65, 85, 0.8)";
   preview.style.boxShadow = "0 7px 16px rgba(15, 23, 42, 0.18)";
   preview.style.pointerEvents = "none";
-  preview.innerHTML = kind === "logic_gate" ? logicGateDockDragPreviewIcon() : nodeDockDragPreviewIcon();
+  preview.innerHTML = kind === "project"
+    ? projectDockDragPreviewIcon()
+    : kind === "logic_gate"
+      ? logicGateDockDragPreviewIcon()
+      : nodeDockDragPreviewIcon();
   document.body.appendChild(preview);
   dataTransfer.setDragImage(preview, 17, 17);
   window.setTimeout(() => preview.remove(), 0);
@@ -378,6 +392,14 @@ function logicGateDockDragPreviewIcon(): string {
     <path d="M2.5 12h4.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
     <path d="M19.3 12h4.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
     <path d="M7 6h6.1a6 6 0 0 1 0 12H7z" fill="rgba(255,255,255,0.62)" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+function projectDockDragPreviewIcon(): string {
+  return `<svg aria-hidden="true" width="20" height="19" viewBox="0 0 24 24" fill="none">
+    <path d="M4 5h16v14H4z" fill="rgba(255,255,255,0.62)" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    <path d="M7 9h5M7 12h8M7 15h5" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/>
+    <path d="M17 8.8h1.8v1.8H17zM17 12.1h1.8v1.8H17zM17 15.4h1.8v1.8H17z" fill="currentColor"/>
   </svg>`;
 }
 
@@ -466,30 +488,6 @@ function taskbarCenterDividerStyle(dockWidth: number, visible: boolean, timeline
   };
 }
 
-function taskbarDockPaneStyle(expanded: boolean, visible: boolean, detached: boolean): React.CSSProperties {
-  return {
-    gridColumn: 1,
-    alignSelf: detached ? "end" : "stretch",
-    minWidth: 0,
-    minHeight: 0,
-    height: detached ? TASKBAR_COLLAPSED_HEIGHT : "auto",
-    display: "flex",
-    alignItems: expanded ? "end" : "center",
-    justifyContent: "end",
-    padding: expanded ? "14px 18px 14px 16px" : "10px 18px 10px 14px",
-    boxSizing: "border-box",
-    overflow: "hidden",
-    visibility: visible ? "visible" : "hidden",
-    pointerEvents: visible ? "auto" : "none",
-    border: detached ? "1px solid transparent" : "none",
-    borderRadius: detached ? 18 : 0,
-    background: detached ? `${TASKBAR_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box` : "transparent",
-    boxShadow: detached ? TASKBAR_SHADOW : "none",
-    backdropFilter: detached ? "blur(18px)" : "none",
-    WebkitBackdropFilter: detached ? "blur(18px)" : "none",
-  };
-}
-
 function taskbarTimelinePaneStyle(expanded: boolean, timelineVisible: boolean, dockVisible: boolean): React.CSSProperties {
   if (!timelineVisible) {
     return {
@@ -522,16 +520,42 @@ function taskbarTimelinePaneStyle(expanded: boolean, timelineVisible: boolean, d
   };
 }
 
+function minimizedDockStripStyle(leftInset: number, viewportWidth: number): React.CSSProperties {
+  const left = taskbarLeft(leftInset);
+  return {
+    position: "fixed",
+    left,
+    bottom: TASKBAR_FLOATING_GAP,
+    maxWidth: Math.max(240, viewportWidth - left - TASKBAR_FLOATING_GAP),
+    minWidth: 0,
+    height: 44,
+    display: "flex",
+    alignItems: "center",
+    padding: "5px 6px",
+    boxSizing: "border-box",
+    border: "1px solid transparent",
+    borderRadius: 8,
+    background: `${TASKBAR_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box`,
+    boxShadow: "10px 10px 24px rgba(174, 174, 192, 0.26), -8px -8px 22px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255,255,255,0.9)",
+    backdropFilter: "blur(16px)",
+    WebkitBackdropFilter: "blur(16px)",
+    zIndex: 118,
+    overflow: "hidden",
+    color: "#0f172a",
+    fontFamily: "var(--mango-font-family)",
+  };
+}
+
 const dockScrollerStyle: React.CSSProperties = {
   width: "100%",
   maxWidth: "100%",
   minWidth: 0,
   display: "flex",
-  justifyContent: "end",
+  justifyContent: "start",
   overflowX: "auto",
   overflowY: "hidden",
   scrollbarWidth: "thin",
-  padding: "4px 0",
+  padding: "0 0 3px",
   boxSizing: "border-box",
 };
 
@@ -539,9 +563,8 @@ const dockRailStyle: React.CSSProperties = {
   minWidth: "max-content",
   display: "flex",
   alignItems: "center",
-  justifyContent: "end",
+  justifyContent: "start",
   gap: TASKBAR_DOCK_BUTTON_GAP,
-  marginLeft: "auto",
 };
 
 function dockButtonStyle(active: boolean, moving: boolean, hovered: boolean): React.CSSProperties {
@@ -550,33 +573,35 @@ function dockButtonStyle(active: boolean, moving: boolean, hovered: boolean): Re
     flex: "0 0 auto",
     position: "relative",
     width: TASKBAR_DOCK_BUTTON_WIDTH,
-    height: 64,
+    height: 32,
     display: "grid",
-    gridTemplateRows: "36px 20px",
-    placeItems: "center",
+    gridTemplateColumns: "18px minmax(0, 1fr)",
+    alignItems: "center",
+    justifyItems: "start",
+    gap: 7,
     border: lifted ? "1px solid transparent" : `1px solid ${TASKBAR_SOFT_BORDER}`,
-    borderRadius: 10,
+    borderRadius: 6,
     background: lifted ? `${TASKBAR_ACTIVE_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box` : TASKBAR_SURFACE,
     color: active || hovered ? "#0f172a" : "#334155",
     cursor: moving ? "grabbing" : "pointer",
     font: "inherit",
     letterSpacing: 0,
-    padding: "5px 5px 4px",
+    padding: "0 12px 0 10px",
     opacity: moving ? 0.78 : 1,
-    boxShadow: lifted ? TASKBAR_RAISED_SHADOW : "4px 4px 11px rgba(174, 174, 192, 0.20), -4px -4px 11px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255,255,255,0.84)",
-    transform: hovered && !moving ? "translateY(-2px)" : "none",
+    boxShadow: lifted ? TASKBAR_RAISED_SHADOW : "3px 3px 8px rgba(174, 174, 192, 0.18), -3px -3px 8px rgba(255, 255, 255, 0.86), inset 1px 1px 0 rgba(255,255,255,0.84)",
+    transform: hovered && !moving ? "translateY(-1px)" : "none",
     transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, opacity 120ms ease, transform 160ms ease, color 140ms ease",
   };
 }
 
 function dockIconStyle(active: boolean, hovered: boolean): React.CSSProperties {
   return {
-    width: 36,
-    height: 34,
+    width: 18,
+    height: 18,
     display: "grid",
     placeItems: "center",
     color: active || hovered ? "#19a8ff" : "#334155",
-    transform: active || hovered ? "scale(1.52)" : "scale(1.45)",
+    transform: active || hovered ? "scale(1.12)" : "none",
     transition: "color 140ms ease, transform 160ms ease",
   };
 }
@@ -585,16 +610,16 @@ function dockLabelStyle(active: boolean, hovered: boolean): React.CSSProperties 
   return {
     maxWidth: "100%",
     minWidth: 0,
-    height: 20,
+    height: 18,
     overflow: "hidden",
     color: active || hovered ? "#111827" : "#475569",
-    fontSize: 9,
+    fontSize: 12,
     fontWeight: active || hovered ? 850 : 750,
-    lineHeight: "10px",
+    lineHeight: "18px",
     letterSpacing: 0,
-    textAlign: "center",
-    whiteSpace: "normal",
-    wordBreak: "break-word",
+    textAlign: "left",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
     transition: "color 140ms ease, font-weight 140ms ease",
   };
 }

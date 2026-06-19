@@ -1125,6 +1125,19 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       if (onNavigate) onNavigate(buildNodeRoute(tab.entityID));
       return;
     }
+    if (tab.kind === "project") {
+      const cleanProjectID = tab.entityID.trim();
+      if (!cleanProjectID) return;
+      setExplorerNodePopup(null);
+      setProjectManagementTarget({ projectID: cleanProjectID, requestID: Date.now() });
+      const ensured = activatePrimaryPage("project-management");
+      if (onNavigate) {
+        saveViews(ensured.tabs, ensured.tab.id);
+        onNavigate(buildProjectRoute(cleanProjectID));
+      }
+      setActiveDockTabID(tab.id);
+      return;
+    }
 
     const companyID = getActiveCompanyID();
     setExplorerNodePopup(null);
@@ -1262,6 +1275,19 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       onNavigate(buildProjectRoute(cleanProjectID));
     }
   }, [activatePrimaryPage, closeMenus, onNavigate]);
+
+  const collapseProjectManagementProjectToTab = useCallback((target: { projectID: string; label: string }) => {
+    const cleanProjectID = target.projectID.trim();
+    if (!cleanProjectID) return;
+    upsertDockTab({
+      kind: "project",
+      entityID: cleanProjectID,
+      label: target.label,
+    });
+    setActiveDockTabID(null);
+    setProjectManagementTarget(null);
+    if (onNavigate) onNavigate("/", { replace: true });
+  }, [onNavigate, upsertDockTab]);
 
   const openNotificationNodePopup = useCallback((node: { nodeID: string; nodeTitle: string; focusInformationID?: string }) => {
     const cleanNodeID = node.nodeID.trim();
@@ -1469,7 +1495,11 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     boxShadow: isHomeView ? "none" : "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(15, 23, 42, 0.18)",
   };
   const dockTabMenuTab = dockTabMenu ? dockTabs.find((tab) => tab.id === dockTabMenu.id) ?? null : null;
-  const dockTabMenuSidebarKind = dockTabMenuTab?.kind === "logic_gate_arena" ? "logic_gate" : dockTabMenuTab?.kind;
+  const dockTabMenuSidebarKind = dockTabMenuTab?.kind === "logic_gate_arena"
+    ? "logic_gate"
+    : dockTabMenuTab?.kind === "node"
+      ? "node"
+      : null;
 
   return (
     <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: isHomeView ? "#ffffff" : "#f1f5f9" }}>
@@ -1685,6 +1715,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               onNodeOpen={openProjectManagementNodeOverlay}
               onLogicGateOpen={openProjectManagementLogicGate}
               onProjectOpen={openProjectManagementProject}
+              onProjectCollapseToTab={collapseProjectManagementProjectToTab}
               targetProjectID={projectManagementTarget?.projectID}
               targetProjectRequestID={projectManagementTarget?.requestID}
             />

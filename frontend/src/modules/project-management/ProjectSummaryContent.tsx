@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes.js";
+import { MinimizeToLineIcon } from "../../app/nodeEditorPopupControls.js";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks.js";
 import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
@@ -81,6 +82,7 @@ type ProjectSummaryContentProps = {
   onNodeOpen?: (nodeID: string) => void;
   onLogicGateOpen?: (logicGateID: string) => void;
   onOpenInNewTab?: () => void;
+  onCollapseToTab?: (target: { projectID: string; label: string }) => void;
   workspace?: ProjectSummaryWorkspaceSnapshot;
 };
 
@@ -151,6 +153,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   onNodeOpen,
   onLogicGateOpen,
   onOpenInNewTab,
+  onCollapseToTab,
   workspace,
 }) => {
   const companyID = getActiveCompanyID();
@@ -855,6 +858,17 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           )}
         </div>
         <div style={summaryMetaPillsStyle}>
+          {onCollapseToTab && (
+            <button
+              type="button"
+              style={summaryMinimizeButtonStyle}
+              title="Minimize project"
+              aria-label="Minimize project"
+              onClick={() => onCollapseToTab({ projectID, label: project?.name || projectID })}
+            >
+              <MinimizeToLineIcon />
+            </button>
+          )}
           {onOpenInNewTab && (
             <button type="button" style={summaryPermissionButtonStyle} onClick={onOpenInNewTab}>
               Open in new tab
@@ -1777,6 +1791,15 @@ const summaryPermissionButtonStyle: React.CSSProperties = {
   fontWeight: 850,
   cursor: "pointer",
   padding: "0 12px",
+};
+
+const summaryMinimizeButtonStyle: React.CSSProperties = {
+  ...summaryPermissionButtonStyle,
+  width: 32,
+  minWidth: 32,
+  padding: 0,
+  display: "grid",
+  placeItems: "center",
 };
 
 const statusPillStyle = (accent: string): React.CSSProperties => ({

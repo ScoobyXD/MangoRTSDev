@@ -61,6 +61,7 @@ type ProjectManagementContentProps = {
   onNodeOpen?: (nodeID: string) => void;
   onLogicGateOpen?: (logicGateID: string) => void;
   onProjectOpen?: (projectID: string) => void;
+  onProjectCollapseToTab?: (target: { projectID: string; label: string }) => void;
   targetProjectID?: string;
   targetProjectRequestID?: number;
 };
@@ -697,6 +698,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   onNodeOpen,
   onLogicGateOpen,
   onProjectOpen,
+  onProjectCollapseToTab,
   targetProjectID,
   targetProjectRequestID,
 }) => {
@@ -1310,6 +1312,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         onNodeOpen={onNodeOpen}
         onLogicGateOpen={onLogicGateOpen}
         onOpenInNewTab={() => openAppPathInNewTab(buildProjectRoute(activeProjectID))}
+        onCollapseToTab={onProjectCollapseToTab ? (target) => {
+          onProjectCollapseToTab(target);
+          setActiveProjectID("");
+        } : undefined}
       />
     );
   }
