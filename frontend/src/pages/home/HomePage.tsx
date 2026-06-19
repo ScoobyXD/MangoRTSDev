@@ -3756,9 +3756,9 @@ export function HomePage({
             <UpdatesView
               companyID={companyID}
               currentUserID={currentUserID}
-              onOpenNode={(nodeID) => {
+              onOpenNode={(nodeID, informationID) => {
                 const node = nodeByID.get(nodeID);
-                if (node) openNodeEditorOverlay(node);
+                if (node) openNodeEditorOverlay(node, informationID);
               }}
               onOpenLogicGate={(logicGateID, label) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)))}
               onOpenProject={openProjectManagement}

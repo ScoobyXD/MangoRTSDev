@@ -116,7 +116,7 @@ func TestUpdateGroupsLoadRootsAndBranches(t *testing.T) {
 	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, user.UserID)
 	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, user.UserID)
 
-	if _, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{
+	created, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{
 		{
 			CompanyID:       companyID,
 			RecipientUserID: user.UserID,
@@ -139,8 +139,12 @@ func TestUpdateGroupsLoadRootsAndBranches(t *testing.T) {
 			LogicGateID:     logicGate.LogicGateID,
 			NodeID:          node.NodeID,
 		},
-	}}); err != nil {
+	}})
+	if err != nil {
 		t.Fatalf("CreateNotifications: %v", err)
+	}
+	if len(created) != 2 {
+		t.Fatalf("created notifications = %+v, want 2", created)
 	}
 
 	rootsReq := httptest.NewRequest(http.MethodGet, "/v1/updates/groups/roots?company_id="+companyID+"&filter=update", nil)
@@ -181,6 +185,26 @@ func TestUpdateGroupsLoadRootsAndBranches(t *testing.T) {
 	}
 	if !updateGroupHasResource(branchPayload.Group, store.EntityTypeLogicGate, logicGate.LogicGateID) || !updateGroupHasResource(branchPayload.Group, store.EntityTypeNode, node.NodeID) {
 		t.Fatalf("branch hierarchy = %+v, want logic gate and node layers", branchPayload.Group)
+	}
+
+	if _, err := repo.MarkNotificationRead(user.UserID, created[0].NotificationID, true); err != nil {
+		t.Fatalf("MarkNotificationRead: %v", err)
+	}
+	readRootsReq := httptest.NewRequest(http.MethodGet, "/v1/updates/groups/roots?company_id="+companyID+"&filter=update", nil)
+	readRootsReq = requestWithActorForNotifications(readRootsReq, user, companyID)
+	readRootsRR := httptest.NewRecorder()
+	handler.ServeHTTP(readRootsRR, readRootsReq)
+	if readRootsRR.Code != http.StatusOK {
+		t.Fatalf("read roots status = %d body=%s", readRootsRR.Code, readRootsRR.Body.String())
+	}
+	var readRootsPayload struct {
+		Groups []store.UpdatesNestedGroup `json:"groups"`
+	}
+	if err := json.NewDecoder(readRootsRR.Body).Decode(&readRootsPayload); err != nil {
+		t.Fatalf("decode read roots: %v", err)
+	}
+	if len(readRootsPayload.Groups) != 0 {
+		t.Fatalf("read roots = %+v, want no update roots after mark read", readRootsPayload.Groups)
 	}
 
 	urgentReq := httptest.NewRequest(http.MethodGet, "/v1/updates/groups/branch?company_id="+companyID+"&filter=urgent&root_id="+url.QueryEscape(rootsPayload.Groups[0].ID), nil)
@@ -568,7 +592,7 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	if !strings.Contains(notifications[0].Title, "Author User") {
 		t.Fatalf("notification title = %q, want author label", notifications[0].Title)
 	}
-	if !strings.Contains(notifications[0].Title, "has mentioned you in Review packet") {
+	if !strings.Contains(notifications[0].Title, "mentioned you in Review packet") {
 		t.Fatalf("notification title = %q, want mention target format", notifications[0].Title)
 	}
 	if notifications[0].Surface != domain.NotificationSurfaceACIInbox || notifications[0].Role != domain.NotificationRoleOther {

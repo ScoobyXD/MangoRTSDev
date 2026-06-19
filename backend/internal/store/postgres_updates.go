@@ -56,6 +56,7 @@ with visible as (
   from notifications
   where notifications.recipient_user_id=$1::uuid
     and notifications.company_id=$2::uuid
+    and notifications.read_timestamp is null
     and (
       $3 = 'all'
       or ($3 = 'urgent' and notifications.notification_type = $4)
@@ -189,6 +190,7 @@ with filtered as (
   from notifications
   where notifications.recipient_user_id=$1::uuid
     and notifications.company_id=$2::uuid
+    and notifications.read_timestamp is null
     and (
       $3 = 'all'
       or ($3 = 'urgent' and notifications.notification_type = $4)

@@ -202,7 +202,7 @@ func TestProcessDomainEventsLogicGateWorkUsesGVICMatrixnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	process("saved", store.WorkItemLogicGateAssignmentSavedEventType, "added", assigned.Events)
+	process("saved", store.WorkItemLogicGateAssignmentSavedEventType, "Brand new node", assigned.Events)
 
 	moved, err := repo.MoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentMoveInput{
 		CompanyID:   companyID,
