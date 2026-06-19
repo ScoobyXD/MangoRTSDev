@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { buildProjectRoute } from "../../app/deepLinkRoutes.js";
 import { openAppPathInNewTab } from "../../app/resourceLinks.js";
 import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
@@ -736,7 +737,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [barDraft, setBarDraft] = useState<BarDraft | null>(null);
   const [timelineContextMenu, setTimelineContextMenu] = useState<TimelineContextMenuState | null>(null);
   const [projectContextMenu, setProjectContextMenu] = useState<ProjectContextMenuState | null>(null);
-  const [projectDeleteConfirmation, setProjectDeleteConfirmation] = useState<ProjectRecord | null>(null);
+  const [projectDeleteConfirmation, setProjectDeleteConfirmation] = useState<{ project: ProjectRecord; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectRecord | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [projectRenameSaving, setProjectRenameSaving] = useState(false);
@@ -1462,9 +1463,12 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           <button
             type="button"
             role="menuitem"
-            style={{ ...projectContextMenuButtonStyle, color: "#b91c1c" }}
-            onClick={() => {
-              setProjectDeleteConfirmation(projectContextMenu.project);
+            style={{ ...projectContextMenuButtonStyle, color: "#dc2626" }}
+            onClick={(event) => {
+              setProjectDeleteConfirmation({
+                project: projectContextMenu.project,
+                position: confirmMenuPositionFromElement(event.currentTarget),
+              });
               setProjectContextMenu(null);
             }}
           >
@@ -1514,28 +1518,15 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         </div>
       ) : null}
       {projectDeleteConfirmation ? (
-        <div
-          role="presentation"
-          style={projectDeleteBackdropStyle}
-          onPointerDown={() => setProjectDeleteConfirmation(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="project-delete-title"
-            style={projectDeleteDialogStyle}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <h3 id="project-delete-title" style={projectDeleteTitleStyle}>Delete project?</h3>
-            <p style={projectDeleteMessageStyle}>
-              Are you sure you want to delete {projectDeleteConfirmation.name || "this project"}?
-            </p>
-            <div style={projectDeleteActionsStyle}>
-              <button type="button" style={projectDeleteCancelButtonStyle} onClick={() => setProjectDeleteConfirmation(null)}>Cancel</button>
-              <button type="button" style={projectDeleteYesButtonStyle} onClick={() => void confirmDeleteProject(projectDeleteConfirmation)}>Yes, delete</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmActionMenu
+          title="Delete project?"
+          detail={`Are you sure you want to delete ${projectDeleteConfirmation.project.name || "this project"}?`}
+          position={projectDeleteConfirmation.position}
+          confirmLabel="Yes, delete"
+          cancelLabel="No"
+          onConfirm={() => void confirmDeleteProject(projectDeleteConfirmation.project)}
+          onCancel={() => setProjectDeleteConfirmation(null)}
+        />
       ) : null}
       <div aria-hidden="true" data-project-management-scope={widgetId?.trim() || "project-management"} style={{ display: "none" }} />
     </div>
@@ -1936,7 +1927,7 @@ function TimelineChart({
             <button
               type="button"
               role="menuitem"
-              style={{ ...timelineContextMenuButtonStyle, color: "#b91c1c" }}
+              style={{ ...timelineContextMenuButtonStyle, color: "#dc2626" }}
               onClick={() => onDeleteNode(contextMenu.item)}
             >
               Delete node
@@ -2778,14 +2769,6 @@ const projectDeleteTitleStyle: React.CSSProperties = {
   fontWeight: 950,
 };
 
-const projectDeleteMessageStyle: React.CSSProperties = {
-  margin: 0,
-  color: "#475569",
-  fontSize: 13,
-  fontWeight: 750,
-  lineHeight: 1.45,
-};
-
 const projectDeleteActionsStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "flex-end",
@@ -2803,13 +2786,6 @@ const projectDeleteCancelButtonStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 900,
   padding: "0 12px",
-};
-
-const projectDeleteYesButtonStyle: React.CSSProperties = {
-  ...projectDeleteCancelButtonStyle,
-  border: "1px solid rgba(185, 28, 28, 0.22)",
-  background: "#b91c1c",
-  color: "#ffffff",
 };
 
 const projectRenameInputStyle: React.CSSProperties = {

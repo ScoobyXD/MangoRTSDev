@@ -44,6 +44,7 @@ import { useFrameDragResize } from "./useFrameDragResize";
 import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeSidebarView, type SidebarPin } from "./AppSidebarChrome";
 import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackLabel, type SidebarPinRequestDetail } from "./sidebarPins";
 import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeCreator";
+import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import { AppTaskbar } from "./AppTaskbar";
 import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, appTaskbarStorageScope, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
 import { readAppTimelineState, rollTimelineStateToDate, saveAppTimelineState, type AppTimelineState } from "./timelineState";
@@ -401,7 +402,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
   const [frameRightClickMenu, setFrameRightClickMenu] = useState<{ x: number; y: number; id: string } | null>(null);
-  const [frameDeleteConfirmation, setFrameDeleteConfirmation] = useState<{ frameIDs: string[] } | null>(null);
+  const [frameDeleteConfirmation, setFrameDeleteConfirmation] = useState<{ frameIDs: string[]; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [moduleTypeMenu, setModuleTypeMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<{ x: number; y: number; gridX: number; gridY: number } | null>(null);
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null);
@@ -778,11 +779,11 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     });
   }, [frames]);
 
-  const confirmDeleteFrameSelection = useCallback((frameIDs: string[]) => {
+  const confirmDeleteFrameSelection = useCallback((frameIDs: string[], position?: ConfirmActionMenuPosition) => {
     if (frameIDs.length === 0) return;
     // Keep IDs unique so the confirmation copy and delete result stay deterministic.
     const uniqueFrameIDs = Array.from(new Set(frameIDs));
-    setFrameDeleteConfirmation({ frameIDs: uniqueFrameIDs });
+    setFrameDeleteConfirmation({ frameIDs: uniqueFrameIDs, position: position ?? null });
   }, []);
 
   const attachSelectedFrames = useCallback(() => {
@@ -1915,7 +1916,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       {tabMenu && (
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
-          <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#334155" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
+          <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#dc2626" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
           <button style={menuBtnBase} onClick={() => { openDefaultNodeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Map</button>
           <button style={menuBtnBase} onPointerEnter={preloadLogicGateArenaSurface} onFocus={preloadLogicGateArenaSurface} onPointerDown={preloadLogicGateArenaSurface} onClick={() => { openLogicGateArena(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Logic Gate Arena</button>
           <button style={menuBtnBase} onPointerEnter={preloadHomeSurface} onFocus={preloadHomeSurface} onPointerDown={preloadHomeSurface} onClick={() => { openHomeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Home</button>
@@ -1974,7 +1975,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               <span style={{ width: 10, height: 10, border: "1px solid #333", background: COLORWAYS[theme].color, display: "inline-block" }} /> {COLORWAY_LABELS[theme]}
             </button>
           ))}
-          <button style={{ ...menuBtnBase, color: "#334155" }} onClick={() => { confirmDeleteFrameSelection([frameRightClickMenu.id]); closeMenus(); }} {...hoverHandlers}>Delete</button>
+          <button style={{ ...menuBtnBase, color: "#dc2626" }} onClick={(event) => { confirmDeleteFrameSelection([frameRightClickMenu.id], confirmMenuPositionFromElement(event.currentTarget)); closeMenus(); }} {...hoverHandlers}>Delete</button>
         </FrameRightClickMenu>
       )}
 
@@ -2002,20 +2003,13 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       )}
 
       {frameDeleteConfirmation && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.28)", zIndex: 120, display: "grid", placeItems: "center" }}>
-          <div style={{ width: "min(420px, 90%)", borderRadius: 10, border: "1px solid rgba(100,116,139,0.45)", background: "rgba(255,255,255,0.95)", padding: 12, display: "grid", gap: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 700 }}>
-              Are you sure you want to delete {frameDeleteConfirmation.frameIDs.length} frame{frameDeleteConfirmation.frameIDs.length === 1 ? "" : "s"}?
-            </div>
-            <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>
-              This removes the selected frame from the active view immediately. Use Undo (Ctrl/Cmd + Z) if this was accidental.
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <button onClick={() => { applyConfirmedFrameDelete(frameDeleteConfirmation.frameIDs); setFrameDeleteConfirmation(null); }} style={{ border: "1px solid rgba(100,116,139,0.45)", background: "#fff", cursor: "pointer", fontWeight: 700 }}>Yes</button>
-              <button onClick={() => setFrameDeleteConfirmation(null)} style={{ border: "1px solid #64748b", boxShadow: "inset 0 0 0 1px rgba(100,116,139,0.25), 0 0 10px rgba(100,116,139,0.18)", color: "#334155", background: "#fff", cursor: "pointer", fontWeight: 700 }}>No</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmActionMenu
+          title={`Are you sure you want to delete ${frameDeleteConfirmation.frameIDs.length} frame${frameDeleteConfirmation.frameIDs.length === 1 ? "" : "s"}?`}
+          detail="This removes the selected frame from the active view immediately. Use Undo (Ctrl/Cmd + Z) if this was accidental."
+          position={frameDeleteConfirmation.position}
+          onConfirm={() => { applyConfirmedFrameDelete(frameDeleteConfirmation.frameIDs); setFrameDeleteConfirmation(null); }}
+          onCancel={() => setFrameDeleteConfirmation(null)}
+        />
       )}
 
       {moduleTypeMenu && (

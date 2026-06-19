@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { hoverHandlers, menuBtnBase } from "../../app/frameLayoutTypes";
 import type { CompanyExplorerFolderKind, CompanyExplorerFolderScopeType } from "../folders/companyExplorerFolders";
@@ -22,7 +23,7 @@ type CompanyExplorerContextMenuProps = {
   onOpenFolderPermissions: (target: CompanyExplorerFolderPermissionsTarget) => void;
   onOpenInNewTab: (target: CompanyExplorerOpenInNewTabTarget) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
-  onDeleteTargets: (targets: ExplorerDeleteTargetWithLabel[]) => void;
+  onDeleteTargets: (targets: ExplorerDeleteTargetWithLabel[], position?: ConfirmActionMenuPosition) => void;
 };
 
 export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProps> = ({
@@ -265,12 +266,12 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
         disabled={!action.enabled}
         style={menuButtonStyle(
           action.enabled,
-          { color: action.enabled ? "#334155" : disabledButtonStyle.color },
+          { color: action.enabled ? "#dc2626" : disabledButtonStyle.color },
         )}
         {...menuItemEvents(action.enabled, closePrioritySubmenu)}
-        onClick={() => {
+        onClick={(event) => {
           if (!hasDeleteAction) return;
-          onDeleteTargets(menu.deleteTargets.length > 0 ? menu.deleteTargets : [menu.deleteTarget!]);
+          onDeleteTargets(menu.deleteTargets.length > 0 ? menu.deleteTargets : [menu.deleteTarget!], confirmMenuPositionFromElement(event.currentTarget));
         }}
       >
         {action.label}

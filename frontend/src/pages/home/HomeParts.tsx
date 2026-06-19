@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { NotificationPopover } from "../../app/NotificationPopover";
 import { requestAppSidebarPin, type SidebarPinKind } from "../../app/sidebarPins";
@@ -92,7 +93,7 @@ function openHomePinContextMenu(
 function HomePinContextMenu({ menu, onClose, onDelete }: {
   menu: HomePinContextMenuState | null;
   onClose: () => void;
-  onDelete?: (target: HomePinContextMenuState) => void;
+  onDelete?: (target: HomePinContextMenuState, position?: ConfirmActionMenuPosition) => void;
 }) {
   if (!menu) return null;
   return (
@@ -110,9 +111,9 @@ function HomePinContextMenu({ menu, onClose, onDelete }: {
       {onDelete && (
         <button
           type="button"
-          style={sharedInboxContextMenuButtonStyle}
-          onClick={() => {
-            onDelete(menu);
+          style={{ ...sharedInboxContextMenuButtonStyle, color: "#dc2626" }}
+          onClick={(event) => {
+            onDelete(menu, confirmMenuPositionFromElement(event.currentTarget));
             onClose();
           }}
         >
@@ -133,7 +134,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
   onApplyNodePatch: (nodeIDs: string[], patch: Partial<Pick<NodeRecord, "priority" | "status" | "due_date">>) => void;
   onApplyLogicGateGVIC: (logicGateIDs: string[], role: CommunicationsSharedInboxGVICRole, userID: string, action: "add" | "remove") => void;
   onAddNodesToLogicGate: (nodeIDs: string[], logicGateID: string) => void;
-  onRequestDelete: (kind: "node" | "logic_gate", ids: string[]) => void;
+  onRequestDelete: (kind: "node" | "logic_gate", ids: string[], position?: ConfirmActionMenuPosition) => void;
 }) {
   const [priority, setPriority] = useState("__no_change__");
   const [status, setStatus] = useState("__no_change__");
@@ -327,10 +328,10 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
         <button
           type="button"
           disabled={busy}
-          style={{ ...actionButtonStyle, color: "#8b123f", background: "#fff7fb", borderColor: "rgba(139, 18, 63, 0.34)" }}
-          onClick={() => {
+          style={{ ...actionButtonStyle, color: "#dc2626", background: "#fff7fb", borderColor: "rgba(220, 38, 38, 0.34)" }}
+          onClick={(event) => {
             if (busy) return;
-            onRequestDelete(menu.kind, menu.ids);
+            onRequestDelete(menu.kind, menu.ids, confirmMenuPositionFromElement(event.currentTarget));
           }}
         >
           Delete
@@ -917,7 +918,7 @@ export function HomeSidebar({
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
   const [sharedCreateDialog, setSharedCreateDialog] = useState<{ mode: "folder" | "shared_inbox"; parentFolderID: string; parentName: string; name: string; accountEmail: string; error: string } | null>(null);
   const [sharedEmailDialog, setSharedEmailDialog] = useState<{ folder: CommunicationsSharedInbox; draft: string; error: string } | null>(null);
-  const [sharedDeleteDialog, setSharedDeleteDialog] = useState<{ folder: CommunicationsSharedInbox; title: string; detail: string; label: string; confirmLabel: string } | null>(null);
+  const [sharedDeleteDialog, setSharedDeleteDialog] = useState<{ folder: CommunicationsSharedInbox; title: string; detail: string; label: string; confirmLabel: string; position?: ConfirmActionMenuPosition | null } | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
@@ -1082,7 +1083,7 @@ export function HomeSidebar({
     void setSharedFolderAccountEmail(folderID, accountEmail);
   }, [setSharedFolderAccountEmail, sharedBusy, sharedEmailDialog]);
 
-  const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox) => {
+  const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox, position?: ConfirmActionMenuPosition) => {
     setSharedContextMenu(null);
     const label = folder.name.trim() || "this folder";
     if (folder.entry_type === "shared_inbox") {
@@ -1092,12 +1093,13 @@ export function HomeSidebar({
         detail: "this email from Shared Triage",
         label,
         confirmLabel: "Delete email",
+        position: position ?? null,
       });
       return;
     }
     const count = collectSharedInboxSubtreeIDs(sharedInboxes, folder.folder_id).size || 1;
     const detail = count === 1 ? "this folder" : `this folder and ${count - 1} child folder${count === 2 ? "" : "s"}`;
-    setSharedDeleteDialog({ folder, title: "Delete folder", detail, label, confirmLabel: "Delete" });
+    setSharedDeleteDialog({ folder, title: "Delete folder", detail, label, confirmLabel: "Delete", position: position ?? null });
   }, [sharedInboxes]);
 
   const openSharedContextMenu = useCallback((event: React.MouseEvent, folder: CommunicationsSharedInbox | null) => {
@@ -1417,9 +1419,9 @@ export function HomeSidebar({
                 </button>
                 <button
                   type="button"
-                  style={{ ...sharedInboxContextMenuButtonStyle, color: "#334155" }}
+                  style={{ ...sharedInboxContextMenuButtonStyle, color: "#dc2626" }}
                   disabled={sharedBusy}
-                  onClick={() => void requestDeleteSharedFolder(contextFolder)}
+                  onClick={(event) => void requestDeleteSharedFolder(contextFolder, confirmMenuPositionFromElement(event.currentTarget))}
                 >
                   {contextFolder.entry_type === "shared_inbox" ? "Delete email" : "Delete"}
                 </button>
@@ -1461,6 +1463,7 @@ export function HomeSidebar({
           label={sharedDeleteDialog.label}
           detail={sharedDeleteDialog.detail}
           confirmLabel={sharedDeleteDialog.confirmLabel}
+          position={sharedDeleteDialog.position}
           busy={sharedBusy}
           onCancel={() => setSharedDeleteDialog(null)}
           onConfirm={() => {
@@ -1586,32 +1589,27 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, account
   );
 }
 
-function SharedInboxDeleteDialog({ title, label, detail, confirmLabel, busy, onConfirm, onCancel }: {
+function SharedInboxDeleteDialog({ title, label, detail, confirmLabel, position, busy, onConfirm, onCancel }: {
   title: string;
   label: string;
   detail: string;
   confirmLabel: string;
+  position?: ConfirmActionMenuPosition | null;
   busy: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
   return (
-    <div style={deleteModalBackdropStyle} onPointerDown={onCancel}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Delete shared inbox"
-        style={deleteModalStyle}
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        <div style={{ fontSize: 12, fontWeight: 700 }}>{title}</div>
-        <div style={deleteModalDetailStyle}>Delete {detail}: {label}?</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <button type="button" disabled={busy} onClick={onCancel} style={smallButtonStyle}>Cancel</button>
-          <button type="button" disabled={busy} onClick={onConfirm} style={dangerButtonStyle}>{busy ? "Deleting" : confirmLabel}</button>
-        </div>
-      </div>
-    </div>
+    <ConfirmActionMenu
+      title={title}
+      detail={`Delete ${detail}: ${label}?`}
+      position={position}
+      confirmLabel={busy ? "Deleting" : confirmLabel}
+      cancelLabel="No"
+      confirmDisabled={busy}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   );
 }
 
@@ -2128,7 +2126,7 @@ export function LogicGateRail({
   onRemoveShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[], priority: number) => void;
   onCreateLogicGate: (options?: { creatorGVICRole?: LogicGateGVICRole }) => void;
-  onRequestDeleteLogicGate: (logicGateID: string) => void;
+  onRequestDeleteLogicGate: (logicGateID: string, position?: ConfirmActionMenuPosition) => void;
 }) {
   const railSplit = useRailTopResize(HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, 240);
   const [pinContextMenu, setPinContextMenu] = useState<HomePinContextMenuState | null>(null);
@@ -2301,8 +2299,8 @@ export function LogicGateRail({
     <HomePinContextMenu
       menu={pinContextMenu}
       onClose={() => setPinContextMenu(null)}
-      onDelete={(target) => {
-        if (target.kind === "logic_gate") onRequestDeleteLogicGate(target.id);
+      onDelete={(target, position) => {
+        if (target.kind === "logic_gate") onRequestDeleteLogicGate(target.id, position);
       }}
     />
     {createContextMenu && (
@@ -2476,7 +2474,7 @@ export function NodeInboxRail({
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
   onRemoveLogicGateShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[], priority: number) => void;
-  onRequestDeleteLogicGate: (logicGateID: string) => void;
+  onRequestDeleteLogicGate: (logicGateID: string, position?: ConfirmActionMenuPosition) => void;
   onCreateNode: () => void;
 }) {
   const myNodeOrderedRowIDs = useMemo(() => myNodeGroups.flatMap((group) => group.nodes.map((node) => nodeTreeID(node.node_id))), [myNodeGroups]);
@@ -2642,8 +2640,8 @@ export function NodeInboxRail({
     <HomePinContextMenu
       menu={pinContextMenu}
       onClose={() => setPinContextMenu(null)}
-      onDelete={(target) => {
-        if (target.kind === "logic_gate") onRequestDeleteLogicGate(target.id);
+      onDelete={(target, position) => {
+        if (target.kind === "logic_gate") onRequestDeleteLogicGate(target.id, position);
       }}
     />
     {createContextMenu && (
@@ -3973,7 +3971,7 @@ export function GVICRoleInboxMatrix({
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenuAt: (logicGateID: string, x: number, y: number) => void;
-  onRequestDeleteLogicGate: (logicGateID: string) => void;
+  onRequestDeleteLogicGate: (logicGateID: string, position?: ConfirmActionMenuPosition) => void;
   onCreateNodeInLogicGate: (input: InboxNodeDropInput) => void;
   onCreateLogicGateInCell: (input: InboxCellCreateInput) => void;
   onCreateNodeInCell: (input: InboxCellCreateInput) => void;
@@ -4377,7 +4375,7 @@ export function LogicGateInboxNodeGroupCard({
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenuAt?: (logicGateID: string, x: number, y: number) => void;
-  onRequestDeleteLogicGate?: (logicGateID: string) => void;
+  onRequestDeleteLogicGate?: (logicGateID: string, position?: ConfirmActionMenuPosition) => void;
   onCreateLogicGate?: () => void;
   onCreateNode?: () => void;
   getLogicGateDragIDs?: (logicGateID: string) => string[];
@@ -4635,10 +4633,10 @@ export function LogicGateInboxNodeGroupCard({
           {onRequestDeleteLogicGate && (
             <button
               type="button"
-              style={sharedInboxContextMenuButtonStyle}
-              onClick={() => {
+              style={{ ...sharedInboxContextMenuButtonStyle, color: "#dc2626" }}
+              onClick={(event) => {
                 setGroupContextMenu(null);
-                onRequestDeleteLogicGate(group.logicGateID);
+                onRequestDeleteLogicGate(group.logicGateID, confirmMenuPositionFromElement(event.currentTarget));
               }}
             >
               Delete
@@ -5975,37 +5973,31 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
   );
 }
 
-export function DeleteMessagesConfirmationModal({ count, busy, onConfirm, onCancel }: {
+export function DeleteMessagesConfirmationModal({ count, busy, position, onConfirm, onCancel }: {
   count: number;
   busy: boolean;
+  position?: ConfirmActionMenuPosition | null;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
   return (
-    <div style={deleteModalBackdropStyle}>
-      <div style={deleteModalStyle}>
-        <div style={{ fontSize: 12, fontWeight: 700 }}>
-          {count === 1 ? "Are you sure you want to delete this?" : `Are you sure you want to delete these ${count} emails?`}
-        </div>
-        <div style={deleteModalDetailStyle}>
-          This deletes the selected email{count === 1 ? "" : "s"} from your mailbox immediately.
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <button type="button" disabled={busy} onClick={onConfirm} style={{ border: "1px solid rgba(100,116,139,0.45)", background: "#ffffff", color: "#111111", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
-            {busy ? "Deleting" : "Yes"}
-          </button>
-          <button type="button" disabled={busy} onClick={onCancel} style={{ border: "1px solid #64748b", boxShadow: "inset 0 0 0 1px rgba(100,116,139,0.25), 0 0 10px rgba(100,116,139,0.18)", color: "#334155", background: "#ffffff", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
-            No
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConfirmActionMenu
+      title={count === 1 ? "Are you sure you want to delete this?" : `Are you sure you want to delete these ${count} emails?`}
+      detail={`This deletes the selected email${count === 1 ? "" : "s"} from your mailbox immediately.`}
+      position={position}
+      confirmLabel={busy ? "Deleting" : "Yes"}
+      cancelLabel="No"
+      confirmDisabled={busy}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   );
 }
 
-export function DeleteHomeEntitiesConfirmationModal({ targets, busy, onConfirm, onCancel }: {
+export function DeleteHomeEntitiesConfirmationModal({ targets, busy, position, onConfirm, onCancel }: {
   targets: HomeEntityDeleteTarget[];
   busy: boolean;
+  position?: ConfirmActionMenuPosition | null;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -6019,27 +6011,21 @@ export function DeleteHomeEntitiesConfirmationModal({ targets, busy, onConfirm, 
     logicGateCount ? `${logicGateCount} Logic Gate${logicGateCount === 1 ? "" : "s"}` : "",
   ].filter(Boolean).join(" and ");
   return (
-    <div style={deleteModalBackdropStyle}>
-      <div style={deleteModalStyle}>
-        <div style={{ fontSize: 12, fontWeight: 700 }}>
-          {count === 1 ? `Are you sure you want to delete ${targetList[0]}?` : `Are you sure you want to delete these ${count} items?`}
-        </div>
-        <div style={deleteModalDetailStyle}>
-          This deletes {description || "the selected items"} immediately.
-        </div>
-        <div style={deleteModalDetailStyle}>
-          Selected: {targetList.join(", ")}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <button type="button" disabled={busy} onClick={onConfirm} style={{ border: "1px solid rgba(100,116,139,0.45)", background: "#ffffff", color: "#111111", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
-            {busy ? "Deleting" : "Yes"}
-          </button>
-          <button type="button" disabled={busy} onClick={onCancel} style={{ border: "1px solid #64748b", boxShadow: "inset 0 0 0 1px rgba(100,116,139,0.25), 0 0 10px rgba(100,116,139,0.18)", color: "#334155", background: "#ffffff", cursor: busy ? "not-allowed" : "pointer", fontWeight: 700 }}>
-            No
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConfirmActionMenu
+      title={count === 1 ? `Are you sure you want to delete ${targetList[0]}?` : `Are you sure you want to delete these ${count} items?`}
+      detail={(
+        <>
+          <div>This deletes {description || "the selected items"} immediately.</div>
+          <div>Selected: {targetList.join(", ")}</div>
+        </>
+      )}
+      position={position}
+      confirmLabel={busy ? "Deleting" : "Yes"}
+      cancelLabel="No"
+      confirmDisabled={busy}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   );
 }
 

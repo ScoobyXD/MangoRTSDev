@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { buildLogicGateRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks";
+import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { getNodeTitle as getNodeRecordTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeTitle as getLogicGateRecordTitle, toLogicGateCanvasRecord, type LogicGateGVICRole, type LogicGateRecord as LogicGateApiRecord, type NodeRecord as LogicGateCanvasRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../node-map/eventbus";
@@ -1468,7 +1469,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const [triageDropTreeID, setTriageDropTreeID] = useState("");
   const [explorerContextMenu, setExplorerContextMenu] = useState<CompanyExplorerContextMenuState | null>(null);
   const [folderPermissionsTarget, setFolderPermissionsTarget] = useState<CompanyExplorerFolderPermissionsTarget | null>(null);
-  const [deleteConfirmation, setDeleteConfirmation] = useState<{ targets: ExplorerDeleteTargetWithLabel[] } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ targets: ExplorerDeleteTargetWithLabel[]; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [deleteBlockedMessage, setDeleteBlockedMessage] = useState("");
   const [deleteFolderAcknowledged, setDeleteFolderAcknowledged] = useState(false);
   const effectiveExplorerSearchQuery = externalSearchQuery ?? "";
@@ -2807,7 +2808,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     return targets;
   }, [folders]);
 
-  const requestDeleteTargets = useCallback((targets: ExplorerDeleteTargetWithLabel[]) => {
+  const requestDeleteTargets = useCallback((targets: ExplorerDeleteTargetWithLabel[], position?: ConfirmActionMenuPosition) => {
     if (targets.length === 0) return;
     const protectedFolder = findProtectedSystemFolderInDeleteTargets(targets, folders);
     if (protectedFolder) {
@@ -2817,7 +2818,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     }
     setExplorerContextMenu(null);
     setDeleteFolderAcknowledged(false);
-    setDeleteConfirmation({ targets });
+    setDeleteConfirmation({ targets, position: position ?? null });
   }, [folders]);
 
   const requestDeleteSelection = useCallback(() => {
@@ -3790,6 +3791,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           summary={deleteSummary}
           acknowledged={deleteFolderAcknowledged}
           isDarkTheme={isDarkTheme}
+          position={deleteConfirmation.position}
           onAcknowledgedChange={setDeleteFolderAcknowledged}
           onConfirm={(targets) => {
             setDeleteConfirmation(null);

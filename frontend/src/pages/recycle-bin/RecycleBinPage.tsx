@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons.js";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation.js";
@@ -34,6 +35,7 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ itemIDs: string[]; position?: ConfirmActionMenuPosition | null } | null>(null);
   const dragSelectRef = useRef<DragSelectState>(EMPTY_DRAG_STATE);
   const orderedIDs = useMemo(() => items.map((item) => item.recycle_bin_item_id), [items]);
   const selectedItemIDs = useMemo(() => orderedIDs.filter((id) => selectedIDs.has(id)), [orderedIDs, selectedIDs]);
@@ -119,14 +121,18 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
     }
   }, [busy, companyID, selectedItemIDs]);
 
-  const deleteSelected = useCallback(async () => {
+  const requestDeleteSelected = useCallback((position?: ConfirmActionMenuPosition) => {
     if (!companyID || selectedItemIDs.length === 0 || busy) return;
-    const count = selectedItemIDs.length;
-    if (!window.confirm(`Permanently delete ${count} recycle bin item${count === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    setDeleteConfirmation({ itemIDs: selectedItemIDs, position: position ?? null });
+  }, [busy, companyID, selectedItemIDs]);
+
+  const deleteSelected = useCallback(async (itemIDs: string[]) => {
+    if (!companyID || itemIDs.length === 0 || busy) return;
+    setDeleteConfirmation(null);
     setBusy(true);
     setError("");
     try {
-      await permanentlyDeleteRecycleBinItems(companyID, selectedItemIDs);
+      await permanentlyDeleteRecycleBinItems(companyID, itemIDs);
       setSelectedIDs(new Set());
       setSelectionAnchorID("");
       await listRecycleBinItems(companyID).then(setItems);
@@ -135,7 +141,7 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
     } finally {
       setBusy(false);
     }
-  }, [busy, companyID, selectedItemIDs]);
+  }, [busy, companyID]);
 
   return (
     <main data-frame-interactive="true" style={recyclePageStyle(embedded)}>
@@ -149,11 +155,23 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
           <button type="button" disabled={busy || selectedItemIDs.length === 0} onClick={restoreSelected} style={toolbarButtonStyle("primary", busy || selectedItemIDs.length === 0)}>
             Restore
           </button>
-          <button type="button" disabled={busy || selectedItemIDs.length === 0} onClick={deleteSelected} style={toolbarButtonStyle("danger", busy || selectedItemIDs.length === 0)}>
+          <button type="button" disabled={busy || selectedItemIDs.length === 0} onClick={(event) => requestDeleteSelected(confirmMenuPositionFromElement(event.currentTarget))} style={toolbarButtonStyle("danger", busy || selectedItemIDs.length === 0)}>
             Permanently delete
           </button>
         </div>
       </div>
+      {deleteConfirmation && (
+        <ConfirmActionMenu
+          title={`Permanently delete ${deleteConfirmation.itemIDs.length} recycle bin item${deleteConfirmation.itemIDs.length === 1 ? "" : "s"}?`}
+          detail="This cannot be undone."
+          position={deleteConfirmation.position}
+          confirmLabel={busy ? "Deleting" : "Yes"}
+          cancelLabel="No"
+          confirmDisabled={busy}
+          onConfirm={() => void deleteSelected(deleteConfirmation.itemIDs)}
+          onCancel={() => setDeleteConfirmation(null)}
+        />
+      )}
       {error && <div role="alert" style={recycleErrorStyle}>{error}</div>}
       <section style={recycleTableShellStyle}>
         <div role="row" style={recycleTableHeaderStyle}>

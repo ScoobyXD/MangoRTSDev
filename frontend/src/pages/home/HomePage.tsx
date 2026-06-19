@@ -5,6 +5,7 @@ import { entityMatchesAccountFilter } from "../../modules/accounts/accountsApi";
 import { createRequestJSON, requestJSON } from "../../modules/api/requestJSON";
 import { EntityPermissionsDialog } from "../../modules/permissions/EntityPermissionsDialog";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { requestAppDockTab } from "../../app/appDockTabs";
 import { MangoWordmark } from "../../app/MangoLogo";
 import { preloadLogicGateArenaSurface, preloadProjectManagementSurface } from "../../app/preloadDashboardModules";
@@ -286,8 +287,8 @@ export function HomePage({
   const [pendingStarredMessageIDs, setPendingStarredMessageIDs] = useState<Set<string>>(new Set());
   const [messageContextMenu, setMessageContextMenu] = useState<{ x: number; y: number; messageIDs: string[] } | null>(null);
   const [bulkEditMenu, setBulkEditMenu] = useState<{ x: number; y: number; kind: "node" | "logic_gate"; ids: string[] } | null>(null);
-  const [deleteConfirmation, setDeleteConfirmation] = useState<{ messageIDs: string[] } | null>(null);
-  const [entityDeleteConfirmation, setEntityDeleteConfirmation] = useState<{ targets: HomeEntityDeleteTarget[] } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ messageIDs: string[]; position?: ConfirmActionMenuPosition | null } | null>(null);
+  const [entityDeleteConfirmation, setEntityDeleteConfirmation] = useState<{ targets: HomeEntityDeleteTarget[]; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -2588,12 +2589,12 @@ export function HomePage({
     }
     return cleanIDList(ids);
   }, [messages, selectedMessageID, selectedMessageIDs]);
-  const requestDeleteMessages = useCallback((messageIDs: string[]) => {
+  const requestDeleteMessages = useCallback((messageIDs: string[], position?: ConfirmActionMenuPosition) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
     setMessageContextMenu(null);
-    setDeleteConfirmation({ messageIDs: ids });
+    setDeleteConfirmation({ messageIDs: ids, position: position ?? null });
   }, [canMutateCurrentMailView]);
   const deleteDraftMessages = useCallback((messageIDs: string[]) => {
     const ids = cleanIDList(messageIDs);
@@ -3373,7 +3374,7 @@ export function HomePage({
       : [cleanLogicGateID];
     return buildLogicGateDeleteTargets(ids);
   }, [buildLogicGateDeleteTargets, logicGateByID, selectedLogicGateRowIDs]);
-  const requestDeleteHomeEntities = useCallback((targets: HomeEntityDeleteTarget[]) => {
+  const requestDeleteHomeEntities = useCallback((targets: HomeEntityDeleteTarget[], position?: ConfirmActionMenuPosition) => {
     const seen = new Set<string>();
     const normalizedTargets = targets.filter((target) => {
       const id = target.id.trim();
@@ -3385,7 +3386,7 @@ export function HomePage({
     }).map((target) => ({ ...target, id: target.id.trim(), label: target.label.trim() || target.id.trim() }));
     if (normalizedTargets.length === 0) return;
     setBulkEditMenu(null);
-    setEntityDeleteConfirmation({ targets: normalizedTargets });
+    setEntityDeleteConfirmation({ targets: normalizedTargets, position: position ?? null });
   }, []);
   const requestDeleteSelectedHomeEntities = useCallback(() => {
     if (activeDeleteSelectionKindRef.current === "node") {
@@ -3396,13 +3397,13 @@ export function HomePage({
       requestDeleteHomeEntities(buildLogicGateDeleteTargets(Array.from(selectedLogicGateRowIDs).map(logicGateIDFromTreeID)));
     }
   }, [buildLogicGateDeleteTargets, buildNodeDeleteTargets, requestDeleteHomeEntities, selectedLogicGateRowIDs, selectedNodeRowIDs]);
-  const requestDeleteLogicGateContext = useCallback((logicGateID: string) => {
+  const requestDeleteLogicGateContext = useCallback((logicGateID: string, position?: ConfirmActionMenuPosition) => {
     activeDeleteSelectionKindRef.current = "logic_gate";
-    requestDeleteHomeEntities(getLogicGateDeleteTargetsForContext(logicGateID));
+    requestDeleteHomeEntities(getLogicGateDeleteTargetsForContext(logicGateID), position);
   }, [getLogicGateDeleteTargetsForContext, requestDeleteHomeEntities]);
-  const requestDeleteBulkEditTargets = useCallback((kind: "node" | "logic_gate", ids: string[]) => {
+  const requestDeleteBulkEditTargets = useCallback((kind: "node" | "logic_gate", ids: string[], position?: ConfirmActionMenuPosition) => {
     activeDeleteSelectionKindRef.current = kind;
-    requestDeleteHomeEntities(kind === "node" ? buildNodeDeleteTargets(ids) : buildLogicGateDeleteTargets(ids));
+    requestDeleteHomeEntities(kind === "node" ? buildNodeDeleteTargets(ids) : buildLogicGateDeleteTargets(ids), position);
   }, [buildLogicGateDeleteTargets, buildNodeDeleteTargets, requestDeleteHomeEntities]);
   const deleteHomeEntities = useCallback(async (targets: HomeEntityDeleteTarget[]) => {
     const normalizedTargets = targets.map((target) => ({ kind: target.kind, id: target.id.trim() })).filter((target) => target.id);
@@ -4013,6 +4014,7 @@ export function HomePage({
       {entityDeleteConfirmation && (
         <DeleteHomeEntitiesConfirmationModal
           targets={entityDeleteConfirmation.targets}
+          position={entityDeleteConfirmation.position}
           busy={busy === "entity-delete"}
           onCancel={() => setEntityDeleteConfirmation(null)}
           onConfirm={() => { void deleteHomeEntities(entityDeleteConfirmation.targets); }}

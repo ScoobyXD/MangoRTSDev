@@ -1,4 +1,5 @@
 import React from "react";
+import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { MinimizeToLineIcon, OpenInNewTabIcon } from "../../app/nodeEditorPopupControls";
@@ -57,8 +58,8 @@ export function KanbanContextMenus({
   onCreateNodeInColumn: (columnID: string, anchor: { x: number; y: number }) => void;
   onRenameNode: (card: KanbanCard) => void;
   onOpenNodeInNewTab: (card: KanbanCard) => void;
-  onRequestNodeDeleteFromCards: (cardIDs: string[]) => void;
-  onRequestCardDelete: (cardIDs: string[]) => void;
+  onRequestNodeDeleteFromCards: (cardIDs: string[], position?: ConfirmActionMenuPosition) => void;
+  onRequestCardDelete: (cardIDs: string[], position?: ConfirmActionMenuPosition) => void;
 }) {
   return (
     <>
@@ -109,10 +110,10 @@ export function KanbanContextMenus({
           <button type="button" style={contextMenuButtonStyle} onClick={() => onRenameNode(contextCard)} {...contextMenuHoverHandlers}>
             Rename node
           </button>
-          <button type="button" style={contextMenuButtonStyle} onClick={() => onRequestCardDelete(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
+          <button type="button" style={contextMenuButtonStyle} onClick={(event) => onRequestCardDelete(contextCardSelectionIDs, confirmMenuPositionFromElement(event.currentTarget))} {...contextMenuHoverHandlers}>
             {contextCardSelectionIDs.length > 1 ? "Remove nodes from Kanban Board" : "Remove node from Kanban Board"}
           </button>
-          <button type="button" style={{ ...contextMenuButtonStyle, color: "#dc2626" }} onClick={() => onRequestNodeDeleteFromCards(contextCardSelectionIDs)} {...contextMenuHoverHandlers}>
+          <button type="button" style={{ ...contextMenuButtonStyle, color: "#dc2626" }} onClick={(event) => onRequestNodeDeleteFromCards(contextCardSelectionIDs, confirmMenuPositionFromElement(event.currentTarget))} {...contextMenuHoverHandlers}>
             {contextCardSelectionIDs.length > 1 ? "Delete nodes" : "Delete node"}
           </button>
         </FrameRightClickMenu>
@@ -378,23 +379,21 @@ const noButtonStyle: React.CSSProperties = {
   fontWeight: 700,
 };
 
-function ModalShell({ title, detail, onConfirm, onCancel }: {
+function ModalShell({ title, detail, position, onConfirm, onCancel }: {
   title: React.ReactNode;
   detail: React.ReactNode;
+  position?: ConfirmActionMenuPosition | null;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
   return (
-    <div style={modalBackdropStyle}>
-      <div style={modalPanelStyle}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#111111" }}>{title}</div>
-        <div style={{ fontSize: 11, lineHeight: 1.35, color: "#2e2e2e" }}>{detail}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <button className="mango-elevated-action" type="button" onClick={onConfirm} style={yesButtonStyle}>Yes</button>
-          <button className="mango-elevated-action" type="button" onClick={onCancel} style={noButtonStyle}>No</button>
-        </div>
-      </div>
-    </div>
+    <ConfirmActionMenu
+      title={title}
+      detail={detail}
+      position={position}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   );
 }
 
@@ -406,8 +405,8 @@ export function KanbanDeleteConfirmations({
   onCancelNodeDelete,
   onCancelCardDelete,
 }: {
-  deleteNodeConfirmation: { nodeIDs: string[] } | null;
-  deleteCardConfirmation: { cardIDs: string[] } | null;
+  deleteNodeConfirmation: { nodeIDs: string[]; position?: ConfirmActionMenuPosition | null } | null;
+  deleteCardConfirmation: { cardIDs: string[]; position?: ConfirmActionMenuPosition | null } | null;
   onRemoveNodes: (nodeIDs: string[]) => void;
   onRemoveCards: (cardIDs: string[]) => void;
   onCancelNodeDelete: () => void;
@@ -418,6 +417,7 @@ export function KanbanDeleteConfirmations({
       <ModalShell
         title={`Are you sure you want to delete ${deleteNodeConfirmation.nodeIDs.length} node${deleteNodeConfirmation.nodeIDs.length === 1 ? "" : "s"}?`}
         detail="This deletes the underlying node data and removes its Kanban placements."
+        position={deleteNodeConfirmation.position}
         onConfirm={() => onRemoveNodes(deleteNodeConfirmation.nodeIDs)}
         onCancel={onCancelNodeDelete}
       />
@@ -428,6 +428,7 @@ export function KanbanDeleteConfirmations({
       <ModalShell
         title={`Are you sure you want to remove ${deleteCardConfirmation.cardIDs.length} node${deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} from this Kanban Board?`}
         detail={`The underlying node${deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} will continue to exist outside this board.`}
+        position={deleteCardConfirmation.position}
         onConfirm={() => onRemoveCards(deleteCardConfirmation.cardIDs)}
         onCancel={onCancelCardDelete}
       />
