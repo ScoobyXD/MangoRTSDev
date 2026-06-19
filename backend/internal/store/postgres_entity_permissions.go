@@ -245,6 +245,17 @@ select exists(select 1 from descendants where group_id=$3)`, companyID, groupID,
 		}
 	}
 
+	oldAffectedGroupIDs := []string(nil)
+	if parentChanged {
+		if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
+			return domain.CompanyUserGroup{}, err
+		}
+		oldAffectedGroupIDs, err = gvicAncestorGroupIDsForGroupsTx(ctx, tx, companyID, []string{groupID})
+		if err != nil {
+			return domain.CompanyUserGroup{}, err
+		}
+	}
+
 	item, err := scanCompanyUserGroup(tx.QueryRowContext(ctx, `
 update company_user_groups
 set parent_group_id=$3,
@@ -259,7 +270,19 @@ returning company_id::text, group_id::text, parent_group_id::text, name, positio
 		return domain.CompanyUserGroup{}, err
 	}
 	if parentChanged {
-		if err := recomputeGroupDependentEffectiveAccessForCompanyTx(ctx, tx, companyID); err != nil {
+		if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
+			return domain.CompanyUserGroup{}, err
+		}
+		newAffectedGroupIDs, err := gvicAncestorGroupIDsForGroupsTx(ctx, tx, companyID, []string{groupID})
+		if err != nil {
+			return domain.CompanyUserGroup{}, err
+		}
+		affectedGroupIDs := cleanUUIDTextSlice(append(oldAffectedGroupIDs, newAffectedGroupIDs...))
+		affectedKeys, err := gvicResourceKeysForGroupPrincipalIDsTx(ctx, tx, companyID, affectedGroupIDs)
+		if err != nil {
+			return domain.CompanyUserGroup{}, err
+		}
+		if _, err := syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, affectedKeys); err != nil {
 			return domain.CompanyUserGroup{}, err
 		}
 	}
@@ -319,6 +342,19 @@ from subtree`, companyID, groupID)
 	if len(groupIDs) == 0 {
 		return ErrNotFound
 	}
+
+	if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
+		return err
+	}
+	affectedGroupIDs, err := gvicAncestorGroupIDsForGroupsTx(ctx, tx, companyID, groupIDs)
+	if err != nil {
+		return err
+	}
+	affectedKeys, err := gvicResourceKeysForGroupPrincipalIDsTx(ctx, tx, companyID, affectedGroupIDs)
+	if err != nil {
+		return err
+	}
+
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_access_grants
 where company_id=$1::uuid
@@ -346,7 +382,10 @@ where company_id=$1::uuid and group_id=$2::uuid`, companyID, groupID)
 	if affected == 0 {
 		return ErrNotFound
 	}
-	if err := recomputeGroupDependentEffectiveAccessForCompanyTx(ctx, tx, companyID); err != nil {
+	if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
+		return err
+	}
+	if _, err := syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, affectedKeys); err != nil {
 		return err
 	}
 	return tx.Commit()

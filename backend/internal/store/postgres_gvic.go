@@ -518,6 +518,70 @@ where company_id=$1::uuid
 	return deltas, nil
 }
 
+func syncPostgresGVICForResourceKeysTx(ctx context.Context, tx *sql.Tx, companyID string, keys []resourceGVICKey) ([]ProjectionDelta, error) {
+	companyID = cleanUUIDText(companyID)
+	if ctx == nil || tx == nil || companyID == "" {
+		return nil, ErrInvalid
+	}
+	ordered, err := normalizeResourceGVICKeysForCompany(companyID, keys)
+	if err != nil {
+		return nil, err
+	}
+	if len(ordered) == 0 {
+		return nil, nil
+	}
+	deltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, ordered)
+	if err != nil {
+		return nil, err
+	}
+	for _, keyValue := range ordered {
+		switch keyValue.resourceType {
+		case EntityTypeNode:
+			nodeDeltas, err := syncPostgresGVICMatrixProjectionForNodeDeltasTx(ctx, tx, keyValue.companyID, keyValue.resourceID)
+			if err != nil {
+				return nil, err
+			}
+			deltas = append(deltas, nodeDeltas...)
+		case EntityTypeLogicGate:
+			logicGateDeltas, err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, keyValue.companyID, keyValue.resourceID, nil, nil)
+			if err != nil {
+				return nil, err
+			}
+			deltas = append(deltas, logicGateDeltas...)
+		}
+	}
+	return deltas, nil
+}
+
+func normalizeResourceGVICKeysForCompany(companyID string, keys []resourceGVICKey) ([]resourceGVICKey, error) {
+	companyID = cleanUUIDText(companyID)
+	if companyID == "" {
+		return nil, ErrInvalid
+	}
+	deduped := map[resourceGVICKey]bool{}
+	for _, keyValue := range keys {
+		normalized, err := normalizeResourceGVICKey(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
+		if err != nil {
+			return nil, err
+		}
+		if normalized.companyID != companyID {
+			return nil, ErrInvalid
+		}
+		deduped[normalized] = true
+	}
+	ordered := make([]resourceGVICKey, 0, len(deduped))
+	for keyValue := range deduped {
+		ordered = append(ordered, keyValue)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].resourceType != ordered[j].resourceType {
+			return ordered[i].resourceType < ordered[j].resourceType
+		}
+		return ordered[i].resourceID < ordered[j].resourceID
+	})
+	return ordered, nil
+}
+
 func insertDerivedResourceGVICEffectiveAssignmentsTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey) error {
 	_, err := tx.ExecContext(ctx, `
 with requested as (
@@ -673,7 +737,41 @@ do update set depth=excluded.depth`, companyID)
 	return err
 }
 
-func gvicResourceKeysForAffectedGroupsTx(ctx context.Context, tx *sql.Tx, companyID string, groupIDs []string) ([]resourceGVICKey, error) {
+func gvicAncestorGroupIDsForGroupsTx(ctx context.Context, tx *sql.Tx, companyID string, groupIDs []string) ([]string, error) {
+	companyID = cleanUUIDText(companyID)
+	groupIDs = cleanUUIDTextSlice(groupIDs)
+	if ctx == nil || tx == nil || companyID == "" {
+		return nil, ErrInvalid
+	}
+	if len(groupIDs) == 0 {
+		return []string{}, nil
+	}
+	rows, err := tx.QueryContext(ctx, `
+with input_groups(group_id) as (
+  select distinct unnest($2::text[])::uuid
+)
+select distinct closure.ancestor_group_id::text
+from company_user_group_closure closure
+join input_groups input_group
+  on closure.descendant_group_id=input_group.group_id
+where closure.company_id=$1::uuid
+order by closure.ancestor_group_id::text asc`, companyID, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var groupID string
+		if err := rows.Scan(&groupID); err != nil {
+			return nil, err
+		}
+		out = append(out, groupID)
+	}
+	return out, rows.Err()
+}
+
+func gvicResourceKeysForGroupPrincipalIDsTx(ctx context.Context, tx *sql.Tx, companyID string, groupIDs []string) ([]resourceGVICKey, error) {
 	companyID = cleanUUIDText(companyID)
 	groupIDs = cleanUUIDTextSlice(groupIDs)
 	if ctx == nil || tx == nil || companyID == "" {
@@ -686,18 +784,11 @@ func gvicResourceKeysForAffectedGroupsTx(ctx context.Context, tx *sql.Tx, compan
 with input_groups(group_id) as (
   select distinct unnest($2::text[])::uuid
 ),
-affected_groups as (
-  select distinct closure.ancestor_group_id as group_id
-  from company_user_group_closure closure
-  join input_groups input_group
-    on closure.descendant_group_id=input_group.group_id
-  where closure.company_id=$1::uuid
-),
 direct_keys as (
   select distinct assignment.company_id, assignment.resource_type, assignment.resource_id
   from resource_gvic_assignments assignment
-  join affected_groups affected_group
-    on assignment.principal_id=affected_group.group_id
+  join input_groups input_group
+    on assignment.principal_id=input_group.group_id
   where assignment.company_id=$1::uuid
     and assignment.principal_type='group'
 ),
@@ -730,8 +821,16 @@ order by resource_type asc, resource_id::text asc`, companyID, groupIDs)
 	return out, rows.Err()
 }
 
+func gvicResourceKeysForAffectedGroupsTx(ctx context.Context, tx *sql.Tx, companyID string, groupIDs []string) ([]resourceGVICKey, error) {
+	affectedGroupIDs, err := gvicAncestorGroupIDsForGroupsTx(ctx, tx, companyID, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+	return gvicResourceKeysForGroupPrincipalIDsTx(ctx, tx, companyID, affectedGroupIDs)
+}
+
 // gvicResourceKeysForAllGroupAssignmentsTx is a broad repair/backfill helper. Normal
-// group membership writes should use gvicResourceKeysForAffectedGroupsTx instead.
+// group membership and hierarchy writes should use targeted group-principal helpers instead.
 func gvicResourceKeysForAllGroupAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID string) ([]resourceGVICKey, error) {
 	rows, err := tx.QueryContext(ctx, `
 select distinct company_id::text, resource_type, resource_id::text
@@ -783,7 +882,7 @@ func syncPostgresGVICForAffectedGroupsTx(ctx context.Context, tx *sql.Tx, compan
 	if err != nil {
 		return err
 	}
-	_, err = syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, keys)
+	_, err = syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, keys)
 	return err
 }
 
@@ -798,7 +897,7 @@ func syncPostgresGVICForAllGroupAssignmentsTx(ctx context.Context, tx *sql.Tx, c
 	if err != nil {
 		return err
 	}
-	_, err = syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, keys)
+	_, err = syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, keys)
 	return err
 }
 

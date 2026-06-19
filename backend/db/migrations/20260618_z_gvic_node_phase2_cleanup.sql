@@ -168,6 +168,36 @@ drop table if exists shared_inbox_raci_group_assignments cascade;
 
 do $$
 begin
+  if to_regclass('public.company_projection_sequences') is not null then
+    insert into company_projection_sequences (
+      company_id,
+      projection_name,
+      projection_scope,
+      sequence,
+      updated_timestamp
+    )
+    select
+      company_id,
+      'gvic_matrix',
+      projection_scope,
+      max(sequence),
+      max(updated_timestamp)
+    from company_projection_sequences
+    where projection_name = 'racio_matrix'
+    group by company_id, projection_scope
+    on conflict (company_id, projection_name, projection_scope)
+    do update set
+      sequence = greatest(company_projection_sequences.sequence, excluded.sequence),
+      updated_timestamp = greatest(company_projection_sequences.updated_timestamp, excluded.updated_timestamp);
+
+    delete from company_projection_sequences
+    where projection_name = 'racio_matrix';
+  end if;
+end
+$$;
+
+do $$
+begin
   if to_regclass('public.projection_versions') is not null then
     update projection_versions
     set projection = 'gvic_matrix'
