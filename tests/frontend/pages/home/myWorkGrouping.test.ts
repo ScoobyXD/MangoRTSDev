@@ -8,6 +8,7 @@ import {
   normalizeMyWorkSelectedScope,
   type MyWorkResourceRow,
 } from "../../../../frontend/src/pages/home/myWorkGrouping.js";
+import { loadMyWorkMatrixCellsForUsers } from "../../../../frontend/src/pages/home/myWorkMatrixLoader.js";
 
 function account(accountID: string, name: string) {
   return { company_id: "company-1", account_id: accountID, name, created_timestamp: "2026-01-01T00:00:00Z" };
@@ -94,4 +95,35 @@ test("default expansion opens the first N groups at level N", () => {
   assert.equal(expanded.has(groups[0].groups[0].id), true);
   assert.equal(expanded.has(groups[0].groups[1].id), true);
   assert.equal(expanded.has(groups[0].groups[2].id), false);
+});
+
+
+test("My Work scoped matrix loading preserves successful users when another user fails", async () => {
+  const result = await loadMyWorkMatrixCellsForUsers({
+    companyID: "company-1",
+    targetUserIDs: ["user-ok", "user-fail", "user-ok", ""],
+    fetchMatrix: async (targetUserID) => {
+      if (targetUserID === "user-fail") throw new Error("failed_to_list_my_work_matrix");
+      return {
+        company_id: "company-1",
+        user_id: targetUserID,
+        cells: [{
+          role: "generated",
+          priority: 1,
+          roots: [{
+            kind: "node",
+            resource_id: "node-1",
+            node_id: "node-1",
+            name: "Still visible",
+            children: [],
+          }],
+        }],
+      };
+    },
+  });
+
+  assert.equal(result.cells.length, 1);
+  assert.equal(result.cells[0].userID, "user-ok");
+  assert.equal(result.cells[0].roots[0].name, "Still visible");
+  assert.deepEqual(result.failures, [{ userID: "user-fail", message: "failed_to_list_my_work_matrix" }]);
 });

@@ -3,8 +3,9 @@ import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../.
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
-import { listMyWorkMatrixRows, type MyWorkMatrixCell, type MyWorkResourceTree } from "../../modules/work-items/workItemReadApi";
+import { listMyWorkMatrixRows, type MyWorkResourceTree } from "../../modules/work-items/workItemReadApi";
 import { cleanIDList, logicGateTitle } from "./homeUtils";
+import { loadMyWorkMatrixCellsForUsers, type MyWorkMatrixCellWithUser, type MyWorkMatrixLoadFailure } from "./myWorkMatrixLoader";
 import {
   DEFAULT_MY_WORK_GROUPINGS,
   MY_WORK_GROUPING_FIELDS,
@@ -61,7 +62,6 @@ type ScopePickerRow = {
 const SAVED_GROUPING_SETTINGS_STORAGE_PREFIX = "mangorts.saved_grouping_settings.v1";
 const MY_WORK_MATRIX_ROLES: LogicGateGVICRole[] = ["generated", "verified", "consulted", "informed"];
 const MY_WORK_MATRIX_PRIORITIES = [1, 2, 3, 4, 5, 0] as const;
-type MyWorkMatrixCellWithUser = MyWorkMatrixCell & { companyID: string; userID: string };
 type MyWorkMatrixPriority = typeof MY_WORK_MATRIX_PRIORITIES[number];
 type MyWorkCellCreateInput = { priority: MyWorkMatrixPriority; creatorGVICRole?: LogicGateGVICRole };
 type MyWorkNodeDropInput = { logicGateID: string; nodeIDs: string[]; priority: MyWorkMatrixPriority; fromLogicGateID?: string };
@@ -171,26 +171,26 @@ export function MyWorkView({
   useEffect(() => {
     if (!apiBase || !companyID || targetUserIDs.length === 0) {
       setMatrixCells([]);
+      setMatrixError("");
+      setMatrixLoading(false);
       return;
     }
     let cancelled = false;
     setMatrixLoading(true);
     setMatrixError("");
-    void Promise.all(targetUserIDs.map((targetUserID) => (
-      listMyWorkMatrixRows({ apiBase, companyID, targetUserID })
-        .then((payload) => (payload.cells ?? []).map((cell) => ({ ...cell, companyID: payload.company_id || companyID, userID: payload.user_id || targetUserID })))
-    ))).then((results) => {
+    void loadMyWorkMatrixCellsForUsers({
+      companyID,
+      targetUserIDs,
+      fetchMatrix: (targetUserID) => listMyWorkMatrixRows({ apiBase, companyID, targetUserID }),
+    }).then(({ cells, failures }) => {
       if (cancelled) return;
-      setMatrixCells(results.flat());
-    }).catch((error) => {
-      if (cancelled) return;
-      setMatrixCells([]);
-      setMatrixError(error instanceof Error ? error.message : "Failed to load My Work");
+      setMatrixCells(cells);
+      setMatrixError(myWorkMatrixFailureMessage(failures, targetUserIDs, userByID));
     }).finally(() => {
       if (!cancelled) setMatrixLoading(false);
     });
     return () => { cancelled = true; };
-  }, [apiBase, companyID, targetUserIDs]);
+  }, [apiBase, companyID, targetUserIDs, userByID]);
 
   const updateSelectedSetting = useCallback((updater: (setting: MyWorkSavedGroupingSetting) => MyWorkSavedGroupingSetting) => {
     setSettings((current) => current.map((setting) => {
@@ -1080,6 +1080,19 @@ function userIDsForSelectedScope(
   if (scope.subject_type === "company") return uniqueStrings(companyUsers.map((user) => user.user_id));
   if (scope.subject_type === "user") return uniqueStrings([scope.subject_id]);
   return Array.from(userIDsForGroupSubtree(scope.subject_id, childGroupsByParentID, membersByGroupID));
+}
+
+function myWorkMatrixFailureMessage(failures: MyWorkMatrixLoadFailure[], targetUserIDs: string[], userByID: Map<string, CompanyUser>): string {
+  if (failures.length === 0) return "";
+  const total = new Set(targetUserIDs.map((id) => id.trim()).filter(Boolean)).size;
+  if (failures.length >= total) {
+    return failures[0]?.message || "Failed to load My Work";
+  }
+  if (failures.length === 1) {
+    const failedUserID = failures[0].userID;
+    return `Failed to load My Work for ${userLabel(userByID.get(failedUserID), failedUserID)}`;
+  }
+  return `Failed to load My Work for ${failures.length} people`;
 }
 
 function buildScopePickerRows({
