@@ -340,6 +340,12 @@ const appResizeHandleStyle: React.CSSProperties = {
   touchAction: "none",
 };
 
+const nodeDeepLinkSurfaceStyle: React.CSSProperties = {
+  width: "100%",
+  height: "100%",
+  background: "#ffffff",
+};
+
 const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onNavigate, overrideContent }) => {
   const activeCompanyID = getActiveCompanyID();
   const taskbarScope = useMemo(() => (
@@ -437,7 +443,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const isHomeView = activePrimaryPage === "home";
   const isProjectManagementView = activePrimaryPage === "project-management";
   const isAccountManagerView = activePrimaryPage === "account-manager";
-  const isFullPageView = isLogicGateArenaView || isHomeView || isProjectManagementView || isAccountManagerView;
+  const isNodeDeepLinkView = deepLink?.kind === "node";
+  const isFullPageView = isLogicGateArenaView || isHomeView || isProjectManagementView || isAccountManagerView || isNodeDeepLinkView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
 
   useEffect(() => {
@@ -1024,7 +1031,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   useEffect(() => {
     if (deepLinkNodeID) {
       routeManagedExplorerNodePopupRef.current = true;
-      activatePrimaryPage("map");
       setActiveDockTabID(null);
       setExplorerNodePopup((current) => (
         current?.nodeID === deepLinkNodeID
@@ -1037,7 +1043,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     routeManagedExplorerNodePopupRef.current = false;
     setExplorerNodePopup(null);
     setActiveDockTabID(null);
-  }, [activatePrimaryPage, deepLinkNodeID]);
+  }, [deepLinkNodeID]);
 
   const deepLinkProjectID = deepLink?.kind === "project" ? deepLink.projectID : "";
   useEffect(() => {
@@ -1465,15 +1471,15 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     height: canvasH,
     margin: 0,
     overflow: "hidden",
-    background: isHomeView ? "#ffffff" : bgColor || UI_THEME.surface,
-    borderRadius: isHomeView ? 0 : PAGE_SURFACE_RADIUS,
-    boxShadow: isHomeView ? "none" : "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(15, 23, 42, 0.18)",
+    background: isHomeView || isNodeDeepLinkView ? "#ffffff" : bgColor || UI_THEME.surface,
+    borderRadius: isHomeView || isNodeDeepLinkView ? 0 : PAGE_SURFACE_RADIUS,
+    boxShadow: isHomeView || isNodeDeepLinkView ? "none" : "inset 0 0 0 1px rgba(255, 255, 255, 0.58), 0 10px 24px rgba(15, 23, 42, 0.18)",
   };
   const dockTabMenuTab = dockTabMenu ? dockTabs.find((tab) => tab.id === dockTabMenu.id) ?? null : null;
   const dockTabMenuSidebarKind = dockTabMenuTab?.kind === "logic_gate_arena" ? "logic_gate" : dockTabMenuTab?.kind;
 
   return (
-    <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: isHomeView ? "#ffffff" : "#f1f5f9" }}>
+    <div ref={appRootRef} style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: isHomeView || isNodeDeepLinkView ? "#ffffff" : "#f1f5f9" }}>
       <AppLiveFreshnessBridge />
       <TextSelectionNodeCreator
         companyID={getActiveCompanyID()}
@@ -1694,6 +1700,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           <React.Suspense fallback={fullPageFallback}>
             <LazyAccountManagerPage />
           </React.Suspense>
+        ) : isNodeDeepLinkView ? (
+          <div aria-hidden="true" style={nodeDeepLinkSurfaceStyle} />
         ) : (
           <>
         <GridCrosses cols={gridCols} rows={gridRows} stepX={stepX} stepY={stepY} width={canvasW} height={canvasH} color={crossColor} />
