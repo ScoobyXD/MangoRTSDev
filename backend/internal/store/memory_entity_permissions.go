@@ -299,7 +299,7 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 		r.userGroupMembers[userGroupMemberKey(companyID, groupID, userID)] = member
 		items = append(items, r.withCompanyUserGroupMemberUserLocked(member))
 	}
-	if err := r.recomputeGroupDependentEffectiveAccessForCompanyLocked(companyID); err != nil {
+	if err := r.recomputeGroupDependentEffectiveAccessForGroupsLocked(companyID, []string{groupID}); err != nil {
 		r.userGroupMembers = userGroupMembersSnapshot
 		r.effectiveAccess = effectiveAccessSnapshot
 		r.gvicEffectiveAssignments = gvicEffectiveSnapshot
@@ -1017,6 +1017,25 @@ func companyUserGroupSubtreeIDsLocked(groups map[string]domain.CompanyUserGroup,
 				ids[group.GroupID] = true
 				changed = true
 			}
+		}
+	}
+	return ids
+}
+
+func companyUserGroupAncestorIDsLocked(groups map[string]domain.CompanyUserGroup, companyID string, groupIDs []string) map[string]bool {
+	companyID = strings.TrimSpace(companyID)
+	ids := map[string]bool{}
+	for _, groupID := range groupIDs {
+		groupID = strings.TrimSpace(groupID)
+		seen := map[string]bool{}
+		for groupID != "" && !seen[groupID] {
+			seen[groupID] = true
+			group, ok := groups[userGroupKey(companyID, groupID)]
+			if !ok {
+				break
+			}
+			ids[group.GroupID] = true
+			groupID = companyUserGroupParentID(group)
 		}
 	}
 	return ids
