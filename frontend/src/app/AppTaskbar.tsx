@@ -33,7 +33,6 @@ const TASKBAR_DOCK_BUTTON_WIDTH = 176;
 const TASKBAR_DOCK_BUTTON_GAP = 0;
 const TASKBAR_DOCK_TOGGLE_GAP = 4;
 const TASKBAR_DOCK_TOGGLE_SIZE = 32;
-const TASKBAR_DOCK_COLLAPSED_WIDTH = 44;
 const APP_TASKBAR_DOCK_COLLAPSED_STORAGE_KEY = "mangorts.app-taskbar.dockCollapsed.v1";
 const APP_TASKBAR_DOCK_TAB_DRAG_MIME = "application/x-mangorts-app-taskbar-dock-tab";
 const TASKBAR_EDGE_FRAME = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
@@ -471,21 +470,21 @@ function minimizedDockStripStyle(viewportWidth: number, tabCount: number, collap
     position: "fixed",
     left: TASKBAR_DOCK_LEFT_GAP,
     bottom: TASKBAR_BOTTOM_GAP,
-    width: collapsed ? TASKBAR_DOCK_COLLAPSED_WIDTH : expandedWidth,
+    width: collapsed ? TASKBAR_DOCK_TOGGLE_SIZE : expandedWidth,
     maxWidth,
-    minWidth: collapsed ? TASKBAR_DOCK_COLLAPSED_WIDTH : 0,
-    height: 44,
+    minWidth: collapsed ? TASKBAR_DOCK_TOGGLE_SIZE : 0,
+    height: collapsed ? TASKBAR_DOCK_TOGGLE_SIZE : 44,
     display: "flex",
     alignItems: "center",
     gap: TASKBAR_DOCK_TOGGLE_GAP,
-    padding: collapsed ? 5 : `5px ${TASKBAR_DOCK_TOGGLE_SIZE / 2 + TASKBAR_DOCK_TOGGLE_GAP}px 5px 6px`,
+    padding: collapsed ? 0 : `5px ${TASKBAR_DOCK_TOGGLE_SIZE / 2 + TASKBAR_DOCK_TOGGLE_GAP}px 5px 6px`,
     boxSizing: "border-box",
-    border: "1px solid transparent",
-    borderRadius: 8,
-    background: `${TASKBAR_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box`,
-    boxShadow: "10px 10px 24px rgba(174, 174, 192, 0.26), -8px -8px 22px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255,255,255,0.9)",
-    backdropFilter: "blur(16px)",
-    WebkitBackdropFilter: "blur(16px)",
+    border: collapsed ? "none" : "1px solid transparent",
+    borderRadius: collapsed ? 999 : 8,
+    background: collapsed ? "transparent" : `${TASKBAR_SURFACE} padding-box, ${TASKBAR_EDGE_FRAME} border-box`,
+    boxShadow: collapsed ? "none" : "10px 10px 24px rgba(174, 174, 192, 0.26), -8px -8px 22px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255,255,255,0.9)",
+    backdropFilter: collapsed ? "none" : "blur(16px)",
+    WebkitBackdropFilter: collapsed ? "none" : "blur(16px)",
     zIndex: 118,
     overflow: "visible",
     color: "#0f172a",
@@ -530,7 +529,7 @@ function dockToggleButtonStyle(collapsed: boolean): React.CSSProperties {
     padding: 0,
     border: "1px solid transparent",
     borderRadius: 999,
-    background: `#ffffff padding-box, ${TASKBAR_EDGE_FRAME} border-box`,
+    background: `linear-gradient(#ffffff, #ffffff) padding-box, ${TASKBAR_EDGE_FRAME} border-box`,
     color: "#334155",
     cursor: "pointer",
     boxShadow: "4px 4px 10px rgba(174, 174, 192, 0.22), -4px -4px 10px rgba(255, 255, 255, 0.86), inset 1px 1px 0 rgba(255,255,255,0.84)",
