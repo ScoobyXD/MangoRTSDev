@@ -281,6 +281,28 @@ func TestMemoryRepoMyWorkMatrixRowsDuplicateAcrossActiveProjectRelationships(t *
 	}
 	assertMyWorkProjectNames(t, rows, EntityTypeLogicGate, logicGate.LogicGateID, []string{"Alpha Project", "Bravo Project"})
 	assertMyWorkProjectNames(t, rows, EntityTypeNode, node.NodeID, []string{"Alpha Project", "Bravo Project"})
+
+	matrix, err := repo.ListMyWorkMatrix(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID})
+	if err != nil {
+		t.Fatalf("ListMyWorkMatrix: %v", err)
+	}
+	cell := findMyWorkTestCell(matrix, domain.GVICRoleGenerated, 3)
+	if cell == nil {
+		t.Fatalf("generated priority 3 cell missing: %+v", matrix.Cells)
+	}
+	for _, projectName := range []string{"Alpha Project", "Bravo Project"} {
+		project := findMyWorkTestTree(cell.Roots, EntityTypeProject, projectName)
+		if project == nil {
+			t.Fatalf("project %q missing from roots: %+v", projectName, cell.Roots)
+		}
+		gate := findMyWorkTestTree(project.Children, EntityTypeLogicGate, logicGate.LogicGateID)
+		if gate == nil {
+			t.Fatalf("logic gate missing under %q: %+v", projectName, project.Children)
+		}
+		if nodeTree := findMyWorkTestTree(gate.Children, EntityTypeNode, node.NodeID); nodeTree == nil {
+			t.Fatalf("node missing under %q/%s: %+v", projectName, logicGate.LogicGateID, gate.Children)
+		}
+	}
 }
 
 func TestMemoryRepoMyWorkMatrixRowsApplyProjectActiveRules(t *testing.T) {
@@ -321,6 +343,28 @@ func TestMemoryRepoMyWorkMatrixRowsApplyProjectActiveRules(t *testing.T) {
 	assertMyWorkProjectNames(t, rows, EntityTypeNode, standaloneDone.NodeID, nil)
 	assertMyWorkProjectNames(t, rows, EntityTypeNode, activeProjectDone.NodeID, []string{"Active Project"})
 	assertMyWorkProjectNames(t, rows, EntityTypeNode, doneProjectNode.NodeID, nil)
+}
+
+func TestMemoryRepoMyWorkMatrixIncludesProjectAsFirstClassRoot(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666666"
+	repo.EnsureCompany(companyID, "My Work Project Root Company")
+	user := mustCreateInboxReadCompanyUser(t, repo, "my-work-root-user", companyID, "my-work-root@example.com", "My Work Root User")
+	project := mustCreateInboxReadProject(t, repo, companyID, "First Class Project", "Active", user.UserID)
+	mustSetInboxReadResourceGVIC(t, repo, companyID, EntityTypeProject, project.ProjectID, domain.GVICRoleVerified, user.UserID)
+
+	matrix, err := repo.ListMyWorkMatrix(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID})
+	if err != nil {
+		t.Fatalf("ListMyWorkMatrix: %v", err)
+	}
+	cell := findMyWorkTestCell(matrix, domain.GVICRoleVerified, 0)
+	if cell == nil {
+		t.Fatalf("verified no-priority cell missing: %+v", matrix.Cells)
+	}
+	root := findMyWorkTestTree(cell.Roots, EntityTypeProject, project.ProjectID)
+	if root == nil || root.Name != "First Class Project" {
+		t.Fatalf("project root = %+v, want First Class Project", root)
+	}
 }
 
 func mustCreateInboxReadCompanyUser(t *testing.T, repo *MemoryRepo, subject, companyID, email, displayName string) domain.User {
@@ -392,17 +436,22 @@ func mustUpdateInboxReadNodeStatus(t *testing.T, repo *MemoryRepo, companyID, no
 
 func mustSetInboxReadNodeGVIC(t *testing.T, repo *MemoryRepo, companyID, nodeID, userID string) {
 	t.Helper()
+	mustSetInboxReadResourceGVIC(t, repo, companyID, EntityTypeNode, nodeID, domain.GVICRoleGenerated, userID)
+}
+
+func mustSetInboxReadResourceGVIC(t *testing.T, repo *MemoryRepo, companyID, resourceType, resourceID, role, userID string) {
+	t.Helper()
 	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
 		CompanyID:    companyID,
-		ResourceType: EntityTypeNode,
-		ResourceID:   nodeID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
 		Assignments: []ResourceGVICAssignmentInput{{
-			Role:          domain.GVICRoleGenerated,
+			Role:          role,
 			PrincipalType: EntityPermissionSubjectUser,
 			PrincipalID:   userID,
 		}},
 	}); err != nil {
-		t.Fatalf("SetResourceGVICAssignments %s: %v", nodeID, err)
+		t.Fatalf("SetResourceGVICAssignments %s %s: %v", resourceType, resourceID, err)
 	}
 }
 
@@ -425,6 +474,33 @@ func assertMyWorkProjectNames(t *testing.T, rows []GVICMatrixProjectionRow, reso
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("project names for %s %s = %+v, want %+v; rows=%+v", resourceType, resourceID, got, want, rows)
 	}
+}
+
+func findMyWorkTestCell(matrix MyWorkMatrixResponse, role string, priority int) *MyWorkMatrixCell {
+	for index := range matrix.Cells {
+		cell := &matrix.Cells[index]
+		gotPriority := 0
+		if cell.Priority != nil {
+			gotPriority = *cell.Priority
+		}
+		if cell.Role == role && gotPriority == priority {
+			return cell
+		}
+	}
+	return nil
+}
+
+func findMyWorkTestTree(items []MyWorkResourceTree, kind, idOrName string) *MyWorkResourceTree {
+	for index := range items {
+		item := &items[index]
+		if item.Kind == kind && (item.ResourceID == idOrName || item.Name == idOrName) {
+			return item
+		}
+		if child := findMyWorkTestTree(item.Children, kind, idOrName); child != nil {
+			return child
+		}
+	}
+	return nil
 }
 
 func setMemoryInboxReadNodeCreatedTimestamp(t *testing.T, repo *MemoryRepo, companyID, nodeID string, created time.Time) {

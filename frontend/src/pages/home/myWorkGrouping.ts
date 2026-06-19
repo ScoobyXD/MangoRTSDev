@@ -41,7 +41,7 @@ export type MyWorkSavedGroupingSetting = {
   updated_timestamp: string;
 };
 
-export type MyWorkResourceKind = "node" | "logic_gate";
+export type MyWorkResourceKind = "project" | "node" | "logic_gate";
 
 export type MyWorkPerson = {
   userID: string;
@@ -73,6 +73,7 @@ export type MyWorkResourceRow = {
   projectName?: string;
   logicGateLabels: string[];
   logicGateIDs: string[];
+  children?: MyWorkResourceRow[];
 };
 
 export type MyWorkGroupValue = UniversalGroupValue;
@@ -260,6 +261,16 @@ export function computeDefaultExpandedGroupIDs(groups: MyWorkNestedGroup[]): Set
   return computeUniversalDefaultExpandedGroupIDs(groups);
 }
 
+export function computeAllExpandedGroupIDs(groups: MyWorkNestedGroup[]): Set<string> {
+  const expanded = new Set<string>();
+  const visit = (group: MyWorkNestedGroup) => {
+    expanded.add(group.id);
+    for (const child of group.groups) visit(child);
+  };
+  for (const group of groups) visit(group);
+  return expanded;
+}
+
 export function applyManualExpandedState(defaultExpanded: Set<string>, manualState: Record<string, boolean>): Set<string> {
   const expanded = new Set(defaultExpanded);
   for (const [id, open] of Object.entries(manualState)) {
@@ -275,10 +286,17 @@ export function sortMyWorkRows(rows: MyWorkResourceRow[]): MyWorkResourceRow[] {
     const rightPriority = Number.isFinite(Number(right.priority)) && Number(right.priority) > 0 ? Number(right.priority) : Number.MAX_SAFE_INTEGER;
     return leftPriority - rightPriority
       || dueDateSortValue(left.dueDate) - dueDateSortValue(right.dueDate)
+      || myWorkKindSort(left.kind) - myWorkKindSort(right.kind)
       || left.title.localeCompare(right.title, undefined, { numeric: true, sensitivity: "base" })
       || left.kind.localeCompare(right.kind)
       || left.id.localeCompare(right.id);
   });
+}
+
+function myWorkKindSort(kind: MyWorkResourceKind): number {
+  if (kind === "project") return 1;
+  if (kind === "logic_gate") return 2;
+  return 3;
 }
 
 export function myWorkNodeIsActive(input: { status?: string | null; due_date?: string | null }, today = new Date()): boolean {

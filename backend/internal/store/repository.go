@@ -227,6 +227,7 @@ type WorkItemReadRepository interface {
 	ListMyLogicGates(query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListMyLogicGatesContext(ctx context.Context, query WorkItemInboxQuery) ([]WorkItemLogicGateInboxItem, error)
 	ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error)
+	ListMyWorkMatrix(query WorkItemInboxQuery) (MyWorkMatrixResponse, error)
 	ListGVICMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]GVICMatrixProjectionRow, error)
 	ListGVICMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]GVICMatrixProjectionRow, error)
 	ListGVICMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]GVICMatrixProjectionRow, error)
@@ -533,6 +534,33 @@ type WorkItemLogicGateInboxItem struct {
 	Roles            []string                         `json:"roles"`
 	GVICAssignments  []domain.LogicGateGVICAssignment `json:"gvic_assignments,omitempty"`
 	CreatedTimestamp time.Time                        `json:"created_timestamp"`
+}
+
+type MyWorkMatrixResponse struct {
+	CompanyID string             `json:"company_id"`
+	UserID    string             `json:"user_id"`
+	Cells     []MyWorkMatrixCell `json:"cells"`
+}
+
+type MyWorkMatrixCell struct {
+	Priority *int                 `json:"priority"`
+	Role     string               `json:"role"`
+	Roots    []MyWorkResourceTree `json:"roots"`
+}
+
+type MyWorkResourceTree struct {
+	Kind                     string               `json:"kind"`
+	ResourceID               string               `json:"resource_id"`
+	ProjectID                string               `json:"project_id,omitempty"`
+	LogicGateID              string               `json:"logic_gate_id,omitempty"`
+	NodeID                   string               `json:"node_id,omitempty"`
+	Name                     string               `json:"name"`
+	Status                   *string              `json:"status,omitempty"`
+	DueDate                  *string              `json:"due_date,omitempty"`
+	Priority                 *int                 `json:"priority,omitempty"`
+	Accounts                 []domain.Account     `json:"accounts,omitempty"`
+	ResourceCreatedTimestamp time.Time            `json:"resource_created_timestamp,omitempty"`
+	Children                 []MyWorkResourceTree `json:"children"`
 }
 
 type ProjectionRow struct {

@@ -3744,6 +3744,14 @@ export function HomePage({
               onOpenNode={openNodeEditorOverlay}
               onOpenLogicGate={(logicGateID, label, nodeID) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)), nodeID)}
               onOpenProject={openProjectManagement}
+              onOpenNodeBulkMenu={openNodeBulkEditMenu}
+              onOpenLogicGateBulkMenu={openLogicGateBulkEditMenu}
+              onCreateNodeInLogicGate={(input) => { void createHomeNode(input); }}
+              onCreateLogicGateInCell={(input) => { void createLogicGateInInboxCell(input); }}
+              onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
+              onDropNodes={(input) => { void dropNodesIntoInboxLogicGate(input); }}
+              onDropNodesInCell={(input) => { void dropNodesIntoNewInboxLogicGate(input); }}
+              onDropLogicGates={(input) => { void moveLogicGatesIntoInboxCell(input); }}
             />
           ) : isUpdatesView ? (
             <UpdatesView

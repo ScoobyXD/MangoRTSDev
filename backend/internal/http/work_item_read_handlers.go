@@ -206,7 +206,7 @@ func (s *Server) handleWorkItemMyWorkMatrix(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	query.Limit = 0
-	rows, err := s.repo.ListMyWorkMatrixRows(query)
+	matrix, err := s.repo.ListMyWorkMatrix(query)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_my_work_matrix")
 		return
@@ -214,8 +214,7 @@ func (s *Server) handleWorkItemMyWorkMatrix(w http.ResponseWriter, r *http.Reque
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 		"company_id": query.CompanyID,
 		"user_id":    query.UserID,
-		"limit":      query.Limit,
-		"rows":       rows,
+		"cells":      matrix.Cells,
 	})
 }
 
