@@ -69,7 +69,7 @@ import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type
 import { applyGVICMatrixProjectionEnvelope, parseGVICMatrixProjectionSequence, GVICMatrixRealtimeScope, type GVICMatrixProjectionDeltaEnvelope } from "../../modules/gvic/gvicMatrixProjectionDeltas";
 import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../../modules/realtime/realtimeWebSocket";
 import { listMyLogicGates, listGVICMatrixProjectionRows } from "../../modules/work-items/workItemReadApi";
-import { subscribeWorkspaceRealtime, workspaceRealtimeScope } from "../../modules/workspace/workspaceRealtime";
+import { subscribeWorkspaceRealtime, workspaceRealtimeScope, type WorkspaceReconciliationScope } from "../../modules/workspace/workspaceRealtime";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
@@ -95,6 +95,34 @@ function homeViewUsesSharedEmailConnection(viewID: HomeViewID): boolean {
 
 function isTriageMailViewID(viewID: HomeViewID): boolean {
   return viewID === "my-triage" || viewID === "shared-root" || viewID.startsWith("shared:");
+}
+
+function hasSemanticWorkspaceScopes(scopes: WorkspaceReconciliationScope[]): boolean {
+  return scopes.some((scope) => Boolean(scope.semanticScope));
+}
+
+function workspaceScopeTouchesHomeWorkspacePanel(scope: WorkspaceReconciliationScope): boolean {
+  if (scope.semanticScope) return false;
+  return (
+    scope.kind === "company_explorer" ||
+    (scope.kind === "node_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
+    (scope.kind === "logic_gate_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
+    scope.kind === "kanban_board" ||
+    scope.kind === "kanban_board_list" ||
+    scope.kind === "gvic_matrix" ||
+    scope.kind === "work_item_assignment" ||
+    scope.kind === "workspace"
+  );
+}
+
+function workspaceScopeTouchesSharedInbox(scope: WorkspaceReconciliationScope): boolean {
+  if (scope.semanticScope) return false;
+  return (
+    scope.eventType === "communications_shared_inbox_gvic_updated" ||
+    scope.eventType === "shared_triage_access_updated" ||
+    (scope.kind === "company_explorer" && (!scope.folderKind || scope.folderKind === "communications")) ||
+    scope.kind === "workspace"
+  );
 }
 
 function homeMessageIsDraft(message: EmailMessage): boolean {
@@ -351,6 +379,8 @@ export function HomePage({
     return params.get("nylas") === "connected" && scope === "shared" ? sharedInboxID : "";
   });
   const [pendingSharedInboxMessageRefreshID, setPendingSharedInboxMessageRefreshID] = useState("");
+  const [myWorkLiveRefreshToken, setMyWorkLiveRefreshToken] = useState(0);
+  const [updatesLiveRefreshToken, setUpdatesLiveRefreshToken] = useState(0);
   const [noticeResourceAction, setNoticeResourceAction] = useState<HomeNoticeResourceAction | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [workspaceTrackWidth, setWorkspaceTrackWidth] = useState(() => Math.max(1, window.innerWidth - 20));
@@ -1532,22 +1562,11 @@ export function HomePage({
     const unsubscribe = subscribeWorkspaceRealtime(apiBase, companyID, workspaceRealtimeScope(currentUserID), {
       onGap(gap) {
         if (gap.companyID !== companyID) return;
-        const touchesSharedInbox = gap.scopes.some((scope) => (
-          scope.eventType === "communications_shared_inbox_gvic_updated" || scope.eventType === "shared_triage_access_updated" ||
-          (scope.kind === "company_explorer" && (!scope.folderKind || scope.folderKind === "communications")) ||
-          scope.kind === "workspace"
-        ));
-        const touchesWorkspacePanel = gap.scopes.some((scope) => (
-          scope.kind === "company_explorer" ||
-          (scope.kind === "node_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
-          (scope.kind === "logic_gate_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
-          scope.kind === "kanban_board" ||
-          scope.kind === "kanban_board_list" ||
-          scope.kind === "gvic_matrix" ||
-          scope.kind === "work_item_assignment" ||
-          scope.kind === "workspace"
-        ));
-        const touchesGVICMatrix = gap.scopes.some((scope) => scope.kind === "gvic_matrix" || scope.kind === "workspace");
+        const touchesSharedInbox = gap.scopes.some(workspaceScopeTouchesSharedInbox);
+        const touchesWorkspacePanel = gap.scopes.some(workspaceScopeTouchesHomeWorkspacePanel);
+        const touchesGVICMatrix = gap.scopes.some((scope) => !scope.semanticScope && (scope.kind === "gvic_matrix" || scope.kind === "workspace"));
+        if (gap.scopes.some((scope) => scope.kind === "my_work")) setMyWorkLiveRefreshToken((value) => value + 1);
+        if (gap.scopes.some((scope) => scope.kind === "updates")) setUpdatesLiveRefreshToken((value) => value + 1);
         if (touchesSharedInbox) void loadSharedInboxes();
         if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
         if (touchesGVICMatrix) requestGVICMatrixProjectionRefreshRef.current?.();
@@ -1565,26 +1584,20 @@ export function HomePage({
         if (!type) return;
         const data: Record<string, unknown> = envelope.data && typeof envelope.data === "object" ? envelope.data : {};
         const scopes = context.scopes ?? [];
-        const touchesSharedInbox = scopes.some((scope) => (
-          scope.eventType === "communications_shared_inbox_gvic_updated" || scope.eventType === "shared_triage_access_updated" ||
-          (scope.kind === "company_explorer" && (!scope.folderKind || scope.folderKind === "communications"))
-        ));
-        const touchesWorkspacePanel = scopes.some((scope) => (
-          scope.kind === "company_explorer" ||
-          (scope.kind === "node_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
-          (scope.kind === "logic_gate_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
-          scope.kind === "kanban_board" ||
-          scope.kind === "kanban_board_list" ||
-          scope.kind === "gvic_matrix" ||
-          scope.kind === "work_item_assignment" ||
-          scope.kind === "workspace"
-        ));
-        const touchesGVICMatrix = scopes.some((scope) => scope.kind === "gvic_matrix" || scope.kind === "workspace");
+        const semanticScopesPresent = hasSemanticWorkspaceScopes(scopes);
+        const touchesSharedInbox = scopes.some(workspaceScopeTouchesSharedInbox);
+        const touchesWorkspacePanel = scopes.some(workspaceScopeTouchesHomeWorkspacePanel);
+        const touchesGVICMatrix = scopes.some((scope) => !scope.semanticScope && (scope.kind === "gvic_matrix" || scope.kind === "workspace"));
+        const touchesMyWork = scopes.some((scope) => scope.kind === "my_work");
+        const touchesUpdates = scopes.some((scope) => scope.kind === "updates");
+        if (touchesMyWork) setMyWorkLiveRefreshToken((value) => value + 1);
+        if (touchesUpdates) setUpdatesLiveRefreshToken((value) => value + 1);
         if (touchesSharedInbox) {
           void loadSharedInboxes();
         }
         if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
         if (touchesGVICMatrix) requestGVICMatrixProjectionRefreshRef.current?.();
+        if (semanticScopesPresent && !touchesSharedInbox && !touchesWorkspacePanel && !touchesGVICMatrix) return;
         if (type === "node_created" || type === "node_updated" || type === "node_permissions_updated") {
           const node = data.node && typeof data.node === "object" ? data.node as NodeRecord : null;
           if (node?.node_id) {
@@ -3735,6 +3748,7 @@ export function HomePage({
               loading={loadingNodes || loadingLogicGates}
               companyID={companyID}
               currentUserID={currentUserID}
+              liveRefreshToken={myWorkLiveRefreshToken}
               nodes={nodes}
               logicGates={logicGates}
               companyUsers={companyUsers}
@@ -3756,6 +3770,7 @@ export function HomePage({
             <UpdatesView
               companyID={companyID}
               currentUserID={currentUserID}
+              liveRefreshToken={updatesLiveRefreshToken}
               onOpenNode={(nodeID, informationID) => {
                 const node = nodeByID.get(nodeID);
                 if (node) openNodeEditorOverlay(node, informationID);

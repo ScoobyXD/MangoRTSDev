@@ -3,6 +3,7 @@ import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-e
 import {
   fetchUpdateBranch,
   fetchUpdateRootGroups,
+  EVENT_NOTIFICATIONS_UPDATED,
   markNotificationRead,
   NOTIFICATION_TYPE_MENTION,
   NOTIFICATION_TYPE_URGENT_MENTION,
@@ -16,6 +17,7 @@ import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNes
 type UpdatesViewProps = {
   companyID: string;
   currentUserID: string;
+  liveRefreshToken?: number;
   onOpenNode: (nodeID: string, informationID?: string) => void;
   onOpenLogicGate: (logicGateID: string, label: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
@@ -90,7 +92,7 @@ const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_SAVED = "work_item.logic_gate_assi
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_MOVED = "work_item.logic_gate_assignment_moved";
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_REMOVED = "work_item.logic_gate_assignment_removed";
 
-export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicGate, onOpenProject }: UpdatesViewProps) {
+export function UpdatesView({ companyID, currentUserID, liveRefreshToken = 0, onOpenNode, onOpenLogicGate, onOpenProject }: UpdatesViewProps) {
   const [rootGroups, setRootGroups] = useState<UpdateGroup[]>([]);
   const [branchByRootID, setBranchByRootID] = useState<Record<string, UpdateGroup>>({});
   const [loadingRoots, setLoadingRoots] = useState(false);
@@ -107,6 +109,7 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
   const [hiddenNotificationIDs, setHiddenNotificationIDs] = useState<Set<string>>(new Set());
   const [selectedNotificationKey, setSelectedNotificationKey] = useState("");
   const [hoveredNotificationKey, setHoveredNotificationKey] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     const next = readSavedUpdateGroupingSettings(storageKey, fallbackSetting);
@@ -249,9 +252,21 @@ export function UpdatesView({ companyID, currentUserID, onOpenNode, onOpenLogicG
           setLoadingRoots(false);
           setBranchLoadingIDs(new Set());
         }
-      });
+    });
     return () => { cancelled = true; };
-  }, [companyID, filter]);
+  }, [companyID, filter, liveRefreshToken, reloadToken]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handleNotificationsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ companyID?: string }>).detail;
+      const eventCompanyID = detail?.companyID?.trim() ?? "";
+      if (eventCompanyID && eventCompanyID !== companyID) return;
+      setReloadToken((value) => value + 1);
+    };
+    window.addEventListener(EVENT_NOTIFICATIONS_UPDATED, handleNotificationsUpdated);
+    return () => window.removeEventListener(EVENT_NOTIFICATIONS_UPDATED, handleNotificationsUpdated);
+  }, [companyID]);
 
   const sourceGroups = useMemo(() => rootGroups.map((root) => branchByRootID[root.id] ?? root), [branchByRootID, rootGroups]);
   const updateRows = useMemo(() => flattenUpdateRows(sourceGroups, hiddenNotificationIDs), [hiddenNotificationIDs, sourceGroups]);

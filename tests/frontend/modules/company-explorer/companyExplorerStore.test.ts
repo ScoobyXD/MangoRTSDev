@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import {
+  companyExplorerAffectedScopesFromEnvelope,
+  companyExplorerRefreshPlanFromAffectedScopes,
   createCompanyExplorerStoreState,
   reduceCompanyExplorerStore,
   shouldInvalidateKanbanBoardListForExplorerEnvelope,
@@ -59,6 +61,26 @@ const folderItem = (folderID: string, itemType: "node" | "logic_gate" | "kanban"
   position: 1000,
   created_timestamp: itemID,
   updated_timestamp: itemID,
+});
+
+const v2Row = (input: {
+  entityID: string;
+  entityType: "company" | "folder" | "project" | "logic_gate" | "node";
+  resourceID?: string;
+  parentEntityID?: string;
+  edgeID?: string;
+}) => ({
+  company_id: "c",
+  entity_id: input.entityID,
+  entity_type: input.entityType,
+  resource_id: input.resourceID ?? input.entityID,
+  name: input.entityID,
+  parent_entity_id: input.parentEntityID ?? "",
+  edge_id: input.edgeID,
+  position: 1000,
+  has_children: false,
+  created_timestamp: input.entityID,
+  updated_timestamp: input.entityID,
 });
 
 run("snapshot reducer replaces explorer snapshot and preserves board list", () => {
@@ -206,6 +228,57 @@ run("v2 row reducer preserves manual and native parent contexts", () => {
   assert.equal(state.rows.length, 2);
   assert.equal(state.rows.find((row) => row.edge_id === "edge-gate-folder")?.name, "Gate A Updated");
   assert.equal(state.rows.find((row) => row.parent_entity_id === "project-entity")?.name, "Gate A");
+});
+
+run("affected scope helpers plan only matching Company Explorer branch refreshes", () => {
+  const affectedScopes = companyExplorerAffectedScopesFromEnvelope({
+    company_id: "c",
+    type: "node_updated",
+    data: {
+      affected_scopes: [
+        "updates:user:user-1",
+        "company_explorer:root:c",
+        "company_explorer:folder:folder-entity",
+        "company_explorer:node:node-a",
+        "company_explorer:node:node-a",
+      ],
+    },
+  });
+  assert.deepEqual(affectedScopes, [
+    "updates:user:user-1",
+    "company_explorer:root:c",
+    "company_explorer:folder:folder-entity",
+    "company_explorer:node:node-a",
+  ]);
+
+  const plan = companyExplorerRefreshPlanFromAffectedScopes({
+    companyID: "c",
+    affectedScopes,
+    rows: [
+      v2Row({ entityID: "root-entity", entityType: "company", resourceID: "c" }),
+      v2Row({ entityID: "folder-entity", entityType: "folder", parentEntityID: "root-entity", edgeID: "edge-folder-root" }),
+      v2Row({ entityID: "node-entity", entityType: "node", resourceID: "node-a", parentEntityID: "folder-entity", edgeID: "edge-node-folder" }),
+      v2Row({ entityID: "node-entity", entityType: "node", resourceID: "node-a", parentEntityID: "project-entity" }),
+    ],
+  });
+
+  assert.equal(plan.hasAffectedScopes, true);
+  assert.equal(plan.hasCompanyExplorerScopes, true);
+  assert.equal(plan.refreshRoot, true);
+  assert.deepEqual(plan.parentEntityIDs.sort(), ["folder-entity", "node-entity", "project-entity", "root-entity"].sort());
+});
+
+run("affected scope helpers ignore non-Explorer semantic scopes", () => {
+  const plan = companyExplorerRefreshPlanFromAffectedScopes({
+    companyID: "c",
+    affectedScopes: ["my_work:user:user-1", "updates:user:user-1"],
+    rows: [v2Row({ entityID: "node-entity", entityType: "node", resourceID: "node-a", parentEntityID: "folder-entity" })],
+  });
+
+  assert.equal(plan.hasAffectedScopes, true);
+  assert.equal(plan.hasCompanyExplorerScopes, false);
+  assert.equal(plan.refreshRoot, false);
+  assert.deepEqual(plan.parentEntityIDs, []);
 });
 
 run("store event helpers preserve existing refresh contracts", () => {

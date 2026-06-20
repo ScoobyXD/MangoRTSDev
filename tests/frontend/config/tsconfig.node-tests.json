@@ -32,6 +32,8 @@
     "../pages/home/homeUtils.test.ts",
     "../../../frontend/src/pages/home/myWorkGrouping.ts",
     "../pages/home/myWorkGrouping.test.ts",
+    "../../../frontend/src/pages/home/myWorkMatrixLoader.ts",
+    "../pages/home/myWorkMatrixLoader.test.ts",
     "../../../frontend/src/pages/home/homeCommands.ts",
     "../pages/home/homeCommands.test.ts",
     "../../../frontend/src/modules/workspace/workspaceRealtime.ts",

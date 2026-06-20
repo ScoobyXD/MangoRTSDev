@@ -67,6 +67,8 @@ import {
   type CompanyExplorerWorkspaceEntityBatchResponse,
 } from "./CompanyExplorerContentModel";
 import {
+  companyExplorerAffectedScopesFromEnvelope,
+  companyExplorerRefreshPlanFromAffectedScopes,
   createCompanyExplorerStoreState,
   reduceCompanyExplorerStore,
   shouldInvalidateKanbanBoardListForExplorerEnvelope,
@@ -206,6 +208,15 @@ function shouldRefreshGVICExplorerProjectionForEnvelope(companyID: string, envel
 
 function cleanExplorerID(value: string | null | undefined): string {
   return value?.trim() ?? "";
+}
+
+function companyExplorerEnvelopeParentEntityID(data: Record<string, unknown>): string | null {
+  if (typeof data.parent_entity_id === "string") return cleanExplorerID(data.parent_entity_id);
+  if (data.entity && typeof data.entity === "object" && !Array.isArray(data.entity)) {
+    const entity = data.entity as { parent_entity_id?: unknown };
+    if (typeof entity.parent_entity_id === "string") return cleanExplorerID(entity.parent_entity_id);
+  }
+  return null;
 }
 
 function companyExplorerUserLabel(user: Pick<CompanyUser, "user_id" | "display_name" | "email"> | null | undefined, fallbackUserID: string): string {
@@ -1441,6 +1452,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
   const [explorerStore, dispatchExplorerStore] = useReducer(reduceCompanyExplorerStore, undefined, createCompanyExplorerStoreState);
   const { nodes, logicGates, projects, kanbanBoards, folders, folderItems, rows: companyExplorerV2Rows, folderSnapshotLoaded } = explorerStore;
+  const companyExplorerV2RowsRef = useRef<CompanyExplorerV2Row[]>(companyExplorerV2Rows);
   const [selectedTreeID, setSelectedTreeID] = useState("folder-root");
   const [selectedTreeIDs, setSelectedTreeIDs] = useState<Set<string>>(new Set(["folder-root"]));
   const [selectionAnchorTreeID, setSelectionAnchorTreeID] = useState("folder-root");
@@ -1502,6 +1514,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const GVICProjectionRequestIDRef = useRef(0);
   const GVICMultiProjectionRequestIDRef = useRef(0);
   const requestGVICExplorerProjectionRefreshRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    companyExplorerV2RowsRef.current = companyExplorerV2Rows;
+  }, [companyExplorerV2Rows]);
   const scopedRootName = scopedRootFolderName.trim();
   const scopedKind = scopedRootName ? (scopedRootFolderKind ?? "logic_gate") : undefined;
   const scopedExplorerActive = Boolean(scopedKind && scopedRootName);
@@ -1571,9 +1586,18 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     }
   }, [apiBase, companyExplorerLazyScope, companyID]);
 
+  const companyExplorerBranchKey = useCallback((parentEntityID: string) => {
+    const cleanParentEntityID = cleanExplorerID(parentEntityID);
+    return cleanParentEntityID ? `${companyExplorerLazyScope}:entity:${cleanParentEntityID}` : `roots:${companyExplorerLazyScope}`;
+  }, [companyExplorerLazyScope]);
+
+  const isCompanyExplorerBranchLoaded = useCallback((parentEntityID: string) => (
+    loadedCompanyExplorerBranchesRef.current.has(companyExplorerBranchKey(parentEntityID))
+  ), [companyExplorerBranchKey]);
+
   const refreshCompanyExplorerBranch = useCallback(async (parentEntityID: string) => {
     const cleanParentEntityID = cleanExplorerID(parentEntityID);
-    const branchKey = cleanParentEntityID ? `${companyExplorerLazyScope}:entity:${cleanParentEntityID}` : `roots:${companyExplorerLazyScope}`;
+    const branchKey = companyExplorerBranchKey(cleanParentEntityID);
     if (inflightCompanyExplorerBranchesRef.current.has(branchKey)) return;
     inflightCompanyExplorerBranchesRef.current.add(branchKey);
     try {
@@ -1588,7 +1612,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     } finally {
       inflightCompanyExplorerBranchesRef.current.delete(branchKey);
     }
-  }, [apiBase, companyExplorerLazyScope, companyID]);
+  }, [apiBase, companyExplorerBranchKey, companyExplorerLazyScope, companyID]);
+
+  const refreshLoadedCompanyExplorerBranch = useCallback((parentEntityID: string) => {
+    if (!isCompanyExplorerBranchLoaded(parentEntityID)) return;
+    void refreshCompanyExplorerBranch(parentEntityID);
+  }, [isCompanyExplorerBranchLoaded, refreshCompanyExplorerBranch]);
 
   const refreshLoadedCompanyExplorerBranches = useCallback(() => {
     const parentEntityIDs = new Set<string>();
@@ -1601,14 +1630,24 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (branchKey.startsWith(prefix)) parentEntityIDs.add(branchKey.slice(prefix.length));
     }
     for (const parentEntityID of parentEntityIDs) {
-      void refreshCompanyExplorerBranch(parentEntityID);
+      refreshLoadedCompanyExplorerBranch(parentEntityID);
     }
-  }, [companyExplorerLazyScope, refreshCompanyExplorerBranch]);
+  }, [companyExplorerLazyScope, refreshLoadedCompanyExplorerBranch]);
 
   const refreshCompanyExplorerBranchesForEnvelope = useCallback((envelope: CompanyExplorerWorkspaceStreamEnvelope) => {
     if (envelope.company_id !== companyID) return;
     const type = envelope.type?.trim() ?? "";
     const data = envelope.data ?? {};
+    const affectedScopes = companyExplorerAffectedScopesFromEnvelope(envelope);
+    if (affectedScopes.length > 0) {
+      const plan = companyExplorerRefreshPlanFromAffectedScopes({ companyID, affectedScopes, rows: companyExplorerV2RowsRef.current });
+      if (!plan.hasCompanyExplorerScopes) return;
+      if (plan.refreshRoot) refreshLoadedCompanyExplorerBranch("");
+      for (const parentEntityID of plan.parentEntityIDs) refreshLoadedCompanyExplorerBranch(parentEntityID);
+      const payloadParentEntityID = companyExplorerEnvelopeParentEntityID(data);
+      if (payloadParentEntityID !== null) refreshLoadedCompanyExplorerBranch(payloadParentEntityID);
+      return;
+    }
     if (type === "company_explorer_v2_subscription_upserted" || type === "company_explorer_v2_subscription_deleted") {
       if (companyExplorerLazyScope !== "all") refreshLoadedCompanyExplorerBranches();
       return;
@@ -1648,14 +1687,27 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       : typeof data.entity === "object" && data.entity && typeof (data.entity as { parent_entity_id?: unknown }).parent_entity_id === "string"
         ? cleanExplorerID((data.entity as { parent_entity_id: string }).parent_entity_id)
         : "";
-    void refreshCompanyExplorerBranch(parentEntityID);
-  }, [companyExplorerLazyScope, companyID, refreshCompanyExplorerBranch, refreshLoadedCompanyExplorerBranches]);
+    refreshLoadedCompanyExplorerBranch(parentEntityID);
+  }, [companyExplorerLazyScope, companyID, refreshLoadedCompanyExplorerBranch, refreshLoadedCompanyExplorerBranches]);
   const reconcileCompanyExplorerGap = useCallback((gap: WorkspaceStreamGapSignal) => {
+    if (gap.envelope) {
+      const affectedScopes = companyExplorerAffectedScopesFromEnvelope(gap.envelope);
+      if (affectedScopes.length > 0) {
+        const plan = companyExplorerRefreshPlanFromAffectedScopes({ companyID, affectedScopes, rows: companyExplorerV2RowsRef.current });
+        if (!plan.hasCompanyExplorerScopes) return;
+        if (plan.refreshRoot) refreshLoadedCompanyExplorerBranch("");
+        for (const parentEntityID of plan.parentEntityIDs) refreshLoadedCompanyExplorerBranch(parentEntityID);
+        const data: Record<string, unknown> = gap.envelope.data ?? {};
+        const payloadParentEntityID = companyExplorerEnvelopeParentEntityID(data);
+        if (payloadParentEntityID !== null) refreshLoadedCompanyExplorerBranch(payloadParentEntityID);
+        return;
+      }
+    }
     if (!shouldRefreshCompanyExplorerSnapshotForGap(gap, companyID)) return;
     void refreshCompanyExplorerSnapshot().catch(() => {
       // Stream recovery is best effort; the next explicit Explorer action can retry the same bounded reads.
     });
-  }, [companyID, refreshCompanyExplorerSnapshot]);
+  }, [companyID, refreshCompanyExplorerSnapshot, refreshLoadedCompanyExplorerBranch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1712,6 +1764,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         if (event.event !== "workspace" || event.data.length === 0) return;
         try {
           const envelope = JSON.parse(event.data) as CompanyExplorerWorkspaceStreamEnvelope;
+          const affectedScopes = companyExplorerAffectedScopesFromEnvelope(envelope);
+          if (affectedScopes.length > 0) {
+            const plan = companyExplorerRefreshPlanFromAffectedScopes({ companyID, affectedScopes, rows: companyExplorerV2RowsRef.current });
+            if (!plan.hasCompanyExplorerScopes) return;
+          }
           if (shouldInvalidateKanbanBoardListForExplorerEnvelope(companyID, envelope)) {
             invalidateKanbanBoardListCache(apiBase, companyID);
           }

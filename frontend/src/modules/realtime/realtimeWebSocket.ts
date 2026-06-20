@@ -46,6 +46,7 @@ export type RealtimeSubscriptionRejectedMessage = RealtimeBaseMessage & {
 export type RealtimeProjectionDeltaMessage = RealtimeBaseMessage & {
   type: "projection.delta";
   scope: string;
+  affected_scopes?: string[];
   sequence?: number;
   projection?: string;
   projection_scope?: string;
@@ -79,6 +80,7 @@ export type RealtimeNotificationCreatedMessage = RealtimeBaseMessage & {
   type: "notification.created";
   company_id: string;
   scope: string;
+  affected_scopes?: string[];
   notification: NotificationItem;
   ts?: string;
 };
@@ -87,6 +89,7 @@ export type RealtimeNotificationDeletedMessage = RealtimeBaseMessage & {
   type: "notification.deleted";
   company_id: string;
   scope: string;
+  affected_scopes?: string[];
   notification_id: string;
   ts?: string;
 };
@@ -95,6 +98,7 @@ export type RealtimeNotificationsClearedMessage = RealtimeBaseMessage & {
   type: "notifications.cleared";
   company_id: string;
   scope: string;
+  affected_scopes?: string[];
   deleted_count: number;
   ts?: string;
 };
@@ -192,6 +196,19 @@ function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
+function stringListValue(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of value) {
+    const clean = stringValue(item);
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    out.push(clean);
+  }
+  return out;
+}
+
 function objectValue(raw: string): Record<string, unknown> {
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -242,6 +259,7 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         ...base,
         type,
         scope,
+        affected_scopes: stringListValue(payload.affected_scopes),
         sequence,
         projection: stringValue(payload.projection) || undefined,
         projection_scope: stringValue(payload.projection_scope) || undefined,
@@ -291,6 +309,7 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         type,
         company_id: companyID,
         scope,
+        affected_scopes: stringListValue(payload.affected_scopes),
         notification: notification as unknown as NotificationItem,
         ts: stringValue(payload.ts) || undefined,
       };
@@ -307,6 +326,7 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         type,
         company_id: companyID,
         scope,
+        affected_scopes: stringListValue(payload.affected_scopes),
         notification_id: notificationID,
         ts: stringValue(payload.ts) || undefined,
       };
@@ -321,6 +341,7 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         type,
         company_id: companyID,
         scope,
+        affected_scopes: stringListValue(payload.affected_scopes),
         deleted_count: optionalNumber(payload.deleted_count) ?? 0,
         ts: stringValue(payload.ts) || undefined,
       };

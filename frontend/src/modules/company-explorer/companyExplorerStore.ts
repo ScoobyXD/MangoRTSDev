@@ -72,6 +72,13 @@ type CompanyExplorerGapLike = {
   scopes: Array<{ kind: string }>;
 };
 
+export type CompanyExplorerAffectedScopeRefreshPlan = {
+  hasAffectedScopes: boolean;
+  hasCompanyExplorerScopes: boolean;
+  refreshRoot: boolean;
+  parentEntityIDs: string[];
+};
+
 export function createCompanyExplorerStoreState(): CompanyExplorerStoreState {
   return {
     nodes: [],
@@ -162,6 +169,78 @@ export function reduceCompanyExplorerStore(
     case "restore":
       return action.state;
   }
+}
+
+export function companyExplorerAffectedScopesFromEnvelope(envelope: CompanyExplorerWorkspaceStreamEnvelope): string[] {
+  return cleanStringList(envelope.data?.affected_scopes);
+}
+
+export function companyExplorerRefreshPlanFromAffectedScopes({
+  companyID,
+  affectedScopes,
+  rows,
+}: {
+  companyID: string;
+  affectedScopes: string[];
+  rows: CompanyExplorerV2Row[];
+}): CompanyExplorerAffectedScopeRefreshPlan {
+  const cleanCompanyID = companyID.trim();
+  const parentEntityIDs: string[] = [];
+  const seenParentEntityIDs = new Set<string>();
+  let hasCompanyExplorerScopes = false;
+  let refreshRoot = false;
+
+  const addParentEntityID = (value: string | undefined) => {
+    const clean = value?.trim() ?? "";
+    if (!clean) {
+      refreshRoot = true;
+      return;
+    }
+    if (seenParentEntityIDs.has(clean)) return;
+    seenParentEntityIDs.add(clean);
+    parentEntityIDs.push(clean);
+  };
+
+  const addRowsForResource = (targetType: string, targetID: string) => {
+    const cleanTargetID = targetID.trim();
+    if (!cleanTargetID) return;
+    for (const row of rows) {
+      if (row.entity_type !== targetType || (row.resource_id ?? "").trim() !== cleanTargetID) continue;
+      addParentEntityID(row.entity_id);
+      addParentEntityID(row.parent_entity_id);
+    }
+  };
+
+  for (const affectedScope of cleanStringList(affectedScopes)) {
+    const [surface, targetType, ...idParts] = affectedScope.split(":").map((part) => part.trim()).filter(Boolean);
+    const targetID = idParts.join(":").trim();
+    if (surface !== "company_explorer" || !targetType || !targetID) continue;
+    hasCompanyExplorerScopes = true;
+    if (targetType === "root") {
+      if (!cleanCompanyID || targetID === cleanCompanyID) refreshRoot = true;
+      continue;
+    }
+    if (targetType === "folder") {
+      addParentEntityID(targetID);
+      for (const row of rows) {
+        const rowResourceID = (row.resource_id ?? "").trim();
+        if (row.entity_id !== targetID && !(row.entity_type === "folder" && rowResourceID === targetID)) continue;
+        addParentEntityID(row.parent_entity_id);
+        addParentEntityID(row.entity_id);
+      }
+      continue;
+    }
+    if (targetType === "project" || targetType === "logic_gate" || targetType === "node") {
+      addRowsForResource(targetType, targetID);
+    }
+  }
+
+  return {
+    hasAffectedScopes: cleanStringList(affectedScopes).length > 0,
+    hasCompanyExplorerScopes,
+    refreshRoot,
+    parentEntityIDs,
+  };
 }
 
 export function shouldRefreshCompanyExplorerSnapshotForGap(gap: CompanyExplorerGapLike, companyID: string): boolean {
@@ -421,6 +500,20 @@ function sortKanbanBoards(boards: KanbanBoard[]): KanbanBoard[] {
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object");
+}
+
+function cleanStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const clean = item.trim();
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    out.push(clean);
+  }
+  return out;
 }
 
 function asNodeRecord(value: unknown): NodeRecord | null {
