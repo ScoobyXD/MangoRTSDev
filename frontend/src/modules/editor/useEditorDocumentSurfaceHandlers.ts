@@ -55,6 +55,7 @@ import {
   type MentionableCompanyUser,
 } from "./editorMentions";
 import {
+  EDITOR_IMAGE_NODE_ATTRIBUTE,
   DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX,
   EDITOR_IMAGE_MAX_WIDTH_INSET_PX,
   applyEditorImageFloatLayout,
@@ -959,17 +960,146 @@ function replaceDocumentWithPlainText(root: HTMLElement, text: string, selection
   setEditorSelectionByOffsets(root, selectionStart, selectionEnd);
 }
 
-function replaceSelectionWithSimplePlainTextEdit(
+function documentHasEditorImages(root: HTMLElement): boolean {
+  return root.querySelector(`span[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"]`) !== null;
+}
+
+type EditorPlainTextBoundary = {
+  container: Node;
+  offset: number;
+};
+
+function locateEditorPlainTextBoundary(root: HTMLElement, offset: number): EditorPlainTextBoundary {
+  const target = Math.max(0, offset);
+  let currentOffset = 0;
+
+  const walk = (parent: Node): EditorPlainTextBoundary | null => {
+    for (let index = 0; index < parent.childNodes.length; index += 1) {
+      const child = parent.childNodes.item(index);
+      if (child.nodeType === Node.TEXT_NODE) {
+        const length = child.textContent?.length ?? 0;
+        if (target <= currentOffset + length) {
+          return {
+            container: child,
+            offset: Math.max(0, Math.min(length, target - currentOffset)),
+          };
+        }
+        currentOffset += length;
+        continue;
+      }
+      if (child instanceof HTMLElement && child.tagName === "BR") {
+        if (target <= currentOffset + 1) {
+          return {
+            container: parent,
+            offset: index + (target > currentOffset ? 1 : 0),
+          };
+        }
+        currentOffset += 1;
+        continue;
+      }
+      const nested = walk(child);
+      if (nested) return nested;
+    }
+    return null;
+  };
+
+  return walk(root) ?? { container: root, offset: root.childNodes.length };
+}
+
+function setEditorSelectionByPlainTextOffsets(root: HTMLElement, start: number, end = start) {
+  const selection = root.ownerDocument.getSelection();
+  if (!selection) return;
+  const safeStart = Math.max(0, start);
+  const safeEnd = Math.max(safeStart, end);
+  const range = root.ownerDocument.createRange();
+  const startBoundary = locateEditorPlainTextBoundary(root, safeStart);
+  const endBoundary = locateEditorPlainTextBoundary(root, safeEnd);
+  try {
+    range.setStart(startBoundary.container, startBoundary.offset);
+    range.setEnd(endBoundary.container, endBoundary.offset);
+  } catch {
+    return;
+  }
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function rangeIntersectsEditorImage(root: HTMLElement, range: Range): boolean {
+  if (range.collapsed) return false;
+  return Array.from(root.querySelectorAll(`span[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"]`)).some((node) => {
+    try {
+      return range.intersectsNode(node);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function replaceTextByPlainTextOffsets(
+  root: HTMLElement,
+  start: number,
+  end: number,
+  text: string,
+  selectionStart: number,
+  selectionEnd = selectionStart,
+): boolean {
+  if (start < 0 || end < start) return false;
+  removeEditorTerminalBreaks(root);
+  const range = root.ownerDocument.createRange();
+  const startBoundary = locateEditorPlainTextBoundary(root, start);
+  const endBoundary = locateEditorPlainTextBoundary(root, end);
+  try {
+    range.setStart(startBoundary.container, startBoundary.offset);
+    range.setEnd(endBoundary.container, endBoundary.offset);
+  } catch {
+    return false;
+  }
+  if (rangeIntersectsEditorImage(root, range)) return false;
+  range.deleteContents();
+  if (text) {
+    const textNode = root.ownerDocument.createTextNode(text);
+    range.insertNode(textNode);
+  }
+  setEditorSelectionByPlainTextOffsets(root, selectionStart, selectionEnd);
+  return true;
+}
+
+function applyPlainTextEditToRichDocument(
   root: HTMLElement,
   currentText: string,
-  offsets: { start: number; end: number },
-  edit: { value: string; selectionStart: number },
-  fallbackInsertedText = "",
+  edit: { value: string; selectionStart: number; selectionEnd?: number },
 ): boolean {
-  const insertedText = edit.value.slice(offsets.start, edit.selectionStart);
-  const simpleReplacement = `${currentText.slice(0, offsets.start)}${insertedText}${currentText.slice(offsets.end)}`;
-  if (simpleReplacement !== edit.value) return false;
-  return replaceSelectionWithText(root, insertedText || fallbackInsertedText);
+  if (edit.value === currentText) {
+    setEditorSelectionByPlainTextOffsets(root, edit.selectionStart, edit.selectionEnd ?? edit.selectionStart);
+    return true;
+  }
+
+  let prefixLength = 0;
+  const maxPrefixLength = Math.min(currentText.length, edit.value.length);
+  while (prefixLength < maxPrefixLength && currentText[prefixLength] === edit.value[prefixLength]) {
+    prefixLength += 1;
+  }
+
+  let suffixLength = 0;
+  const maxSuffixLength = Math.min(currentText.length - prefixLength, edit.value.length - prefixLength);
+  while (
+    suffixLength < maxSuffixLength &&
+    currentText[currentText.length - 1 - suffixLength] === edit.value[edit.value.length - 1 - suffixLength]
+  ) {
+    suffixLength += 1;
+  }
+
+  const replaceStart = prefixLength;
+  const replaceEnd = currentText.length - suffixLength;
+  const replacementText = edit.value.slice(prefixLength, edit.value.length - suffixLength);
+  return replaceTextByPlainTextOffsets(
+    root,
+    replaceStart,
+    replaceEnd,
+    replacementText,
+    edit.selectionStart,
+    edit.selectionEnd ?? edit.selectionStart,
+  );
 }
 
 function deleteTextByOffsets(root: HTMLElement, start: number, end: number, options: { preserveTrailingNewline?: boolean } = {}): boolean {
@@ -2448,8 +2578,11 @@ export function useEditorDocumentSurfaceHandlers({
               event.preventDefault();
               pendingEditorFontSizeRef.current = null;
               const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
-              const appliedLocalEdit = replaceSelectionWithSimplePlainTextEdit(root, currentText, offsets, edit, inputEvent.data);
-              if (!appliedLocalEdit) replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
+              const appliedLocalEdit = applyPlainTextEditToRichDocument(root, currentText, edit);
+              if (!appliedLocalEdit) {
+                if (documentHasEditorImages(root)) return;
+                replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
+              }
               recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
               commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
               return;
@@ -2940,7 +3073,11 @@ export function useEditorDocumentSurfaceHandlers({
       if (!event.shiftKey && simpleReplacement === edit.value) {
         replaceSelectionWithText(root, simpleInsertedText || EDITOR_TAB_TEXT);
       } else {
-        replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
+        const appliedRichEdit = applyPlainTextEditToRichDocument(root, currentText, edit);
+        if (!appliedRichEdit) {
+          if (documentHasEditorImages(root)) return;
+          replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
+        }
       }
       recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "tab");
       commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
