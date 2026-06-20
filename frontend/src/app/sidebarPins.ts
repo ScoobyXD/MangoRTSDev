@@ -1,5 +1,4 @@
 import { humanLabelOrFallback } from "../modules/entityLabels.js";
-import type { ExplorerDropPayload } from "../modules/company-explorer/treePresentation.js";
 export type SidebarPinKind = "node" | "logic_gate";
 
 export type SidebarPin = {
@@ -20,14 +19,6 @@ export const EVENT_APP_SIDEBAR_PIN_REQUESTED = "mangorts:app-sidebar-pin-request
 export function sidebarPinFallbackLabel(kind: SidebarPinKind, id: string): string {
   if (kind === "logic_gate") return "Logic Gate";
   return `Node ${id.trim().slice(0, 8) || "pin"}`;
-}
-
-export function sidebarPinExplorerDropPayload(pin: Pick<SidebarPin, "id" | "kind">): ExplorerDropPayload | null {
-  const id = pin.id.trim();
-  if (!id) return null;
-  if (pin.kind === "node") return { kind: "node", itemID: id, itemType: "node" };
-  if (pin.kind === "logic_gate") return { kind: "logic_gate", itemID: id, itemType: "logic_gate" };
-  return null;
 }
 
 export function requestAppSidebarPin(detail: SidebarPinRequestDetail): void {
