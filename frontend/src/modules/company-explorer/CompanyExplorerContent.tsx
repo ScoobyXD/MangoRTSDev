@@ -2786,7 +2786,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     );
     const normalizedTargets = targets.filter((target) => {
       if (target.kind === "kanban" && selectedLogicGateBoardIDs.has(target.id)) return false;
-      const key = target.entityID ? `${target.entityType}:${target.entityID}` : `${target.kind}:${target.id}`;
+      const key = target.edgeID ? `edge:${target.edgeID}` : target.entityID ? `${target.entityType}:${target.entityID}` : `${target.kind}:${target.id}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;

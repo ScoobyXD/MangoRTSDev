@@ -697,7 +697,7 @@ select exists(
 
 func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput) (CompanyExplorerDeleteResult, error) {
 	companyID = strings.TrimSpace(companyID)
-	if companyID == "" || len(targets) == 0 || len(targets) > CompanyExplorerDeleteBatchMaxItems {
+	if companyID == "" || len(targets) == 0 {
 		return CompanyExplorerDeleteResult{}, ErrInvalid
 	}
 	targets = normalizeCompanyExplorerDeleteTargets(targets)

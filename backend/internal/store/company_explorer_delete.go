@@ -2,7 +2,6 @@ package store
 
 import "strings"
 
-const CompanyExplorerDeleteBatchMaxItems = CompanyExplorerFolderItemBatchMaxItems
 const RecycleBinBatchMaxItems = CompanyExplorerFolderItemBatchMaxItems
 
 func normalizeCompanyExplorerDeleteTargets(targets []CompanyExplorerDeleteTargetInput) []CompanyExplorerDeleteTargetInput {
@@ -23,9 +22,6 @@ func normalizeCompanyExplorerDeleteTargets(targets []CompanyExplorerDeleteTarget
 		}
 		seen[key] = true
 		out = append(out, item)
-		if len(out) >= CompanyExplorerDeleteBatchMaxItems {
-			break
-		}
 	}
 	return out
 }
@@ -40,9 +36,6 @@ func normalizeCompanyExplorerV2EdgeIDs(edgeIDs []string) []string {
 		}
 		seen[edgeID] = true
 		out = append(out, edgeID)
-		if len(out) >= CompanyExplorerDeleteBatchMaxItems {
-			break
-		}
 	}
 	return out
 }

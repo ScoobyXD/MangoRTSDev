@@ -497,15 +497,13 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 		id := strings.TrimSpace(target.ID)
 		edgeID := strings.TrimSpace(target.EdgeID)
 		if edgeID != "" {
-			if kind != store.EntityTypeNode && kind != store.EntityTypeLogicGate && kind != store.EntityTypeProject {
-				writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
-				return
-			}
 			edgeIDs = append(edgeIDs, edgeID)
-			edgeEventTargets[edgeID] = struct {
-				TargetType string
-				TargetID   string
-			}{TargetType: kind, TargetID: id}
+			if id != "" && (kind == store.EntityTypeNode || kind == store.EntityTypeLogicGate || kind == store.EntityTypeProject) {
+				edgeEventTargets[edgeID] = struct {
+					TargetType string
+					TargetID   string
+				}{TargetType: kind, TargetID: id}
+			}
 			continue
 		}
 		if kind == "" || id == "" {
