@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1255,7 +1256,7 @@ func TestCompanyExplorerLazyFolderChildrenReturnImmediateRowsOnly(t *testing.T) 
 	}
 }
 
-func TestCompanyExplorerBatchDeleteTargetsRemovesMultipleV2Edges(t *testing.T) {
+func TestCompanyExplorerBatchDeleteTargetsMovesV2RowsToRecycleBinAndRestores(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -1321,6 +1322,16 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMultipleV2Edges(t *testing.T) {
 	if len(children.Rows) != 0 {
 		t.Fatalf("children after batch edge delete = %+v, want empty", children.Rows)
 	}
+	if _, err := repo.GetNode(companyID, nodeA.NodeID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetNode A after delete err = %v, want ErrNotFound", err)
+	}
+	recycleItems, err := repo.ListRecycleBinItems(companyID)
+	if err != nil {
+		t.Fatalf("ListRecycleBinItems after delete: %v", err)
+	}
+	if len(recycleItems) != 2 {
+		t.Fatalf("recycle items after delete = %d, want 2; items=%+v", len(recycleItems), recycleItems)
+	}
 	events, err := repo.ListDomainEventsAfter(store.DomainEventReplayQuery{
 		CompanyID:     companyID,
 		StreamType:    workspaceDomainStreamType,
@@ -1333,12 +1344,30 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMultipleV2Edges(t *testing.T) {
 	}
 	removed := 0
 	for _, event := range events {
-		if event.Type == "company_explorer_item_removed" {
+		if event.Type == "node_deleted" {
 			removed++
 		}
 	}
 	if removed != 2 {
-		t.Fatalf("company_explorer_item_removed events = %d, want 2; events=%+v", removed, events)
+		t.Fatalf("node_deleted events = %d, want 2; events=%+v", removed, events)
+	}
+	itemIDs := make([]string, 0, len(recycleItems))
+	for _, item := range recycleItems {
+		itemIDs = append(itemIDs, item.RecycleBinItemID)
+	}
+	if _, err := repo.RestoreRecycleBinItems(companyID, itemIDs); err != nil {
+		t.Fatalf("RestoreRecycleBinItems failed: %v", err)
+	}
+	children, err = repo.ListCompanyExplorerV2ChildRows(store.CompanyExplorerV2RowsQuery{
+		CompanyID:      companyID,
+		View:           store.CompanyExplorerLazyScopeAll,
+		ParentEntityID: folder.EntityID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows after restore: %v", err)
+	}
+	if len(children.Rows) != 2 {
+		t.Fatalf("children after restore = %d, want 2", len(children.Rows))
 	}
 }
 
@@ -1375,7 +1404,7 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 		if err != nil {
 			t.Fatalf("UpsertCompanyExplorerV2Edge %d: %v", index, err)
 		}
-		targets = append(targets, map[string]string{"edge_id": row.EdgeID})
+		targets = append(targets, map[string]string{"kind": "node", "id": node.NodeID, "edge_id": row.EdgeID})
 	}
 
 	body, err := json.Marshal(map[string]any{"company_id": companyID, "targets": targets})
@@ -1389,13 +1418,13 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 		t.Fatalf("POST large batch delete status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	var response struct {
-		EdgeIDs []string `json:"edge_ids"`
+		Targets []store.CompanyExplorerDeletedTarget `json:"targets"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Unmarshal response: %v", err)
 	}
-	if len(response.EdgeIDs) != count {
-		t.Fatalf("deleted edge IDs = %d, want %d", len(response.EdgeIDs), count)
+	if len(response.Targets) != count {
+		t.Fatalf("deleted targets = %d, want %d", len(response.Targets), count)
 	}
 	children, err := repo.ListCompanyExplorerV2ChildRows(store.CompanyExplorerV2RowsQuery{
 		CompanyID:      companyID,
@@ -1407,6 +1436,59 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 	}
 	if len(children.Rows) != 0 {
 		t.Fatalf("children after large batch edge delete = %d, want empty", len(children.Rows))
+	}
+	recycleItems, err := repo.ListRecycleBinItems(companyID)
+	if err != nil {
+		t.Fatalf("ListRecycleBinItems after large delete: %v", err)
+	}
+	if len(recycleItems) != count {
+		t.Fatalf("recycle items after large delete = %d, want %d", len(recycleItems), count)
+	}
+	itemIDs := make([]string, 0, len(recycleItems))
+	for _, item := range recycleItems {
+		itemIDs = append(itemIDs, item.RecycleBinItemID)
+	}
+	if _, err := repo.RestoreRecycleBinItems(companyID, itemIDs); err != nil {
+		t.Fatalf("RestoreRecycleBinItems large batch failed: %v", err)
+	}
+	children, err = repo.ListCompanyExplorerV2ChildRows(store.CompanyExplorerV2RowsQuery{
+		CompanyID:      companyID,
+		View:           store.CompanyExplorerLazyScopeAll,
+		ParentEntityID: folder.EntityID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows after large restore: %v", err)
+	}
+	if len(children.Rows) != count {
+		t.Fatalf("children after large restore = %d, want %d", len(children.Rows), count)
+	}
+	deleteAgainBody, err := json.Marshal(map[string]any{"company_id": companyID, "targets": targets})
+	if err != nil {
+		t.Fatalf("Marshal second large delete request: %v", err)
+	}
+	deleteAgainReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/delete-targets", bytes.NewReader(deleteAgainBody))
+	deleteAgainRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteAgainRec, deleteAgainReq)
+	if deleteAgainRec.Code != http.StatusOK {
+		t.Fatalf("POST second large batch delete status = %d, want %d body=%s", deleteAgainRec.Code, http.StatusOK, deleteAgainRec.Body.String())
+	}
+	recycleItems, err = repo.ListRecycleBinItems(companyID)
+	if err != nil {
+		t.Fatalf("ListRecycleBinItems after second large delete: %v", err)
+	}
+	itemIDs = itemIDs[:0]
+	for _, item := range recycleItems {
+		itemIDs = append(itemIDs, item.RecycleBinItemID)
+	}
+	if err := repo.PermanentlyDeleteRecycleBinItems(companyID, itemIDs); err != nil {
+		t.Fatalf("PermanentlyDeleteRecycleBinItems large batch failed: %v", err)
+	}
+	remainingRecycleItems, err := repo.ListRecycleBinItems(companyID)
+	if err != nil {
+		t.Fatalf("ListRecycleBinItems after permanent delete: %v", err)
+	}
+	if len(remainingRecycleItems) != 0 {
+		t.Fatalf("recycle items after permanent delete = %d, want empty", len(remainingRecycleItems))
 	}
 }
 

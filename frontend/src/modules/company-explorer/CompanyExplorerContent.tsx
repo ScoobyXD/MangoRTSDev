@@ -2798,7 +2798,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const deletedLogicGateIDs = new Set<string>();
     const deletedProjectIDs = new Set<string>();
     const deletedKanbanBoardIDs = new Set<string>();
-    const deletedEdgeIDs = new Set<string>();
     const v2FolderEntityIDs = new Set(companyExplorerV2Rows.filter((row) => row.entity_type === "folder").map((row) => row.entity_id));
     const collectV2FolderSubtreeIDs = (rootEntityID: string): Set<string> => {
       const deleted = new Set<string>();
@@ -2824,8 +2823,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         } else {
           for (const id of collectFolderSubtreeIDs(folders, target.id)) deletedFolderIDs.add(id);
         }
-      } else if (target.edgeID) {
-        deletedEdgeIDs.add(target.edgeID);
       } else if (target.kind === "node") {
         deletedNodeIDs.add(target.id);
       } else if (target.kind === "logic_gate") {
@@ -2854,16 +2851,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       deletedProjectIDs,
       deletedKanbanBoardIDs,
     });
-    if (deletedEdgeIDs.size > 0) dispatchExplorerStore({ type: "removeV2Edges", edgeIDs: deletedEdgeIDs });
     try {
       const deleteTargets = normalizedTargets.map((target) => {
         if (target.kind === "folder") {
           return { kind: "folder", id: target.id, folder_kind: target.folderKind };
         }
-        if (target.edgeID) {
-          return { kind: target.kind, id: target.id, edge_id: target.edgeID };
-        }
-        throw new Error("company_explorer_reference_id_required");
+        return { kind: target.kind, id: target.id };
       });
       await requestJSON("/v1/company-explorer/delete-targets", {
         method: "POST",

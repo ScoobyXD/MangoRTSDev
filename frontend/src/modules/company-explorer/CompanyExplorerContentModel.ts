@@ -237,7 +237,7 @@ export function buildDeleteConfirmationSummary(input: {
     const vocabulary = getDeleteVocabulary(target.kind);
     return {
       title: `Are you sure you want to delete this ${vocabulary}: ${target.label?.trim() || target.id}?`,
-      detail: `This deletes ${totalThings} thing${totalThings === 1 ? "" : "s"}.`,
+      detail: `This moves ${totalThings} thing${totalThings === 1 ? "" : "s"} to the Recycle Bin.`,
       targetList: getDeleteTargetLabel(target),
       totalThings,
       requiresFolderAcknowledgement,
@@ -248,7 +248,7 @@ export function buildDeleteConfirmationSummary(input: {
     .map(([kind, count]) => `${count} ${getDeleteVocabulary(kind, count !== 1)}`);
   return {
     title: `Are you sure you want to delete these ${totalThings} things?`,
-    detail: `This batch includes ${joinHumanList(kindDetails)}.`,
+    detail: `This moves ${joinHumanList(kindDetails)} to the Recycle Bin.`,
     targetList: joinHumanList(targetList),
     totalThings,
     requiresFolderAcknowledgement,

@@ -487,25 +487,9 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 	}
 
 	deleteTargets := make([]store.CompanyExplorerDeleteTargetInput, 0, len(req.Targets))
-	edgeIDs := make([]string, 0, len(req.Targets))
-	edgeEventTargets := make(map[string]struct {
-		TargetType string
-		TargetID   string
-	})
 	for _, target := range req.Targets {
 		kind := strings.TrimSpace(target.Kind)
 		id := strings.TrimSpace(target.ID)
-		edgeID := strings.TrimSpace(target.EdgeID)
-		if edgeID != "" {
-			edgeIDs = append(edgeIDs, edgeID)
-			if id != "" && (kind == store.EntityTypeNode || kind == store.EntityTypeLogicGate || kind == store.EntityTypeProject) {
-				edgeEventTargets[edgeID] = struct {
-					TargetType string
-					TargetID   string
-				}{TargetType: kind, TargetID: id}
-			}
-			continue
-		}
 		if kind == "" || id == "" {
 			continue
 		}
@@ -515,58 +499,29 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 			FolderKind: strings.TrimSpace(target.FolderKind),
 		})
 	}
-	if len(deleteTargets) == 0 && len(edgeIDs) == 0 {
+	if len(deleteTargets) == 0 {
 		writeError(w, http.StatusBadRequest, "company_explorer_delete_targets_required")
 		return
 	}
 
 	result := store.CompanyExplorerDeleteResult{Targets: []store.CompanyExplorerDeletedTarget{}}
-	if len(deleteTargets) > 0 {
-		var err error
-		result, err = s.repo.DeleteCompanyExplorerTargets(req.CompanyID, deleteTargets)
-		if errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
-			return
-		}
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "company_explorer_delete_target_not_found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_targets")
-			return
-		}
+	var err error
+	result, err = s.repo.DeleteCompanyExplorerTargets(req.CompanyID, deleteTargets)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
+		return
 	}
-	if len(edgeIDs) > 0 {
-		if err := s.repo.DeleteCompanyExplorerV2Edges(req.CompanyID, edgeIDs); errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
-			return
-		} else if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "company_explorer_delete_target_not_found")
-			return
-		} else if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_targets")
-			return
-		}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "company_explorer_delete_target_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_targets")
+		return
 	}
 
 	s.publishCompanyExplorerDeletedTargets(req.CompanyID, result.Targets)
-	publishedEdgeIDs := map[string]bool{}
-	for _, edgeID := range edgeIDs {
-		edgeID = strings.TrimSpace(edgeID)
-		if edgeID == "" || publishedEdgeIDs[edgeID] {
-			continue
-		}
-		publishedEdgeIDs[edgeID] = true
-		target := edgeEventTargets[edgeID]
-		payload := map[string]any{"item_id": edgeID}
-		if target.TargetType != "" && target.TargetID != "" {
-			payload["target_type"] = target.TargetType
-			payload["target_id"] = target.TargetID
-		}
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_item_removed", payload)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets, "edge_ids": edgeIDs})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 }
 
 func (s *Server) handleCommunicationsSharedInboxGVIC(w http.ResponseWriter, r *http.Request, folderID string) {

@@ -76,7 +76,7 @@ func (r *MemoryRepo) ListRecycleBinItems(companyID string) ([]domain.RecycleBinI
 func (r *MemoryRepo) PermanentlyDeleteRecycleBinItems(companyID string, itemIDs []string) error {
 	companyID = strings.TrimSpace(companyID)
 	itemIDs = normalizeRecycleBinItemIDs(itemIDs)
-	if companyID == "" || len(itemIDs) == 0 || len(itemIDs) > RecycleBinBatchMaxItems {
+	if companyID == "" || len(itemIDs) == 0 {
 		return ErrInvalid
 	}
 	r.mu.Lock()
@@ -99,7 +99,7 @@ func (r *MemoryRepo) PermanentlyDeleteRecycleBinItems(companyID string, itemIDs 
 func (r *MemoryRepo) RestoreRecycleBinItems(companyID string, itemIDs []string) (RecycleBinRestoreResult, error) {
 	companyID = strings.TrimSpace(companyID)
 	itemIDs = normalizeRecycleBinItemIDs(itemIDs)
-	if companyID == "" || len(itemIDs) == 0 || len(itemIDs) > RecycleBinBatchMaxItems {
+	if companyID == "" || len(itemIDs) == 0 {
 		return RecycleBinRestoreResult{}, ErrInvalid
 	}
 	r.mu.Lock()
