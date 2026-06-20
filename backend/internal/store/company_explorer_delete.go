@@ -2,8 +2,6 @@ package store
 
 import "strings"
 
-const RecycleBinBatchMaxItems = CompanyExplorerFolderItemBatchMaxItems
-
 func normalizeCompanyExplorerDeleteTargets(targets []CompanyExplorerDeleteTargetInput) []CompanyExplorerDeleteTargetInput {
 	out := make([]CompanyExplorerDeleteTargetInput, 0, len(targets))
 	seen := map[string]bool{}
@@ -70,9 +68,6 @@ func normalizeRecycleBinItemIDs(itemIDs []string) []string {
 		}
 		seen[itemID] = true
 		out = append(out, itemID)
-		if len(out) >= RecycleBinBatchMaxItems {
-			break
-		}
 	}
 	return out
 }

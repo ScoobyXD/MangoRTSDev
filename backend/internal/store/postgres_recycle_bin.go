@@ -115,7 +115,7 @@ order by deleted_timestamp desc, recycle_bin_item_id desc`, companyID)
 func (r *PostgresRepo) PermanentlyDeleteRecycleBinItems(companyID string, itemIDs []string) error {
 	companyID = strings.TrimSpace(companyID)
 	itemIDs = normalizeRecycleBinItemIDs(itemIDs)
-	if companyID == "" || len(itemIDs) == 0 || len(itemIDs) > RecycleBinBatchMaxItems {
+	if companyID == "" || len(itemIDs) == 0 {
 		return ErrInvalid
 	}
 	result, err := r.db.ExecContext(context.Background(), `
@@ -141,7 +141,7 @@ where company_id=$1::uuid
 func (r *PostgresRepo) RestoreRecycleBinItems(companyID string, itemIDs []string) (RecycleBinRestoreResult, error) {
 	companyID = strings.TrimSpace(companyID)
 	itemIDs = normalizeRecycleBinItemIDs(itemIDs)
-	if companyID == "" || len(itemIDs) == 0 || len(itemIDs) > RecycleBinBatchMaxItems {
+	if companyID == "" || len(itemIDs) == 0 {
 		return RecycleBinRestoreResult{}, ErrInvalid
 	}
 

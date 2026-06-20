@@ -184,7 +184,7 @@ export function CompanyExplorerDeleteConfirmationDialog({
             onChange={(event) => onAcknowledgedChange(event.currentTarget.checked)}
             style={{ marginTop: 1 }}
           />
-          <span>I understand that deleting this folder deletes all contents inside of this folder.</span>
+          <span>I understand that deleting this folder moves all contents inside of this folder to the Recycle Bin.</span>
         </label>
       )}
     </ConfirmActionMenu>
