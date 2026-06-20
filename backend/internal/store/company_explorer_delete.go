@@ -30,6 +30,23 @@ func normalizeCompanyExplorerDeleteTargets(targets []CompanyExplorerDeleteTarget
 	return out
 }
 
+func normalizeCompanyExplorerV2EdgeIDs(edgeIDs []string) []string {
+	out := make([]string, 0, len(edgeIDs))
+	seen := map[string]bool{}
+	for _, edgeID := range edgeIDs {
+		edgeID = strings.TrimSpace(edgeID)
+		if edgeID == "" || seen[edgeID] {
+			continue
+		}
+		seen[edgeID] = true
+		out = append(out, edgeID)
+		if len(out) >= CompanyExplorerDeleteBatchMaxItems {
+			break
+		}
+	}
+	return out
+}
+
 func validCompanyExplorerDeleteKind(kind string) bool {
 	return kind == "folder" || kind == "node" || kind == "logic_gate" || kind == "project" || kind == "kanban"
 }

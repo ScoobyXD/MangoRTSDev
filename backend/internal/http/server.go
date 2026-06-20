@@ -283,6 +283,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/editor/collaboration/events", s.handleEditorCollaborationEvents)
 	mux.HandleFunc("/v1/company-explorer/roots", s.handleCompanyExplorerRoots)
 	mux.HandleFunc("/v1/company-explorer/children", s.handleCompanyExplorerChildren)
+	mux.HandleFunc("/v1/company-explorer/delete-targets", s.handleCompanyExplorerDeleteTargets)
 	mux.HandleFunc("/v1/company-explorer/folders", s.handleCompanyExplorerFolders)
 	mux.HandleFunc("/v1/company-explorer/folders/", s.handleCompanyExplorerFolderByID)
 	mux.HandleFunc("/v1/company-explorer/items", s.handleCompanyExplorerItems)

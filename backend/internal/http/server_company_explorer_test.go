@@ -1254,6 +1254,93 @@ func TestCompanyExplorerLazyFolderChildrenReturnImmediateRowsOnly(t *testing.T) 
 	}
 }
 
+func TestCompanyExplorerBatchDeleteTargetsRemovesMultipleV2Edges(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-explorer-batch-delete-test"
+	repo.EnsureCompany(companyID, "Batch Delete")
+
+	folder, err := repo.CreateCompanyExplorerV2Folder(store.CompanyExplorerV2FolderInput{
+		CompanyID:      companyID,
+		ParentEntityID: companyID,
+		Name:           "Placed work",
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder: %v", err)
+	}
+	nodeA, err := repo.CreateNode(companyID, "Batch node A")
+	if err != nil {
+		t.Fatalf("CreateNode A: %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "Batch node B")
+	if err != nil {
+		t.Fatalf("CreateNode B: %v", err)
+	}
+	rowA, err := repo.UpsertCompanyExplorerV2Edge(store.CompanyExplorerV2EdgeInput{
+		CompanyID:       companyID,
+		ParentEntityID:  folder.EntityID,
+		ChildEntityType: store.CompanyExplorerV2EntityNode,
+		ChildResourceID: nodeA.NodeID,
+	})
+	if err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge A: %v", err)
+	}
+	rowB, err := repo.UpsertCompanyExplorerV2Edge(store.CompanyExplorerV2EdgeInput{
+		CompanyID:       companyID,
+		ParentEntityID:  folder.EntityID,
+		ChildEntityType: store.CompanyExplorerV2EntityNode,
+		ChildResourceID: nodeB.NodeID,
+	})
+	if err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge B: %v", err)
+	}
+
+	body := []byte(`{"company_id":"` + companyID + `","targets":[` +
+		`{"kind":"node","id":"` + nodeA.NodeID + `","edge_id":"` + rowA.EdgeID + `"},` +
+		`{"kind":"node","id":"` + nodeB.NodeID + `","edge_id":"` + rowB.EdgeID + `"}` +
+		`]}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/delete-targets", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST batch delete status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	children, err := repo.ListCompanyExplorerV2ChildRows(store.CompanyExplorerV2RowsQuery{
+		CompanyID:      companyID,
+		View:           store.CompanyExplorerLazyScopeAll,
+		ParentEntityID: folder.EntityID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows after delete: %v", err)
+	}
+	if len(children.Rows) != 0 {
+		t.Fatalf("children after batch edge delete = %+v, want empty", children.Rows)
+	}
+	events, err := repo.ListDomainEventsAfter(store.DomainEventReplayQuery{
+		CompanyID:     companyID,
+		StreamType:    workspaceDomainStreamType,
+		StreamID:      companyID,
+		AfterSequence: 0,
+		Limit:         10,
+	})
+	if err != nil {
+		t.Fatalf("ListDomainEventsAfter: %v", err)
+	}
+	removed := 0
+	for _, event := range events {
+		if event.Type == "company_explorer_item_removed" {
+			removed++
+		}
+	}
+	if removed != 2 {
+		t.Fatalf("company_explorer_item_removed events = %d, want 2; events=%+v", removed, events)
+	}
+}
+
 func TestCompanyExplorerLazyLogicGateChildrenReturnDirectNodes(t *testing.T) {
 	t.Parallel()
 
