@@ -769,9 +769,6 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			if count == 0 {
 				return CompanyExplorerDeleteResult{}, ErrNotFound
 			}
-			if err := postgresAddFolderScopeItemsTx(ctx, tx, companyID, &targetScope); err != nil {
-				return CompanyExplorerDeleteResult{}, err
-			}
 			folderRootIDs[target.ID] = true
 		case "node":
 			exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`, companyID, target.ID)
@@ -808,6 +805,9 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			targetScope.ProjectIDs[target.ID] = true
 		case "kanban":
 			return CompanyExplorerDeleteResult{}, ErrInvalid
+		}
+		if err := postgresExpandCompanyExplorerRecycleScopeTx(ctx, tx, companyID, &targetScope); err != nil {
+			return CompanyExplorerDeleteResult{}, err
 		}
 		for folderID := range targetScope.FolderIDs {
 			folderIDs[folderID] = true

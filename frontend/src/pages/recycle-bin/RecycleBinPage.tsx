@@ -186,6 +186,7 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
             <div style={recycleEmptyStyle}>No deleted objects</div>
           ) : items.map((item) => {
             const selected = selectedIDs.has(item.recycle_bin_item_id);
+            const containedSummary = formatContainedItems(item.contained_items ?? []);
             return (
               <div
                 key={item.recycle_bin_item_id}
@@ -212,7 +213,10 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
               >
                 <span style={recycleObjectCellStyle}>
                   <ObjectKindIcon kind={item.object_kind} />
-                  <span style={recycleObjectTextStyle}>{item.object_label}</span>
+                  <span style={recycleObjectStackStyle}>
+                    <span style={recycleObjectTextStyle}>{item.object_label}</span>
+                    {containedSummary && <span style={recycleContainedTextStyle}>{containedSummary}</span>}
+                  </span>
                 </span>
                 <span style={recycleMutedCellStyle}>{formatObjectKind(item.object_kind, item.object_folder_kind)}</span>
                 <span style={recycleMutedCellStyle}>{formatDeletedTimestamp(item.deleted_timestamp)}</span>
@@ -230,6 +234,13 @@ function formatObjectKind(kind: RecycleBinObjectKind, folderKind?: string): stri
   if (kind === "folder") return folderKind ? `${formatObjectKind(folderKind as RecycleBinObjectKind)} folder` : "Folder";
   if (kind === "kanban") return "Kanban";
   return kind.slice(0, 1).toUpperCase() + kind.slice(1);
+}
+
+function formatContainedItems(items: NonNullable<RecycleBinItem["contained_items"]>): string {
+  if (items.length === 0) return "";
+  const visibleItems = items.slice(0, 5).map((item) => `${formatObjectKind(item.kind, item.folder_kind)}: ${item.label}`);
+  const suffix = items.length > visibleItems.length ? `, +${items.length - visibleItems.length} more` : "";
+  return `Contains ${items.length} item${items.length === 1 ? "" : "s"}: ${visibleItems.join(", ")}${suffix}`;
 }
 
 function formatDeletedTimestamp(value: string): string {
@@ -385,7 +396,7 @@ const recycleRowsStyle: React.CSSProperties = {
 
 function recycleRowStyle(selected: boolean): React.CSSProperties {
   return {
-    minHeight: 40,
+    minHeight: 44,
     display: "grid",
     gridTemplateColumns: "minmax(180px, 1fr) minmax(110px, 150px) minmax(150px, 210px)",
     alignItems: "center",
@@ -394,7 +405,7 @@ function recycleRowStyle(selected: boolean): React.CSSProperties {
     background: selected ? "#e0f2fe" : "#ffffff",
     color: "#111827",
     cursor: "default",
-    padding: "0 12px",
+    padding: "6px 12px",
     fontSize: 12,
     userSelect: "none",
   };
@@ -405,6 +416,12 @@ const recycleObjectCellStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
+};
+
+const recycleObjectStackStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 2,
 };
 
 const recycleObjectIconStyle: React.CSSProperties = {
@@ -421,6 +438,16 @@ const recycleObjectTextStyle: React.CSSProperties = {
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
   fontWeight: 720,
+};
+
+const recycleContainedTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#64748b",
+  fontSize: 11,
+  fontWeight: 650,
 };
 
 const recycleMutedCellStyle: React.CSSProperties = {

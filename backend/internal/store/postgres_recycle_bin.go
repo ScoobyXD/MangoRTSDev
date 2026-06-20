@@ -80,7 +80,8 @@ select company_id::text,
        object_label,
        coalesce(object_folder_kind, ''),
        coalesce(deleted_by_user_id::text, ''),
-       deleted_timestamp
+       deleted_timestamp,
+       restore_payload
 from recycle_bin_items
 where company_id=$1::uuid
 order by deleted_timestamp desc, recycle_bin_item_id desc`, companyID)
@@ -95,6 +96,7 @@ order by deleted_timestamp desc, recycle_bin_item_id desc`, companyID)
 	items := make([]domain.RecycleBinItem, 0)
 	for rows.Next() {
 		var item domain.RecycleBinItem
+		var payload []byte
 		if err := rows.Scan(
 			&item.CompanyID,
 			&item.RecycleBinItemID,
@@ -104,9 +106,11 @@ order by deleted_timestamp desc, recycle_bin_item_id desc`, companyID)
 			&item.ObjectFolderKind,
 			&item.DeletedByUserID,
 			&item.DeletedTimestamp,
+			&payload,
 		); err != nil {
 			return nil, err
 		}
+		item.ContainedItems = recycleContainedItemsFromPayload(item, payload)
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -727,6 +731,28 @@ insert into recycle_bin_items (
 	return nil
 }
 
+func postgresExpandCompanyExplorerRecycleScopeTx(ctx context.Context, tx *sql.Tx, companyID string, scope *companyExplorerRecycleScope) error {
+	if scope == nil {
+		return nil
+	}
+	changed := true
+	for changed {
+		before := len(scope.FolderIDs) + len(scope.NodeIDs) + len(scope.LogicGateIDs) + len(scope.ProjectIDs) + len(scope.KanbanBoardIDs)
+		if err := postgresAddFolderScopeItemsTx(ctx, tx, companyID, scope); err != nil {
+			return err
+		}
+		if err := postgresAddProjectScopeItemsTx(ctx, tx, companyID, scope); err != nil {
+			return err
+		}
+		if err := postgresAddLogicGateScopeItemsTx(ctx, tx, companyID, scope); err != nil {
+			return err
+		}
+		after := len(scope.FolderIDs) + len(scope.NodeIDs) + len(scope.LogicGateIDs) + len(scope.ProjectIDs) + len(scope.KanbanBoardIDs)
+		changed = after > before
+	}
+	return nil
+}
+
 func postgresAddFolderScopeItemsTx(ctx context.Context, tx *sql.Tx, companyID string, scope *companyExplorerRecycleScope) error {
 	if scope == nil || len(scope.FolderIDs) == 0 {
 		return nil
@@ -758,6 +784,64 @@ where company_id=$1::uuid
 		case "kanban":
 			scope.KanbanBoardIDs[itemID] = true
 		}
+	}
+	return rows.Err()
+}
+
+func postgresAddProjectScopeItemsTx(ctx context.Context, tx *sql.Tx, companyID string, scope *companyExplorerRecycleScope) error {
+	if scope == nil || len(scope.ProjectIDs) == 0 {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx, `
+select resource_type, resource_id::text
+from project_relationships
+where company_id=$1::uuid
+  and project_id = any(string_to_array($2, ',')::uuid[])`,
+		companyID, strings.Join(sortedMapKeys(scope.ProjectIDs), ","),
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var resourceType string
+		var resourceID string
+		if err := rows.Scan(&resourceType, &resourceID); err != nil {
+			return err
+		}
+		switch resourceType {
+		case EntityTypeNode:
+			scope.NodeIDs[resourceID] = true
+		case EntityTypeLogicGate:
+			scope.LogicGateIDs[resourceID] = true
+		case EntityTypeProject:
+			scope.ProjectIDs[resourceID] = true
+		}
+	}
+	return rows.Err()
+}
+
+func postgresAddLogicGateScopeItemsTx(ctx context.Context, tx *sql.Tx, companyID string, scope *companyExplorerRecycleScope) error {
+	if scope == nil || len(scope.LogicGateIDs) == 0 {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx, `
+select node_id::text
+from node_logic_gate_assignments
+where company_id=$1::uuid
+  and logic_gate_id = any(string_to_array($2, ',')::uuid[])`,
+		companyID, strings.Join(sortedMapKeys(scope.LogicGateIDs), ","),
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var nodeID string
+		if err := rows.Scan(&nodeID); err != nil {
+			return err
+		}
+		scope.NodeIDs[nodeID] = true
 	}
 	return rows.Err()
 }
