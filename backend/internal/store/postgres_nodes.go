@@ -55,23 +55,21 @@ with recursive folder_scope as (
   from company_explorer_folders
   where company_id=$1
     and folder_id=$2::uuid
-    and folder_kind='node'
   union all
   select child.company_id, child.folder_id
   from company_explorer_folders child
   join folder_scope parent
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
-  where child.folder_kind='node'
 ), windowed_positions as (
   select position.company_id, position.node_id, position.x, position.y, position.updated_timestamp
   from node_map_positions position
-  join company_explorer_folder_items item
+  join company_explorer_items item
     on item.company_id=position.company_id
-   and item.item_type='node'
-   and item.item_id=position.node_id::text
+   and item.target_type='node'
+   and item.target_id=position.node_id
   join folder_scope folder
-    on folder.folder_id=item.folder_id
+    on folder.folder_id=item.parent_folder_id
   where position.company_id=$1
     and position.x >= $3
     and position.x <= $4
@@ -94,7 +92,6 @@ select exists(
   from company_explorer_folders
   where company_id=$1
     and folder_id=$2::uuid
-    and folder_kind='node'
 )`, query.CompanyID, query.FolderID).Scan(&exists)
 	return exists, err
 }
@@ -512,19 +509,18 @@ func (r *PostgresRepo) ListNodesInFolderSubtree(companyID, folderID string) ([]d
 		`with recursive folder_scope as (
 		   select company_id, folder_id
 		   from company_explorer_folders
-		   where company_id=$1 and folder_id=$2::uuid and folder_kind='node'
+		   where company_id=$1 and folder_id=$2::uuid
 		   union all
 		   select child.company_id, child.folder_id
 		   from company_explorer_folders child
 		   join folder_scope parent
 		     on child.company_id=parent.company_id
 		    and child.parent_folder_id=parent.folder_id
-		   where child.folder_kind='node'
 		 ), visible_nodes as (
-		   select item.item_id::uuid as node_id
-		   from company_explorer_folder_items item
-		   join folder_scope folder on folder.folder_id=item.folder_id
-		   where item.company_id=$1 and item.item_type='node'
+		   select item.target_id as node_id
+		   from company_explorer_items item
+		   join folder_scope folder on folder.folder_id=item.parent_folder_id
+		   where item.company_id=$1::uuid and item.target_type='node'
 		 )
 		 select `+nodeSelectColumns+`
 		 from nodes n
@@ -568,19 +564,18 @@ func (r *PostgresRepo) ListVisibleNodesInFolderSubtree(companyID, folderID, user
 		`with recursive folder_scope as (
 		   select company_id, folder_id
 		   from company_explorer_folders
-		   where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='node'
+		   where company_id=$1::uuid and folder_id=$2::uuid
 		   union all
 		   select child.company_id, child.folder_id
 		   from company_explorer_folders child
 		   join folder_scope parent
 		     on child.company_id=parent.company_id
 		    and child.parent_folder_id=parent.folder_id
-		   where child.folder_kind='node'
 		 ), folder_nodes as (
-		   select distinct item.item_id::uuid as node_id
-		   from company_explorer_folder_items item
-		   join folder_scope folder on folder.folder_id=item.folder_id
-		   where item.company_id=$1::uuid and item.item_type='node'
+		   select distinct item.target_id as node_id
+		   from company_explorer_items item
+		   join folder_scope folder on folder.folder_id=item.parent_folder_id
+		   where item.company_id=$1::uuid and item.target_type='node'
 		 )
 		 select `+nodeSelectColumns+`
 		 from nodes n
@@ -670,19 +665,18 @@ func (r *PostgresRepo) ListNodeRelationshipsInFolderSubtree(companyID, folderID 
 		`with recursive folder_scope as (
 		   select company_id, folder_id
 		   from company_explorer_folders
-		   where company_id=$1 and folder_id=$2::uuid and folder_kind='node'
+		   where company_id=$1 and folder_id=$2::uuid
 		   union all
 		   select child.company_id, child.folder_id
 		   from company_explorer_folders child
 		   join folder_scope parent
 		     on child.company_id=parent.company_id
 		    and child.parent_folder_id=parent.folder_id
-		   where child.folder_kind='node'
 		 ), visible_nodes as (
-		   select item.item_id::uuid as node_id
-		   from company_explorer_folder_items item
-		   join folder_scope folder on folder.folder_id=item.folder_id
-		   where item.company_id=$1 and item.item_type='node'
+		   select item.target_id as node_id
+		   from company_explorer_items item
+		   join folder_scope folder on folder.folder_id=item.parent_folder_id
+		   where item.company_id=$1::uuid and item.target_type='node'
 		 )
 		 select rel.company_id, rel.node_relationship_id, rel.node_id_a, rel.node_id_b, rel.a_position::text, rel.b_position::text, rel.created_timestamp
 		 from node_relationships rel
@@ -864,19 +858,18 @@ func (r *PostgresRepo) ListNodeMapPositionsInFolderSubtree(companyID, folderID s
 with recursive folder_scope as (
   select company_id, folder_id
   from company_explorer_folders
-  where company_id=$1 and folder_id=$2::uuid and folder_kind='node'
+  where company_id=$1 and folder_id=$2::uuid
   union all
   select child.company_id, child.folder_id
   from company_explorer_folders child
   join folder_scope parent
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
-  where child.folder_kind='node'
 ), visible_nodes as (
-  select item.item_id::uuid as node_id
-  from company_explorer_folder_items item
-  join folder_scope folder on folder.folder_id=item.folder_id
-  where item.company_id=$1 and item.item_type='node'
+  select item.target_id as node_id
+  from company_explorer_items item
+  join folder_scope folder on folder.folder_id=item.parent_folder_id
+  where item.company_id=$1::uuid and item.target_type='node'
 )
 select position.company_id, position.node_id, position.x, position.y, position.updated_timestamp
 from node_map_positions position
@@ -1012,11 +1005,11 @@ order by rel.created_timestamp asc`, args...)
 	}
 
 	itemRows, err := r.db.QueryContext(ctx, postgresNodeMapWindowCTE+`
-select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
-from company_explorer_folder_items item
-join windowed_positions visible on visible.node_id::text=item.item_id
-where item.company_id=$1
-  and item.item_type='node'
+select item.company_id::text, coalesce(item.parent_folder_id::text, '') as folder_id, item.target_type, item.target_id::text, item.position, item.created_timestamp, item.updated_timestamp
+from company_explorer_items item
+join windowed_positions visible on visible.node_id=item.target_id
+where item.company_id=$1::uuid
+  and item.target_type='node'
 order by item.position asc, item.created_timestamp asc`, args...)
 	if err != nil {
 		return NodeMapWindowResult{}, err

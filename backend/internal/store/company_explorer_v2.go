@@ -8,7 +8,7 @@ import (
 
 func NormalizeCompanyExplorerV2View(value string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", CompanyExplorerLazyScopeAll, CompanyExplorerLazyScopeMe, CompanyExplorerLazyScopeTeam:
+	case "", CompanyExplorerLazyScopeAll:
 		return CompanyExplorerLazyScopeAll, true
 	default:
 		return "", false
@@ -16,10 +16,10 @@ func NormalizeCompanyExplorerV2View(value string) (string, bool) {
 }
 
 func normalizeCompanyExplorerV2RowsQuery(query CompanyExplorerV2RowsQuery, requireParent bool) (CompanyExplorerV2RowsQuery, error) {
-	query.CompanyID = cleanUUIDText(query.CompanyID)
-	query.ScopeUserID = cleanUUIDText(query.ScopeUserID)
-	query.PermissionUserID = cleanUUIDText(query.PermissionUserID)
-	query.ParentEntityID = cleanUUIDText(query.ParentEntityID)
+	query.CompanyID = strings.TrimSpace(query.CompanyID)
+	query.ScopeUserID = strings.TrimSpace(query.ScopeUserID)
+	query.PermissionUserID = strings.TrimSpace(query.PermissionUserID)
+	query.ParentEntityID = strings.TrimSpace(query.ParentEntityID)
 	view, ok := NormalizeCompanyExplorerV2View(query.View)
 	if !ok {
 		return CompanyExplorerV2RowsQuery{}, ErrInvalid
@@ -35,10 +35,6 @@ func normalizeCompanyExplorerV2EntityType(value string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case CompanyExplorerV2EntityCompany:
 		return CompanyExplorerV2EntityCompany, true
-	case CompanyExplorerV2EntityUserGroup:
-		return CompanyExplorerV2EntityUserGroup, true
-	case CompanyExplorerV2EntityUser:
-		return CompanyExplorerV2EntityUser, true
 	case CompanyExplorerV2EntityFolder:
 		return CompanyExplorerV2EntityFolder, true
 	case CompanyExplorerV2EntityProject:
@@ -53,11 +49,11 @@ func normalizeCompanyExplorerV2EntityType(value string) (string, bool) {
 }
 
 func normalizeCompanyExplorerV2FolderInput(input CompanyExplorerV2FolderInput) (CompanyExplorerV2FolderInput, error) {
-	input.CompanyID = cleanUUIDText(input.CompanyID)
-	input.ParentEntityID = cleanUUIDText(input.ParentEntityID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.ParentEntityID = strings.TrimSpace(input.ParentEntityID)
 	input.Name = strings.TrimSpace(input.Name)
-	input.ActorUserID = cleanUUIDText(input.ActorUserID)
-	input.PermissionUserID = cleanUUIDText(input.PermissionUserID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
 	input.DefaultAccess = strings.TrimSpace(input.DefaultAccess)
 	if input.DefaultAccess == "" {
 		input.DefaultAccess = ResourceDefaultAccessEdit
@@ -72,11 +68,11 @@ func normalizeCompanyExplorerV2FolderInput(input CompanyExplorerV2FolderInput) (
 }
 
 func normalizeCompanyExplorerV2FolderUpdateInput(input CompanyExplorerV2FolderUpdateInput) (CompanyExplorerV2FolderUpdateInput, error) {
-	input.CompanyID = cleanUUIDText(input.CompanyID)
-	input.EntityID = cleanUUIDText(input.EntityID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.EntityID = strings.TrimSpace(input.EntityID)
 	input.Name = strings.TrimSpace(input.Name)
-	input.ActorUserID = cleanUUIDText(input.ActorUserID)
-	input.PermissionUserID = cleanUUIDText(input.PermissionUserID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
 	if input.CompanyID == "" || input.EntityID == "" || input.Name == "" {
 		return CompanyExplorerV2FolderUpdateInput{}, ErrInvalid
 	}
@@ -84,12 +80,12 @@ func normalizeCompanyExplorerV2FolderUpdateInput(input CompanyExplorerV2FolderUp
 }
 
 func normalizeCompanyExplorerV2EdgeInput(input CompanyExplorerV2EdgeInput) (CompanyExplorerV2EdgeInput, error) {
-	input.CompanyID = cleanUUIDText(input.CompanyID)
-	input.ParentEntityID = cleanUUIDText(input.ParentEntityID)
-	input.ChildEntityID = cleanUUIDText(input.ChildEntityID)
-	input.ChildResourceID = cleanUUIDText(input.ChildResourceID)
-	input.ActorUserID = cleanUUIDText(input.ActorUserID)
-	input.PermissionUserID = cleanUUIDText(input.PermissionUserID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.ParentEntityID = strings.TrimSpace(input.ParentEntityID)
+	input.ChildEntityID = strings.TrimSpace(input.ChildEntityID)
+	input.ChildResourceID = strings.TrimSpace(input.ChildResourceID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
 	entityType, ok := normalizeCompanyExplorerV2EntityType(input.ChildEntityType)
 	if input.ChildEntityID == "" && (!ok || input.ChildResourceID == "") {
 		return CompanyExplorerV2EdgeInput{}, ErrInvalid
@@ -102,11 +98,11 @@ func normalizeCompanyExplorerV2EdgeInput(input CompanyExplorerV2EdgeInput) (Comp
 }
 
 func normalizeCompanyExplorerV2MoveEdgeInput(input CompanyExplorerV2MoveEdgeInput) (CompanyExplorerV2MoveEdgeInput, error) {
-	input.CompanyID = cleanUUIDText(input.CompanyID)
-	input.EdgeID = cleanUUIDText(input.EdgeID)
-	input.ParentEntityID = cleanUUIDText(input.ParentEntityID)
-	input.ActorUserID = cleanUUIDText(input.ActorUserID)
-	input.PermissionUserID = cleanUUIDText(input.PermissionUserID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.EdgeID = strings.TrimSpace(input.EdgeID)
+	input.ParentEntityID = strings.TrimSpace(input.ParentEntityID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
 	if input.CompanyID == "" || input.EdgeID == "" || input.ParentEntityID == "" {
 		return CompanyExplorerV2MoveEdgeInput{}, ErrInvalid
 	}
@@ -114,12 +110,12 @@ func normalizeCompanyExplorerV2MoveEdgeInput(input CompanyExplorerV2MoveEdgeInpu
 }
 
 func normalizeCompanyExplorerV2SubscriptionInput(input CompanyExplorerV2SubscriptionInput) (CompanyExplorerV2SubscriptionInput, error) {
-	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.OwnerType = strings.ToLower(strings.TrimSpace(input.OwnerType))
-	input.OwnerID = cleanUUIDText(input.OwnerID)
-	input.AnchorEntityID = cleanUUIDText(input.AnchorEntityID)
-	input.ActorUserID = cleanUUIDText(input.ActorUserID)
-	input.PermissionUserID = cleanUUIDText(input.PermissionUserID)
+	input.OwnerID = strings.TrimSpace(input.OwnerID)
+	input.AnchorEntityID = strings.TrimSpace(input.AnchorEntityID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
 	if input.OwnerType == "" {
 		input.OwnerType = CompanyExplorerV2SubscriptionOwnerUser
 	}
@@ -135,6 +131,10 @@ func normalizeCompanyExplorerV2SubscriptionInput(input CompanyExplorerV2Subscrip
 	return input, nil
 }
 func companyExplorerV2NativeEntityID(companyID, entityType, resourceID string) string {
+	switch strings.ToLower(strings.TrimSpace(entityType)) {
+	case CompanyExplorerV2EntityCompany, CompanyExplorerV2EntityProject, CompanyExplorerV2EntityLogicGate, CompanyExplorerV2EntityNode:
+		return strings.TrimSpace(resourceID)
+	}
 	sum := md5.Sum([]byte(companyID + ":company_explorer_v2_entity:" + strings.ToLower(strings.TrimSpace(entityType)) + ":" + resourceID))
 	return uuidStringFromMD5(sum[:])
 }
@@ -181,10 +181,6 @@ func companyExplorerV2NativeContext(entityType, entityID, resourceID string) map
 	switch entityType {
 	case CompanyExplorerV2EntityCompany:
 		context["company_id"] = resourceID
-	case CompanyExplorerV2EntityUserGroup:
-		context["user_group_id"] = resourceID
-	case CompanyExplorerV2EntityUser:
-		context["user_id"] = resourceID
 	case CompanyExplorerV2EntityFolder:
 		context["folder_id"] = entityID
 	case CompanyExplorerV2EntityProject:

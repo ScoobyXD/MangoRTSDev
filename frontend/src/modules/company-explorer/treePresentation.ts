@@ -161,7 +161,7 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
   if (!row || !payload || !row.folderID) return null;
   if (row.syntheticKind === "default_scope_folder") return null;
   const isGVICScopedRow = row.syntheticKind === "GVIC_folder" || Boolean(row.GVICRole);
-  const genericV2Container = Boolean(row.entityID) && (row.entityType === "company" || row.entityType === "user_group" || row.entityType === "user" || row.entityType === "folder");
+  const genericV2Container = Boolean(row.entityID) && (row.entityType === "company" || row.entityType === "folder");
 
   // Drag events fire on the row under the pointer. A file row already carries
   // its containing folderID, so users can drop anywhere inside that visible
@@ -374,7 +374,7 @@ export function buildExplorerSearchViewRows<T extends ExplorerSearchRow & { id: 
   return input.rows.filter((row) => includedIDs.has(row.id));
 }
 
-type ExplorerDeleteTargetV2Metadata = { entityID?: string; entityType?: CompanyExplorerV2EntityType };
+type ExplorerDeleteTargetV2Metadata = { entityID?: string; entityType?: CompanyExplorerV2EntityType; edgeID?: string };
 
 export type ExplorerDeleteTarget =
   | ({ kind: "folder"; id: string; folderKind: CompanyExplorerFolderKind } & ExplorerDeleteTargetV2Metadata)
@@ -388,7 +388,8 @@ export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | n
   if (row.systemKey) return null;
   const entityID = row.entityID?.trim() ?? "";
   const entityType = row.entityType;
-  const v2Metadata = entityID && entityType ? { entityID, entityType } : {};
+  const edgeID = row.edgeID?.trim() ?? "";
+  const v2Metadata = entityID && entityType ? { entityID, entityType, ...(edgeID && entityType !== "folder" ? { edgeID } : {}) } : {};
   if (row.kind === "folder" && row.folderID && row.folderKind && (!entityType || entityType === "folder")) {
     return { kind: "folder", id: entityType === "folder" ? entityID : row.folderID, folderKind: row.folderKind, ...v2Metadata };
   }

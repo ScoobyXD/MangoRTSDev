@@ -741,7 +741,6 @@ returns boolean as $$
     where normalized.resource_type='company_explorer_folder'
       and folder.company_id=p_company_id
       and folder.folder_id=p_resource_id
-      and folder.folder_kind <> 'communications'
     union all
     select coalesce(folder.default_access, 'edit')
     from shared_inbox_folders folder, normalized_resource normalized
@@ -1277,40 +1276,22 @@ create table if not exists company_explorer_folders (
   company_id uuid not null,
   folder_id uuid not null,
   parent_folder_id uuid,
-  folder_kind text not null,
-  system_key text,
   name text not null,
   default_access text not null default 'edit',
-  scope_type text not null default 'company',
-  scope_id text,
   position integer not null default 1000,
-  created_timestamp timestamptz not null,
-  updated_timestamp timestamptz not null,
-  constraint company_explorer_folders_kind_chk check (folder_kind in ('node', 'logic_gate', 'project')),
+  created_by_user_id uuid,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
   constraint company_explorer_folders_default_access_chk check (default_access in ('edit', 'no_access')),
-  constraint company_explorer_folders_scope_chk check (
-    scope_type in ('company', 'user', 'team')
-    and (
-      (scope_type = 'company' and scope_id is null)
-      or (scope_type in ('user', 'team') and scope_id is not null and btrim(scope_id) <> '')
-    )
-  ),
-  constraint company_explorer_folders_system_key_nonblank_chk check (system_key is null or btrim(system_key) <> ''),
   constraint company_explorer_folders_name_nonblank_chk check (btrim(name) <> ''),
   constraint company_explorer_folders_parent_not_self_chk check (parent_folder_id is null or parent_folder_id <> folder_id),
   primary key (company_id, folder_id),
-  foreign key (company_id, parent_folder_id) references company_explorer_folders (company_id, folder_id) on delete cascade
+  foreign key (company_id, parent_folder_id) references company_explorer_folders (company_id, folder_id) on delete cascade,
+  foreign key (created_by_user_id) references users (user_id) on delete set null
 );
 
-create unique index if not exists idx_company_explorer_folders_system_key
-  on company_explorer_folders(company_id, system_key)
-  where system_key is not null;
-
-create index if not exists idx_company_explorer_folders_parent_kind
-  on company_explorer_folders(company_id, folder_kind, parent_folder_id, position, created_timestamp);
-
-create index if not exists idx_company_explorer_folders_scope
-  on company_explorer_folders(company_id, scope_type, scope_id);
+create index if not exists idx_company_explorer_folders_parent_position
+  on company_explorer_folders(company_id, parent_folder_id, position, created_timestamp, folder_id);
 
 create table if not exists shared_inbox_folders (
   company_id uuid not null,
@@ -1356,58 +1337,28 @@ create index if not exists idx_shared_inboxes_parent
 create index if not exists idx_shared_inboxes_account_email
   on shared_inboxes(company_id, account_email);
 
-create table if not exists company_explorer_default_folder_seeds (
+create table if not exists company_explorer_items (
   company_id uuid not null,
-  seed_key text not null,
-  created_timestamp timestamptz not null default now(),
-  constraint company_explorer_default_folder_seeds_key_nonblank_chk check (btrim(seed_key) <> ''),
-  primary key (company_id, seed_key)
-);
-
-create table if not exists company_explorer_folder_items (
-  company_id uuid not null,
-  folder_id uuid not null,
-  item_type text not null,
-  item_id text not null,
+  item_id uuid not null,
+  parent_folder_id uuid,
+  target_type text not null,
+  target_id uuid not null,
   position integer not null default 1000,
-  created_timestamp timestamptz not null,
-  updated_timestamp timestamptz not null,
-  constraint company_explorer_folder_items_type_chk check (item_type in ('node', 'logic_gate', 'project')),
-  primary key (company_id, item_type, item_id),
-  foreign key (company_id, folder_id) references company_explorer_folders (company_id, folder_id) on delete cascade
-);
-
-create index if not exists idx_company_explorer_folder_items_folder_type
-  on company_explorer_folder_items(company_id, folder_id, item_type, position, created_timestamp);
-
-create table if not exists company_explorer_folder_shares (
-  company_id uuid not null,
-  folder_id uuid not null,
-  email text not null,
-  user_id uuid,
-  status text not null default 'pending',
-  invited_by_user_id uuid not null,
+  created_by_user_id uuid,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint company_explorer_folder_shares_email_nonblank_chk check (btrim(email) <> ''),
-  constraint company_explorer_folder_shares_email_lowercase_chk check (email = lower(btrim(email))),
-  constraint company_explorer_folder_shares_status_chk check (status in ('pending', 'active')),
-  constraint company_explorer_folder_shares_status_user_chk check (
-    (status = 'pending' and user_id is null) or
-    (status = 'active' and user_id is not null)
-  ),
-  primary key (company_id, folder_id, email),
-  foreign key (company_id, folder_id) references company_explorer_folders (company_id, folder_id) on delete cascade,
-  foreign key (company_id, user_id) references company_memberships (company_id, user_id) on delete cascade,
-  foreign key (invited_by_user_id) references users (user_id) on delete cascade
+  constraint company_explorer_items_target_type_chk check (target_type in ('project', 'logic_gate', 'node')),
+  primary key (company_id, item_id),
+  unique (company_id, target_type, target_id),
+  foreign key (company_id, parent_folder_id) references company_explorer_folders(company_id, folder_id) on delete cascade,
+  foreign key (created_by_user_id) references users(user_id) on delete set null
 );
 
-create index if not exists idx_company_explorer_folder_shares_user
-  on company_explorer_folder_shares(company_id, user_id, folder_id)
-  where user_id is not null;
+create index if not exists idx_company_explorer_items_parent_position
+  on company_explorer_items(company_id, parent_folder_id, position, created_timestamp, item_id);
 
-create index if not exists idx_company_explorer_folder_shares_email_status
-  on company_explorer_folder_shares(company_id, email, status);
+create index if not exists idx_company_explorer_items_target
+  on company_explorer_items(company_id, target_type, target_id);
 
 create or replace function mangorts_try_uuid(p_value text)
 returns uuid as $$
@@ -1418,358 +1369,45 @@ exception when invalid_text_representation then
 end;
 $$ language plpgsql immutable;
 
-create or replace function mangorts_company_explorer_v2_entity_id(
-  p_company_id uuid,
-  p_entity_type text,
-  p_resource_id uuid
-)
-returns uuid as $$
-  select md5(
-    p_company_id::text || ':company_explorer_v2_entity:' ||
-    lower(btrim(p_entity_type)) || ':' ||
-    p_resource_id::text
-  )::uuid;
-$$ language sql immutable;
-
-create or replace function mangorts_company_explorer_v2_edge_id(
-  p_company_id uuid,
-  p_parent_entity_id uuid,
-  p_child_entity_id uuid
-)
-returns uuid as $$
-  select md5(
-    p_company_id::text || ':company_explorer_v2_edge:' ||
-    p_parent_entity_id::text || ':' ||
-    p_child_entity_id::text
-  )::uuid;
-$$ language sql immutable;
-
-create table if not exists company_explorer_entities (
-  company_id uuid not null,
-  entity_id uuid not null,
-  entity_type text not null,
-  resource_id uuid,
-  name text,
-  default_access text,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint company_explorer_entities_type_chk check (
-    entity_type in ('company', 'user_group', 'user', 'folder', 'project', 'logic_gate', 'node')
-  ),
-  constraint company_explorer_entities_resource_shape_chk check (
-    (entity_type = 'folder' and resource_id is null)
-    or (entity_type <> 'folder' and resource_id is not null)
-  ),
-  constraint company_explorer_entities_name_nonblank_chk check (name is null or btrim(name) <> ''),
-  constraint company_explorer_entities_default_access_chk check (default_access is null or default_access in ('edit', 'no_access')),
-  constraint company_explorer_entities_folder_default_access_chk check (
-    (entity_type = 'folder' and default_access is not null)
-    or (entity_type <> 'folder' and default_access is null)
-  ),
-  primary key (company_id, entity_id),
-  foreign key (company_id) references companies (company_id) on delete cascade
-);
-
-create unique index if not exists idx_company_explorer_entities_native_resource
-  on company_explorer_entities(company_id, entity_type, resource_id)
-  where resource_id is not null;
-
-create index if not exists idx_company_explorer_entities_type_name
-  on company_explorer_entities(company_id, entity_type, lower(name), entity_id);
-
-create table if not exists company_explorer_edges (
-  company_id uuid not null,
-  edge_id uuid not null,
-  parent_entity_id uuid not null,
-  child_entity_id uuid not null,
-  position integer not null default 1000,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint company_explorer_edges_not_self_chk check (parent_entity_id <> child_entity_id),
-  primary key (company_id, edge_id),
-  unique (company_id, parent_entity_id, child_entity_id),
-  unique (company_id, child_entity_id),
-  foreign key (company_id, parent_entity_id) references company_explorer_entities (company_id, entity_id) on delete cascade,
-  foreign key (company_id, child_entity_id) references company_explorer_entities (company_id, entity_id) on delete cascade
-);
-
-create index if not exists idx_company_explorer_edges_parent_position
-  on company_explorer_edges(company_id, parent_entity_id, position, created_timestamp, edge_id);
-
-create index if not exists idx_company_explorer_edges_child
-  on company_explorer_edges(company_id, child_entity_id, parent_entity_id);
-
-create unique index if not exists idx_company_explorer_edges_one_parent_per_child
-  on company_explorer_edges(company_id, child_entity_id);
-
-create table if not exists company_explorer_subscriptions (
-  company_id uuid not null,
-  subscription_id uuid not null,
-  owner_type text not null,
-  owner_id uuid not null,
-  anchor_entity_id uuid not null,
-  position integer not null default 1000,
-  created_by_user_id uuid,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint company_explorer_subscriptions_owner_type_chk check (owner_type in ('user', 'team')),
-  primary key (company_id, subscription_id),
-  unique (company_id, owner_type, owner_id, anchor_entity_id),
-  foreign key (company_id, anchor_entity_id) references company_explorer_entities (company_id, entity_id) on delete cascade,
-  foreign key (created_by_user_id) references users (user_id) on delete set null
-);
-
-create index if not exists idx_company_explorer_subscriptions_owner_position
-  on company_explorer_subscriptions(company_id, owner_type, owner_id, position, created_timestamp, subscription_id);
-
-create index if not exists idx_company_explorer_subscriptions_anchor
-  on company_explorer_subscriptions(company_id, anchor_entity_id, owner_type, owner_id);
-create or replace function mangorts_prevent_company_explorer_edge_cycle()
-returns trigger as $$
-begin
-  if new.parent_entity_id = new.child_entity_id then
-    raise exception 'company_explorer_edges cannot place an entity under itself';
-  end if;
-
-  if exists (
-    with recursive ancestors(entity_id, path) as (
-      select new.parent_entity_id, array[new.parent_entity_id]
-      union all
-      select edge.parent_entity_id, ancestors.path || edge.parent_entity_id
-      from ancestors
-      join company_explorer_edges edge
-        on edge.company_id = new.company_id
-       and edge.child_entity_id = ancestors.entity_id
-      where edge.edge_id <> new.edge_id
-        and not edge.parent_entity_id = any(ancestors.path)
-    )
-    select 1
-    from ancestors
-    where entity_id = new.child_entity_id
-  ) then
-    raise exception 'company_explorer_edges cycle detected for parent % and child %', new.parent_entity_id, new.child_entity_id;
-  end if;
-
-  return new;
-end;
-$$ language plpgsql;
-
-drop trigger if exists trg_company_explorer_edges_prevent_cycle on company_explorer_edges;
-
-create trigger trg_company_explorer_edges_prevent_cycle
-  before insert or update of company_id, parent_entity_id, child_entity_id
-  on company_explorer_edges
-  for each row
-  execute function mangorts_prevent_company_explorer_edge_cycle();
-
-create or replace view company_explorer_v2_backfill_verification as
+create or replace view company_explorer_final_backfill_verification as
 select check_name, expected_count, actual_count, expected_count = actual_count as ok
 from (
-  select 'old_folders_to_v2_folder_entities'::text as check_name,
-         (select count(*) from company_explorer_folders)::bigint as expected_count,
+  select 'manual_references_have_existing_targets'::text as check_name,
+         (select count(*) from company_explorer_items)::bigint as expected_count,
          (
            select count(*)
-           from company_explorer_folders folder
-           join company_explorer_entities entity
-             on entity.company_id = folder.company_id
-            and entity.entity_id = folder.folder_id
-            and entity.entity_type = 'folder'
-            and entity.resource_id is null
+           from company_explorer_items item
+           left join projects project
+             on item.target_type='project'
+            and project.company_id=item.company_id
+            and project.project_id=item.target_id
+           left join logic_gates logic_gate
+             on item.target_type='logic_gate'
+            and logic_gate.company_id=item.company_id
+            and logic_gate.logic_gate_id=item.target_id
+           left join nodes node
+             on item.target_type='node'
+            and node.company_id=item.company_id
+            and node.node_id=item.target_id
+           where (item.target_type='project' and project.project_id is not null)
+              or (item.target_type='logic_gate' and logic_gate.logic_gate_id is not null)
+              or (item.target_type='node' and node.node_id is not null)
          )::bigint as actual_count
 ) check_row
 union all
 select check_name, expected_count, actual_count, expected_count = actual_count as ok
 from (
-  select 'old_folder_items_to_v2_resource_edges'::text as check_name,
-         (select count(*) from company_explorer_folder_items)::bigint as expected_count,
-         (
-           select count(*)
-           from company_explorer_folder_items item
-           join company_explorer_entities child
-             on child.company_id = item.company_id
-            and child.entity_type = item.item_type
-            and child.resource_id = mangorts_try_uuid(item.item_id)
-           join company_explorer_edges edge
-             on edge.company_id = item.company_id
-            and edge.parent_entity_id = item.folder_id
-            and edge.child_entity_id = child.entity_id
-         )::bigint as actual_count
-) check_row
-union all
-select check_name, expected_count, actual_count, expected_count = actual_count as ok
-from (
-  select 'old_parent_child_folder_paths_to_v2_edges'::text as check_name,
+  select 'folders_have_valid_parents'::text as check_name,
          (select count(*) from company_explorer_folders where parent_folder_id is not null)::bigint as expected_count,
          (
            select count(*)
-           from company_explorer_folders folder
-           join company_explorer_edges edge
-             on edge.company_id = folder.company_id
-            and edge.parent_entity_id = folder.parent_folder_id
-            and edge.child_entity_id = folder.folder_id
-           where folder.parent_folder_id is not null
-         )::bigint as actual_count
-) check_row
-union all
-select check_name, expected_count, actual_count, expected_count = actual_count as ok
-from (
-  select 'company_root_folders_to_company_root_edges'::text as check_name,
-         (select count(*) from company_explorer_folders where parent_folder_id is null and scope_type = 'company')::bigint as expected_count,
-         (
-           select count(*)
-           from company_explorer_folders folder
-           join company_explorer_edges edge
-             on edge.company_id = folder.company_id
-            and edge.child_entity_id = folder.folder_id
-           join company_explorer_entities parent
-             on parent.company_id = edge.company_id
-            and parent.entity_id = edge.parent_entity_id
-            and parent.entity_type = 'company'
-            and parent.resource_id = folder.company_id
-           where folder.parent_folder_id is null
-             and folder.scope_type = 'company'
-         )::bigint as actual_count
-) check_row
-union all
-select check_name, expected_count, actual_count, expected_count = actual_count as ok
-from (
-  select 'user_root_folders_to_user_root_edges'::text as check_name,
-         (
-           select count(*)
-           from company_explorer_folders
-           where parent_folder_id is null
-             and scope_type = 'user'
-             and mangorts_try_uuid(scope_id) is not null
-         )::bigint as expected_count,
-         (
-           select count(*)
-           from company_explorer_folders folder
-           join company_explorer_edges edge
-             on edge.company_id = folder.company_id
-            and edge.child_entity_id = folder.folder_id
-           join company_explorer_entities parent
-             on parent.company_id = edge.company_id
-            and parent.entity_id = edge.parent_entity_id
-            and parent.entity_type = 'user'
-            and parent.resource_id = mangorts_try_uuid(folder.scope_id)
-           where folder.parent_folder_id is null
-             and folder.scope_type = 'user'
-             and mangorts_try_uuid(folder.scope_id) is not null
-         )::bigint as actual_count
-) check_row
-union all
-select check_name, expected_count, actual_count, expected_count = actual_count as ok
-from (
-  select 'team_root_folders_to_group_root_edges'::text as check_name,
-         (
-           select count(*)
-           from company_explorer_folders
-           where parent_folder_id is null
-             and scope_type = 'team'
-             and mangorts_try_uuid(scope_id) is not null
-         )::bigint as expected_count,
-         (
-           select count(*)
-           from company_explorer_folders folder
-           join company_explorer_edges edge
-             on edge.company_id = folder.company_id
-            and edge.child_entity_id = folder.folder_id
-           join company_explorer_entities parent
-             on parent.company_id = edge.company_id
-            and parent.entity_id = edge.parent_entity_id
-            and parent.entity_type = 'user_group'
-            and parent.resource_id = mangorts_try_uuid(folder.scope_id)
-           where folder.parent_folder_id is null
-             and folder.scope_type = 'team'
-             and mangorts_try_uuid(folder.scope_id) is not null
-         )::bigint as actual_count
-) check_row
-union all
-select check_name, expected_count, actual_count, expected_count = actual_count as ok
-from (
-  select 'folder_default_access_to_v2_entities'::text as check_name,
-         (select count(*) from company_explorer_folders)::bigint as expected_count,
-         (
-           select count(*)
-           from company_explorer_folders folder
-           join company_explorer_entities entity
-             on entity.company_id = folder.company_id
-            and entity.entity_id = folder.folder_id
-            and entity.entity_type = 'folder'
-            and entity.default_access = folder.default_access
-         )::bigint as actual_count
-) check_row
-union all
-select check_name, expected_count, actual_count, expected_count = actual_count as ok
-from (
-  select 'folder_permission_rows_target_v2_folder_entities'::text as check_name,
-         (
-           select count(*)
-           from resource_permissions permission
-           join company_explorer_folders folder
-             on folder.company_id = permission.company_id
-            and folder.folder_id = permission.resource_id
-           where permission.resource_type = 'company_explorer_folder'
-         )::bigint as expected_count,
-         (
-           select count(*)
-           from resource_permissions permission
-           join company_explorer_entities entity
-             on entity.company_id = permission.company_id
-            and entity.entity_id = permission.resource_id
-            and entity.entity_type = 'folder'
-           where permission.resource_type = 'company_explorer_folder'
-         )::bigint as actual_count
-) check_row
-union all
-select check_name, expected_count, actual_count, expected_count = actual_count as ok
-from (
-  select 'active_folder_shares_to_edit_grants'::text as check_name,
-         (
-           select count(*)
-           from company_explorer_folder_shares share
-           where share.status = 'active'
-             and share.user_id is not null
-         )::bigint as expected_count,
-         (
-           select count(*)
-           from company_explorer_folder_shares share
-           join resource_access_grants grant_row
-             on grant_row.company_id = share.company_id
-            and grant_row.resource_type = 'company_explorer_folder'
-            and grant_row.resource_id = share.folder_id
-            and grant_row.principal_type = 'user'
-            and grant_row.principal_id = share.user_id
-            and grant_row.access_level = 'edit'
-           where share.status = 'active'
-             and share.user_id is not null
-         )::bigint as actual_count
-) check_row
-union all
-select check_name, expected_count, actual_count, expected_count = actual_count as ok
-from (
-  select 'legacy_folder_item_ids_are_valid_uuids'::text as check_name,
-         0::bigint as expected_count,
-         (
-           select count(*)
-           from company_explorer_folder_items
-           where mangorts_try_uuid(item_id) is null
-         )::bigint as actual_count
-) check_row
-union all
-select check_name, expected_count, actual_count, expected_count = actual_count as ok
-from (
-  select 'legacy_root_scope_ids_are_valid_uuids'::text as check_name,
-         0::bigint as expected_count,
-         (
-           select count(*)
-           from company_explorer_folders
-           where parent_folder_id is null
-             and scope_type in ('user', 'team')
-             and mangorts_try_uuid(scope_id) is null
+           from company_explorer_folders child
+           join company_explorer_folders parent
+             on parent.company_id=child.company_id
+            and parent.folder_id=child.parent_folder_id
+           where child.parent_folder_id is not null
          )::bigint as actual_count
 ) check_row;
-
 create table if not exists recycle_bin_items (
   company_id uuid not null,
   recycle_bin_item_id uuid not null,
@@ -1899,14 +1537,7 @@ returns table(scope text, resource_key text) as $$
     ('workspace-snapshot:logic_gate_map', ''),
     ('workspace-snapshot:logic_gate_map_window', ''),
     ('workspace-snapshot:company_explorer', ''),
-    ('workspace-snapshot:company_explorer', 'folder_kind:node'),
-    ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
-    ('workspace-snapshot:company_explorer', 'folder_kind:project'),
     ('workspace-snapshot:shared_triage', ''),
-    ('company-explorer-folder-items', ''),
-    ('company-explorer-folder-items', 'item_type:node'),
-    ('company-explorer-folder-items', 'item_type:logic_gate'),
-    ('company-explorer-folder-items', 'item_type:project'),
     ('nodes', ''),
     ('projects', ''),
     ('node-relationships', ''),
@@ -1924,8 +1555,6 @@ create or replace function workspace_read_version_keys_for_domain_event(p_event_
 returns table(scope text, resource_key text) as $$
 declare
   board_id text := btrim(coalesce(p_payload->>'board_id', ''));
-  folder_kind text := btrim(coalesce(p_payload->>'folder_kind', ''));
-  item_type text := btrim(coalesce(p_payload->>'item_type', ''));
 begin
   return query select v.scope, v.resource_key from (values
     ('workspace-snapshot:full', '')
@@ -1950,15 +1579,7 @@ begin
       ('nodes', ''),
       ('workspace-snapshot:node_map', ''),
       ('workspace-snapshot:node_map_window', ''),
-      ('workspace-snapshot:company_explorer', ''),
-      ('workspace-snapshot:company_explorer', 'folder_kind:node')
-    ) as v(scope, resource_key);
-  end if;
-
-  if p_event_type = any(array['node_deleted', 'node_permissions_updated']::text[]) then
-    return query select v.scope, v.resource_key from (values
-      ('company-explorer-folder-items', ''),
-      ('company-explorer-folder-items', 'item_type:node')
+      ('workspace-snapshot:company_explorer', '')
     ) as v(scope, resource_key);
   end if;
 
@@ -1991,39 +1612,7 @@ begin
       ('logic-gates', ''),
       ('workspace-snapshot:logic_gate_map', ''),
       ('workspace-snapshot:logic_gate_map_window', ''),
-      ('workspace-snapshot:company_explorer', ''),
-      ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate')
-    ) as v(scope, resource_key);
-  end if;
-
-  if p_event_type = any(array['logic_gate_deleted', 'logic_gate_permissions_updated']::text[]) then
-    return query select v.scope, v.resource_key from (values
-      ('company-explorer-folder-items', ''),
-      ('company-explorer-folder-items', 'item_type:logic_gate')
-    ) as v(scope, resource_key);
-  end if;
-
-  if p_event_type = any(array[
-    'project_created',
-    'project_updated',
-    'project_deleted',
-    'project_information_created',
-    'project_information_deleted',
-    'project_relationship_upserted',
-    'project_relationship_deleted',
-    'project_permissions_updated'
-  ]::text[]) then
-    return query select v.scope, v.resource_key from (values
-      ('projects', ''),
-      ('workspace-snapshot:company_explorer', ''),
-      ('workspace-snapshot:company_explorer', 'folder_kind:project')
-    ) as v(scope, resource_key);
-  end if;
-
-  if p_event_type = any(array['project_deleted', 'project_permissions_updated']::text[]) then
-    return query select v.scope, v.resource_key from (values
-      ('company-explorer-folder-items', ''),
-      ('company-explorer-folder-items', 'item_type:project')
+      ('workspace-snapshot:company_explorer', '')
     ) as v(scope, resource_key);
   end if;
 
@@ -2052,76 +1641,38 @@ begin
   end if;
 
   if p_event_type = any(array[
+    'project_created',
+    'project_updated',
+    'project_deleted',
+    'project_information_created',
+    'project_information_deleted',
+    'project_relationship_upserted',
+    'project_relationship_deleted',
+    'project_permissions_updated'
+  ]::text[]) then
+    return query select v.scope, v.resource_key from (values
+      ('projects', ''),
+      ('workspace-snapshot:company_explorer', '')
+    ) as v(scope, resource_key);
+  end if;
+
+  if p_event_type = any(array[
     'company_explorer_folder_created',
     'company_explorer_folder_updated',
     'company_explorer_folder_deleted',
     'company_explorer_folder_permissions_updated',
-    'communications_shared_inbox_gvic_updated',
-    'shared_triage_access_updated'
+    'company_explorer_item_placed',
+    'company_explorer_item_removed'
   ]::text[]) then
-    if folder_kind = 'node' then
-      return query select v.scope, v.resource_key from (values
-        ('workspace-snapshot:node_map', ''),
-        ('workspace-snapshot:node_map_window', ''),
-        ('map-layout:node-window', ''),
-        ('workspace-snapshot:company_explorer', ''),
-        ('workspace-snapshot:company_explorer', 'folder_kind:node'),
-        ('company-explorer-folder-items', ''),
-        ('company-explorer-folder-items', 'item_type:node')
-      ) as v(scope, resource_key);
-    elsif folder_kind = 'logic_gate' then
-      return query select v.scope, v.resource_key from (values
-        ('workspace-snapshot:logic_gate_map', ''),
-        ('workspace-snapshot:logic_gate_map_window', ''),
-        ('map-layout:logic_gate-window', ''),
-        ('workspace-snapshot:company_explorer', ''),
-        ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
-        ('company-explorer-folder-items', ''),
-        ('company-explorer-folder-items', 'item_type:logic_gate')
-      ) as v(scope, resource_key);
-    elsif folder_kind = 'project' then
-      return query select v.scope, v.resource_key from (values
-        ('workspace-snapshot:company_explorer', ''),
-        ('workspace-snapshot:company_explorer', 'folder_kind:project'),
-        ('company-explorer-folder-items', ''),
-        ('company-explorer-folder-items', 'item_type:project')
-      ) as v(scope, resource_key);
-    elsif folder_kind = 'communications' then
-      return query select v.scope, v.resource_key from (values
-        ('workspace-snapshot:shared_triage', '')
-      ) as v(scope, resource_key);
-    end if;
+    return query select v.scope, v.resource_key from (values
+      ('workspace-snapshot:company_explorer', '')
+    ) as v(scope, resource_key);
   end if;
 
-  if p_event_type = any(array['company_explorer_folder_item_assigned', 'company_explorer_folder_item_removed']::text[]) then
-    if item_type = 'node' then
-      return query select v.scope, v.resource_key from (values
-        ('workspace-snapshot:node_map', ''),
-        ('workspace-snapshot:node_map_window', ''),
-        ('map-layout:node-window', ''),
-        ('workspace-snapshot:company_explorer', ''),
-        ('workspace-snapshot:company_explorer', 'folder_kind:node'),
-        ('company-explorer-folder-items', ''),
-        ('company-explorer-folder-items', 'item_type:node')
-      ) as v(scope, resource_key);
-    elsif item_type = 'logic_gate' then
-      return query select v.scope, v.resource_key from (values
-        ('workspace-snapshot:logic_gate_map', ''),
-        ('workspace-snapshot:logic_gate_map_window', ''),
-        ('map-layout:logic_gate-window', ''),
-        ('workspace-snapshot:company_explorer', ''),
-        ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
-        ('company-explorer-folder-items', ''),
-        ('company-explorer-folder-items', 'item_type:logic_gate')
-      ) as v(scope, resource_key);
-    elsif item_type = 'project' then
-      return query select v.scope, v.resource_key from (values
-        ('workspace-snapshot:company_explorer', ''),
-        ('workspace-snapshot:company_explorer', 'folder_kind:project'),
-        ('company-explorer-folder-items', ''),
-        ('company-explorer-folder-items', 'item_type:project')
-      ) as v(scope, resource_key);
-    end if;
+  if p_event_type = any(array['communications_shared_inbox_gvic_updated', 'shared_triage_access_updated']::text[]) then
+    return query select v.scope, v.resource_key from (values
+      ('workspace-snapshot:shared_triage', '')
+    ) as v(scope, resource_key);
   end if;
 
   if p_event_type = any(array['kanban_board_saved', 'kanban_board_updated', 'kanban_board_deleted', 'logic_gate_deleted']::text[]) then
@@ -2134,36 +1685,14 @@ begin
     'kanban_column_created',
     'kanban_column_updated',
     'kanban_column_deleted',
-    'kanban_board_deleted',
-    'logic_gate_deleted'
-  ]::text[]) then
-    return query select v.scope, v.resource_key from (values
-      ('kanban-columns', 'board_id:' || board_id),
-      ('workspace-snapshot:kanban', 'board_id:' || board_id)
-    ) as v(scope, resource_key);
-  end if;
-
-  if board_id <> '' and p_event_type = any(array[
     'kanban_card_upserted',
     'kanban_card_moved',
-    'kanban_card_deleted',
-    'work_item.logic_gate_assignment_saved',
-    'work_item.logic_gate_assignment_moved',
-    'work_item.logic_gate_assignment_removed',
-    'work_item.logic_gate_issue_toggled',
-    'kanban_column_deleted',
-    'kanban_board_deleted',
-    'node_deleted',
-    'logic_gate_deleted'
+    'kanban_card_deleted'
   ]::text[]) then
-    return query select v.scope, v.resource_key from (values
-      ('kanban-cards', 'board_id:' || board_id),
-      ('workspace-snapshot:kanban', 'board_id:' || board_id)
-    ) as v(scope, resource_key);
+    return query select 'kanban-board'::text, board_id;
   end if;
 end;
 $$ language plpgsql immutable;
-
 create or replace function trg_update_workspace_read_versions()
 returns trigger as $$
 begin

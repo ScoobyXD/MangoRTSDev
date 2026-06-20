@@ -15,9 +15,10 @@ func TestPostgresDeferredExplorerProjectionUsesInsertIfMissingSQL(t *testing.T) 
 	insertBody := extractFunctionSourceForTest(t, source, "func insertMissingCompanyExplorerFolderItemSQL")
 	normalizedInsert := strings.ToLower(strings.Join(strings.Fields(insertBody), " "))
 	for _, needle := range []string{
-		"insert into company_explorer_folder_items",
-		"on conflict (company_id, item_type, item_id) do nothing",
-		"returning company_id, folder_id, item_type, item_id, position",
+		"insert into company_explorer_items",
+		"parent_folder_id, target_type, target_id",
+		"on conflict (company_id, target_type, target_id) do nothing",
+		"returning company_id::text, coalesce(parent_folder_id::text, '') as folder_id, target_type, target_id::text, position",
 	} {
 		if !strings.Contains(normalizedInsert, needle) {
 			t.Fatalf("insertMissingCompanyExplorerFolderItemSQL missing %q", needle)
@@ -34,7 +35,7 @@ func TestPostgresDeferredExplorerProjectionUsesInsertIfMissingSQL(t *testing.T) 
 	for _, needle := range []string{
 		"insertmissingcompanyexplorerfolderitemsql",
 		"if !inserted { return nil, nil }",
-		"folderitemassignedworkspaceeventinput",
+		"company_explorer_item_placed",
 	} {
 		if !strings.Contains(normalizedProject, needle) {
 			t.Fatalf("projectDeferredCompanyExplorerFolderItemTx missing %q", needle)

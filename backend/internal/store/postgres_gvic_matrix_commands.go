@@ -230,16 +230,6 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 	var folderItem domain.CompanyExplorerFolderItem
 	if syncFolderItem {
 		stop = observeTiming(ctx, "repo.createGVICMatrixLogicGateTx.folder_item_writes")
-		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveLogicGatesKey)
-		if err != nil {
-			stop()
-			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
-		}
-		folderItem, _, err = assignCompanyExplorerFolderItemSQL(ctx, tx, input.CompanyID, activeFolder.FolderID, "logic_gate", created.LogicGateID, 0)
-		if err != nil {
-			stop()
-			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
-		}
 		stop()
 	}
 	return created, folderItem, projectionDeltas, nil
@@ -249,8 +239,11 @@ func postgresCompanyExplorerFolderItemForEntityTx(ctx context.Context, tx *sql.T
 	var item domain.CompanyExplorerFolderItem
 	if err := tx.QueryRowContext(ctx, `
 select company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp
-from company_explorer_folder_items
-where company_id=$1 and item_type=$2 and item_id=$3`,
+from (
+  select company_id::text, coalesce(parent_folder_id::text, '') as folder_id, target_type as item_type, target_id::text as item_id, position, created_timestamp, updated_timestamp
+  from company_explorer_items
+  where company_id=$1::uuid and target_type=$2 and target_id=$3::uuid
+) item`,
 		companyID, itemType, itemID,
 	).Scan(
 		&item.CompanyID,

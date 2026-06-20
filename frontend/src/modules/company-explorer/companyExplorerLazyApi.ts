@@ -3,7 +3,7 @@ import type { CompanyExplorerSnapshotPayload } from "./companyExplorerStore.js";
 
 export type CompanyExplorerLazyScope = "all";
 
-export type CompanyExplorerV2EntityType = "company" | "user_group" | "user" | "folder" | "project" | "logic_gate" | "node";
+export type CompanyExplorerV2EntityType = "company" | "folder" | "project" | "logic_gate" | "node";
 
 export type CompanyExplorerV2Row = {
   company_id: string;
@@ -33,7 +33,7 @@ export function fetchCompanyExplorerRoots(
   void scope;
   return requestJSON<CompanyExplorerSnapshotPayload>(
     apiBase,
-    `/v2/company-explorer/roots?${lazyScopeQuery(companyID)}`,
+    `/v1/company-explorer/roots?${lazyScopeQuery(companyID)}`,
   );
 }
 
@@ -46,6 +46,6 @@ export function fetchCompanyExplorerChildren(
   void scope;
   return requestJSON<CompanyExplorerSnapshotPayload>(
     apiBase,
-    `/v2/company-explorer/entities/${encodeURIComponent(parentEntityID)}/children?${lazyScopeQuery(companyID)}`,
+    `/v1/company-explorer/children?${lazyScopeQuery(companyID)}&parent_id=${encodeURIComponent(parentEntityID)}`,
   );
 }

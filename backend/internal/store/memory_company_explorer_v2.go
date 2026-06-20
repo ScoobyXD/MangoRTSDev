@@ -201,8 +201,8 @@ func companyExplorerV2TreeEdgeLess(left, right memoryCompanyExplorerV2TreeEdge) 
 }
 
 func (r *MemoryRepo) GetCompanyExplorerV2FolderDefaultAccess(companyID, entityID string) (string, error) {
-	companyID = cleanUUIDText(companyID)
-	entityID = cleanUUIDText(entityID)
+	companyID = strings.TrimSpace(companyID)
+	entityID = strings.TrimSpace(entityID)
 	if companyID == "" || entityID == "" {
 		return "", ErrInvalid
 	}
@@ -218,8 +218,8 @@ func (r *MemoryRepo) GetCompanyExplorerV2FolderDefaultAccess(companyID, entityID
 }
 
 func (r *MemoryRepo) GetCompanyExplorerV2Entity(companyID, entityID, permissionUserID string) (CompanyExplorerV2Row, error) {
-	companyID = cleanUUIDText(companyID)
-	entityID = cleanUUIDText(entityID)
+	companyID = strings.TrimSpace(companyID)
+	entityID = strings.TrimSpace(entityID)
 	permissionUserID = strings.TrimSpace(permissionUserID)
 	if companyID == "" || entityID == "" {
 		return CompanyExplorerV2Row{}, ErrInvalid
@@ -416,8 +416,8 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 }
 
 func (r *MemoryRepo) DeleteCompanyExplorerV2Edge(companyID, edgeID string) error {
-	companyID = cleanUUIDText(companyID)
-	edgeID = cleanUUIDText(edgeID)
+	companyID = strings.TrimSpace(companyID)
+	edgeID = strings.TrimSpace(edgeID)
 	if companyID == "" || edgeID == "" {
 		return ErrInvalid
 	}
@@ -476,9 +476,9 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Subscription(input CompanyExplorerV2
 }
 
 func (r *MemoryRepo) DeleteCompanyExplorerV2Subscription(companyID, subscriptionID, actorUserID string) error {
-	companyID = cleanUUIDText(companyID)
-	subscriptionID = cleanUUIDText(subscriptionID)
-	actorUserID = cleanUUIDText(actorUserID)
+	companyID = strings.TrimSpace(companyID)
+	subscriptionID = strings.TrimSpace(subscriptionID)
+	actorUserID = strings.TrimSpace(actorUserID)
 	if companyID == "" || subscriptionID == "" || actorUserID == "" {
 		return ErrInvalid
 	}
@@ -536,8 +536,8 @@ func companyExplorerV2SubscriptionFromMemory(item memoryCompanyExplorerV2Subscri
 	}
 }
 func (r *MemoryRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string) error {
-	companyID = cleanUUIDText(companyID)
-	entityID = cleanUUIDText(entityID)
+	companyID = strings.TrimSpace(companyID)
+	entityID = strings.TrimSpace(entityID)
 	if companyID == "" || entityID == "" {
 		return ErrInvalid
 	}

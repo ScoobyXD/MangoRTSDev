@@ -651,7 +651,9 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 			if err != nil {
 				return CommunicationsTriageConversionResult{}, err
 			}
-			result.ExplorerV2Rows = append(result.ExplorerV2Rows, row)
+			if row.EntityID != "" {
+				result.ExplorerV2Rows = append(result.ExplorerV2Rows, row)
+			}
 		}
 		if input.Target.Mode == CommunicationsEmailConversionTargetProject {
 			relationship, deltas, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
@@ -685,11 +687,13 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 
 func postgresCompanyExplorerV2ParentExistsAndCanEdit(ctx context.Context, tx *sql.Tx, companyID, parentEntityID, userID string) error {
 	var exists bool
-	if err := tx.QueryRowContext(ctx, `
+	if parentEntityID == companyID {
+		exists = true
+	} else if err := tx.QueryRowContext(ctx, `
 select exists (
   select 1
-  from company_explorer_entities
-  where company_id=$1::uuid and entity_id=$2::uuid
+  from company_explorer_folders
+  where company_id=$1::uuid and folder_id=$2::uuid
 )`, companyID, parentEntityID).Scan(&exists); err != nil {
 		return err
 	}
@@ -700,47 +704,61 @@ select exists (
 }
 
 func upsertCommunicationsExplorerV2NodeEdgeTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, nodeID, nodeTitle string) (CompanyExplorerV2Row, error) {
-	childEntityID := companyExplorerV2NativeEntityID(input.CompanyID, CompanyExplorerV2EntityNode, nodeID)
-	if _, err := tx.ExecContext(ctx, `
-insert into company_explorer_entities (company_id, entity_id, entity_type, resource_id, name, default_access, created_timestamp, updated_timestamp)
-values ($1::uuid, $2::uuid, 'node', $3::uuid, $4, null, now(), now())
-on conflict (company_id, entity_type, resource_id) where resource_id is not null do update set
-  name=coalesce(excluded.name, company_explorer_entities.name),
-  updated_timestamp=greatest(company_explorer_entities.updated_timestamp, excluded.updated_timestamp)`, input.CompanyID, childEntityID, nodeID, nodeTitle); err != nil {
-		return CompanyExplorerV2Row{}, err
+	parentEntityID := strings.TrimSpace(input.Target.ParentEntityID)
+	var parentFolderID any
+	if parentEntityID == "" || parentEntityID == input.CompanyID {
+		parentEntityID = input.CompanyID
+	} else {
+		var folderExists bool
+		if err := tx.QueryRowContext(ctx, `
+select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid)`,
+			input.CompanyID, parentEntityID).Scan(&folderExists); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+		if !folderExists {
+			return CompanyExplorerV2Row{}, nil
+		}
+		parentFolderID = parentEntityID
 	}
 	position := input.Target.Position
 	if position <= 0 {
-		if err := tx.QueryRowContext(ctx, `select coalesce(max(position), 0) + 1000 from company_explorer_edges where company_id=$1::uuid and parent_entity_id=$2::uuid`, input.CompanyID, input.Target.ParentEntityID).Scan(&position); err != nil {
+		if err := tx.QueryRowContext(ctx, `
+select coalesce(max(position), 0) + 1000
+from company_explorer_items
+where company_id=$1::uuid
+  and (($2::uuid is null and parent_folder_id is null) or parent_folder_id=$2::uuid)`,
+			input.CompanyID, parentFolderID).Scan(&position); err != nil {
 			return CompanyExplorerV2Row{}, err
 		}
 	}
-	edgeID := companyExplorerV2EdgeID(input.CompanyID, input.Target.ParentEntityID, childEntityID)
-	if _, err := tx.ExecContext(ctx, `
-insert into company_explorer_edges (company_id, edge_id, parent_entity_id, child_entity_id, position, created_timestamp, updated_timestamp)
-values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, now(), now())
-on conflict (company_id, child_entity_id) do update set
-  edge_id=excluded.edge_id,
-  parent_entity_id=excluded.parent_entity_id,
+	itemID := newUUIDv7String()
+	var createdTimestamp time.Time
+	var updatedTimestamp time.Time
+	if err := tx.QueryRowContext(ctx, `
+insert into company_explorer_items (company_id, item_id, parent_folder_id, target_type, target_id, position, created_by_user_id, created_timestamp, updated_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, 'node', $4::uuid, $5, nullif($6, '')::uuid, now(), now())
+on conflict (company_id, target_type, target_id) do update set
+  parent_folder_id=excluded.parent_folder_id,
   position=excluded.position,
-  updated_timestamp=now()`, input.CompanyID, edgeID, input.Target.ParentEntityID, childEntityID, position); err != nil {
+  updated_timestamp=now()
+returning item_id::text, created_timestamp, updated_timestamp`,
+		input.CompanyID, itemID, parentFolderID, nodeID, position, input.ActorUserID).Scan(&itemID, &createdTimestamp, &updatedTimestamp); err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
-	now := time.Now().UTC()
 	return CompanyExplorerV2Row{
 		CompanyID:        input.CompanyID,
-		EntityID:         childEntityID,
+		EntityID:         nodeID,
 		EntityType:       CompanyExplorerV2EntityNode,
 		ResourceID:       nodeID,
 		Name:             nodeTitle,
-		ParentEntityID:   input.Target.ParentEntityID,
-		EdgeID:           edgeID,
+		ParentEntityID:   parentEntityID,
+		EdgeID:           itemID,
 		Position:         position,
 		HasChildren:      false,
 		EffectiveAccess:  EntityPermissionEdit,
-		NativeContext:    companyExplorerV2NativeContext(CompanyExplorerV2EntityNode, childEntityID, nodeID),
-		CreatedTimestamp: now,
-		UpdatedTimestamp: now,
+		NativeContext:    companyExplorerV2NativeContext(CompanyExplorerV2EntityNode, nodeID, nodeID),
+		CreatedTimestamp: createdTimestamp,
+		UpdatedTimestamp: updatedTimestamp,
 	}, nil
 }
 
@@ -1052,8 +1070,8 @@ where company_id=$1 and (node_id_a=$2 or node_id_b=$2)`, input.CompanyID, link.N
 		return CommunicationsTriageRevertResult{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-delete from company_explorer_folder_items
-where company_id=$1 and item_type='node' and item_id=$2`, input.CompanyID, link.NodeID); err != nil {
+delete from company_explorer_items
+where company_id=$1::uuid and target_type='node' and target_id=$2::uuid`, input.CompanyID, link.NodeID); err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `

@@ -203,14 +203,14 @@ func TestMemoryWorkspaceReadVersionsTrackScopedEventSemantics(t *testing.T) {
 	}
 	assertWorkspaceReadVersion(t, repo, companyID, "nodes", "", 1, true)
 	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:node_map_window", "", 1, true)
-	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:company_explorer", WorkspaceReadVersionResourceKey("folder_kind", "node"), 1, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:company_explorer", "", 1, true)
 	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:logic_gate_map_window", "", 0, true)
 
 	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "company_explorer_folder_created", Payload: map[string]any{"folder_kind": "communications"}}); err != nil {
 		t.Fatalf("AppendDomainEvent communications folder: %v", err)
 	}
 	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:node_map_window", "", 1, true)
-	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:shared_triage", "", 2, true)
+	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:shared_triage", "", 0, true)
 	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:full", "", 2, true)
 
 	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "node_map_positions_updated"}); err != nil {

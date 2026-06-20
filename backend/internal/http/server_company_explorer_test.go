@@ -49,7 +49,7 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 			t.Fatalf("POST company explorer folders status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 		}
 		var payload struct {
-			FolderID string `json:"folder_id"`
+			FolderID string `json:"entity_id"`
 		}
 		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode folder: %v", err)
@@ -76,13 +76,13 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 		t.Fatalf("PUT company explorer folder status = %d, want %d body=%s", moveRec.Code, http.StatusOK, moveRec.Body.String())
 	}
 	var movedFolder struct {
-		ParentFolderID *string `json:"parent_folder_id"`
+		ParentEntityID string `json:"parent_entity_id"`
 	}
 	if err := json.NewDecoder(moveRec.Body).Decode(&movedFolder); err != nil {
 		t.Fatalf("decode moved folder: %v", err)
 	}
-	if movedFolder.ParentFolderID == nil || *movedFolder.ParentFolderID != siblingID {
-		t.Fatalf("moved folder parent = %v, want %s", movedFolder.ParentFolderID, siblingID)
+	if movedFolder.ParentEntityID != siblingID {
+		t.Fatalf("moved folder parent = %q, want %s", movedFolder.ParentEntityID, siblingID)
 	}
 
 	renameBody, _ := json.Marshal(map[string]string{
@@ -118,32 +118,37 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 		t.Fatalf("cyclic PUT company explorer folder status = %d, want %d body=%s", cycleRec.Code, http.StatusBadRequest, cycleRec.Body.String())
 	}
 
-	assignBody, _ := json.Marshal(map[string]string{
-		"company_id": companyID,
-		"folder_id":  childID,
-		"item_type":  "node",
-		"item_id":    node.NodeID,
-	})
-	assignReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(assignBody))
-	assignReq.Header.Set("Content-Type", "application/json")
-	assignRec := httptest.NewRecorder()
-	handler.ServeHTTP(assignRec, assignReq)
-	if assignRec.Code != http.StatusOK {
-		t.Fatalf("POST company explorer folder-items status = %d, want %d body=%s", assignRec.Code, http.StatusOK, assignRec.Body.String())
+	placeItem := func(targetID string, position int) store.CompanyExplorerV2Row {
+		t.Helper()
+		body := map[string]any{
+			"company_id":       companyID,
+			"parent_entity_id": childID,
+			"target_type":      "node",
+			"target_id":        targetID,
+		}
+		if position != 0 {
+			body["position"] = position
+		}
+		encoded, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/items", bytes.NewReader(encoded))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST company explorer item status = %d, want %d body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+		}
+		var row store.CompanyExplorerV2Row
+		if err := json.NewDecoder(rec.Body).Decode(&row); err != nil {
+			t.Fatalf("decode company explorer item: %v", err)
+		}
+		if row.EdgeID == "" || row.EntityType != "node" || row.ResourceID != targetID || row.ParentEntityID != childID {
+			t.Fatalf("placed row = %+v, want node target %s under child folder", row, targetID)
+		}
+		return row
 	}
-	secondAssignBody, _ := json.Marshal(map[string]string{
-		"company_id": companyID,
-		"folder_id":  childID,
-		"item_type":  "node",
-		"item_id":    secondNode.NodeID,
-	})
-	secondAssignReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(secondAssignBody))
-	secondAssignReq.Header.Set("Content-Type", "application/json")
-	secondAssignRec := httptest.NewRecorder()
-	handler.ServeHTTP(secondAssignRec, secondAssignReq)
-	if secondAssignRec.Code != http.StatusOK {
-		t.Fatalf("POST second company explorer folder-items status = %d, want %d body=%s", secondAssignRec.Code, http.StatusOK, secondAssignRec.Body.String())
-	}
+
+	placeItem(node.NodeID, 0)
+	placeItem(secondNode.NodeID, 0)
 	mixedFolderBody, _ := json.Marshal(map[string]string{
 		"company_id":       companyID,
 		"parent_folder_id": childID,
@@ -166,109 +171,59 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if mixedFolder.Position != 3000 {
 		t.Fatalf("mixed sibling folder position = %d, want 3000 after two item rows", mixedFolder.Position)
 	}
-	thirdAssignBody, _ := json.Marshal(map[string]string{
-		"company_id": companyID,
-		"folder_id":  childID,
-		"item_type":  "node",
-		"item_id":    thirdNode.NodeID,
-	})
-	thirdAssignReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(thirdAssignBody))
-	thirdAssignReq.Header.Set("Content-Type", "application/json")
-	thirdAssignRec := httptest.NewRecorder()
-	handler.ServeHTTP(thirdAssignRec, thirdAssignReq)
-	if thirdAssignRec.Code != http.StatusOK {
-		t.Fatalf("POST third company explorer folder-items status = %d, want %d body=%s", thirdAssignRec.Code, http.StatusOK, thirdAssignRec.Body.String())
-	}
-	var thirdAssigned struct {
-		Position int `json:"position"`
-	}
-	if err := json.NewDecoder(thirdAssignRec.Body).Decode(&thirdAssigned); err != nil {
-		t.Fatalf("decode third folder item: %v", err)
-	}
+	thirdAssigned := placeItem(thirdNode.NodeID, 0)
 	if thirdAssigned.Position != 4000 {
-		t.Fatalf("third folder item position = %d, want 4000 after folder sibling", thirdAssigned.Position)
-	}
-	reorderBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
-		"folder_id":  childID,
-		"item_type":  "node",
-		"item_id":    node.NodeID,
-		"position":   5000,
-	})
-	reorderReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(reorderBody))
-	reorderReq.Header.Set("Content-Type", "application/json")
-	reorderRec := httptest.NewRecorder()
-	handler.ServeHTTP(reorderRec, reorderReq)
-	if reorderRec.Code != http.StatusOK {
-		t.Fatalf("POST reorder company explorer folder-items status = %d, want %d body=%s", reorderRec.Code, http.StatusOK, reorderRec.Body.String())
+		t.Fatalf("third item position = %d, want 4000 after folder sibling", thirdAssigned.Position)
 	}
 
-	itemsReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folder-items?company_id="+companyID+"&folder_id="+childID+"&item_type=node", nil)
-	itemsRec := httptest.NewRecorder()
-	handler.ServeHTTP(itemsRec, itemsReq)
-	if itemsRec.Code != http.StatusOK {
-		t.Fatalf("GET company explorer folder-items status = %d, want %d body=%s", itemsRec.Code, http.StatusOK, itemsRec.Body.String())
+	placeItem(node.NodeID, 5000)
+
+	childrenReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/children?company_id="+companyID+"&parent_id="+childID, nil)
+	childrenRec := httptest.NewRecorder()
+	handler.ServeHTTP(childrenRec, childrenReq)
+	if childrenRec.Code != http.StatusOK {
+		t.Fatalf("GET company explorer children status = %d, want %d body=%s", childrenRec.Code, http.StatusOK, childrenRec.Body.String())
 	}
-	var itemsPayload struct {
-		Items []struct {
-			FolderID string `json:"folder_id"`
-			ItemType string `json:"item_type"`
-			ItemID   string `json:"item_id"`
-			Position int    `json:"position"`
-		} `json:"folder_items"`
+	var children store.CompanyExplorerV2Rows
+	if err := json.NewDecoder(childrenRec.Body).Decode(&children); err != nil {
+		t.Fatalf("decode folder children: %v", err)
 	}
-	if err := json.NewDecoder(itemsRec.Body).Decode(&itemsPayload); err != nil {
-		t.Fatalf("decode folder items: %v", err)
+	nodeRows := make([]store.CompanyExplorerV2Row, 0, 3)
+	foundMixedFolder := false
+	for _, row := range children.Rows {
+		if row.EntityType == "folder" && row.Name == "Mixed sibling folder" && row.ParentEntityID == childID && row.Position == 3000 {
+			foundMixedFolder = true
+			continue
+		}
+		if row.EntityType == "node" {
+			nodeRows = append(nodeRows, row)
+		}
 	}
-	if len(itemsPayload.Items) != 3 || itemsPayload.Items[0].ItemID != secondNode.NodeID || itemsPayload.Items[1].ItemID != thirdNode.NodeID || itemsPayload.Items[1].Position != 4000 || itemsPayload.Items[2].ItemID != node.NodeID || itemsPayload.Items[2].Position != 5000 {
-		t.Fatalf("folder item payload = %+v, want reordered nodes in child folder", itemsPayload.Items)
+	if !foundMixedFolder {
+		t.Fatalf("children rows = %+v, want mixed child folder at position 3000", children.Rows)
+	}
+	if len(nodeRows) != 3 || nodeRows[0].ResourceID != secondNode.NodeID || nodeRows[1].ResourceID != thirdNode.NodeID || nodeRows[1].Position != 4000 || nodeRows[2].ResourceID != node.NodeID || nodeRows[2].Position != 5000 {
+		t.Fatalf("node child rows = %+v, want reordered final item refs in child folder", nodeRows)
 	}
 
-	snapshotReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID, nil)
-	snapshotRec := httptest.NewRecorder()
-	handler.ServeHTTP(snapshotRec, snapshotReq)
-	if snapshotRec.Code != http.StatusOK {
-		t.Fatalf("GET workspace snapshot status = %d, want %d body=%s", snapshotRec.Code, http.StatusOK, snapshotRec.Body.String())
+	siblingReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/children?company_id="+companyID+"&parent_id="+siblingID, nil)
+	siblingRec := httptest.NewRecorder()
+	handler.ServeHTTP(siblingRec, siblingReq)
+	if siblingRec.Code != http.StatusOK {
+		t.Fatalf("GET sibling company explorer children status = %d, want %d body=%s", siblingRec.Code, http.StatusOK, siblingRec.Body.String())
 	}
-	var snapshot struct {
-		Folders []struct {
-			FolderID       string  `json:"folder_id"`
-			ParentFolderID *string `json:"parent_folder_id"`
-			SystemKey      *string `json:"system_key"`
-		} `json:"folders"`
-		FolderItems []struct {
-			FolderID string `json:"folder_id"`
-			ItemID   string `json:"item_id"`
-		} `json:"folder_items"`
+	var siblingChildren store.CompanyExplorerV2Rows
+	if err := json.NewDecoder(siblingRec.Body).Decode(&siblingChildren); err != nil {
+		t.Fatalf("decode sibling children: %v", err)
 	}
-	if err := json.NewDecoder(snapshotRec.Body).Decode(&snapshot); err != nil {
-		t.Fatalf("decode snapshot: %v", err)
-	}
-	if len(snapshot.Folders) != 14 || len(snapshot.FolderItems) != 3 {
-		t.Fatalf("snapshot folder counts = folders:%d items:%d, want 14/3", len(snapshot.Folders), len(snapshot.FolderItems))
-	}
-	foundChild := false
-	foundActiveLogicGates := false
-	foundActiveProjects := false
-	for _, folder := range snapshot.Folders {
-		if folder.FolderID == childID && folder.ParentFolderID != nil && *folder.ParentFolderID == siblingID {
-			foundChild = true
-		}
-		if folder.SystemKey != nil && *folder.SystemKey == store.CompanyExplorerSystemActiveLogicGatesKey {
-			foundActiveLogicGates = true
-		}
-		if folder.SystemKey != nil && *folder.SystemKey == store.CompanyExplorerSystemActiveProjectsKey {
-			foundActiveProjects = true
+	foundMovedChild := false
+	for _, row := range siblingChildren.Rows {
+		if row.EntityType == "folder" && row.EntityID == childID && row.ParentEntityID == siblingID {
+			foundMovedChild = true
 		}
 	}
-	if !foundChild {
-		t.Fatalf("snapshot did not preserve moved child folder parent")
-	}
-	if !foundActiveLogicGates {
-		t.Fatalf("snapshot did not include Active Logic Gates system folder")
-	}
-	if !foundActiveProjects {
-		t.Fatalf("snapshot did not include Active Projects system folder")
+	if !foundMovedChild {
+		t.Fatalf("sibling children = %+v, want moved child folder", siblingChildren.Rows)
 	}
 }
 
@@ -505,7 +460,7 @@ func TestCompanyExplorerDefaultFoldersSeedOnceAndProtectSystemFolders(t *testing
 	}
 }
 
-func TestCompanyExplorerRejectsCommunicationsFolderKind(t *testing.T) {
+func TestCompanyExplorerFolderCreateIgnoresDeprecatedFolderKind(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -523,15 +478,15 @@ func TestCompanyExplorerRejectsCommunicationsFolderKind(t *testing.T) {
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusBadRequest {
-		t.Fatalf("POST communications company explorer folder status = %d, want %d body=%s", createRec.Code, http.StatusBadRequest, createRec.Body.String())
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("POST deprecated folder_kind company explorer folder status = %d, want %d body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
 	}
-
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=communications", nil)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusBadRequest {
-		t.Fatalf("GET communications company explorer folders status = %d, want %d body=%s", listRec.Code, http.StatusBadRequest, listRec.Body.String())
+	var payload store.CompanyExplorerV2Row
+	if err := json.NewDecoder(createRec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode created folder: %v", err)
+	}
+	if payload.EntityType != store.CompanyExplorerV2EntityFolder || payload.EntityID == "" {
+		t.Fatalf("created deprecated folder_kind payload = %+v, want normal folder row", payload)
 	}
 }
 
@@ -939,48 +894,6 @@ func TestCompanyExplorerFolderAndItemListEndpointsSupportSubtreeReads(t *testing
 	}
 	assertIDs("folders", folderIDs, parent.FolderID, child.FolderID)
 
-	directItemsReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folder-items?company_id="+companyID+"&folder_id="+parent.FolderID+"&item_type=node", nil)
-	directItemsRec := httptest.NewRecorder()
-	handler.ServeHTTP(directItemsRec, directItemsReq)
-	if directItemsRec.Code != http.StatusOK {
-		t.Fatalf("GET direct folder items status = %d, want %d body=%s", directItemsRec.Code, http.StatusOK, directItemsRec.Body.String())
-	}
-	var directItemsPayload struct {
-		Items []domain.CompanyExplorerFolderItem `json:"folder_items"`
-	}
-	if err := json.NewDecoder(directItemsRec.Body).Decode(&directItemsPayload); err != nil {
-		t.Fatalf("decode direct folder items: %v", err)
-	}
-	directItemIDs := make([]string, 0, len(directItemsPayload.Items))
-	for _, item := range directItemsPayload.Items {
-		directItemIDs = append(directItemIDs, item.ItemID)
-	}
-	assertIDs("direct folder items", directItemIDs, nodeA.NodeID)
-
-	subtreeItemsReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folder-items?company_id="+companyID+"&folder_id="+parent.FolderID+"&item_type=node&subtree=true", nil)
-	subtreeItemsRec := httptest.NewRecorder()
-	handler.ServeHTTP(subtreeItemsRec, subtreeItemsReq)
-	if subtreeItemsRec.Code != http.StatusOK {
-		t.Fatalf("GET subtree folder items status = %d, want %d body=%s", subtreeItemsRec.Code, http.StatusOK, subtreeItemsRec.Body.String())
-	}
-	var subtreeItemsPayload struct {
-		Items []domain.CompanyExplorerFolderItem `json:"folder_items"`
-	}
-	if err := json.NewDecoder(subtreeItemsRec.Body).Decode(&subtreeItemsPayload); err != nil {
-		t.Fatalf("decode subtree folder items: %v", err)
-	}
-	subtreeItemIDs := make([]string, 0, len(subtreeItemsPayload.Items))
-	for _, item := range subtreeItemsPayload.Items {
-		subtreeItemIDs = append(subtreeItemIDs, item.ItemID)
-	}
-	assertIDs("subtree folder items", subtreeItemIDs, nodeA.NodeID, nodeB.NodeID)
-
-	missingItemTypeReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folder-items?company_id="+companyID+"&folder_id="+parent.FolderID+"&subtree=true", nil)
-	missingItemTypeRec := httptest.NewRecorder()
-	handler.ServeHTTP(missingItemTypeRec, missingItemTypeReq)
-	if missingItemTypeRec.Code != http.StatusBadRequest {
-		t.Fatalf("GET subtree folder items without item_type status = %d, want %d body=%s", missingItemTypeRec.Code, http.StatusBadRequest, missingItemTypeRec.Body.String())
-	}
 	invalidFolderReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=node&folder_id=bad-folder-id", nil)
 	invalidFolderRec := httptest.NewRecorder()
 	handler.ServeHTTP(invalidFolderRec, invalidFolderReq)
@@ -988,55 +901,6 @@ func TestCompanyExplorerFolderAndItemListEndpointsSupportSubtreeReads(t *testing
 		t.Fatalf("GET invalid folders subtree status = %d, want %d body=%s", invalidFolderRec.Code, http.StatusBadRequest, invalidFolderRec.Body.String())
 	}
 }
-func TestCompanyExplorerFolderItemBatchAssignsItemsInOneRequest(t *testing.T) {
-	t.Parallel()
-
-	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
-	handler := server.Routes()
-	companyID := "company-folder-item-batch-test"
-
-	nodeA, err := repo.CreateNode(companyID, "Batch A")
-	if err != nil {
-		t.Fatalf("CreateNode(A) error = %v", err)
-	}
-	nodeB, err := repo.CreateNode(companyID, "Batch B")
-	if err != nil {
-		t.Fatalf("CreateNode(B) error = %v", err)
-	}
-	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Batch folder")
-	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder() error = %v", err)
-	}
-
-	body, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
-		"assignments": []map[string]any{
-			{"folder_id": folder.FolderID, "item_type": "node", "item_id": nodeA.NodeID, "position": 1000},
-			{"folder_id": folder.FolderID, "item_type": "node", "item_id": nodeB.NodeID, "position": 2000},
-		},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items/batch", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST folder item batch status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	var payload struct {
-		FolderItems []struct {
-			ItemID   string `json:"item_id"`
-			Position int    `json:"position"`
-		} `json:"folder_items"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode folder item batch: %v", err)
-	}
-	if len(payload.FolderItems) != 2 || payload.FolderItems[0].ItemID != nodeA.NodeID || payload.FolderItems[0].Position != 1000 || payload.FolderItems[1].ItemID != nodeB.NodeID || payload.FolderItems[1].Position != 2000 {
-		t.Fatalf("batch payload = %+v, want assigned nodes in request order", payload.FolderItems)
-	}
-}
-
 func TestCommunicationsSharedInboxVisibleListUsesDefaultAccessOverrides(t *testing.T) {
 	t.Parallel()
 
@@ -1169,66 +1033,7 @@ func TestCompanyExplorerCommunicationsFolderListDoesNotApplyGVICFiltering(t *tes
 	}
 }
 
-func TestCompanyExplorerDeleteBatchDeletesSelectedTargetsInOneRequest(t *testing.T) {
-	t.Parallel()
-
-	repo := store.NewMemoryRepo()
-	server := NewServer(repo)
-	handler := server.Routes()
-	companyID := "company-explorer-delete-batch-test"
-
-	node, err := repo.CreateNode(companyID, "Batch delete node")
-	if err != nil {
-		t.Fatalf("CreateNode() error = %v", err)
-	}
-	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Batch delete folder")
-	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder() error = %v", err)
-	}
-	childFolder, err := repo.CreateCompanyExplorerFolder(companyID, folder.FolderID, "node", "Batch delete child folder")
-	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder(child) error = %v", err)
-	}
-	folderNode, err := repo.CreateNode(companyID, "Node inside folder")
-	if err != nil {
-		t.Fatalf("CreateNode(folderNode) error = %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, childFolder.FolderID, "node", folderNode.NodeID, 1000); err != nil {
-		t.Fatalf("AssignCompanyExplorerFolderItem(node) error = %v", err)
-	}
-
-	body, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
-		"targets": []map[string]string{
-			{"kind": "node", "id": node.NodeID},
-			{"kind": "folder", "id": folder.FolderID, "folder_kind": "node"},
-		},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/delete-batch", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST delete batch status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if _, err := repo.GetNode(companyID, node.NodeID); err != store.ErrNotFound {
-		t.Fatalf("GetNode after batch delete error = %v, want ErrNotFound", err)
-	}
-	if _, err := repo.GetNode(companyID, folderNode.NodeID); err != store.ErrNotFound {
-		t.Fatalf("GetNode for folder child after batch delete error = %v, want ErrNotFound", err)
-	}
-	folders, err := repo.ListCompanyExplorerFolders(companyID, "node")
-	if err != nil {
-		t.Fatalf("ListCompanyExplorerFolders() error = %v", err)
-	}
-	for _, item := range folders {
-		if item.FolderID == folder.FolderID || item.FolderID == childFolder.FolderID {
-			t.Fatalf("folder %s still exists after batch delete", item.FolderID)
-		}
-	}
-}
-
-func TestCompanyExplorerFolderItemMovesBreakRelationships(t *testing.T) {
+func TestCompanyExplorerItemPlacementDoesNotBreakNativeRelationships(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -1251,7 +1056,7 @@ func TestCompanyExplorerFolderItemMovesBreakRelationships(t *testing.T) {
 			t.Fatalf("POST folder %s status = %d, want %d body=%s", name, rec.Code, http.StatusCreated, rec.Body.String())
 		}
 		var payload struct {
-			FolderID string `json:"folder_id"`
+			FolderID string `json:"entity_id"`
 		}
 		if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode folder %s: %v", name, err)
@@ -1262,18 +1067,18 @@ func TestCompanyExplorerFolderItemMovesBreakRelationships(t *testing.T) {
 	assign := func(folderID, itemType, itemID string, position int) {
 		t.Helper()
 		body, _ := json.Marshal(map[string]any{
-			"company_id": companyID,
-			"folder_id":  folderID,
-			"item_type":  itemType,
-			"item_id":    itemID,
-			"position":   position,
+			"company_id":       companyID,
+			"parent_entity_id": folderID,
+			"target_type":      itemType,
+			"target_id":        itemID,
+			"position":         position,
 		})
-		req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folder-items", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/items", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("POST folder item %s/%s status = %d, want %d body=%s", itemType, itemID, rec.Code, http.StatusOK, rec.Body.String())
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST company explorer item %s/%s status = %d, want %d body=%s", itemType, itemID, rec.Code, http.StatusCreated, rec.Body.String())
 		}
 	}
 
@@ -1298,8 +1103,8 @@ func TestCompanyExplorerFolderItemMovesBreakRelationships(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListNodeRelationships after move error = %v", err)
 	}
-	if len(nodeRelationships) != 0 {
-		t.Fatalf("node relationships after cross-folder move = %d, want 0", len(nodeRelationships))
+	if len(nodeRelationships) != 1 {
+		t.Fatalf("node relationships after cross-folder reference move = %d, want 1", len(nodeRelationships))
 	}
 
 	assign(nodeFolderB, "node", nodeB.NodeID, 0)
@@ -1311,8 +1116,8 @@ func TestCompanyExplorerFolderItemMovesBreakRelationships(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListNodeRelationships after reorder error = %v", err)
 	}
-	if len(nodeRelationships) != 1 {
-		t.Fatalf("node relationships after same-folder reorder = %d, want 1", len(nodeRelationships))
+	if len(nodeRelationships) != 2 {
+		t.Fatalf("node relationships after same-folder reorder = %d, want 2", len(nodeRelationships))
 	}
 
 	gateA, err := repo.CreateLogicGate(companyID, "Gate A")
@@ -1336,8 +1141,8 @@ func TestCompanyExplorerFolderItemMovesBreakRelationships(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListLogicGateRelationships after move error = %v", err)
 	}
-	if len(logicRelationships) != 0 {
-		t.Fatalf("logic-gate relationships after cross-folder move = %d, want 0", len(logicRelationships))
+	if len(logicRelationships) != 1 {
+		t.Fatalf("logic-gate relationships after cross-folder reference move = %d, want 1", len(logicRelationships))
 	}
 }
 
@@ -1366,7 +1171,18 @@ func TestCompanyExplorerLazyRootsReturnOnlyRootRows(t *testing.T) {
 		t.Fatalf("GET lazy roots status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	payload := decodeCompanyExplorerLazyRowsForTest(t, rec)
-	folders := companyExplorerLazyFolderIDSet(payload)
+	companies := companyExplorerLazyCompanyIDSet(payload)
+	if !companies[companyID] {
+		t.Fatalf("lazy roots = %v, want company root %s", payload.Rows, companyID)
+	}
+
+	childReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/children?company_id="+companyID+"&scope=all&parent_id="+companyID, nil)
+	childRec := httptest.NewRecorder()
+	handler.ServeHTTP(childRec, childReq)
+	if childRec.Code != http.StatusOK {
+		t.Fatalf("GET company root children status = %d, want %d body=%s", childRec.Code, http.StatusOK, childRec.Body.String())
+	}
+	folders := companyExplorerLazyFolderIDSet(decodeCompanyExplorerLazyRowsForTest(t, childRec))
 	if !folders[root.FolderID] {
 		t.Fatalf("lazy root folders = %v, want root folder %s", folders, root.FolderID)
 	}
@@ -1492,7 +1308,7 @@ func TestCompanyExplorerLazyLogicGateChildrenReturnDirectNodes(t *testing.T) {
 	}
 }
 
-func TestCompanyExplorerLazyLegacyScopesReadCompanyWideVisibleRows(t *testing.T) {
+func TestCompanyExplorerLazyRejectsLegacyScopes(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -1500,6 +1316,15 @@ func TestCompanyExplorerLazyLegacyScopesReadCompanyWideVisibleRows(t *testing.T)
 	handler := server.Routes()
 	companyID := "company-lazy-scope-test"
 	repo.EnsureCompany(companyID, "Lazy Scope")
+	for _, scope := range []string{"me", "team"} {
+		req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/roots?company_id="+companyID+"&scope="+scope, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET company explorer roots scope=%s status = %d, want %d body=%s", scope, rec.Code, http.StatusBadRequest, rec.Body.String())
+		}
+	}
+	return
 
 	userA, err := repo.UpsertAuthUser("lazy-scope-user-a", "a@example.com", "User A")
 	if err != nil {
@@ -1660,7 +1485,7 @@ func mustCreateScopedCompanyExplorerFolderForTest(t *testing.T, repo *store.Memo
 	return folder
 }
 
-func getCompanyExplorerLazyRowsForTest(t *testing.T, handler http.Handler, companyID, scope, userID string) store.CompanyExplorerLazyRows {
+func getCompanyExplorerLazyRowsForTest(t *testing.T, handler http.Handler, companyID, scope, userID string) store.CompanyExplorerV2Rows {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/roots?company_id="+companyID+"&scope="+scope, nil)
 	req = workItemInboxReadRequestWithActor(req, userID, companyID, domain.RoleCompanyUser, false)
@@ -1672,7 +1497,7 @@ func getCompanyExplorerLazyRowsForTest(t *testing.T, handler http.Handler, compa
 	return decodeCompanyExplorerLazyRowsForTest(t, rec)
 }
 
-func getCompanyExplorerLazyChildRowsForTest(t *testing.T, handler http.Handler, companyID, scope, userID, parentType, parentID string) store.CompanyExplorerLazyRows {
+func getCompanyExplorerLazyChildRowsForTest(t *testing.T, handler http.Handler, companyID, scope, userID, parentType, parentID string) store.CompanyExplorerV2Rows {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/children?company_id="+companyID+"&scope="+scope+"&parent_type="+parentType+"&parent_id="+parentID, nil)
 	req = workItemInboxReadRequestWithActor(req, userID, companyID, domain.RoleCompanyUser, false)
@@ -1684,43 +1509,61 @@ func getCompanyExplorerLazyChildRowsForTest(t *testing.T, handler http.Handler, 
 	return decodeCompanyExplorerLazyRowsForTest(t, rec)
 }
 
-func decodeCompanyExplorerLazyRowsForTest(t *testing.T, rec *httptest.ResponseRecorder) store.CompanyExplorerLazyRows {
+func decodeCompanyExplorerLazyRowsForTest(t *testing.T, rec *httptest.ResponseRecorder) store.CompanyExplorerV2Rows {
 	t.Helper()
-	var payload store.CompanyExplorerLazyRows
+	var payload store.CompanyExplorerV2Rows
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode lazy rows: %v", err)
 	}
 	return payload
 }
 
-func companyExplorerLazyFolderIDSet(payload store.CompanyExplorerLazyRows) map[string]bool {
+func companyExplorerLazyFolderIDSet(payload store.CompanyExplorerV2Rows) map[string]bool {
 	ids := map[string]bool{}
-	for _, folder := range payload.Folders {
-		ids[folder.FolderID] = true
+	for _, row := range payload.Rows {
+		if row.EntityType == store.CompanyExplorerV2EntityFolder {
+			ids[row.EntityID] = true
+		}
 	}
 	return ids
 }
 
-func companyExplorerLazyNodeIDSet(payload store.CompanyExplorerLazyRows) map[string]bool {
+func companyExplorerLazyCompanyIDSet(payload store.CompanyExplorerV2Rows) map[string]bool {
 	ids := map[string]bool{}
-	for _, node := range payload.Nodes {
-		ids[node.NodeID] = true
+	for _, row := range payload.Rows {
+		if row.EntityType == store.CompanyExplorerV2EntityCompany {
+			ids[row.EntityID] = true
+		}
 	}
 	return ids
 }
 
-func companyExplorerLazyLogicGateIDSet(payload store.CompanyExplorerLazyRows) map[string]bool {
+func companyExplorerLazyNodeIDSet(payload store.CompanyExplorerV2Rows) map[string]bool {
 	ids := map[string]bool{}
-	for _, gate := range payload.LogicGates {
-		ids[gate.LogicGateID] = true
+	for _, row := range payload.Rows {
+		if row.EntityType == store.CompanyExplorerV2EntityNode {
+			ids[row.ResourceID] = true
+		}
 	}
 	return ids
 }
 
-func companyExplorerLazyFolderItemIDSet(payload store.CompanyExplorerLazyRows) map[string]bool {
+func companyExplorerLazyLogicGateIDSet(payload store.CompanyExplorerV2Rows) map[string]bool {
 	ids := map[string]bool{}
-	for _, item := range payload.FolderItems {
-		ids[item.ItemID] = true
+	for _, row := range payload.Rows {
+		if row.EntityType == store.CompanyExplorerV2EntityLogicGate {
+			ids[row.ResourceID] = true
+		}
+	}
+	return ids
+}
+
+func companyExplorerLazyFolderItemIDSet(payload store.CompanyExplorerV2Rows) map[string]bool {
+	ids := map[string]bool{}
+	for _, row := range payload.Rows {
+		if row.EntityType == store.CompanyExplorerV2EntityNode || row.EntityType == store.CompanyExplorerV2EntityLogicGate || row.EntityType == store.CompanyExplorerV2EntityProject {
+			ids[row.ResourceID] = true
+		}
 	}
 	return ids
 }

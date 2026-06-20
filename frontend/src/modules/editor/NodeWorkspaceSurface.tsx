@@ -16,6 +16,7 @@ import { getNodeTitle, type NodeRecord, type NodeRelationship } from "../node-ma
 import { listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
 import { publishLiveSelection } from "../selectionCoordinator";
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
+import type { CompanyExplorerV2Row } from "../company-explorer/companyExplorerLazyApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import {
@@ -1063,17 +1064,44 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setLogicGateOptionsLoading(true);
     const params = new URLSearchParams({ company_id: companyID, assigned_to_me: "1" });
     const folderParams = new URLSearchParams({ company_id: companyID, folder_kind: "logic_gate" });
-    const folderItemParams = new URLSearchParams({ company_id: companyID, item_type: "logic_gate" });
+    const listLogicGateExplorerItems = async (): Promise<CompanyExplorerFolderItem[]> => {
+      const rows: CompanyExplorerV2Row[] = [];
+      const visited = new Set<string>();
+      const normalizeRows = (payload: { rows?: CompanyExplorerV2Row[] } | CompanyExplorerV2Row[]) => Array.isArray(payload) ? payload : (payload.rows ?? []);
+      const visit = async (parentID: string) => {
+        if (visited.has(parentID)) return;
+        visited.add(parentID);
+        const query = new URLSearchParams({ company_id: companyID });
+        const endpoint = parentID
+          ? `/v1/company-explorer/children?${query.toString()}&parent_id=${encodeURIComponent(parentID)}`
+          : `/v1/company-explorer/roots?${query.toString()}`;
+        const children = normalizeRows(await requestJSON<{ rows?: CompanyExplorerV2Row[] } | CompanyExplorerV2Row[]>(endpoint));
+        rows.push(...children);
+        await Promise.all(children.filter((row) => row.entity_type === "folder" && row.has_children).map((row) => visit(row.entity_id)));
+      };
+      await visit("");
+      return rows
+        .filter((row) => row.entity_type === "logic_gate" && row.parent_entity_id && row.edge_id)
+        .map((row) => ({
+          company_id: row.company_id,
+          folder_id: row.parent_entity_id ?? "",
+          item_type: "logic_gate",
+          item_id: row.resource_id || row.entity_id,
+          position: row.position,
+          created_timestamp: row.created_timestamp,
+          updated_timestamp: row.updated_timestamp,
+        }));
+    };
     void Promise.all([
       requestJSON<{ logic_gates?: LogicGateRecord[] }>(`/v1/logic-gates?${params.toString()}`),
       requestJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${folderParams.toString()}`),
-      requestJSON<{ folder_items?: CompanyExplorerFolderItem[] }>(`/v1/company-explorer/folder-items?${folderItemParams.toString()}`),
+      listLogicGateExplorerItems(),
     ])
-      .then(([logicGatePayload, folderPayload, folderItemPayload]) => {
+      .then(([logicGatePayload, folderPayload, folderItems]) => {
         if (!cancelled) {
           setLogicGateOptions(logicGatePayload.logic_gates ?? []);
           setLogicGateFolders(folderPayload.folders ?? []);
-          setLogicGateFolderItems(folderItemPayload.folder_items ?? []);
+          setLogicGateFolderItems(folderItems);
         }
       })
       .catch((cause) => {

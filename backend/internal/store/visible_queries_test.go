@@ -367,7 +367,7 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 		"func (r *postgresrepo) listvisiblecompanyexplorernodesummaries",
 		"func (r *postgresrepo) listvisiblecompanyexplorerlogicgatesummaries",
 		"mangorts_user_can_access_resource",
-		"item.item_type not in ('node', 'logic_gate', 'project')",
+		"item.target_type not in ('node', 'logic_gate', 'project')",
 	} {
 		if !strings.Contains(companyExplorerSource, needle) {
 			t.Fatalf("Postgres visible company explorer query missing %q", needle)

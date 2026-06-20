@@ -250,11 +250,11 @@ func folderItemAssignedWorkspaceEventInput(item domain.CompanyExplorerFolderItem
 }
 
 func companyExplorerV2EdgeUpsertedWorkspaceEventInput(row CompanyExplorerV2Row, meta workItemAssignmentEventMetadata) DomainEventInput {
-	input := workspaceDomainEventInput(row.CompanyID, "company_explorer_v2_edge_upserted", map[string]any{
-		"entity_id":        row.EntityID,
-		"entity_type":      row.EntityType,
+	input := workspaceDomainEventInput(row.CompanyID, "company_explorer_item_placed", map[string]any{
+		"item_id":          row.EdgeID,
 		"parent_entity_id": row.ParentEntityID,
-		"edge_id":          row.EdgeID,
+		"target_type":      row.EntityType,
+		"target_id":        row.ResourceID,
 		"entity":           row,
 	})
 	input.ActorUserID = meta.ActorUserID
