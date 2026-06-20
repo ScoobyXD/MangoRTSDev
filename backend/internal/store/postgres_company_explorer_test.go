@@ -145,3 +145,65 @@ func TestPostgresCompanyExplorerV2RootRowsUseContiguousRootArgs(t *testing.T) {
 		t.Fatalf("queryCompanyExplorerFinalRootChildren must not use child-row args with an unused parent parameter")
 	}
 }
+
+func TestPostgresCompanyExplorerV2NativeChildrenUseCompactArgs(t *testing.T) {
+	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_company_explorer_v2.go: %v", err)
+	}
+	source := string(raw)
+	nativeArgs := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func companyExplorerNativeChildrenArgs")), " "))
+	for _, want := range []string{
+		"query.companyid",
+		"companyexplorerlazynullable(query.permissionuserid)",
+		"entitypermissionview",
+		"parententityid",
+	} {
+		if !strings.Contains(nativeArgs, want) {
+			t.Fatalf("companyExplorerNativeChildrenArgs missing %q", want)
+		}
+	}
+	if strings.Contains(nativeArgs, "query.parententityid") {
+		t.Fatalf("companyExplorerNativeChildrenArgs must not include query.ParentEntityID")
+	}
+
+	projectRows := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) queryCompanyExplorerFinalProjectChildren")), " "))
+	for _, want := range []string{
+		"companyexplorernativechildrenargs(query, projectid)",
+		"projection.project_id=$4::uuid",
+		"companyexplorernativechildreneffectiveaccessselect",
+		"companyexplorernativechildrenaccesspredicate",
+	} {
+		if !strings.Contains(projectRows, want) {
+			t.Fatalf("queryCompanyExplorerFinalProjectChildren missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"companyexplorerfinalargs(query)",
+		"projection.project_id=$5::uuid",
+	} {
+		if strings.Contains(projectRows, forbidden) {
+			t.Fatalf("queryCompanyExplorerFinalProjectChildren kept stale arg shape marker %q", forbidden)
+		}
+	}
+
+	logicGateRows := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) queryCompanyExplorerFinalLogicGateChildren")), " "))
+	for _, want := range []string{
+		"companyexplorernativechildrenargs(query, logicgateid)",
+		"assignment.logic_gate_id=$4::uuid",
+		"companyexplorernativechildreneffectiveaccessselect",
+		"companyexplorernativechildrenaccesspredicate",
+	} {
+		if !strings.Contains(logicGateRows, want) {
+			t.Fatalf("queryCompanyExplorerFinalLogicGateChildren missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"companyexplorerfinalargs(query)",
+		"assignment.logic_gate_id=$5::uuid",
+	} {
+		if strings.Contains(logicGateRows, forbidden) {
+			t.Fatalf("queryCompanyExplorerFinalLogicGateChildren kept stale arg shape marker %q", forbidden)
+		}
+	}
+}
