@@ -6,7 +6,6 @@ import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMe
 import FrameRightClickMenu from "./framerightclickmenu";
 import { HeaderAccountManagerIcon, HeaderMapIcon, HeaderProjectManagementIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
-import { NotificationPopover } from "./NotificationPopover";
 import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadProjectManagementSurface } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
@@ -27,10 +26,7 @@ import {
   type CommunicationsTriageConversionTarget,
   type EmailProvider,
 } from "../modules/communications/communicationsApi";
-import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
-import { deleteNotification, deleteNotifications, EVENT_NOTIFICATIONS_UPDATED, fetchNotifications, type NotificationItem, type NotificationGVICRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
-import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../modules/node-map/eventbus";
-import { INBOX_PRIORITIES, GVIC_INBOX_SECTIONS } from "../pages/home/homeConstants";
+import { INBOX_PRIORITIES } from "../pages/home/homeConstants";
 import { convertMessagesToExplorerTargetCommand } from "../pages/home/homeCommands";
 import {
   buildSharedInboxRows,
@@ -69,7 +65,6 @@ const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIDEBAR_BUFFER = 14;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v1";
-const NODE_EDITOR_POPUP_NOTIFICATION_Z_INDEX = 160;
 const NODE_EDITOR_POPUP_Z_INDEX = 130;
 const SIDEBAR_ELEVATED_RADIUS = 11;
 const SIDEBAR_SCROLL_ACCENT = "rgba(203, 213, 225, 0.82)";
@@ -92,29 +87,10 @@ const SIDEBAR_EDGE_FRAME_GRADIENT = "linear-gradient(135deg, rgba(92, 238, 255, 
 const SIDEBAR_EDGE_FRAME_SHADOW = "0 0 0 1px rgba(120, 224, 255, 0.22), 0 8px 22px rgba(96, 165, 250, 0.12), 0 0 16px rgba(183, 124, 255, 0.24), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
 const SIDEBAR_ACTIVE_TEXT = "#111111";
 
-type SidebarSectionID = "shared-triage" | "views";
+type SidebarSectionID = "shared-triage";
 
 export type HomeSidebarView = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "my-work" | "updates" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
-
-type GVICHomeSidebarView = Extract<HomeSidebarView, "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox">;
-
-const APP_SIDEBAR_GVIC_VIEWS = GVIC_INBOX_SECTIONS.map((section) => {
-  const label = section.role === "other" ? "Others" : section.label;
-  return {
-    viewID: section.viewID,
-    role: section.role,
-    label,
-    notificationTitle: `${label} updates`,
-    surface: section.role === "generated" ? "r_inbox" : "aci_inbox",
-  };
-}) satisfies ReadonlyArray<{
-  viewID: GVICHomeSidebarView;
-  role: NotificationGVICRole;
-  label: string;
-  notificationTitle: string;
-  surface: NotificationSurface;
-}>;
 
 type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management" | "account-manager";
 
@@ -127,7 +103,6 @@ type AppSidebarProps = {
   explorerSelectionTargetFrameIDs: string[];
   onHomeViewSelect: (view: HomeSidebarView) => void;
   onPageSelect: (page: AppSidebarPrimaryPage) => void;
-  onNotificationNodeOpen: (node: { nodeID: string; nodeTitle: string; focusInformationID?: string }) => void;
   onPinOpen: (pin: SidebarPin) => void;
   onPinRemove: (pin: SidebarPin) => void;
   onPinReorder: (moving: SidebarPin, target: SidebarPin | null, placement: "before" | "after") => void;
@@ -135,22 +110,6 @@ type AppSidebarProps = {
   onPinDragLeave: () => void;
   onPinDragOver: (event: React.DragEvent<HTMLElement>) => void;
   onPinDrop: (event: React.DragEvent<HTMLElement>) => void;
-};
-
-type SidebarNotificationMenuFilter = {
-  title: string;
-  type?: string;
-  surface?: NotificationSurface;
-  role?: NotificationGVICRole;
-};
-
-type SidebarNotificationMenuState = SidebarNotificationMenuFilter & {
-  requestID: number;
-  anchorTop: number;
-  loading: boolean;
-  error: string;
-  items: NotificationItem[];
-  seenNotificationIDs: string[];
 };
 
 function sidebarExplorerTriageConversionTarget(target: Parameters<CompanyExplorerTriageMessageDropHandler>[0]): CommunicationsTriageConversionTarget | null {
@@ -205,12 +164,6 @@ type SidebarSharedInboxDeleteDialogState = {
 
 function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
   return dataTransfer.getData(SHARED_TRIAGE_FOLDER_DRAG_MIME).trim();
-}
-
-function homeSidebarViewForGVICNotification(surface: NotificationSurface | undefined, role: NotificationGVICRole | "" | undefined): GVICHomeSidebarView {
-  const roleView = APP_SIDEBAR_GVIC_VIEWS.find((view) => view.role === role);
-  if (roleView) return roleView.viewID;
-  return surface === "r_inbox" ? "r-inbox" : "a-inbox";
 }
 
 function getSharedTriageDropPlacement(event: React.DragEvent<HTMLElement>): SharedInboxDropPlacement {
@@ -279,7 +232,6 @@ export function AppSidebar({
   explorerSelectionTargetFrameIDs,
   onHomeViewSelect,
   onPageSelect,
-  onNotificationNodeOpen,
   onPinOpen,
   onPinRemove,
   onPinReorder,
@@ -290,9 +242,7 @@ export function AppSidebar({
 }: AppSidebarProps): React.ReactElement {
   const homeActive = activePage === "home";
   const companyID = getActiveCompanyID();
-  const notificationSummary = useNotificationSummary(companyID);
   const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", false);
-  const [viewsOpen, setViewsOpen] = usePersistedSidebarSectionOpen("views", false);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [connectedAccountEmail, setConnectedAccountEmail] = useState("");
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
@@ -311,7 +261,6 @@ export function AppSidebar({
   const [sharedDeleteDialog, setSharedDeleteDialog] = useState<SidebarSharedInboxDeleteDialogState | null>(null);
   const [sharedEmailConnectionDialog, setSharedEmailConnectionDialog] = useState<{ accountEmail: string } | null>(null);
   const [pinContextMenu, setPinContextMenu] = useState<{ x: number; y: number; pin: SidebarPin } | null>(null);
-  const [notificationMenu, setNotificationMenu] = useState<SidebarNotificationMenuState | null>(null);
   const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: "before" | "after" } | null>(null);
   const [explorerTriagePriorityMenu, setExplorerTriagePriorityMenu] = useState<SidebarExplorerTriagePriorityMenuState | null>(null);
   const [explorerTriageBusy, setExplorerTriageBusy] = useState(false);
@@ -320,8 +269,6 @@ export function AppSidebar({
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
-  const keyViewsSectionRef = useRef<HTMLElement | null>(null);
-  const notificationMenuRequestRef = useRef(0);
   const skipRenameBlurRef = useRef(false);
   const cleanConnectedAccountEmail = connectedAccountEmail.trim().toLowerCase();
   const sharedRows = useMemo(
@@ -329,13 +276,6 @@ export function AppSidebar({
     [expandedSharedFolderIDs, sharedInboxes, sharedTriageOpen],
   );
   const sharedTriageActive = homeActive && (activeHomeView === "shared-root" || activeHomeView.startsWith("shared:"));
-  const GVICNotificationCounts = useMemo(
-    () => APP_SIDEBAR_GVIC_VIEWS.reduce<Partial<Record<NotificationGVICRole, number>>>((counts, view) => {
-      counts[view.role] = notificationSummaryRoleCount(notificationSummary, view.surface, view.role);
-      return counts;
-    }, {}),
-    [notificationSummary],
-  );
   const myTriageNotificationCount = useMemo(
     () => mailUnreadCounts.myTriage,
     [mailUnreadCounts.myTriage],
@@ -405,156 +345,6 @@ export function AppSidebar({
     setSelectedSharedTreeIDs((previous) => previous.size === 0 ? previous : new Set());
     setSharedSelectionAnchorTreeID("");
   }, [activeHomeView]);
-  const loadNotificationMenuItems = useCallback((requestID: number, filter: SidebarNotificationMenuFilter) => {
-    fetchNotifications({ companyID, type: filter.type, unreadOnly: true, limit: 100 })
-      .then((items) => {
-        const filtered = items.filter((item) => sidebarNotificationMatchesFilter(item, filter));
-        setNotificationMenu((current) => (
-          current?.requestID === requestID
-            ? { ...current, loading: false, items: filtered }
-            : current
-        ));
-      })
-      .catch((error) => {
-        setNotificationMenu((current) => (
-          current?.requestID === requestID
-            ? { ...current, loading: false, error: error instanceof Error ? error.message : "Failed to load updates" }
-            : current
-        ));
-      });
-  }, [companyID]);
-
-  const openNotificationMenu = useCallback((event: React.MouseEvent, filter: SidebarNotificationMenuFilter) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const requestID = notificationMenuRequestRef.current + 1;
-    notificationMenuRequestRef.current = requestID;
-    const sectionRect = keyViewsSectionRef.current?.getBoundingClientRect();
-    const anchorRect = event.currentTarget instanceof HTMLElement ? event.currentTarget.getBoundingClientRect() : null;
-    const anchorTop = sectionRect && anchorRect ? Math.max(0, anchorRect.bottom - sectionRect.top + 5) : 0;
-    const nextMenu: SidebarNotificationMenuState = {
-      ...filter,
-      requestID,
-      anchorTop,
-      loading: true,
-      error: "",
-      items: [],
-      seenNotificationIDs: [],
-    };
-    setNotificationMenu(nextMenu);
-    loadNotificationMenuItems(requestID, filter);
-  }, [loadNotificationMenuItems]);
-
-  useEffect(() => {
-    if (!notificationMenu) return undefined;
-    const activeRequestID = notificationMenu.requestID;
-    const filter: SidebarNotificationMenuFilter = {
-      title: notificationMenu.title,
-      type: notificationMenu.type,
-      surface: notificationMenu.surface,
-      role: notificationMenu.role,
-    };
-    const onNotificationsUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ companyID?: string }>).detail;
-      const eventCompanyID = detail?.companyID?.trim() ?? "";
-      if (eventCompanyID && eventCompanyID !== companyID) return;
-      const requestID = notificationMenuRequestRef.current + 1;
-      notificationMenuRequestRef.current = requestID;
-      setNotificationMenu((current) => (
-        current?.requestID === activeRequestID
-          ? { ...current, requestID, loading: true, error: "" }
-          : current
-      ));
-      loadNotificationMenuItems(requestID, filter);
-    };
-    window.addEventListener(EVENT_NOTIFICATIONS_UPDATED, onNotificationsUpdated);
-    return () => window.removeEventListener(EVENT_NOTIFICATIONS_UPDATED, onNotificationsUpdated);
-  }, [companyID, loadNotificationMenuItems, notificationMenu]);
-
-  const clearNotificationMenu = useCallback(() => {
-    const menu = notificationMenu;
-    if (!menu || menu.loading || menu.items.length === 0) return;
-    setNotificationMenu(null);
-    void deleteNotifications({
-      companyID,
-      type: menu.type,
-      surface: menu.surface,
-      role: menu.role,
-    }).catch((error) => {
-      console.error("Failed to clear updates", error);
-      setNotificationMenu({
-        ...menu,
-        loading: false,
-        error: error instanceof Error ? error.message : "Failed to clear updates",
-      });
-    });
-  }, [companyID, notificationMenu]);
-
-  const openNotificationTarget = useCallback((notification: NotificationItem) => {
-    const notificationID = notification.notification_id.trim();
-    if (notificationID) {
-      setNotificationMenu((current) => {
-        if (!current) return current;
-        const seen = new Set(current.seenNotificationIDs);
-        seen.add(notificationID);
-        return {
-          ...current,
-          items: current.items.filter((item) => item.notification_id !== notificationID),
-          seenNotificationIDs: Array.from(seen),
-        };
-      });
-      void deleteNotification(notificationID, notification.company_id || companyID).catch((error) => console.error("Failed to delete notification", error));
-    }
-
-    const informationID = notification.information_id?.trim() ?? "";
-    const nodeID = notification.node_id?.trim() || (notification.entity_type === "node" ? notification.entity_id.trim() : "");
-    const logicGateID = notification.logic_gate_id?.trim() || (notification.entity_type === "logic_gate" ? notification.entity_id.trim() : "");
-    if (notification.type === "mention.created" && notification.entity_type === "logic_gate" && logicGateID) {
-      emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
-        companyID: notification.company_id || companyID,
-        sourceFrameID: "app-sidebar-notifications",
-        kind: "logic_gate",
-        id: logicGateID,
-        label: notification.title || logicGateID,
-        nodeID: nodeID || undefined,
-        informationID: informationID || undefined,
-        selectedTreeID: `logic-gate-${logicGateID}`,
-        changedAt: Date.now(),
-      });
-      return;
-    }
-    if (nodeID) {
-      onNotificationNodeOpen({
-        nodeID,
-        nodeTitle: notification.title || nodeID,
-        focusInformationID: informationID || undefined,
-      });
-      return;
-    }
-    if (logicGateID) {
-      emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
-        companyID: notification.company_id || companyID,
-        sourceFrameID: "app-sidebar-notifications",
-        kind: "logic_gate",
-        id: logicGateID,
-        label: notification.title || logicGateID,
-        selectedTreeID: `logic-gate-${logicGateID}`,
-        informationID: informationID || undefined,
-        changedAt: Date.now(),
-      });
-      return;
-    }
-    if (notification.surface === "aci_inbox" || notification.surface === "r_inbox") {
-      onPageSelect("home");
-      onHomeViewSelect(homeSidebarViewForGVICNotification(notification.surface, notification.role));
-    } else if (notification.surface === "shared_triage") {
-      onPageSelect("home");
-      onHomeViewSelect("shared-root");
-    } else {
-      onPageSelect("home");
-      onHomeViewSelect("my-triage");
-    }
-  }, [companyID, onHomeViewSelect, onNotificationNodeOpen, onPageSelect]);
 
   const readDraggedSidebarPin = useCallback((dataTransfer: DataTransfer): SidebarPin | null => {
     try {
@@ -1093,7 +883,6 @@ export function AppSidebar({
     );
   };
 
-  const viewsActive = homeActive && APP_SIDEBAR_GVIC_VIEWS.some((view) => activeHomeView === view.viewID);
   return (
     <aside className="company-explorer-scroll" data-app-sidebar="primary" style={appSidebarStyle}>
       <div style={appSidebarBrandStyle} aria-label="MangoRTS">
@@ -1124,7 +913,7 @@ export function AppSidebar({
         </div>
       </div>
 
-      <section ref={keyViewsSectionRef} style={appSidebarKeyViewsSectionStyle} aria-label="Home inboxes">
+      <section style={appSidebarKeyViewsSectionStyle} aria-label="Home inboxes">
         <AppSidebarButton
           label="My Triage"
           active={homeActive && activeHomeView === "my-triage"}
@@ -1192,48 +981,6 @@ export function AppSidebar({
           )}
           {sharedError && <div style={appSidebarSharedErrorStyle}>{sharedError}</div>}
         </div>
-        <div style={appSidebarViewsBlockStyle(viewsActive, viewsOpen)}>
-          <div style={appSidebarViewsRowStyle(viewsActive, viewsOpen)}>
-            <button
-              type="button"
-              style={appSidebarViewsButtonStyle}
-              onClick={() => setViewsOpen((open) => !open)}
-            >
-              <span style={appSidebarTextStyle}>Views</span>
-            </button>
-            <button
-              type="button"
-              title={viewsOpen ? "Collapse Views" : "Expand Views"}
-              aria-label={viewsOpen ? "Collapse Views" : "Expand Views"}
-              style={appSidebarSharedDisclosureStyle}
-              onClick={(event) => {
-                event.stopPropagation();
-                setViewsOpen((open) => !open);
-              }}
-            >
-              <ExplorerDisclosureIcon open={viewsOpen} color="rgba(15, 23, 42, 0.68)" />
-            </button>
-          </div>
-          {viewsOpen && (
-            <div className="app-sidebar-elevated-dropdown" style={appSidebarViewsNestedStyle}>
-              {APP_SIDEBAR_GVIC_VIEWS.map((view) => (
-                <AppSidebarButton
-                  key={view.viewID}
-                  label={view.label}
-                  active={homeActive && activeHomeView === view.viewID}
-                  trailing={<SidebarNotificationBadges badges={[{
-                    key: view.role,
-                    count: GVICNotificationCounts[view.role] ?? 0,
-                    tone: view.role,
-                    title: view.notificationTitle,
-                    onClick: (event) => openNotificationMenu(event, { title: view.notificationTitle, surface: view.surface, role: view.role }),
-                  }]} />}
-                  onClick={() => onHomeViewSelect(view.viewID)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
         <AppSidebarButton
           label="My Work"
           active={homeActive && activeHomeView === "my-work"}
@@ -1246,21 +993,6 @@ export function AppSidebar({
           elevated
           onClick={() => onHomeViewSelect("updates")}
         />
-        {notificationMenu && (
-          <div style={appSidebarNotificationPopoverOverlayStyle(notificationMenu.anchorTop)}>
-            <NotificationPopover
-              embedded
-              title={notificationMenu.title}
-              loading={notificationMenu.loading}
-              error={notificationMenu.error}
-              items={notificationMenu.items}
-              seenNotificationIDs={new Set(notificationMenu.seenNotificationIDs)}
-              onClose={() => setNotificationMenu(null)}
-              onOpen={openNotificationTarget}
-              onClear={clearNotificationMenu}
-            />
-          </div>
-        )}
       </section>
 
       <section style={appSidebarPrimaryPagesSectionStyle} aria-label="Primary pages">
@@ -1572,7 +1304,7 @@ function AppSidebarCompanyExplorerSection({
   );
 }
 
-type SidebarNotificationBadgeTone = NotificationGVICRole | "aci" | "mail";
+type SidebarNotificationBadgeTone = "mail";
 
 type SidebarNotificationBadge = {
   key: string;
@@ -1582,19 +1314,6 @@ type SidebarNotificationBadge = {
   showZero?: boolean;
   onClick?: (event: React.MouseEvent) => void;
 };
-
-function notificationSummaryRoleCount(summary: NotificationSummary, surface: NotificationSurface, role: NotificationGVICRole): number {
-  return (summary.role_counts ?? []).reduce((count, item) => (
-    item.surface === surface && item.role === role ? count + normalizeSidebarNotificationCount(item.count) : count
-  ), 0);
-}
-
-function sidebarNotificationMatchesFilter(item: NotificationItem, filter: SidebarNotificationMenuFilter): boolean {
-  if (filter.type && item.type !== filter.type) return false;
-  if (filter.surface && item.surface !== filter.surface) return false;
-  if (filter.role && item.role !== filter.role) return false;
-  return true;
-}
 
 function normalizeSidebarNotificationCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
@@ -2239,73 +1958,6 @@ const appSidebarKeyViewsSectionStyle: React.CSSProperties = {
   borderBottom: `1px solid ${SIDEBAR_DIVIDER}`,
 };
 
-function appSidebarViewsBlockStyle(active: boolean, open: boolean): React.CSSProperties {
-  return {
-    display: "grid",
-    gap: 0,
-    minWidth: 0,
-    margin: 0,
-    border: `1px solid ${active ? "transparent" : SIDEBAR_SOFT_BORDER}`,
-    borderRadius: SIDEBAR_ELEVATED_RADIUS,
-    background: active ? `${SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE} padding-box, ${SIDEBAR_EDGE_FRAME_GRADIENT} border-box` : SIDEBAR_NEUMORPHIC_SURFACE,
-    boxShadow: active ? `${SIDEBAR_NEUMORPHIC_ACTIVE_SHADOW}, ${SIDEBAR_EDGE_FRAME_SHADOW}` : SIDEBAR_NEUMORPHIC_SHADOW,
-    overflow: open ? "hidden" : "visible",
-  };
-}
-
-function appSidebarViewsRowStyle(active: boolean, open: boolean): React.CSSProperties {
-  return {
-    width: "100%",
-    minHeight: 44,
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 34px",
-    alignItems: "center",
-    border: "none",
-    borderRadius: open ? `${SIDEBAR_ELEVATED_RADIUS - 1}px ${SIDEBAR_ELEVATED_RADIUS - 1}px 0 0` : SIDEBAR_ELEVATED_RADIUS - 1,
-    background: active ? SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE : "transparent",
-    color: SIDEBAR_ACTIVE_TEXT,
-    minWidth: 0,
-  };
-}
-
-const appSidebarViewsButtonStyle: React.CSSProperties = {
-  minWidth: 0,
-  minHeight: 42,
-  display: "grid",
-  alignItems: "center",
-  border: "none",
-  background: "transparent",
-  color: "inherit",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 13,
-  fontWeight: 650,
-  lineHeight: 1.1,
-  letterSpacing: 0,
-  padding: "0 0 0 14px",
-  textAlign: "left",
-};
-
-const appSidebarViewsNestedStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  alignContent: "start",
-  gap: 4,
-  padding: "4px 6px 7px",
-};
-
-function appSidebarNotificationPopoverOverlayStyle(top: number): React.CSSProperties {
-  return {
-    position: "absolute",
-    top,
-    left: 3,
-    right: 3,
-    zIndex: NODE_EDITOR_POPUP_NOTIFICATION_Z_INDEX,
-    minWidth: 0,
-    pointerEvents: "auto",
-  };
-}
-
 const appSidebarPrimaryPagesSectionStyle: React.CSSProperties = {
   flex: "0 0 auto",
   display: "grid",
@@ -2459,23 +2111,8 @@ function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone): R
 }
 
 function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { background: string; border: string; color: string } {
-  switch (tone) {
-    case "generated":
-      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.36)", color: "#c2410c" };
-    case "verified":
-      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.38)", color: "#c2410c" };
-    case "consulted":
-      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
-    case "informed":
-      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.32)", color: "#c2410c" };
-    case "other":
-      return { background: "#fffaf3", border: "rgba(255, 136, 32, 0.30)", color: "#c2410c" };
-    case "aci":
-      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.34)", color: "#c2410c" };
-    case "mail":
-    default:
-      return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.36)", color: "#c2410c" };
-  }
+  if (tone === "mail") return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.36)", color: "#c2410c" };
+  return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.36)", color: "#c2410c" };
 }
 function appSidebarSharedRootBlockStyle(active: boolean, raised: boolean): React.CSSProperties {
   const framed = active || raised;

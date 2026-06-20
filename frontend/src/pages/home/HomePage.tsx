@@ -291,7 +291,7 @@ export function HomePage({
   onNavigate,
   embedded = false,
   hideNavigation = false,
-  initialViewID = "my-triage",
+  initialViewID = "my-work",
   deepLinkNodeID,
   onNodeOverlayOpen,
   onNodeOverlayClose,
@@ -3733,7 +3733,6 @@ export function HomePage({
               sharedInboxes={sharedInboxes}
               loadingSharedInboxes={loadingSharedInboxes}
               busy={busy}
-              notificationSummary={notificationSummary}
               onSelectView={selectHomeView}
               onCreateSharedInbox={createSharedInboxFolder}
               onRenameSharedInbox={renameSharedInboxFolder}
@@ -3759,8 +3758,6 @@ export function HomePage({
               onOpenProject={openProjectManagement}
               onOpenNodeBulkMenu={openNodeBulkEditMenu}
               onOpenLogicGateBulkMenu={openLogicGateBulkEditMenu}
-              onCreateNodeInLogicGate={(input) => { void createHomeNode(input); }}
-              onCreateLogicGateInCell={(input) => { void createLogicGateInInboxCell(input); }}
               onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
               onDropNodes={(input) => { void dropNodesIntoInboxLogicGate(input); }}
               onDropNodesInCell={(input) => { void dropNodesIntoNewInboxLogicGate(input); }}
