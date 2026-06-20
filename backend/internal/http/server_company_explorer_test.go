@@ -1492,7 +1492,7 @@ func TestCompanyExplorerLazyLogicGateChildrenReturnDirectNodes(t *testing.T) {
 	}
 }
 
-func TestCompanyExplorerLazyScopesRespectFolderScopeAndVisibility(t *testing.T) {
+func TestCompanyExplorerLazyLegacyScopesReadCompanyWideVisibleRows(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -1604,20 +1604,20 @@ func TestCompanyExplorerLazyScopesRespectFolderScopeAndVisibility(t *testing.T) 
 
 	meRows := getCompanyExplorerLazyRowsForTest(t, handler, companyID, "me", userA.UserID)
 	meFolders := companyExplorerLazyFolderIDSet(meRows)
-	if !meFolders[userAFolder.FolderID] || !meFolders[allFolder.FolderID] || !meFolders[responsibleRoot.FolderID] || meFolders[userBFolder.FolderID] || meFolders[teamFolder.FolderID] || meFolders[hiddenFolder.FolderID] {
-		t.Fatalf("me scoped folders = %v, want user A and visible company-scoped folder shells only", meFolders)
+	if !meFolders[userAFolder.FolderID] || !meFolders[userBFolder.FolderID] || !meFolders[teamFolder.FolderID] || !meFolders[allFolder.FolderID] || !meFolders[responsibleRoot.FolderID] || meFolders[hiddenFolder.FolderID] {
+		t.Fatalf("legacy me folders = %v, want all visible company-wide folder shells", meFolders)
 	}
 
 	teamRows := getCompanyExplorerLazyRowsForTest(t, handler, companyID, "team", userA.UserID)
 	teamFolders := companyExplorerLazyFolderIDSet(teamRows)
 	if !teamFolders[userAFolder.FolderID] || !teamFolders[userBFolder.FolderID] || !teamFolders[teamFolder.FolderID] || !teamFolders[allFolder.FolderID] || !teamFolders[responsibleRoot.FolderID] || teamFolders[hiddenFolder.FolderID] {
-		t.Fatalf("team scoped folders = %v, want team/user and visible company-scoped folder shells only", teamFolders)
+		t.Fatalf("legacy team folders = %v, want all visible company-wide folder shells", teamFolders)
 	}
 
 	allRows := getCompanyExplorerLazyRowsForTest(t, handler, companyID, "all", userA.UserID)
 	allFolders := companyExplorerLazyFolderIDSet(allRows)
 	if !allFolders[userAFolder.FolderID] || !allFolders[userBFolder.FolderID] || !allFolders[teamFolder.FolderID] || !allFolders[allFolder.FolderID] || !allFolders[responsibleRoot.FolderID] || allFolders[hiddenFolder.FolderID] {
-		t.Fatalf("all scoped folders = %v, want all visible scoped folders and no hidden folder", allFolders)
+		t.Fatalf("all folders = %v, want all visible company-wide folder shells and no hidden folder", allFolders)
 	}
 
 	responsibleChildren := getCompanyExplorerLazyChildRowsForTest(t, handler, companyID, "me", userA.UserID, "folder", responsibleRoot.FolderID)
@@ -1629,18 +1629,19 @@ func TestCompanyExplorerLazyScopesRespectFolderScopeAndVisibility(t *testing.T) 
 	allFolderChildren := getCompanyExplorerLazyChildRowsForTest(t, handler, companyID, "me", userA.UserID, "folder", allFolder.FolderID)
 	allFolderItems := companyExplorerLazyFolderItemIDSet(allFolderChildren)
 	allFolderLogicGates := companyExplorerLazyLogicGateIDSet(allFolderChildren)
-	if !allFolderItems[gateA.LogicGateID] || allFolderItems[gateB.LogicGateID] || !allFolderLogicGates[gateA.LogicGateID] || allFolderLogicGates[gateB.LogicGateID] {
-		t.Fatalf("me scoped all-folder gate rows items=%v gates=%v, want only %s", allFolderItems, allFolderLogicGates, gateA.LogicGateID)
+	if !allFolderItems[gateA.LogicGateID] || !allFolderItems[gateB.LogicGateID] || !allFolderLogicGates[gateA.LogicGateID] || !allFolderLogicGates[gateB.LogicGateID] {
+		t.Fatalf("legacy me all-folder gate rows items=%v gates=%v, want all company-wide gate rows", allFolderItems, allFolderLogicGates)
 	}
 
 	gateAChildren := getCompanyExplorerLazyChildRowsForTest(t, handler, companyID, "me", userA.UserID, "logic_gate", gateA.LogicGateID)
 	gateANodes := companyExplorerLazyNodeIDSet(gateAChildren)
 	if !gateANodes[nodeA.NodeID] || gateANodes[nodeB.NodeID] {
-		t.Fatalf("me scoped gate A children = %v, want only %s", gateANodes, nodeA.NodeID)
+		t.Fatalf("legacy me gate A children = %v, want native child %s only", gateANodes, nodeA.NodeID)
 	}
 	gateBChildren := getCompanyExplorerLazyChildRowsForTest(t, handler, companyID, "me", userA.UserID, "logic_gate", gateB.LogicGateID)
-	if nodes := companyExplorerLazyNodeIDSet(gateBChildren); len(nodes) != 0 {
-		t.Fatalf("me scoped gate B children = %v, want no nodes outside selected scope", nodes)
+	gateBNodes := companyExplorerLazyNodeIDSet(gateBChildren)
+	if !gateBNodes[nodeB.NodeID] || gateBNodes[nodeA.NodeID] {
+		t.Fatalf("legacy me gate B children = %v, want native child %s only", gateBNodes, nodeB.NodeID)
 	}
 }
 

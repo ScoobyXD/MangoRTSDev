@@ -22,7 +22,6 @@ type CompanyExplorerContextMenuProps = {
   onCreateProject: (parentFolderID: string, position?: number) => void;
   onOpenFolderPermissions: (target: CompanyExplorerFolderPermissionsTarget) => void;
   onOpenInNewTab: (target: CompanyExplorerOpenInNewTabTarget) => void;
-  onSubscribeEntity: (ownerType: "user" | "team", anchorEntityID: string) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
   onDeleteTargets: (targets: ExplorerDeleteTargetWithLabel[], position?: ConfirmActionMenuPosition) => void;
 };
@@ -36,7 +35,6 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   onCreateProject,
   onOpenFolderPermissions,
   onOpenInNewTab,
-  onSubscribeEntity,
   onRenameTarget,
   onDeleteTargets,
 }) => {
@@ -51,8 +49,6 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   const menuSections = buildCompanyExplorerContextMenuSections({
     openInNewTabEnabled: Boolean(menu.openInNewTabTarget),
     permissionsEnabled: Boolean(menu.permissionsTarget),
-    subscribeMeEnabled: menu.canSubscribeToMe,
-    subscribeTeamEnabled: menu.canSubscribeToTeam,
     createFolderEnabled: menu.canCreateFolder,
     createNodeEnabled: menu.canCreateNode,
     createLogicGateEnabled: menu.canCreateLogicGate,
@@ -172,24 +168,6 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
           onClick={() => {
             if (!menu.openInNewTabTarget) return;
             onOpenInNewTab(menu.openInNewTabTarget);
-          }}
-        >
-          {action.label}
-        </button>
-      );
-    }
-    if (action.id === "subscribe_me" || action.id === "subscribe_team") {
-      const ownerType = action.id === "subscribe_team" ? "team" : "user";
-      return (
-        <button
-          key={action.id}
-          type="button"
-          disabled={!action.enabled}
-          style={menuButtonStyle(action.enabled)}
-          {...menuItemEvents(action.enabled, closePrioritySubmenu)}
-          onClick={() => {
-            if (!action.enabled || !menu.subscriptionAnchorEntityID) return;
-            onSubscribeEntity(ownerType, menu.subscriptionAnchorEntityID);
           }}
         >
           {action.label}

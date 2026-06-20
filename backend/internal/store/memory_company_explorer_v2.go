@@ -59,32 +59,9 @@ func (r *MemoryRepo) ListCompanyExplorerV2RootRows(query CompanyExplorerV2RowsQu
 
 	r.ensureCompanyExplorerV2CompanyGraphLocked(query.CompanyID)
 	rows := CompanyExplorerV2Rows{Rows: []CompanyExplorerV2Row{}}
-	if query.View == CompanyExplorerLazyScopeAll {
-		entity, ok := r.companyExplorerV2EntityForNativeLocked(query.CompanyID, CompanyExplorerV2EntityCompany, query.CompanyID)
-		if ok && r.companyExplorerV2EntityVisibleLocked(query, entity) {
-			rows.Rows = append(rows.Rows, r.companyExplorerV2RowLocked(query, entity, nil))
-		}
-		sortCompanyExplorerV2Rows(rows.Rows)
-		return rows, nil
-	}
-
-	companyRoot, ok := r.companyExplorerV2EntityForNativeLocked(query.CompanyID, CompanyExplorerV2EntityCompany, query.CompanyID)
-	if !ok {
-		return rows, nil
-	}
-	included := r.companyExplorerV2SubscriptionEntityIDsLocked(query)
-	for _, edge := range r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, companyRoot.EntityID) {
-		if !included[edge.ChildEntityID] {
-			continue
-		}
-		child, ok := r.companyExplorerV2Entities[key(query.CompanyID, edge.ChildEntityID)]
-		if !ok || !r.companyExplorerV2EntityVisibleLocked(query, child) {
-			continue
-		}
-		rowEdge := edge.memoryEdge()
-		row := r.companyExplorerV2RowLocked(query, child, &rowEdge)
-		row.ParentEntityID = ""
-		rows.Rows = append(rows.Rows, row)
+	entity, ok := r.companyExplorerV2EntityForNativeLocked(query.CompanyID, CompanyExplorerV2EntityCompany, query.CompanyID)
+	if ok && r.companyExplorerV2EntityVisibleLocked(query, entity) {
+		rows.Rows = append(rows.Rows, r.companyExplorerV2RowLocked(query, entity, nil))
 	}
 	sortCompanyExplorerV2Rows(rows.Rows)
 	return rows, nil
@@ -103,15 +80,8 @@ func (r *MemoryRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQ
 	if !ok || !r.companyExplorerV2EntityVisibleLocked(query, parent) {
 		return CompanyExplorerV2Rows{}, ErrNotFound
 	}
-	included := map[string]bool(nil)
-	if query.View == CompanyExplorerLazyScopeMe || query.View == CompanyExplorerLazyScopeTeam {
-		included = r.companyExplorerV2SubscriptionEntityIDsLocked(query)
-	}
 	rows := CompanyExplorerV2Rows{Rows: []CompanyExplorerV2Row{}}
 	for _, edge := range r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, parent.EntityID) {
-		if included != nil && !included[edge.ChildEntityID] {
-			continue
-		}
 		child, ok := r.companyExplorerV2Entities[key(query.CompanyID, edge.ChildEntityID)]
 		if !ok || !r.companyExplorerV2EntityVisibleLocked(query, child) {
 			continue
@@ -154,7 +124,7 @@ func (r *MemoryRepo) companyExplorerV2DirectChildEdgesLocked(companyID, parentEn
 }
 
 func (r *MemoryRepo) companyExplorerV2DirectTreeEdgesLocked(companyID string) []memoryCompanyExplorerV2TreeEdge {
-	bestByChild := map[string]memoryCompanyExplorerV2TreeEdge{}
+	bestByParentChild := map[string]memoryCompanyExplorerV2TreeEdge{}
 	add := func(candidate memoryCompanyExplorerV2TreeEdge) {
 		if candidate.CompanyID != companyID || candidate.ParentEntityID == "" || candidate.ChildEntityID == "" || candidate.ParentEntityID == candidate.ChildEntityID {
 			return
@@ -165,9 +135,10 @@ func (r *MemoryRepo) companyExplorerV2DirectTreeEdgesLocked(companyID string) []
 		if _, ok := r.companyExplorerV2Entities[key(companyID, candidate.ChildEntityID)]; !ok {
 			return
 		}
-		current, ok := bestByChild[candidate.ChildEntityID]
+		edgeKey := key(candidate.ParentEntityID, candidate.ChildEntityID)
+		current, ok := bestByParentChild[edgeKey]
 		if !ok || candidate.SourcePriority < current.SourcePriority || (candidate.SourcePriority == current.SourcePriority && companyExplorerV2TreeEdgeLess(candidate, current)) {
-			bestByChild[candidate.ChildEntityID] = candidate
+			bestByParentChild[edgeKey] = candidate
 		}
 	}
 	for _, assignment := range r.nodeLogicGateAssignments {
@@ -204,8 +175,8 @@ func (r *MemoryRepo) companyExplorerV2DirectTreeEdgesLocked(companyID string) []
 		}
 		add(memoryCompanyExplorerV2TreeEdge{CompanyID: edge.CompanyID, EdgeID: edge.EdgeID, ParentEntityID: edge.ParentEntityID, ChildEntityID: edge.ChildEntityID, Position: edge.Position, CreatedTimestamp: edge.CreatedTimestamp, UpdatedTimestamp: edge.UpdatedTimestamp, SourcePriority: 30})
 	}
-	edges := make([]memoryCompanyExplorerV2TreeEdge, 0, len(bestByChild))
-	for _, edge := range bestByChild {
+	edges := make([]memoryCompanyExplorerV2TreeEdge, 0, len(bestByParentChild))
+	for _, edge := range bestByParentChild {
 		edges = append(edges, edge)
 	}
 	return edges
@@ -229,68 +200,6 @@ func companyExplorerV2TreeEdgeLess(left, right memoryCompanyExplorerV2TreeEdge) 
 	return leftID < rightID
 }
 
-func (r *MemoryRepo) companyExplorerV2SubscriptionEntityIDsLocked(query CompanyExplorerV2RowsQuery) map[string]bool {
-	anchors := map[string]bool{}
-	for _, subscription := range r.companyExplorerV2Subscriptions {
-		if subscription.CompanyID != query.CompanyID || !r.companyExplorerV2SubscriptionMatchesQueryLocked(subscription, query) {
-			continue
-		}
-		anchors[subscription.AnchorEntityID] = true
-	}
-	included := map[string]bool{}
-	if len(anchors) == 0 {
-		return included
-	}
-	edges := r.companyExplorerV2DirectTreeEdgesLocked(query.CompanyID)
-	parentByChild := map[string]string{}
-	childrenByParent := map[string][]string{}
-	for _, edge := range edges {
-		parentByChild[edge.ChildEntityID] = edge.ParentEntityID
-		childrenByParent[edge.ParentEntityID] = append(childrenByParent[edge.ParentEntityID], edge.ChildEntityID)
-	}
-	for anchorID := range anchors {
-		current := anchorID
-		seen := map[string]bool{}
-		for current != "" && !seen[current] {
-			seen[current] = true
-			included[current] = true
-			current = parentByChild[current]
-		}
-		queue := []string{anchorID}
-		for len(queue) > 0 {
-			current = queue[0]
-			queue = queue[1:]
-			if included[current] {
-				// Already included from the ancestor walk or another anchor; still inspect children below.
-			}
-			included[current] = true
-			for _, childID := range childrenByParent[current] {
-				if included[childID] {
-					continue
-				}
-				queue = append(queue, childID)
-			}
-		}
-	}
-	return included
-}
-
-func (r *MemoryRepo) companyExplorerV2SubscriptionMatchesQueryLocked(subscription memoryCompanyExplorerV2Subscription, query CompanyExplorerV2RowsQuery) bool {
-	switch query.View {
-	case CompanyExplorerLazyScopeMe:
-		return subscription.OwnerType == CompanyExplorerV2SubscriptionOwnerUser && subscription.OwnerID == query.ScopeUserID
-	case CompanyExplorerLazyScopeTeam:
-		if subscription.OwnerType != CompanyExplorerV2SubscriptionOwnerTeam {
-			return false
-		}
-		for _, member := range r.userGroupMembers {
-			if member.CompanyID == query.CompanyID && member.GroupID == subscription.OwnerID && member.UserID == query.ScopeUserID {
-				return true
-			}
-		}
-	}
-	return false
-}
 func (r *MemoryRepo) GetCompanyExplorerV2FolderDefaultAccess(companyID, entityID string) (string, error) {
 	companyID = cleanUUIDText(companyID)
 	entityID = cleanUUIDText(entityID)

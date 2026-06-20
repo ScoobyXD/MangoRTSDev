@@ -112,16 +112,6 @@ func (s *Server) companyExplorerV2RowsQuery(w http.ResponseWriter, r *http.Reque
 	if hasActor {
 		query.ScopeUserID = strings.TrimSpace(actor.User.UserID)
 	}
-	if view == store.CompanyExplorerLazyScopeMe || view == store.CompanyExplorerLazyScopeTeam {
-		if !hasActor || strings.TrimSpace(actor.User.UserID) == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
-			return store.CompanyExplorerV2RowsQuery{}, false
-		}
-		if actorRoleForCompany(actor, companyID) == "" {
-			writeError(w, http.StatusForbidden, "company_access_denied")
-			return store.CompanyExplorerV2RowsQuery{}, false
-		}
-	}
 	return query, true
 }
 

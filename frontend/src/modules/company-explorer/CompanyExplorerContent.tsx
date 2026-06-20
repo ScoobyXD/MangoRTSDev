@@ -74,7 +74,7 @@ import {
   shouldRefreshKanbanBoardsAfterUpdate,
   type CompanyExplorerWorkspaceStreamEnvelope,
 } from "./companyExplorerStore";
-import { fetchCompanyExplorerChildren, fetchCompanyExplorerRoots, subscribeCompanyExplorerEntity, type CompanyExplorerLazyScope, type CompanyExplorerV2Row, type CompanyExplorerV2SubscriptionOwnerType } from "./companyExplorerLazyApi";
+import { fetchCompanyExplorerChildren, fetchCompanyExplorerRoots, type CompanyExplorerLazyScope, type CompanyExplorerV2Row } from "./companyExplorerLazyApi";
 import { shouldIncludeGVICCustomRootFolder, shouldShowGVICCompanyScopedFolderShell } from "./companyExplorerGVICVisibility";
 
 const scopedRootCreationKeys = new Set<string>();
@@ -104,10 +104,13 @@ function openCompanyExplorerTargetInNewTab(target: CompanyExplorerOpenInNewTabTa
 }
 
 function companyExplorerLazyScopeForView(scopeView: CompanyExplorerScopeView, scopeViewsEnabled: boolean): CompanyExplorerLazyScope {
-  if (!scopeViewsEnabled) return "all";
-  if (scopeView === "mine") return "me";
-  if (scopeView === "team") return "team";
+  void scopeView;
+  void scopeViewsEnabled;
   return "all";
+}
+
+function defaultCompanyExplorerScopeView(): CompanyExplorerScopeView {
+  return "company";
 }
 
 const GVIC_FOLDER_ROWS = [
@@ -1487,7 +1490,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const pendingExplorerSelectionIntentRef = useRef<SelectionIntent>("activate");
   const explorerContextSequenceRef = useRef(0);
   const pendingScrollAlignRef = useRef<"nearest" | "center">("nearest");
-  const [scopeView, setScopeView] = useState<CompanyExplorerScopeView>("mine");
+  const scopeView = defaultCompanyExplorerScopeView();
   const [currentUserID, setCurrentUserID] = useState("");
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [companyGroups, setCompanyGroups] = useState<CompanyUserGroup[]>([]);
@@ -1502,7 +1505,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const scopedRootName = scopedRootFolderName.trim();
   const scopedKind = scopedRootName ? (scopedRootFolderKind ?? "logic_gate") : undefined;
   const scopedExplorerActive = Boolean(scopedKind && scopedRootName);
-  const scopeViewsEnabled = !hideTopControls && !scopedExplorerActive;
+  const scopeViewsEnabled = false;
   const companyExplorerLazyScope = useMemo(
     () => companyExplorerLazyScopeForView(scopeView, scopeViewsEnabled),
     [scopeView, scopeViewsEnabled],
@@ -2913,28 +2916,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     setDeleteConfirmation({ targets, position: position ?? null });
   }, [folders]);
 
-  const subscribeExplorerEntity = useCallback(async (ownerType: CompanyExplorerV2SubscriptionOwnerType, anchorEntityID: string) => {
-    const cleanAnchorEntityID = cleanExplorerID(anchorEntityID);
-    const ownerID = ownerType === "team" ? cleanExplorerID(currentTeamScopeID) : cleanExplorerID(currentUserID);
-    if (!cleanAnchorEntityID || !ownerID) {
-      setError(ownerType === "team" ? "team_subscription_target_missing" : "user_subscription_target_missing");
-      return;
-    }
-    setError("");
-    try {
-      await subscribeCompanyExplorerEntity(apiBase, {
-        companyID,
-        ownerType,
-        ownerID,
-        anchorEntityID: cleanAnchorEntityID,
-      });
-      if ((ownerType === "user" && companyExplorerLazyScope === "me") || (ownerType === "team" && companyExplorerLazyScope === "team")) {
-        refreshLoadedCompanyExplorerBranches();
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_subscribe_company_explorer_entity");
-    }
-  }, [apiBase, companyExplorerLazyScope, companyID, currentTeamScopeID, currentUserID, refreshLoadedCompanyExplorerBranches]);
   const requestDeleteSelection = useCallback(() => {
     if (deleteConfirmation) return;
     const selectedRows = treeRows.filter((row) => selectedTreeIDs.has(row.id));
@@ -3631,12 +3612,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         permissionsPath: row.entityType === "folder" ? `/v2/company-explorer/entities/${encodeURIComponent(row.folderID)}/permissions` : undefined,
       }
       : null;
-    const subscriptionAnchorEntityID = !protectedGVICRow && row?.entityID && (
-      row.entityType === "folder"
-      || row.entityType === "project"
-      || row.entityType === "logic_gate"
-      || row.entityType === "node"
-    ) ? row.entityID : "";
     setExplorerContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -3646,9 +3621,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       renameTarget: protectedGVICRow ? null : resolveExplorerRenameTarget(row ?? null),
       permissionsTarget,
       openInNewTabTarget: protectedGVICRow ? null : getOpenInNewTabTargetForExplorerRow(row),
-      subscriptionAnchorEntityID,
-      canSubscribeToMe: Boolean(subscriptionAnchorEntityID && cleanExplorerID(currentUserID)),
-      canSubscribeToTeam: Boolean(subscriptionAnchorEntityID && cleanExplorerID(currentTeamScopeID)),
       renameTreeID: row?.id ?? "",
       renameLabel: row?.label ?? "",
       contextKind,
@@ -3663,7 +3635,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       canCreateLogicGate: canCreateForContext && (scopedKind ? scopedKind === "logic_gate" && Boolean(scopedRootFolder) : true),
       canCreateProject: canCreateForContext && (scopedKind ? scopedKind === "project" && Boolean(scopedRootFolder) : true),
     });
-  }, [currentTeamScopeID, currentUserID, focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, GVICExplorerActive, resolveCreateFolderScope, scopedKind, scopedRootFolder, scopedRootRow, selectTreeRow, selectedTreeIDs, teamCompanyExplorerActive, treeRows]);
+  }, [focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, GVICExplorerActive, resolveCreateFolderScope, scopedKind, scopedRootFolder, scopedRootRow, selectTreeRow, selectedTreeIDs, teamCompanyExplorerActive, treeRows]);
 
   // Kanban accepts node cards only. A mixed Explorer selection is still valid
   // for navigation, but the drag payload intentionally exports node rows only.
@@ -3740,36 +3712,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const scrollbarAccent = theme === "light" ? LIGHT_EXPLORER_CYAN_ACCENT : accent;
   const scrollbarTrack = isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(71, 85, 105, 0.08)";
   const elevatedExplorerControls = useParentScroll && theme === "light" && !hideTopControls;
-  const scopeToggleStyle: React.CSSProperties = {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-    gap: 4,
-    minWidth: 0,
-  };
-  const scopeButtonStyle = (active: boolean): React.CSSProperties => ({
-    minWidth: 0,
-    height: 28,
-    border: `1px solid ${active ? "rgba(71, 85, 105, 0.72)" : "rgba(148, 163, 184, 0.34)"}`,
-    borderRadius: 7,
-    background: active ? "rgba(71, 85, 105, 0.14)" : "rgba(255, 255, 255, 0.82)",
-    color: "#111827",
-    cursor: "pointer",
-    fontFamily: "var(--mango-font-family)",
-    fontSize: 11,
-    fontWeight: active ? 760 : 620,
-    letterSpacing: 0,
-    padding: "0 6px",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  });
-  const scopeControls = scopeViewsEnabled ? (
-    <div data-frame-interactive="true" style={scopeToggleStyle} aria-label="Company Explorer view scope">
-      <button type="button" style={scopeButtonStyle(scopeView === "mine")} onClick={() => setScopeView("mine")}>Me</button>
-      <button type="button" style={scopeButtonStyle(scopeView === "team")} onClick={() => setScopeView("team")}>Team</button>
-      <button type="button" style={scopeButtonStyle(scopeView === "company")} onClick={() => setScopeView("company")}>All</button>
-    </div>
-  ) : undefined;
+  const scopeControls = undefined;
 
   return (
     <div
@@ -3875,10 +3818,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         onOpenInNewTab={(target) => {
           setExplorerContextMenu(null);
           openCompanyExplorerTargetInNewTab(target);
-        }}
-        onSubscribeEntity={(ownerType, anchorEntityID) => {
-          setExplorerContextMenu(null);
-          void subscribeExplorerEntity(ownerType, anchorEntityID);
         }}
         onRenameTarget={(treeID, target, value) => {
           setExplorerContextMenu(null);
