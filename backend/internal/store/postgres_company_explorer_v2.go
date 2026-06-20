@@ -812,19 +812,53 @@ func (r *PostgresRepo) DeleteCompanyExplorerV2Edge(companyID, edgeID string) err
 	if companyID == "" || edgeID == "" {
 		return ErrInvalid
 	}
-	result, err := r.db.ExecContext(context.Background(), `
+	return r.DeleteCompanyExplorerV2Edges(companyID, []string{edgeID})
+}
+
+func (r *PostgresRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []string) error {
+	companyID = cleanUUIDText(companyID)
+	edgeIDs = normalizeCompanyExplorerV2EdgeIDs(edgeIDs)
+	if companyID == "" || len(edgeIDs) == 0 {
+		return ErrInvalid
+	}
+	cleanEdgeIDs := make([]string, 0, len(edgeIDs))
+	for _, edgeID := range edgeIDs {
+		cleanEdgeID := cleanUUIDText(edgeID)
+		if cleanEdgeID == "" {
+			return ErrInvalid
+		}
+		cleanEdgeIDs = append(cleanEdgeIDs, cleanEdgeID)
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var existingCount int
+	if err := tx.QueryRowContext(ctx, `
+select count(*)
+from company_explorer_items
+where company_id=$1::uuid
+  and item_id = any(string_to_array($2, ',')::uuid[])`, companyID, strings.Join(cleanEdgeIDs, ",")).Scan(&existingCount); err != nil {
+		return err
+	}
+	if existingCount != len(cleanEdgeIDs) {
+		return ErrNotFound
+	}
+	result, err := tx.ExecContext(ctx, `
 delete from company_explorer_items
 where company_id=$1::uuid
-  and item_id=$2::uuid`, companyID, edgeID)
+  and item_id = any(string_to_array($2, ',')::uuid[])`, companyID, strings.Join(cleanEdgeIDs, ","))
 	if err != nil {
 		return err
 	}
 	if affected, err := result.RowsAffected(); err != nil {
 		return err
-	} else if affected == 0 {
+	} else if affected != int64(len(cleanEdgeIDs)) {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *PostgresRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string) error {

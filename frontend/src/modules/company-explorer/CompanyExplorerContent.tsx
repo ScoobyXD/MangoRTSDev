@@ -2856,15 +2856,19 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     });
     if (deletedEdgeIDs.size > 0) dispatchExplorerStore({ type: "removeV2Edges", edgeIDs: deletedEdgeIDs });
     try {
-      await Promise.all(normalizedTargets.map((target) => {
+      const deleteTargets = normalizedTargets.map((target) => {
         if (target.kind === "folder") {
-          return requestJSON(`/v1/company-explorer/folders/${encodeURIComponent(target.id)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+          return { kind: "folder", id: target.id, folder_kind: target.folderKind };
         }
         if (target.edgeID) {
-          return requestJSON(`/v1/company-explorer/items/${encodeURIComponent(target.edgeID)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+          return { kind: target.kind, id: target.id, edge_id: target.edgeID };
         }
         throw new Error("company_explorer_reference_id_required");
-      }));
+      });
+      await requestJSON("/v1/company-explorer/delete-targets", {
+        method: "POST",
+        body: JSON.stringify({ company_id: companyID, targets: deleteTargets }),
+      });
 
       if (deletedFolderIDs.size > 0) {
         for (const folderID of deletedFolderIDs) {

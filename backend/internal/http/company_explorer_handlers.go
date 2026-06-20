@@ -462,6 +462,115 @@ func (s *Server) handleCompanyExplorerItemByID(w http.ResponseWriter, r *http.Re
 	}
 }
 
+func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID string `json:"company_id"`
+		Targets   []struct {
+			Kind       string `json:"kind"`
+			ID         string `json:"id"`
+			FolderKind string `json:"folder_kind"`
+			EdgeID     string `json:"edge_id"`
+		} `json:"targets"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	if req.CompanyID == "" || len(req.Targets) == 0 {
+		writeError(w, http.StatusBadRequest, "company_id_and_targets_required")
+		return
+	}
+
+	deleteTargets := make([]store.CompanyExplorerDeleteTargetInput, 0, len(req.Targets))
+	edgeIDs := make([]string, 0, len(req.Targets))
+	edgeEventTargets := make(map[string]struct {
+		TargetType string
+		TargetID   string
+	})
+	for _, target := range req.Targets {
+		kind := strings.TrimSpace(target.Kind)
+		id := strings.TrimSpace(target.ID)
+		edgeID := strings.TrimSpace(target.EdgeID)
+		if edgeID != "" {
+			if kind != store.EntityTypeNode && kind != store.EntityTypeLogicGate && kind != store.EntityTypeProject {
+				writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
+				return
+			}
+			edgeIDs = append(edgeIDs, edgeID)
+			edgeEventTargets[edgeID] = struct {
+				TargetType string
+				TargetID   string
+			}{TargetType: kind, TargetID: id}
+			continue
+		}
+		if kind == "" || id == "" {
+			continue
+		}
+		deleteTargets = append(deleteTargets, store.CompanyExplorerDeleteTargetInput{
+			Kind:       kind,
+			ID:         id,
+			FolderKind: strings.TrimSpace(target.FolderKind),
+		})
+	}
+	if len(deleteTargets) == 0 && len(edgeIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "company_explorer_delete_targets_required")
+		return
+	}
+
+	result := store.CompanyExplorerDeleteResult{Targets: []store.CompanyExplorerDeletedTarget{}}
+	if len(deleteTargets) > 0 {
+		var err error
+		result, err = s.repo.DeleteCompanyExplorerTargets(req.CompanyID, deleteTargets)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "company_explorer_delete_target_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_targets")
+			return
+		}
+	}
+	if len(edgeIDs) > 0 {
+		if err := s.repo.DeleteCompanyExplorerV2Edges(req.CompanyID, edgeIDs); errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
+			return
+		} else if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "company_explorer_delete_target_not_found")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_targets")
+			return
+		}
+	}
+
+	s.publishCompanyExplorerDeletedTargets(req.CompanyID, result.Targets)
+	publishedEdgeIDs := map[string]bool{}
+	for _, edgeID := range edgeIDs {
+		edgeID = strings.TrimSpace(edgeID)
+		if edgeID == "" || publishedEdgeIDs[edgeID] {
+			continue
+		}
+		publishedEdgeIDs[edgeID] = true
+		target := edgeEventTargets[edgeID]
+		payload := map[string]any{"item_id": edgeID}
+		if target.TargetType != "" && target.TargetID != "" {
+			payload["target_type"] = target.TargetType
+			payload["target_id"] = target.TargetID
+		}
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_item_removed", payload)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets, "edge_ids": edgeIDs})
+}
+
 func (s *Server) handleCommunicationsSharedInboxGVIC(w http.ResponseWriter, r *http.Request, folderID string) {
 	if r.Method == http.MethodGet {
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))

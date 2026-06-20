@@ -436,12 +436,34 @@ func (r *MemoryRepo) DeleteCompanyExplorerV2Edge(companyID, edgeID string) error
 	if companyID == "" || edgeID == "" {
 		return ErrInvalid
 	}
+	return r.DeleteCompanyExplorerV2Edges(companyID, []string{edgeID})
+}
+
+func (r *MemoryRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []string) error {
+	companyID = strings.TrimSpace(companyID)
+	edgeIDs = normalizeCompanyExplorerV2EdgeIDs(edgeIDs)
+	if companyID == "" || len(edgeIDs) == 0 {
+		return ErrInvalid
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.companyExplorerV2Edges[key(companyID, edgeID)]; !ok {
-		return ErrNotFound
+	for _, edgeID := range edgeIDs {
+		if _, ok := r.companyExplorerV2Edges[key(companyID, edgeID)]; !ok {
+			return ErrNotFound
+		}
 	}
-	delete(r.companyExplorerV2Edges, key(companyID, edgeID))
+	for _, edgeID := range edgeIDs {
+		edge := r.companyExplorerV2Edges[key(companyID, edgeID)]
+		if parent, ok := r.companyExplorerV2Entities[key(companyID, edge.ParentEntityID)]; ok && parent.EntityType == CompanyExplorerV2EntityFolder {
+			if child, ok := r.companyExplorerV2Entities[key(companyID, edge.ChildEntityID)]; ok {
+				switch child.EntityType {
+				case CompanyExplorerV2EntityNode, CompanyExplorerV2EntityLogicGate, CompanyExplorerV2EntityProject:
+					delete(r.folderItems, folderItemKey(companyID, child.EntityType, child.ResourceID))
+				}
+			}
+		}
+		delete(r.companyExplorerV2Edges, key(companyID, edgeID))
+	}
 	return nil
 }
 

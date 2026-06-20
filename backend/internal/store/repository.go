@@ -264,6 +264,7 @@ type CompanyExplorerRepository interface {
 	UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInput) (CompanyExplorerV2Row, error)
 	MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeInput) (CompanyExplorerV2Row, error)
 	DeleteCompanyExplorerV2Edge(companyID, edgeID string) error
+	DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []string) error
 	DeleteCompanyExplorerV2Folder(companyID, entityID string) error
 	UpsertCompanyExplorerV2Subscription(input CompanyExplorerV2SubscriptionInput) (CompanyExplorerV2Subscription, error)
 	DeleteCompanyExplorerV2Subscription(companyID, subscriptionID, actorUserID string) error
