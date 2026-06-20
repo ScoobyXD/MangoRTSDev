@@ -54,6 +54,8 @@
     "../app/deepLinkRoutes.test.ts",
     "../../../frontend/src/app/resourceLinks.ts",
     "../app/resourceLinks.test.ts",
+    "../../../frontend/src/app/sidebarPins.ts",
+    "../app/sidebarPins.test.ts",
     "../../../frontend/src/app/preloadDashboardPlan.ts",
     "../app/preloadDashboardPlan.test.ts",
     "../../../frontend/src/app/timelineState.ts",

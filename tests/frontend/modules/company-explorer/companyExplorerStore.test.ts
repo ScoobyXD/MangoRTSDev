@@ -230,6 +230,32 @@ run("v2 row reducer preserves manual and native parent contexts", () => {
   assert.equal(state.rows.find((row) => row.parent_entity_id === "project-entity")?.name, "Gate A");
 });
 
+run("v2 folder row reducer replaces the previous parent placement after a move", () => {
+  let state = createCompanyExplorerStoreState();
+  state = reduceCompanyExplorerStore(state, {
+    type: "upsertV2Rows",
+    rows: [
+      v2Row({ entityID: "folder-child", entityType: "folder", parentEntityID: "folder-parent" }),
+    ],
+  });
+
+  state = reduceCompanyExplorerStore(state, {
+    type: "applyWorkspaceEnvelope",
+    companyID: "c",
+    envelope: {
+      company_id: "c",
+      type: "company_explorer_folder_updated",
+      data: {
+        parent_entity_id: "",
+        entity: v2Row({ entityID: "folder-child", entityType: "folder", parentEntityID: "" }),
+      },
+    },
+  });
+
+  assert.equal(state.rows.length, 1);
+  assert.deepEqual(state.rows.map((row) => `${row.parent_entity_id ?? ""}:${row.entity_id}`), [":folder-child"]);
+});
+
 run("affected scope helpers plan only matching Company Explorer branch refreshes", () => {
   const affectedScopes = companyExplorerAffectedScopesFromEnvelope({
     company_id: "c",

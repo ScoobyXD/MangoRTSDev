@@ -32,6 +32,7 @@ E21 - Explorer target deletion removes the underlying target only through the ex
 E22 - Explorer placement, update, and removal events publish the affected parent entity ID.
 E23 - The frontend refreshes loaded branch identities after Explorer events instead of reloading unrelated branches.
 E24 - When refresh context is incomplete, parent entity ID fallback is used to decide which loaded branch should refresh.
+E25 - Pinned sidebar node and logic-gate resources can be dragged into compatible Explorer containers, placing the resource without removing the sidebar pin; mismatched resource/container types remain rejected.
 
 ## Scenarios
 
@@ -108,3 +109,17 @@ Expected:
 - Events include the affected parent entity ID.
 - Only loaded branches related to the affected parent refresh.
 - Parent entity ID fallback is used when the event does not include richer branch context.
+
+### Scenario E-S4: Pinned Resource Drag Into Explorer
+
+Business logic covered:
+- E25
+
+Given:
+- A user has pinned node and logic-gate resources in the app sidebar.
+- Explorer has editable node and logic-gate folders.
+
+Expected:
+- Dragging a pinned node into a node folder places that node in Explorer and keeps the sidebar pin.
+- Dragging a pinned logic gate into a logic-gate folder places that logic gate in Explorer and keeps the sidebar pin.
+- Dragging a pinned node into a logic-gate-only container, or a pinned logic gate into a node-only container, is rejected.

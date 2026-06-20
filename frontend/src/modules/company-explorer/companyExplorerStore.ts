@@ -456,7 +456,9 @@ function upsertFolderItems(
 }
 
 function companyExplorerV2RowKey(row: CompanyExplorerV2Row): string {
-  return row.edge_id?.trim() || `${row.parent_entity_id?.trim() ?? ""}:${row.entity_id}`;
+  const entityID = row.entity_id?.trim() ?? "";
+  if (row.entity_type === "folder" && entityID) return `folder:${entityID}`;
+  return row.edge_id?.trim() || `${row.parent_entity_id?.trim() ?? ""}:${entityID}`;
 }
 
 function upsertCompanyExplorerV2Rows(
@@ -467,9 +469,20 @@ function upsertCompanyExplorerV2Rows(
   for (const row of rows) {
     const rowKey = companyExplorerV2RowKey(row);
     if (!rowKey) continue;
-    next = next.some((item) => companyExplorerV2RowKey(item) === rowKey)
-      ? next.map((item) => (companyExplorerV2RowKey(item) === rowKey ? row : item))
-      : [...next, row];
+    let replaced = false;
+    const updated: CompanyExplorerV2Row[] = [];
+    for (const item of next) {
+      if (companyExplorerV2RowKey(item) !== rowKey) {
+        updated.push(item);
+        continue;
+      }
+      if (!replaced) {
+        updated.push(row);
+        replaced = true;
+      }
+    }
+    if (!replaced) updated.push(row);
+    next = updated;
   }
   return next;
 }
