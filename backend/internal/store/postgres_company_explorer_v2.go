@@ -61,13 +61,29 @@ func companyExplorerFinalArgs(query CompanyExplorerV2RowsQuery) []any {
 	}
 }
 
+func companyExplorerRootArgs(query CompanyExplorerV2RowsQuery) []any {
+	return []any{
+		query.CompanyID,
+		companyExplorerLazyNullable(query.PermissionUserID),
+		EntityPermissionView,
+	}
+}
+
 func companyExplorerFinalEffectiveAccessSelect(entityTypeExpr, entityIDExpr string) string {
+	return companyExplorerEffectiveAccessSelect(entityTypeExpr, entityIDExpr, "$3")
+}
+
+func companyExplorerRootEffectiveAccessSelect(entityTypeExpr, entityIDExpr string) string {
+	return companyExplorerEffectiveAccessSelect(entityTypeExpr, entityIDExpr, "$2")
+}
+
+func companyExplorerEffectiveAccessSelect(entityTypeExpr, entityIDExpr, permissionUserParam string) string {
 	return `case
-    when $3::uuid is null then ''
+    when ` + permissionUserParam + `::uuid is null then ''
     when exists (
       select 1
       from company_memberships membership
-      where membership.user_id=$3::uuid
+      where membership.user_id=` + permissionUserParam + `::uuid
         and (
           membership.role='dev_admin'
           or (membership.company_id=$1::uuid and membership.role='company_admin')
@@ -75,32 +91,40 @@ func companyExplorerFinalEffectiveAccessSelect(entityTypeExpr, entityIDExpr stri
     ) then 'admin'
     when ` + entityTypeExpr + `='company' then 'view'
     when ` + entityTypeExpr + `='folder'
-      and mangorts_user_can_access_resource($1::uuid, 'company_explorer_folder', ` + entityIDExpr + `, $3::uuid, 'edit') then 'edit'
+      and mangorts_user_can_access_resource($1::uuid, 'company_explorer_folder', ` + entityIDExpr + `, ` + permissionUserParam + `::uuid, 'edit') then 'edit'
     when ` + entityTypeExpr + ` in ('node', 'logic_gate', 'project')
-      and mangorts_user_can_access_resource($1::uuid, ` + entityTypeExpr + `, ` + entityIDExpr + `, $3::uuid, 'edit') then 'edit'
+      and mangorts_user_can_access_resource($1::uuid, ` + entityTypeExpr + `, ` + entityIDExpr + `, ` + permissionUserParam + `::uuid, 'edit') then 'edit'
     else 'view'
   end`
 }
 
 func companyExplorerFinalAccessPredicate(entityTypeExpr, entityIDExpr string) string {
+	return companyExplorerAccessPredicate(entityTypeExpr, entityIDExpr, "$3", "$4")
+}
+
+func companyExplorerRootAccessPredicate(entityTypeExpr, entityIDExpr string) string {
+	return companyExplorerAccessPredicate(entityTypeExpr, entityIDExpr, "$2", "$3")
+}
+
+func companyExplorerAccessPredicate(entityTypeExpr, entityIDExpr, permissionUserParam, accessLevelParam string) string {
 	return `(
-    $3::uuid is null
+    ` + permissionUserParam + `::uuid is null
     or (
       ` + entityTypeExpr + `='company'
       and exists (
         select 1
         from company_memberships membership
-        where membership.user_id=$3::uuid
+        where membership.user_id=` + permissionUserParam + `::uuid
           and (membership.role='dev_admin' or membership.company_id=$1::uuid)
       )
     )
     or (
       ` + entityTypeExpr + `='folder'
-      and mangorts_user_can_access_resource($1::uuid, 'company_explorer_folder', ` + entityIDExpr + `, $3::uuid, $4::text)
+      and mangorts_user_can_access_resource($1::uuid, 'company_explorer_folder', ` + entityIDExpr + `, ` + permissionUserParam + `::uuid, ` + accessLevelParam + `::text)
     )
     or (
       ` + entityTypeExpr + ` in ('node', 'logic_gate', 'project')
-      and mangorts_user_can_access_resource($1::uuid, ` + entityTypeExpr + `, ` + entityIDExpr + `, $3::uuid, $4::text)
+      and mangorts_user_can_access_resource($1::uuid, ` + entityTypeExpr + `, ` + entityIDExpr + `, ` + permissionUserParam + `::uuid, ` + accessLevelParam + `::text)
     )
   )`
 }
@@ -190,14 +214,14 @@ select company.company_id::text,
        '' as edge_id,
        1000 as position,
        `+companyExplorerFinalHasChildrenExpr("'company'", "company.company_id")+` as has_children,
-       `+companyExplorerFinalEffectiveAccessSelect("'company'", "company.company_id")+` as effective_access,
+       `+companyExplorerRootEffectiveAccessSelect("'company'", "company.company_id")+` as effective_access,
        `+companyExplorerFinalNativeContext("'company'", "company.company_id", "company.company_id")+` as native_context,
        company.created_timestamp,
        company.updated_timestamp
 from companies company
 where company.company_id=$1::uuid
-  and `+companyExplorerFinalAccessPredicate("'company'", "company.company_id")+`
-limit 1`, companyExplorerFinalArgs(query)...))
+  and `+companyExplorerRootAccessPredicate("'company'", "company.company_id")+`
+limit 1`, companyExplorerRootArgs(query)...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return CompanyExplorerV2Rows{Rows: []CompanyExplorerV2Row{}}, nil
 	}
