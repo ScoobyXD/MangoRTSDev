@@ -127,7 +127,7 @@ What real native children should appear when a project, logic gate, or node is e
 
 Company Explorer should be company-wide. There should be no Company Explorer `Me`, `Team`, or `All` scopes.
 
-Recommended storage shape:
+Required target storage shape:
 
 ```text
 company_explorer_folders
@@ -176,6 +176,8 @@ GET /company-explorer/search?q=...
 ```
 
 The exact endpoint names can follow the existing v1/v2 route style, but the contract should preserve this separation.
+
+Important: this target schema is not optional. Company Explorer is not complete until the old scoped/copy-graph tables are migrated away and removed.
 
 Children rules:
 
@@ -362,6 +364,153 @@ company_explorer:logic_gate:<company_id>:<logic_gate_id>
 company_explorer:node:<company_id>:<node_id>
 ```
 
+## Phase 4: Hard Cutover Company Explorer Schema And Commands
+
+Goal: finish the Company Explorer architecture by migrating the database to the final containment/reference model, deleting the old Company Explorer storage model, and routing all Explorer CRUD through semantic backend commands.
+
+This phase is a hard cutoff. Do not keep compatibility tables, old scope behavior, or duplicate Explorer graph tables around as long-term runtime paths.
+
+### Final Table Ownership
+
+Company Explorer owns only folder containment and manual references:
+
+```text
+company_explorer_folders
+- company_id
+- folder_id
+- parent_folder_id nullable
+- name
+- position
+- default_access
+- created_by_user_id
+- created_timestamp
+- updated_timestamp
+```
+
+```text
+company_explorer_items
+- company_id
+- item_id
+- parent_folder_id nullable
+- target_type: project | logic_gate | node
+- target_id
+- position
+- created_by_user_id
+- created_timestamp
+- updated_timestamp
+```
+
+Canonical source tables own all real resources and relationships:
+
+```text
+projects
+logic_gates
+nodes
+project_relationships / project_relationship_projection
+node_logic_gate_assignments
+node_relationships
+logic_gate_relationships
+resource_permissions
+```
+
+Company Explorer must not store copies of:
+
+- project rows
+- logic gate rows
+- node rows
+- project-to-resource relationships
+- logic-gate-to-node assignments
+- node relationships
+- logic gate relationships
+- Me/Team/All scopes
+- user/team subscriptions
+
+### Schema Migration Tasks
+
+- [ ] Create the final `company_explorer_folders` shape with no `folder_kind`, no `system_key`, no `scope_type`, and no `scope_id`.
+- [ ] Create `company_explorer_items` for manual folder/root references to canonical projects, logic gates, and nodes.
+- [ ] Enforce one parent per folder through `parent_folder_id`.
+- [ ] Enforce valid manual targets with `target_type in ('project', 'logic_gate', 'node')`.
+- [ ] Enforce target existence by application validation or database constraints where practical.
+- [ ] Enforce one manual Explorer placement per canonical target unless the product later explicitly adds shortcut support.
+- [ ] Preserve folder permissions as permissions on `company_explorer_folder`.
+- [ ] Keep native resource permissions on native projects, logic gates, and nodes.
+
+### Data Migration Tasks
+
+- [ ] Backfill final folders from existing Company Explorer folder/entity rows.
+- [ ] Backfill folder nesting into `company_explorer_folders.parent_folder_id`.
+- [ ] Backfill manual references into `company_explorer_items` only when the parent is root/folder containment.
+- [ ] Do not backfill native project relationships into `company_explorer_items`.
+- [ ] Do not backfill native logic-gate node assignments into `company_explorer_items`.
+- [ ] Do not migrate Me/Team/All subscriptions. They are deleted with the old product model.
+- [ ] Validate no orphan folders remain.
+- [ ] Validate every item target points at an existing project, logic gate, or node.
+- [ ] Validate row counts before and after migration with explicit migration verification SQL.
+
+### Old Model Removal Tasks
+
+- [ ] Drop `company_explorer_folder_items`.
+- [ ] Drop `company_explorer_entities`.
+- [ ] Drop `company_explorer_edges`.
+- [ ] Drop `company_explorer_subscriptions`.
+- [ ] Remove old Company Explorer lazy scope constants and normalization for `me` and `team`.
+- [ ] Remove old backend handlers that write folder items, V2 entities, V2 edges, or subscriptions.
+- [ ] Remove frontend code that posts to old folder-item, V2 edge, or subscription endpoints.
+- [ ] Remove tests that assert old scoped/copy-graph behavior.
+- [ ] Add replacement tests for the final containment/reference behavior.
+
+### Final Read Rules
+
+- [ ] Root read returns root folders and root manual item references from Company Explorer tables.
+- [ ] Folder children read returns child folders and manual item references from Company Explorer tables.
+- [ ] Project children read returns native project relationships from project relationship tables/projections.
+- [ ] Logic gate children read returns native node assignments from `node_logic_gate_assignments`.
+- [ ] Node expansion reads native node relationships only if the product supports node-native children; otherwise it opens/selects the node.
+- [ ] Search reads canonical visible projects, logic gates, and nodes, and may include manual Explorer folder location as context.
+
+### Final Write Rules
+
+Folder/manual placement commands:
+
+- [ ] Create, rename, move, and delete folders through `company_explorer_folders`.
+- [ ] Place existing project, logic gate, or node into root/folder through `company_explorer_items`.
+- [ ] Move a manual item between root/folders by updating `company_explorer_items`.
+- [ ] Remove a manual item from Explorer without deleting the native resource.
+
+Native semantic commands from Explorer:
+
+- [ ] Create project under root/folder: create native project and optional Explorer manual item.
+- [ ] Create logic gate under root/folder: create native logic gate and optional Explorer manual item.
+- [ ] Create node under root/folder: create native node and optional Explorer manual item.
+- [ ] Create or move logic gate under project: update native project relationship.
+- [ ] Create or move node under project: update native project relationship.
+- [ ] Create or move node under logic gate: update native logic-gate assignment.
+- [ ] Create or move node under logic gate inside project: update native logic-gate assignment and native project relationship in one backend command.
+- [ ] Delete native project, logic gate, or node only through native delete commands; cleanup Explorer references as part of that command.
+
+Email drop commands:
+
+- [ ] Drop email on existing node: attach/link email to that node.
+- [ ] Drop email on folder/root: create native node and create Explorer manual item.
+- [ ] Drop email on project: create native node and native project relationship.
+- [ ] Drop email on logic gate: create native node and native logic-gate assignment.
+- [ ] Drop email on logic gate inside project: create native node, native logic-gate assignment, and native project relationship in one backend command.
+- [ ] Include enough target context in the frontend drop payload to distinguish a standalone logic gate from a logic gate being viewed inside a project.
+- [ ] Email drop must be one transaction-backed backend command, not a sequence of frontend writes.
+
+### Live Refresh Rules
+
+- [ ] Every Company Explorer command emits affected scopes for the exact parents/resources touched.
+- [ ] Use `company_explorer:root:<company_id>` for root containment changes.
+- [ ] Use `company_explorer:folder:<folder_id>` for folder containment/manual item changes.
+- [ ] Use `company_explorer:project:<project_id>` when native project children changed.
+- [ ] Use `company_explorer:logic_gate:<logic_gate_id>` when native logic-gate children changed.
+- [ ] Use `company_explorer:node:<node_id>` when native node context changed.
+- [ ] Frontend refreshes only loaded affected parents.
+- [ ] Unloaded folders/projects/logic gates/nodes are marked stale at most; they are fetched when opened.
+- [ ] Sequence gap recovery refetches only the affected loaded parent scopes when possible.
+
 ## Acceptance Criteria
 
 - [ ] My Work `Me`, `Team`, and `All` can each load independently.
@@ -379,3 +528,7 @@ company_explorer:node:<company_id>:<node_id>
 - [ ] Creating nodes, logic gates, and projects from Company Explorer creates real native resources.
 - [ ] Moving nodes/logic gates/projects from Company Explorer updates real native relationship tables where applicable.
 - [ ] My Work drag/drop uses the same semantic commands and does not mutate projection rows directly.
+- [ ] Final Company Explorer schema has no runtime dependency on old scoped/copy-graph tables.
+- [ ] Old Company Explorer folder-item, entity, edge, and subscription tables are dropped after verified migration.
+- [ ] Company Explorer stores only folders and manual references; native relationships remain in native tables.
+- [ ] Company Explorer realtime refreshes only loaded affected parent scopes.
