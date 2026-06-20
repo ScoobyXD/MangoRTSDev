@@ -392,23 +392,21 @@ with recursive folder_scope as (
   from company_explorer_folders
   where company_id=$1::uuid
     and folder_id=$2::uuid
-    and folder_kind='project'
   union all
   select child.company_id, child.folder_id
   from company_explorer_folders child
   join folder_scope parent
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
-  where child.folder_kind='project'
 )
 select `+projectSelectColumns+`
 from projects project
-join company_explorer_folder_items item
+join company_explorer_items item
   on item.company_id=project.company_id
- and item.item_type='project'
- and item.item_id=project.project_id::text
+ and item.target_type='project'
+ and item.target_id=project.project_id
 join folder_scope folder
-  on folder.folder_id=item.folder_id
+  on folder.folder_id=item.parent_folder_id
 where project.company_id=$1::uuid
 order by lower(project.name) asc, project.project_id asc`, companyID, folderID)
 	if err != nil {
@@ -446,7 +444,6 @@ with recursive folder_scope as (
   from company_explorer_folders
   where company_id=$1::uuid
     and folder_id=$2::uuid
-    and folder_kind='project'
     and mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $3::uuid, $4::text)
   union all
   select child.company_id, child.folder_id
@@ -454,17 +451,16 @@ with recursive folder_scope as (
   join folder_scope parent
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
-  where child.folder_kind='project'
-    and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4::text)
+  where mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4::text)
 )
 select `+projectSelectColumns+`
 from projects project
-join company_explorer_folder_items item
+join company_explorer_items item
   on item.company_id=project.company_id
- and item.item_type='project'
- and item.item_id=project.project_id::text
+ and item.target_type='project'
+ and item.target_id=project.project_id
 join folder_scope folder
-  on folder.folder_id=item.folder_id
+  on folder.folder_id=item.parent_folder_id
 where project.company_id=$1::uuid
   and mangorts_user_can_access_resource(project.company_id, 'project', project.project_id, $3::uuid, $4::text)
 order by lower(project.name) asc, project.project_id asc`, companyID, folderID, userID, EntityPermissionView)
@@ -1112,7 +1108,7 @@ func syncProjectRelationshipProjectionTx(ctx context.Context, tx *sql.Tx, compan
 }
 
 func postgresDeleteProjectTx(ctx context.Context, tx *sql.Tx, companyID, projectID string) error {
-	if _, err := tx.ExecContext(ctx, `delete from company_explorer_folder_items where company_id=$1::uuid and item_type='project' and item_id=$2`, companyID, projectID); err != nil {
+	if _, err := tx.ExecContext(ctx, `delete from company_explorer_items where company_id=$1::uuid and target_type='project' and target_id=$2::uuid`, companyID, projectID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `delete from resource_access_grants where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid`, companyID, projectID); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {

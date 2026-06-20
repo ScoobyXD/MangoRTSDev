@@ -5,8 +5,8 @@ import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { getNodeTitle as getNodeRecordTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeTitle as getLogicGateRecordTitle, toLogicGateCanvasRecord, type LogicGateGVICRole, type LogicGateRecord as LogicGateApiRecord, type NodeRecord as LogicGateCanvasRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../node-map/eventbus";
-import { removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, removeNodeRelationshipGraphRelationshipsForNode, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
-import { removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, removeLogicGateRelationshipGraphRelationshipsForLogicGate, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
+import { removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
+import { removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { type ExplorerSelectionState } from "./explorerSync";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerFolderScopeType, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
 import { invalidateKanbanBoardListCache, listKanbanBoards, type GVICMatrixProjectionRow } from "../kanban/kanbanApi";
@@ -60,9 +60,7 @@ import {
   findProtectedSystemFolderInDeleteTargets,
   getSystemFolderKeyForTreeRowID,
   type CompanyExplorerContentProps,
-  type CompanyExplorerDeleteBatchResponse,
   type CompanyExplorerFolderItemAssignment,
-  type CompanyExplorerFolderItemsBatchResponse,
   type CompanyExplorerSearchResultSummary,
   type CompanyExplorerWorkspaceEntityBatchResponse,
 } from "./CompanyExplorerContentModel";
@@ -1543,8 +1541,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const resourceID = row.resource_id || row.entity_id;
     if (row.entity_type === "company" && !cleanExplorerID(row.parent_entity_id)) return "folder-root";
     if (row.entity_type === "folder") return `workspace-folder-${row.entity_id}`;
-    if (row.entity_type === "user_group") return `company-explorer-group-${resourceID}`;
-    if (row.entity_type === "user") return `company-explorer-user-${resourceID}`;
     if (row.entity_type === "logic_gate") return `logic-gate-${resourceID}`;
     if (row.entity_type === "node") return `node-${resourceID}`;
     if (row.entity_type === "project") return `project-${resourceID}`;
@@ -1648,13 +1644,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (payloadParentEntityID !== null) refreshLoadedCompanyExplorerBranch(payloadParentEntityID);
       return;
     }
-    if (type === "company_explorer_v2_subscription_upserted" || type === "company_explorer_v2_subscription_deleted") {
-      if (companyExplorerLazyScope !== "all") refreshLoadedCompanyExplorerBranches();
-      return;
-    }
     const refreshAllLoadedBranchTypes = new Set([
-      "company_explorer_v2_edge_deleted",
-      "company_explorer_v2_entity_deleted",
+      "company_explorer_folder_deleted",
+      "company_explorer_item_removed",
       "project_relationship_upserted",
       "project_relationship_deleted",
       "work_item.logic_gate_assignment_saved",
@@ -1675,10 +1667,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       return;
     }
     if (
-      type !== "company_explorer_v2_entity_created"
-      && type !== "company_explorer_v2_entity_updated"
-      && type !== "company_explorer_v2_edge_upserted"
-      && type !== "company_explorer_v2_edge_moved"
+      type !== "company_explorer_folder_created"
+      && type !== "company_explorer_folder_updated"
+      && type !== "company_explorer_item_placed"
     ) {
       return;
     }
@@ -2424,11 +2415,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (companyExplorerV2Rows.length > 0) {
         const parentEntityID = parentFolderID || companyExplorerV2RootEntityID;
         if (!parentEntityID) throw new Error("company_explorer_v2_parent_missing");
-        const row = await requestJSON<CompanyExplorerV2Row>("/v2/company-explorer/folders", {
+        const row = await requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/folders", {
           method: "POST",
           body: JSON.stringify({
             company_id: companyID,
-            parent_entity_id: parentEntityID,
+            parent_folder_id: parentEntityID === companyExplorerV2RootEntityID ? "" : parentEntityID,
             name: "New Folder",
             position,
           }),
@@ -2497,7 +2488,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       && assignment.item_type !== "kanban"
     ));
     if (normalizedAssignments.length === 0) return true;
-    const previousFolderIDByKey = new Map(folderItems.map((row) => [`${row.item_type}:${row.item_id}`, row.folder_id]));
     setError("");
     try {
       if (companyExplorerV2Rows.length > 0) {
@@ -2509,7 +2499,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
             && row.edge_id
           ));
           if (existing?.edge_id) {
-            updatedRows.push(await requestJSON<CompanyExplorerV2Row>(`/v2/company-explorer/edges/${existing.edge_id}`, {
+            updatedRows.push(await requestJSON<CompanyExplorerV2Row>(`/v1/company-explorer/items/${existing.edge_id}`, {
               method: "PUT",
               body: JSON.stringify({
                 company_id: companyID,
@@ -2518,13 +2508,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
               }),
             }));
           } else {
-            updatedRows.push(await requestJSON<CompanyExplorerV2Row>("/v2/company-explorer/edges", {
+            updatedRows.push(await requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
               method: "POST",
               body: JSON.stringify({
                 company_id: companyID,
                 parent_entity_id: assignment.folder_id,
-                child_entity_type: assignment.item_type,
-                child_resource_id: assignment.item_id,
+                target_type: assignment.item_type,
+                target_id: assignment.item_id,
                 position: assignment.position,
               }),
             }));
@@ -2542,24 +2532,30 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         }
         return true;
       }
-      const payload = await requestJSON<CompanyExplorerFolderItemsBatchResponse>("/v1/company-explorer/folder-items/batch", {
+      const rows = await Promise.all(normalizedAssignments.map((assignment) => requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
-          assignments: normalizedAssignments,
+          parent_entity_id: assignment.folder_id,
+          target_type: assignment.item_type,
+          target_id: assignment.item_id,
+          position: assignment.position,
         }),
-      });
-      const items = payload.folder_items ?? [];
+      })));
+      const items = rows.map((row) => ({
+        company_id: row.company_id,
+        folder_id: row.parent_entity_id ?? "",
+        item_type: row.entity_type as CompanyExplorerFolderItem["item_type"],
+        item_id: row.resource_id || row.entity_id,
+        position: row.position ?? 0,
+        created_timestamp: row.created_timestamp,
+        updated_timestamp: row.updated_timestamp,
+      })).filter((item) => item.folder_id && item.item_id);
+      dispatchExplorerStore({ type: "upsertV2Rows", rows });
       dispatchExplorerStore({ type: "upsertFolderItems", folderItems: items });
       for (const item of items) {
         upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
         upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
-        if (previousFolderIDByKey.get(`${item.item_type}:${item.item_id}`) !== item.folder_id) {
-          // Moving between folder levels starts a new local context. Drop stale
-          // edges immediately; the API performs the same cleanup canonically.
-          if (item.item_type === "node") removeNodeRelationshipGraphRelationshipsForNode(apiBase, companyID, item.item_id);
-          else if (item.item_type === "logic_gate") removeLogicGateRelationshipGraphRelationshipsForLogicGate(apiBase, companyID, item.item_id);
-        }
       }
       if (options.expandTarget) {
         setExpanded((previous) => {
@@ -2624,13 +2620,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (companyExplorerV2Rows.length > 0 && !targetLogicGateID) {
         const parentEntityID = parentFolderID || companyExplorerV2RootEntityID;
         if (parentEntityID) {
-          const row = await requestJSON<CompanyExplorerV2Row>("/v2/company-explorer/edges", {
+          const row = await requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
             method: "POST",
             body: JSON.stringify({
               company_id: companyID,
               parent_entity_id: parentEntityID,
-              child_entity_type: "node",
-              child_resource_id: node.node_id,
+              target_type: "node",
+              target_id: node.node_id,
               position,
             }),
           });
@@ -2691,13 +2687,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (companyExplorerV2Rows.length > 0) {
         const parentEntityID = parentFolderID || companyExplorerV2RootEntityID;
         if (parentEntityID) {
-          const row = await requestJSON<CompanyExplorerV2Row>("/v2/company-explorer/edges", {
+          const row = await requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
             method: "POST",
             body: JSON.stringify({
               company_id: companyID,
               parent_entity_id: parentEntityID,
-              child_entity_type: "logic_gate",
-              child_resource_id: logicGate.logic_gate_id,
+              target_type: "logic_gate",
+              target_id: logicGate.logic_gate_id,
               position,
             }),
           });
@@ -2739,13 +2735,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (companyExplorerV2Rows.length > 0) {
         const parentEntityID = parentFolderID || companyExplorerV2RootEntityID;
         if (parentEntityID) {
-          const row = await requestJSON<CompanyExplorerV2Row>("/v2/company-explorer/edges", {
+          const row = await requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
             method: "POST",
             body: JSON.stringify({
               company_id: companyID,
               parent_entity_id: parentEntityID,
-              child_entity_type: "project",
-              child_resource_id: project.project_id,
+              target_type: "project",
+              target_id: project.project_id,
               position,
             }),
           });
@@ -2801,6 +2797,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const deletedLogicGateIDs = new Set<string>();
     const deletedProjectIDs = new Set<string>();
     const deletedKanbanBoardIDs = new Set<string>();
+    const deletedEdgeIDs = new Set<string>();
     const v2FolderEntityIDs = new Set(companyExplorerV2Rows.filter((row) => row.entity_type === "folder").map((row) => row.entity_id));
     const collectV2FolderSubtreeIDs = (rootEntityID: string): Set<string> => {
       const deleted = new Set<string>();
@@ -2826,6 +2823,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         } else {
           for (const id of collectFolderSubtreeIDs(folders, target.id)) deletedFolderIDs.add(id);
         }
+      } else if (target.edgeID) {
+        deletedEdgeIDs.add(target.edgeID);
       } else if (target.kind === "node") {
         deletedNodeIDs.add(target.id);
       } else if (target.kind === "logic_gate") {
@@ -2835,17 +2834,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         deletedProjectIDs.add(target.id);
       } else {
         deletedKanbanBoardIDs.add(target.id);
-      }
-    }
-    for (const item of folderItems) {
-      if (!deletedFolderIDs.has(item.folder_id)) continue;
-      if (item.item_type === "node") {
-        deletedNodeIDs.add(item.item_id);
-      } else if (item.item_type === "logic_gate") {
-        deletedLogicGateIDs.add(item.item_id);
-        deletedKanbanBoardIDs.add(logicGateKanbanBoardID(item.item_id));
-      } else if (item.item_type === "project") {
-        deletedProjectIDs.add(item.item_id);
       }
     }
     for (const board of kanbanBoards) {
@@ -2865,25 +2853,17 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       deletedProjectIDs,
       deletedKanbanBoardIDs,
     });
+    if (deletedEdgeIDs.size > 0) dispatchExplorerStore({ type: "removeV2Edges", edgeIDs: deletedEdgeIDs });
     try {
-      const v2Targets = normalizedTargets.filter((target) => Boolean(target.entityID && target.entityType && target.entityType !== "company" && target.entityType !== "user_group" && target.entityType !== "user"));
-      const legacyTargets = normalizedTargets.filter((target) => !v2Targets.includes(target));
-      await Promise.all(v2Targets.map((target) => requestJSON(`/v2/company-explorer/entities/${encodeURIComponent(target.entityID ?? target.id)}?company_id=${encodeURIComponent(companyID)}`, {
-        method: "DELETE",
-      })));
-      if (legacyTargets.length > 0) {
-        await requestJSON<CompanyExplorerDeleteBatchResponse>("/v1/company-explorer/delete-batch", {
-          method: "POST",
-          body: JSON.stringify({
-            company_id: companyID,
-            targets: legacyTargets.map((target) => ({
-              kind: target.kind,
-              id: target.id,
-              folder_kind: target.kind === "folder" ? target.folderKind : undefined,
-            })),
-          }),
-        });
-      }
+      await Promise.all(normalizedTargets.map((target) => {
+        if (target.kind === "folder") {
+          return requestJSON(`/v1/company-explorer/folders/${encodeURIComponent(target.id)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+        }
+        if (target.edgeID) {
+          return requestJSON(`/v1/company-explorer/items/${encodeURIComponent(target.edgeID)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+        }
+        throw new Error("company_explorer_reference_id_required");
+      }));
 
       if (deletedFolderIDs.size > 0) {
         for (const folderID of deletedFolderIDs) {
@@ -2994,7 +2974,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (activeRename.target.kind === "folder") {
         const isV2Folder = companyExplorerV2Rows.some((row) => row.entity_id === activeRename.target.id && row.entity_type === "folder");
         if (isV2Folder) {
-          const row = await requestJSON<CompanyExplorerV2Row>(`/v2/company-explorer/entities/${activeRename.target.id}`, {
+          const row = await requestJSON<CompanyExplorerV2Row>(`/v1/company-explorer/folders/${activeRename.target.id}`, {
             method: "PUT",
             body: JSON.stringify({ company_id: companyID, name: value }),
           });
@@ -3038,15 +3018,14 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     setError("");
     try {
       const v2Row = companyExplorerV2Rows.find((row) => row.entity_id === folderID && row.entity_type === "folder");
-      if (v2Row?.edge_id) {
+      if (v2Row) {
         const parentEntityID = parentFolderID || companyExplorerV2RootEntityID;
         if (!parentEntityID) throw new Error("company_explorer_v2_parent_missing");
-        const row = await requestJSON<CompanyExplorerV2Row>(`/v2/company-explorer/entities/${folderID}`, {
+        const row = await requestJSON<CompanyExplorerV2Row>(`/v1/company-explorer/folders/${folderID}`, {
           method: "PUT",
           body: JSON.stringify({
             company_id: companyID,
-            edge_id: v2Row.edge_id,
-            parent_entity_id: parentEntityID,
+            parent_folder_id: parentEntityID === companyExplorerV2RootEntityID ? "" : parentEntityID,
             position: options.position,
           }),
         });
@@ -3666,7 +3645,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       ? {
         folderID: row.folderID,
         label: row.label,
-        permissionsPath: row.entityType === "folder" ? `/v2/company-explorer/entities/${encodeURIComponent(row.folderID)}/permissions` : undefined,
+        permissionsPath: row.entityType === "folder" ? `/v1/company-explorer/folders/${encodeURIComponent(row.folderID)}/permissions` : undefined,
       }
       : null;
     setExplorerContextMenu({

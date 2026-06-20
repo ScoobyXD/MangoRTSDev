@@ -257,8 +257,7 @@ var recycleSnapshotTables = map[string]bool{
 	"entity_access_permissions":              true,
 	"resource_access_grants":                 true,
 	"resource_permissions":                   true,
-	"company_explorer_folder_items":          true,
-	"company_explorer_folder_shares":         true,
+	"company_explorer_items":                 true,
 	"communications_email_nodes":             true,
 }
 
@@ -283,7 +282,6 @@ var recycleRestoreTableOrder = []string{
 	"entity_access_permissions",
 	"resource_access_grants",
 	"resource_permissions",
-	"company_explorer_folder_shares",
 	"user_logic_gate_shortcuts",
 	"communications_email_nodes",
 	"node_logic_gate_assignments",
@@ -295,7 +293,7 @@ var recycleRestoreTableOrder = []string{
 	"project_management_timeline_projection",
 	"kanban_board_projection",
 	"gvic_matrix_projection_table",
-	"company_explorer_folder_items",
+	"company_explorer_items",
 }
 
 func postgresRestoreRecycleTableTx(ctx context.Context, tx *sql.Tx, tableName string, rows json.RawMessage) error {
@@ -382,9 +380,6 @@ func postgresSnapshotRecyclePayloadTx(ctx context.Context, tx *sql.Tx, companyID
 		if err := addTable("company_explorer_folders", `company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
 			return nil, err
 		}
-		if err := addTable("company_explorer_folder_shares", `company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
-			return nil, err
-		}
 	}
 	if len(nodeIDs) > 0 {
 		for _, tableName := range []string{"nodes", "node_information", "node_projection_table", "node_projection_seen_snapshots", "node_map_positions", "node_account_assignments"} {
@@ -439,10 +434,10 @@ func postgresSnapshotRecyclePayloadTx(ctx context.Context, tx *sql.Tx, companyID
 			}
 		}
 	}
-	if len(folderIDs) > 0 || len(nodeIDs) > 0 || len(logicGateIDs) > 0 || len(projectIDs) > 0 || len(boardIDs) > 0 {
+	if len(folderIDs) > 0 || len(nodeIDs) > 0 || len(logicGateIDs) > 0 || len(projectIDs) > 0 {
 		itemWhere, itemArgs := recycleFolderItemsWhere(companyID, folderIDs, nodeIDs, logicGateIDs, projectIDs, boardIDs)
 		if itemWhere != "" {
-			if err := addTable("company_explorer_folder_items", itemWhere, itemArgs...); err != nil {
+			if err := addTable("company_explorer_items", itemWhere, itemArgs...); err != nil {
 				return nil, err
 			}
 		}
@@ -640,19 +635,18 @@ func recycleFolderItemsWhere(companyID string, folderIDs, nodeIDs, logicGateIDs,
 	args := []any{companyID}
 	if len(folderIDs) > 0 {
 		args = append(args, strings.Join(folderIDs, ","))
-		clauses = append(clauses, fmt.Sprintf("folder_id = any(string_to_array($%d, ',')::uuid[])", len(args)))
+		clauses = append(clauses, fmt.Sprintf("parent_folder_id = any(string_to_array($%d, ',')::uuid[])", len(args)))
 	}
 	addItem := func(itemType string, ids []string) {
 		if len(ids) == 0 {
 			return
 		}
 		args = append(args, itemType, strings.Join(ids, ","))
-		clauses = append(clauses, fmt.Sprintf("(item_type=$%d and item_id = any(string_to_array($%d, ',')))", len(args)-1, len(args)))
+		clauses = append(clauses, fmt.Sprintf("(target_type=$%d and target_id = any(string_to_array($%d, ',')::uuid[]))", len(args)-1, len(args)))
 	}
 	addItem(EntityTypeNode, nodeIDs)
 	addItem(EntityTypeLogicGate, logicGateIDs)
 	addItem(EntityTypeProject, projectIDs)
-	addItem("kanban", boardIDs)
 	if len(clauses) == 0 {
 		return "", nil
 	}
@@ -738,10 +732,10 @@ func postgresAddFolderScopeItemsTx(ctx context.Context, tx *sql.Tx, companyID st
 		return nil
 	}
 	rows, err := tx.QueryContext(ctx, `
-select item_type, item_id
-from company_explorer_folder_items
+select target_type, target_id::text
+from company_explorer_items
 where company_id=$1::uuid
-  and folder_id = any(string_to_array($2, ',')::uuid[])`,
+  and parent_folder_id = any(string_to_array($2, ',')::uuid[])`,
 		companyID, strings.Join(sortedMapKeys(scope.FolderIDs), ","),
 	)
 	if err != nil {

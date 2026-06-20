@@ -56,6 +56,7 @@ export type CompanyExplorerStoreAction =
   | { type: "upsertProject"; project: ProjectRecord }
   | { type: "replaceProject"; project: ProjectRecord }
   | { type: "upsertV2Rows"; rows: CompanyExplorerV2Row[] }
+  | { type: "removeV2Edges"; edgeIDs: ReadonlySet<string> }
   | { type: "replaceV2Children"; parentEntityID: string; rows: CompanyExplorerV2Row[] }
   | {
       type: "removeDeletedEntities";
@@ -156,6 +157,8 @@ export function reduceCompanyExplorerStore(
       return { ...state, projects: replaceByID(state.projects, action.project, (project) => project.project_id) };
     case "upsertV2Rows":
       return { ...state, rows: upsertCompanyExplorerV2Rows(state.rows, action.rows) };
+    case "removeV2Edges":
+      return { ...state, rows: state.rows.filter((row) => !action.edgeIDs.has(row.edge_id ?? "")) };
     case "replaceV2Children":
       return {
         ...state,
@@ -343,6 +346,8 @@ function applyWorkspaceEnvelope(
     envelope.type === "company_explorer_folder_moved" ||
     envelope.type === "company_explorer_folder_updated"
   ) {
+    const row = asCompanyExplorerV2Row(data.entity);
+    if (row) return { ...state, rows: upsertCompanyExplorerV2Rows(state.rows, [row]) };
     const folder = asCompanyExplorerFolder(data.folder);
     return folder ? { ...state, folders: upsertByID(state.folders, folder, (item) => item.folder_id) } : state;
   }
@@ -355,39 +360,24 @@ function applyWorkspaceEnvelope(
       ...state,
       folders: state.folders.filter((folder) => !deletedFolderIDs.has(folder.folder_id)),
       folderItems: state.folderItems.filter((item) => !deletedFolderIDs.has(item.folder_id)),
+      rows: state.rows.filter((row) => !deletedFolderIDs.has(row.entity_id) && !deletedFolderIDs.has(row.parent_entity_id ?? "")),
     };
   }
-  if (envelope.type === "company_explorer_folder_item_assigned") {
+  if (envelope.type === "company_explorer_item_placed") {
+    const row = asCompanyExplorerV2Row(data.entity);
+    if (row) return { ...state, rows: upsertCompanyExplorerV2Rows(state.rows, [row]) };
     const folderItem = asCompanyExplorerFolderItem(data.folder_item);
     return folderItem ? { ...state, folderItems: upsertFolderItems(state.folderItems, [folderItem]) } : state;
   }
-  if (envelope.type === "company_explorer_folder_item_removed") {
-    const itemType = typeof data.item_type === "string" ? data.item_type : "";
-    const itemID = typeof data.item_id === "string" ? data.item_id : "";
-    if (!itemType || !itemID) return state;
+  if (envelope.type === "company_explorer_item_removed") {
+    const edgeID = typeof data.item_id === "string" ? data.item_id : "";
+    const targetType = typeof data.target_type === "string" ? data.target_type : "";
+    const targetID = typeof data.target_id === "string" ? data.target_id : "";
     return {
       ...state,
-      folderItems: state.folderItems.filter((item) => item.item_type !== itemType || item.item_id !== itemID),
+      rows: edgeID ? state.rows.filter((row) => row.edge_id !== edgeID) : state.rows,
+      folderItems: targetType && targetID ? state.folderItems.filter((item) => item.item_type !== targetType || item.item_id !== targetID) : state.folderItems,
     };
-  }
-  if (
-    envelope.type === "company_explorer_v2_entity_created" ||
-    envelope.type === "company_explorer_v2_entity_updated" ||
-    envelope.type === "company_explorer_v2_edge_upserted" ||
-    envelope.type === "company_explorer_v2_edge_moved"
-  ) {
-    const row = asCompanyExplorerV2Row(data.entity);
-    return row ? { ...state, rows: upsertCompanyExplorerV2Rows(state.rows, [row]) } : state;
-  }
-  if (envelope.type === "company_explorer_v2_edge_deleted") {
-    const edgeID = typeof data.edge_id === "string" ? data.edge_id : "";
-    if (!edgeID) return state;
-    return { ...state, rows: state.rows.filter((row) => row.edge_id !== edgeID) };
-  }
-  if (envelope.type === "company_explorer_v2_entity_deleted") {
-    const entityID = typeof data.entity_id === "string" ? data.entity_id : "";
-    if (!entityID) return state;
-    return { ...state, rows: state.rows.filter((row) => row.entity_id !== entityID && row.parent_entity_id !== entityID) };
   }
   if (envelope.type === "kanban_board_saved" || envelope.type === "kanban_board_updated") {
     const board = asKanbanBoard(data.board);
@@ -418,6 +408,7 @@ function removeDeletedEntities(
     kanbanBoards: state.kanbanBoards.filter((board) => !action.deletedKanbanBoardIDs.has(board.board_id)),
     rows: state.rows.filter((row) =>
       !action.deletedFolderIDs.has(row.entity_id)
+      && !action.deletedFolderIDs.has(row.parent_entity_id ?? "")
       && (row.entity_type !== "node" || !action.deletedNodeIDs.has(row.resource_id ?? ""))
       && (row.entity_type !== "logic_gate" || !action.deletedLogicGateIDs.has(row.resource_id ?? ""))
       && (row.entity_type !== "project" || !action.deletedProjectIDs.has(row.resource_id ?? ""))

@@ -7,7 +7,7 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func TestMemoryCompanyExplorerV2LegacyViewsReadCompanyTree(t *testing.T) {
+func TestMemoryCompanyExplorerV2FinalViewReadsCompanyTree(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000001"
 	repo.EnsureCompany(companyID, "V2 Explorer Co")
@@ -32,17 +32,13 @@ func TestMemoryCompanyExplorerV2LegacyViewsReadCompanyTree(t *testing.T) {
 	if len(allRoots.Rows) != 1 || companyRoot.ParentEntityID != "" {
 		t.Fatalf("all roots = %+v, want only company root", allRoots.Rows)
 	}
-	meRoots, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
+	_, err = repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
 		View:             CompanyExplorerLazyScopeMe,
 		PermissionUserID: user.UserID,
 	})
-	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2RootRows legacy me: %v", err)
-	}
-	meRoot := requireCompanyExplorerV2Row(t, meRoots.Rows, CompanyExplorerV2EntityCompany, companyID)
-	if len(meRoots.Rows) != 1 || meRoot.ParentEntityID != "" {
-		t.Fatalf("legacy me roots = %+v, want company-wide root", meRoots.Rows)
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("ListCompanyExplorerV2RootRows legacy me err = %v, want ErrInvalid", err)
 	}
 
 	folder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
@@ -104,42 +100,42 @@ func TestMemoryCompanyExplorerV2LegacyViewsReadCompanyTree(t *testing.T) {
 
 	rootChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
-		View:             CompanyExplorerLazyScopeMe,
+		View:             CompanyExplorerLazyScopeAll,
 		ParentEntityID:   companyRoot.EntityID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2ChildRows legacy me root: %v", err)
+		t.Fatalf("ListCompanyExplorerV2ChildRows root: %v", err)
 	}
 	requireCompanyExplorerV2Row(t, rootChildren.Rows, CompanyExplorerV2EntityFolder, folder.EntityID)
 	folderChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
-		View:             CompanyExplorerLazyScopeMe,
+		View:             CompanyExplorerLazyScopeAll,
 		ParentEntityID:   folder.EntityID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2ChildRows legacy me folder: %v", err)
+		t.Fatalf("ListCompanyExplorerV2ChildRows folder: %v", err)
 	}
 	requireCompanyExplorerV2Row(t, folderChildren.Rows, CompanyExplorerV2EntityProject, project.ProjectID)
 	projectChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
-		View:             CompanyExplorerLazyScopeMe,
+		View:             CompanyExplorerLazyScopeAll,
 		ParentEntityID:   projectRow.EntityID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2ChildRows legacy me project: %v", err)
+		t.Fatalf("ListCompanyExplorerV2ChildRows project: %v", err)
 	}
 	logicGateRow := requireCompanyExplorerV2Row(t, projectChildren.Rows, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID)
 	teamGateChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
-		View:             CompanyExplorerLazyScopeTeam,
+		View:             CompanyExplorerLazyScopeAll,
 		ParentEntityID:   logicGateRow.EntityID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2ChildRows legacy team logic gate: %v", err)
+		t.Fatalf("ListCompanyExplorerV2ChildRows logic gate: %v", err)
 	}
 	requireCompanyExplorerV2Row(t, teamGateChildren.Rows, CompanyExplorerV2EntityNode, node.NodeID)
 }

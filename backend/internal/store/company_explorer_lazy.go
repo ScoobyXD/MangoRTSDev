@@ -4,7 +4,7 @@ import "strings"
 
 func NormalizeCompanyExplorerLazyScope(value string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", CompanyExplorerLazyScopeAll, CompanyExplorerLazyScopeMe, CompanyExplorerLazyScopeTeam:
+	case "", CompanyExplorerLazyScopeAll:
 		return CompanyExplorerLazyScopeAll, true
 	default:
 		return "", false

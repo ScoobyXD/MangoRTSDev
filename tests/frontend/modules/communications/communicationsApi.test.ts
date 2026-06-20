@@ -155,7 +155,7 @@ test("workspace panel scoped stale refetches only matching resource caches", asy
     calls.push(path);
     if (path.startsWith("/v1/logic-gates?")) return jsonResponse({ logic_gates: [{ company_id: "company-1", logic_gate_id: "gate-1", header: "Gate 1", created_timestamp: "2026-01-01T00:00:00Z" }] });
     if (path.startsWith("/v1/nodes?")) return jsonResponse({ nodes: [{ company_id: "company-1", node_id: `node-${calls.filter((call) => call.startsWith("/v1/nodes?")).length}`, name: "Node", created_timestamp: "2026-01-01T00:00:00Z" }] });
-    if (path.startsWith("/v1/company-explorer/folder-items?")) return jsonResponse({ folder_items: [{ company_id: "company-1", folder_id: "folder-1", item_type: "node", item_id: "node-1", position: 1000, created_timestamp: "2026-01-01T00:00:00Z", updated_timestamp: "2026-01-01T00:00:00Z" }] });
+    if (path.startsWith("/v1/company-explorer/roots?")) return jsonResponse({ rows: [] });
     return jsonResponse({ folders: [], shortcuts: [], users: [] });
   };
   try {
@@ -170,7 +170,7 @@ test("workspace panel scoped stale refetches only matching resource caches", asy
     assert.deepEqual(calls, [
       "/v1/logic-gates?company_id=company-1",
       "/v1/nodes?company_id=company-1",
-      "/v1/company-explorer/folder-items?company_id=company-1&item_type=node",
+      "/v1/company-explorer/roots?company_id=company-1",
       "/v1/nodes?company_id=company-1",
     ]);
   } finally {

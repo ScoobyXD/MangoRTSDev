@@ -57,6 +57,23 @@ func WorkspaceEventAccessTargets(event domain.DomainEvent) []WorkspaceEventAcces
 			return targets
 		}
 	}
+	if targetType := workspaceEventPayloadText(event.Payload, "target_type"); targetType != "" {
+		switch targetType {
+		case EntityTypeNode:
+			add(EntityTypeNode, workspaceEventPayloadText(event.Payload, "target_id"))
+			return targets
+		case EntityTypeLogicGate:
+			add(EntityTypeLogicGate, workspaceEventPayloadText(event.Payload, "target_id"))
+			return targets
+		case EntityTypeProject:
+			add(EntityTypeProject, workspaceEventPayloadText(event.Payload, "target_id"))
+			return targets
+		}
+	}
+	if folderID := workspaceEventPayloadText(event.Payload, "folder_id"); folderID != "" {
+		add(EntityTypeCompanyExplorerFolder, folderID)
+		return targets
+	}
 	if folderKind := workspaceEventPayloadText(event.Payload, "folder_kind"); folderKind != "" {
 		if folderKind == "communications" {
 			resourceType := EntityTypeSharedInboxFolder

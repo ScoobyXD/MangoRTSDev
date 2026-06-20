@@ -253,7 +253,7 @@ func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBa
 		})
 	}
 	for _, item := range result.FolderItems {
-		appendEvent("company_explorer_folder_item_assigned", map[string]any{"folder_id": item.FolderID, "item_type": item.ItemType, "item_id": item.ItemID, "folder_item": item})
+		appendEvent("company_explorer_item_placed", map[string]any{"parent_entity_id": item.FolderID, "target_type": item.ItemType, "target_id": item.ItemID, "folder_item": item})
 	}
 	for _, item := range result.Nodes {
 		appendEvent("node_created", map[string]any{"node_id": item.NodeID, "node": item})

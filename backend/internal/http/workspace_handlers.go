@@ -129,7 +129,7 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", "")
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_items")
 		return
 	}
 	folderItems = filterCompanyExplorerItemsForVisibleEntities(folderItems, nodeIDs, logicGateIDs, projectIDs)
@@ -292,7 +292,7 @@ func (s *Server) handleNodeMapWorkspaceSnapshot(w http.ResponseWriter, r *http.R
 			folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", "node")
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_items")
 			return
 		}
 	} else {
@@ -330,7 +330,7 @@ func (s *Server) handleNodeMapWorkspaceSnapshot(w http.ResponseWriter, r *http.R
 			folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, "node")
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_items")
 			return
 		}
 	}
@@ -601,7 +601,7 @@ func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *h
 			folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", "logic_gate")
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_items")
 			return
 		}
 	} else {
@@ -639,7 +639,7 @@ func (s *Server) handleLogicGateMapWorkspaceSnapshot(w http.ResponseWriter, r *h
 			folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, "logic_gate")
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_items")
 			return
 		}
 	}
@@ -706,7 +706,7 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 				folderItems, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType)
 			}
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+				writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_items")
 				return
 			}
 		}
@@ -776,7 +776,7 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 				folderItems, err = s.repo.ListCompanyExplorerFolderItems(companyID, "", itemType)
 			}
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
+				writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_items")
 				return
 			}
 		}

@@ -360,19 +360,18 @@ func (r *PostgresRepo) ListLogicGatesInFolderSubtree(companyID, folderID string)
 		`with recursive folder_scope as (
 		   select company_id, folder_id
 		   from company_explorer_folders
-		   where company_id=$1 and folder_id=$2::uuid and folder_kind='logic_gate'
+		   where company_id=$1 and folder_id=$2::uuid
 		   union all
 		   select child.company_id, child.folder_id
 		   from company_explorer_folders child
 		   join folder_scope parent
 		     on child.company_id=parent.company_id
 		    and child.parent_folder_id=parent.folder_id
-		   where child.folder_kind='logic_gate'
 		 ), visible_gates as (
-		   select item.item_id::uuid as logic_gate_id
-		   from company_explorer_folder_items item
-		   join folder_scope folder on folder.folder_id=item.folder_id
-		   where item.company_id=$1 and item.item_type='logic_gate'
+		   select item.target_id as logic_gate_id
+		   from company_explorer_items item
+		   join folder_scope folder on folder.folder_id=item.parent_folder_id
+		   where item.company_id=$1::uuid and item.target_type='logic_gate'
 		 )
 		 select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
 		 from logic_gates gate
@@ -415,19 +414,18 @@ func (r *PostgresRepo) ListVisibleLogicGatesInFolderSubtree(companyID, folderID,
 		`with recursive folder_scope as (
 		   select company_id, folder_id
 		   from company_explorer_folders
-		   where company_id=$1::uuid and folder_id=$2::uuid and folder_kind='logic_gate'
+		   where company_id=$1::uuid and folder_id=$2::uuid
 		   union all
 		   select child.company_id, child.folder_id
 		   from company_explorer_folders child
 		   join folder_scope parent
 		     on child.company_id=parent.company_id
 		    and child.parent_folder_id=parent.folder_id
-		   where child.folder_kind='logic_gate'
 		 ), folder_gates as (
-		   select distinct item.item_id::uuid as logic_gate_id
-		   from company_explorer_folder_items item
-		   join folder_scope folder on folder.folder_id=item.folder_id
-		   where item.company_id=$1::uuid and item.item_type='logic_gate'
+		   select distinct item.target_id as logic_gate_id
+		   from company_explorer_items item
+		   join folder_scope folder on folder.folder_id=item.parent_folder_id
+		   where item.company_id=$1::uuid and item.target_type='logic_gate'
 		 )
 		 select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
 		 from logic_gates gate
@@ -465,23 +463,21 @@ with recursive folder_scope as (
   from company_explorer_folders
   where company_id=$1
     and folder_id=$2::uuid
-    and folder_kind='logic_gate'
   union all
   select child.company_id, child.folder_id
   from company_explorer_folders child
   join folder_scope parent
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
-  where child.folder_kind='logic_gate'
 ), windowed_positions as (
   select position.company_id, position.logic_gate_id, position.x, position.y, position.updated_timestamp
   from logic_gate_map_positions position
-  join company_explorer_folder_items item
+  join company_explorer_items item
     on item.company_id=position.company_id
-   and item.item_type='logic_gate'
-   and item.item_id=position.logic_gate_id::text
+   and item.target_type='logic_gate'
+   and item.target_id=position.logic_gate_id
   join folder_scope folder
-    on folder.folder_id=item.folder_id
+    on folder.folder_id=item.parent_folder_id
   where position.company_id=$1
     and position.x >= $3
     and position.x <= $4
@@ -504,7 +500,6 @@ select exists(
   from company_explorer_folders
   where company_id=$1
     and folder_id=$2::uuid
-    and folder_kind='logic_gate'
 )`, query.CompanyID, query.FolderID).Scan(&exists)
 	return exists, err
 }
@@ -822,19 +817,18 @@ func (r *PostgresRepo) ListLogicGateMapPositionsInFolderSubtree(companyID, folde
 with recursive folder_scope as (
   select company_id, folder_id
   from company_explorer_folders
-  where company_id=$1 and folder_id=$2::uuid and folder_kind='logic_gate'
+  where company_id=$1 and folder_id=$2::uuid
   union all
   select child.company_id, child.folder_id
   from company_explorer_folders child
   join folder_scope parent
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
-  where child.folder_kind='logic_gate'
 ), visible_gates as (
-  select item.item_id::uuid as logic_gate_id
-  from company_explorer_folder_items item
-  join folder_scope folder on folder.folder_id=item.folder_id
-  where item.company_id=$1 and item.item_type='logic_gate'
+  select item.target_id as logic_gate_id
+  from company_explorer_items item
+  join folder_scope folder on folder.folder_id=item.parent_folder_id
+  where item.company_id=$1::uuid and item.target_type='logic_gate'
 )
 select position.company_id, position.logic_gate_id, position.x, position.y, position.updated_timestamp
 from logic_gate_map_positions position
@@ -973,11 +967,11 @@ order by rel.created_timestamp asc`, args...)
 	}
 
 	itemRows, err := r.db.QueryContext(ctx, postgresLogicGateMapWindowCTE+`
-select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
-from company_explorer_folder_items item
-join windowed_positions visible on visible.logic_gate_id::text=item.item_id
-where item.company_id=$1
-  and item.item_type='logic_gate'
+select item.company_id::text, coalesce(item.parent_folder_id::text, '') as folder_id, item.target_type, item.target_id::text, item.position, item.created_timestamp, item.updated_timestamp
+from company_explorer_items item
+join windowed_positions visible on visible.logic_gate_id=item.target_id
+where item.company_id=$1::uuid
+  and item.target_type='logic_gate'
 order by item.position asc, item.created_timestamp asc`, args...)
 	if err != nil {
 		return LogicGateMapWindowResult{}, err
@@ -1120,19 +1114,18 @@ func (r *PostgresRepo) ListLogicGateRelationshipsInFolderSubtree(companyID, fold
 		`with recursive folder_scope as (
 		   select company_id, folder_id
 		   from company_explorer_folders
-		   where company_id=$1 and folder_id=$2::uuid and folder_kind='logic_gate'
+		   where company_id=$1 and folder_id=$2::uuid
 		   union all
 		   select child.company_id, child.folder_id
 		   from company_explorer_folders child
 		   join folder_scope parent
 		     on child.company_id=parent.company_id
 		    and child.parent_folder_id=parent.folder_id
-		   where child.folder_kind='logic_gate'
 		 ), visible_gates as (
-		   select item.item_id::uuid as logic_gate_id
-		   from company_explorer_folder_items item
-		   join folder_scope folder on folder.folder_id=item.folder_id
-		   where item.company_id=$1 and item.item_type='logic_gate'
+		   select item.target_id as logic_gate_id
+		   from company_explorer_items item
+		   join folder_scope folder on folder.folder_id=item.parent_folder_id
+		   where item.company_id=$1::uuid and item.target_type='logic_gate'
 		 )
 		 select rel.company_id, rel.logic_gate_relationship_id, rel.logic_gate_id_a, rel.logic_gate_id_b, rel.a_position::text, rel.b_position::text, rel.created_timestamp
 		 from logic_gate_relationships rel

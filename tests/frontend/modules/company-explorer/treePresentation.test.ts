@@ -315,7 +315,7 @@ run("v2 delete targets keep explorer entity identity separate from source ids", 
   });
 
   assert.deepEqual(resolveExplorerDeleteTarget(rows[1]), { kind: "folder", id: "folder-a", folderKind: "logic_gate", entityID: "folder-a", entityType: "folder" });
-  assert.deepEqual(resolveExplorerDeleteTarget(rows[2]), { kind: "logic_gate", id: "gate-a", entityID: "gate-entity", entityType: "logic_gate" });
+  assert.deepEqual(resolveExplorerDeleteTarget(rows[2]), { kind: "logic_gate", id: "gate-a", entityID: "gate-entity", entityType: "logic_gate", edgeID: "edge-gate-a" });
   assert.deepEqual(resolveExplorerDeleteTarget(rows[3]), { kind: "node", id: "node-a", entityID: "node-entity", entityType: "node" });
 });
 

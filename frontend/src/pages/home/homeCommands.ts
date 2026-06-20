@@ -541,20 +541,19 @@ export async function deleteHomeEntitiesCommand(args: {
   if (targets.length === 0) return null;
 
   const requestJSON = args.requestJSON ?? defaultRequestJSON;
-  const response = await requestJSON<HomeDeleteEntitiesResponse>(args.apiBase, "/v1/company-explorer/delete-batch", {
-    method: "POST",
-    body: JSON.stringify({
-      company_id: args.companyID,
-      targets,
-    }),
-  });
+  await Promise.all(targets.map((target) => {
+    const endpoint = target.kind === "node"
+      ? `/v1/nodes/${encodeURIComponent(target.id)}?company_id=${encodeURIComponent(args.companyID)}`
+      : `/v1/logic-gates/${encodeURIComponent(target.id)}?company_id=${encodeURIComponent(args.companyID)}`;
+    return requestJSON(args.apiBase, endpoint, { method: "DELETE" });
+  }));
 
   for (const target of targets) {
     if (target.kind === "logic_gate") {
       dispatchKanbanBoardsUpdated({ companyID: args.companyID, deletedBoardID: logicGateKanbanBoardID(target.id) });
     }
   }
-  return response ?? { status: "ok", targets };
+  return { status: "ok", targets };
 }
 export async function applyBulkNodePatchCommand(args: {
   apiBase: string;

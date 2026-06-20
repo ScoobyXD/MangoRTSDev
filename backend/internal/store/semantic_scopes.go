@@ -109,6 +109,12 @@ func CompanyExplorerAffectedScopes(companyID, eventType string, payload map[stri
 
 	addFolderScope(payloadText(payload, "folder_id"))
 	addFolderScope(payloadText(payload, "parent_folder_id"))
+	parentEntityID := payloadText(payload, "parent_entity_id")
+	if parentEntityID == companyID {
+		scopes = append(scopes, CompanyExplorerRootScope(companyID))
+	} else {
+		addFolderScope(parentEntityID)
+	}
 	entityType := payloadText(payload, "entity_type")
 	entityID := payloadText(payload, "entity_id")
 	resourceID := payloadText(payload, "resource_id")
@@ -118,6 +124,7 @@ func CompanyExplorerAffectedScopes(companyID, eventType string, payload map[stri
 		addResourceScope(entityType, resourceID)
 	}
 	addResourceScope(payloadText(payload, "item_type"), payloadText(payload, "item_id"))
+	addResourceScope(payloadText(payload, "target_type"), payloadText(payload, "target_id"))
 	addResourceScope(EntityTypeProject, payloadText(payload, "project_id"))
 	addResourceScope(EntityTypeLogicGate, payloadText(payload, "logic_gate_id"))
 	addResourceScope(EntityTypeNode, payloadText(payload, "node_id"))

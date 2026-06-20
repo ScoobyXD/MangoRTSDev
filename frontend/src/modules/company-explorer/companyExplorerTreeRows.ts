@@ -420,8 +420,6 @@ export function buildCompanyExplorerV2TreeRows({
     const resourceID = row.resource_id || row.entity_id;
     if (row.entity_type === "company" && !row.parent_entity_id) return "folder-root";
     if (row.entity_type === "folder") return `workspace-folder-${row.entity_id}`;
-    if (row.entity_type === "user_group") return `company-explorer-group-${resourceID}`;
-    if (row.entity_type === "user") return `company-explorer-user-${resourceID}`;
     const contextSuffix = (rowCountByEntityID.get(row.entity_id) ?? 0) > 1 && row.parent_entity_id
       ? `-context-${row.edge_id || row.parent_entity_id}`
       : "";

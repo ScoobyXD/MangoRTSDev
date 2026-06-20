@@ -812,9 +812,7 @@ export async function listNodeFolders(companyID: string): Promise<CompanyExplore
 export async function listNodeFolderItems(companyID: string): Promise<CompanyExplorerFolderItem[]> {
   const cleanCompanyID = companyID.trim();
   return cachedRead(`node-folder-items:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
-    const params = new URLSearchParams({ company_id: cleanCompanyID, item_type: "node" });
-    const payload = await apiFetchJSON<{ folder_items?: CompanyExplorerFolderItem[] }>(`/v1/company-explorer/folder-items?${params.toString()}`);
-    return cloneCompanyExplorerFolderItems(payload.folder_items ?? []);
+    return listCompanyExplorerReferenceItems(cleanCompanyID, "node");
   }, cloneCompanyExplorerFolderItems);
 }
 
@@ -830,10 +828,39 @@ export async function listLogicGateFolders(companyID: string): Promise<CompanyEx
 export async function listLogicGateFolderItems(companyID: string): Promise<CompanyExplorerFolderItem[]> {
   const cleanCompanyID = companyID.trim();
   return cachedRead(`logic-gate-folder-items:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
-    const params = new URLSearchParams({ company_id: cleanCompanyID, item_type: "logic_gate" });
-    const payload = await apiFetchJSON<{ folder_items?: CompanyExplorerFolderItem[] }>(`/v1/company-explorer/folder-items?${params.toString()}`);
-    return cloneCompanyExplorerFolderItems(payload.folder_items ?? []);
+    return listCompanyExplorerReferenceItems(cleanCompanyID, "logic_gate");
   }, cloneCompanyExplorerFolderItems);
+}
+
+async function listCompanyExplorerReferenceItems(companyID: string, itemType: "node" | "logic_gate" | "project"): Promise<CompanyExplorerFolderItem[]> {
+  const rows: CompanyExplorerV2Row[] = [];
+  const visitedParents = new Set<string>();
+  const normalizeRows = (payload: CompanyExplorerV2Row[] | { rows?: CompanyExplorerV2Row[] }): CompanyExplorerV2Row[] => (
+    Array.isArray(payload) ? payload : (payload.rows ?? [])
+  );
+  const visit = async (parentID: string) => {
+    if (visitedParents.has(parentID)) return;
+    visitedParents.add(parentID);
+    const params = new URLSearchParams({ company_id: companyID });
+    const endpoint = parentID
+      ? `/v1/company-explorer/children?${params.toString()}&parent_id=${encodeURIComponent(parentID)}`
+      : `/v1/company-explorer/roots?${params.toString()}`;
+    const children = normalizeRows(await apiFetchJSON<CompanyExplorerV2Row[] | { rows?: CompanyExplorerV2Row[] }>(endpoint));
+    rows.push(...children);
+    await Promise.all(children.filter((row) => row.entity_type === "folder" && row.has_children).map((row) => visit(row.entity_id)));
+  };
+  await visit("");
+  return rows
+    .filter((row) => row.entity_type === itemType && row.edge_id && row.parent_entity_id)
+    .map((row) => ({
+      company_id: row.company_id,
+      folder_id: row.parent_entity_id ?? "",
+      item_type: itemType,
+      item_id: row.resource_id || row.entity_id,
+      position: row.position,
+      created_timestamp: row.created_timestamp,
+      updated_timestamp: row.updated_timestamp,
+    }));
 }
 
 export async function listMyLogicGateShortcuts(companyID: string): Promise<UserLogicGateShortcut[]> {

@@ -111,15 +111,12 @@ func companyExplorerFolderAccountEmailColumn(includeAccountEmail bool, qualifier
 }
 
 func companyExplorerFolderScopeColumns(qualifier string) string {
-	if strings.TrimSpace(qualifier) == "" {
-		return "coalesce(scope_type, 'company') as scope_type, scope_id"
-	}
-	return "coalesce(" + qualifier + ".scope_type, 'company') as scope_type, " + qualifier + ".scope_id"
+	return "'company'::text as scope_type, null::text as scope_id"
 }
 
 func (r *PostgresRepo) getCompanyExplorerFolder(ctx context.Context, companyID, folderID string, includeAccountEmail bool) (domain.CompanyExplorerFolder, error) {
 	item, err := scanCompanyExplorerFolder(r.db.QueryRowContext(ctx,
-		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, `+companyExplorerFolderScopeColumns("")+`, position, created_timestamp, updated_timestamp
+		`select company_id, folder_id, parent_folder_id, 'folder'::text as folder_kind, null::text as system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, `+companyExplorerFolderScopeColumns("")+`, position, created_timestamp, updated_timestamp
 		 from company_explorer_folders
 		 where company_id=$1 and folder_id=$2`,
 		companyID, folderID,
@@ -152,148 +149,32 @@ func nextCompanyExplorerSQLRowPosition(ctx context.Context, tx *sql.Tx, companyI
 		   select position
 		 from company_explorer_folders
 		 where company_id=$1
-		     and (($3::uuid is null and parent_folder_id is null) or parent_folder_id=$3::uuid)
-		     and ($3::uuid is not null or folder_kind=$2)
+		     and (($2::uuid is null and parent_folder_id is null) or parent_folder_id=$2::uuid)
 		   union all
 		   select position
-		   from company_explorer_folder_items
+		   from company_explorer_items
 		   where company_id=$1
-		     and folder_id=$3::uuid
+		     and (($2::uuid is null and parent_folder_id is null) or parent_folder_id=$2::uuid)
 		 ) explorer_siblings`,
-		companyID, folderKind, parent,
+		companyID, parent,
 	).Scan(&position)
 	return position, err
 }
 
 func createCompanyExplorerDefaultFolderTreeSQL(ctx context.Context, tx *sql.Tx, companyID, folderKind string, parent any, startPosition int, seeds []companyExplorerDefaultFolderDefinition) error {
-	for index, seed := range seeds {
-		folderID := newUUIDv7String()
-		if _, err := tx.ExecContext(ctx,
-			`insert into company_explorer_folders
-			 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
-			 values ($1, $2, $3, $4, null, $5, $6, now(), now())`,
-			companyID, folderID, parent, folderKind, seed.Name, startPosition+index*1000,
-		); err != nil {
-			return err
-		}
-		if len(seed.Children) > 0 {
-			if err := createCompanyExplorerDefaultFolderTreeSQL(ctx, tx, companyID, folderKind, folderID, 1000, seed.Children); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
 func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, companyID string) error {
-	if _, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtext('mangorts_company_explorer_default_folders'), hashtext($1))`, companyID); err != nil {
-		return err
-	}
-
-	var insertedSystemSeed string
-	err := tx.QueryRowContext(ctx,
-		`insert into company_explorer_default_folder_seeds
-		 (company_id, seed_key, created_timestamp)
-		 values ($1, $2, now())
-		 on conflict (company_id, seed_key) do nothing
-		 returning seed_key`,
-		companyID, companyExplorerSystemFolderSeedKey,
-	).Scan(&insertedSystemSeed)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if err == nil {
-		for _, seed := range companyExplorerSystemFolderSeeds {
-			if _, err := tx.ExecContext(ctx,
-				`insert into company_explorer_folders
-				 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
-				 values ($1, $2, null, $3, $4, $5, $6, now(), now())
-				 on conflict (company_id, system_key) where system_key is not null do nothing`,
-				companyID, newUUIDv7String(), seed.FolderKind, seed.Key, seed.Name, seed.Position,
-			); err != nil {
-				return err
-			}
-		}
-	}
-
-	var insertedSeed string
-	err = tx.QueryRowContext(ctx,
-		`insert into company_explorer_default_folder_seeds
-		 (company_id, seed_key, created_timestamp)
-		 values ($1, $2, now())
-		 on conflict (company_id, seed_key) do nothing
-		 returning seed_key`,
-		companyID, companyExplorerDefaultFolderSeedKey,
-	).Scan(&insertedSeed)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if err == nil {
-		position, err := nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, "logic_gate", nil)
-		if err != nil {
-			return err
-		}
-		rootID := newUUIDv7String()
-		if _, err := tx.ExecContext(ctx,
-			`insert into company_explorer_folders
-			 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
-			 values ($1, $2, null, 'logic_gate', null, 'Logic Gates', $3, now(), now())`,
-			companyID, rootID, position,
-		); err != nil {
-			return err
-		}
-		for index, name := range companyExplorerDefaultLogicGateChildFolderNames {
-			if _, err := tx.ExecContext(ctx,
-				`insert into company_explorer_folders
-				 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
-				 values ($1, $2, $3, 'logic_gate', null, $4, $5, now(), now())`,
-				companyID, newUUIDv7String(), rootID, name, (index+1)*1000,
-			); err != nil {
-				return err
-			}
-		}
-	}
-
 	return nil
 }
 
 func ensureCompanyExplorerSystemFolderSQL(ctx context.Context, tx *sql.Tx, companyID, systemKey string) (domain.CompanyExplorerFolder, error) {
 	defer observeTiming(ctx, "repo.ensureCompanyExplorerSystemFolderSQL")()
-	seed, ok := companyExplorerSystemFolderDefinitionForKey(systemKey)
-	if !ok {
-		return domain.CompanyExplorerFolder{}, ErrNotFound
-	}
-	item, err := scanCompanyExplorerFolder(tx.QueryRowContext(ctx,
-		`with inserted as (
-		   insert into company_explorer_folders
-		     (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, position, created_timestamp, updated_timestamp)
-		   values ($1, $2, null, $3, $4, $5, $6, now(), now())
-		   on conflict (company_id, system_key) where system_key is not null do nothing
-		   returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, coalesce(scope_type, 'company') as scope_type, scope_id, position, created_timestamp, updated_timestamp
-		 )
-		 select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, scope_type, scope_id, position, created_timestamp, updated_timestamp
-		 from inserted
-		 union all
-		 select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, coalesce(scope_type, 'company') as scope_type, scope_id, position, created_timestamp, updated_timestamp
-		 from company_explorer_folders
-		 where company_id=$1 and system_key=$4
-		   and not exists (select 1 from inserted)
-		 limit 1`,
-		companyID, newUUIDv7String(), seed.FolderKind, seed.Key, seed.Name, seed.Position,
-	))
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.CompanyExplorerFolder{}, ErrNotFound
-		}
-		return domain.CompanyExplorerFolder{}, err
-	}
-	return item, nil
+	return domain.CompanyExplorerFolder{}, ErrNotFound
 }
 
 func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error) {
-	if strings.TrimSpace(folderKind) == "communications" {
-		return domain.CompanyExplorerFolder{}, ErrInvalid
-	}
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -303,18 +184,20 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 
 	var parent any
 	scopeType := CompanyExplorerFolderScopeCompany
-	var scopeID any
 	if parentFolderID != "" {
+		var exists bool
 		if err := tx.QueryRowContext(ctx,
-			`select coalesce(scope_type, 'company'), scope_id
-			 from company_explorer_folders
-			 where company_id=$1 and folder_id=$2 and folder_kind <> 'communications'`,
+			`select exists(
+			   select 1
+			   from company_explorer_folders
+			   where company_id=$1::uuid and folder_id=$2::uuid
+			 )`,
 			companyID, parentFolderID,
-		).Scan(&scopeType, &scopeID); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return domain.CompanyExplorerFolder{}, ErrNotFound
-			}
+		).Scan(&exists); err != nil {
 			return domain.CompanyExplorerFolder{}, err
+		}
+		if !exists {
+			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		parent = parentFolderID
 	}
@@ -327,17 +210,17 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 	item := domain.CompanyExplorerFolder{
 		CompanyID:  companyID,
 		FolderID:   newUUIDv7String(),
-		FolderKind: folderKind,
+		FolderKind: "folder",
 		Name:       name,
 		ScopeType:  scopeType,
 		Position:   position,
 	}
 	item, err = scanCompanyExplorerFolder(tx.QueryRowContext(ctx,
 		`insert into company_explorer_folders
-		 (company_id, folder_id, parent_folder_id, folder_kind, system_key, name, scope_type, scope_id, position, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4, null, $5, $6, $7, $8, now(), now())
-		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, coalesce(scope_type, 'company') as scope_type, scope_id, position, created_timestamp, updated_timestamp`,
-		item.CompanyID, item.FolderID, parent, item.FolderKind, item.Name, scopeType, scopeID, item.Position,
+		 (company_id, folder_id, parent_folder_id, name, position, created_timestamp, updated_timestamp)
+		 values ($1::uuid, $2::uuid, $3::uuid, $4, $5, now(), now())
+		 returning company_id, folder_id, parent_folder_id, 'folder'::text as folder_kind, null::text as system_key, name, null::text as account_email, 'company'::text as scope_type, null::text as scope_id, position, created_timestamp, updated_timestamp`,
+		item.CompanyID, item.FolderID, parent, item.Name, item.Position,
 	))
 	if err != nil {
 		return domain.CompanyExplorerFolder{}, err
@@ -370,47 +253,16 @@ func (r *PostgresRepo) SetCompanyExplorerFolderScope(companyID, folderID, scopeT
 	if companyID == "" || folderID == "" {
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
-	normalizedScopeType, normalizedScopeID, err := normalizeCompanyExplorerFolderScope(scopeType, scopeID)
-	if err != nil {
-		return domain.CompanyExplorerFolder{}, err
-	}
-
-	var scopeIDParam any
-	if normalizedScopeID != nil {
-		scopeIDParam = *normalizedScopeID
-	}
-	ctx := context.Background()
-	item, err := scanCompanyExplorerFolder(r.db.QueryRowContext(ctx,
-		`update company_explorer_folders
-		 set scope_type=$3, scope_id=$4, updated_timestamp=now()
-		 where company_id=$1 and folder_id=$2
-		   and folder_kind <> 'communications'
-		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, coalesce(scope_type, 'company') as scope_type, scope_id, position, created_timestamp, updated_timestamp`,
-		companyID, folderID, normalizedScopeType, scopeIDParam,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.CompanyExplorerFolder{}, ErrNotFound
-	}
-	if err != nil {
-		return domain.CompanyExplorerFolder{}, err
-	}
-	return r.getCompanyExplorerFolder(ctx, companyID, item.FolderID, true)
+	return domain.CompanyExplorerFolder{}, ErrInvalid
 }
 
 func (r *PostgresRepo) queryCompanyExplorerFolders(ctx context.Context, companyID, folderKind string, includeAccountEmail bool) ([]domain.CompanyExplorerFolder, error) {
-	var kindParam any
-	if folderKind != "" {
-		kindParam = folderKind
-	}
 	rows, err := r.db.QueryContext(ctx,
-		`select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, `+companyExplorerFolderScopeColumns("")+`, position, created_timestamp, updated_timestamp
+		`select company_id, folder_id, parent_folder_id, 'folder'::text as folder_kind, null::text as system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, `+companyExplorerFolderScopeColumns("")+`, position, created_timestamp, updated_timestamp
 		 from company_explorer_folders
 		 where company_id=$1
-		   and ($2::text is null or folder_kind=$2)
-		   and folder_kind <> 'communications'
-		   and (system_key is null or system_key <> 'kanban_boards')
 		 order by position asc, created_timestamp asc`,
-		companyID, kindParam,
+		companyID,
 	)
 	if err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
@@ -462,13 +314,6 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 	if companyID == "" || userID == "" {
 		return nil, ErrInvalid
 	}
-	if strings.TrimSpace(folderKind) == "communications" {
-		return []domain.CompanyExplorerFolder{}, nil
-	}
-	var kindParam any
-	if folderKind != "" {
-		kindParam = folderKind
-	}
 	rows, err := r.db.QueryContext(ctx,
 		`with recursive visible_workspace_folder as (
 		   select folder.folder_id as resource_id,
@@ -487,7 +332,6 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 		          end as access_level
 		   from company_explorer_folders folder
 		   where folder.company_id=$1::uuid
-		     and folder.folder_kind <> 'communications'
 		     and folder.parent_folder_id is null
 		     and mangorts_user_can_access_resource(folder.company_id, 'company_explorer_folder', folder.folder_id, $3::uuid, $4)
 		   union all
@@ -509,19 +353,15 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 		   join visible_workspace_folder parent
 		     on parent.resource_id=child.parent_folder_id
 		   where child.company_id=$1::uuid
-		     and child.folder_kind <> 'communications'
 		     and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4)
 		 )
-		 select folder.company_id, folder.folder_id, folder.parent_folder_id, folder.folder_kind, folder.system_key, folder.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "folder")+`, `+companyExplorerFolderScopeColumns("folder")+`, folder.position, folder.created_timestamp, folder.updated_timestamp,
+		 select folder.company_id, folder.folder_id, folder.parent_folder_id, 'folder'::text as folder_kind, null::text as system_key, folder.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "folder")+`, `+companyExplorerFolderScopeColumns("folder")+`, folder.position, folder.created_timestamp, folder.updated_timestamp,
 		        visible_workspace_folder.access_level
 		 from company_explorer_folders folder
 		 join visible_workspace_folder on visible_workspace_folder.resource_id=folder.folder_id
 		 where folder.company_id=$1::uuid
-		   and ($2::text is null or folder.folder_kind=$2)
-		   and folder.folder_kind <> 'communications'
-		   and (folder.system_key is null or folder.system_key <> 'kanban_boards')
 		 order by folder.position asc, folder.created_timestamp asc`,
-		companyID, kindParam, userID, EntityPermissionView,
+		companyID, nil, userID, EntityPermissionView,
 	)
 	if err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
@@ -549,9 +389,6 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 }
 
 func (r *PostgresRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind string) ([]domain.CompanyExplorerFolder, error) {
-	if strings.TrimSpace(folderKind) == "communications" {
-		return []domain.CompanyExplorerFolder{}, nil
-	}
 	if strings.TrimSpace(folderID) == "" {
 		return r.ListCompanyExplorerFolders(companyID, folderKind)
 	}
@@ -560,9 +397,6 @@ func (r *PostgresRepo) ListCompanyExplorerFolderSubtree(companyID, folderID, fol
 }
 
 func (r *PostgresRepo) ListVisibleCompanyExplorerFolderSubtree(companyID, folderID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error) {
-	if strings.TrimSpace(folderKind) == "communications" {
-		return []domain.CompanyExplorerFolder{}, nil
-	}
 	if strings.TrimSpace(folderID) == "" {
 		return r.ListVisibleCompanyExplorerFolders(companyID, folderKind, userID)
 	}
@@ -571,31 +405,22 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerFolderSubtree(companyID, folder
 }
 
 func (r *PostgresRepo) queryCompanyExplorerFolderSubtree(ctx context.Context, companyID, folderID, folderKind string, includeAccountEmail bool) ([]domain.CompanyExplorerFolder, error) {
-	var kindParam any
-	if strings.TrimSpace(folderKind) != "" {
-		kindParam = strings.TrimSpace(folderKind)
-	}
 	rows, err := r.db.QueryContext(ctx, `
 with recursive subtree as (
-  select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, `+companyExplorerFolderScopeColumns("")+`, position, created_timestamp, updated_timestamp
+  select company_id, folder_id, parent_folder_id, 'folder'::text as folder_kind, null::text as system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, `+companyExplorerFolderScopeColumns("")+`, position, created_timestamp, updated_timestamp
   from company_explorer_folders
   where company_id=$1
     and folder_id=$2::uuid
-    and ($3::text is null or folder_kind=$3)
-    and folder_kind <> 'communications'
   union all
-  select child.company_id, child.folder_id, child.parent_folder_id, child.folder_kind, child.system_key, child.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "child")+`, `+companyExplorerFolderScopeColumns("child")+`, child.position, child.created_timestamp, child.updated_timestamp
+  select child.company_id, child.folder_id, child.parent_folder_id, 'folder'::text as folder_kind, null::text as system_key, child.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "child")+`, `+companyExplorerFolderScopeColumns("child")+`, child.position, child.created_timestamp, child.updated_timestamp
   from company_explorer_folders child
   join subtree parent
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
-  where ($3::text is null or child.folder_kind=$3)
-    and child.folder_kind <> 'communications'
 )
 select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, account_email, scope_type, scope_id, position, created_timestamp, updated_timestamp
 from subtree
-where system_key is null or system_key <> 'kanban_boards'
-order by position asc, created_timestamp asc`, companyID, strings.TrimSpace(folderID), kindParam)
+order by position asc, created_timestamp asc`, companyID, strings.TrimSpace(folderID))
 	if err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
 			return r.queryCompanyExplorerFolderSubtree(ctx, companyID, folderID, folderKind, false)
@@ -628,53 +453,43 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolderSubtree(ctx context.Cont
 	if companyID == "" || userID == "" || folderID == "" {
 		return nil, ErrInvalid
 	}
-	var kindParam any
-	if strings.TrimSpace(folderKind) != "" {
-		kindParam = strings.TrimSpace(folderKind)
-	}
 	rows, err := r.db.QueryContext(ctx, `
 with recursive subtree as (
-  select company_id, folder_id, parent_folder_id, folder_kind, system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, `+companyExplorerFolderScopeColumns("")+`, position, created_timestamp, updated_timestamp
+  select company_id, folder_id, parent_folder_id, 'folder'::text as folder_kind, null::text as system_key, name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "")+`, `+companyExplorerFolderScopeColumns("")+`, position, created_timestamp, updated_timestamp
   from company_explorer_folders
   where company_id=$1::uuid
     and folder_id=$2::uuid
-    and ($3::text is null or folder_kind=$3)
-    and folder_kind <> 'communications'
-    and mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $4::uuid, $5)
+    and mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $3::uuid, $4)
   union all
-  select child.company_id, child.folder_id, child.parent_folder_id, child.folder_kind, child.system_key, child.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "child")+`, `+companyExplorerFolderScopeColumns("child")+`, child.position, child.created_timestamp, child.updated_timestamp
+  select child.company_id, child.folder_id, child.parent_folder_id, 'folder'::text as folder_kind, null::text as system_key, child.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "child")+`, `+companyExplorerFolderScopeColumns("child")+`, child.position, child.created_timestamp, child.updated_timestamp
   from company_explorer_folders child
   join subtree parent
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
-  where ($3::text is null or child.folder_kind=$3)
-    and child.folder_kind <> 'communications'
-    and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $4::uuid, $5)
+  where mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4)
 ), visible_workspace_folder as (
   select subtree.folder_id as resource_id,
          case
            when exists (
              select 1
              from company_memberships membership
-             where membership.user_id=$4::uuid
+             where membership.user_id=$3::uuid
                and (
                  membership.role='dev_admin'
                  or (membership.company_id=$1::uuid and membership.role='company_admin')
                )
            ) then 'admin'
-           when mangorts_user_can_access_resource(subtree.company_id, 'company_explorer_folder', subtree.folder_id, $4::uuid, 'edit') then 'edit'
+           when mangorts_user_can_access_resource(subtree.company_id, 'company_explorer_folder', subtree.folder_id, $3::uuid, 'edit') then 'edit'
            else 'view'
          end as access_level
   from subtree
-  where subtree.folder_kind <> 'communications'
-    and mangorts_user_can_access_resource(subtree.company_id, 'company_explorer_folder', subtree.folder_id, $4::uuid, $5)
+  where mangorts_user_can_access_resource(subtree.company_id, 'company_explorer_folder', subtree.folder_id, $3::uuid, $4)
 )
 select subtree.company_id, subtree.folder_id, subtree.parent_folder_id, subtree.folder_kind, subtree.system_key, subtree.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "subtree")+`, `+companyExplorerFolderScopeColumns("subtree")+`, subtree.position, subtree.created_timestamp, subtree.updated_timestamp,
        visible_workspace_folder.access_level
 from subtree
 join visible_workspace_folder on visible_workspace_folder.resource_id=subtree.folder_id
-where (subtree.system_key is null or subtree.system_key <> 'kanban_boards')
-order by subtree.position asc, subtree.created_timestamp asc`, companyID, folderID, kindParam, userID, EntityPermissionView)
+order by subtree.position asc, subtree.created_timestamp asc`, companyID, folderID, userID, EntityPermissionView)
 	if err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {
 			return r.queryVisibleCompanyExplorerFolderSubtree(ctx, companyID, folderID, folderKind, userID, false)
@@ -701,6 +516,11 @@ order by subtree.position asc, subtree.created_timestamp asc`, companyID, folder
 }
 
 func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
+	companyID = cleanUUIDText(companyID)
+	folderID = cleanUUIDText(folderID)
+	if companyID == "" || folderID == "" {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -708,159 +528,155 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 	}
 	defer tx.Rollback()
 
-	var folderKind string
 	var currentParent sql.NullString
 	var currentPosition int
-	if err := tx.QueryRowContext(ctx,
-		`select folder_kind, parent_folder_id, position
-		 from company_explorer_folders
-		 where company_id=$1 and folder_id=$2
-		 for update`,
-		companyID, folderID,
-	).Scan(&folderKind, &currentParent, &currentPosition); err != nil {
+	if err := tx.QueryRowContext(ctx, `
+select parent_folder_id, position
+from company_explorer_folders
+where company_id=$1::uuid and folder_id=$2::uuid
+for update`, companyID, folderID).Scan(&currentParent, &currentPosition); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		return domain.CompanyExplorerFolder{}, err
-	}
-	if folderKind == "communications" {
-		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
 
 	var parent any
-	targetParentID := ""
 	if currentParent.Valid {
-		targetParentID = currentParent.String
 		parent = currentParent.String
 	}
-	parentChanged := false
-	updateScope := false
-	var targetScopeType sql.NullString
-	var targetScopeID sql.NullString
 	if parentFolderID != nil {
-		targetParentID = strings.TrimSpace(*parentFolderID)
+		targetParentID := cleanUUIDText(*parentFolderID)
 		if targetParentID == folderID {
 			return domain.CompanyExplorerFolder{}, ErrInvalid
 		}
-		parentChanged = (!currentParent.Valid && targetParentID != "") || (currentParent.Valid && currentParent.String != targetParentID)
 		parent = nil
-	}
-
-	if parentFolderID != nil && targetParentID != "" {
-		if err := tx.QueryRowContext(ctx,
-			`select coalesce(scope_type, 'company'), scope_id
-			 from company_explorer_folders
-			 where company_id=$1 and folder_id=$2 and folder_kind <> 'communications'`,
-			companyID, targetParentID,
-		).Scan(&targetScopeType, &targetScopeID); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return domain.CompanyExplorerFolder{}, ErrNotFound
-			}
-			return domain.CompanyExplorerFolder{}, err
-		}
-
-		var createsCycle bool
-		if err := tx.QueryRowContext(ctx,
-			`with recursive descendants as (
-			   select folder_id
-			   from company_explorer_folders
-			   where company_id=$1 and folder_id=$2
-			   union all
-			   select child.folder_id
-			   from company_explorer_folders child
-			   join descendants parent on child.company_id=$1 and child.parent_folder_id=parent.folder_id
-			 )
-			 select exists(select 1 from descendants where folder_id=$3)`,
-			companyID, folderID, targetParentID,
-		).Scan(&createsCycle); err != nil {
-			return domain.CompanyExplorerFolder{}, err
-		}
-		if createsCycle {
-			return domain.CompanyExplorerFolder{}, ErrInvalid
-		}
-		parent = targetParentID
-		updateScope = true
-	}
-	targetScopeTypeParam := any(nil)
-	if targetScopeType.Valid {
-		targetScopeTypeParam = targetScopeType.String
-	}
-	targetScopeIDParam := any(nil)
-	if targetScopeID.Valid {
-		targetScopeIDParam = targetScopeID.String
-	}
-
-	if position <= 0 {
-		if parentChanged {
-			position, err = nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, folderKind, parent)
-			if err != nil {
+		if targetParentID != "" {
+			var createsCycle bool
+			if err := tx.QueryRowContext(ctx, `
+with recursive descendants as (
+  select folder_id
+  from company_explorer_folders
+  where company_id=$1::uuid and folder_id=$2::uuid
+  union all
+  select child.folder_id
+  from company_explorer_folders child
+  join descendants parent on child.company_id=$1::uuid and child.parent_folder_id=parent.folder_id
+)
+select exists(select 1 from descendants where folder_id=$3::uuid)`, companyID, folderID, targetParentID).Scan(&createsCycle); err != nil {
 				return domain.CompanyExplorerFolder{}, err
 			}
-		} else {
-			position = currentPosition
+			if createsCycle {
+				return domain.CompanyExplorerFolder{}, ErrInvalid
+			}
+			var exists bool
+			if err := tx.QueryRowContext(ctx, `
+select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, targetParentID).Scan(&exists); err != nil {
+				return domain.CompanyExplorerFolder{}, err
+			}
+			if !exists {
+				return domain.CompanyExplorerFolder{}, ErrNotFound
+			}
+			parent = targetParentID
 		}
 	}
-
-	item, err := scanCompanyExplorerFolder(tx.QueryRowContext(ctx,
-		`update company_explorer_folders
-		 set parent_folder_id=$3,
-		     position=$4,
-		     scope_type=case when $5 then $6 else scope_type end,
-		     scope_id=case when $5 then $7 else scope_id end,
-		     updated_timestamp=now()
-		 where company_id=$1 and folder_id=$2
-		   and folder_kind <> 'communications'
-		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, coalesce(scope_type, 'company') as scope_type, scope_id, position, created_timestamp, updated_timestamp`,
-		companyID, folderID, parent, position, updateScope, targetScopeTypeParam, targetScopeIDParam,
-	))
-	if err != nil {
+	if position <= 0 {
+		position = currentPosition
+	}
+	if position <= 0 {
+		position, err = nextCompanyExplorerFinalPositionSQL(ctx, tx, companyID, parent)
+		if err != nil {
+			return domain.CompanyExplorerFolder{}, err
+		}
+	}
+	var item domain.CompanyExplorerFolder
+	var parentOut sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+update company_explorer_folders
+set parent_folder_id=$3::uuid,
+    position=$4,
+    updated_timestamp=now()
+where company_id=$1::uuid and folder_id=$2::uuid
+returning company_id::text, folder_id::text, parent_folder_id::text, name, default_access, position, created_timestamp, updated_timestamp`,
+		companyID, folderID, parent, position).Scan(
+		&item.CompanyID,
+		&item.FolderID,
+		&parentOut,
+		&item.Name,
+		&item.DefaultAccess,
+		&item.Position,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		return domain.CompanyExplorerFolder{}, err
+	}
+	if parentOut.Valid {
+		item.ParentFolderID = &parentOut.String
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
-	return r.getCompanyExplorerFolder(ctx, companyID, item.FolderID, true)
+	return item, nil
 }
 
 func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
-	ctx := context.Background()
-
-	var systemKey sql.NullString
-	if err := r.db.QueryRowContext(ctx,
-		`select system_key
-		 from company_explorer_folders
-		 where company_id=$1 and folder_id=$2 and folder_kind <> 'communications'`,
-		companyID, folderID,
-	).Scan(&systemKey); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.CompanyExplorerFolder{}, ErrNotFound
-		}
-		return domain.CompanyExplorerFolder{}, err
-	}
-	if systemKey.Valid {
+	companyID = cleanUUIDText(companyID)
+	folderID = cleanUUIDText(folderID)
+	name = strings.TrimSpace(name)
+	if companyID == "" || folderID == "" || name == "" {
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
-
-	item, err := scanCompanyExplorerFolder(r.db.QueryRowContext(ctx,
-		`update company_explorer_folders
-		 set name=$3, updated_timestamp=now()
-		 where company_id=$1 and folder_id=$2
-		   and folder_kind <> 'communications'
-		 returning company_id, folder_id, parent_folder_id, folder_kind, system_key, name, null::text as account_email, coalesce(scope_type, 'company') as scope_type, scope_id, position, created_timestamp, updated_timestamp`,
-		companyID, folderID, name,
-	))
-	if err != nil {
+	ctx := context.Background()
+	var item domain.CompanyExplorerFolder
+	var parentOut sql.NullString
+	if err := r.db.QueryRowContext(ctx, `
+update company_explorer_folders
+set name=$3,
+    updated_timestamp=now()
+where company_id=$1::uuid and folder_id=$2::uuid
+returning company_id::text, folder_id::text, parent_folder_id::text, name, default_access, position, created_timestamp, updated_timestamp`, companyID, folderID, name).Scan(
+		&item.CompanyID,
+		&item.FolderID,
+		&parentOut,
+		&item.Name,
+		&item.DefaultAccess,
+		&item.Position,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		return domain.CompanyExplorerFolder{}, err
 	}
-	return r.getCompanyExplorerFolder(ctx, companyID, item.FolderID, true)
+	if parentOut.Valid {
+		item.ParentFolderID = &parentOut.String
+	}
+	return item, nil
 }
 
+func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {
+	companyID = cleanUUIDText(companyID)
+	folderID = cleanUUIDText(folderID)
+	if companyID == "" || folderID == "" {
+		return ErrInvalid
+	}
+	deleted, err := r.db.ExecContext(context.Background(), `
+delete from company_explorer_folders
+where company_id=$1::uuid and folder_id=$2::uuid`, companyID, folderID)
+	if err != nil {
+		return err
+	}
+	if affected, err := deleted.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 func postgresCompanyHasConnectedEmailAccount(ctx context.Context, tx *sql.Tx, companyID, accountEmail string) (bool, error) {
 	var exists bool
 	if err := tx.QueryRowContext(ctx, `
@@ -877,11 +693,6 @@ select exists(
 		return false, err
 	}
 	return exists, nil
-}
-
-func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {
-	_, err := r.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folderID}})
-	return err
 }
 
 func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput) (CompanyExplorerDeleteResult, error) {
@@ -916,7 +727,6 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 	projectIDs := map[string]bool{}
 	directProjectIDs := map[string]bool{}
 	kanbanBoardIDs := map[string]bool{}
-	directKanbanBoardIDs := map[string]bool{}
 	recycleRoots := make([]companyExplorerRecycleRootScope, 0, len(targets))
 
 	for _, target := range targets {
@@ -925,16 +735,15 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 		case "folder":
 			rows, err := tx.QueryContext(ctx,
 				`with recursive subtree as (
-				   select folder_id, folder_kind, system_key
+				   select folder_id
 				   from company_explorer_folders
-				   where company_id=$1 and folder_id=$2 and folder_kind <> 'communications'
+				   where company_id=$1::uuid and folder_id=$2::uuid
 				   union all
-				   select child.folder_id, child.folder_kind, child.system_key
+				   select child.folder_id
 				   from company_explorer_folders child
 				   join subtree parent on child.company_id=$1 and child.parent_folder_id=parent.folder_id
-				   where child.folder_kind <> 'communications'
 				 )
-				 select folder_id::text, folder_kind, system_key is not null
+				 select folder_id::text
 				 from subtree`,
 				companyID, target.ID,
 			)
@@ -944,21 +753,13 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			count := 0
 			for rows.Next() {
 				var folderID string
-				var folderKind string
-				var protected bool
-				if err := rows.Scan(&folderID, &folderKind, &protected); err != nil {
+				if err := rows.Scan(&folderID); err != nil {
 					rows.Close()
 					return CompanyExplorerDeleteResult{}, err
 				}
 				count++
-				if protected {
-					rows.Close()
-					return CompanyExplorerDeleteResult{}, ErrInvalid
-				}
 				folderIDs[folderID] = true
-				folderKinds[folderID] = folderKind
 				targetScope.FolderIDs[folderID] = true
-				targetScope.FolderKinds[folderID] = folderKind
 			}
 			if err := rows.Err(); err != nil {
 				rows.Close()
@@ -1003,59 +804,9 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			directProjectIDs[target.ID] = true
 			targetScope.ProjectIDs[target.ID] = true
 		case "kanban":
-			exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folder_items where company_id=$1 and item_type='kanban' and item_id=$2)`, companyID, target.ID)
-			if err != nil {
-				return CompanyExplorerDeleteResult{}, err
-			}
-			if !exists {
-				return CompanyExplorerDeleteResult{}, ErrNotFound
-			}
-			kanbanBoardIDs[target.ID] = true
-			directKanbanBoardIDs[target.ID] = true
-			targetScope.KanbanBoardIDs[target.ID] = true
+			return CompanyExplorerDeleteResult{}, ErrInvalid
 		}
 		recycleRoots = append(recycleRoots, companyExplorerRecycleRootScope{Target: target, Scope: targetScope})
-	}
-
-	for folderID := range folderIDs {
-		rows, err := tx.QueryContext(ctx,
-			`select item_type, item_id
-			 from company_explorer_folder_items
-			 where company_id=$1 and folder_id=$2`,
-			companyID, folderID,
-		)
-		if err != nil {
-			return CompanyExplorerDeleteResult{}, err
-		}
-		for rows.Next() {
-			var itemType string
-			var itemID string
-			if err := rows.Scan(&itemType, &itemID); err != nil {
-				rows.Close()
-				return CompanyExplorerDeleteResult{}, err
-			}
-			switch itemType {
-			case "node":
-				nodeIDs[itemID] = true
-			case "logic_gate":
-				logicGateIDs[itemID] = true
-			case "project":
-				projectIDs[itemID] = true
-			}
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return CompanyExplorerDeleteResult{}, err
-		}
-		rows.Close()
-	}
-	for index := range recycleRoots {
-		if len(recycleRoots[index].Scope.FolderIDs) == 0 {
-			continue
-		}
-		if err := postgresAddFolderScopeItemsTx(ctx, tx, companyID, &recycleRoots[index].Scope); err != nil {
-			return CompanyExplorerDeleteResult{}, err
-		}
 	}
 
 	for nodeID := range nodeIDs {
@@ -1096,18 +847,6 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			continue
 		}
 	}
-	for boardID := range kanbanBoardIDs {
-		exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from company_explorer_folder_items where company_id=$1 and item_type='kanban' and item_id=$2)`, companyID, boardID)
-		if err != nil {
-			return CompanyExplorerDeleteResult{}, err
-		}
-		if !exists {
-			if directKanbanBoardIDs[boardID] {
-				return CompanyExplorerDeleteResult{}, ErrNotFound
-			}
-			delete(kanbanBoardIDs, boardID)
-		}
-	}
 
 	result := CompanyExplorerDeleteResult{Targets: make([]CompanyExplorerDeletedTarget, 0)}
 	projectionDeltas := make([]ProjectionDelta, 0)
@@ -1132,11 +871,18 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 	appendSorted("project", projectIDs)
 	appendSorted("kanban", kanbanBoardIDs)
 
+	recycleCandidates := make([]companyExplorerRecycleRootScope, 0, len(recycleRoots))
 	for index := range recycleRoots {
+		if recycleRoots[index].Target.Kind == "folder" {
+			continue
+		}
 		recycleRoots[index].Scope.addLogicGateBoards()
+		recycleCandidates = append(recycleCandidates, recycleRoots[index])
 	}
-	if err := postgresCreateRecycleBinItemsTx(ctx, tx, companyID, recycleRoots); err != nil {
-		return CompanyExplorerDeleteResult{}, err
+	if len(recycleCandidates) > 0 {
+		if err := postgresCreateRecycleBinItemsTx(ctx, tx, companyID, recycleCandidates); err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
 	}
 
 	for folderID := range folderIDs {
@@ -1167,15 +913,6 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			return CompanyExplorerDeleteResult{}, err
 		}
 		projectionDeltas = append(projectionDeltas, deltas...)
-	}
-	if err := postgresDeleteCompanyExplorerV2NativeEntitiesTx(ctx, tx, companyID, CompanyExplorerV2EntityLogicGate, logicGateIDs); err != nil {
-		return CompanyExplorerDeleteResult{}, err
-	}
-	if err := postgresDeleteCompanyExplorerV2NativeEntitiesTx(ctx, tx, companyID, CompanyExplorerV2EntityProject, projectIDs); err != nil {
-		return CompanyExplorerDeleteResult{}, err
-	}
-	if err := postgresDeleteCompanyExplorerV2NativeEntitiesTx(ctx, tx, companyID, CompanyExplorerV2EntityNode, nodeIDs); err != nil {
-		return CompanyExplorerDeleteResult{}, err
 	}
 	if len(folderIDs) > 0 {
 		grantFolderIDs := make([]string, 0, len(folderIDs))
@@ -1226,10 +963,10 @@ func postgresDeleteCompanyExplorerV2NativeEntitiesTx(ctx context.Context, tx *sq
 	}
 	sort.Strings(values)
 	_, err := tx.ExecContext(ctx, `
-delete from company_explorer_entities
+delete from company_explorer_items
 where company_id=$1::uuid
-  and entity_type=$2
-  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, entityType, strings.Join(values, ","))
+  and target_type=$2
+  and target_id = any(string_to_array($3, ',')::uuid[])`, companyID, entityType, strings.Join(values, ","))
 	return err
 }
 
@@ -1288,8 +1025,8 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`delete from company_explorer_folder_items
-		 where company_id=$1 and item_type='node' and item_id=$2`,
+		`delete from company_explorer_items
+		 where company_id=$1::uuid and target_type='node' and target_id=$2::uuid`,
 		companyID, nodeID,
 	); err != nil {
 		return err
@@ -1418,19 +1155,9 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`delete from company_explorer_folder_items
-		 where company_id=$1 and item_type='logic_gate' and item_id=$2`,
+		`delete from company_explorer_items
+		 where company_id=$1::uuid and target_type='logic_gate' and target_id=$2::uuid`,
 		companyID, logicGateID,
-	); err != nil {
-		return err
-	}
-	boardID := LogicGateKanbanBoardID(logicGateID)
-	if _, err := tx.ExecContext(ctx,
-		`delete from company_explorer_folder_items
-		 where company_id=$1
-		   and item_type='kanban'
-		   and item_id=$2`,
-		companyID, boardID,
 	); err != nil {
 		return err
 	}
@@ -1491,35 +1218,20 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 }
 
 func postgresDeleteKanbanBoardTx(ctx context.Context, tx *sql.Tx, companyID, boardID string) error {
-	deleted, err := tx.ExecContext(ctx, `
-delete from company_explorer_folder_items
-where company_id=$1 and item_type='kanban' and item_id=$2`, companyID, boardID)
-	if err != nil {
-		return err
-	}
-	affected, err := deleted.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return ErrNotFound
 }
 
 func assignCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error) {
 	var err error
-	var folderKind string
+	var folderExists bool
 	if err := tx.QueryRowContext(ctx,
-		`select folder_kind
-		 from company_explorer_folders
-		 where company_id=$1 and folder_id=$2`,
+		`select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid)`,
 		companyID, folderID,
-	).Scan(&folderKind); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
-		}
+	).Scan(&folderExists); err != nil {
 		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
+	if !folderExists {
+		return domain.CompanyExplorerFolderItem{}, nil, ErrNotFound
 	}
 	var exists bool
 	var existsQuery string
@@ -1543,9 +1255,9 @@ func assignCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, company
 	var existingPosition int
 	var hasExisting bool
 	if err := tx.QueryRowContext(ctx,
-		`select folder_id, position
-		 from company_explorer_folder_items
-		 where company_id=$1 and item_type=$2 and item_id=$3
+		`select coalesce(parent_folder_id::text, ''), position
+		 from company_explorer_items
+		 where company_id=$1::uuid and target_type=$2 and target_id=$3::uuid
 		 for update`,
 		companyID, itemType, itemID,
 	).Scan(&existingFolderID, &existingPosition); err != nil {
@@ -1559,7 +1271,7 @@ func assignCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, company
 		position = existingPosition
 	}
 	if position <= 0 {
-		position, err = nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, folderKind, folderID)
+		position, err = nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, itemType, folderID)
 		if err != nil {
 			return domain.CompanyExplorerFolderItem{}, nil, err
 		}
@@ -1567,16 +1279,16 @@ func assignCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, company
 
 	var item domain.CompanyExplorerFolderItem
 	if err := tx.QueryRowContext(ctx,
-		`insert into company_explorer_folder_items
-		 (company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4, $5, now(), now())
-		 on conflict (company_id, item_type, item_id)
+		`insert into company_explorer_items
+		 (company_id, item_id, parent_folder_id, target_type, target_id, position, created_timestamp, updated_timestamp)
+		 values ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, now(), now())
+		 on conflict (company_id, target_type, target_id)
 		 do update set
-		   folder_id=excluded.folder_id,
+		   parent_folder_id=excluded.parent_folder_id,
 		   position=excluded.position,
 		   updated_timestamp=now()
-		 returning company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp`,
-		companyID, folderID, itemType, itemID, position,
+		 returning company_id::text, coalesce(parent_folder_id::text, '') as folder_id, target_type, target_id::text, position, created_timestamp, updated_timestamp`,
+		companyID, newUUIDv7String(), folderID, itemType, itemID, position,
 	).Scan(
 		&item.CompanyID,
 		&item.FolderID,
@@ -1588,46 +1300,7 @@ func assignCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, company
 	); err != nil {
 		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
-	deletedRelationshipIDs := make([]string, 0)
-	if !hasExisting || existingFolderID != folderID {
-		var deleteRows *sql.Rows
-		if itemType == "node" {
-			deleteRows, err = tx.QueryContext(ctx,
-				`delete from node_relationships
-				 where company_id=$1 and (node_id_a=$2 or node_id_b=$2)
-				 returning node_relationship_id::text`,
-				companyID, itemID,
-			)
-		} else if itemType == "logic_gate" {
-			deleteRows, err = tx.QueryContext(ctx,
-				`delete from logic_gate_relationships
-				 where company_id=$1 and (logic_gate_id_a=$2 or logic_gate_id_b=$2)
-				 returning logic_gate_relationship_id::text`,
-				companyID, itemID,
-			)
-		} else {
-			deleteRows = nil
-		}
-		if err != nil {
-			return domain.CompanyExplorerFolderItem{}, nil, err
-		}
-		if deleteRows != nil {
-			for deleteRows.Next() {
-				var relationshipID string
-				if err := deleteRows.Scan(&relationshipID); err != nil {
-					deleteRows.Close()
-					return domain.CompanyExplorerFolderItem{}, nil, err
-				}
-				deletedRelationshipIDs = append(deletedRelationshipIDs, relationshipID)
-			}
-			if err := deleteRows.Err(); err != nil {
-				deleteRows.Close()
-				return domain.CompanyExplorerFolderItem{}, nil, err
-			}
-			deleteRows.Close()
-		}
-	}
-	return item, deletedRelationshipIDs, nil
+	return item, nil, nil
 }
 
 func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error) {
@@ -1695,12 +1368,11 @@ func (r *PostgresRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemT
 		itemTypeParam = itemType
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`select company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp
-		 from company_explorer_folder_items
-		 where company_id=$1
-		   and ($2::uuid is null or folder_id=$2::uuid)
-		   and ($3::text is null or item_type=$3)
-		   and item_type <> 'kanban'
+		`select company_id::text, coalesce(parent_folder_id::text, '') as folder_id, target_type, target_id::text, position, created_timestamp, updated_timestamp
+		 from company_explorer_items
+		 where company_id=$1::uuid
+		   and ($2::uuid is null or parent_folder_id=$2::uuid)
+		   and ($3::text is null or target_type=$3)
 		 order by position asc, created_timestamp asc`,
 		companyID, folderParam, itemTypeParam,
 	)
@@ -1747,23 +1419,21 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerFolderItems(companyID, folderID
 		itemTypeParam = itemType
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
-		 from company_explorer_folder_items item
+		`select item.company_id::text, coalesce(item.parent_folder_id::text, '') as folder_id, item.target_type, item.target_id::text, item.position, item.created_timestamp, item.updated_timestamp
+		 from company_explorer_items item
 		 join company_explorer_folders folder
 		   on folder.company_id=item.company_id
-		  and folder.folder_id=item.folder_id
+		  and folder.folder_id=item.parent_folder_id
 		 where item.company_id=$1::uuid
-		   and ($2::uuid is null or item.folder_id=$2::uuid)
-		   and ($3::text is null or item.item_type=$3)
-		   and item.item_type <> 'kanban'
-		   and folder.folder_kind <> 'communications'
-		   and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.folder_id, $4::uuid, $5)
+		   and ($2::uuid is null or item.parent_folder_id=$2::uuid)
+		   and ($3::text is null or item.target_type=$3)
+		   and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.parent_folder_id, $4::uuid, $5)
 		   and (
-		     item.item_type not in ('node', 'logic_gate', 'project')
+		     item.target_type not in ('node', 'logic_gate', 'project')
 		     or mangorts_user_can_access_resource(
 		       item.company_id,
-		       item.item_type,
-		       item.item_id::uuid,
+		       item.target_type,
+		       item.target_id,
 		       $4::uuid,
 		       $5
 		     )
@@ -1813,20 +1483,17 @@ with recursive subtree as (
   from company_explorer_folders
   where company_id=$1
     and folder_id=$2::uuid
-    and folder_kind <> 'communications'
   union all
   select child.folder_id
   from company_explorer_folders child
   join subtree parent on child.parent_folder_id=parent.folder_id
   where child.company_id=$1
-    and child.folder_kind <> 'communications'
 )
-select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
-from company_explorer_folder_items item
-join subtree folder_scope on folder_scope.folder_id=item.folder_id
-where item.company_id=$1
-  and ($3::text is null or item.item_type=$3)
-  and item.item_type <> 'kanban'
+select item.company_id::text, coalesce(item.parent_folder_id::text, '') as folder_id, item.target_type, item.target_id::text, item.position, item.created_timestamp, item.updated_timestamp
+from company_explorer_items item
+join subtree folder_scope on folder_scope.folder_id=item.parent_folder_id
+where item.company_id=$1::uuid
+  and ($3::text is null or item.target_type=$3)
 order by item.position asc, item.created_timestamp asc`, companyID, folderID, itemTypeParam)
 	if err != nil {
 		return nil, err
@@ -1874,33 +1541,29 @@ with recursive subtree as (
   from company_explorer_folders
   where company_id=$1::uuid
     and folder_id=$2::uuid
-    and folder_kind <> 'communications'
     and mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $4::uuid, $5)
   union all
   select child.folder_id
   from company_explorer_folders child
   join subtree parent on child.parent_folder_id=parent.folder_id
   where child.company_id=$1::uuid
-    and child.folder_kind <> 'communications'
     and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $4::uuid, $5)
 )
-select item.company_id, item.folder_id, item.item_type, item.item_id, item.position, item.created_timestamp, item.updated_timestamp
-from company_explorer_folder_items item
-join subtree folder_scope on folder_scope.folder_id=item.folder_id
+select item.company_id::text, coalesce(item.parent_folder_id::text, '') as folder_id, item.target_type, item.target_id::text, item.position, item.created_timestamp, item.updated_timestamp
+from company_explorer_items item
+join subtree folder_scope on folder_scope.folder_id=item.parent_folder_id
 join company_explorer_folders folder
   on folder.company_id=item.company_id
- and folder.folder_id=item.folder_id
+ and folder.folder_id=item.parent_folder_id
 where item.company_id=$1::uuid
-  and ($3::text is null or item.item_type=$3)
-  and item.item_type <> 'kanban'
-  and folder.folder_kind <> 'communications'
-  and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.folder_id, $4::uuid, $5)
+  and ($3::text is null or item.target_type=$3)
+  and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.parent_folder_id, $4::uuid, $5)
   and (
-    item.item_type not in ('node', 'logic_gate', 'project')
+    item.target_type not in ('node', 'logic_gate', 'project')
     or mangorts_user_can_access_resource(
       item.company_id,
-      item.item_type,
-      item.item_id::uuid,
+      item.target_type,
+      item.target_id,
       $4::uuid,
       $5
     )
@@ -1986,20 +1649,18 @@ with recursive folder_scope as (
   from company_explorer_folders
   where company_id=$1
     and folder_id=$2::uuid
-    and folder_kind='node'
   union all
   select child.company_id, child.folder_id
   from company_explorer_folders child
   join folder_scope parent
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
-  where child.folder_kind='node'
 ), visible_nodes as (
-  select distinct item.item_id::uuid as node_id
-  from company_explorer_folder_items item
-  join folder_scope folder on folder.folder_id=item.folder_id
-  where item.company_id=$1
-    and item.item_type='node'
+  select distinct item.target_id as node_id
+  from company_explorer_items item
+  join folder_scope folder on folder.folder_id=item.parent_folder_id
+  where item.company_id=$1::uuid
+    and item.target_type='node'
 )
 select `+nodeSelectColumns+`
 from nodes n
@@ -2029,7 +1690,6 @@ with recursive folder_scope as (
   from company_explorer_folders
   where company_id=$1::uuid
     and folder_id=$2::uuid
-    and folder_kind='node'
     and mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $3::uuid, $4)
   union all
   select child.company_id, child.folder_id
@@ -2037,14 +1697,13 @@ with recursive folder_scope as (
   join folder_scope parent
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
-  where child.folder_kind='node'
-    and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4)
+  where mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4)
 ), folder_nodes as (
-  select distinct item.item_id::uuid as node_id
-  from company_explorer_folder_items item
-  join folder_scope folder on folder.folder_id=item.folder_id
+  select distinct item.target_id as node_id
+  from company_explorer_items item
+  join folder_scope folder on folder.folder_id=item.parent_folder_id
   where item.company_id=$1::uuid
-    and item.item_type='node'
+    and item.target_type='node'
 )
 select `+nodeSelectColumns+`
 from nodes n
@@ -2127,20 +1786,18 @@ with recursive folder_scope as (
   from company_explorer_folders
   where company_id=$1
     and folder_id=$2::uuid
-    and folder_kind='logic_gate'
   union all
   select child.company_id, child.folder_id
   from company_explorer_folders child
   join folder_scope parent
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
-  where child.folder_kind='logic_gate'
 ), visible_gates as (
-  select distinct item.item_id::uuid as logic_gate_id
-  from company_explorer_folder_items item
-  join folder_scope folder on folder.folder_id=item.folder_id
-  where item.company_id=$1
-    and item.item_type='logic_gate'
+  select distinct item.target_id as logic_gate_id
+  from company_explorer_items item
+  join folder_scope folder on folder.folder_id=item.parent_folder_id
+  where item.company_id=$1::uuid
+    and item.target_type='logic_gate'
 )
 select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
 from logic_gates gate
@@ -2173,7 +1830,6 @@ with recursive folder_scope as (
   from company_explorer_folders
   where company_id=$1::uuid
     and folder_id=$2::uuid
-    and folder_kind='logic_gate'
     and mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $3::uuid, $4)
   union all
   select child.company_id, child.folder_id
@@ -2181,14 +1837,13 @@ with recursive folder_scope as (
   join folder_scope parent
     on child.company_id=parent.company_id
    and child.parent_folder_id=parent.folder_id
-  where child.folder_kind='logic_gate'
-    and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4)
+  where mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4)
 ), folder_gates as (
-  select distinct item.item_id::uuid as logic_gate_id
-  from company_explorer_folder_items item
-  join folder_scope folder on folder.folder_id=item.folder_id
+  select distinct item.target_id as logic_gate_id
+  from company_explorer_items item
+  join folder_scope folder on folder.folder_id=item.parent_folder_id
   where item.company_id=$1::uuid
-    and item.item_type='logic_gate'
+    and item.target_type='logic_gate'
 )
 select gate.company_id, gate.logic_gate_id, gate.header, gate.created_timestamp
 from logic_gates gate
@@ -2209,8 +1864,8 @@ order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, f
 func (r *PostgresRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error {
 	ctx := context.Background()
 	deleted, err := r.db.ExecContext(ctx,
-		`delete from company_explorer_folder_items
-		 where company_id=$1 and item_type=$2 and item_id=$3`,
+		`delete from company_explorer_items
+		 where company_id=$1::uuid and target_type=$2 and target_id=$3::uuid`,
 		companyID, itemType, itemID,
 	)
 	if err != nil {

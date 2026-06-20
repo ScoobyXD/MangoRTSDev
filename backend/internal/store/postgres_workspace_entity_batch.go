@@ -35,8 +35,8 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 		input.CreatorUserID = creatorUser.UserID
 	}
 
-	syncFolderItems := MutationOriginNeedsCompanyExplorerFolderItem(input.MutationOrigin)
-	if (input.MutationOrigin == MutationOriginNodeMap || input.MutationOrigin == MutationOriginLogicGateMap) && strings.TrimSpace(input.FolderID) != "" {
+	syncFolderItems := strings.TrimSpace(input.FolderID) != "" && MutationOriginNeedsCompanyExplorerFolderItem(input.MutationOrigin)
+	if strings.TrimSpace(input.FolderID) != "" && (input.MutationOrigin == MutationOriginNodeMap || input.MutationOrigin == MutationOriginLogicGateMap) {
 		syncFolderItems = true
 	}
 	syncMapPositions := (input.EntityKind == "node" && MutationOriginNeedsNodeMapPosition(input.MutationOrigin)) ||
@@ -46,27 +46,11 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	targetFolderKind := input.EntityKind
 	if syncFolderItems {
 		stopFolderSetup := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.folder_setup")
-		if input.EntityKind == "node" {
-			activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
-			if err != nil {
-				stopFolderSetup()
-				return WorkspaceEntityBatchResult{}, err
-			}
-			targetFolderID = activeFolder.FolderID
-			targetFolderKind = activeFolder.FolderKind
-		} else if input.FolderID == "" {
-			activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveLogicGatesKey)
-			if err != nil {
-				stopFolderSetup()
-				return WorkspaceEntityBatchResult{}, err
-			}
-			targetFolderID = activeFolder.FolderID
-			targetFolderKind = activeFolder.FolderKind
-		} else if input.FolderID != "" {
+		if input.FolderID != "" {
 			if err := tx.QueryRowContext(ctx,
-				`select folder_kind
+				`select 'folder'::text
 				 from company_explorer_folders
-				 where company_id=$1 and folder_id=$2`,
+				 where company_id=$1::uuid and folder_id=$2::uuid`,
 				input.CompanyID, input.FolderID,
 			).Scan(&targetFolderKind); err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
@@ -252,11 +236,13 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 			var item domain.CompanyExplorerFolderItem
 			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.folder_item_writes")
 			if err := tx.QueryRowContext(ctx,
-				`insert into company_explorer_folder_items
-				 (company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp)
-				 values ($1, $2, $3, $4, $5, now(), now())
-				 returning company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp`,
-				input.CompanyID, targetFolderID, input.EntityKind, mapping.EntityID, itemPosition,
+				`insert into company_explorer_items
+				 (company_id, item_id, parent_folder_id, target_type, target_id, position, created_timestamp, updated_timestamp)
+				 values ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, now(), now())
+				 on conflict (company_id, target_type, target_id)
+				 do update set parent_folder_id=excluded.parent_folder_id, position=excluded.position, updated_timestamp=now()
+				 returning company_id::text, coalesce(parent_folder_id::text, '') as folder_id, target_type, target_id::text, position, created_timestamp, updated_timestamp`,
+				input.CompanyID, newUUIDv7String(), targetFolderID, input.EntityKind, mapping.EntityID, itemPosition,
 			).Scan(
 				&item.CompanyID,
 				&item.FolderID,
@@ -276,19 +262,6 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 				position += 1000
 			}
 			result.FolderItems = append(result.FolderItems, item)
-		}
-	} else if !syncFolderItems {
-		systemFolderKey := CompanyExplorerSystemActiveLogicGatesKey
-		if input.EntityKind == "node" {
-			systemFolderKey = CompanyExplorerSystemActiveNodesKey
-		}
-		for _, mapping := range result.EntityMappings {
-			result.DeferredFolderItems = append(result.DeferredFolderItems, DeferredCompanyExplorerFolderItemAssignment{
-				FolderID:        input.FolderID,
-				SystemFolderKey: systemFolderKey,
-				ItemType:        input.EntityKind,
-				ItemID:          mapping.EntityID,
-			})
 		}
 	}
 

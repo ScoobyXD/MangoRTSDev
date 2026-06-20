@@ -15,17 +15,27 @@ func (s *Server) handleCompanyExplorerRoots(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	query, ok := s.companyExplorerLazyRowsQuery(w, r)
-	if !ok {
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	rows, err := s.repo.ListCompanyExplorerRootRows(query)
+	if scope := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("scope"))); scope != "" && scope != store.CompanyExplorerLazyScopeAll {
+		writeError(w, http.StatusBadRequest, "invalid_scope")
+		return
+	}
+	query := store.CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             store.CompanyExplorerLazyScopeAll,
+		PermissionUserID: s.entityPermissionActorUserID(r, companyID),
+	}
+	rows, err := s.repo.ListCompanyExplorerV2RootRows(query)
 	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_company_explorer_scope")
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_query")
 		return
 	}
 	if err != nil {
-		log.Printf("company explorer roots: failed company_id=%s scope=%s: %v", query.CompanyID, query.Scope, err)
+		log.Printf("company explorer roots: failed company_id=%s: %v", query.CompanyID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_roots")
 		return
 	}
@@ -37,35 +47,27 @@ func (s *Server) handleCompanyExplorerChildren(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	query, ok := s.companyExplorerLazyRowsQuery(w, r)
-	if !ok {
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	parentID := strings.TrimSpace(r.URL.Query().Get("parent_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	parentType := strings.TrimSpace(r.URL.Query().Get("parent_type"))
-	parentID := strings.TrimSpace(r.URL.Query().Get("parent_id"))
-	if parentID == "" || !isValidCompanyExplorerResourceID(parentID) {
+	if parentID == "" || (parentID != companyID && !isValidCompanyExplorerResourceID(parentID)) {
 		writeError(w, http.StatusBadRequest, "invalid_parent_id")
 		return
 	}
-	query.ParentID = parentID
-
-	var rows store.CompanyExplorerLazyRows
-	var err error
-	switch parentType {
-	case "folder":
-		if !s.requireEntityView(w, r, query.CompanyID, store.EntityTypeCompanyExplorerFolder, parentID, "company_explorer_folder_not_found") {
-			return
-		}
-		rows, err = s.repo.ListCompanyExplorerFolderChildRows(query)
-	case "logic_gate":
-		if !s.requireEntityView(w, r, query.CompanyID, store.EntityTypeLogicGate, parentID, "logic_gate_not_found") {
-			return
-		}
-		rows, err = s.repo.ListCompanyExplorerLogicGateChildRows(query)
-	default:
-		writeError(w, http.StatusBadRequest, "invalid_parent_type")
+	if scope := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("scope"))); scope != "" && scope != store.CompanyExplorerLazyScopeAll {
+		writeError(w, http.StatusBadRequest, "invalid_scope")
 		return
 	}
+	query := store.CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             store.CompanyExplorerLazyScopeAll,
+		ParentEntityID:   parentID,
+		PermissionUserID: s.entityPermissionActorUserID(r, companyID),
+	}
+	rows, err := s.repo.ListCompanyExplorerV2ChildRows(query)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_company_explorer_child_query")
 		return
@@ -75,7 +77,7 @@ func (s *Server) handleCompanyExplorerChildren(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if err != nil {
-		log.Printf("company explorer children: failed company_id=%s scope=%s parent_type=%s parent_id=%s: %v", query.CompanyID, query.Scope, parentType, parentID, err)
+		log.Printf("company explorer children: failed company_id=%s parent_id=%s: %v", query.CompanyID, parentID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_children")
 		return
 	}
@@ -162,10 +164,9 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 	var req struct {
 		CompanyID      string `json:"company_id"`
 		ParentFolderID string `json:"parent_folder_id"`
-		FolderKind     string `json:"folder_kind"`
 		Name           string `json:"name"`
-		ScopeType      string `json:"scope_type"`
-		ScopeID        string `json:"scope_id"`
+		Position       int    `json:"position"`
+		DefaultAccess  string `json:"default_access"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
@@ -173,15 +174,25 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 	}
 	req.CompanyID = strings.TrimSpace(req.CompanyID)
 	req.ParentFolderID = strings.TrimSpace(req.ParentFolderID)
-	req.FolderKind = strings.TrimSpace(req.FolderKind)
 	req.Name = strings.TrimSpace(req.Name)
-	req.ScopeType = strings.TrimSpace(req.ScopeType)
-	req.ScopeID = strings.TrimSpace(req.ScopeID)
-	if req.CompanyID == "" || req.Name == "" || !isValidCompanyExplorerFolderKind(req.FolderKind) {
-		writeError(w, http.StatusBadRequest, "company_id_folder_kind_name_required")
+	if req.CompanyID == "" || req.Name == "" {
+		writeError(w, http.StatusBadRequest, "company_id_and_name_required")
 		return
 	}
-	item, err := s.repo.CreateCompanyExplorerFolder(req.CompanyID, req.ParentFolderID, req.FolderKind, req.Name)
+	parentEntityID := req.ParentFolderID
+	if parentEntityID == "" {
+		parentEntityID = req.CompanyID
+	}
+	actor, _ := authenticatedActor(r)
+	item, err := s.repo.CreateCompanyExplorerV2Folder(store.CompanyExplorerV2FolderInput{
+		CompanyID:        req.CompanyID,
+		ParentEntityID:   parentEntityID,
+		Name:             req.Name,
+		Position:         req.Position,
+		DefaultAccess:    req.DefaultAccess,
+		ActorUserID:      strings.TrimSpace(actor.User.UserID),
+		PermissionUserID: s.entityPermissionActorUserID(r, req.CompanyID),
+	})
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "parent_folder_not_found")
 		return
@@ -190,23 +201,7 @@ func (s *Server) handleCompanyExplorerFolders(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "failed_to_create_company_explorer_folder")
 		return
 	}
-	if req.ScopeType != "" || req.ScopeID != "" {
-		item, err = s.repo.SetCompanyExplorerFolderScope(req.CompanyID, item.FolderID, req.ScopeType, req.ScopeID)
-		if err != nil {
-			_ = s.repo.DeleteCompanyExplorerFolder(req.CompanyID, item.FolderID)
-			if errors.Is(err, store.ErrInvalid) {
-				writeError(w, http.StatusBadRequest, "invalid_company_explorer_folder_scope")
-				return
-			}
-			if errors.Is(err, store.ErrNotFound) {
-				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "failed_to_scope_company_explorer_folder")
-			return
-		}
-	}
-	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "folder_kind": item.FolderKind, "folder": item})
+	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.EntityID, "parent_entity_id": item.ParentEntityID, "entity": item})
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -248,8 +243,7 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		var item domain.CompanyExplorerFolder
-		var err error
+		var row store.CompanyExplorerV2Row
 		changed := false
 		if req.ParentFolderID != nil || req.Position > 0 {
 			var parentFolderID *string
@@ -257,34 +251,52 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 				parent := strings.TrimSpace(*req.ParentFolderID)
 				parentFolderID = &parent
 			}
-			item, err = s.repo.MoveCompanyExplorerFolder(req.CompanyID, folderID, parentFolderID, req.Position)
-			if errors.Is(err, store.ErrNotFound) {
+			folder, moveErr := s.repo.MoveCompanyExplorerFolder(req.CompanyID, folderID, parentFolderID, req.Position)
+			if errors.Is(moveErr, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 				return
 			}
-			if errors.Is(err, store.ErrInvalid) {
+			if errors.Is(moveErr, store.ErrInvalid) {
 				writeError(w, http.StatusBadRequest, "invalid_company_explorer_folder_move")
 				return
 			}
-			if err != nil {
+			if moveErr != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_move_company_explorer_folder")
 				return
+			}
+			row, moveErr = s.repo.GetCompanyExplorerV2Entity(req.CompanyID, folder.FolderID, s.entityPermissionActorUserID(r, req.CompanyID))
+			if moveErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_read_company_explorer_folder")
+				return
+			}
+			row.ParentEntityID = req.CompanyID
+			if folder.ParentFolderID != nil {
+				row.ParentEntityID = *folder.ParentFolderID
 			}
 			changed = true
 		}
 		if req.Name != "" {
-			item, err = s.repo.RenameCompanyExplorerFolder(req.CompanyID, folderID, req.Name)
-			if errors.Is(err, store.ErrNotFound) {
+			folder, renameErr := s.repo.RenameCompanyExplorerFolder(req.CompanyID, folderID, req.Name)
+			if errors.Is(renameErr, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 				return
 			}
-			if errors.Is(err, store.ErrInvalid) {
+			if errors.Is(renameErr, store.ErrInvalid) {
 				writeError(w, http.StatusConflict, "protected_company_explorer_folder_cannot_be_renamed")
 				return
 			}
-			if err != nil {
+			if renameErr != nil {
 				writeError(w, http.StatusInternalServerError, "failed_to_rename_company_explorer_folder")
 				return
+			}
+			row, renameErr = s.repo.GetCompanyExplorerV2Entity(req.CompanyID, folder.FolderID, s.entityPermissionActorUserID(r, req.CompanyID))
+			if renameErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_read_company_explorer_folder")
+				return
+			}
+			row.ParentEntityID = req.CompanyID
+			if folder.ParentFolderID != nil {
+				row.ParentEntityID = *folder.ParentFolderID
 			}
 			changed = true
 		}
@@ -292,8 +304,8 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, "company_explorer_folder_update_required")
 			return
 		}
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_updated", map[string]any{"folder_id": item.FolderID, "folder_kind": item.FolderKind, "folder": item})
-		writeJSON(w, http.StatusOK, item)
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_updated", map[string]any{"folder_id": row.EntityID, "parent_entity_id": row.ParentEntityID, "entity": row})
+		writeJSON(w, http.StatusOK, row)
 		return
 	}
 
@@ -303,7 +315,7 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		result, err := s.repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folderID}})
+		err := s.repo.DeleteCompanyExplorerFolder(companyID, folderID)
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 			return
@@ -314,12 +326,140 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_folder")
 			return
 		}
-		s.publishCompanyExplorerDeletedTargets(companyID, result.Targets)
+		s.publishWorkspaceEvent(companyID, "company_explorer_folder_deleted", map[string]any{"folder_id": folderID})
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
 
 	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+}
+
+func (s *Server) handleCompanyExplorerItems(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var req struct {
+		CompanyID      string `json:"company_id"`
+		ParentEntityID string `json:"parent_entity_id"`
+		ParentFolderID string `json:"parent_folder_id"`
+		TargetType     string `json:"target_type"`
+		TargetID       string `json:"target_id"`
+		Position       int    `json:"position"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	parentEntityID := strings.TrimSpace(req.ParentEntityID)
+	if parentEntityID == "" {
+		parentEntityID = strings.TrimSpace(req.ParentFolderID)
+	}
+	if parentEntityID == "" {
+		parentEntityID = req.CompanyID
+	}
+	if req.CompanyID == "" || parentEntityID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_and_parent_required")
+		return
+	}
+	actor, _ := authenticatedActor(r)
+	row, err := s.repo.UpsertCompanyExplorerV2Edge(store.CompanyExplorerV2EdgeInput{
+		CompanyID:        req.CompanyID,
+		ParentEntityID:   parentEntityID,
+		ChildEntityType:  req.TargetType,
+		ChildResourceID:  req.TargetID,
+		Position:         req.Position,
+		ActorUserID:      strings.TrimSpace(actor.User.UserID),
+		PermissionUserID: s.entityPermissionActorUserID(r, req.CompanyID),
+	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_item")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_place_company_explorer_item")
+		return
+	}
+	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_item_placed", map[string]any{"item_id": row.EdgeID, "parent_entity_id": row.ParentEntityID, "target_type": row.EntityType, "target_id": row.ResourceID, "entity": row})
+	writeJSON(w, http.StatusCreated, row)
+}
+
+func (s *Server) handleCompanyExplorerItemByID(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/company-explorer/items/"), "/")
+	itemID := strings.TrimSpace(trimmed)
+	if itemID == "" || strings.Contains(itemID, "/") {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var req struct {
+			CompanyID      string `json:"company_id"`
+			ParentEntityID string `json:"parent_entity_id"`
+			ParentFolderID string `json:"parent_folder_id"`
+			Position       int    `json:"position"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		req.CompanyID = strings.TrimSpace(req.CompanyID)
+		parentEntityID := strings.TrimSpace(req.ParentEntityID)
+		if parentEntityID == "" {
+			parentEntityID = strings.TrimSpace(req.ParentFolderID)
+		}
+		if parentEntityID == "" {
+			parentEntityID = req.CompanyID
+		}
+		actor, _ := authenticatedActor(r)
+		row, err := s.repo.MoveCompanyExplorerV2Edge(store.CompanyExplorerV2MoveEdgeInput{
+			CompanyID:        req.CompanyID,
+			EdgeID:           itemID,
+			ParentEntityID:   parentEntityID,
+			Position:         req.Position,
+			ActorUserID:      strings.TrimSpace(actor.User.UserID),
+			PermissionUserID: s.entityPermissionActorUserID(r, req.CompanyID),
+		})
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_company_explorer_item_move")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeAccessResourceNotFound(w)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_move_company_explorer_item")
+			return
+		}
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_item_placed", map[string]any{"item_id": row.EdgeID, "parent_entity_id": row.ParentEntityID, "target_type": row.EntityType, "target_id": row.ResourceID, "entity": row})
+		writeJSON(w, http.StatusOK, row)
+	case http.MethodDelete:
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if err := s.repo.DeleteCompanyExplorerV2Edge(companyID, itemID); errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_company_explorer_item")
+			return
+		} else if errors.Is(err, store.ErrNotFound) {
+			writeAccessResourceNotFound(w)
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_remove_company_explorer_item")
+			return
+		}
+		s.publishWorkspaceEvent(companyID, "company_explorer_item_removed", map[string]any{"item_id": itemID})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+	}
 }
 
 func (s *Server) handleCommunicationsSharedInboxGVIC(w http.ResponseWriter, r *http.Request, folderID string) {
@@ -762,110 +902,6 @@ func (s *Server) sendCognitoInvitation(r *http.Request, email string, existingMa
 	return firstNonBlank(result.Status, "created")
 }
 
-func (s *Server) handleCompanyExplorerDeleteBatch(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-
-	var req struct {
-		CompanyID string `json:"company_id"`
-		Targets   []struct {
-			Kind       string `json:"kind"`
-			ID         string `json:"id"`
-			FolderKind string `json:"folder_kind"`
-		} `json:"targets"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
-		return
-	}
-	req.CompanyID = strings.TrimSpace(req.CompanyID)
-	if req.CompanyID == "" || len(req.Targets) == 0 || len(req.Targets) > store.CompanyExplorerFolderItemBatchMaxItems {
-		writeError(w, http.StatusBadRequest, "company_delete_targets_required")
-		return
-	}
-
-	targets := make([]store.CompanyExplorerDeleteTargetInput, 0, len(req.Targets))
-	seen := map[string]bool{}
-	for _, target := range req.Targets {
-		item := store.CompanyExplorerDeleteTargetInput{
-			Kind:       strings.TrimSpace(target.Kind),
-			ID:         strings.TrimSpace(target.ID),
-			FolderKind: strings.TrimSpace(target.FolderKind),
-		}
-		if item.ID == "" {
-			writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
-			return
-		}
-		if item.Kind == "folder" {
-			if item.FolderKind != "" && !isValidCompanyExplorerFolderKind(item.FolderKind) {
-				writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
-				return
-			}
-		} else if item.Kind != "node" && item.Kind != "logic_gate" && item.Kind != "project" && item.Kind != "kanban" {
-			writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
-			return
-		}
-		if item.Kind == "node" || item.Kind == "logic_gate" || item.Kind == "project" {
-			if entityType, ok := companyExplorerEntityType(item.Kind); ok {
-				if !s.requireEntityView(w, r, req.CompanyID, entityType, item.ID, companyExplorerEntityNotFoundCode(item.Kind)) {
-					return
-				}
-			}
-		}
-		if item.Kind == "kanban" && store.IsLogicGateKanbanBoardID(item.ID) {
-			logicGateID := strings.TrimSpace(strings.TrimPrefix(item.ID, "logic-gate:"))
-			if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
-				return
-			}
-		}
-		key := item.Kind + ":" + item.ID
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		targets = append(targets, item)
-	}
-	if len(targets) == 0 {
-		writeError(w, http.StatusBadRequest, "company_delete_targets_required")
-		return
-	}
-	logicGateBoardIDs := map[string]bool{}
-	for _, target := range targets {
-		if target.Kind == "logic_gate" {
-			logicGateBoardIDs[store.LogicGateKanbanBoardID(target.ID)] = true
-		}
-	}
-	if len(logicGateBoardIDs) > 0 {
-		filtered := targets[:0]
-		for _, target := range targets {
-			if target.Kind == "kanban" && logicGateBoardIDs[target.ID] {
-				continue
-			}
-			filtered = append(filtered, target)
-		}
-		targets = filtered
-	}
-
-	result, err := s.repo.DeleteCompanyExplorerTargets(req.CompanyID, targets)
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "company_explorer_delete_target_not_found")
-		return
-	}
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusConflict, "company_explorer_delete_target_invalid")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_targets")
-		return
-	}
-
-	s.publishCompanyExplorerDeletedTargets(req.CompanyID, result.Targets)
-	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
-}
-
 func (s *Server) publishCompanyExplorerDeletedTargets(companyID string, targets []store.CompanyExplorerDeletedTarget) {
 	for _, target := range targets {
 		switch target.Kind {
@@ -881,237 +917,6 @@ func (s *Server) publishCompanyExplorerDeletedTargets(companyID string, targets 
 			s.publishWorkspaceEvent(companyID, "kanban_board_deleted", map[string]any{"board_id": target.ID})
 		}
 	}
-}
-
-func (s *Server) handleCompanyExplorerFolderItems(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-		folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
-		itemType := strings.TrimSpace(r.URL.Query().Get("item_type"))
-		includeDescendants := parseBoolQuery(r.URL.Query().Get("subtree")) || parseBoolQuery(r.URL.Query().Get("include_descendants"))
-		if companyID == "" {
-			writeError(w, http.StatusBadRequest, "company_id_required")
-			return
-		}
-		if folderID != "" && !isValidCompanyExplorerResourceID(folderID) {
-			writeError(w, http.StatusBadRequest, "invalid_folder_id")
-			return
-		}
-		if itemType != "" && !isValidCompanyExplorerItemType(itemType) {
-			writeError(w, http.StatusBadRequest, "invalid_item_type")
-			return
-		}
-		if includeDescendants {
-			if folderID == "" {
-				writeError(w, http.StatusBadRequest, "folder_id_required")
-				return
-			}
-			if itemType == "" {
-				writeError(w, http.StatusBadRequest, "item_type_required")
-				return
-			}
-		}
-		etag, notModified, err := s.writeWorkspaceEventNotModified(w, r, companyID, "company-explorer-folder-items", companyExplorerFolderItemsVersionQueries(itemType))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_read_workspace_version")
-			return
-		}
-		if notModified {
-			return
-		}
-
-		var items []domain.CompanyExplorerFolderItem
-		userID := s.entityPermissionActorUserID(r, companyID)
-		if includeDescendants {
-			folders, listErr := s.repo.ListCompanyExplorerFolderSubtree(companyID, folderID, itemType)
-			if listErr != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folders")
-				return
-			}
-			if len(folders) == 0 {
-				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
-				return
-			}
-			if userID != "" {
-				items, err = s.repo.ListVisibleCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType, userID)
-			} else {
-				items, err = s.repo.ListCompanyExplorerFolderItemsInFolderSubtree(companyID, folderID, itemType)
-			}
-		} else {
-			if userID != "" {
-				items, err = s.repo.ListVisibleCompanyExplorerFolderItems(companyID, folderID, itemType, userID)
-			} else {
-				items, err = s.repo.ListCompanyExplorerFolderItems(companyID, folderID, itemType)
-			}
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_list_company_explorer_folder_items")
-			return
-		}
-		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"folder_items": items}, etag)
-		return
-	}
-	if r.Method == http.MethodPost {
-		var req struct {
-			CompanyID string `json:"company_id"`
-			FolderID  string `json:"folder_id"`
-			ItemType  string `json:"item_type"`
-			ItemID    string `json:"item_id"`
-			Position  int    `json:"position"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_json")
-			return
-		}
-		req.CompanyID = strings.TrimSpace(req.CompanyID)
-		req.FolderID = strings.TrimSpace(req.FolderID)
-		req.ItemType = strings.TrimSpace(req.ItemType)
-		req.ItemID = strings.TrimSpace(req.ItemID)
-		if req.CompanyID == "" || req.FolderID == "" || req.ItemID == "" || !isValidCompanyExplorerItemType(req.ItemType) {
-			writeError(w, http.StatusBadRequest, "company_folder_item_required")
-			return
-		}
-		if entityType, ok := companyExplorerEntityType(req.ItemType); ok {
-			if !s.requireEntityView(w, r, req.CompanyID, entityType, req.ItemID, companyExplorerEntityNotFoundCode(req.ItemType)) {
-				return
-			}
-		}
-		item, deletedRelationshipIDs, err := s.repo.AssignCompanyExplorerFolderItem(req.CompanyID, req.FolderID, req.ItemType, req.ItemID, req.Position)
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "company_explorer_folder_or_item_not_found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_assign_company_explorer_folder_item")
-			return
-		}
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_id": item.FolderID, "item_type": item.ItemType, "item_id": item.ItemID, "folder_item": item})
-		for _, relationshipID := range deletedRelationshipIDs {
-			if req.ItemType == "node" {
-				s.publishWorkspaceEvent(req.CompanyID, "relationship_deleted", map[string]any{"node_relationship_id": relationshipID})
-			} else if req.ItemType == "logic_gate" {
-				s.publishWorkspaceEvent(req.CompanyID, "logic_gate_relationship_deleted", map[string]any{"logic_gate_relationship_id": relationshipID})
-			}
-		}
-		writeJSON(w, http.StatusOK, item)
-		return
-	}
-
-	if r.Method == http.MethodDelete {
-		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-		itemType := strings.TrimSpace(r.URL.Query().Get("item_type"))
-		itemID := strings.TrimSpace(r.URL.Query().Get("item_id"))
-		if companyID == "" || itemID == "" || !isValidCompanyExplorerItemType(itemType) {
-			writeError(w, http.StatusBadRequest, "company_item_required")
-			return
-		}
-		if entityType, ok := companyExplorerEntityType(itemType); ok {
-			if !s.requireEntityView(w, r, companyID, entityType, itemID, companyExplorerEntityNotFoundCode(itemType)) {
-				return
-			}
-		}
-		if err := s.repo.RemoveCompanyExplorerFolderItem(companyID, itemType, itemID); errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "company_explorer_folder_item_not_found")
-			return
-		} else if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_remove_company_explorer_folder_item")
-			return
-		}
-		s.publishWorkspaceEvent(companyID, "company_explorer_folder_item_removed", map[string]any{"item_type": itemType, "item_id": itemID})
-		writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
-		return
-	}
-
-	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-}
-
-func companyExplorerFolderItemsVersionQueries(itemType string) []store.DomainEventStreamQuery {
-	switch strings.TrimSpace(itemType) {
-	case "node":
-		return []store.DomainEventStreamQuery{
-			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("node")),
-			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("node")),
-		}
-	case "logic_gate":
-		return []store.DomainEventStreamQuery{
-			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("logic_gate")),
-			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("logic_gate")),
-		}
-	case "project":
-		return []store.DomainEventStreamQuery{
-			workspaceEventQueryPayload(companyExplorerFolderItemWorkspaceEventTypes, itemTypePayload("project")),
-			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("project")),
-		}
-	default:
-		return []store.DomainEventStreamQuery{
-			workspaceEventQuery(companyExplorerFolderItemWorkspaceEventTypes...),
-			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("node")),
-			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("logic_gate")),
-			workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("project")),
-		}
-	}
-}
-
-func (s *Server) handleCompanyExplorerFolderItemsBatch(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-
-	var req struct {
-		CompanyID   string                                           `json:"company_id"`
-		Assignments []store.CompanyExplorerFolderItemAssignmentInput `json:"assignments"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
-		return
-	}
-	req.CompanyID = strings.TrimSpace(req.CompanyID)
-	if req.CompanyID == "" || len(req.Assignments) == 0 || len(req.Assignments) > store.CompanyExplorerFolderItemBatchMaxItems {
-		writeError(w, http.StatusBadRequest, "company_assignments_required")
-		return
-	}
-	for index := range req.Assignments {
-		req.Assignments[index].FolderID = strings.TrimSpace(req.Assignments[index].FolderID)
-		req.Assignments[index].ItemType = strings.TrimSpace(req.Assignments[index].ItemType)
-		req.Assignments[index].ItemID = strings.TrimSpace(req.Assignments[index].ItemID)
-		if req.Assignments[index].FolderID == "" || req.Assignments[index].ItemID == "" || !isValidCompanyExplorerItemType(req.Assignments[index].ItemType) {
-			writeError(w, http.StatusBadRequest, "invalid_company_explorer_assignment")
-			return
-		}
-		if entityType, ok := companyExplorerEntityType(req.Assignments[index].ItemType); ok {
-			if !s.requireEntityView(w, r, req.CompanyID, entityType, req.Assignments[index].ItemID, companyExplorerEntityNotFoundCode(req.Assignments[index].ItemType)) {
-				return
-			}
-		}
-	}
-
-	items, deleted, err := s.repo.AssignCompanyExplorerFolderItems(req.CompanyID, req.Assignments)
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "company_explorer_folder_or_item_not_found")
-		return
-	}
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_company_explorer_folder_item_batch")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_assign_company_explorer_folder_items")
-		return
-	}
-	for _, item := range items {
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_item_assigned", map[string]any{"folder_id": item.FolderID, "item_type": item.ItemType, "item_id": item.ItemID, "folder_item": item})
-	}
-	for _, result := range deleted {
-		for _, relationshipID := range result.RelationshipIDs {
-			if result.ItemType == "node" {
-				s.publishWorkspaceEvent(req.CompanyID, "relationship_deleted", map[string]any{"node_relationship_id": relationshipID})
-			} else if result.ItemType == "logic_gate" {
-				s.publishWorkspaceEvent(req.CompanyID, "logic_gate_relationship_deleted", map[string]any{"logic_gate_relationship_id": relationshipID})
-			}
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"folder_items": items, "deleted_relationships": deleted})
 }
 
 func isValidCompanyExplorerFolderKind(value string) bool {

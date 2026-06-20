@@ -126,7 +126,6 @@ func (r *PostgresRepo) projectDeferredCompanyExplorerFolderItemTx(ctx context.Co
 	itemType := workspaceDerivedPayloadString(payload, "item_type")
 	itemID := workspaceDerivedPayloadString(payload, "item_id")
 	folderID := workspaceDerivedPayloadString(payload, "folder_id")
-	systemFolderKey := workspaceDerivedPayloadString(payload, "system_folder_key")
 	position := workspaceDerivedPayloadInt(payload, "position")
 	if companyID == "" || itemType == "" || itemID == "" {
 		return nil, ErrInvalid
@@ -134,23 +133,8 @@ func (r *PostgresRepo) projectDeferredCompanyExplorerFolderItemTx(ctx context.Co
 	if itemType != "node" && itemType != "logic_gate" {
 		return nil, ErrInvalid
 	}
-	if folderID == "" && systemFolderKey == "" {
-		switch itemType {
-		case "node":
-			systemFolderKey = CompanyExplorerSystemActiveNodesKey
-		case "logic_gate":
-			systemFolderKey = CompanyExplorerSystemActiveLogicGatesKey
-		default:
-			return nil, ErrInvalid
-		}
-	}
-
 	if folderID == "" {
-		folder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, companyID, systemFolderKey)
-		if err != nil {
-			return nil, err
-		}
-		folderID = folder.FolderID
+		return nil, nil
 	}
 	item, inserted, err := insertMissingCompanyExplorerFolderItemSQL(ctx, tx, companyID, folderID, itemType, itemID, position)
 	if err != nil {
@@ -162,8 +146,13 @@ func (r *PostgresRepo) projectDeferredCompanyExplorerFolderItemTx(ctx context.Co
 	if !inserted {
 		return nil, nil
 	}
-	meta := workItemAssignmentEventMetadataFromValues(workspaceDerivedEventActor(event), "")
-	eventInput := folderItemAssignedWorkspaceEventInput(item, meta)
+	eventInput := workspaceDomainEventInput(companyID, "company_explorer_item_placed", map[string]any{
+		"parent_entity_id": item.FolderID,
+		"target_type":      item.ItemType,
+		"target_id":        item.ItemID,
+		"folder_item":      item,
+	})
+	eventInput.ActorUserID = workspaceDerivedEventActor(event)
 	eventInput.IdempotencyKey = workspaceDerivedTaskIdempotencyKey(event, index, "folder-item")
 	return &eventInput, nil
 }
@@ -248,17 +237,15 @@ func workspaceDerivedTaskIdempotencyKey(event domain.DomainEvent, index int, suf
 
 func insertMissingCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, bool, error) {
 	var err error
-	var folderKind string
+	var folderExists bool
 	if err := tx.QueryRowContext(ctx,
-		`select folder_kind
-		 from company_explorer_folders
-		 where company_id=$1 and folder_id=$2`,
+		`select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid)`,
 		companyID, folderID,
-	).Scan(&folderKind); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.CompanyExplorerFolderItem{}, false, ErrNotFound
-		}
+	).Scan(&folderExists); err != nil {
 		return domain.CompanyExplorerFolderItem{}, false, err
+	}
+	if !folderExists {
+		return domain.CompanyExplorerFolderItem{}, false, ErrNotFound
 	}
 	var exists bool
 	var existsQuery string
@@ -276,7 +263,7 @@ func insertMissingCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, 
 		return domain.CompanyExplorerFolderItem{}, false, ErrNotFound
 	}
 	if position <= 0 {
-		position, err = nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, folderKind, folderID)
+		position, err = nextCompanyExplorerSQLRowPosition(ctx, tx, companyID, itemType, folderID)
 		if err != nil {
 			return domain.CompanyExplorerFolderItem{}, false, err
 		}
@@ -284,12 +271,12 @@ func insertMissingCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, 
 
 	var item domain.CompanyExplorerFolderItem
 	if err := tx.QueryRowContext(ctx,
-		`insert into company_explorer_folder_items
-		 (company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp)
-		 values ($1, $2, $3, $4, $5, now(), now())
-		 on conflict (company_id, item_type, item_id) do nothing
-		 returning company_id, folder_id, item_type, item_id, position, created_timestamp, updated_timestamp`,
-		companyID, folderID, itemType, itemID, position,
+		`insert into company_explorer_items
+		 (company_id, item_id, parent_folder_id, target_type, target_id, position, created_timestamp, updated_timestamp)
+		 values ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, now(), now())
+		 on conflict (company_id, target_type, target_id) do nothing
+		 returning company_id::text, coalesce(parent_folder_id::text, '') as folder_id, target_type, target_id::text, position, created_timestamp, updated_timestamp`,
+		companyID, newUUIDv7String(), folderID, itemType, itemID, position,
 	).Scan(
 		&item.CompanyID,
 		&item.FolderID,
