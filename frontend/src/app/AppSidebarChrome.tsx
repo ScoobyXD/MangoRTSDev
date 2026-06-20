@@ -22,13 +22,14 @@ import {
   listCommunicationsSharedInboxes,
   updateCommunicationsSharedInbox,
   type CommunicationsSharedInbox,
+  type CommunicationsTriageConversionTarget,
   type EmailProvider,
 } from "../modules/communications/communicationsApi";
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
 import { deleteNotification, deleteNotifications, EVENT_NOTIFICATIONS_UPDATED, fetchNotifications, type NotificationItem, type NotificationGVICRole, type NotificationSummary, type NotificationSurface } from "../modules/notifications/notificationsApi";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../modules/node-map/eventbus";
 import { INBOX_PRIORITIES, GVIC_INBOX_SECTIONS } from "../pages/home/homeConstants";
-import { convertMessagesToLogicGateCommand } from "../pages/home/homeCommands";
+import { convertMessagesToExplorerTargetCommand } from "../pages/home/homeCommands";
 import {
   buildSharedInboxRows,
   cleanIDList,
@@ -150,6 +151,30 @@ type SidebarNotificationMenuState = SidebarNotificationMenuFilter & {
   seenNotificationIDs: string[];
 };
 
+function sidebarExplorerTriageConversionTarget(target: Parameters<CompanyExplorerTriageMessageDropHandler>[0]): CommunicationsTriageConversionTarget | null {
+  switch (target.kind) {
+    case "folder": {
+      const folderID = target.folderID?.trim() ?? "";
+      const parentEntityID = target.parentEntityID?.trim() ?? "";
+      return folderID || parentEntityID ? { mode: "folder", folderID: folderID || undefined, parentEntityID: parentEntityID || undefined } : null;
+    }
+    case "project": {
+      const projectID = target.projectID.trim();
+      return projectID ? { mode: "project", projectID } : null;
+    }
+    case "logic_gate": {
+      const logicGateID = target.logicGateID.trim();
+      return logicGateID ? { mode: "existing_logic_gate", logicGateID } : null;
+    }
+    case "node": {
+      const nodeID = target.nodeID.trim();
+      const logicGateID = target.logicGateID?.trim() ?? "";
+      return nodeID ? { mode: "existing_node", nodeID, logicGateID: logicGateID || undefined } : null;
+    }
+    default:
+      return null;
+  }
+}
 type SidebarExplorerTriagePriorityMenuState = {
   x: number;
   y: number;
@@ -352,11 +377,15 @@ export function AppSidebar({
     setExplorerTriagePriorityMenu(null);
     setExplorerTriageBusy(true);
     try {
-      await convertMessagesToLogicGateCommand({
+      const target = sidebarExplorerTriageConversionTarget(menu.target);
+      if (!target) {
+        setSharedError("This Explorer location cannot receive email.");
+        return;
+      }
+      await convertMessagesToExplorerTargetCommand({
         apiBase: readAuthConfig().apiBase,
         companyID: cleanCompanyID,
-        logicGateID: menu.target.logicGateID,
-        nodeID: menu.target.kind === "node" ? menu.target.nodeID : undefined,
+        target,
         messageIDs: menu.messageIDs,
         priority,
       });

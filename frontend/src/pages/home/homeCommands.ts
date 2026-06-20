@@ -2,6 +2,7 @@ import {
   archiveEmailMessage as defaultArchiveEmailMessage,
   archiveEmailMessagesBatch as defaultArchiveEmailMessagesBatch,
   addMyLogicGateShortcuts as defaultAddMyLogicGateShortcuts,
+  convertTriageMessagesToExplorerTarget as defaultConvertTriageMessagesToExplorerTarget,
   convertTriageMessagesToLogicGate as defaultConvertTriageMessagesToLogicGate,
   createCommunicationsSharedInbox as defaultCreateCommunicationsSharedInbox,
   deleteCommunicationsSharedInbox as defaultDeleteCommunicationsSharedInbox,
@@ -26,6 +27,7 @@ import type {
   CommunicationsSharedInboxGVICRole,
   CommunicationsSharedInboxGVICPrincipalType,
   EmailMessage,
+  CommunicationsTriageConversionTarget,
   SendEmailInput,
   UserLogicGateShortcut,
 } from "../../modules/communications/communicationsApi.js";
@@ -77,6 +79,7 @@ export type HomeSendEmail = typeof defaultSendEmail;
 export type HomeBulkUpdateNode = typeof defaultUpdateNode;
 export type HomeAddMyLogicGateShortcuts = typeof defaultAddMyLogicGateShortcuts;
 export type HomeRemoveMyLogicGateShortcut = typeof defaultRemoveMyLogicGateShortcut;
+export type HomeConvertTriageMessagesToExplorerTarget = typeof defaultConvertTriageMessagesToExplorerTarget;
 export type HomeConvertTriageMessagesToLogicGate = typeof defaultConvertTriageMessagesToLogicGate;
 export type HomeCreateSharedInbox = typeof defaultCreateCommunicationsSharedInbox;
 export type HomeUpdateSharedInbox = typeof defaultUpdateCommunicationsSharedInbox;
@@ -100,6 +103,11 @@ export type HomeTriageConversionCommandResult = {
   result: Awaited<ReturnType<HomeConvertTriageMessagesToLogicGate>>;
   boardID: string;
   logicGateID: string;
+  convertedMessageIDs: string[];
+};
+
+export type HomeExplorerTriageConversionCommandResult = {
+  result: Awaited<ReturnType<HomeConvertTriageMessagesToExplorerTarget>>;
   convertedMessageIDs: string[];
 };
 
@@ -797,6 +805,97 @@ export async function removeMyLogicGateShortcutCommand(args: {
   return logicGateID;
 }
 
+function explorerTargetLogicGateID(target: CommunicationsTriageConversionTarget): string {
+  switch (target.mode) {
+    case "existing_logic_gate":
+      return target.logicGateID.trim();
+    case "existing_node":
+      return target.logicGateID?.trim() ?? "";
+    default:
+      return "";
+  }
+}
+
+function explorerConversionTargetIsValid(target: CommunicationsTriageConversionTarget): boolean {
+  switch (target.mode) {
+    case "existing_logic_gate":
+      return target.logicGateID.trim().length > 0;
+    case "existing_node":
+      return target.nodeID.trim().length > 0;
+    case "folder":
+      return Boolean(target.folderID?.trim() || target.parentEntityID?.trim());
+    case "project":
+      return target.projectID.trim().length > 0;
+    default:
+      return false;
+  }
+}
+
+export async function convertMessagesToExplorerTargetCommand(args: {
+  apiBase: string;
+  companyID: string;
+  target: CommunicationsTriageConversionTarget;
+  messageIDs: string[];
+  priority: number;
+  convertTriageMessagesToExplorerTarget?: HomeConvertTriageMessagesToExplorerTarget;
+  invalidateKanbanBoardList?: typeof defaultInvalidateKanbanBoardListCache;
+  invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
+  invalidateLogicGateArenaView?: typeof defaultInvalidateLogicGateArenaViewCache;
+  dispatchKanbanBoardsUpdated?: (detail: KanbanBoardsUpdatedDetail) => void;
+  dispatchKanbanBoardContentsUpdated?: (detail: KanbanBoardContentsUpdatedDetail) => void;
+  invalidateNodeRecord?: HomeNodeRecordInvalidator;
+  upsertNodeRelationshipGraphNode?: HomeNodeGraphNodeUpsert;
+  upsertNodeFolderItemInRelationshipGraph?: HomeFolderItemGraphUpsert;
+  upsertLogicGateFolderItemInRelationshipGraph?: HomeFolderItemGraphUpsert;
+  invalidateCommunications?: typeof defaultInvalidateCommunicationsCache;
+}): Promise<HomeExplorerTriageConversionCommandResult | null> {
+  const companyID = args.companyID.trim();
+  const messageIDs = cleanIDList(args.messageIDs);
+  if (!companyID || messageIDs.length === 0 || !explorerConversionTargetIsValid(args.target)) return null;
+
+  const priority = Number.isInteger(args.priority) && args.priority >= 1 && args.priority <= 5 ? args.priority : 3;
+  const convertTriageMessagesToExplorerTarget = args.convertTriageMessagesToExplorerTarget ?? defaultConvertTriageMessagesToExplorerTarget;
+  const result = await convertTriageMessagesToExplorerTarget({
+    companyID,
+    target: args.target,
+    messageIDs,
+    priority,
+  });
+
+  const targetLogicGateID = explorerTargetLogicGateID(args.target);
+  const boardID = result.board?.board_id?.trim() || (targetLogicGateID ? logicGateKanbanBoardID(targetLogicGateID) : "");
+  const boardLogicGateID = result.board?.logic_gate_id?.trim() || targetLogicGateID;
+  const invalidateKanbanBoardList = args.invalidateKanbanBoardList ?? defaultInvalidateKanbanBoardListCache;
+  const invalidateKanbanBoardContents = args.invalidateKanbanBoardContents ?? noopKanbanBoardContentsInvalidator;
+  const invalidateLogicGateArenaView = args.invalidateLogicGateArenaView ?? defaultInvalidateLogicGateArenaViewCache;
+  const emitKanbanBoardsUpdated = args.dispatchKanbanBoardsUpdated ?? dispatchKanbanBoardsUpdated;
+  const emitKanbanBoardContentsUpdated = args.dispatchKanbanBoardContentsUpdated ?? dispatchKanbanBoardContentsUpdated;
+  const invalidateNodeRecord = args.invalidateNodeRecord ?? noopNodeRecordInvalidator;
+  const upsertNodeRelationshipGraphNode = args.upsertNodeRelationshipGraphNode ?? noopNodeGraphNodeUpsert;
+  const upsertNodeFolderItemInRelationshipGraph = args.upsertNodeFolderItemInRelationshipGraph ?? noopFolderItemGraphUpsert;
+  const upsertLogicGateFolderItemInRelationshipGraph = args.upsertLogicGateFolderItemInRelationshipGraph ?? noopFolderItemGraphUpsert;
+  const invalidateCommunications = args.invalidateCommunications ?? defaultInvalidateCommunicationsCache;
+
+  if (boardID && boardLogicGateID) {
+    invalidateKanbanBoardList(args.apiBase, companyID);
+    invalidateKanbanBoardContents(args.apiBase, companyID, boardID);
+    invalidateLogicGateArenaView(args.apiBase, companyID, boardLogicGateID);
+    emitKanbanBoardsUpdated({ companyID, board: result.board });
+    emitKanbanBoardContentsUpdated({ companyID, boardID, logicGateID: boardLogicGateID });
+  }
+  for (const node of result.nodes ?? []) {
+    invalidateNodeRecord(args.apiBase, companyID, node.node_id);
+    upsertNodeRelationshipGraphNode(args.apiBase, companyID, node);
+  }
+  for (const item of result.folder_items ?? []) {
+    upsertNodeFolderItemInRelationshipGraph(args.apiBase, companyID, item);
+    upsertLogicGateFolderItemInRelationshipGraph(args.apiBase, companyID, item);
+  }
+  invalidateCommunications({ messagePages: true, messages: true });
+
+  const convertedMessageIDs = result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs;
+  return { result, convertedMessageIDs };
+}
 export async function convertMessagesToLogicGateCommand(args: {
   apiBase: string;
   companyID: string;

@@ -1257,13 +1257,19 @@ const (
 	CommunicationsEmailConversionTargetExistingLogicGate = "existing_logic_gate"
 	CommunicationsEmailConversionTargetNewLogicGate      = "new_logic_gate"
 	CommunicationsEmailConversionTargetExistingNode      = "existing_node"
+	CommunicationsEmailConversionTargetFolder            = "folder"
+	CommunicationsEmailConversionTargetProject           = "project"
 )
 
 type CommunicationsTriageConversionTarget struct {
-	Mode        string `json:"mode"`
-	LogicGateID string `json:"logic_gate_id,omitempty"`
-	NodeID      string `json:"node_id,omitempty"`
-	Header      string `json:"header,omitempty"`
+	Mode           string `json:"mode"`
+	LogicGateID    string `json:"logic_gate_id,omitempty"`
+	NodeID         string `json:"node_id,omitempty"`
+	FolderID       string `json:"folder_id,omitempty"`
+	ProjectID      string `json:"project_id,omitempty"`
+	ParentEntityID string `json:"parent_entity_id,omitempty"`
+	Header         string `json:"header,omitempty"`
+	Position       int    `json:"position,omitempty"`
 }
 
 type CommunicationsMessageReadStatusInput struct {
@@ -1290,6 +1296,7 @@ type CommunicationsTriageConversionInput struct {
 	UserID             string
 	CompanyID          string
 	ActorUserID        string
+	PermissionUserID   string
 	IdempotencyKey     string
 	MessageIDs         []string
 	Target             CommunicationsTriageConversionTarget
@@ -1303,19 +1310,21 @@ type CommunicationsTriageConversionInput struct {
 }
 
 type CommunicationsTriageConversionResult struct {
-	Target            CommunicationsTriageConversionTarget      `json:"target"`
-	LogicGate         domain.LogicGate                          `json:"logic_gate"`
-	CreatedLogicGate  bool                                      `json:"created_logic_gate,omitempty"`
-	Board             domain.KanbanBoard                        `json:"board"`
-	Cards             []domain.KanbanCard                       `json:"cards"`
-	Nodes             []domain.Node                             `json:"nodes"`
-	Assignments       []domain.NodeLogicGateAssignment          `json:"assignments,omitempty"`
-	EmailPlacements   []domain.CommunicationsEmailPlacement     `json:"email_placements,omitempty"`
-	EmailProvenance   []CommunicationsEmailConversionProvenance `json:"email_provenance,omitempty"`
-	FolderItems       []domain.CompanyExplorerFolderItem        `json:"folder_items,omitempty"`
-	DeletedMessageIDs []string                                  `json:"deleted_message_ids"`
-	Events            []domain.DomainEvent                      `json:"-"`
-	ProjectionDeltas  []ProjectionDelta                         `json:"-"`
+	Target               CommunicationsTriageConversionTarget      `json:"target"`
+	LogicGate            domain.LogicGate                          `json:"logic_gate"`
+	CreatedLogicGate     bool                                      `json:"created_logic_gate,omitempty"`
+	Board                domain.KanbanBoard                        `json:"board"`
+	Cards                []domain.KanbanCard                       `json:"cards"`
+	Nodes                []domain.Node                             `json:"nodes"`
+	Assignments          []domain.NodeLogicGateAssignment          `json:"assignments,omitempty"`
+	EmailPlacements      []domain.CommunicationsEmailPlacement     `json:"email_placements,omitempty"`
+	EmailProvenance      []CommunicationsEmailConversionProvenance `json:"email_provenance,omitempty"`
+	FolderItems          []domain.CompanyExplorerFolderItem        `json:"folder_items,omitempty"`
+	ExplorerV2Rows       []CompanyExplorerV2Row                    `json:"explorer_v2_rows,omitempty"`
+	ProjectRelationships []domain.ProjectRelationshipProjection    `json:"project_relationships,omitempty"`
+	DeletedMessageIDs    []string                                  `json:"deleted_message_ids"`
+	Events               []domain.DomainEvent                      `json:"-"`
+	ProjectionDeltas     []ProjectionDelta                         `json:"-"`
 }
 
 type CommunicationsTriageRevertInput struct {

@@ -249,6 +249,23 @@ func (r *PostgresRepo) ConvertCommunicationsTriageItems(input CommunicationsTria
 	}
 	defer tx.Rollback()
 
+	switch input.Target.Mode {
+	case CommunicationsEmailConversionTargetExistingNode:
+		if input.LogicGateID == "" {
+			result, err := r.attachCommunicationsTriageItemsToStandaloneNodeTx(ctx, tx, input)
+			if err != nil {
+				return CommunicationsTriageConversionResult{}, err
+			}
+			return r.finishCommunicationsTriageConversionTx(ctx, tx, input, result)
+		}
+	case CommunicationsEmailConversionTargetFolder, CommunicationsEmailConversionTargetProject:
+		result, err := r.convertCommunicationsTriageItemsToExplorerTargetTx(ctx, tx, input)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		return r.finishCommunicationsTriageConversionTx(ctx, tx, input, result)
+	}
+
 	var logicGate domain.LogicGate
 	createdLogicGate := false
 	switch input.Target.Mode {
@@ -487,6 +504,281 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 	return result, nil
 }
 
+func (r *PostgresRepo) finishCommunicationsTriageConversionTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, result CommunicationsTriageConversionResult) (CommunicationsTriageConversionResult, error) {
+	events, err := r.appendDomainEventsTx(ctx, tx, communicationsEmailConversionWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	result.Events = events
+	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	return result, nil
+}
+
+func (r *PostgresRepo) attachCommunicationsTriageItemsToStandaloneNodeTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
+	updateResult, err := tx.ExecContext(ctx, `
+update nodes
+set priority=$3::smallint
+where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *input.Priority)
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	if affected, err := updateResult.RowsAffected(); err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	} else if affected == 0 {
+		return CommunicationsTriageConversionResult{}, ErrNotFound
+	}
+
+	result := CommunicationsTriageConversionResult{Target: input.Target}
+	for _, messageID := range input.MessageIDs {
+		var rawMessage []byte
+		if err := tx.QueryRowContext(ctx, `
+select message
+from communications_triage_items
+where user_id=$1 and message_id=$2
+for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrNoRows) {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		} else if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+
+		var message domain.EmailMessageSnapshot
+		if err := json.Unmarshal(rawMessage, &message); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		message = normalizeEmailMessageSnapshot(message)
+		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.NodeID, message, time.Now().UTC()); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+delete from communications_triage_items
+where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		node, err := scanNode(tx.QueryRowContext(ctx, `
+select `+nodeSelectColumns+`
+from nodes n
+`+nodeStatusJoin+`
+where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		result.Nodes = append(result.Nodes, node)
+		result.EmailProvenance = append(result.EmailProvenance, CommunicationsEmailConversionProvenance{
+			CompanyID: input.CompanyID,
+			UserID:    input.UserID,
+			MessageID: messageID,
+			ThreadID:  strings.TrimSpace(message.ThreadID),
+			NodeID:    input.NodeID,
+		})
+		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
+	}
+	return result, nil
+}
+
+func (r *PostgresRepo) convertCommunicationsTriageItemsToExplorerTargetTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
+	activeNodeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
+	if err != nil {
+		return CommunicationsTriageConversionResult{}, err
+	}
+	legacyFolderID := activeNodeFolder.FolderID
+	if input.Target.Mode == CommunicationsEmailConversionTargetFolder && input.Target.ParentEntityID == "" && input.Target.FolderID != "" {
+		legacyFolderID = input.Target.FolderID
+	}
+	if input.Target.Mode == CommunicationsEmailConversionTargetProject {
+		var projectExists bool
+		if err := tx.QueryRowContext(ctx, `select exists (select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`, input.CompanyID, input.Target.ProjectID).Scan(&projectExists); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		if !projectExists {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		}
+	}
+	if input.Target.ParentEntityID != "" {
+		if err := postgresCompanyExplorerV2ParentExistsAndCanEdit(ctx, tx, input.CompanyID, input.Target.ParentEntityID, input.PermissionUserID); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+	}
+
+	result := CommunicationsTriageConversionResult{Target: input.Target}
+	for index, messageID := range input.MessageIDs {
+		var rawMessage []byte
+		if err := tx.QueryRowContext(ctx, `
+select message
+from communications_triage_items
+where user_id=$1 and message_id=$2
+for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrNoRows) {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		} else if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+
+		var message domain.EmailMessageSnapshot
+		if err := json.Unmarshal(rawMessage, &message); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		message = normalizeEmailMessageSnapshot(message)
+		nodeID := newUUIDv7String()
+		nodeTitle := emailNodeTitle(message)
+		if _, err := tx.ExecContext(ctx, `
+insert into nodes (company_id, node_id, name, priority, created_timestamp)
+values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, *input.Priority); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		folderItem, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, input.CompanyID, legacyFolderID, "node", nodeID, 0)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
+values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28), 120+float64(index*28)); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, message, time.Now().UTC()); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+delete from communications_triage_items
+where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		if input.Target.ParentEntityID != "" {
+			row, err := upsertCommunicationsExplorerV2NodeEdgeTx(ctx, tx, input, nodeID, nodeTitle)
+			if err != nil {
+				return CommunicationsTriageConversionResult{}, err
+			}
+			result.ExplorerV2Rows = append(result.ExplorerV2Rows, row)
+		}
+		if input.Target.Mode == CommunicationsEmailConversionTargetProject {
+			relationship, deltas, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
+			if err != nil {
+				return CommunicationsTriageConversionResult{}, err
+			}
+			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
+			result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
+		}
+		node, err := scanNode(tx.QueryRowContext(ctx, `
+select `+nodeSelectColumns+`
+from nodes n
+`+nodeStatusJoin+`
+where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		result.Nodes = append(result.Nodes, node)
+		result.EmailProvenance = append(result.EmailProvenance, CommunicationsEmailConversionProvenance{
+			CompanyID: input.CompanyID,
+			UserID:    input.UserID,
+			MessageID: messageID,
+			ThreadID:  strings.TrimSpace(message.ThreadID),
+			NodeID:    nodeID,
+		})
+		result.FolderItems = append(result.FolderItems, folderItem)
+		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
+	}
+	return result, nil
+}
+
+func postgresCompanyExplorerV2ParentExistsAndCanEdit(ctx context.Context, tx *sql.Tx, companyID, parentEntityID, userID string) error {
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `
+select exists (
+  select 1
+  from company_explorer_entities
+  where company_id=$1::uuid and entity_id=$2::uuid
+)`, companyID, parentEntityID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return postgresCompanyExplorerV2ParentCanEdit(ctx, tx, companyID, parentEntityID, userID)
+}
+
+func upsertCommunicationsExplorerV2NodeEdgeTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, nodeID, nodeTitle string) (CompanyExplorerV2Row, error) {
+	childEntityID := companyExplorerV2NativeEntityID(input.CompanyID, CompanyExplorerV2EntityNode, nodeID)
+	if _, err := tx.ExecContext(ctx, `
+insert into company_explorer_entities (company_id, entity_id, entity_type, resource_id, name, default_access, created_timestamp, updated_timestamp)
+values ($1::uuid, $2::uuid, 'node', $3::uuid, $4, null, now(), now())
+on conflict (company_id, entity_type, resource_id) where resource_id is not null do update set
+  name=coalesce(excluded.name, company_explorer_entities.name),
+  updated_timestamp=greatest(company_explorer_entities.updated_timestamp, excluded.updated_timestamp)`, input.CompanyID, childEntityID, nodeID, nodeTitle); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	position := input.Target.Position
+	if position <= 0 {
+		if err := tx.QueryRowContext(ctx, `select coalesce(max(position), 0) + 1000 from company_explorer_edges where company_id=$1::uuid and parent_entity_id=$2::uuid`, input.CompanyID, input.Target.ParentEntityID).Scan(&position); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
+	edgeID := companyExplorerV2EdgeID(input.CompanyID, input.Target.ParentEntityID, childEntityID)
+	if _, err := tx.ExecContext(ctx, `
+insert into company_explorer_edges (company_id, edge_id, parent_entity_id, child_entity_id, position, created_timestamp, updated_timestamp)
+values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, now(), now())
+on conflict (company_id, child_entity_id) do update set
+  edge_id=excluded.edge_id,
+  parent_entity_id=excluded.parent_entity_id,
+  position=excluded.position,
+  updated_timestamp=now()`, input.CompanyID, edgeID, input.Target.ParentEntityID, childEntityID, position); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	now := time.Now().UTC()
+	return CompanyExplorerV2Row{
+		CompanyID:        input.CompanyID,
+		EntityID:         childEntityID,
+		EntityType:       CompanyExplorerV2EntityNode,
+		ResourceID:       nodeID,
+		Name:             nodeTitle,
+		ParentEntityID:   input.Target.ParentEntityID,
+		EdgeID:           edgeID,
+		Position:         position,
+		HasChildren:      false,
+		EffectiveAccess:  EntityPermissionEdit,
+		NativeContext:    companyExplorerV2NativeContext(CompanyExplorerV2EntityNode, childEntityID, nodeID),
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}, nil
+}
+
+func upsertCommunicationsTriageProjectRelationshipTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, nodeID string) (domain.ProjectRelationshipProjection, []ProjectionDelta, error) {
+	position := input.Target.Position
+	if position <= 0 {
+		if err := tx.QueryRowContext(ctx, `select coalesce(max(position), 0) + 1000 from project_relationships where company_id=$1::uuid and project_id=$2::uuid`, input.CompanyID, input.Target.ProjectID).Scan(&position); err != nil {
+			return domain.ProjectRelationshipProjection{}, nil, err
+		}
+	}
+	relationshipID := newUUIDv7String()
+	var returnedID string
+	err := tx.QueryRowContext(ctx, `
+insert into project_relationships (
+  company_id, relationship_id, project_id, resource_type, resource_id, position, created_timestamp, updated_timestamp
+) values ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, now(), now())
+on conflict (company_id, resource_type, resource_id)
+do update set
+  project_id=excluded.project_id,
+  position=excluded.position,
+  updated_timestamp=now()
+returning relationship_id::text`, input.CompanyID, relationshipID, input.Target.ProjectID, EntityTypeNode, nodeID, position).Scan(&returnedID)
+	if err != nil {
+		return domain.ProjectRelationshipProjection{}, nil, err
+	}
+	deltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+		CompanyID:      input.CompanyID,
+		RelationshipID: returnedID,
+	})
+	if err != nil {
+		return domain.ProjectRelationshipProjection{}, nil, err
+	}
+	projection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, returnedID)
+	if err != nil {
+		return domain.ProjectRelationshipProjection{}, nil, err
+	}
+	return projection, deltas, nil
+}
 func (r *PostgresRepo) attachCommunicationsTriageItemsToExistingNodeTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, logicGate domain.LogicGate) (CommunicationsTriageConversionResult, error) {
 	assignment, err := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
 	if err != nil {

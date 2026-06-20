@@ -128,10 +128,12 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		return
 	}
 	actorUserID, idempotencyKey := workItemAssignmentRequestEventMetadata(r)
+	permissionUserID := s.entityPermissionActorUserID(r, req.CompanyID)
 	conversionInput, err := store.NormalizeCommunicationsTriageConversionInput(store.CommunicationsTriageConversionInput{
 		UserID:             connection.UserID,
 		CompanyID:          req.CompanyID,
 		ActorUserID:        actorUserID,
+		PermissionUserID:   permissionUserID,
 		IdempotencyKey:     idempotencyKey,
 		LogicGateID:        req.LogicGateID,
 		NodeID:             req.NodeID,
@@ -155,9 +157,8 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		return
 	}
 	if conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetExistingLogicGate ||
-		conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetExistingNode {
-		userID := s.entityPermissionActorUserID(r, conversionInput.CompanyID)
-		if !s.requireKanbanLogicGateEffectiveAccess(w, conversionInput.CompanyID, userID, conversionInput.LogicGateID, store.EntityPermissionEdit) {
+		(conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetExistingNode && conversionInput.LogicGateID != "") {
+		if !s.requireKanbanLogicGateEffectiveAccess(w, conversionInput.CompanyID, permissionUserID, conversionInput.LogicGateID, store.EntityPermissionEdit) {
 			return
 		}
 	}
@@ -165,7 +166,14 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		!s.requireEntityEdit(w, r, conversionInput.CompanyID, store.EntityTypeNode, conversionInput.NodeID, "node_not_found") {
 		return
 	}
-
+	if conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetProject &&
+		!s.requireEntityEdit(w, r, conversionInput.CompanyID, store.EntityTypeProject, conversionInput.Target.ProjectID, "project_not_found") {
+		return
+	}
+	if conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetFolder && conversionInput.Target.ParentEntityID == "" && conversionInput.Target.FolderID != "" &&
+		!s.requireEntityEdit(w, r, conversionInput.CompanyID, store.EntityTypeCompanyExplorerFolder, conversionInput.Target.FolderID, "company_explorer_folder_not_found") {
+		return
+	}
 	for _, messageID := range conversionInput.MessageIDs {
 		message, err := s.communicationsMessage(r.Context(), connection, messageID)
 		if err != nil {

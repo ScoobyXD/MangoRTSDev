@@ -8,6 +8,7 @@ import {
   type CompanyExplorerSystemFolderKey,
 } from "../folders/companyExplorerFolders.js";
 import { collectFolderSubtreeIDs } from "./companyExplorerDragDrop.js";
+import type { CompanyExplorerV2EntityType } from "./companyExplorerLazyApi.js";
 import {
   type ExplorerDeleteTarget,
   type ExplorerDeleteTargetWithLabel,
@@ -101,8 +102,10 @@ export type CompanyExplorerSearchSelectionRequest = {
 };
 
 export type CompanyExplorerTriageMessageDropTarget =
-  | { kind: "logic_gate"; logicGateID: string; label: string }
-  | { kind: "node"; logicGateID: string; nodeID: string; label: string };
+  | { kind: "folder"; folderID?: string; parentEntityID?: string; entityType?: CompanyExplorerV2EntityType; label: string }
+  | { kind: "project"; projectID: string; parentEntityID?: string; label: string }
+  | { kind: "logic_gate"; logicGateID: string; parentEntityID?: string; label: string }
+  | { kind: "node"; logicGateID?: string; nodeID: string; parentEntityID?: string; label: string };
 
 export type CompanyExplorerTriageMessageDropHandler = (
   target: CompanyExplorerTriageMessageDropTarget,
