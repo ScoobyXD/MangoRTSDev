@@ -27,6 +27,7 @@ func (r *MemoryRepo) CreateProject(input ProjectInput) (ProjectMutationResult, e
 		ProjectID:        input.ProjectID,
 		Name:             input.Name,
 		Status:           input.Status,
+		Health:           input.Health,
 		DefaultAccess:    ResourceDefaultAccessEdit,
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
@@ -62,6 +63,7 @@ func (r *MemoryRepo) UpdateProject(input ProjectInput) (ProjectMutationResult, e
 	}
 	project.Name = input.Name
 	project.Status = input.Status
+	project.Health = input.Health
 	if input.AccountIDsSet {
 		r.setProjectAccountAssignmentsLocked(input.CompanyID, input.ProjectID, input.AccountIDs)
 	}
@@ -208,6 +210,7 @@ func (r *MemoryRepo) GetProjectView(companyID, projectID, viewerUserID string) (
 		return projections[i].InformationID < projections[j].InformationID
 	})
 	relationships := r.projectRelationshipProjectionsForViewerLocked(companyID, projectID, viewerUserID)
+	criticalPath := r.projectCriticalPathStepsForViewerLocked(companyID, projectID, viewerUserID)
 	project = r.withProjectReadModelLocked(project)
 	view := domain.ProjectView{
 		CompanyID:         companyID,
@@ -216,9 +219,11 @@ func (r *MemoryRepo) GetProjectView(companyID, projectID, viewerUserID string) (
 		Information:       append([]domain.ProjectInformation{}, r.projectInfo[key(companyID, projectID)]...),
 		Projections:       projections,
 		Relationships:     relationships,
+		CriticalPath:      criticalPath,
 		InformationCount:  len(r.projectInfo[key(companyID, projectID)]),
 		ProjectionCount:   len(projections),
 		RelationshipCount: len(relationships),
+		CriticalPathCount: len(criticalPath),
 	}
 	if viewerUserID != "" {
 		view.CanView = true
@@ -331,6 +336,93 @@ func (r *MemoryRepo) DeleteProjectProjection(input ProjectProjectionDeleteInput)
 			}
 		}
 	}
+	return nil
+}
+
+func (r *MemoryRepo) ListProjectCriticalPathSteps(companyID, projectID, viewerUserID string) ([]domain.ProjectCriticalPathStep, error) {
+	companyID = strings.TrimSpace(companyID)
+	projectID = strings.TrimSpace(projectID)
+	viewerUserID = strings.TrimSpace(viewerUserID)
+	if companyID == "" || projectID == "" {
+		return nil, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if _, ok := r.projects[key(companyID, projectID)]; !ok {
+		return nil, ErrNotFound
+	}
+	return r.projectCriticalPathStepsForViewerLocked(companyID, projectID, viewerUserID), nil
+}
+
+func (r *MemoryRepo) UpsertProjectCriticalPathStep(input ProjectCriticalPathStepInput) (domain.ProjectCriticalPathStep, error) {
+	input, err := NormalizeProjectCriticalPathStepInput(input)
+	if err != nil {
+		return domain.ProjectCriticalPathStep{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.projects[key(input.CompanyID, input.ProjectID)]; !ok {
+		return domain.ProjectCriticalPathStep{}, ErrNotFound
+	}
+	if input.RelationshipID != "" {
+		relationship, ok := r.projectRelationships[projectRelationshipKey(input.CompanyID, input.RelationshipID)]
+		if !ok || relationship.ProjectID != input.ProjectID {
+			return domain.ProjectCriticalPathStep{}, ErrNotFound
+		}
+	}
+	if input.IsCurrent {
+		for stepKey, step := range r.projectCriticalPathSteps {
+			if step.CompanyID == input.CompanyID && step.ProjectID == input.ProjectID && step.StepID != input.StepID && step.IsCurrent {
+				step.IsCurrent = false
+				step.UpdatedTimestamp = time.Now().UTC()
+				r.projectCriticalPathSteps[stepKey] = step
+			}
+		}
+	}
+	now := time.Now().UTC()
+	stepKey := projectCriticalPathStepKey(input.CompanyID, input.ProjectID, input.StepID)
+	existing := r.projectCriticalPathSteps[stepKey]
+	created := now
+	if !existing.CreatedTimestamp.IsZero() {
+		created = existing.CreatedTimestamp
+	}
+	item := domain.ProjectCriticalPathStep{
+		CompanyID:        input.CompanyID,
+		ProjectID:        input.ProjectID,
+		StepID:           input.StepID,
+		Name:             input.Name,
+		OwnerType:        input.OwnerType,
+		Position:         input.Position,
+		IsCurrent:        input.IsCurrent,
+		CreatedTimestamp: created,
+		UpdatedTimestamp: now,
+	}
+	if input.RelationshipID != "" {
+		item.RelationshipID = stringPointer(input.RelationshipID)
+	}
+	if input.DueDate != "" {
+		item.DueDate = stringPointer(input.DueDate)
+	}
+	if input.OwnerID != "" {
+		item.OwnerID = stringPointer(input.OwnerID)
+	}
+	r.projectCriticalPathSteps[stepKey] = item
+	item = r.withProjectCriticalPathReadModelLocked(item, "")
+	return cloneProjectCriticalPathStep(item), nil
+}
+
+func (r *MemoryRepo) DeleteProjectCriticalPathStep(input ProjectCriticalPathStepDeleteInput) error {
+	input, err := NormalizeProjectCriticalPathStepDeleteInput(input)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stepKey := projectCriticalPathStepKey(input.CompanyID, input.ProjectID, input.StepID)
+	if _, ok := r.projectCriticalPathSteps[stepKey]; !ok {
+		return ErrNotFound
+	}
+	delete(r.projectCriticalPathSteps, stepKey)
 	return nil
 }
 
@@ -588,6 +680,62 @@ func (r *MemoryRepo) projectRelationshipProjectionsForViewerLocked(companyID, pr
 	return items
 }
 
+func (r *MemoryRepo) projectCriticalPathStepsForViewerLocked(companyID, projectID, viewerUserID string) []domain.ProjectCriticalPathStep {
+	items := make([]domain.ProjectCriticalPathStep, 0)
+	for _, step := range r.projectCriticalPathSteps {
+		if step.CompanyID != companyID || step.ProjectID != projectID {
+			continue
+		}
+		items = append(items, r.withProjectCriticalPathReadModelLocked(step, viewerUserID))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Position != items[j].Position {
+			return items[i].Position < items[j].Position
+		}
+		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].StepID < items[j].StepID
+	})
+	return items
+}
+
+func (r *MemoryRepo) withProjectCriticalPathReadModelLocked(step domain.ProjectCriticalPathStep, viewerUserID string) domain.ProjectCriticalPathStep {
+	step = cloneProjectCriticalPathStep(step)
+	if step.RelationshipID != nil {
+		if projection, ok := r.projectRelationshipProjection[projectRelationshipKey(step.CompanyID, *step.RelationshipID)]; ok {
+			canAttach := true
+			if viewerUserID != "" {
+				canAttach = r.userHasEffectiveAccessLocked(step.CompanyID, viewerUserID, projection.ResourceType, projection.ResourceID, EntityPermissionView)
+			}
+			if canAttach {
+				step.ResourceType = projection.ResourceType
+				step.ResourceID = projection.ResourceID
+				step.LogicGateID = cloneStringPointer(projection.LogicGateID)
+				step.NodeID = cloneStringPointer(projection.NodeID)
+				step.DisplayTitle = projection.DisplayTitle
+				step.Status = cloneStringPointer(projection.Status)
+			}
+		}
+	}
+	if step.OwnerID != nil {
+		switch step.OwnerType {
+		case "user":
+			if user, ok := r.users[*step.OwnerID]; ok {
+				step.OwnerLabel = strings.TrimSpace(user.DisplayName)
+				if step.OwnerLabel == "" {
+					step.OwnerLabel = strings.TrimSpace(user.Email)
+				}
+			}
+		case "group":
+			if group, ok := r.userGroups[userGroupKey(step.CompanyID, *step.OwnerID)]; ok {
+				step.OwnerLabel = strings.TrimSpace(group.Name)
+			}
+		}
+	}
+	return step
+}
+
 func (r *MemoryRepo) projectRelationshipProjectionRowsForRelationshipLocked(companyID, relationshipID string) []ProjectRelationshipProjectionRow {
 	relationshipKey := projectRelationshipKey(companyID, relationshipID)
 	projection, ok := r.projectRelationshipProjection[relationshipKey]
@@ -693,6 +841,10 @@ func projectRelationshipKey(companyID, relationshipID string) string {
 	return strings.TrimSpace(companyID) + ":" + strings.TrimSpace(relationshipID)
 }
 
+func projectCriticalPathStepKey(companyID, projectID, stepID string) string {
+	return strings.TrimSpace(companyID) + ":" + strings.TrimSpace(projectID) + ":" + strings.TrimSpace(stepID)
+}
+
 func (r *MemoryRepo) deleteProjectLocked(companyID, projectID string) error {
 	k := key(companyID, projectID)
 	if _, ok := r.projects[k]; !ok {
@@ -717,6 +869,11 @@ func (r *MemoryRepo) deleteProjectLocked(companyID, projectID string) error {
 		if relationship.CompanyID == companyID && relationship.ProjectID == projectID {
 			delete(r.projectRelationships, relationshipKey)
 			delete(r.projectRelationshipProjection, relationshipKey)
+		}
+	}
+	for stepKey, step := range r.projectCriticalPathSteps {
+		if step.CompanyID == companyID && step.ProjectID == projectID {
+			delete(r.projectCriticalPathSteps, stepKey)
 		}
 	}
 	delete(r.folderItems, folderItemKey(companyID, EntityTypeProject, projectID))

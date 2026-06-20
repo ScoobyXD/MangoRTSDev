@@ -12,6 +12,7 @@ type projectRequest struct {
 	CompanyID  string    `json:"company_id"`
 	Name       string    `json:"name"`
 	Status     string    `json:"status"`
+	Health     string    `json:"health"`
 	AccountIDs *[]string `json:"account_ids"`
 	TeamIDs    *[]string `json:"team_ids"`
 }
@@ -29,6 +30,18 @@ type projectRelationshipRequest struct {
 	ResourceType   string `json:"resource_type"`
 	ResourceID     string `json:"resource_id"`
 	Position       int    `json:"position"`
+}
+
+type projectCriticalPathStepRequest struct {
+	CompanyID      string `json:"company_id"`
+	StepID         string `json:"step_id"`
+	Name           string `json:"name"`
+	RelationshipID string `json:"relationship_id"`
+	DueDate        string `json:"due_date"`
+	OwnerType      string `json:"owner_type"`
+	OwnerID        string `json:"owner_id"`
+	Position       int    `json:"position"`
+	IsCurrent      bool   `json:"is_current"`
 }
 
 type projectInitialInformationRequest struct {
@@ -118,6 +131,7 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 			CompanyID:     companyID,
 			Name:          req.Name,
 			Status:        req.Status,
+			Health:        req.Health,
 			AccountIDs:    stringSliceValue(req.AccountIDs),
 			AccountIDsSet: req.AccountIDs != nil,
 			TeamIDs:       stringSliceValue(req.TeamIDs),
@@ -177,6 +191,16 @@ func (s *Server) handleProjectSubresource(w http.ResponseWriter, r *http.Request
 		}
 		if len(parts) == 3 {
 			s.handleProjectProjectionByID(w, r, projectID, parts[2])
+			return
+		}
+		writeError(w, http.StatusNotFound, "not_found")
+	case "critical-path":
+		if len(parts) == 2 {
+			s.handleProjectCriticalPath(w, r, projectID)
+			return
+		}
+		if len(parts) == 3 {
+			s.handleProjectCriticalPathStepByID(w, r, projectID, parts[2])
 			return
 		}
 		writeError(w, http.StatusNotFound, "not_found")
@@ -249,6 +273,7 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request, proje
 			ProjectID:     projectID,
 			Name:          req.Name,
 			Status:        req.Status,
+			Health:        req.Health,
 			AccountIDs:    stringSliceValue(req.AccountIDs),
 			AccountIDsSet: req.AccountIDs != nil,
 			TeamIDs:       stringSliceValue(req.TeamIDs),
@@ -359,6 +384,90 @@ func (s *Server) handleProjectProjectionByID(w http.ResponseWriter, r *http.Requ
 	}
 	s.publishWorkspaceEvent(companyID, "project_information_deleted", map[string]any{"project_id": projectID, "information_id": informationID})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleProjectCriticalPath(w http.ResponseWriter, r *http.Request, projectID string) {
+	switch r.Method {
+	case http.MethodGet:
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
+			return
+		}
+		viewerUserID := s.entityPermissionActorUserID(r, companyID)
+		steps, err := s.repo.ListProjectCriticalPathSteps(companyID, projectID, viewerUserID)
+		if err != nil {
+			s.writeProjectMutationError(w, err, "failed_to_list_project_critical_path")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"project_id": projectID, "critical_path": steps})
+	case http.MethodPost:
+		var req projectCriticalPathStepRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		companyID := strings.TrimSpace(req.CompanyID)
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
+			return
+		}
+		actor, _ := authenticatedActor(r)
+		step, err := s.repo.UpsertProjectCriticalPathStep(store.ProjectCriticalPathStepInput{
+			CompanyID:      companyID,
+			ProjectID:      projectID,
+			StepID:         req.StepID,
+			Name:           req.Name,
+			RelationshipID: req.RelationshipID,
+			DueDate:        req.DueDate,
+			OwnerType:      req.OwnerType,
+			OwnerID:        req.OwnerID,
+			Position:       req.Position,
+			IsCurrent:      req.IsCurrent,
+			ActorUserID:    actor.User.UserID,
+		})
+		if err != nil {
+			s.writeProjectMutationError(w, err, "failed_to_save_project_critical_path")
+			return
+		}
+		s.publishWorkspaceEvent(companyID, "project_updated", map[string]any{"project_id": projectID, "critical_path_step": step})
+		writeJSON(w, http.StatusOK, map[string]any{"step": step})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+	}
+}
+
+func (s *Server) handleProjectCriticalPathStepByID(w http.ResponseWriter, r *http.Request, projectID, stepID string) {
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
+		return
+	}
+	actor, _ := authenticatedActor(r)
+	if err := s.repo.DeleteProjectCriticalPathStep(store.ProjectCriticalPathStepDeleteInput{
+		CompanyID:   companyID,
+		ProjectID:   projectID,
+		StepID:      stepID,
+		ActorUserID: actor.User.UserID,
+	}); err != nil {
+		s.writeProjectMutationError(w, err, "failed_to_delete_project_critical_path")
+		return
+	}
+	s.publishWorkspaceEvent(companyID, "project_updated", map[string]any{"project_id": projectID, "deleted_critical_path_step_id": stepID})
+	writeJSON(w, http.StatusOK, map[string]string{"deleted_step_id": stepID})
 }
 
 func (s *Server) handleProjectRelationships(w http.ResponseWriter, r *http.Request, projectID string) {

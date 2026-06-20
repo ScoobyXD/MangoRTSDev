@@ -13,6 +13,7 @@ project.company_id::text,
 project.project_id::text,
 project.name,
 project.status,
+project.health,
 project.default_access,
 project.created_timestamp,
 project.updated_timestamp`
@@ -24,6 +25,7 @@ func scanProject(row interface{ Scan(dest ...any) error }) (domain.Project, erro
 		&item.ProjectID,
 		&item.Name,
 		&item.Status,
+		&item.Health,
 		&item.DefaultAccess,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
@@ -209,13 +211,13 @@ func (r *PostgresRepo) CreateProject(input ProjectInput) (ProjectMutationResult,
 	project, err := scanProject(tx.QueryRowContext(ctx, `
 with inserted as (
   insert into projects (
-    company_id, project_id, name, status, default_access, created_timestamp, updated_timestamp
-  ) values ($1::uuid, $2::uuid, $3, $4, 'edit', now(), now())
+    company_id, project_id, name, status, health, default_access, created_timestamp, updated_timestamp
+  ) values ($1::uuid, $2::uuid, $3, $4, $5, 'edit', now(), now())
   returning *
 )
 select `+projectSelectColumns+`
 from inserted project
-`, input.CompanyID, input.ProjectID, input.Name, input.Status))
+`, input.CompanyID, input.ProjectID, input.Name, input.Status, input.Health))
 	if err != nil {
 		return ProjectMutationResult{}, err
 	}
@@ -254,12 +256,13 @@ func (r *PostgresRepo) UpdateProject(input ProjectInput) (ProjectMutationResult,
 		return ProjectMutationResult{}, err
 	}
 	defer tx.Rollback()
-	args := []any{input.CompanyID, input.ProjectID, input.Name, input.Status}
+	args := []any{input.CompanyID, input.ProjectID, input.Name, input.Status, input.Health}
 	query := `
 with updated as (
   update projects
   set name=$3,
       status=$4,
+      health=$5,
       updated_timestamp=now()
   where company_id=$1::uuid
     and project_id=$2::uuid
@@ -498,6 +501,10 @@ func (r *PostgresRepo) GetProjectView(companyID, projectID, viewerUserID string)
 	if err != nil {
 		return domain.ProjectView{}, err
 	}
+	criticalPath, err := r.ListProjectCriticalPathSteps(companyID, projectID, viewerUserID)
+	if err != nil {
+		return domain.ProjectView{}, err
+	}
 	information, err := r.listProjectInformation(companyID, projectID)
 	if err != nil {
 		return domain.ProjectView{}, err
@@ -509,9 +516,11 @@ func (r *PostgresRepo) GetProjectView(companyID, projectID, viewerUserID string)
 		Information:       information,
 		Projections:       projections,
 		Relationships:     relationships,
+		CriticalPath:      criticalPath,
 		InformationCount:  len(information),
 		ProjectionCount:   len(projections),
 		RelationshipCount: len(relationships),
+		CriticalPathCount: len(criticalPath),
 	}
 	if strings.TrimSpace(viewerUserID) != "" {
 		view.CanView = true
@@ -644,6 +653,263 @@ func (r *PostgresRepo) DeleteProjectProjection(input ProjectProjectionDeleteInpu
 	}
 	return tx.Commit()
 }
+
+func scanProjectCriticalPathStep(row interface{ Scan(dest ...any) error }) (domain.ProjectCriticalPathStep, error) {
+	var item domain.ProjectCriticalPathStep
+	var relationshipID sql.NullString
+	var resourceID sql.NullString
+	var logicGateID sql.NullString
+	var nodeID sql.NullString
+	var status sql.NullString
+	var dueDate sql.NullString
+	var ownerID sql.NullString
+	err := row.Scan(
+		&item.CompanyID,
+		&item.ProjectID,
+		&item.StepID,
+		&item.Name,
+		&relationshipID,
+		&item.ResourceType,
+		&resourceID,
+		&logicGateID,
+		&nodeID,
+		&item.DisplayTitle,
+		&status,
+		&dueDate,
+		&item.OwnerType,
+		&ownerID,
+		&item.OwnerLabel,
+		&item.Position,
+		&item.IsCurrent,
+		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
+	)
+	if relationshipID.Valid && strings.TrimSpace(relationshipID.String) != "" {
+		value := relationshipID.String
+		item.RelationshipID = &value
+	}
+	if resourceID.Valid && strings.TrimSpace(resourceID.String) != "" {
+		item.ResourceID = resourceID.String
+	}
+	if logicGateID.Valid && strings.TrimSpace(logicGateID.String) != "" {
+		value := logicGateID.String
+		item.LogicGateID = &value
+	}
+	if nodeID.Valid && strings.TrimSpace(nodeID.String) != "" {
+		value := nodeID.String
+		item.NodeID = &value
+	}
+	if status.Valid {
+		value := status.String
+		item.Status = &value
+	}
+	if dueDate.Valid && strings.TrimSpace(dueDate.String) != "" {
+		value := dueDate.String
+		item.DueDate = &value
+	}
+	if ownerID.Valid && strings.TrimSpace(ownerID.String) != "" {
+		value := ownerID.String
+		item.OwnerID = &value
+	}
+	return item, err
+}
+
+func (r *PostgresRepo) ListProjectCriticalPathSteps(companyID, projectID, viewerUserID string) ([]domain.ProjectCriticalPathStep, error) {
+	companyID = cleanUUIDText(companyID)
+	projectID = cleanUUIDText(projectID)
+	viewerUserID = cleanUUIDText(viewerUserID)
+	if companyID == "" || projectID == "" {
+		return nil, ErrInvalid
+	}
+	query := projectCriticalPathSelectSQL
+	args := []any{companyID, projectID}
+	if viewerUserID != "" {
+		query = strings.Replace(query, "/* viewer_access */", `
+ and mangorts_user_can_access_resource(projection.company_id, projection.resource_type, projection.resource_id, $3::uuid, $4::text)`, 1)
+		args = append(args, viewerUserID, EntityPermissionView)
+	} else {
+		query = strings.Replace(query, "/* viewer_access */", "", 1)
+	}
+	query += `
+where step.company_id=$1::uuid
+  and step.project_id=$2::uuid
+order by step.position asc, step.created_timestamp asc, step.step_id asc`
+	rows, err := r.db.QueryContext(context.Background(), query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.ProjectCriticalPathStep, 0)
+	for rows.Next() {
+		item, err := scanProjectCriticalPathStep(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *PostgresRepo) UpsertProjectCriticalPathStep(input ProjectCriticalPathStepInput) (domain.ProjectCriticalPathStep, error) {
+	input, err := NormalizeProjectCriticalPathStepInput(input)
+	if err != nil {
+		return domain.ProjectCriticalPathStep{}, err
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.ProjectCriticalPathStep{}, err
+	}
+	defer tx.Rollback()
+	if input.RelationshipID != "" {
+		var relationshipExists bool
+		if err := tx.QueryRowContext(ctx, `
+select exists (
+  select 1
+  from project_relationships
+  where company_id=$1::uuid
+    and project_id=$2::uuid
+    and relationship_id=$3::uuid
+)`, input.CompanyID, input.ProjectID, input.RelationshipID).Scan(&relationshipExists); err != nil {
+			return domain.ProjectCriticalPathStep{}, err
+		}
+		if !relationshipExists {
+			return domain.ProjectCriticalPathStep{}, ErrNotFound
+		}
+	}
+	if input.IsCurrent {
+		if _, err := tx.ExecContext(ctx, `
+update project_critical_path_steps
+set is_current=false,
+    updated_timestamp=now()
+where company_id=$1::uuid
+  and project_id=$2::uuid
+  and step_id<>$3::uuid`, input.CompanyID, input.ProjectID, input.StepID); err != nil {
+			return domain.ProjectCriticalPathStep{}, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+insert into project_critical_path_steps (
+  company_id,
+  project_id,
+  step_id,
+  name,
+  relationship_id,
+  due_date,
+  owner_type,
+  owner_id,
+  position,
+  is_current,
+  created_timestamp,
+  updated_timestamp
+) values (
+  $1::uuid,
+  $2::uuid,
+  $3::uuid,
+  $4,
+  nullif($5, '')::uuid,
+  nullif($6, '')::date,
+  $7,
+  nullif($8, '')::uuid,
+  $9,
+  $10,
+  now(),
+  now()
+)
+on conflict (company_id, project_id, step_id)
+do update set
+  name=excluded.name,
+  relationship_id=excluded.relationship_id,
+  due_date=excluded.due_date,
+  owner_type=excluded.owner_type,
+  owner_id=excluded.owner_id,
+  position=excluded.position,
+  is_current=excluded.is_current,
+  updated_timestamp=now()`,
+		input.CompanyID,
+		input.ProjectID,
+		input.StepID,
+		input.Name,
+		input.RelationshipID,
+		input.DueDate,
+		input.OwnerType,
+		input.OwnerID,
+		input.Position,
+		input.IsCurrent,
+	); err != nil {
+		return domain.ProjectCriticalPathStep{}, err
+	}
+	item, err := scanProjectCriticalPathStep(tx.QueryRowContext(ctx, projectCriticalPathSelectSQL+`
+where step.company_id=$1::uuid
+  and step.project_id=$2::uuid
+  and step.step_id=$3::uuid`, input.CompanyID, input.ProjectID, input.StepID))
+	if err != nil {
+		return domain.ProjectCriticalPathStep{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.ProjectCriticalPathStep{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) DeleteProjectCriticalPathStep(input ProjectCriticalPathStepDeleteInput) error {
+	input, err := NormalizeProjectCriticalPathStepDeleteInput(input)
+	if err != nil {
+		return err
+	}
+	result, err := r.db.ExecContext(context.Background(), `
+delete from project_critical_path_steps
+where company_id=$1::uuid
+  and project_id=$2::uuid
+  and step_id=$3::uuid`, input.CompanyID, input.ProjectID, input.StepID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+const projectCriticalPathSelectSQL = `
+select
+  step.company_id::text,
+  step.project_id::text,
+  step.step_id::text,
+  step.name,
+  step.relationship_id::text,
+  coalesce(projection.resource_type, '') as resource_type,
+  projection.resource_id::text,
+  projection.logic_gate_id::text,
+  projection.node_id::text,
+  coalesce(projection.display_title, '') as display_title,
+  projection.status,
+  step.due_date::text,
+  step.owner_type,
+  step.owner_id::text,
+  coalesce(nullif(owner_user.display_name, ''), owner_user.email, owner_group.name, '') as owner_label,
+  step.position,
+  step.is_current,
+  step.created_timestamp,
+  step.updated_timestamp
+from project_critical_path_steps step
+left join project_relationship_projection projection
+  on projection.company_id=step.company_id
+ and projection.project_id=step.project_id
+ and projection.relationship_id=step.relationship_id
+ /* viewer_access */
+left join users owner_user
+  on step.owner_type='user'
+ and owner_user.user_id=step.owner_id
+left join company_user_groups owner_group
+  on step.owner_type='group'
+ and owner_group.company_id=step.company_id
+ and owner_group.group_id=step.owner_id
+`
 
 func (r *PostgresRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (ProjectRelationshipMutationResult, error) {
 	input, err := NormalizeProjectRelationshipInput(input)
