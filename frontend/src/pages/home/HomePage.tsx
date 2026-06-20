@@ -3768,6 +3768,7 @@ export function HomePage({
             />
           ) : isUpdatesView ? (
             <UpdatesView
+              apiBase={apiBase}
               companyID={companyID}
               currentUserID={currentUserID}
               liveRefreshToken={updatesLiveRefreshToken}

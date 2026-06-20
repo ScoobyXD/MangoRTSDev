@@ -12,9 +12,11 @@ import {
   type UpdateGroup,
 } from "../../modules/notifications/notificationsApi";
 import { formatNotificationTimestamp } from "../../modules/notifications/notificationTime";
+import { createSavedViewID, deleteSavedView as deleteSavedViewRequest, fetchSavedViews, saveSavedView, type SavedView, type SavedViewPrincipal } from "./savedViewsApi";
 import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNestedGroup } from "./universalGrouping";
 
 type UpdatesViewProps = {
+  apiBase: string;
   companyID: string;
   currentUserID: string;
   liveRefreshToken?: number;
@@ -43,6 +45,8 @@ type UpdateSavedGroupingSetting = {
   company_id: string;
   user_id: string;
   surface: "updates";
+  principal: SavedViewPrincipal;
+  principal_id: string;
   name: string;
   groupings: UpdateGroupingSetting[];
   panel_collapsed: boolean;
@@ -84,7 +88,6 @@ const UPDATE_RESOURCE_GROUPINGS: UpdateDisplayGroupingSetting[] = [
 const DEFAULT_UPDATE_GROUPINGS: UpdateGroupingSetting[] = [];
 
 const UPDATE_GROUPING_FIELD_SET = new Set<UpdateGroupingField>(UPDATE_GROUPING_FIELDS.map((field) => field.value));
-const SAVED_UPDATE_GROUPING_SETTINGS_STORAGE_PREFIX = "mangorts.updates.grouping_settings.v3";
 const NOTIFICATION_TYPE_NODE_ASSIGNED = "node.assigned";
 const NOTIFICATION_TYPE_NODE_FIELDS_CHANGED = "node.fields_changed";
 const NOTIFICATION_TYPE_NODE_COMMENT_CREATED = "node.comment_created";
@@ -92,7 +95,7 @@ const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_SAVED = "work_item.logic_gate_assi
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_MOVED = "work_item.logic_gate_assignment_moved";
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_REMOVED = "work_item.logic_gate_assignment_removed";
 
-export function UpdatesView({ companyID, currentUserID, liveRefreshToken = 0, onOpenNode, onOpenLogicGate, onOpenProject }: UpdatesViewProps) {
+export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToken = 0, onOpenNode, onOpenLogicGate, onOpenProject }: UpdatesViewProps) {
   const [rootGroups, setRootGroups] = useState<UpdateGroup[]>([]);
   const [branchByRootID, setBranchByRootID] = useState<Record<string, UpdateGroup>>({});
   const [loadingRoots, setLoadingRoots] = useState(false);
@@ -101,25 +104,38 @@ export function UpdatesView({ companyID, currentUserID, liveRefreshToken = 0, on
   const [filter, setFilter] = useState<UpdateFeedFilter>("all");
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const fallbackSetting = useMemo(() => createDefaultUpdateGroupingSetting(companyID, currentUserID), [companyID, currentUserID]);
-  const storageKey = useMemo(() => savedUpdateGroupingSettingsStorageKey(companyID, currentUserID), [companyID, currentUserID]);
-  const [settings, setSettings] = useState<UpdateSavedGroupingSetting[]>(() => readSavedUpdateGroupingSettings(storageKey, fallbackSetting));
+  const [settings, setSettings] = useState<UpdateSavedGroupingSetting[]>(() => [fallbackSetting]);
   const [selectedSettingID, setSelectedSettingID] = useState(settings[0]?.setting_id ?? "");
   const [addGroupingOpen, setAddGroupingOpen] = useState(false);
   const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
+  const [settingsError, setSettingsError] = useState("");
   const [hiddenNotificationIDs, setHiddenNotificationIDs] = useState<Set<string>>(new Set());
   const [selectedNotificationKey, setSelectedNotificationKey] = useState("");
   const [hoveredNotificationKey, setHoveredNotificationKey] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
-    const next = readSavedUpdateGroupingSettings(storageKey, fallbackSetting);
-    setSettings(next);
-    setSelectedSettingID(next[0]?.setting_id ?? "");
-  }, [fallbackSetting, storageKey]);
-
-  useEffect(() => {
-    writeSavedUpdateGroupingSettings(storageKey, settings);
-  }, [settings, storageKey]);
+    if (!apiBase || !companyID.trim()) {
+      setSettings([fallbackSetting]);
+      setSelectedSettingID(fallbackSetting.setting_id);
+      return undefined;
+    }
+    let cancelled = false;
+    setSettingsError("");
+    void fetchSavedViews({ apiBase, companyID, surface: "updates" }).then((savedViews) => {
+      if (cancelled) return;
+      const next = savedViewsToUpdateSettings(savedViews, fallbackSetting, currentUserID);
+      const settingsForState = next.length > 0 ? next : [fallbackSetting];
+      setSettings(settingsForState);
+      setSelectedSettingID(settingsForState[0]?.setting_id ?? "");
+    }).catch((nextError) => {
+      if (cancelled) return;
+      setSettings([fallbackSetting]);
+      setSelectedSettingID(fallbackSetting.setting_id);
+      setSettingsError(savedViewErrorMessage(nextError, "Failed to load saved views"));
+    });
+    return () => { cancelled = true; };
+  }, [apiBase, companyID, currentUserID, fallbackSetting]);
 
   useEffect(() => {
     if (settings.some((setting) => setting.setting_id === selectedSettingID)) return;
@@ -139,17 +155,72 @@ export function UpdatesView({ companyID, currentUserID, liveRefreshToken = 0, on
     setHoveredNotificationKey("");
   }, [filter]);
 
+  const persistSavedSetting = useCallback((setting: UpdateSavedGroupingSetting) => {
+    if (!apiBase || !companyID.trim()) return;
+    setSettingsError("");
+    void saveSavedView({
+      apiBase,
+      savedView: updateSettingToSavedViewInput(setting, companyID, currentUserID),
+    }).then((savedView) => {
+      setSettings((current) => current.map((item) => (
+        item.setting_id === setting.setting_id
+          ? savedViewToUpdateSetting(savedView, item, currentUserID)
+          : item
+      )));
+    }).catch((nextError) => {
+      setSettingsError(savedViewErrorMessage(nextError, "Failed to save view"));
+    });
+  }, [apiBase, companyID, currentUserID]);
+
   const updateSelectedSetting = useCallback((updater: (setting: UpdateSavedGroupingSetting) => UpdateSavedGroupingSetting) => {
-    setSettings((current) => current.map((setting) => {
-      if (setting.setting_id !== selectedSetting.setting_id) return setting;
-      const next = updater(setting);
-      return {
-        ...next,
-        groupings: normalizeUpdateGroupingStack(next.groupings),
-        updated_timestamp: new Date().toISOString(),
-      };
-    }));
+    const updated = updater(selectedSetting);
+    const next = {
+      ...updated,
+      groupings: normalizeUpdateGroupingStack(updated.groupings),
+      updated_timestamp: new Date().toISOString(),
+    };
+    setSettings((current) => current.map((setting) => (setting.setting_id === selectedSetting.setting_id ? next : setting)));
+    persistSavedSetting(next);
+  }, [persistSavedSetting, selectedSetting]);
+
+  const toggleSelectedSettingCollapsed = useCallback(() => {
+    setSettings((current) => current.map((setting) => (
+      setting.setting_id === selectedSetting.setting_id
+        ? { ...setting, panel_collapsed: !setting.panel_collapsed }
+        : setting
+    )));
   }, [selectedSetting.setting_id]);
+
+  const addSavedView = useCallback(() => {
+    const now = new Date().toISOString();
+    const setting: UpdateSavedGroupingSetting = {
+      ...selectedSetting,
+      setting_id: createSavedViewID(),
+      principal: "user",
+      principal_id: currentUserID,
+      name: `View ${settings.length + 1}`,
+      created_timestamp: now,
+      updated_timestamp: now,
+    };
+    setSettings((current) => [...current, setting]);
+    setSelectedSettingID(setting.setting_id);
+    persistSavedSetting(setting);
+  }, [currentUserID, persistSavedSetting, selectedSetting, settings.length]);
+
+  const deleteSavedView = useCallback((settingID: string) => {
+    const setting = settings.find((item) => item.setting_id === settingID);
+    setSettings((current) => {
+      if (current.length <= 1) return current;
+      const next = current.filter((item) => item.setting_id !== settingID);
+      if (selectedSettingID === settingID) setSelectedSettingID(next[0]?.setting_id ?? "");
+      return next;
+    });
+    if (apiBase && companyID.trim() && setting) {
+      void deleteSavedViewRequest({ apiBase, companyID, savedViewID: setting.setting_id }).catch((nextError) => {
+        setSettingsError(savedViewErrorMessage(nextError, "Failed to delete view"));
+      });
+    }
+  }, [apiBase, companyID, selectedSettingID, settings]);
 
   const updateGrouping = useCallback((index: number, grouping: UpdateGroupingSetting) => {
     updateSelectedSetting((setting) => ({
@@ -351,7 +422,7 @@ export function UpdatesView({ companyID, currentUserID, liveRefreshToken = 0, on
     if (group.resource_type === "project") onOpenProject(resourceID, group.label);
   }, [onOpenLogicGate, onOpenNode, onOpenProject]);
 
-  const meta = loadingRoots || branchLoadingIDs.size > 0 ? "Loading" : error;
+  const meta = loadingRoots || branchLoadingIDs.size > 0 ? "Loading" : error || settingsError;
 
   return (
     <section style={updatesShellStyle}>
@@ -363,10 +434,14 @@ export function UpdatesView({ companyID, currentUserID, liveRefreshToken = 0, on
         <div style={updatesHeaderControlsStyle}>
           <UpdateGroupingPanel
             setting={selectedSetting}
+            settings={settings}
             addableFields={addableFields}
             addGroupingOpen={addGroupingOpen}
             groupingFieldMenuIndex={groupingFieldMenuIndex}
-            onToggleCollapsed={() => updateSelectedSetting((setting) => ({ ...setting, panel_collapsed: !setting.panel_collapsed }))}
+            onSelectSetting={setSelectedSettingID}
+            onAddSavedView={addSavedView}
+            onDeleteSavedView={deleteSavedView}
+            onToggleCollapsed={toggleSelectedSettingCollapsed}
             onUpdateGrouping={updateGrouping}
             onRemoveGrouping={removeGrouping}
             onSetAddGroupingOpen={setAddGroupingOpen}
@@ -407,9 +482,13 @@ export function UpdatesView({ companyID, currentUserID, liveRefreshToken = 0, on
 
 function UpdateGroupingPanel({
   setting,
+  settings,
   addableFields,
   addGroupingOpen,
   groupingFieldMenuIndex,
+  onSelectSetting,
+  onAddSavedView,
+  onDeleteSavedView,
   onToggleCollapsed,
   onUpdateGrouping,
   onRemoveGrouping,
@@ -418,9 +497,13 @@ function UpdateGroupingPanel({
   onAddGrouping,
 }: {
   setting: UpdateSavedGroupingSetting;
+  settings: UpdateSavedGroupingSetting[];
   addableFields: ReadonlyArray<{ value: UpdateGroupingField; label: string }>;
   addGroupingOpen: boolean;
   groupingFieldMenuIndex: number | null;
+  onSelectSetting: (settingID: string) => void;
+  onAddSavedView: () => void;
+  onDeleteSavedView: (settingID: string) => void;
   onToggleCollapsed: () => void;
   onUpdateGrouping: (index: number, grouping: UpdateGroupingSetting) => void;
   onRemoveGrouping: (index: number) => void;
@@ -436,6 +519,19 @@ function UpdateGroupingPanel({
       </button>
       {!setting.panel_collapsed && (
         <div style={updatesGroupingBodyStyle}>
+          <div style={updatesSavedViewsStyle}>
+            <div style={updatesSavedViewsListStyle}>
+              {settings.map((item) => (
+                <div key={item.setting_id} style={updatesSavedViewRowStyle(item.setting_id === setting.setting_id)}>
+                  <button type="button" style={updatesSavedViewButtonStyle} onClick={() => onSelectSetting(item.setting_id)}>
+                    {item.name}
+                  </button>
+                  <button type="button" title="Delete view" style={updatesSavedViewDeleteStyle} disabled={settings.length <= 1} onClick={() => onDeleteSavedView(item.setting_id)}>x</button>
+                </div>
+              ))}
+            </div>
+            <button type="button" style={updatesNewViewButtonStyle} onClick={onAddSavedView}>+ New View</button>
+          </div>
           <div style={updatesGroupingStackStyle}>
             {setting.groupings.map((grouping, index) => (
               <div key={`${grouping.field}:${index}`} style={updatesGroupingRowStyle(index)}>
@@ -919,10 +1015,12 @@ function updateGVICRoleSort(role: string): number {
 function createDefaultUpdateGroupingSetting(companyID: string, currentUserID: string): UpdateSavedGroupingSetting {
   const now = new Date().toISOString();
   return {
-    setting_id: "default",
+    setting_id: createSavedViewID(),
     company_id: companyID.trim(),
     user_id: currentUserID.trim(),
     surface: "updates",
+    principal: "user",
+    principal_id: currentUserID.trim(),
     name: "Updates",
     groupings: [...DEFAULT_UPDATE_GROUPINGS],
     panel_collapsed: true,
@@ -931,51 +1029,65 @@ function createDefaultUpdateGroupingSetting(companyID: string, currentUserID: st
   };
 }
 
-function savedUpdateGroupingSettingsStorageKey(companyID: string, currentUserID: string): string {
-  return `${SAVED_UPDATE_GROUPING_SETTINGS_STORAGE_PREFIX}:${companyID.trim() || "global"}:${currentUserID.trim() || "anonymous"}`;
+function savedViewsToUpdateSettings(savedViews: SavedView[], fallback: UpdateSavedGroupingSetting, currentUserID: string): UpdateSavedGroupingSetting[] {
+  return savedViews
+    .filter((view) => view.surface === "updates")
+    .map((view) => savedViewToUpdateSetting(view, fallback, currentUserID));
 }
 
-function readSavedUpdateGroupingSettings(storageKey: string, fallback: UpdateSavedGroupingSetting): UpdateSavedGroupingSetting[] {
-  if (typeof localStorage === "undefined") return [fallback];
-  try {
-    return normalizeUpdateSavedGroupingSettings(JSON.parse(localStorage.getItem(storageKey) ?? "null"), fallback);
-  } catch {
-    return [fallback];
-  }
-}
-
-function writeSavedUpdateGroupingSettings(storageKey: string, settings: UpdateSavedGroupingSetting[]): void {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(storageKey, JSON.stringify(settings));
-}
-
-function normalizeUpdateSavedGroupingSettings(value: unknown, fallback: UpdateSavedGroupingSetting): UpdateSavedGroupingSetting[] {
-  if (!Array.isArray(value)) return [fallback];
-  const out: UpdateSavedGroupingSetting[] = [];
-  const seen = new Set<string>();
-  for (const item of value) {
-    const normalized = normalizeUpdateSavedGroupingSetting(item, fallback);
-    if (!normalized.setting_id || seen.has(normalized.setting_id)) continue;
-    seen.add(normalized.setting_id);
-    out.push(normalized);
-  }
-  return out.length > 0 ? out : [fallback];
+function savedViewToUpdateSetting(view: SavedView, fallback: UpdateSavedGroupingSetting, currentUserID: string): UpdateSavedGroupingSetting {
+  return normalizeUpdateSavedGroupingSetting({
+    setting_id: view.saved_view_id,
+    company_id: view.company_id,
+    user_id: currentUserID,
+    surface: "updates",
+    principal: view.principal,
+    principal_id: view.principal_id,
+    name: view.name,
+    groupings: view.groupings,
+    panel_collapsed: fallback.panel_collapsed,
+    created_timestamp: view.created_timestamp,
+    updated_timestamp: view.updated_timestamp,
+  }, fallback);
 }
 
 function normalizeUpdateSavedGroupingSetting(value: unknown, fallback: UpdateSavedGroupingSetting): UpdateSavedGroupingSetting {
   if (!value || typeof value !== "object") return fallback;
   const candidate = value as Partial<UpdateSavedGroupingSetting>;
+  const principal = candidate.principal === "group" ? "group" : "user";
+  const principalID = typeof candidate.principal_id === "string" && candidate.principal_id.trim()
+    ? candidate.principal_id.trim()
+    : fallback.principal_id;
   return {
     setting_id: typeof candidate.setting_id === "string" && candidate.setting_id.trim() ? candidate.setting_id.trim() : fallback.setting_id,
     company_id: fallback.company_id,
     user_id: fallback.user_id,
     surface: "updates",
+    principal,
+    principal_id: principalID,
     name: typeof candidate.name === "string" && candidate.name.trim() ? candidate.name.trim() : fallback.name,
     groupings: normalizeUpdateGroupingStack(candidate.groupings),
     panel_collapsed: candidate.panel_collapsed === true,
     created_timestamp: typeof candidate.created_timestamp === "string" && candidate.created_timestamp.trim() ? candidate.created_timestamp : fallback.created_timestamp,
     updated_timestamp: typeof candidate.updated_timestamp === "string" && candidate.updated_timestamp.trim() ? candidate.updated_timestamp : fallback.updated_timestamp,
   };
+}
+
+function updateSettingToSavedViewInput(setting: UpdateSavedGroupingSetting, companyID: string, currentUserID: string) {
+  const principal = setting.principal === "group" ? "group" as const : "user" as const;
+  return {
+    company_id: companyID,
+    saved_view_id: setting.setting_id,
+    surface: "updates" as const,
+    principal,
+    principal_id: (principal === "group" ? setting.principal_id : currentUserID).trim(),
+    name: setting.name,
+    groupings: setting.groupings,
+  };
+}
+
+function savedViewErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim() ? error.message.trim() : fallback;
 }
 
 const updatesShellStyle: React.CSSProperties = {
@@ -1037,6 +1149,82 @@ const updatesGroupingBodyStyle: React.CSSProperties = {
   borderRadius: 6,
   background: "#ffffff",
   boxShadow: "0 12px 30px rgba(15, 23, 42, 0.14)",
+};
+
+const updatesSavedViewsStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 6,
+  paddingBottom: 7,
+  borderBottom: "1px solid rgba(148, 163, 184, 0.22)",
+};
+
+const updatesSavedViewsListStyle: React.CSSProperties = {
+  minWidth: 0,
+  maxHeight: 112,
+  overflow: "auto",
+  display: "grid",
+  gap: 4,
+};
+
+function updatesSavedViewRowStyle(active: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: 28,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 24px",
+    alignItems: "center",
+    gap: 4,
+    border: `1px solid ${active ? "rgba(37, 99, 235, 0.42)" : "rgba(15, 23, 42, 0.14)"}`,
+    borderRadius: 5,
+    background: active ? "rgba(37, 99, 235, 0.08)" : "#f8fafc",
+    padding: "2px 3px 2px 7px",
+  };
+}
+
+const updatesSavedViewButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  height: 22,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  border: "none",
+  background: "transparent",
+  color: "#111827",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 800,
+  textAlign: "left",
+  cursor: "pointer",
+  padding: 0,
+};
+
+const updatesSavedViewDeleteStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  border: "none",
+  borderRadius: 4,
+  background: "transparent",
+  color: "#64748b",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  cursor: "pointer",
+  padding: 0,
+};
+
+const updatesNewViewButtonStyle: React.CSSProperties = {
+  minHeight: 28,
+  justifySelf: "start",
+  border: "1px dashed rgba(15, 23, 42, 0.24)",
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "#334155",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 800,
+  cursor: "pointer",
+  padding: "0 8px",
 };
 
 const updatesGroupingStackStyle: React.CSSProperties = {

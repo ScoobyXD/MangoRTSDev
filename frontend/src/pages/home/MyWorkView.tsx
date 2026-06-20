@@ -35,7 +35,7 @@ import {
   GVICRoleLabel,
   myWorkGroupingFieldLabel,
   normalizeMyWorkGroupingStack,
-  normalizeMyWorkSavedGroupingSettings,
+  normalizeMyWorkSavedGroupingSetting,
   priorityLabel,
   sortMyWorkRows,
   type MyWorkGroupingField,
@@ -46,6 +46,7 @@ import {
   type MyWorkScopeLevel,
   type MyWorkSelectedScope,
 } from "./myWorkGrouping";
+import { createSavedViewID, deleteSavedView as deleteSavedViewRequest, fetchSavedViews, saveSavedView, type SavedView } from "./savedViewsApi";
 
 type MyWorkViewProps = {
   apiBase: string;
@@ -80,7 +81,6 @@ type ScopePickerRow = {
   scope: MyWorkSelectedScope;
 };
 
-const SAVED_GROUPING_SETTINGS_STORAGE_PREFIX = "mangorts.saved_grouping_settings.v1";
 const MY_WORK_MATRIX_ROLES: LogicGateGVICRole[] = ["generated", "verified", "consulted", "informed"];
 const MY_WORK_MATRIX_PRIORITIES = [1, 2, 3, 4, 5, 0] as const;
 type MyWorkMatrixPriority = typeof MY_WORK_MATRIX_PRIORITIES[number];
@@ -162,9 +162,9 @@ export function MyWorkView({
   }, [currentUserID, groupByID, groupIDsByUserID]);
 
   const fallbackSetting = useMemo(() => createDefaultGroupingSetting(companyID, currentUserID), [companyID, currentUserID]);
-  const storageKey = useMemo(() => savedGroupingSettingsStorageKey(companyID, currentUserID), [companyID, currentUserID]);
-  const [settings, setSettings] = useState<MyWorkSavedGroupingSetting[]>(() => readSavedGroupingSettings(storageKey, fallbackSetting, currentUserID));
+  const [settings, setSettings] = useState<MyWorkSavedGroupingSetting[]>(() => [fallbackSetting]);
   const [selectedSettingID, setSelectedSettingID] = useState(settings[0]?.setting_id ?? "");
+  const [selectedScope, setSelectedScope] = useState<MyWorkSelectedScope>(() => defaultMyWorkSelectedScope(currentUserID));
   const [scopeMenuLevel, setScopeMenuLevel] = useState<MyWorkScopeLevel | null>(null);
   const [addGroupingOpen, setAddGroupingOpen] = useState(false);
   const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
@@ -172,17 +172,35 @@ export function MyWorkView({
   const [matrixCells, setMatrixCells] = useState<MyWorkMatrixCellWithUser[]>([]);
   const [matrixLoading, setMatrixLoading] = useState(false);
   const [matrixError, setMatrixError] = useState("");
+  const [settingsError, setSettingsError] = useState("");
   const [matrixReloadToken, setMatrixReloadToken] = useState(0);
 
   useEffect(() => {
-    const next = readSavedGroupingSettings(storageKey, fallbackSetting, currentUserID);
-    setSettings(next);
-    setSelectedSettingID(next[0]?.setting_id ?? "");
-  }, [currentUserID, fallbackSetting, storageKey]);
+    setSelectedScope(defaultMyWorkSelectedScope(currentUserID));
+  }, [currentUserID]);
 
   useEffect(() => {
-    writeSavedGroupingSettings(storageKey, settings);
-  }, [settings, storageKey]);
+    if (!apiBase || !companyID.trim()) {
+      setSettings([fallbackSetting]);
+      setSelectedSettingID(fallbackSetting.setting_id);
+      return undefined;
+    }
+    let cancelled = false;
+    setSettingsError("");
+    void fetchSavedViews({ apiBase, companyID, surface: "my_work" }).then((savedViews) => {
+      if (cancelled) return;
+      const next = savedViewsToMyWorkSettings(savedViews, fallbackSetting, currentUserID);
+      const settingsForState = next.length > 0 ? next : [fallbackSetting];
+      setSettings(settingsForState);
+      setSelectedSettingID(settingsForState[0]?.setting_id ?? "");
+    }).catch((error) => {
+      if (cancelled) return;
+      setSettings([fallbackSetting]);
+      setSelectedSettingID(fallbackSetting.setting_id);
+      setSettingsError(savedViewErrorMessage(error, "Failed to load saved views"));
+    });
+    return () => { cancelled = true; };
+  }, [apiBase, companyID, currentUserID, fallbackSetting]);
 
   useEffect(() => {
     if (settings.some((setting) => setting.setting_id === selectedSettingID)) return;
@@ -190,13 +208,13 @@ export function MyWorkView({
   }, [selectedSettingID, settings]);
 
   const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
-  const targetUserIDs = useMemo(() => userIDsForSelectedScope(selectedSetting.selected_scope, companyUsers, childGroupsByParentID, membersByGroupID), [childGroupsByParentID, companyUsers, membersByGroupID, selectedSetting.selected_scope]);
+  const targetUserIDs = useMemo(() => userIDsForSelectedScope(selectedScope, companyUsers, childGroupsByParentID, membersByGroupID), [childGroupsByParentID, companyUsers, membersByGroupID, selectedScope]);
   const matrixTargetUserIDs = useMemo(() => uniqueMyWorkTargetUserIDs(targetUserIDs), [targetUserIDs]);
   const matrixCacheKey = useMemo(() => myWorkMatrixCacheKey({
     companyID,
-    selectedScope: selectedSetting.selected_scope,
+    selectedScope,
     targetUserIDs: matrixTargetUserIDs,
-  }), [companyID, matrixTargetUserIDs, selectedSetting.selected_scope]);
+  }), [companyID, matrixTargetUserIDs, selectedScope]);
 
   useEffect(() => {
     if (!apiBase || !companyID || matrixTargetUserIDs.length === 0) {
@@ -247,16 +265,41 @@ export function MyWorkView({
     };
   }, [apiBase, companyID, matrixCacheKey, matrixTargetUserIDs]);
 
+  const persistSavedSetting = useCallback((setting: MyWorkSavedGroupingSetting) => {
+    if (!apiBase || !companyID.trim()) return;
+    setSettingsError("");
+    void saveSavedView({
+      apiBase,
+      savedView: myWorkSettingToSavedViewInput(setting, companyID, currentUserID),
+    }).then((savedView) => {
+      setSettings((current) => current.map((item) => (
+        item.setting_id === setting.setting_id
+          ? savedViewToMyWorkSetting(savedView, item, currentUserID)
+          : item
+      )));
+    }).catch((error) => {
+      setSettingsError(savedViewErrorMessage(error, "Failed to save view"));
+    });
+  }, [apiBase, companyID, currentUserID]);
+
   const updateSelectedSetting = useCallback((updater: (setting: MyWorkSavedGroupingSetting) => MyWorkSavedGroupingSetting) => {
-    setSettings((current) => current.map((setting) => {
-      if (setting.setting_id !== selectedSetting.setting_id) return setting;
-      const next = updater(setting);
-      return {
-        ...next,
-        groupings: normalizeMyWorkGroupingStack(next.groupings),
-        updated_timestamp: new Date().toISOString(),
-      };
-    }));
+    const updated = updater(selectedSetting);
+    const next = {
+      ...updated,
+      selected_scope: selectedScope,
+      groupings: normalizeMyWorkGroupingStack(updated.groupings),
+      updated_timestamp: new Date().toISOString(),
+    };
+    setSettings((current) => current.map((setting) => (setting.setting_id === selectedSetting.setting_id ? next : setting)));
+    persistSavedSetting(next);
+  }, [persistSavedSetting, selectedScope, selectedSetting]);
+
+  const toggleSelectedSettingCollapsed = useCallback(() => {
+    setSettings((current) => current.map((setting) => (
+      setting.setting_id === selectedSetting.setting_id
+        ? { ...setting, panel_collapsed: !setting.panel_collapsed }
+        : setting
+    )));
   }, [selectedSetting.setting_id]);
 
   const defaultScopeForLevel = useCallback((level: MyWorkScopeLevel): MyWorkSelectedScope => {
@@ -272,43 +315,53 @@ export function MyWorkView({
   const selectScopeLevel = useCallback((level: MyWorkScopeLevel) => {
     const nextScope = defaultScopeForLevel(level);
     if (level === "me") {
-      updateSelectedSetting((setting) => ({ ...setting, selected_scope: nextScope }));
+      setSelectedScope(nextScope);
       setScopeMenuLevel(null);
       return;
     }
-    if (selectedSetting.selected_scope.level !== level) {
-      updateSelectedSetting((setting) => ({ ...setting, selected_scope: nextScope }));
+    if (selectedScope.level !== level) {
+      setSelectedScope(nextScope);
     }
     setScopeMenuLevel((current) => (current === level ? null : level));
-  }, [defaultScopeForLevel, selectedSetting.selected_scope.level, updateSelectedSetting]);
+  }, [defaultScopeForLevel, selectedScope.level]);
 
   const selectScope = useCallback((scope: MyWorkSelectedScope) => {
-    updateSelectedSetting((setting) => ({ ...setting, selected_scope: scope }));
+    setSelectedScope(scope);
     setScopeMenuLevel(null);
-  }, [updateSelectedSetting]);
+  }, []);
 
   const addSavedView = useCallback(() => {
     const now = new Date().toISOString();
     const nextNumber = settings.length + 1;
     const setting: MyWorkSavedGroupingSetting = {
       ...selectedSetting,
-      setting_id: createLocalID(),
+      setting_id: createSavedViewID(),
+      principal: "user",
+      principal_id: currentUserID,
       name: `View ${nextNumber}`,
+      selected_scope: selectedScope,
       created_timestamp: now,
       updated_timestamp: now,
     };
     setSettings((current) => [...current, setting]);
     setSelectedSettingID(setting.setting_id);
-  }, [selectedSetting, settings.length]);
+    persistSavedSetting(setting);
+  }, [currentUserID, persistSavedSetting, selectedScope, selectedSetting, settings.length]);
 
   const deleteSavedView = useCallback((settingID: string) => {
+    const setting = settings.find((item) => item.setting_id === settingID);
     setSettings((current) => {
       if (current.length <= 1) return current;
       const next = current.filter((setting) => setting.setting_id !== settingID);
       if (selectedSettingID === settingID) setSelectedSettingID(next[0]?.setting_id ?? "");
       return next;
     });
-  }, [selectedSettingID]);
+    if (apiBase && companyID.trim() && setting) {
+      void deleteSavedViewRequest({ apiBase, companyID, savedViewID: setting.setting_id }).catch((error) => {
+        setSettingsError(savedViewErrorMessage(error, "Failed to delete view"));
+      });
+    }
+  }, [apiBase, companyID, selectedSettingID, settings]);
 
   const updateGrouping = useCallback((index: number, grouping: MyWorkGroupingSetting) => {
     updateSelectedSetting((setting) => ({
@@ -345,17 +398,17 @@ export function MyWorkView({
   const nestedGroups = useMemo(() => buildNestedGroups(visibleRows, selectedSetting.groupings), [selectedSetting.groupings, visibleRows]);
   const groupingSignature = useMemo(() => JSON.stringify({
     setting: selectedSetting.setting_id,
-    scope: selectedSetting.selected_scope,
+    scope: selectedScope,
     groupings: selectedSetting.groupings,
     rows: visibleRows.map((row) => row.rowKey ?? `${row.kind}:${row.id}`).sort(),
-  }), [selectedSetting.groupings, selectedSetting.selected_scope, selectedSetting.setting_id, visibleRows]);
+  }), [selectedScope, selectedSetting.groupings, selectedSetting.setting_id, visibleRows]);
 
   useEffect(() => {
     setExpandedGroupIDs(computeAllExpandedGroupIDs(nestedGroups));
   }, [groupingSignature, nestedGroups]);
 
   const scopeRows = useMemo(() => buildScopePickerRows({
-    level: scopeMenuLevel ?? selectedSetting.selected_scope.level,
+    level: scopeMenuLevel ?? selectedScope.level,
     currentUserID,
     companyUsers,
     companyUserGroups,
@@ -363,8 +416,8 @@ export function MyWorkView({
     membersByGroupID,
     childGroupsByParentID,
     currentUserImmediateGroupID,
-  }), [childGroupsByParentID, companyUserGroups, companyUsers, currentUserID, currentUserImmediateGroupID, groupByID, membersByGroupID, scopeMenuLevel, selectedSetting.selected_scope.level]);
-  const scopeLabel = selectedScopeLabel(selectedSetting.selected_scope, userByID, groupByID);
+  }), [childGroupsByParentID, companyUserGroups, companyUsers, currentUserID, currentUserImmediateGroupID, groupByID, membersByGroupID, scopeMenuLevel, selectedScope.level]);
+  const scopeLabel = selectedScopeLabel(selectedScope, userByID, groupByID);
   const activeFieldSet = new Set(selectedSetting.groupings.map((grouping) => grouping.field));
   const addableFields = MY_WORK_GROUPING_FIELDS.filter((field) => !activeFieldSet.has(field.value));
 
@@ -377,6 +430,7 @@ export function MyWorkView({
             {scopeLabel}
             {loading || matrixLoading ? " - Loading" : ""}
             {matrixError ? ` - ${matrixError}` : ""}
+            {settingsError ? ` - ${settingsError}` : ""}
           </div>
         </div>
         <GroupingPanel
@@ -393,7 +447,8 @@ export function MyWorkView({
           onDeleteSavedView={deleteSavedView}
           onSelectScopeLevel={selectScopeLevel}
           onSelectScope={selectScope}
-          onToggleCollapsed={() => updateSelectedSetting((setting) => ({ ...setting, panel_collapsed: !setting.panel_collapsed }))}
+          selectedScope={selectedScope}
+          onToggleCollapsed={toggleSelectedSettingCollapsed}
           onUpdateGrouping={updateGrouping}
           onRemoveGrouping={removeGrouping}
           onSetAddGroupingOpen={setAddGroupingOpen}
@@ -441,6 +496,7 @@ function GroupingPanel({
   setting,
   settings,
   scopeLabel,
+  selectedScope,
   scopeMenuLevel,
   scopeRows,
   addableFields,
@@ -461,6 +517,7 @@ function GroupingPanel({
   setting: MyWorkSavedGroupingSetting;
   settings: MyWorkSavedGroupingSetting[];
   scopeLabel: string;
+  selectedScope: MyWorkSelectedScope;
   scopeMenuLevel: MyWorkScopeLevel | null;
   scopeRows: ScopePickerRow[];
   addableFields: ReadonlyArray<{ value: MyWorkGroupingField; label: string }>;
@@ -486,7 +543,7 @@ function GroupingPanel({
             <button
               key={level}
               type="button"
-              style={scopeTabStyle(setting.selected_scope.level === level)}
+              style={scopeTabStyle(selectedScope.level === level)}
               onClick={() => onSelectScopeLevel(level)}
             >
               {level === "me" ? "Me" : level === "team" ? "Team" : "All"}
@@ -506,7 +563,7 @@ function GroupingPanel({
             <button
               key={row.key}
               type="button"
-              style={scopePickerRowStyle(row.depth, scopesEqual(row.scope, setting.selected_scope))}
+              style={scopePickerRowStyle(row.depth, scopesEqual(row.scope, selectedScope))}
               onClick={() => onSelectScope(row.scope)}
             >
               <ScopeIcon icon={row.icon} />
@@ -1371,10 +1428,12 @@ function sortCompanyUserGroups(left: CompanyUserGroup, right: CompanyUserGroup):
 function createDefaultGroupingSetting(companyID: string, currentUserID: string): MyWorkSavedGroupingSetting {
   const now = new Date().toISOString();
   return {
-    setting_id: createLocalID(),
+    setting_id: createSavedViewID(),
     company_id: companyID,
     user_id: currentUserID,
     surface: "my_work",
+    principal: "user",
+    principal_id: currentUserID,
     name: "Project",
     selected_scope: defaultMyWorkSelectedScope(currentUserID),
     groupings: [...DEFAULT_MY_WORK_GROUPINGS],
@@ -1384,26 +1443,43 @@ function createDefaultGroupingSetting(companyID: string, currentUserID: string):
   };
 }
 
-function savedGroupingSettingsStorageKey(companyID: string, userID: string): string {
-  return `${SAVED_GROUPING_SETTINGS_STORAGE_PREFIX}:${companyID.trim() || "company"}:${userID.trim() || "user"}:my_work`;
+function savedViewsToMyWorkSettings(savedViews: SavedView[], fallback: MyWorkSavedGroupingSetting, currentUserID: string): MyWorkSavedGroupingSetting[] {
+  return savedViews
+    .filter((view) => view.surface === "my_work")
+    .map((view) => savedViewToMyWorkSetting(view, fallback, currentUserID));
 }
 
-function readSavedGroupingSettings(storageKey: string, fallback: MyWorkSavedGroupingSetting, currentUserID: string): MyWorkSavedGroupingSetting[] {
-  if (typeof localStorage === "undefined") return [fallback];
-  try {
-    return normalizeMyWorkSavedGroupingSettings(JSON.parse(localStorage.getItem(storageKey) ?? "null"), fallback, currentUserID);
-  } catch {
-    return [fallback];
-  }
+function savedViewToMyWorkSetting(view: SavedView, fallback: MyWorkSavedGroupingSetting, currentUserID: string): MyWorkSavedGroupingSetting {
+  return normalizeMyWorkSavedGroupingSetting({
+    setting_id: view.saved_view_id,
+    company_id: view.company_id,
+    user_id: currentUserID,
+    surface: "my_work",
+    principal: view.principal,
+    principal_id: view.principal_id,
+    name: view.name,
+    selected_scope: fallback.selected_scope,
+    groupings: view.groupings,
+    panel_collapsed: fallback.panel_collapsed,
+    created_timestamp: view.created_timestamp,
+    updated_timestamp: view.updated_timestamp,
+  }, fallback, currentUserID);
 }
 
-function writeSavedGroupingSettings(storageKey: string, settings: MyWorkSavedGroupingSetting[]): void {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(storageKey, JSON.stringify(settings));
+function myWorkSettingToSavedViewInput(setting: MyWorkSavedGroupingSetting, companyID: string, currentUserID: string) {
+  return {
+    company_id: companyID,
+    saved_view_id: setting.setting_id,
+    surface: "my_work" as const,
+    principal: setting.principal === "group" ? "group" as const : "user" as const,
+    principal_id: (setting.principal === "group" ? setting.principal_id : currentUserID).trim(),
+    name: setting.name,
+    groupings: setting.groupings,
+  };
 }
 
-function createLocalID(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `setting-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+function savedViewErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim() ? error.message.trim() : fallback;
 }
 
 function scopesEqual(left: MyWorkSelectedScope, right: MyWorkSelectedScope): boolean {
