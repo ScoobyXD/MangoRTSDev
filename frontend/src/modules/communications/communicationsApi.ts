@@ -1,8 +1,10 @@
 import { apiFetchJSON, getApiAccessToken, getAuthSessionCacheGeneration, readAuthConfig } from "../../auth/cognitoAuth.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
+import type { CompanyExplorerV2Row } from "../company-explorer/companyExplorerLazyApi.js";
 import { logicGateKanbanBoardID, type KanbanBoard, type KanbanCard } from "../kanban/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
 import type { LogicGateGVICAssignment, LogicGateGVICRole, LogicGateGVICPrincipalType, LogicGateRecord } from "../logic-gate-map/shared.js";
+import type { ProjectRelationshipProjection } from "../project-management/projectManagementApi.js";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache.js";
 
 export type EmailProvider = "google" | "microsoft";
@@ -880,43 +882,82 @@ export async function fetchCommunicationsWorkspacePanel(companyID: string): Prom
   };
 }
 
-export async function convertTriageMessagesToLogicGate(input: {
-  companyID: string;
-  logicGateID: string;
-  nodeID?: string;
-  messageIDs: string[];
-  priority: number;
-}): Promise<{
-  board: KanbanBoard;
-  cards: KanbanCard[];
+export type CommunicationsTriageConversionTarget =
+  | { mode: "existing_logic_gate"; logicGateID: string }
+  | { mode: "existing_node"; nodeID: string; logicGateID?: string }
+  | { mode: "folder"; folderID?: string; parentEntityID?: string; position?: number }
+  | { mode: "project"; projectID: string; position?: number };
+
+export type CommunicationsTriageConversionResult = {
+  board?: KanbanBoard;
+  cards?: KanbanCard[];
   nodes: NodeRecord[];
   folder_items?: CompanyExplorerFolderItem[];
+  explorer_v2_rows?: CompanyExplorerV2Row[];
+  project_relationships?: ProjectRelationshipProjection[];
   deleted_message_ids: string[];
-}> {
-  const cleanNodeID = input.nodeID?.trim() ?? "";
-  const result = await apiFetchJSON<{
-    board: KanbanBoard;
-    cards: KanbanCard[];
-    nodes: NodeRecord[];
-    folder_items?: CompanyExplorerFolderItem[];
-    deleted_message_ids: string[];
-  }>("/v1/communications/triage/convert", {
+};
+
+function communicationsTriageConversionTargetPayload(target: CommunicationsTriageConversionTarget): Record<string, unknown> {
+  switch (target.mode) {
+    case "existing_logic_gate":
+      return { mode: "existing_logic_gate", logic_gate_id: target.logicGateID };
+    case "existing_node":
+      return { mode: "existing_node", node_id: target.nodeID, logic_gate_id: target.logicGateID || undefined };
+    case "folder":
+      return {
+        mode: "folder",
+        folder_id: target.folderID || undefined,
+        parent_entity_id: target.parentEntityID || undefined,
+        position: target.position,
+      };
+    case "project":
+      return { mode: "project", project_id: target.projectID, position: target.position };
+    default:
+      return { mode: "invalid" };
+  }
+}
+
+export async function convertTriageMessagesToExplorerTarget(input: {
+  companyID: string;
+  target: CommunicationsTriageConversionTarget;
+  messageIDs: string[];
+  priority: number;
+}): Promise<CommunicationsTriageConversionResult> {
+  const result = await apiFetchJSON<CommunicationsTriageConversionResult>("/v1/communications/triage/convert", {
     method: "POST",
     body: JSON.stringify({
       company_id: input.companyID,
-      logic_gate_id: input.logicGateID,
-      node_id: cleanNodeID || undefined,
-      target: cleanNodeID
-        ? { mode: "existing_node", logic_gate_id: input.logicGateID, node_id: cleanNodeID }
-        : { mode: "existing_logic_gate", logic_gate_id: input.logicGateID },
+      target: communicationsTriageConversionTargetPayload(input.target),
       message_ids: cleanIDs(input.messageIDs),
       priority: input.priority,
     }),
   });
   invalidateWorkspacePanelCache(input.companyID);
   markNodeWorkspaceSnapshotScopesStale(input.companyID);
-  markKanbanWorkspaceSnapshotScopeStale(input.companyID, logicGateKanbanBoardID(input.logicGateID));
+  const logicGateID = input.target.mode === "existing_logic_gate" || input.target.mode === "existing_node"
+    ? input.target.logicGateID?.trim() ?? ""
+    : "";
+  if (logicGateID) markKanbanWorkspaceSnapshotScopeStale(input.companyID, logicGateKanbanBoardID(logicGateID));
   return result;
+}
+
+export async function convertTriageMessagesToLogicGate(input: {
+  companyID: string;
+  logicGateID: string;
+  nodeID?: string;
+  messageIDs: string[];
+  priority: number;
+}): Promise<CommunicationsTriageConversionResult> {
+  const cleanNodeID = input.nodeID?.trim() ?? "";
+  return convertTriageMessagesToExplorerTarget({
+    companyID: input.companyID,
+    target: cleanNodeID
+      ? { mode: "existing_node", logicGateID: input.logicGateID, nodeID: cleanNodeID }
+      : { mode: "existing_logic_gate", logicGateID: input.logicGateID },
+    messageIDs: input.messageIDs,
+    priority: input.priority,
+  });
 }
 
 export async function revertKanbanCardToMyTriage(input: {

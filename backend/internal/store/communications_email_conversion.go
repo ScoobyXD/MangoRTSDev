@@ -12,6 +12,7 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 	input.UserID = strings.TrimSpace(input.UserID)
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
 	input.NodeID = strings.TrimSpace(input.NodeID)
@@ -22,6 +23,9 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 	input.Target.Mode = normalizeCommunicationsEmailConversionTargetMode(input.Target.Mode)
 	input.Target.LogicGateID = strings.TrimSpace(input.Target.LogicGateID)
 	input.Target.NodeID = strings.TrimSpace(input.Target.NodeID)
+	input.Target.FolderID = strings.TrimSpace(input.Target.FolderID)
+	input.Target.ProjectID = strings.TrimSpace(input.Target.ProjectID)
+	input.Target.ParentEntityID = strings.TrimSpace(input.Target.ParentEntityID)
 	input.Target.Header = strings.TrimSpace(input.Target.Header)
 
 	if input.Target.LogicGateID == "" {
@@ -41,6 +45,10 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 			input.Target.Mode = CommunicationsEmailConversionTargetExistingLogicGate
 		case input.Target.Header != "":
 			input.Target.Mode = CommunicationsEmailConversionTargetNewLogicGate
+		case input.Target.ProjectID != "":
+			input.Target.Mode = CommunicationsEmailConversionTargetProject
+		case input.Target.FolderID != "" || input.Target.ParentEntityID != "":
+			input.Target.Mode = CommunicationsEmailConversionTargetFolder
 		}
 	}
 
@@ -70,13 +78,19 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 		input.LogicGateID = input.Target.LogicGateID
 		input.NodeID = ""
 		input.NewLogicGateHeader = ""
+		input.Target.FolderID = ""
+		input.Target.ProjectID = ""
+		input.Target.ParentEntityID = ""
 	case CommunicationsEmailConversionTargetExistingNode:
-		if input.Target.NodeID == "" || input.Target.LogicGateID == "" {
+		if input.Target.NodeID == "" {
 			return CommunicationsTriageConversionInput{}, ErrInvalid
 		}
 		input.LogicGateID = input.Target.LogicGateID
 		input.NodeID = input.Target.NodeID
 		input.NewLogicGateHeader = ""
+		input.Target.FolderID = ""
+		input.Target.ProjectID = ""
+		input.Target.ParentEntityID = ""
 	case CommunicationsEmailConversionTargetNewLogicGate:
 		if input.Target.Header == "" {
 			return CommunicationsTriageConversionInput{}, ErrInvalid
@@ -84,6 +98,32 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 		input.LogicGateID = ""
 		input.NodeID = ""
 		input.NewLogicGateHeader = input.Target.Header
+		input.Target.FolderID = ""
+		input.Target.ProjectID = ""
+		input.Target.ParentEntityID = ""
+	case CommunicationsEmailConversionTargetFolder:
+		if input.Target.FolderID == "" && input.Target.ParentEntityID == "" {
+			return CommunicationsTriageConversionInput{}, ErrInvalid
+		}
+		input.LogicGateID = ""
+		input.NodeID = ""
+		input.NewLogicGateHeader = ""
+		input.Target.LogicGateID = ""
+		input.Target.NodeID = ""
+		input.Target.Header = ""
+		input.Target.ProjectID = ""
+	case CommunicationsEmailConversionTargetProject:
+		if input.Target.ProjectID == "" {
+			return CommunicationsTriageConversionInput{}, ErrInvalid
+		}
+		input.LogicGateID = ""
+		input.NodeID = ""
+		input.NewLogicGateHeader = ""
+		input.Target.LogicGateID = ""
+		input.Target.NodeID = ""
+		input.Target.Header = ""
+		input.Target.FolderID = ""
+		input.Target.ParentEntityID = ""
 	default:
 		return CommunicationsTriageConversionInput{}, ErrInvalid
 	}
@@ -101,6 +141,10 @@ func normalizeCommunicationsEmailConversionTargetMode(mode string) string {
 		return CommunicationsEmailConversionTargetNewLogicGate
 	case "node", "existing_node":
 		return CommunicationsEmailConversionTargetExistingNode
+	case "folder", "existing_folder", "company_explorer_folder":
+		return CommunicationsEmailConversionTargetFolder
+	case "project", "existing_project":
+		return CommunicationsEmailConversionTargetProject
 	default:
 		return "invalid"
 	}
@@ -143,6 +187,12 @@ func communicationsEmailConversionWorkspaceEventInputs(result CommunicationsTria
 			inputs = append(inputs, kanbanCardWorkspaceEventInput(card.CompanyID, "kanban_card_upserted", card, true, meta))
 		}
 		inputs = append(inputs, nodeUpdatedWorkspaceEventInputWithMetadata(node, meta))
+	}
+	for _, row := range result.ExplorerV2Rows {
+		inputs = append(inputs, companyExplorerV2EdgeUpsertedWorkspaceEventInput(row, meta))
+	}
+	for _, relationship := range result.ProjectRelationships {
+		inputs = append(inputs, projectRelationshipUpsertedWorkspaceEventInput(relationship, meta.ActorUserID))
 	}
 	return inputs
 }
@@ -194,6 +244,18 @@ func folderItemAssignedWorkspaceEventInput(item domain.CompanyExplorerFolderItem
 		"item_type":   item.ItemType,
 		"item_id":     item.ItemID,
 		"folder_item": item,
+	})
+	input.ActorUserID = meta.ActorUserID
+	return input
+}
+
+func companyExplorerV2EdgeUpsertedWorkspaceEventInput(row CompanyExplorerV2Row, meta workItemAssignmentEventMetadata) DomainEventInput {
+	input := workspaceDomainEventInput(row.CompanyID, "company_explorer_v2_edge_upserted", map[string]any{
+		"entity_id":        row.EntityID,
+		"entity_type":      row.EntityType,
+		"parent_entity_id": row.ParentEntityID,
+		"edge_id":          row.EdgeID,
+		"entity":           row,
 	})
 	input.ActorUserID = meta.ActorUserID
 	return input

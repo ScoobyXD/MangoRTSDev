@@ -84,15 +84,30 @@ type CompanyExplorerTreeRowProps = {
   assignExplorerPayloadItemsToFolder: (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => Promise<void>;
 };
 
-function getTriageMessageDropTarget(row: ExplorerTreeNode): CompanyExplorerTriageMessageDropTarget | null {
+function getTriageMessageDropTarget(row: ExplorerTreeNode, treeRows: ExplorerTreeNode[]): CompanyExplorerTriageMessageDropTarget | null {
+  const parentEntityID = row.entityID?.trim() ?? "";
+  if (row.kind === "folder") {
+    const folderID = row.folderID?.trim() || row.entityID?.trim() || "";
+    return folderID || parentEntityID
+      ? { kind: "folder", folderID: folderID || undefined, parentEntityID: parentEntityID || undefined, entityType: row.entityType, label: row.label }
+      : null;
+  }
+  if (row.kind === "project") {
+    const projectID = row.projectID?.trim() || (row.entityType === "project" ? row.resourceID?.trim() ?? "" : "");
+    return projectID ? { kind: "project", projectID, parentEntityID: parentEntityID || undefined, label: row.label } : null;
+  }
   if (row.kind === "logic_gate") {
     const logicGateID = row.logicGateID?.trim() ?? "";
-    return logicGateID ? { kind: "logic_gate", logicGateID, label: row.label } : null;
+    return logicGateID ? { kind: "logic_gate", logicGateID, parentEntityID: parentEntityID || undefined, label: row.label } : null;
   }
   if (row.kind === "node") {
-    const logicGateID = row.parentLogicGateID?.trim() ?? "";
     const nodeID = row.nodeID?.trim() ?? "";
-    return logicGateID && nodeID ? { kind: "node", logicGateID, nodeID, label: row.label } : null;
+    if (!nodeID) return null;
+    const directLogicGateID = row.parentLogicGateID?.trim() ?? "";
+    const parentLogicGateID = directLogicGateID || (row.parentEntityID
+      ? treeRows.find((candidate) => candidate.entityID === row.parentEntityID && candidate.kind === "logic_gate")?.logicGateID?.trim() ?? ""
+      : "");
+    return { kind: "node", logicGateID: parentLogicGateID || undefined, nodeID, parentEntityID: parentEntityID || undefined, label: row.label };
   }
   return null;
 }
@@ -153,7 +168,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   const suppressModifiedClickRef = React.useRef(false);
   const rowDragPayload = isSearchActive ? null : getExplorerDragPayloadForSelection(row, selectedTreeIDs, treeRows);
   const isDragging = draggingTreeID === row.id;
-  const triageDropTarget = onTriageMessagesDrop ? getTriageMessageDropTarget(row) : null;
+  const triageDropTarget = onTriageMessagesDrop ? getTriageMessageDropTarget(row, treeRows) : null;
   const isExplorerDropTarget = dragOverTreeID === row.id;
   const isTriageDropTarget = triageDropTreeID === row.id;
   const rowFrameGradient = "linear-gradient(135deg, rgba(92, 238, 255, 0.92), rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86))";

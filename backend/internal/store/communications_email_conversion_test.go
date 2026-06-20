@@ -239,6 +239,205 @@ func TestMemoryEmailConversionCommandAttachesEmailToExistingNode(t *testing.T) {
 	}
 }
 
+func TestMemoryEmailConversionCommandCreatesNodeInExplorerFolderTarget(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111107"
+	repo.EnsureCompany(companyID, "Email Conversion Company")
+	user, _ := setupEmailConversionUserAndGate(t, repo, companyID)
+	roots, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeAll,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2RootRows: %v", err)
+	}
+	companyRoot := requireCompanyExplorerV2Row(t, roots.Rows, CompanyExplorerV2EntityCompany, companyID)
+	targetFolder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
+		CompanyID:        companyID,
+		ParentEntityID:   companyRoot.EntityID,
+		Name:             "Email Drops",
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder: %v", err)
+	}
+	baselineEvents, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: 0, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListDomainEventsAfter baseline: %v", err)
+	}
+	afterSequence := int64(0)
+	if len(baselineEvents) > 0 {
+		afterSequence = baselineEvents[len(baselineEvents)-1].Sequence
+	}
+	message := domain.EmailMessageSnapshot{ID: "message-folder-target", ThreadID: "thread-folder-target", Subject: "Create this in Explorer"}
+	if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
+		t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
+	}
+
+	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+		UserID:    user.UserID,
+		CompanyID: companyID,
+		Target: CommunicationsTriageConversionTarget{
+			Mode:           CommunicationsEmailConversionTargetFolder,
+			ParentEntityID: targetFolder.EntityID,
+		},
+		MessageIDs: []string{message.ID},
+	})
+	if err != nil {
+		t.Fatalf("ConvertCommunicationsTriageItems folder target: %v", err)
+	}
+	if len(result.Nodes) != 1 || result.Nodes[0].Title != message.Subject {
+		t.Fatalf("nodes = %+v, want one created email node", result.Nodes)
+	}
+	if len(result.ExplorerV2Rows) != 1 || result.ExplorerV2Rows[0].ParentEntityID != targetFolder.EntityID || result.ExplorerV2Rows[0].ResourceID != result.Nodes[0].NodeID {
+		t.Fatalf("explorer v2 rows = %+v, want node under target folder", result.ExplorerV2Rows)
+	}
+
+	triageItems, err := repo.ListCommunicationsTriageItems(user.UserID)
+	if err != nil || len(triageItems) != 0 {
+		t.Fatalf("triage items after folder conversion = %+v err=%v, want deleted", triageItems, err)
+	}
+	durable, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: afterSequence, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListDomainEventsAfter: %v", err)
+	}
+	wantTypes := []string{WorkItemEmailConvertedEventType, "company_explorer_folder_item_assigned", "node_created", "node_updated", "company_explorer_v2_edge_upserted"}
+	if gotTypes := domainEventTypes(durable); !reflect.DeepEqual(gotTypes, wantTypes) {
+		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
+	}
+}
+
+func TestMemoryEmailConversionCommandCreatesNodeInProjectTarget(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111108"
+	repo.EnsureCompany(companyID, "Email Conversion Company")
+	user, _ := setupEmailConversionUserAndGate(t, repo, companyID)
+	projectResult, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Email Project", Status: "Active", ActorUserID: user.UserID})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if projectResult.Project == nil {
+		t.Fatalf("CreateProject returned nil project")
+	}
+	project := projectResult.Project
+	baselineEvents, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: 0, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListDomainEventsAfter baseline: %v", err)
+	}
+	afterSequence := int64(0)
+	if len(baselineEvents) > 0 {
+		afterSequence = baselineEvents[len(baselineEvents)-1].Sequence
+	}
+	message := domain.EmailMessageSnapshot{ID: "message-project-target", ThreadID: "thread-project-target", Subject: "Create this in project"}
+	if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
+		t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
+	}
+
+	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+		UserID:    user.UserID,
+		CompanyID: companyID,
+		Target: CommunicationsTriageConversionTarget{
+			Mode:      CommunicationsEmailConversionTargetProject,
+			ProjectID: project.ProjectID,
+		},
+		MessageIDs: []string{message.ID},
+	})
+	if err != nil {
+		t.Fatalf("ConvertCommunicationsTriageItems project target: %v", err)
+	}
+	if len(result.Nodes) != 1 || result.Nodes[0].Title != message.Subject {
+		t.Fatalf("nodes = %+v, want one created email node", result.Nodes)
+	}
+	if len(result.ProjectRelationships) != 1 {
+		t.Fatalf("project relationships = %+v, want one relationship", result.ProjectRelationships)
+	}
+	relationship := result.ProjectRelationships[0]
+	if relationship.ProjectID != project.ProjectID || relationship.ResourceType != EntityTypeNode || relationship.ResourceID != result.Nodes[0].NodeID || relationship.NodeID == nil || *relationship.NodeID != result.Nodes[0].NodeID {
+		t.Fatalf("project relationship = %+v, want node relationship for %s", relationship, result.Nodes[0].NodeID)
+	}
+	relationships, err := repo.ListProjectRelationshipProjections(companyID, project.ProjectID)
+	if err != nil {
+		t.Fatalf("ListProjectRelationshipProjections: %v", err)
+	}
+	if len(relationships) != 1 || relationships[0].RelationshipID != relationship.RelationshipID {
+		t.Fatalf("relationships = %+v, want created relationship %s", relationships, relationship.RelationshipID)
+	}
+	if len(result.ProjectionDeltas) == 0 {
+		t.Fatalf("projection deltas = %+v, want scoped project relationship delta", result.ProjectionDeltas)
+	}
+	durable, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: afterSequence, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListDomainEventsAfter: %v", err)
+	}
+	wantTypes := []string{WorkItemEmailConvertedEventType, "company_explorer_folder_item_assigned", "node_created", "node_updated", "project_relationship_upserted"}
+	if gotTypes := domainEventTypes(durable); !reflect.DeepEqual(gotTypes, wantTypes) {
+		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
+	}
+}
+
+func TestMemoryEmailConversionCommandAttachesEmailToStandaloneExistingNode(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111109"
+	repo.EnsureCompany(companyID, "Email Conversion Company")
+	user, _ := setupEmailConversionUserAndGate(t, repo, companyID)
+	node, err := repo.CreateNode(companyID, "Standalone customer node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	baselineEvents, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: 0, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListDomainEventsAfter baseline: %v", err)
+	}
+	afterSequence := int64(0)
+	if len(baselineEvents) > 0 {
+		afterSequence = baselineEvents[len(baselineEvents)-1].Sequence
+	}
+	message := domain.EmailMessageSnapshot{ID: "message-standalone-node", ThreadID: "thread-standalone-node", Subject: "Attach to standalone"}
+	if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
+		t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
+	}
+	priority := 1
+
+	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+		UserID:    user.UserID,
+		CompanyID: companyID,
+		Target: CommunicationsTriageConversionTarget{
+			Mode:   CommunicationsEmailConversionTargetExistingNode,
+			NodeID: node.NodeID,
+		},
+		MessageIDs:  []string{message.ID},
+		Priority:    &priority,
+		PrioritySet: true,
+	})
+	if err != nil {
+		t.Fatalf("ConvertCommunicationsTriageItems standalone node: %v", err)
+	}
+	if len(result.Nodes) != 1 || result.Nodes[0].NodeID != node.NodeID {
+		t.Fatalf("result nodes = %+v, want existing node", result.Nodes)
+	}
+	if len(result.Cards) != 0 || len(result.Assignments) != 0 || len(result.EmailPlacements) != 0 || len(result.FolderItems) != 0 {
+		t.Fatalf("cards/assignments/placements/folder items = %d/%d/%d/%d, want none", len(result.Cards), len(result.Assignments), len(result.EmailPlacements), len(result.FolderItems))
+	}
+	if result.Nodes[0].Priority == nil || *result.Nodes[0].Priority != priority {
+		t.Fatalf("node priority = %+v, want %d", result.Nodes[0].Priority, priority)
+	}
+	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
+	if err != nil || len(projections) != 1 || projections[0].Type != "Attached email" {
+		t.Fatalf("email projections = %+v err=%v", projections, err)
+	}
+	placements, err := repo.ListCommunicationsEmailPlacements(user.UserID, companyID, []string{message.ID})
+	if err != nil || len(placements) != 0 {
+		t.Fatalf("email placements = %+v err=%v, want none for standalone node", placements, err)
+	}
+	durable, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: afterSequence, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListDomainEventsAfter: %v", err)
+	}
+	if gotTypes, wantTypes := domainEventTypes(durable), []string{WorkItemEmailConvertedEventType, "node_updated"}; !reflect.DeepEqual(gotTypes, wantTypes) {
+		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
+	}
+}
 func TestMemoryEmailConversionCommandRollsBackPartialWork(t *testing.T) {
 	errAppend := errors.New("append failed")
 

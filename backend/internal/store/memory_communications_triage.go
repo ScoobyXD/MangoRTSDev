@@ -22,40 +22,48 @@ type communicationsEmailNodeLink struct {
 }
 
 type memoryCommunicationsTriageConversionSnapshot struct {
-	triageItems              map[string]domain.CommunicationsTriageItem
-	logicGates               map[string]domain.LogicGate
-	nodes                    map[string]domain.Node
-	nodeInfo                 map[string][]domain.NodeInformation
-	nodeText                 map[string]map[string]domain.NodeProjection
-	folders                  map[string]domain.CompanyExplorerFolder
-	folderItems              map[string]domain.CompanyExplorerFolderItem
-	defaultFolderSeed        map[string]bool
-	nodeMapPositions         map[string]domain.NodeMapPosition
-	kanbanBoards             map[string]domain.KanbanBoard
-	kanbanColumns            map[string][]domain.KanbanColumn
-	kanbanCards              map[string][]domain.KanbanCard
-	nodeLogicGateAssignments map[string]domain.NodeLogicGateAssignment
-	emailNodeLinks           map[string]communicationsEmailNodeLink
-	domainEvents             map[string]domain.DomainEvent
+	triageItems                   map[string]domain.CommunicationsTriageItem
+	logicGates                    map[string]domain.LogicGate
+	nodes                         map[string]domain.Node
+	nodeInfo                      map[string][]domain.NodeInformation
+	nodeText                      map[string]map[string]domain.NodeProjection
+	folders                       map[string]domain.CompanyExplorerFolder
+	folderItems                   map[string]domain.CompanyExplorerFolderItem
+	defaultFolderSeed             map[string]bool
+	nodeMapPositions              map[string]domain.NodeMapPosition
+	kanbanBoards                  map[string]domain.KanbanBoard
+	kanbanColumns                 map[string][]domain.KanbanColumn
+	kanbanCards                   map[string][]domain.KanbanCard
+	nodeLogicGateAssignments      map[string]domain.NodeLogicGateAssignment
+	emailNodeLinks                map[string]communicationsEmailNodeLink
+	domainEvents                  map[string]domain.DomainEvent
+	projectRelationships          map[string]domain.ProjectRelationship
+	projectRelationshipProjection map[string]domain.ProjectRelationshipProjection
+	companyExplorerV2Entities     map[string]memoryCompanyExplorerV2Entity
+	companyExplorerV2Edges        map[string]memoryCompanyExplorerV2Edge
 }
 
 func (r *MemoryRepo) snapshotCommunicationsTriageConversionStateLocked() memoryCommunicationsTriageConversionSnapshot {
 	return memoryCommunicationsTriageConversionSnapshot{
-		triageItems:              cloneMemoryMap(r.triageItems),
-		logicGates:               cloneMemoryMap(r.logicGates),
-		nodes:                    cloneMemoryMap(r.nodes),
-		nodeInfo:                 cloneMemorySliceMap(r.nodeInfo),
-		nodeText:                 cloneMemoryNodeText(r.nodeText),
-		folders:                  cloneMemoryMap(r.folders),
-		folderItems:              cloneMemoryMap(r.folderItems),
-		defaultFolderSeed:        cloneMemoryMap(r.defaultFolderSeed),
-		nodeMapPositions:         cloneMemoryMap(r.nodeMapPositions),
-		kanbanBoards:             cloneMemoryMap(r.kanbanBoards),
-		kanbanColumns:            cloneMemorySliceMap(r.kanbanColumns),
-		kanbanCards:              cloneMemorySliceMap(r.kanbanCards),
-		nodeLogicGateAssignments: cloneMemoryMap(r.nodeLogicGateAssignments),
-		emailNodeLinks:           cloneMemoryMap(r.emailNodeLinks),
-		domainEvents:             cloneMemoryMap(r.domainEvents),
+		triageItems:                   cloneMemoryMap(r.triageItems),
+		logicGates:                    cloneMemoryMap(r.logicGates),
+		nodes:                         cloneMemoryMap(r.nodes),
+		nodeInfo:                      cloneMemorySliceMap(r.nodeInfo),
+		nodeText:                      cloneMemoryNodeText(r.nodeText),
+		folders:                       cloneMemoryMap(r.folders),
+		folderItems:                   cloneMemoryMap(r.folderItems),
+		defaultFolderSeed:             cloneMemoryMap(r.defaultFolderSeed),
+		nodeMapPositions:              cloneMemoryMap(r.nodeMapPositions),
+		kanbanBoards:                  cloneMemoryMap(r.kanbanBoards),
+		kanbanColumns:                 cloneMemorySliceMap(r.kanbanColumns),
+		kanbanCards:                   cloneMemorySliceMap(r.kanbanCards),
+		nodeLogicGateAssignments:      cloneMemoryMap(r.nodeLogicGateAssignments),
+		emailNodeLinks:                cloneMemoryMap(r.emailNodeLinks),
+		domainEvents:                  cloneMemoryMap(r.domainEvents),
+		projectRelationships:          cloneMemoryMap(r.projectRelationships),
+		projectRelationshipProjection: cloneMemoryMap(r.projectRelationshipProjection),
+		companyExplorerV2Entities:     cloneMemoryMap(r.companyExplorerV2Entities),
+		companyExplorerV2Edges:        cloneMemoryMap(r.companyExplorerV2Edges),
 	}
 }
 
@@ -75,6 +83,10 @@ func (r *MemoryRepo) restoreCommunicationsTriageConversionStateLocked(snapshot m
 	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
 	r.emailNodeLinks = snapshot.emailNodeLinks
 	r.domainEvents = snapshot.domainEvents
+	r.projectRelationships = snapshot.projectRelationships
+	r.projectRelationshipProjection = snapshot.projectRelationshipProjection
+	r.companyExplorerV2Entities = snapshot.companyExplorerV2Entities
+	r.companyExplorerV2Edges = snapshot.companyExplorerV2Edges
 }
 
 func (r *MemoryRepo) ListCommunicationsTriageItems(userID string) ([]domain.CommunicationsTriageItem, error) {
@@ -179,7 +191,19 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 		committed = true
 		return result, nil
 	}
-
+	if input.Target.Mode == CommunicationsEmailConversionTargetFolder || input.Target.Mode == CommunicationsEmailConversionTargetProject {
+		result, err := r.convertCommunicationsTriageItemsToExplorerTargetLocked(input)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		events, err := r.appendDomainEventsLocked(communicationsEmailConversionWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		result.Events = events
+		committed = true
+		return result, nil
+	}
 	logicGate := domain.LogicGate{}
 	createdLogicGate := false
 	switch input.Target.Mode {
@@ -337,7 +361,180 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 	return result, nil
 }
 
+func (r *MemoryRepo) attachCommunicationsTriageItemsToStandaloneNodeLocked(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
+	node, ok := r.nodes[key(input.CompanyID, input.NodeID)]
+	if !ok {
+		return CommunicationsTriageConversionResult{}, ErrNotFound
+	}
+	priority := *input.Priority
+	node.Priority = &priority
+	r.nodes[key(input.CompanyID, input.NodeID)] = node
+
+	now := time.Now().UTC()
+	result := CommunicationsTriageConversionResult{Target: input.Target}
+	for _, messageID := range input.MessageIDs {
+		triageItem, ok := r.triageItems[triageItemKey(input.UserID, messageID)]
+		if !ok {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		}
+		r.addEmailProjectionLocked(input.CompanyID, input.NodeID, triageItem.Message, now)
+		delete(r.triageItems, triageItemKey(input.UserID, messageID))
+		updatedNode := r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, input.NodeID)])
+		result.Nodes = append(result.Nodes, updatedNode)
+		result.EmailProvenance = append(result.EmailProvenance, CommunicationsEmailConversionProvenance{
+			CompanyID: input.CompanyID,
+			UserID:    input.UserID,
+			MessageID: messageID,
+			ThreadID:  strings.TrimSpace(triageItem.Message.ThreadID),
+			NodeID:    input.NodeID,
+		})
+		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
+	}
+	return result, nil
+}
+
+func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
+	activeNodeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(input.CompanyID, CompanyExplorerSystemActiveNodesKey)
+	if !ok {
+		return CommunicationsTriageConversionResult{}, ErrNotFound
+	}
+	legacyFolderID := activeNodeFolder.FolderID
+	if input.Target.Mode == CommunicationsEmailConversionTargetFolder && input.Target.ParentEntityID == "" && input.Target.FolderID != "" {
+		legacyFolderID = input.Target.FolderID
+	}
+	if input.Target.Mode == CommunicationsEmailConversionTargetProject {
+		if _, ok := r.projects[key(input.CompanyID, input.Target.ProjectID)]; !ok {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		}
+	}
+	if input.Target.ParentEntityID != "" {
+		r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
+		if _, ok := r.companyExplorerV2Entities[key(input.CompanyID, input.Target.ParentEntityID)]; !ok {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		}
+	}
+
+	now := time.Now().UTC()
+	result := CommunicationsTriageConversionResult{Target: input.Target}
+	for index, messageID := range input.MessageIDs {
+		triageItem, ok := r.triageItems[triageItemKey(input.UserID, messageID)]
+		if !ok {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		}
+		nodeID := newUUIDv7String()
+		priority := *input.Priority
+		node := domain.Node{
+			CompanyID:        input.CompanyID,
+			NodeID:           nodeID,
+			Title:            emailNodeTitle(triageItem.Message),
+			Priority:         &priority,
+			CreatedTimestamp: now,
+		}
+		r.nodes[key(input.CompanyID, nodeID)] = node
+		folderItem, _, err := r.assignCompanyExplorerFolderItemLocked(input.CompanyID, legacyFolderID, "node", nodeID, 0)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		r.nodeMapPositions[key(input.CompanyID, nodeID)] = domain.NodeMapPosition{
+			CompanyID:        input.CompanyID,
+			NodeID:           nodeID,
+			X:                120 + float64(index*28),
+			Y:                120 + float64(index*28),
+			UpdatedTimestamp: now,
+		}
+		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now)
+		delete(r.triageItems, triageItemKey(input.UserID, messageID))
+		if input.Target.ParentEntityID != "" {
+			entity := r.ensureCompanyExplorerV2NativeEntityLocked(input.CompanyID, CompanyExplorerV2EntityNode, nodeID, node.Title, now, now)
+			position := input.Target.Position
+			if position <= 0 {
+				position = r.nextCompanyExplorerV2EdgePositionLocked(input.CompanyID, input.Target.ParentEntityID)
+			}
+			edge := memoryCompanyExplorerV2Edge{
+				CompanyID:        input.CompanyID,
+				EdgeID:           companyExplorerV2EdgeID(input.CompanyID, input.Target.ParentEntityID, entity.EntityID),
+				ParentEntityID:   input.Target.ParentEntityID,
+				ChildEntityID:    entity.EntityID,
+				Position:         position,
+				CreatedTimestamp: now,
+				UpdatedTimestamp: now,
+			}
+			for edgeKey, existing := range r.companyExplorerV2Edges {
+				if existing.CompanyID == input.CompanyID && existing.ChildEntityID == entity.EntityID {
+					delete(r.companyExplorerV2Edges, edgeKey)
+					if !existing.CreatedTimestamp.IsZero() {
+						edge.CreatedTimestamp = existing.CreatedTimestamp
+					}
+				}
+			}
+			r.companyExplorerV2Edges[key(input.CompanyID, edge.EdgeID)] = edge
+			result.ExplorerV2Rows = append(result.ExplorerV2Rows, r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, entity, &edge))
+		}
+		if input.Target.Mode == CommunicationsEmailConversionTargetProject {
+			relationship, deltas, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
+			if err != nil {
+				return CommunicationsTriageConversionResult{}, err
+			}
+			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
+			result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
+		}
+		node = r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, nodeID)])
+		result.Nodes = append(result.Nodes, node)
+		result.EmailProvenance = append(result.EmailProvenance, CommunicationsEmailConversionProvenance{
+			CompanyID: input.CompanyID,
+			UserID:    input.UserID,
+			MessageID: messageID,
+			ThreadID:  strings.TrimSpace(triageItem.Message.ThreadID),
+			NodeID:    nodeID,
+		})
+		result.FolderItems = append(result.FolderItems, folderItem)
+		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
+	}
+	return result, nil
+}
+
+func (r *MemoryRepo) nextProjectRelationshipPositionLocked(companyID, projectID string) int {
+	position := 1000
+	for _, relationship := range r.projectRelationships {
+		if relationship.CompanyID == companyID && relationship.ProjectID == projectID && relationship.Position >= position {
+			position = relationship.Position + 1000
+		}
+	}
+	return position
+}
+
+func (r *MemoryRepo) upsertCommunicationsTriageProjectRelationshipLocked(input CommunicationsTriageConversionInput, nodeID string, now time.Time) (domain.ProjectRelationshipProjection, []ProjectionDelta, error) {
+	position := input.Target.Position
+	if position <= 0 {
+		position = r.nextProjectRelationshipPositionLocked(input.CompanyID, input.Target.ProjectID)
+	}
+	relationshipID := newUUIDv7String()
+	relationshipKey := projectRelationshipKey(input.CompanyID, relationshipID)
+	before := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, relationshipID)
+	r.projectRelationships[relationshipKey] = domain.ProjectRelationship{
+		CompanyID:        input.CompanyID,
+		RelationshipID:   relationshipID,
+		ProjectID:        input.Target.ProjectID,
+		ResourceType:     EntityTypeNode,
+		ResourceID:       nodeID,
+		Position:         position,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	if err := r.syncProjectRelationshipProjectionLocked(input.CompanyID, relationshipID); err != nil {
+		return domain.ProjectRelationshipProjection{}, nil, err
+	}
+	after := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, relationshipID)
+	projection, ok := r.projectRelationshipProjection[relationshipKey]
+	if !ok {
+		return domain.ProjectRelationshipProjection{}, nil, ErrNotFound
+	}
+	return projection, diffProjectRelationshipProjectionRows(before, after), nil
+}
 func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
+	if input.LogicGateID == "" {
+		return r.attachCommunicationsTriageItemsToStandaloneNodeLocked(input)
+	}
 	logicGate, ok := r.logicGates[key(input.CompanyID, input.LogicGateID)]
 	if !ok {
 		return CommunicationsTriageConversionResult{}, ErrNotFound
