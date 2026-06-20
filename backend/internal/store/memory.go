@@ -55,6 +55,7 @@ type MemoryRepo struct {
 	memberships                    map[string]domain.CompanyMembership
 	userGroups                     map[string]domain.CompanyUserGroup
 	userGroupMembers               map[string]domain.CompanyUserGroupMember
+	savedViews                     map[string]domain.SavedView
 	entityPermissions              map[string]domain.EntityPermission
 	effectiveAccess                map[string]domain.EffectiveResourceAccess
 	invitations                    map[string]domain.Invitation
@@ -124,6 +125,7 @@ func NewMemoryRepo() *MemoryRepo {
 		memberships:                    map[string]domain.CompanyMembership{},
 		userGroups:                     map[string]domain.CompanyUserGroup{},
 		userGroupMembers:               map[string]domain.CompanyUserGroupMember{},
+		savedViews:                     map[string]domain.SavedView{},
 		entityPermissions:              map[string]domain.EntityPermission{},
 		effectiveAccess:                map[string]domain.EffectiveResourceAccess{},
 		invitations:                    map[string]domain.Invitation{},

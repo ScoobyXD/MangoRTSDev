@@ -26,11 +26,15 @@ export type MyWorkGroupingSetting = {
   direction: MyWorkGroupingDirection;
 };
 
+export type MyWorkSavedViewPrincipal = "user" | "group";
+
 export type MyWorkSavedGroupingSetting = {
   setting_id: string;
   company_id: string;
   user_id: string;
   surface: "my_work";
+  principal: MyWorkSavedViewPrincipal;
+  principal_id: string;
   name: string;
   selected_scope: MyWorkSelectedScope;
   groupings: MyWorkGroupingSetting[];
@@ -153,6 +157,8 @@ export function normalizeMyWorkSavedGroupingSetting(
     company_id: fallback.company_id,
     user_id: fallback.user_id,
     surface: "my_work",
+    principal: candidate.principal === "group" ? "group" : "user",
+    principal_id: normalizeMyWorkSavedViewPrincipalID(candidate.principal_id, candidate.principal, fallback, currentUserID),
     name,
     selected_scope: normalizeMyWorkSelectedScope(candidate.selected_scope, currentUserID),
     groupings: normalizeMyWorkGroupingStack(candidate.groupings),
@@ -177,6 +183,18 @@ export function normalizeMyWorkSavedGroupingSettings(
     out.push(normalized);
   }
   return out.length > 0 ? out : [fallback];
+}
+
+function normalizeMyWorkSavedViewPrincipalID(
+  value: unknown,
+  principal: unknown,
+  fallback: MyWorkSavedGroupingSetting,
+  currentUserID: string,
+): string {
+  const clean = typeof value === "string" ? value.trim() : "";
+  if (clean) return clean;
+  if (principal === "group") return fallback.principal === "group" ? fallback.principal_id : "";
+  return currentUserID.trim() || fallback.principal_id;
 }
 
 export function getMyWorkGroupValues(row: MyWorkResourceRow, field: MyWorkGroupingField): MyWorkGroupValue[] {

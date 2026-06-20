@@ -130,6 +130,24 @@ type CompanyUserGroupMember struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type SavedViewGrouping struct {
+	Field     string `json:"field"`
+	Direction string `json:"direction"`
+}
+
+type SavedView struct {
+	CompanyID        string              `json:"company_id"`
+	SavedViewID      string              `json:"saved_view_id"`
+	Surface          string              `json:"surface"`
+	Principal        string              `json:"principal"`
+	PrincipalID      string              `json:"principal_id"`
+	Name             string              `json:"name"`
+	Groupings        []SavedViewGrouping `json:"groupings"`
+	Position         int                 `json:"position"`
+	CreatedTimestamp time.Time           `json:"created_timestamp"`
+	UpdatedTimestamp time.Time           `json:"updated_timestamp"`
+}
+
 type EntityPermission struct {
 	CompanyID        string    `json:"company_id"`
 	EntityType       string    `json:"entity_type"`

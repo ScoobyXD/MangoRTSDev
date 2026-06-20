@@ -36,6 +36,7 @@ type Repository interface {
 	EntityPermissionRepository
 	EffectiveAccessRepository
 	ConsolidatedViewRepository
+	SavedViewRepository
 	LogicGateWorkRepository
 	WorkItemReadRepository
 	CompanyExplorerRepository
@@ -214,6 +215,43 @@ type EffectiveAccessRepository interface {
 type ConsolidatedViewRepository interface {
 	GetNodeView(input NodeViewInput) (domain.NodeView, error)
 	GetLogicGateView(companyID, logicGateID string) (domain.LogicGateView, error)
+}
+
+type SavedViewRepository interface {
+	ListSavedViews(input SavedViewListInput) ([]domain.SavedView, error)
+	GetSavedView(companyID, savedViewID string) (domain.SavedView, error)
+	UpsertSavedView(input SavedViewInput) (domain.SavedView, error)
+	DeleteSavedView(input SavedViewDeleteInput) error
+}
+
+const (
+	SavedViewSurfaceMyWork  = "my_work"
+	SavedViewSurfaceUpdates = "updates"
+
+	SavedViewPrincipalUser  = "user"
+	SavedViewPrincipalGroup = "group"
+)
+
+type SavedViewListInput struct {
+	CompanyID    string
+	ViewerUserID string
+	Surface      string
+}
+
+type SavedViewInput struct {
+	CompanyID   string
+	SavedViewID string
+	Surface     string
+	Principal   string
+	PrincipalID string
+	Name        string
+	Groupings   []domain.SavedViewGrouping
+	Position    int
+}
+
+type SavedViewDeleteInput struct {
+	CompanyID   string
+	SavedViewID string
 }
 
 type LogicGateWorkRepository interface {
