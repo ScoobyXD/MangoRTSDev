@@ -85,7 +85,7 @@ const companyExplorerV2DirectTreeEdgesCTE = `
    and child.resource_id=assignment.node_id
   where assignment.company_id=$1::uuid
 ), direct_tree_edges as (
-  select distinct on (candidate.company_id, candidate.child_entity_id)
+  select distinct on (candidate.company_id, candidate.parent_entity_id, candidate.child_entity_id)
          candidate.company_id,
          candidate.parent_entity_id,
          candidate.child_entity_id,
@@ -101,52 +101,12 @@ const companyExplorerV2DirectTreeEdgesCTE = `
     select * from stored_tree_edges
   ) candidate
   order by candidate.company_id,
+           candidate.parent_entity_id,
            candidate.child_entity_id,
            candidate.source_priority asc,
            candidate.created_timestamp asc,
            candidate.position asc,
            coalesce(candidate.edge_id, candidate.child_entity_id) asc
-)
-`
-
-const companyExplorerV2SubscriptionTreeCTE = `
-, subscription_anchors as (
-  select subscription.anchor_entity_id as entity_id
-  from company_explorer_subscriptions subscription
-  cross join v2_args
-  where subscription.company_id=$1::uuid
-    and (
-      (v2_args.view='me' and subscription.owner_type='user' and subscription.owner_id=v2_args.scope_user_id)
-      or (
-        v2_args.view='team'
-        and subscription.owner_type='team'
-        and exists (
-          select 1
-          from company_user_group_members member
-          where member.company_id=subscription.company_id
-            and member.group_id=subscription.owner_id
-            and member.user_id=v2_args.scope_user_id
-        )
-      )
-    )
-), subscription_ancestors(entity_id) as (
-  select entity_id from subscription_anchors
-  union
-  select edge.parent_entity_id
-  from direct_tree_edges edge
-  join subscription_ancestors ancestor
-    on ancestor.entity_id=edge.child_entity_id
-), subscription_descendants(entity_id) as (
-  select entity_id from subscription_anchors
-  union
-  select edge.child_entity_id
-  from direct_tree_edges edge
-  join subscription_descendants descendant
-    on descendant.entity_id=edge.parent_entity_id
-), subscription_entities as (
-  select entity_id from subscription_ancestors
-  union
-  select entity_id from subscription_descendants
 )
 `
 
@@ -392,9 +352,6 @@ func (r *PostgresRepo) ListCompanyExplorerV2RootRows(query CompanyExplorerV2Rows
 	if err := r.ensureCompanyExplorerV2NativeEntities(ctx, query.CompanyID); err != nil {
 		return CompanyExplorerV2Rows{}, err
 	}
-	if query.View == CompanyExplorerLazyScopeMe || query.View == CompanyExplorerLazyScopeTeam {
-		return r.queryCompanyExplorerV2SubscriptionRootRows(ctx, query)
-	}
 
 	rows, err := r.db.QueryContext(ctx, companyExplorerV2TypedArgsCTE+`
 select `+companyExplorerV2RowSelect("entity", "null::uuid", "null::uuid", "1000", "entity.created_timestamp", "entity.updated_timestamp")+`
@@ -454,41 +411,8 @@ func (r *PostgresRepo) GetCompanyExplorerV2Entity(companyID, entityID, permissio
 	})
 }
 
-func (r *PostgresRepo) queryCompanyExplorerV2SubscriptionRootRows(ctx context.Context, query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error) {
-	rows, err := r.db.QueryContext(ctx, companyExplorerV2TypedArgsCTE+companyExplorerV2DirectTreeEdgesCTE+companyExplorerV2SubscriptionTreeCTE+`
-select `+companyExplorerV2RowSelect("entity", "null::uuid", "tree_edge.edge_id", "tree_edge.position", "tree_edge.created_timestamp", "tree_edge.updated_timestamp")+`
-from company_explorer_entities company_root
-join direct_tree_edges tree_edge
-  on tree_edge.company_id=company_root.company_id
- and tree_edge.parent_entity_id=company_root.entity_id
-join company_explorer_entities entity
-  on entity.company_id=tree_edge.company_id
- and entity.entity_id=tree_edge.child_entity_id
-`+companyExplorerV2TypedArgsJoin+`
-`+companyExplorerV2Joins("entity")+`
-where company_root.company_id=$1::uuid
-  and company_root.entity_type='company'
-  and company_root.resource_id=$1::uuid
-  and entity.entity_id in (select entity_id from subscription_entities)
-  and `+companyExplorerV2AccessPredicate("entity")+`
-order by tree_edge.position asc, tree_edge.created_timestamp asc, name asc, entity.entity_id asc`, companyExplorerV2Args(query)...)
-	if err != nil {
-		return CompanyExplorerV2Rows{}, err
-	}
-	items, err := scanCompanyExplorerV2Rows(rows)
-	if err != nil {
-		return CompanyExplorerV2Rows{}, err
-	}
-	return CompanyExplorerV2Rows{Rows: items}, nil
-}
-
 func (r *PostgresRepo) queryCompanyExplorerV2DirectChildren(ctx context.Context, query CompanyExplorerV2RowsQuery) ([]CompanyExplorerV2Row, error) {
-	subscriptionPredicate := ""
 	cte := companyExplorerV2TypedArgsCTE + companyExplorerV2DirectTreeEdgesCTE
-	if query.View == CompanyExplorerLazyScopeMe || query.View == CompanyExplorerLazyScopeTeam {
-		cte += companyExplorerV2SubscriptionTreeCTE
-		subscriptionPredicate = " and entity.entity_id in (select entity_id from subscription_entities)"
-	}
 	rows, err := r.db.QueryContext(ctx, cte+`
 select `+companyExplorerV2RowSelect("entity", "tree_edge.parent_entity_id", "tree_edge.edge_id", "tree_edge.position", "tree_edge.created_timestamp", "tree_edge.updated_timestamp")+`
 from direct_tree_edges tree_edge
@@ -499,7 +423,6 @@ join company_explorer_entities entity
 `+companyExplorerV2Joins("entity")+`
 where tree_edge.company_id=$1::uuid
   and tree_edge.parent_entity_id=$5::uuid
-  `+subscriptionPredicate+`
   and `+companyExplorerV2AccessPredicate("entity")+`
 order by tree_edge.position asc, tree_edge.created_timestamp asc, name asc, entity.entity_id asc`, companyExplorerV2Args(query)...)
 	if err != nil {

@@ -386,7 +386,7 @@ function upsertFolderItems(
 }
 
 function companyExplorerV2RowKey(row: CompanyExplorerV2Row): string {
-  return row.entity_id;
+  return row.edge_id?.trim() || `${row.parent_entity_id?.trim() ?? ""}:${row.entity_id}`;
 }
 
 function upsertCompanyExplorerV2Rows(

@@ -112,6 +112,7 @@ func TestPostgresCompanyExplorerV2RowsQueriesTypeSharedPlaceholders(t *testing.T
 		"$3::uuid as scope_user_id",
 		"$5::uuid as parent_entity_id",
 		"$6::text as access_level",
+		"distinct on (candidate.company_id, candidate.parent_entity_id, candidate.child_entity_id)",
 	} {
 		if !strings.Contains(normalized, needle) {
 			t.Fatalf("V2 rows queries must type shared placeholder %q", needle)

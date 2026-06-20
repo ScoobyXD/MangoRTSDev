@@ -7,7 +7,12 @@ import (
 )
 
 func NormalizeCompanyExplorerV2View(value string) (string, bool) {
-	return NormalizeCompanyExplorerLazyScope(value)
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", CompanyExplorerLazyScopeAll, CompanyExplorerLazyScopeMe, CompanyExplorerLazyScopeTeam:
+		return CompanyExplorerLazyScopeAll, true
+	default:
+		return "", false
+	}
 }
 
 func normalizeCompanyExplorerV2RowsQuery(query CompanyExplorerV2RowsQuery, requireParent bool) (CompanyExplorerV2RowsQuery, error) {
@@ -21,9 +26,6 @@ func normalizeCompanyExplorerV2RowsQuery(query CompanyExplorerV2RowsQuery, requi
 	}
 	query.View = view
 	if query.CompanyID == "" || (requireParent && query.ParentEntityID == "") {
-		return CompanyExplorerV2RowsQuery{}, ErrInvalid
-	}
-	if (query.View == CompanyExplorerLazyScopeMe || query.View == CompanyExplorerLazyScopeTeam) && query.ScopeUserID == "" {
 		return CompanyExplorerV2RowsQuery{}, ErrInvalid
 	}
 	return query, nil

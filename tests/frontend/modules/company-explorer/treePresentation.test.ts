@@ -65,12 +65,12 @@ run("company explorer context menu keeps fixed sections with disabled unavailabl
   });
 
   assert.deepEqual(sections.map((section) => section.map((action) => action.label)), [
-    ["Add to Me", "Add to Team", "Folder Permissions"],
+    ["Folder Permissions"],
     ["Create New Folder", "Create Node", "Create Logic Gate", "Create Project"],
     ["Rename", "Delete"],
   ]);
   assert.deepEqual(sections.map((section) => section.map((action) => action.enabled)), [
-    [false, false, true],
+    [true],
     [true, false, true, true],
     [false, true],
   ]);
@@ -176,6 +176,87 @@ run("v2 tree rows preserve the existing tree shell ids and metadata", () => {
   assert.equal(rows[2]?.logicGateID, "gate-a");
   assert.equal(rows[3]?.nodeID, "node-a");
   assert.equal(rows[3]?.parentEntityID, "gate-entity");
+});
+
+run("v2 tree rows preserve duplicate native resources in separate parent contexts", () => {
+  const rows = buildCompanyExplorerV2TreeRows({
+    expanded: new Set(["folder-root", "workspace-folder-folder-a", "project-project-a"]),
+    rows: [
+      {
+        company_id: "c",
+        entity_id: "company-entity",
+        entity_type: "company",
+        resource_id: "c",
+        name: "Company",
+        position: 1000,
+        has_children: true,
+        created_timestamp: "1",
+        updated_timestamp: "1",
+      },
+      {
+        company_id: "c",
+        entity_id: "folder-a",
+        entity_type: "folder",
+        name: "Folder A",
+        parent_entity_id: "company-entity",
+        edge_id: "edge-folder-a",
+        position: 1000,
+        has_children: true,
+        created_timestamp: "2",
+        updated_timestamp: "2",
+      },
+      {
+        company_id: "c",
+        entity_id: "project-entity",
+        entity_type: "project",
+        resource_id: "project-a",
+        name: "Project A",
+        parent_entity_id: "company-entity",
+        edge_id: "edge-project-a",
+        position: 2000,
+        has_children: true,
+        created_timestamp: "3",
+        updated_timestamp: "3",
+      },
+      {
+        company_id: "c",
+        entity_id: "gate-entity",
+        entity_type: "logic_gate",
+        resource_id: "gate-a",
+        name: "Gate A",
+        parent_entity_id: "folder-a",
+        edge_id: "edge-gate-folder",
+        position: 1000,
+        has_children: false,
+        created_timestamp: "4",
+        updated_timestamp: "4",
+      },
+      {
+        company_id: "c",
+        entity_id: "gate-entity",
+        entity_type: "logic_gate",
+        resource_id: "gate-a",
+        name: "Gate A",
+        parent_entity_id: "project-entity",
+        position: 1000,
+        has_children: false,
+        created_timestamp: "5",
+        updated_timestamp: "5",
+      },
+    ],
+  });
+
+  assert.deepEqual(rows.map((row) => row.id), [
+    "folder-root",
+    "workspace-folder-folder-a",
+    "logic-gate-gate-a-context-edge-gate-folder",
+    "project-project-a",
+    "logic-gate-gate-a-context-project-entity",
+  ]);
+  assert.equal(rows[2]?.parentEntityID, "folder-a");
+  assert.equal(rows[2]?.edgeID, "edge-gate-folder");
+  assert.equal(rows[4]?.parentEntityID, "project-entity");
+  assert.equal(rows[4]?.edgeID, undefined);
 });
 
 run("v2 delete targets keep explorer entity identity separate from source ids", () => {

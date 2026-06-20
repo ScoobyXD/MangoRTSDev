@@ -395,8 +395,10 @@ export function buildCompanyExplorerV2TreeRows({
   }
   const uniqueRows = [...rowByKey.values()];
   const rowByEntityID = new Map<string, CompanyExplorerV2Row>();
+  const rowCountByEntityID = new Map<string, number>();
   for (const row of uniqueRows) {
     if (!rowByEntityID.has(row.entity_id)) rowByEntityID.set(row.entity_id, row);
+    rowCountByEntityID.set(row.entity_id, (rowCountByEntityID.get(row.entity_id) ?? 0) + 1);
   }
   const rowsByParentEntityID = new Map<string, CompanyExplorerV2Row[]>();
   for (const row of uniqueRows) {
@@ -420,13 +422,16 @@ export function buildCompanyExplorerV2TreeRows({
     if (row.entity_type === "folder") return `workspace-folder-${row.entity_id}`;
     if (row.entity_type === "user_group") return `company-explorer-group-${resourceID}`;
     if (row.entity_type === "user") return `company-explorer-user-${resourceID}`;
+    const contextSuffix = (rowCountByEntityID.get(row.entity_id) ?? 0) > 1 && row.parent_entity_id
+      ? `-context-${row.edge_id || row.parent_entity_id}`
+      : "";
     if (row.entity_type === "node") {
       const parent = row.parent_entity_id ? rowByEntityID.get(row.parent_entity_id) : undefined;
       if (parent?.entity_type === "logic_gate" && parent.resource_id) return `logic-gate-${parent.resource_id}-node-${resourceID}`;
-      return `node-${resourceID}`;
+      return `node-${resourceID}${contextSuffix}`;
     }
-    if (row.entity_type === "logic_gate") return `logic-gate-${resourceID}`;
-    if (row.entity_type === "project") return `project-${resourceID}`;
+    if (row.entity_type === "logic_gate") return `logic-gate-${resourceID}${contextSuffix}`;
+    if (row.entity_type === "project") return `project-${resourceID}${contextSuffix}`;
     return `company-explorer-${row.entity_type}-${row.entity_id}`;
   };
 

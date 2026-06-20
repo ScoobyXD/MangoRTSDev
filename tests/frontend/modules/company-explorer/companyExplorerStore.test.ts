@@ -145,6 +145,69 @@ run("kanban board reducer keeps sorted boards and removes explorer placement", (
   assert.deepEqual(state.folderItems, []);
 });
 
+run("v2 row reducer preserves manual and native parent contexts", () => {
+  let state = createCompanyExplorerStoreState();
+  state = reduceCompanyExplorerStore(state, {
+    type: "upsertV2Rows",
+    rows: [
+      {
+        company_id: "c",
+        entity_id: "gate-entity",
+        entity_type: "logic_gate",
+        resource_id: "gate-a",
+        name: "Gate A",
+        parent_entity_id: "folder-entity",
+        edge_id: "edge-gate-folder",
+        position: 1000,
+        has_children: false,
+        created_timestamp: "1",
+        updated_timestamp: "1",
+      },
+      {
+        company_id: "c",
+        entity_id: "gate-entity",
+        entity_type: "logic_gate",
+        resource_id: "gate-a",
+        name: "Gate A",
+        parent_entity_id: "project-entity",
+        position: 1000,
+        has_children: false,
+        created_timestamp: "2",
+        updated_timestamp: "2",
+      },
+    ],
+  });
+
+  assert.equal(state.rows.length, 2);
+  assert.deepEqual(state.rows.map((row) => `${row.parent_entity_id}:${row.edge_id ?? ""}`), [
+    "folder-entity:edge-gate-folder",
+    "project-entity:",
+  ]);
+
+  state = reduceCompanyExplorerStore(state, {
+    type: "upsertV2Rows",
+    rows: [
+      {
+        company_id: "c",
+        entity_id: "gate-entity",
+        entity_type: "logic_gate",
+        resource_id: "gate-a",
+        name: "Gate A Updated",
+        parent_entity_id: "folder-entity",
+        edge_id: "edge-gate-folder",
+        position: 500,
+        has_children: false,
+        created_timestamp: "1",
+        updated_timestamp: "3",
+      },
+    ],
+  });
+
+  assert.equal(state.rows.length, 2);
+  assert.equal(state.rows.find((row) => row.edge_id === "edge-gate-folder")?.name, "Gate A Updated");
+  assert.equal(state.rows.find((row) => row.parent_entity_id === "project-entity")?.name, "Gate A");
+});
+
 run("store event helpers preserve existing refresh contracts", () => {
   assert.equal(shouldRefreshCompanyExplorerSnapshotForGap({ companyID: "c", scopes: [{ kind: "company_explorer" }] }, "c"), true);
   assert.equal(shouldRefreshCompanyExplorerSnapshotForGap({ companyID: "c", scopes: [{ kind: "node_graph" }] }, "c"), false);

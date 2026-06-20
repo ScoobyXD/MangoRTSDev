@@ -4,12 +4,8 @@ import "strings"
 
 func NormalizeCompanyExplorerLazyScope(value string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", CompanyExplorerLazyScopeAll:
+	case "", CompanyExplorerLazyScopeAll, CompanyExplorerLazyScopeMe, CompanyExplorerLazyScopeTeam:
 		return CompanyExplorerLazyScopeAll, true
-	case CompanyExplorerLazyScopeMe:
-		return CompanyExplorerLazyScopeMe, true
-	case CompanyExplorerLazyScopeTeam:
-		return CompanyExplorerLazyScopeTeam, true
 	default:
 		return "", false
 	}
@@ -26,9 +22,6 @@ func normalizeCompanyExplorerLazyRowsQuery(query CompanyExplorerLazyRowsQuery, r
 	}
 	query.Scope = scope
 	if query.CompanyID == "" || (requireParent && query.ParentID == "") {
-		return CompanyExplorerLazyRowsQuery{}, ErrInvalid
-	}
-	if (query.Scope == CompanyExplorerLazyScopeMe || query.Scope == CompanyExplorerLazyScopeTeam) && query.ScopeUserID == "" {
 		return CompanyExplorerLazyRowsQuery{}, ErrInvalid
 	}
 	return query, nil

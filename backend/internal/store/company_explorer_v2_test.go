@@ -7,7 +7,7 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func TestMemoryCompanyExplorerV2SubscriptionsUseRealTreeShape(t *testing.T) {
+func TestMemoryCompanyExplorerV2LegacyViewsReadCompanyTree(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000001"
 	repo.EnsureCompany(companyID, "V2 Explorer Co")
@@ -18,13 +18,6 @@ func TestMemoryCompanyExplorerV2SubscriptionsUseRealTreeShape(t *testing.T) {
 	}
 	if _, err := repo.AddCompanyMembership("v2-roots-user", companyID, domain.RoleCompanyAdmin); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
-	}
-	group, err := repo.CreateCompanyUserGroup(companyID, "", "Operations")
-	if err != nil {
-		t.Fatalf("CreateCompanyUserGroup: %v", err)
-	}
-	if _, err := repo.SetCompanyUserGroupMembers(companyID, group.GroupID, []string{user.UserID}); err != nil {
-		t.Fatalf("SetCompanyUserGroupMembers: %v", err)
 	}
 
 	allRoots, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
@@ -39,18 +32,17 @@ func TestMemoryCompanyExplorerV2SubscriptionsUseRealTreeShape(t *testing.T) {
 	if len(allRoots.Rows) != 1 || companyRoot.ParentEntityID != "" {
 		t.Fatalf("all roots = %+v, want only company root", allRoots.Rows)
 	}
-
 	meRoots, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
 		View:             CompanyExplorerLazyScopeMe,
-		ScopeUserID:      user.UserID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2RootRows me before subscription: %v", err)
+		t.Fatalf("ListCompanyExplorerV2RootRows legacy me: %v", err)
 	}
-	if len(meRoots.Rows) != 0 {
-		t.Fatalf("me roots before subscription = %+v, want empty tag view", meRoots.Rows)
+	meRoot := requireCompanyExplorerV2Row(t, meRoots.Rows, CompanyExplorerV2EntityCompany, companyID)
+	if len(meRoots.Rows) != 1 || meRoot.ParentEntityID != "" {
+		t.Fatalf("legacy me roots = %+v, want company-wide root", meRoots.Rows)
 	}
 
 	folder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
@@ -110,87 +102,149 @@ func TestMemoryCompanyExplorerV2SubscriptionsUseRealTreeShape(t *testing.T) {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
 
-	nodeEntityID := companyExplorerV2NativeEntityID(companyID, CompanyExplorerV2EntityNode, node.NodeID)
-	if _, err := repo.UpsertCompanyExplorerV2Subscription(CompanyExplorerV2SubscriptionInput{
-		CompanyID:        companyID,
-		OwnerType:        CompanyExplorerV2SubscriptionOwnerUser,
-		OwnerID:          user.UserID,
-		AnchorEntityID:   nodeEntityID,
-		ActorUserID:      user.UserID,
-		PermissionUserID: user.UserID,
-	}); err != nil {
-		t.Fatalf("UpsertCompanyExplorerV2Subscription node: %v", err)
-	}
-
-	meRoots, err = repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
+	rootChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
 		View:             CompanyExplorerLazyScopeMe,
-		ScopeUserID:      user.UserID,
+		ParentEntityID:   companyRoot.EntityID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2RootRows me after subscription: %v", err)
+		t.Fatalf("ListCompanyExplorerV2ChildRows legacy me root: %v", err)
 	}
-	meFolder := requireCompanyExplorerV2Row(t, meRoots.Rows, CompanyExplorerV2EntityFolder, folder.EntityID)
-	if meFolder.ParentEntityID != "" {
-		t.Fatalf("subscribed ancestor root parent = %q, want empty tag root", meFolder.ParentEntityID)
-	}
+	requireCompanyExplorerV2Row(t, rootChildren.Rows, CompanyExplorerV2EntityFolder, folder.EntityID)
 	folderChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
 		View:             CompanyExplorerLazyScopeMe,
-		ScopeUserID:      user.UserID,
 		ParentEntityID:   folder.EntityID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2ChildRows subscribed folder: %v", err)
+		t.Fatalf("ListCompanyExplorerV2ChildRows legacy me folder: %v", err)
 	}
 	requireCompanyExplorerV2Row(t, folderChildren.Rows, CompanyExplorerV2EntityProject, project.ProjectID)
 	projectChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
 		View:             CompanyExplorerLazyScopeMe,
-		ScopeUserID:      user.UserID,
 		ParentEntityID:   projectRow.EntityID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2ChildRows subscribed project: %v", err)
+		t.Fatalf("ListCompanyExplorerV2ChildRows legacy me project: %v", err)
 	}
 	logicGateRow := requireCompanyExplorerV2Row(t, projectChildren.Rows, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID)
-	logicGateChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+	teamGateChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
-		View:             CompanyExplorerLazyScopeMe,
-		ScopeUserID:      user.UserID,
+		View:             CompanyExplorerLazyScopeTeam,
 		ParentEntityID:   logicGateRow.EntityID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2ChildRows subscribed logic gate: %v", err)
+		t.Fatalf("ListCompanyExplorerV2ChildRows legacy team logic gate: %v", err)
 	}
-	requireCompanyExplorerV2Row(t, logicGateChildren.Rows, CompanyExplorerV2EntityNode, node.NodeID)
+	requireCompanyExplorerV2Row(t, teamGateChildren.Rows, CompanyExplorerV2EntityNode, node.NodeID)
+}
 
-	logicGateEntityID := companyExplorerV2NativeEntityID(companyID, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID)
-	if _, err := repo.UpsertCompanyExplorerV2Subscription(CompanyExplorerV2SubscriptionInput{
-		CompanyID:        companyID,
-		OwnerType:        CompanyExplorerV2SubscriptionOwnerTeam,
-		OwnerID:          group.GroupID,
-		AnchorEntityID:   logicGateEntityID,
-		ActorUserID:      user.UserID,
-		PermissionUserID: user.UserID,
-	}); err != nil {
-		t.Fatalf("UpsertCompanyExplorerV2Subscription team logic gate: %v", err)
+func TestMemoryCompanyExplorerV2PreservesManualAndNativeParentContexts(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-220000000002"
+	repo.EnsureCompany(companyID, "V2 Context Co")
+
+	user, err := repo.UpsertAuthUser("v2-context-user", "v2-context@example.com", "V2 Context User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
 	}
-	teamGateChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+	if _, err := repo.AddCompanyMembership("v2-context-user", companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	roots, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
-		View:             CompanyExplorerLazyScopeTeam,
-		ScopeUserID:      user.UserID,
-		ParentEntityID:   logicGateEntityID,
+		View:             CompanyExplorerLazyScopeAll,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2ChildRows team logic gate: %v", err)
+		t.Fatalf("ListCompanyExplorerV2RootRows: %v", err)
 	}
-	requireCompanyExplorerV2Row(t, teamGateChildren.Rows, CompanyExplorerV2EntityNode, node.NodeID)
+	companyRoot := requireCompanyExplorerV2Row(t, roots.Rows, CompanyExplorerV2EntityCompany, companyID)
+	folder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
+		CompanyID:        companyID,
+		ParentEntityID:   companyRoot.EntityID,
+		Name:             "Manual Gate Placements",
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder: %v", err)
+	}
+	projectResult, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Native Project", Status: "Active", ActorUserID: user.UserID})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	project := projectResult.Project
+	if project == nil {
+		t.Fatalf("CreateProject returned nil project")
+	}
+	projectRow, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:        companyID,
+		ParentEntityID:   companyRoot.EntityID,
+		ChildEntityType:  CompanyExplorerV2EntityProject,
+		ChildResourceID:  project.ProjectID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge project: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Shared Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID:    companyID,
+		ProjectID:    project.ProjectID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+		ActorUserID:  user.UserID,
+	}); err != nil {
+		t.Fatalf("UpsertProjectRelationship: %v", err)
+	}
+	manualGate, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:        companyID,
+		ParentEntityID:   folder.EntityID,
+		ChildEntityType:  CompanyExplorerV2EntityLogicGate,
+		ChildResourceID:  logicGate.LogicGateID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge logic gate: %v", err)
+	}
+	if manualGate.EdgeID == "" {
+		t.Fatalf("manual gate placement has empty edge id: %+v", manualGate)
+	}
+
+	folderChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeAll,
+		ParentEntityID:   folder.EntityID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows folder: %v", err)
+	}
+	folderGate := requireCompanyExplorerV2Row(t, folderChildren.Rows, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID)
+	if folderGate.ParentEntityID != folder.EntityID || folderGate.EdgeID == "" {
+		t.Fatalf("folder gate row = %+v, want stored edge under folder", folderGate)
+	}
+	projectChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeAll,
+		ParentEntityID:   projectRow.EntityID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows project: %v", err)
+	}
+	projectGate := requireCompanyExplorerV2Row(t, projectChildren.Rows, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID)
+	if projectGate.ParentEntityID != projectRow.EntityID || projectGate.EdgeID != "" {
+		t.Fatalf("project gate row = %+v, want native relationship under project", projectGate)
+	}
 }
 func TestMemoryProjectRelationshipMovesResourceBetweenProjects(t *testing.T) {
 	repo := NewMemoryRepo()

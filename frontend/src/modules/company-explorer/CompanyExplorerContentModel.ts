@@ -132,8 +132,6 @@ export type CompanyExplorerContentProps = {
 export type CompanyExplorerContextMenuActionID =
   | "open_in_new_tab"
   | "folder_permissions"
-  | "subscribe_me"
-  | "subscribe_team"
   | "create_folder"
   | "create_node"
   | "create_logic_gate"
@@ -150,8 +148,6 @@ export type CompanyExplorerContextMenuAction = {
 export function buildCompanyExplorerContextMenuSections(input: {
   openInNewTabEnabled?: boolean;
   permissionsEnabled: boolean;
-  subscribeMeEnabled?: boolean;
-  subscribeTeamEnabled?: boolean;
   createFolderEnabled: boolean;
   createNodeEnabled: boolean;
   createLogicGateEnabled: boolean;
@@ -161,8 +157,6 @@ export function buildCompanyExplorerContextMenuSections(input: {
 }): CompanyExplorerContextMenuAction[][] {
   const resourceActions: CompanyExplorerContextMenuAction[] = [
     ...(input.openInNewTabEnabled ? [{ id: "open_in_new_tab", label: "Open in new browser tab", enabled: true } as CompanyExplorerContextMenuAction] : []),
-    { id: "subscribe_me", label: "Add to Me", enabled: Boolean(input.subscribeMeEnabled) },
-    { id: "subscribe_team", label: "Add to Team", enabled: Boolean(input.subscribeTeamEnabled) },
   ];
   return [
     [
