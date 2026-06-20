@@ -269,7 +269,7 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 				writeError(w, http.StatusInternalServerError, "failed_to_read_company_explorer_folder")
 				return
 			}
-			row.ParentEntityID = req.CompanyID
+			row.ParentEntityID = ""
 			if folder.ParentFolderID != nil {
 				row.ParentEntityID = *folder.ParentFolderID
 			}
@@ -294,7 +294,7 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 				writeError(w, http.StatusInternalServerError, "failed_to_read_company_explorer_folder")
 				return
 			}
-			row.ParentEntityID = req.CompanyID
+			row.ParentEntityID = ""
 			if folder.ParentFolderID != nil {
 				row.ParentEntityID = *folder.ParentFolderID
 			}

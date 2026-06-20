@@ -252,10 +252,12 @@ func TestMemoryEmailConversionCommandCreatesNodeInExplorerFolderTarget(t *testin
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerV2RootRows: %v", err)
 	}
-	companyRoot := requireCompanyExplorerV2Row(t, roots.Rows, CompanyExplorerV2EntityCompany, companyID)
+	if findCompanyExplorerV2Row(roots.Rows, CompanyExplorerV2EntityCompany, companyID) != nil {
+		t.Fatalf("roots included synthetic company root: %+v", roots.Rows)
+	}
 	targetFolder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
 		CompanyID:        companyID,
-		ParentEntityID:   companyRoot.EntityID,
+		ParentEntityID:   companyID,
 		Name:             "Email Drops",
 		PermissionUserID: user.UserID,
 	})

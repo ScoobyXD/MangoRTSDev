@@ -69,6 +69,7 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndNativeChildren(t *testin
 	}
 	source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
 	for _, want := range []string{
+		"func (r *postgresrepo) querycompanyexplorerfinalrootchildren",
 		"func (r *postgresrepo) querycompanyexplorerfinalcontainerchildren",
 		"from company_explorer_folders folder",
 		"from company_explorer_items item",
@@ -118,16 +119,29 @@ func TestPostgresCompanyExplorerV2RootRowsUseContiguousRootArgs(t *testing.T) {
 	}
 
 	rootRows := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) ListCompanyExplorerV2RootRows")), " "))
+	if !strings.Contains(rootRows, "r.querycompanyexplorerfinalrootchildren(ctx, query)") {
+		t.Fatalf("ListCompanyExplorerV2RootRows must read top-level rows through the root-specific query")
+	}
+
+	childRows := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) ListCompanyExplorerV2ChildRows")), " "))
+	if !strings.Contains(childRows, "case companyexplorerv2entitycompany: rows, err = r.querycompanyexplorerfinalrootchildren(ctx, query)") {
+		t.Fatalf("ListCompanyExplorerV2ChildRows must route company-parent reads through root-specific args")
+	}
+
+	rootChildren := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) queryCompanyExplorerFinalRootChildren")), " "))
 	for _, want := range []string{
 		"companyexplorerrooteffectiveaccessselect",
 		"companyexplorerrootaccesspredicate",
 		"companyexplorerrootargs(query)...",
+		"folder.parent_folder_id is null",
+		"item.parent_folder_id is null",
+		"coalesce(all_rows.parent_entity_id::text, '') as parent_entity_id",
 	} {
-		if !strings.Contains(rootRows, want) {
-			t.Fatalf("ListCompanyExplorerV2RootRows missing %q", want)
+		if !strings.Contains(rootChildren, want) {
+			t.Fatalf("queryCompanyExplorerFinalRootChildren missing %q", want)
 		}
 	}
-	if strings.Contains(rootRows, "companyexplorerfinalargs(query)") {
-		t.Fatalf("ListCompanyExplorerV2RootRows must not use child-row args with an unused parent parameter")
+	if strings.Contains(rootChildren, "companyexplorerfinalargs(query)") {
+		t.Fatalf("queryCompanyExplorerFinalRootChildren must not use child-row args with an unused parent parameter")
 	}
 }

@@ -204,31 +204,11 @@ func (r *PostgresRepo) ListCompanyExplorerV2RootRows(query CompanyExplorerV2Rows
 		return CompanyExplorerV2Rows{}, err
 	}
 	ctx := context.Background()
-	row, err := scanCompanyExplorerV2Row(r.db.QueryRowContext(ctx, `
-select company.company_id::text,
-       company.company_id::text as entity_id,
-       'company' as entity_type,
-       company.company_id::text as resource_id,
-       company.name,
-       '' as parent_entity_id,
-       '' as edge_id,
-       1000 as position,
-       `+companyExplorerFinalHasChildrenExpr("'company'", "company.company_id")+` as has_children,
-       `+companyExplorerRootEffectiveAccessSelect("'company'", "company.company_id")+` as effective_access,
-       `+companyExplorerFinalNativeContext("'company'", "company.company_id", "company.company_id")+` as native_context,
-       company.created_timestamp,
-       company.updated_timestamp
-from companies company
-where company.company_id=$1::uuid
-  and `+companyExplorerRootAccessPredicate("'company'", "company.company_id")+`
-limit 1`, companyExplorerRootArgs(query)...))
-	if errors.Is(err, sql.ErrNoRows) {
-		return CompanyExplorerV2Rows{Rows: []CompanyExplorerV2Row{}}, nil
-	}
+	rows, err := r.queryCompanyExplorerFinalRootChildren(ctx, query)
 	if err != nil {
 		return CompanyExplorerV2Rows{}, err
 	}
-	return CompanyExplorerV2Rows{Rows: []CompanyExplorerV2Row{row}}, nil
+	return CompanyExplorerV2Rows{Rows: rows}, nil
 }
 
 func (r *PostgresRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error) {
@@ -243,8 +223,10 @@ func (r *PostgresRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2Row
 	}
 	var rows []CompanyExplorerV2Row
 	switch parent.EntityType {
-	case CompanyExplorerV2EntityCompany, CompanyExplorerV2EntityFolder:
-		rows, err = r.queryCompanyExplorerFinalContainerChildren(ctx, query, parent)
+	case CompanyExplorerV2EntityCompany:
+		rows, err = r.queryCompanyExplorerFinalRootChildren(ctx, query)
+	case CompanyExplorerV2EntityFolder:
+		rows, err = r.queryCompanyExplorerFinalContainerChildren(ctx, query)
 	case CompanyExplorerV2EntityProject:
 		rows, err = r.queryCompanyExplorerFinalProjectChildren(ctx, query, parent.ResourceID)
 	case CompanyExplorerV2EntityLogicGate:
@@ -359,15 +341,84 @@ limit 1`, query.CompanyID, query.ParentEntityID, companyExplorerLazyNullable(que
 	return row, err
 }
 
-func (r *PostgresRepo) queryCompanyExplorerFinalContainerChildren(ctx context.Context, query CompanyExplorerV2RowsQuery, parent CompanyExplorerV2Row) ([]CompanyExplorerV2Row, error) {
+func (r *PostgresRepo) queryCompanyExplorerFinalRootChildren(ctx context.Context, query CompanyExplorerV2RowsQuery) ([]CompanyExplorerV2Row, error) {
+	rows, err := r.db.QueryContext(ctx, `
+with folder_rows as (
+  select folder.company_id,
+         folder.folder_id as entity_id,
+         'folder'::text as entity_type,
+         null::uuid as resource_id,
+         folder.name,
+         null::uuid as parent_entity_id,
+         null::uuid as edge_id,
+         folder.position,
+         folder.created_timestamp,
+         folder.updated_timestamp
+  from company_explorer_folders folder
+  where folder.company_id=$1::uuid
+    and folder.parent_folder_id is null
+), item_rows as (
+  select item.company_id,
+         item.target_id as entity_id,
+         item.target_type as entity_type,
+         item.target_id as resource_id,
+         coalesce(project.name, logic_gate.header, node.name, item.target_id::text) as name,
+         null::uuid as parent_entity_id,
+         item.item_id as edge_id,
+         item.position,
+         item.created_timestamp,
+         item.updated_timestamp
+  from company_explorer_items item
+  left join projects project
+    on item.target_type='project'
+   and project.company_id=item.company_id
+   and project.project_id=item.target_id
+  left join logic_gates logic_gate
+    on item.target_type='logic_gate'
+   and logic_gate.company_id=item.company_id
+   and logic_gate.logic_gate_id=item.target_id
+  left join nodes node
+    on item.target_type='node'
+   and node.company_id=item.company_id
+   and node.node_id=item.target_id
+  where item.company_id=$1::uuid
+    and item.parent_folder_id is null
+    and (
+      (item.target_type='project' and project.project_id is not null)
+      or (item.target_type='logic_gate' and logic_gate.logic_gate_id is not null)
+      or (item.target_type='node' and node.node_id is not null)
+    )
+), all_rows as (
+  select * from folder_rows
+  union all
+  select * from item_rows
+)
+select all_rows.company_id::text,
+       all_rows.entity_id::text,
+       all_rows.entity_type,
+       coalesce(all_rows.resource_id::text, '') as resource_id,
+       all_rows.name,
+       coalesce(all_rows.parent_entity_id::text, '') as parent_entity_id,
+       coalesce(all_rows.edge_id::text, '') as edge_id,
+       all_rows.position,
+       `+companyExplorerFinalHasChildrenExpr("all_rows.entity_type", "all_rows.entity_id")+` as has_children,
+       `+companyExplorerRootEffectiveAccessSelect("all_rows.entity_type", "all_rows.entity_id")+` as effective_access,
+       `+companyExplorerFinalNativeContext("all_rows.entity_type", "all_rows.entity_id", "coalesce(all_rows.resource_id, all_rows.entity_id)")+` as native_context,
+       all_rows.created_timestamp,
+       all_rows.updated_timestamp
+from all_rows
+where `+companyExplorerRootAccessPredicate("all_rows.entity_type", "all_rows.entity_id")+`
+order by all_rows.position asc, all_rows.created_timestamp asc, all_rows.name asc, all_rows.entity_id asc`, companyExplorerRootArgs(query)...)
+	if err != nil {
+		return nil, err
+	}
+	return scanCompanyExplorerV2Rows(rows)
+}
+
+func (r *PostgresRepo) queryCompanyExplorerFinalContainerChildren(ctx context.Context, query CompanyExplorerV2RowsQuery) ([]CompanyExplorerV2Row, error) {
 	parentFolderPredicate := "folder.parent_folder_id=$2::uuid"
 	itemParentPredicate := "item.parent_folder_id=$2::uuid"
 	parentEntityExpr := "$2::uuid"
-	if parent.EntityType == CompanyExplorerV2EntityCompany {
-		parentFolderPredicate = "folder.parent_folder_id is null"
-		itemParentPredicate = "item.parent_folder_id is null"
-		parentEntityExpr = "$1::uuid"
-	}
 	rows, err := r.db.QueryContext(ctx, `
 with folder_rows as (
   select folder.company_id,
@@ -784,6 +835,9 @@ func (r *PostgresRepo) GetCompanyExplorerV2EntityWithParent(companyID, entityID,
 	row, err := r.GetCompanyExplorerV2Entity(companyID, entityID, permissionUserID)
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
+	}
+	if parentEntityID == companyID {
+		parentEntityID = ""
 	}
 	row.ParentEntityID = parentEntityID
 	row.EdgeID = edgeID

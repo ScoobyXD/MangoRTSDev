@@ -28,9 +28,8 @@ func TestMemoryCompanyExplorerV2FinalViewReadsCompanyTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerV2RootRows all: %v", err)
 	}
-	companyRoot := requireCompanyExplorerV2Row(t, allRoots.Rows, CompanyExplorerV2EntityCompany, companyID)
-	if len(allRoots.Rows) != 1 || companyRoot.ParentEntityID != "" {
-		t.Fatalf("all roots = %+v, want only company root", allRoots.Rows)
+	if findCompanyExplorerV2Row(allRoots.Rows, CompanyExplorerV2EntityCompany, companyID) != nil {
+		t.Fatalf("all roots included synthetic company root: %+v", allRoots.Rows)
 	}
 	_, err = repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
@@ -43,7 +42,7 @@ func TestMemoryCompanyExplorerV2FinalViewReadsCompanyTree(t *testing.T) {
 
 	folder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
 		CompanyID:        companyID,
-		ParentEntityID:   companyRoot.EntityID,
+		ParentEntityID:   companyID,
 		Name:             "Customer Work",
 		PermissionUserID: user.UserID,
 	})
@@ -98,10 +97,26 @@ func TestMemoryCompanyExplorerV2FinalViewReadsCompanyTree(t *testing.T) {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
 
+	rootRows, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeAll,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2RootRows after create: %v", err)
+	}
+	rootFolder := requireCompanyExplorerV2Row(t, rootRows.Rows, CompanyExplorerV2EntityFolder, folder.EntityID)
+	if rootFolder.ParentEntityID != "" {
+		t.Fatalf("root folder row parent = %q, want empty visible root parent", rootFolder.ParentEntityID)
+	}
+	if findCompanyExplorerV2Row(rootRows.Rows, CompanyExplorerV2EntityCompany, companyID) != nil {
+		t.Fatalf("root rows included synthetic company row: %+v", rootRows.Rows)
+	}
+
 	rootChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
 		View:             CompanyExplorerLazyScopeAll,
-		ParentEntityID:   companyRoot.EntityID,
+		ParentEntityID:   companyID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
@@ -160,10 +175,12 @@ func TestMemoryCompanyExplorerV2PreservesManualAndNativeParentContexts(t *testin
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerV2RootRows: %v", err)
 	}
-	companyRoot := requireCompanyExplorerV2Row(t, roots.Rows, CompanyExplorerV2EntityCompany, companyID)
+	if findCompanyExplorerV2Row(roots.Rows, CompanyExplorerV2EntityCompany, companyID) != nil {
+		t.Fatalf("roots included synthetic company root: %+v", roots.Rows)
+	}
 	folder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
 		CompanyID:        companyID,
-		ParentEntityID:   companyRoot.EntityID,
+		ParentEntityID:   companyID,
 		Name:             "Manual Gate Placements",
 		PermissionUserID: user.UserID,
 	})
@@ -180,7 +197,7 @@ func TestMemoryCompanyExplorerV2PreservesManualAndNativeParentContexts(t *testin
 	}
 	projectRow, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
 		CompanyID:        companyID,
-		ParentEntityID:   companyRoot.EntityID,
+		ParentEntityID:   companyID,
 		ChildEntityType:  CompanyExplorerV2EntityProject,
 		ChildResourceID:  project.ProjectID,
 		PermissionUserID: user.UserID,
@@ -341,11 +358,13 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerV2RootRows: %v", err)
 	}
-	companyRoot := requireCompanyExplorerV2Row(t, roots.Rows, CompanyExplorerV2EntityCompany, companyID)
+	if findCompanyExplorerV2Row(roots.Rows, CompanyExplorerV2EntityCompany, companyID) != nil {
+		t.Fatalf("roots included synthetic company root: %+v", roots.Rows)
+	}
 
 	privateFolder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
 		CompanyID:        companyID,
-		ParentEntityID:   companyRoot.EntityID,
+		ParentEntityID:   companyID,
 		Name:             "Private folder",
 		DefaultAccess:    ResourceDefaultAccessNoAccess,
 		PermissionUserID: admin.UserID,
@@ -355,7 +374,7 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	}
 	openFolder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
 		CompanyID:        companyID,
-		ParentEntityID:   companyRoot.EntityID,
+		ParentEntityID:   companyID,
 		Name:             "Open folder",
 		PermissionUserID: admin.UserID,
 	})
@@ -366,7 +385,7 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	viewerChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
 		View:             CompanyExplorerLazyScopeAll,
-		ParentEntityID:   companyRoot.EntityID,
+		ParentEntityID:   companyID,
 		PermissionUserID: viewer.UserID,
 	})
 	if err != nil {
@@ -393,7 +412,7 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	viewerChildren, err = repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
 		View:             CompanyExplorerLazyScopeAll,
-		ParentEntityID:   companyRoot.EntityID,
+		ParentEntityID:   companyID,
 		PermissionUserID: viewer.UserID,
 	})
 	if err != nil {

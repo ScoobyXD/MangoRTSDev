@@ -18,6 +18,7 @@ type UseCompanyExplorerTreeModelInput = {
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
   rows?: CompanyExplorerV2Row[];
+  useV2Rows?: boolean;
   rootRowOrder: Record<string, number>;
   selectedTreeID: string;
   treeViewportHeight: number;
@@ -33,16 +34,17 @@ export function useCompanyExplorerTreeModel({
   folders,
   folderItems,
   rows = [],
+  useV2Rows = rows.length > 0,
   rootRowOrder,
   selectedTreeID,
   treeViewportHeight,
   treeScrollTop,
 }: UseCompanyExplorerTreeModelInput) {
   const treeRows = useMemo<ExplorerTreeNode[]>(
-    () => (rows.length > 0
+    () => (useV2Rows
       ? buildCompanyExplorerV2TreeRows({ expanded, rows })
       : buildCompanyExplorerTreeRows({ expanded, nodes, logicGates, projects, kanbanBoards, folders, folderItems, rootRowOrder })),
-    [expanded, nodes, logicGates, projects, kanbanBoards, folders, folderItems, rootRowOrder, rows],
+    [expanded, nodes, logicGates, projects, kanbanBoards, folders, folderItems, rootRowOrder, rows, useV2Rows],
   );
 
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID), [selectedTreeID, treeRows]);
