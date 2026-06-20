@@ -45,14 +45,18 @@ const kanbanModule = createLazyModule(() => import("./kanban/KanbanContent").the
 const homeModule = createLazyModule(() => import("../pages/home/HomePage").then((module) => ({ default: module.HomeFrameContent as ModuleComponent })));
 const projectManagementModule = createLazyModule(() => import("./project-management/ProjectManagementContent").then((module) => ({ default: module.ProjectManagementContent as ModuleComponent })));
 const accountManagerModule = createLazyModule(() => import("./accounts/AccountManagerContent").then((module) => ({ default: module.AccountManagerContent as ModuleComponent })));
+const teamsModule = createLazyModule(() => import("./teams/TeamsContent").then((module) => ({
+  default: ((props: ModuleProps) => React.createElement(module.TeamsContent, { accent: props.accent })) as ModuleComponent,
+})));
 
 const moduleEntries = [
   { kind: "company-explorer", label: "Explorer", defaultW: 18, defaultH: 14, ...companyExplorerModule },
   { kind: "editor", label: "Editor", defaultW: 16, defaultH: 14, ...editorModule },
   { kind: "kanban", label: "Kanban board", defaultW: 18, defaultH: 7, ...kanbanModule },
   { kind: "home", label: "Home", defaultW: 24, defaultH: 16, ...homeModule },
-  { kind: "project-management", label: "Project Management", defaultW: 42, defaultH: 30, ...projectManagementModule },
-  { kind: "account-manager", label: "Account Manager", defaultW: 42, defaultH: 30, ...accountManagerModule },
+  { kind: "project-management", label: "Projects", defaultW: 42, defaultH: 30, ...projectManagementModule },
+  { kind: "account-manager", label: "Accounts", defaultW: 42, defaultH: 30, ...accountManagerModule },
+  { kind: "teams", label: "Teams", defaultW: 42, defaultH: 30, ...teamsModule },
   { kind: "map", label: "Map", defaultW: 16, defaultH: 14, ...mapModule },
 ];
 

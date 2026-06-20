@@ -966,7 +966,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   return (
     <div style={summaryShellStyle}>
       <div style={summaryHeaderStyle}>
-        <button type="button" style={backButtonStyle} onClick={onBack}>{"<"} Project Management</button>
+        <button type="button" style={backButtonStyle} onClick={onBack}>{"<"} Projects</button>
         <div style={summaryTitleClusterStyle}>
           <div style={summaryEyebrowStyle}>Project Summary</div>
           {projectTitleEditing ? (

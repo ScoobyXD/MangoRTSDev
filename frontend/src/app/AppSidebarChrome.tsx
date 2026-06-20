@@ -4,10 +4,10 @@ import { readAuthConfig } from "../auth/cognitoAuth";
 import { WORKTREE_VERSION } from "./worktreeVersion";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import FrameRightClickMenu from "./framerightclickmenu";
-import { HeaderAccountManagerIcon, HeaderMapIcon, HeaderProjectManagementIcon } from "./HeaderIcons";
+import { HeaderAccountManagerIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
 import { UI_THEME } from "./frameLayoutTypes";
-import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadProjectManagementSurface } from "./preloadDashboardModules";
+import { preloadAccountManagerSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
 import type { CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
@@ -69,7 +69,7 @@ const SIDEBAR_ELEVATED_RADIUS = 11;
 const SIDEBAR_SCROLL_ACCENT = "rgba(203, 213, 225, 0.82)";
 const SIDEBAR_PROJECT_ICON_COLOR = "#f97316";
 const SIDEBAR_ACCOUNT_ICON_COLOR = "#14b8a6";
-const SIDEBAR_MAP_ICON_COLOR = "#19a8ff";
+const SIDEBAR_TEAMS_ICON_COLOR = "#6366f1";
 const SIDEBAR_STATE_ACTIVE_BG = "rgba(15, 23, 42, 0.045)";
 const SIDEBAR_STATE_DROP_BG = "rgba(15, 23, 42, 0.055)";
 const SIDEBAR_STATE_HOVER_BG = "rgba(15, 23, 42, 0.055)";
@@ -91,7 +91,7 @@ type SidebarSectionID = "shared-triage";
 export type HomeSidebarView = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "my-work" | "updates" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
-type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management" | "account-manager";
+type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams";
 
 type AppSidebarProps = {
   accountChrome?: React.ReactNode;
@@ -912,7 +912,8 @@ export function AppSidebar({
         </div>
       </div>
 
-      <section style={appSidebarKeyViewsSectionStyle} aria-label="Home inboxes">
+      <section style={appSidebarNavSectionStyle} aria-label="Live Feed">
+        <AppSidebarSectionHeader label="Live Feed" />
         <AppSidebarButton
           label="My Triage"
           active={homeActive && activeHomeView === "my-triage"}
@@ -981,12 +982,6 @@ export function AppSidebar({
           {sharedError && <div style={appSidebarSharedErrorStyle}>{sharedError}</div>}
         </div>
         <AppSidebarButton
-          label="My Work"
-          active={homeActive && activeHomeView === "my-work"}
-          elevated
-          onClick={() => onHomeViewSelect("my-work")}
-        />
-        <AppSidebarButton
           label="Updates"
           active={homeActive && activeHomeView === "updates"}
           elevated
@@ -994,36 +989,13 @@ export function AppSidebar({
         />
       </section>
 
-      <section style={appSidebarPrimaryPagesSectionStyle} aria-label="Primary pages">
+      <section style={appSidebarNavSectionStyle} aria-label="Tower">
+        <AppSidebarSectionHeader label="Tower" />
         <AppSidebarButton
-          label="Project Management"
-          active={activePage === "project-management"}
-          icon={<HeaderProjectManagementIcon color={SIDEBAR_PROJECT_ICON_COLOR} />}
+          label="My Work"
+          active={homeActive && activeHomeView === "my-work"}
           elevated
-          onPointerEnter={preloadProjectManagementSurface}
-          onFocus={preloadProjectManagementSurface}
-          onPointerDown={preloadProjectManagementSurface}
-          onClick={() => onPageSelect("project-management")}
-        />
-        <AppSidebarButton
-          label="Account Manager"
-          active={activePage === "account-manager"}
-          icon={<HeaderAccountManagerIcon color={SIDEBAR_ACCOUNT_ICON_COLOR} />}
-          elevated
-          onPointerEnter={preloadAccountManagerSurface}
-          onFocus={preloadAccountManagerSurface}
-          onPointerDown={preloadAccountManagerSurface}
-          onClick={() => onPageSelect("account-manager")}
-        />
-        <AppSidebarButton
-          label="Map"
-          active={activePage === "map"}
-          icon={<HeaderMapIcon color={SIDEBAR_MAP_ICON_COLOR} />}
-          elevated
-          onPointerEnter={preloadDefaultDashboardModules}
-          onFocus={preloadDefaultDashboardModules}
-          onPointerDown={preloadDefaultDashboardModules}
-          onClick={() => onPageSelect("map")}
+          onClick={() => onHomeViewSelect("my-work")}
         />
       </section>
 
@@ -1057,7 +1029,7 @@ export function AppSidebar({
           onPinDrop(event);
         }}
       >
-        <div style={appSidebarSectionTitleStyle}>Pinned</div>
+        <AppSidebarSectionHeader label="Pinned" />
         <div style={appSidebarPinListStyle}>
           {pins.length === 0 ? (
             <div style={appSidebarEmptyStyle}>No pins</div>
@@ -1110,13 +1082,46 @@ export function AppSidebar({
         </div>
       </section>
 
+      <section style={appSidebarNavSectionStyle} aria-label="Entities">
+        <AppSidebarSectionHeader label="Entities" />
+        <AppSidebarButton
+          label="Projects"
+          active={activePage === "project-management"}
+          icon={<HeaderProjectManagementIcon color={SIDEBAR_PROJECT_ICON_COLOR} />}
+          elevated
+          onPointerEnter={preloadProjectManagementSurface}
+          onFocus={preloadProjectManagementSurface}
+          onPointerDown={preloadProjectManagementSurface}
+          onClick={() => onPageSelect("project-management")}
+        />
+        <AppSidebarButton
+          label="Accounts"
+          active={activePage === "account-manager"}
+          icon={<HeaderAccountManagerIcon color={SIDEBAR_ACCOUNT_ICON_COLOR} />}
+          elevated
+          onPointerEnter={preloadAccountManagerSurface}
+          onFocus={preloadAccountManagerSurface}
+          onPointerDown={preloadAccountManagerSurface}
+          onClick={() => onPageSelect("account-manager")}
+        />
+        <AppSidebarButton
+          label="Teams"
+          active={activePage === "teams"}
+          icon={<HeaderTeamsIcon color={SIDEBAR_TEAMS_ICON_COLOR} />}
+          elevated
+          onPointerEnter={preloadTeamsSurface}
+          onFocus={preloadTeamsSurface}
+          onPointerDown={preloadTeamsSurface}
+          onClick={() => onPageSelect("teams")}
+        />
+      </section>
+
       <AppSidebarCompanyExplorerSection
         selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
         explorerSearchQuery={explorerSearchQuery}
         onExplorerSearchQueryChange={setExplorerSearchQuery}
         onTriageMessagesDrop={requestExplorerTriageMessageDrop}
       />
-
       {WORKTREE_VERSION && (
         <div aria-label={`Worktree version ${WORKTREE_VERSION}`} style={appSidebarVersionStyle}>
           v{WORKTREE_VERSION}
@@ -1270,6 +1275,15 @@ export function AppSidebar({
   );
 }
 
+function AppSidebarSectionHeader({ label }: { label: string }): React.ReactElement {
+  return (
+    <div style={appSidebarSectionHeaderShellStyle}>
+      <span style={appSidebarSectionTitleStyle}>{label}</span>
+      <span aria-hidden="true" style={appSidebarSectionHeaderLineStyle} />
+    </div>
+  );
+}
+
 function AppSidebarCompanyExplorerSection({
   selectionTargetFrameIDs,
   explorerSearchQuery,
@@ -1283,6 +1297,7 @@ function AppSidebarCompanyExplorerSection({
 }): React.ReactElement {
   return (
     <section style={appSidebarCompanyExplorerSectionStyle} aria-label="Company Explorer">
+      <AppSidebarSectionHeader label="Explorer" />
       <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
         <SidebarCompanyExplorerContent
           accent={SIDEBAR_ACTIVE_TEXT}
@@ -1945,23 +1960,27 @@ const appSidebarExplorerSearchIconStyle: React.CSSProperties = {
   pointerEvents: "none",
 };
 
-const appSidebarKeyViewsSectionStyle: React.CSSProperties = {
+const appSidebarNavSectionStyle: React.CSSProperties = {
   position: "relative",
   flex: "0 0 auto",
   display: "grid",
   gap: 8,
   minWidth: 0,
-  padding: "2px 3px 14px",
-  borderBottom: `1px solid ${SIDEBAR_DIVIDER}`,
+  padding: "0 3px 10px",
 };
 
-const appSidebarPrimaryPagesSectionStyle: React.CSSProperties = {
-  flex: "0 0 auto",
-  display: "grid",
-  gap: 8,
+const appSidebarSectionHeaderShellStyle: React.CSSProperties = {
   minWidth: 0,
-  padding: "0 3px 12px",
-  borderBottom: `1px solid ${SIDEBAR_DIVIDER}`,
+  display: "grid",
+  gridTemplateRows: "auto 1px",
+  gap: 5,
+  padding: "0 3px",
+};
+
+const appSidebarSectionHeaderLineStyle: React.CSSProperties = {
+  minWidth: 0,
+  height: 1,
+  background: SIDEBAR_DIVIDER,
 };
 
 function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
@@ -1969,10 +1988,9 @@ function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
     flex: "0 0 auto",
     display: "grid",
     gridTemplateRows: "auto minmax(44px, auto)",
-    gap: 5,
+    gap: 7,
     minWidth: 0,
     padding: "0 0 10px",
-    borderBottom: `1px solid ${SIDEBAR_DIVIDER}`,
     outline: active ? "2px solid rgba(148, 163, 184, 0.24)" : "2px solid transparent",
     outlineOffset: 2,
     borderRadius: 6,
@@ -1982,9 +2000,9 @@ function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
 const appSidebarCompanyExplorerSectionStyle: React.CSSProperties = {
   flex: "0 0 auto",
   minWidth: 0,
-  display: "block",
+  display: "grid",
+  gap: 6,
   padding: "0 0 10px",
-  borderBottom: `1px solid ${SIDEBAR_DIVIDER}`,
 };
 
 const appSidebarSectionTitleStyle: React.CSSProperties = {

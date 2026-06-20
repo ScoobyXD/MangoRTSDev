@@ -1336,10 +1336,10 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       <section style={timelineSurfaceStyle}>
         <div style={surfaceHeaderStyle}>
           <div style={titleClusterStyle}>
-            <h2 style={surfaceTitleStyle}>Project Management</h2>
+            <h2 style={surfaceTitleStyle}>Projects</h2>
             <div style={surfaceMetaStyle}>{viewMode === "timeline" ? `${shortDayLabel(weekDays[0])} - ${shortDayLabel(weekDays[WEEK_DAY_COUNT - 1])}` : `${projects.length} projects`}</div>
           </div>
-          <div role="group" aria-label="Project management view" style={viewToggleStyle}>
+          <div role="group" aria-label="Projects view" style={viewToggleStyle}>
             <span aria-hidden="true" style={viewToggleThumbStyle(viewMode)} />
             <button type="button" style={viewToggleButtonStyle(viewMode === "list")} onClick={() => setViewMode("list")}>List View</button>
             <button type="button" style={viewToggleButtonStyle(viewMode === "timeline")} onClick={() => setViewMode("timeline")}>Timeline View</button>

@@ -76,7 +76,7 @@ export function createProjectManagementFrames(): FrameDataModel[] {
       y: 1,
       w: 42,
       h: 30,
-      title: "Project Management",
+      title: "Projects",
       ...WHITE_FRAME,
     },
   ];
@@ -91,7 +91,22 @@ export function createAccountManagerFrames(): FrameDataModel[] {
       y: 1,
       w: 42,
       h: 30,
-      title: "Account Manager",
+      title: "Accounts",
+      ...WHITE_FRAME,
+    },
+  ];
+}
+
+export function createTeamsFrames(): FrameDataModel[] {
+  return [
+    {
+      id: createFrameId(),
+      kind: "teams",
+      x: 1,
+      y: 1,
+      w: 42,
+      h: 30,
+      title: "Teams",
       ...WHITE_FRAME,
     },
   ];

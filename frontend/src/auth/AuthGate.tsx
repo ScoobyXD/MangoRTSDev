@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../app/ConfirmActionMenu";
-import { preloadAccountManagerSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProjectManagementSurface } from "../app/preloadDashboardModules";
+import { preloadAccountManagerSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
 import { HeaderRecycleBinIcon, HeaderSettingsIcon } from "../app/HeaderIcons";
 import { MangoWordmark } from "../app/MangoLogo";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
@@ -81,6 +81,7 @@ const logicGateArenaPrefetch = prefetchHandlers(preloadLogicGateArenaSurface);
 const homePrefetch = prefetchHandlers(preloadHomeSurface);
 const projectManagementPrefetch = prefetchHandlers(preloadProjectManagementSurface);
 const accountManagerPrefetch = prefetchHandlers(preloadAccountManagerSurface);
+const teamsPrefetch = prefetchHandlers(preloadTeamsSurface);
 const AUTH_RETURN_PATH_KEY = "mangorts:auth-return-path-v1";
 const AUTH_RETURN_STATIC_PATHS = new Set([
   "/",
@@ -90,6 +91,7 @@ const AUTH_RETURN_STATIC_PATHS = new Set([
   "/logic-gate-arena",
   "/project-management",
   "/account-manager",
+  "/teams",
   "/settings",
   "/admin/users",
   "/recycle-bin",
@@ -118,22 +120,6 @@ type CompanyUserOnboarding = {
   invite_accepted: boolean;
   google_connection_status: "connected" | "not_connected" | "reauth_required" | string;
   google_connection_account_email?: string;
-};
-
-type CompanyUserGroup = {
-  company_id: string;
-  group_id: string;
-  parent_group_id?: string;
-  name: string;
-  position: number;
-};
-
-type CompanyUserGroupMember = {
-  company_id: string;
-  group_id: string;
-  user_id: string;
-  user_display_name?: string;
-  user_email?: string;
 };
 
 const PASSWORD_RESET_SECONDS = 60 * 60;
@@ -419,7 +405,9 @@ export default function AuthGate() {
         ? "project-management"
         : normalizedPath === "/account-manager"
           ? "account-manager"
-        : undefined;
+          : normalizedPath === "/teams"
+            ? "teams"
+            : undefined;
 
   if (!authEnabled) {
     return (
@@ -468,6 +456,10 @@ export default function AuthGate() {
 
   if (normalizedPath === "/account-manager") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="account-manager" /></React.Suspense>;
+  }
+
+  if (normalizedPath === "/teams") {
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="teams" /></React.Suspense>;
   }
 
   if (normalizedPath === "/home" || normalizedPath === "/communications" || normalizedPath === "/communication") {
@@ -1144,29 +1136,6 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   const inviteSelectedCompany = companyOptions.find((company) => company.company_id === inviteCompanyID) ?? null;
   const activeCompanyLabel = selectedCompany ? companyName(selectedCompany) : companyID ? "Selected company" : "No company selected";
   const canInvite = me.is_dev_admin || canManageSelectedCompany;
-  const [userGroups, setUserGroups] = useState<CompanyUserGroup[]>([]);
-  const [userGroupMembers, setUserGroupMembers] = useState<CompanyUserGroupMember[]>([]);
-  const [selectedUserGroupID, setSelectedUserGroupID] = useState("");
-  const [newUserGroupName, setNewUserGroupName] = useState("");
-  const [newChildUserGroupName, setNewChildUserGroupName] = useState("");
-  const [groupMemberDraft, setGroupMemberDraft] = useState<Set<string>>(new Set());
-  const [groupBusy, setGroupBusy] = useState(false);
-  const childGroupNameInputRef = useRef<HTMLInputElement | null>(null);
-  const selectedUserGroup = userGroups.find((group) => group.group_id === selectedUserGroupID) ?? null;
-  const userGroupChildrenByParent = useMemo(() => {
-    const grouped = new Map<string, CompanyUserGroup[]>();
-    for (const group of userGroups) {
-      const parentID = group.parent_group_id?.trim() ?? "";
-      const list = grouped.get(parentID) ?? [];
-      list.push(group);
-      grouped.set(parentID, list);
-    }
-    for (const list of grouped.values()) {
-      list.sort((a, b) => (a.position - b.position) || a.name.localeCompare(b.name) || a.group_id.localeCompare(b.group_id));
-    }
-    return grouped;
-  }, [userGroups]);
-
   const loadCompanyOptions = useCallback(async (query = "") => {
     if (!me.is_dev_admin) return;
     const params = new URLSearchParams();
@@ -1187,25 +1156,20 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
     if (!companyID || !canManageSelectedCompany) {
       setUsers([]);
       setOnboarding([]);
-      setUserGroups([]);
-      setUserGroupMembers([]);
-      setSelectedUserGroupID("");
+
       setError("");
       return;
     }
     setError("");
-    const [usersResult, onboardingResult, groupsResult] = await Promise.allSettled([
+    const [usersResult, onboardingResult] = await Promise.allSettled([
       listCompanyUsers(companyID),
       apiFetchJSON<{ onboarding: CompanyUserOnboarding[] }>(`/v1/companies/${encodeURIComponent(companyID)}/onboarding`),
-      apiFetchJSON<{ groups: CompanyUserGroup[]; members: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`),
     ]);
     if (usersResult.status === "rejected") {
       console.error("Company users load failed", usersResult.reason);
       setUsers([]);
       setOnboarding([]);
-      setUserGroups([]);
-      setUserGroupMembers([]);
-      setSelectedUserGroupID("");
+
       setError(formatAuthError(usersResult.reason, "Failed to load users"));
       return;
     }
@@ -1220,18 +1184,6 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
       warnings.push("User onboarding status could not be loaded.");
     }
 
-    if (groupsResult.status === "fulfilled") {
-      const groups = groupsResult.value.groups ?? [];
-      setUserGroups(groups);
-      setUserGroupMembers(groupsResult.value.members ?? []);
-      setSelectedUserGroupID((previous) => groups.some((group) => group.group_id === previous) ? previous : groups[0]?.group_id ?? "");
-    } else {
-      console.error("User groups load failed", groupsResult.reason);
-      setUserGroups([]);
-      setUserGroupMembers([]);
-      setSelectedUserGroupID("");
-      warnings.push("User groups could not be loaded. Run pending database migrations, then refresh.");
-    }
     setError(warnings.join(" "));
   }, [canManageSelectedCompany, companyID]);
 
@@ -1239,121 +1191,9 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (companyID) setActiveCompanyID(companyID); }, [companyID]);
   useEffect(() => {
-    const memberIDs = userGroupMembers.filter((member) => member.group_id === selectedUserGroupID).map((member) => member.user_id);
-    setGroupMemberDraft(new Set(memberIDs));
-  }, [selectedUserGroupID, userGroupMembers]);
-  useEffect(() => {
     if (!me.is_dev_admin) setInviteCompanyID(companyID);
     else if (!inviteCompanyID && companyID) setInviteCompanyID(companyID);
   }, [companyID, inviteCompanyID, me.is_dev_admin]);
-
-  const createUserGroup = async (parentGroupID = "") => {
-    const name = (parentGroupID ? newChildUserGroupName : newUserGroupName).trim();
-    if (!companyID || !name) {
-      setError("Group name required");
-      return;
-    }
-    setGroupBusy(true);
-    setError("");
-    try {
-      const group = await apiFetchJSON<CompanyUserGroup>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`, {
-        method: "POST",
-        body: JSON.stringify({ name, parent_group_id: parentGroupID }),
-      });
-      setUserGroups((previous) => [...previous.filter((item) => item.group_id !== group.group_id), group]);
-      setSelectedUserGroupID(group.group_id);
-      if (parentGroupID) setNewChildUserGroupName("");
-      else setNewUserGroupName("");
-      await load();
-    } catch (groupError) {
-      console.error("Create user group failed", groupError);
-      setError(formatAuthError(groupError, "Create group failed"));
-    } finally {
-      setGroupBusy(false);
-    }
-  };
-
-  const saveSelectedUserGroupMembers = async () => {
-    if (!companyID || !selectedUserGroupID) return;
-    setGroupBusy(true);
-    setError("");
-    try {
-      const payload = await apiFetchJSON<{ members: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups/${encodeURIComponent(selectedUserGroupID)}/members`, {
-        method: "PUT",
-        body: JSON.stringify({ company_id: companyID, user_ids: Array.from(groupMemberDraft) }),
-      });
-      setUserGroupMembers((previous) => [
-        ...previous.filter((member) => member.group_id !== selectedUserGroupID),
-        ...(payload.members ?? []),
-      ]);
-      await load();
-    } catch (groupError) {
-      console.error("Save user group members failed", groupError);
-      setError(formatAuthError(groupError, "Save group users failed"));
-    } finally {
-      setGroupBusy(false);
-    }
-  };
-
-  const deleteSelectedUserGroup = async () => {
-    if (!companyID || !selectedUserGroupID) return;
-    setGroupBusy(true);
-    setError("");
-    try {
-      await apiFetchJSON(`/v1/companies/${encodeURIComponent(companyID)}/user-groups/${encodeURIComponent(selectedUserGroupID)}`, { method: "DELETE" });
-      setSelectedUserGroupID("");
-      await load();
-    } catch (groupError) {
-      console.error("Delete user group failed", groupError);
-      setError(formatAuthError(groupError, "Delete group failed"));
-    } finally {
-      setGroupBusy(false);
-    }
-  };
-
-  const renderUserGroup = (group: CompanyUserGroup, depth = 0): React.ReactNode => {
-    const childGroups = userGroupChildrenByParent.get(group.group_id) ?? [];
-    const memberCount = userGroupMembers.filter((member) => member.group_id === group.group_id).length;
-    const selected = selectedUserGroupID === group.group_id;
-    return (
-      <div key={group.group_id} style={{ display: "grid", gap: 4, marginLeft: depth * 14 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", gap: 4, alignItems: "stretch" }}>
-          <button
-            className="mango-settings-action"
-            type="button"
-            style={{
-              ...smallButtonStyle,
-              justifyContent: "space-between",
-              display: "flex",
-              minHeight: 34,
-              ...(selected ? { background: SETTINGS_SELECTED_BACKGROUND, borderColor: "transparent", boxShadow: SETTINGS_SELECTED_SHADOW } : {}),
-            }}
-            onClick={() => setSelectedUserGroupID(group.group_id)}
-          >
-            <span style={{ overflowWrap: "anywhere", textAlign: "left" }}>{group.name}</span>
-            <span style={{ color: SETTINGS_MUTED }}>{memberCount}</span>
-          </button>
-          <button
-            className="mango-settings-action"
-            type="button"
-            title={`Add subgroup under ${group.name}`}
-            aria-label={`Add subgroup under ${group.name}`}
-            style={{ ...smallButtonStyle, minHeight: 34, padding: 0, fontSize: 16, fontWeight: 760 }}
-            disabled={groupBusy}
-            onClick={() => {
-              setSelectedUserGroupID(group.group_id);
-              setNewChildUserGroupName("");
-              window.setTimeout(() => childGroupNameInputRef.current?.focus(), 0);
-            }}
-          >
-            +
-          </button>
-        </div>
-        {childGroups.map((child) => renderUserGroup(child, depth + 1))}
-      </div>
-    );
-  };
-
   return (
     <div style={embedded ? { ...settingsPageStyle, minHeight: "100%", boxSizing: "border-box" } : settingsPageStyle}>
       <div style={settingsHeaderStyle}>
@@ -1361,8 +1201,9 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
         {!embedded && <div style={settingsNavStyle}>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/logic-gate-arena")} {...logicGateArenaPrefetch}>Logic Gate Arena</button>
-          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/project-management")} {...projectManagementPrefetch}>Project Management</button>
-          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/account-manager")} {...accountManagerPrefetch}>Account Manager</button>
+          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/project-management")} {...projectManagementPrefetch}>Projects</button>
+          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/account-manager")} {...accountManagerPrefetch}>Accounts</button>
+          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/teams")} {...teamsPrefetch}>Teams</button>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/home")} {...homePrefetch}>Home</button>
         </div>}
       </div>
@@ -1576,67 +1417,6 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
               </button>
             </div>
           ))}
-        </div>
-      </section>}
-      {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop: 14 }}>
-        <div style={settingsSectionHeaderRowStyle}>
-          <h2 style={sectionTitleStyle}>User Groups</h2>
-          <span style={settingsSectionScopeStyle}>{activeCompanyLabel}</span>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))", gap: 14 }}>
-          <div style={{ display: "grid", gap: 10, alignContent: "start" }}>
-            <form style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8 }} onSubmit={(event) => {
-              event.preventDefault();
-              void createUserGroup("");
-            }}>
-              <input className="mango-settings-input" style={settingsInputStyle} value={newUserGroupName} onChange={(event) => setNewUserGroupName(event.target.value)} placeholder="New group name" />
-              <button className="mango-settings-action" type="submit" style={smallButtonStyle} disabled={groupBusy}>Create</button>
-            </form>
-            <div style={{ display: "grid", gap: 4 }}>
-              {userGroups.length === 0 && <div style={settingsInfoTextStyle}>No groups yet.</div>}
-              {(userGroupChildrenByParent.get("") ?? []).map((group) => renderUserGroup(group))}
-            </div>
-          </div>
-          <div style={{ display: "grid", gap: 10, alignContent: "start" }}>
-            {selectedUserGroup ? (
-              <>
-                <div style={settingsSubsectionTitleStyle}>{selectedUserGroup.name}</div>
-                <form style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8 }} onSubmit={(event) => {
-                  event.preventDefault();
-                  void createUserGroup(selectedUserGroup.group_id);
-                }}>
-                  <input ref={childGroupNameInputRef} className="mango-settings-input" style={settingsInputStyle} value={newChildUserGroupName} onChange={(event) => setNewChildUserGroupName(event.target.value)} placeholder={`New subgroup under ${selectedUserGroup.name}`} />
-                  <button className="mango-settings-action" type="submit" style={{ ...smallButtonStyle, minHeight: 34 }} disabled={groupBusy || !newChildUserGroupName.trim()}>Add subgroup</button>
-                </form>
-                <div className="company-explorer-scroll" style={{ display: "grid", gap: 4, maxHeight: 260, overflow: "auto", border: "1px solid rgba(255, 255, 255, 0.78)", borderRadius: 8, padding: 8, background: SETTINGS_INSET_SURFACE, boxShadow: SETTINGS_INSET_SHADOW }}>
-                  {users.map((user) => (
-                    <label key={user.user_id} style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", gap: 8, alignItems: "center", fontSize: 12 }}>
-                      <input
-                        type="checkbox"
-                        checked={groupMemberDraft.has(user.user_id)}
-                        onChange={(event) => {
-                          setGroupMemberDraft((previous) => {
-                            const next = new Set(previous);
-                            if (event.target.checked) next.add(user.user_id);
-                            else next.delete(user.user_id);
-                            return next;
-                          });
-                        }}
-                      />
-                      <span style={{ overflowWrap: "anywhere" }}>{companyUserLabel(user)}</span>
-                      <span style={{ color: SETTINGS_MUTED }}>{user.role}</span>
-                    </label>
-                  ))}
-                </div>
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                  <button className="mango-settings-action" type="button" style={{ ...smallButtonStyle, ...dangerButtonStyle }} disabled={groupBusy} onClick={() => void deleteSelectedUserGroup()}>Delete group</button>
-                  <button className="mango-settings-action" type="button" style={settingsPrimaryButtonStyle} disabled={groupBusy} onClick={() => void saveSelectedUserGroupMembers()}>{groupBusy ? "Saving" : "Save users"}</button>
-                </div>
-              </>
-            ) : (
-              <div style={settingsInfoTextStyle}>Select a group to manage users.</div>
-            )}
-          </div>
         </div>
       </section>}
       {deleteConfirmation && (

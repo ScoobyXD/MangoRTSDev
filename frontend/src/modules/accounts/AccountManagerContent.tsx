@@ -280,7 +280,7 @@ export const AccountManagerContent: React.FC<AccountManagerContentProps> = ({
       <section style={managerSurfaceStyle}>
         <div style={headerStyle}>
           <div style={titleStackStyle}>
-            <h2 style={titleStyle}>Account Manager</h2>
+            <h2 style={titleStyle}>Accounts</h2>
             <div style={metaStyle}>{accounts.length} account{accounts.length === 1 ? "" : "s"}{loading ? " - Loading" : ""}</div>
           </div>
           <button type="button" style={refreshButtonStyle(accent)} disabled={loading} onClick={() => { reloadAccounts(); reloadFolders(); }}>

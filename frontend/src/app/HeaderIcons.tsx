@@ -38,6 +38,16 @@ export const HeaderAccountManagerIcon: React.FC<{ color?: string }> = ({ color =
   </svg>
 );
 
+export const HeaderTeamsIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
+    <circle cx="8" cy="4.2" r="2" fill="none" stroke={color} strokeWidth="1.25" />
+    <circle cx="3.8" cy="6.1" r="1.55" fill="none" stroke={color} strokeWidth="1.15" />
+    <circle cx="12.2" cy="6.1" r="1.55" fill="none" stroke={color} strokeWidth="1.15" />
+    <path d="M4.8 13.3v-.8c0-1.65 1.35-3 3.2-3s3.2 1.35 3.2 3v.8" fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" />
+    <path d="M1.7 12.9v-.55c0-1.18.9-2.13 2.15-2.13.62 0 1.14.2 1.53.55M14.3 12.9v-.55c0-1.18-.9-2.13-2.15-2.13-.62 0-1.14.2-1.53.55" fill="none" stroke={color} strokeWidth="1.15" strokeLinecap="round" />
+  </svg>
+);
+
 export const HeaderLogicGateArenaIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
   <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
     <rect x="2" y="2.2" width="4.2" height="4.2" rx="1" fill="none" stroke={color} strokeWidth="1.35" />
