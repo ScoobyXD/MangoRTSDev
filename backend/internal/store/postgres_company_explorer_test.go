@@ -31,6 +31,11 @@ func TestPostgresCompanyExplorerLazyUsesFinalItemsAndNoScopedFolders(t *testing.
 	}
 	source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
 	for _, want := range []string{
+		"$2::text as scope",
+		"$3::uuid as scope_user_id",
+		"$4::uuid as permission_user_id",
+		"$5::uuid as parent_id",
+		"$6::text as access_level",
 		"from company_explorer_items item",
 		"item.parent_folder_id is null",
 		"item.parent_folder_id=$5::uuid",

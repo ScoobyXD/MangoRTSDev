@@ -7,7 +7,10 @@ import (
 	"testing"
 )
 
-const companyExplorerFinalCutoverMigration = "20260620_company_explorer_final_cutover.sql"
+const (
+	companyExplorerFinalCutoverMigration        = "20260620_company_explorer_final_cutover.sql"
+	companyExplorerAccessHelperCutoverMigration = "20260620_z_company_explorer_access_helper_cutover.sql"
+)
 
 func TestCompanyExplorerFinalSchemaDefinesContainmentTables(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "db", "schema.sql"))
@@ -98,6 +101,44 @@ func TestCompanyExplorerFinalVerificationViewCoversCutoverInvariants(t *testing.
 		} {
 			if !strings.Contains(normalized, want) {
 				t.Fatalf("%s missing verification marker %q", path, want)
+			}
+		}
+	}
+}
+
+func TestCompanyExplorerAccessHelperCutoverUsesFinalFolderStorage(t *testing.T) {
+	for _, path := range []string{
+		filepath.Join("..", "..", "db", "schema.sql"),
+		filepath.Join("..", "..", "db", "migrations", companyExplorerAccessHelperCutoverMigration),
+	} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		normalized := normalizeSQLForCompanyExplorerV2Test(string(raw))
+		for _, want := range []string{
+			"create or replace function mangorts_user_can_access_resource",
+			"from company_explorer_folders folder",
+			"where normalized.resource_type='company_explorer_folder' and folder.company_id=p_company_id and folder.folder_id=p_resource_id",
+			"from shared_inbox_folders folder",
+			"from shared_inboxes inbox",
+			"from resource_permissions access",
+			"from resource_gvic_effective_assignments gvic",
+			"normalized.resource_type = 'shared_inbox_folder' and gvic.resource_type = 'shared_triage_folder'",
+		} {
+			if !strings.Contains(normalized, want) {
+				t.Fatalf("%s missing access helper marker %q", path, want)
+			}
+		}
+		for _, forbidden := range []string{
+			"folder.folder_kind",
+			"folder.system_key",
+			"folder.scope_type",
+			"folder.scope_id",
+			"folder_kind <> 'communications'",
+		} {
+			if strings.Contains(normalized, forbidden) {
+				t.Fatalf("%s kept removed access helper marker %q", path, forbidden)
 			}
 		}
 	}
