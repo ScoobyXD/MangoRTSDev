@@ -8,6 +8,17 @@ import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket
 import { listMyWorkMatrixRows, type MyWorkResourceTree } from "../../modules/work-items/workItemReadApi";
 import { cleanIDList, logicGateTitle } from "./homeUtils";
 import {
+  homeColorWithAlpha,
+  homeGVICRoleAccent,
+  logicGateGVICColumnHeaderStyle,
+  logicGateGVICColumnLabelStyle,
+  logicGateGVICColumnLetterStyle,
+  logicGateGVICCornerStyle,
+  logicGateGVICHeaderStyle,
+  logicGateGVICMatrixSurfaceStyle,
+  logicGateGVICPriorityHeaderStyle,
+} from "./homeStyles";
+import {
   loadMyWorkMatrixCellsForUsers,
   myWorkMatrixCacheKey,
   myWorkProjectionDeltaAffectsTargetUsers,
@@ -595,6 +606,7 @@ function GroupingPanel({
 
 function MyWorkGroupList({
   groups,
+  role,
   expandedGroupIDs,
   onToggleGroup,
   onOpenNode,
@@ -608,6 +620,7 @@ function MyWorkGroupList({
   logicGateByID,
 }: {
   groups: MyWorkNestedGroup[];
+  role: LogicGateGVICRole;
   expandedGroupIDs: Set<string>;
   onToggleGroup: (groupID: string) => void;
   onOpenNode: (node: NodeRecord) => void;
@@ -628,7 +641,7 @@ function MyWorkGroupList({
         const resourceTarget = myWorkGroupResourceTarget(group);
         return (
           <div key={group.id} style={groupBlockStyle}>
-            <div style={groupHeaderStyle(group.depth)}>
+            <div style={groupHeaderStyle(group.depth, role)}>
               <button
                 type="button"
                 aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`}
@@ -639,12 +652,12 @@ function MyWorkGroupList({
               </button>
               {resourceTarget ? (
                 <button type="button" style={groupHeaderResourceButtonStyle} onClick={() => onOpenProject(resourceTarget.id, resourceTarget.label)}>
-                  <GroupHeaderIcon field={group.field} />
+                  <GroupHeaderIcon field={group.field} role={role} />
                   <span style={groupHeaderLabelStyle}>{group.label}</span>
                 </button>
               ) : (
                 <span style={groupHeaderStaticContentStyle}>
-                  <GroupHeaderIcon field={group.field} />
+                  <GroupHeaderIcon field={group.field} role={role} />
                   <span style={groupHeaderLabelStyle}>{group.label}</span>
                 </span>
               )}
@@ -652,6 +665,7 @@ function MyWorkGroupList({
             {open && group.groups.length > 0 && (
               <MyWorkGroupList
                 groups={group.groups}
+                role={role}
                 expandedGroupIDs={expandedGroupIDs}
                 onToggleGroup={onToggleGroup}
                 onOpenNode={onOpenNode}
@@ -666,7 +680,7 @@ function MyWorkGroupList({
               />
             )}
             {open && leafRows.length > 0 && (
-              <MyWorkRows rows={leafRows} depth={group.depth + 1} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu} onCreateNodeInLogicGate={onCreateNodeInLogicGate} onDropNodes={onDropNodes} nodeByID={nodeByID} logicGateByID={logicGateByID} />
+              <MyWorkRows rows={leafRows} role={role} depth={group.depth + 1} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu} onCreateNodeInLogicGate={onCreateNodeInLogicGate} onDropNodes={onDropNodes} nodeByID={nodeByID} logicGateByID={logicGateByID} />
             )}
           </div>
         );
@@ -677,6 +691,7 @@ function MyWorkGroupList({
 
 function MyWorkRows({
   rows,
+  role,
   depth,
   onOpenNode,
   onOpenLogicGate,
@@ -689,6 +704,7 @@ function MyWorkRows({
   logicGateByID,
 }: {
   rows: MyWorkResourceRow[];
+  role: LogicGateGVICRole;
   depth: number;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
@@ -706,6 +722,7 @@ function MyWorkRows({
         <MyWorkTreeRow
           key={row.rowKey ?? `${row.kind}:${row.id}`}
           row={row}
+          role={role}
           depth={depth}
           onOpenNode={onOpenNode}
           onOpenLogicGate={onOpenLogicGate}
@@ -724,6 +741,7 @@ function MyWorkRows({
 
 function MyWorkTreeRow({
   row,
+  role,
   depth,
   onOpenNode,
   onOpenLogicGate,
@@ -736,6 +754,7 @@ function MyWorkTreeRow({
   logicGateByID,
 }: {
   row: MyWorkResourceRow;
+  role: LogicGateGVICRole;
   depth: number;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
@@ -757,7 +776,7 @@ function MyWorkTreeRow({
   return (
     <div style={logicGateSectionBlockStyle}>
       <div
-        style={workRowStyle(depth)}
+        style={workRowStyle(depth, role)}
         draggable={row.kind === "node" || row.kind === "logic_gate"}
         onContextMenu={(event) => {
           if (row.kind === "node" && onOpenNodeBulkMenu) onOpenNodeBulkMenu(row.id, event);
@@ -797,7 +816,7 @@ function MyWorkTreeRow({
         </button>
         <span style={workRowMetaCellStyle}>{myWorkKindLabel(row.kind)}</span>
         {row.kind === "logic_gate" && onCreateNodeInLogicGate ? (
-          <button type="button" style={myWorkInlineActionButtonStyle} onClick={() => onCreateNodeInLogicGate({ logicGateID: row.id, nodeIDs: [], priority: actionPriority })}>Node</button>
+          <button type="button" style={myWorkInlineActionButtonStyle(role)} onClick={() => onCreateNodeInLogicGate({ logicGateID: row.id, nodeIDs: [], priority: actionPriority })}>Node</button>
         ) : (
           <span style={workRowMetaCellStyle}>{primaryPerson}</span>
         )}
@@ -811,6 +830,7 @@ function MyWorkTreeRow({
             <MyWorkTreeRow
               key={child.rowKey ?? `${row.rowKey}:${child.kind}:${child.id}`}
               row={child}
+              role={role}
               depth={depth + 1}
               onOpenNode={onOpenNode}
               onOpenLogicGate={onOpenLogicGate}
@@ -926,11 +946,14 @@ function MyWorkMatrix({
     <div style={myWorkMatrixGridStyle}>
       <div style={myWorkMatrixCornerStyle}>Priority</div>
       {MY_WORK_MATRIX_ROLES.map((role) => (
-        <div key={role} style={myWorkMatrixColumnHeaderStyle}>{GVICRoleLabel(role)}</div>
+        <div key={role} style={myWorkMatrixColumnHeaderStyle(role)}>
+          <strong style={logicGateGVICColumnLetterStyle(role)}>{myWorkGVICRoleLetter(role)}</strong>
+          <span style={logicGateGVICColumnLabelStyle(role)}>{GVICRoleLabel(role)}</span>
+        </div>
       ))}
       {MY_WORK_MATRIX_PRIORITIES.map((priority) => (
         <React.Fragment key={priority}>
-          <div style={myWorkMatrixPriorityHeaderStyle}>{priorityLabel(priority)}</div>
+          <div style={myWorkMatrixPriorityHeaderStyle(priority)}>{priorityLabel(priority)}</div>
           {MY_WORK_MATRIX_ROLES.map((role) => {
             const cellRows = sortMyWorkRows(rows.filter((row) => row.primaryGVICRole === role && priorityBucket(row.priority) === priority));
             const groups = buildNestedGroups(cellRows, groupings);
@@ -938,7 +961,7 @@ function MyWorkMatrix({
             return (
               <div
                 key={`${priority}:${role}`}
-                style={myWorkMatrixCellStyle}
+                style={myWorkMatrixCellStyle(role)}
                 onContextMenu={(event) => {
                   if (!onCreateNodeInCell) return;
                   event.preventDefault();
@@ -966,8 +989,8 @@ function MyWorkMatrix({
               >
                 {(onCreateNodeInCell || onCreateLogicGateInCell) && (
                   <div style={myWorkCellActionRowStyle}>
-                    {onCreateNodeInCell && <button type="button" style={myWorkCellActionButtonStyle} onClick={() => onCreateNodeInCell(createInput)}>Node</button>}
-                    {onCreateLogicGateInCell && <button type="button" style={myWorkCellActionButtonStyle} onClick={() => onCreateLogicGateInCell(createInput)}>Gate</button>}
+                    {onCreateNodeInCell && <button type="button" style={myWorkCellActionButtonStyle(role)} onClick={() => onCreateNodeInCell(createInput)}>Node</button>}
+                    {onCreateLogicGateInCell && <button type="button" style={myWorkCellActionButtonStyle(role)} onClick={() => onCreateLogicGateInCell(createInput)}>Gate</button>}
                   </div>
                 )}
                 {cellRows.length === 0 ? (
@@ -975,6 +998,7 @@ function MyWorkMatrix({
                 ) : groups.length > 0 ? (
                   <MyWorkGroupList
                     groups={groups}
+                    role={role}
                     expandedGroupIDs={expandedGroupIDs}
                     onToggleGroup={onToggleGroup}
                     onOpenNode={onOpenNode}
@@ -988,7 +1012,7 @@ function MyWorkMatrix({
                     logicGateByID={logicGateByID}
                   />
                 ) : (
-                  <MyWorkRows rows={cellRows} depth={0} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu} onCreateNodeInLogicGate={onCreateNodeInLogicGate} onDropNodes={onDropNodes} nodeByID={nodeByID} logicGateByID={logicGateByID} />
+                  <MyWorkRows rows={cellRows} role={role} depth={0} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu} onCreateNodeInLogicGate={onCreateNodeInLogicGate} onDropNodes={onDropNodes} nodeByID={nodeByID} logicGateByID={logicGateByID} />
                 )}
               </div>
             );
@@ -1157,6 +1181,13 @@ function collectMyWorkNodeIDs(row: MyWorkResourceRow): string[] {
 function normalizeGVICRole(role: string | null | undefined): LogicGateGVICRole | "" {
   if (role === "generated" || role === "verified" || role === "consulted" || role === "informed") return role;
   return "";
+}
+
+function myWorkGVICRoleLetter(role: LogicGateGVICRole): string {
+  if (role === "generated") return "G";
+  if (role === "verified") return "V";
+  if (role === "consulted") return "C";
+  return "I";
 }
 
 function userIDsForSelectedScope(
@@ -1394,9 +1425,9 @@ function PeopleIcon({ multiple }: { multiple: boolean }) {
   );
 }
 
-function GroupHeaderIcon({ field }: { field: MyWorkGroupingField }) {
+function GroupHeaderIcon({ field, role }: { field: MyWorkGroupingField; role: LogicGateGVICRole }) {
   if (field === "project") return <ExplorerRowIcon kind="project" />;
-  return <span aria-hidden="true" style={groupHeaderBadgeStyle}>{groupHeaderBadgeLabel(field)}</span>;
+  return <span aria-hidden="true" style={groupHeaderBadgeStyle(role)}>{groupHeaderBadgeLabel(field)}</span>;
 }
 
 function groupHeaderBadgeLabel(field: MyWorkGroupingField): string {
@@ -1413,42 +1444,47 @@ const peopleIconStyle: React.CSSProperties = {
   color: "#2563eb",
 };
 
-const groupHeaderBadgeStyle: React.CSSProperties = {
-  width: 16,
-  height: 16,
-  display: "grid",
-  placeItems: "center",
-  border: "none",
-  borderRadius: 0,
-  color: "#64748b",
-  background: "transparent",
-  fontSize: 10,
-  lineHeight: 1,
-  fontWeight: 850,
-};
+function groupHeaderBadgeStyle(role: LogicGateGVICRole): React.CSSProperties {
+  const accent = homeGVICRoleAccent(role);
+  return {
+    width: 18,
+    height: 18,
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${homeColorWithAlpha(accent, 0.28)}`,
+    borderRadius: 5,
+    color: accent,
+    background: `linear-gradient(135deg, rgba(255,255,255,0.96), ${homeColorWithAlpha(accent, 0.14)})`,
+    fontSize: 10,
+    lineHeight: 1,
+    fontWeight: 850,
+    boxShadow: "inset 1px 1px 0 rgba(255, 255, 255, 0.86)",
+  };
+}
 const myWorkShellStyle: React.CSSProperties = {
+  ...logicGateGVICMatrixSurfaceStyle,
   minWidth: 0,
   minHeight: 0,
   height: "100%",
-  display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
-  gap: 6,
-  padding: "7px 14px 14px",
-  background: "#ffffff",
+  gap: 10,
+  padding: "12px 14px 14px",
   color: "#111827",
-  overflow: "hidden",
 };
 
 const myWorkHeaderStyle: React.CSSProperties = {
+  ...logicGateGVICHeaderStyle,
   minWidth: 0,
-  minHeight: 34,
+  minHeight: 54,
   position: "relative",
+  alignItems: "flex-start",
 };
 
 const myWorkTitleStackStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   gap: 4,
+  paddingRight: "min(448px, 48vw)",
 };
 
 const myWorkTitleStyle: React.CSSProperties = {
@@ -1470,6 +1506,8 @@ const myWorkMatrixScrollStyle: React.CSSProperties = {
   minHeight: 0,
   overflow: "auto",
   padding: "2px 10px 24px 0",
+  ["--kanban-board-scroll-accent" as string]: "#475569",
+  ["--kanban-board-scroll-track" as string]: "rgba(71, 85, 105, 0.10)",
 };
 
 const myWorkMatrixGridStyle: React.CSSProperties = {
@@ -1479,67 +1517,63 @@ const myWorkMatrixGridStyle: React.CSSProperties = {
   alignItems: "stretch",
   borderTop: "1px solid rgba(148, 163, 184, 0.34)",
   borderLeft: "1px solid rgba(148, 163, 184, 0.34)",
-  background: "#ffffff",
+  background: "rgba(255, 255, 255, 0.16)",
+  filter: "drop-shadow(0 8px 18px rgba(96, 165, 250, 0.08))",
 };
 
 const myWorkMatrixCornerStyle: React.CSSProperties = {
+  ...logicGateGVICCornerStyle,
   position: "sticky",
   top: 0,
   left: 0,
   zIndex: 3,
-  minHeight: 36,
+  minHeight: 54,
   display: "flex",
   alignItems: "center",
   borderRight: "1px solid rgba(148, 163, 184, 0.34)",
   borderBottom: "1px solid rgba(148, 163, 184, 0.34)",
-  background: "#f8fafc",
   color: "#475569",
   fontSize: 11,
   fontWeight: 850,
   padding: "0 10px",
 };
 
-const myWorkMatrixColumnHeaderStyle: React.CSSProperties = {
-  position: "sticky",
-  top: 0,
-  zIndex: 2,
-  minHeight: 36,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  borderRight: "1px solid rgba(148, 163, 184, 0.34)",
-  borderBottom: "1px solid rgba(148, 163, 184, 0.34)",
-  background: "#f8fafc",
-  color: "#111827",
-  fontSize: 12,
-  fontWeight: 850,
-  padding: "0 10px",
-};
+function myWorkMatrixColumnHeaderStyle(role: LogicGateGVICRole): React.CSSProperties {
+  return {
+    ...logicGateGVICColumnHeaderStyle(role),
+    position: "sticky",
+    top: 0,
+    zIndex: 2,
+    minHeight: 54,
+    borderRight: "1px solid rgba(148, 163, 184, 0.34)",
+    borderBottom: "1px solid rgba(148, 163, 184, 0.34)",
+  };
+}
 
-const myWorkMatrixPriorityHeaderStyle: React.CSSProperties = {
-  position: "sticky",
-  left: 0,
-  zIndex: 1,
-  minHeight: 96,
-  display: "flex",
-  alignItems: "flex-start",
-  borderRight: "1px solid rgba(148, 163, 184, 0.34)",
-  borderBottom: "1px solid rgba(148, 163, 184, 0.34)",
-  background: "#ffffff",
-  color: "#334155",
-  fontSize: 12,
-  fontWeight: 850,
-  padding: "12px 10px",
-};
+function myWorkMatrixPriorityHeaderStyle(priority: MyWorkMatrixPriority): React.CSSProperties {
+  return {
+    ...logicGateGVICPriorityHeaderStyle(priority === 0 ? undefined : priority),
+    position: "sticky",
+    left: 0,
+    zIndex: 1,
+    minHeight: 104,
+    borderRight: "1px solid rgba(148, 163, 184, 0.34)",
+    borderBottom: "1px solid rgba(148, 163, 184, 0.34)",
+  };
+}
 
-const myWorkMatrixCellStyle: React.CSSProperties = {
-  minWidth: 0,
-  minHeight: 96,
-  borderRight: "1px solid rgba(148, 163, 184, 0.34)",
-  borderBottom: "1px solid rgba(148, 163, 184, 0.34)",
-  background: "#ffffff",
-  padding: "8px 6px 10px",
-};
+function myWorkMatrixCellStyle(role: LogicGateGVICRole): React.CSSProperties {
+  const accent = homeGVICRoleAccent(role);
+  return {
+    minWidth: 0,
+    minHeight: 104,
+    borderRight: "1px solid rgba(148, 163, 184, 0.34)",
+    borderBottom: "1px solid rgba(148, 163, 184, 0.34)",
+    background: `linear-gradient(180deg, rgba(255,255,255,0.90), ${homeColorWithAlpha(accent, 0.055)})`,
+    boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.74)",
+    padding: "8px 6px 10px",
+  };
+}
 
 const myWorkMatrixCellEmptyStyle: React.CSSProperties = {
   minHeight: 62,
@@ -1558,18 +1592,21 @@ const myWorkCellActionRowStyle: React.CSSProperties = {
   marginBottom: 6,
 };
 
-const myWorkCellActionButtonStyle: React.CSSProperties = {
-  minHeight: 22,
-  border: "1px solid rgba(100, 116, 139, 0.24)",
-  borderRadius: 5,
-  background: "#ffffff",
-  color: "#334155",
-  font: "inherit",
-  fontSize: 10,
-  fontWeight: 800,
-  cursor: "pointer",
-  padding: "0 7px",
-};
+function myWorkCellActionButtonStyle(role: LogicGateGVICRole): React.CSSProperties {
+  const accent = homeGVICRoleAccent(role);
+  return {
+    minHeight: 22,
+    border: `1px solid ${homeColorWithAlpha(accent, 0.24)}`,
+    borderRadius: 5,
+    background: `linear-gradient(135deg, rgba(255,255,255,0.96), ${homeColorWithAlpha(accent, 0.10)})`,
+    color: accent,
+    font: "inherit",
+    fontSize: 10,
+    fontWeight: 800,
+    cursor: "pointer",
+    padding: "0 7px",
+  };
+}
 
 const myWorkEmptyStyle: React.CSSProperties = {
   minHeight: 160,
@@ -1945,7 +1982,8 @@ const groupBlockStyle: React.CSSProperties = {
   gap: 2,
 };
 
-function groupHeaderStyle(depth: number): React.CSSProperties {
+function groupHeaderStyle(depth: number, role: LogicGateGVICRole): React.CSSProperties {
+  const accent = homeGVICRoleAccent(role);
   return {
     width: "max-content",
     maxWidth: "100%",
@@ -1955,12 +1993,13 @@ function groupHeaderStyle(depth: number): React.CSSProperties {
     alignItems: "center",
     gap: 5,
     marginLeft: depth * 28,
-    border: "none",
-    borderRadius: 0,
-    background: "transparent",
+    border: `1px solid ${homeColorWithAlpha(accent, 0.20)}`,
+    borderRadius: 7,
+    background: `linear-gradient(135deg, rgba(255,255,255,0.94), ${homeColorWithAlpha(accent, 0.10)})`,
     color: "#111827",
     textAlign: "left",
-    padding: "0 2px",
+    padding: "0 8px 0 5px",
+    boxShadow: `0 7px 16px ${homeColorWithAlpha(accent, 0.08)}, inset 1px 1px 0 rgba(255,255,255,0.82)`,
   };
 }
 
@@ -1982,7 +2021,7 @@ const groupHeaderResourceButtonStyle: React.CSSProperties = {
   maxWidth: "100%",
   minHeight: 28,
   display: "grid",
-  gridTemplateColumns: "16px minmax(0, auto)",
+  gridTemplateColumns: "18px minmax(0, auto)",
   alignItems: "center",
   gap: 5,
   border: "none",
@@ -1999,7 +2038,7 @@ const groupHeaderStaticContentStyle: React.CSSProperties = {
   maxWidth: "100%",
   minHeight: 28,
   display: "grid",
-  gridTemplateColumns: "16px minmax(0, auto)",
+  gridTemplateColumns: "18px minmax(0, auto)",
   alignItems: "center",
   gap: 5,
 };
@@ -2031,7 +2070,8 @@ const logicGateNodeListStyle: React.CSSProperties = {
   alignContent: "start",
 };
 
-function workRowStyle(depth: number): React.CSSProperties {
+function workRowStyle(depth: number, role: LogicGateGVICRole): React.CSSProperties {
+  const accent = homeGVICRoleAccent(role);
   return {
     width: "min(980px, calc(100% - 16px))",
     minHeight: 34,
@@ -2040,13 +2080,16 @@ function workRowStyle(depth: number): React.CSSProperties {
     alignItems: "center",
     gap: 10,
     marginLeft: depth * 28 + 42,
-    border: "none",
-    borderBottom: "1px solid rgba(148, 163, 184, 0.28)",
-    background: "#ffffff",
+    marginBottom: 3,
+    border: `1px solid ${homeColorWithAlpha(accent, 0.15)}`,
+    borderLeft: `3px solid ${homeColorWithAlpha(accent, 0.62)}`,
+    borderRadius: 6,
+    background: `linear-gradient(135deg, rgba(255,255,255,0.96), ${homeColorWithAlpha(accent, 0.06)})`,
     color: "#111827",
     font: "inherit",
     textAlign: "left",
-    padding: "0 8px",
+    padding: "0 8px 0 7px",
+    boxShadow: "0 4px 10px rgba(15, 23, 42, 0.035), inset 1px 1px 0 rgba(255, 255, 255, 0.72)",
   };
 }
 
@@ -2083,17 +2126,20 @@ const workRowMetaCellStyle: React.CSSProperties = {
   fontWeight: 650,
 };
 
-const myWorkInlineActionButtonStyle: React.CSSProperties = {
-  minWidth: 0,
-  width: "max-content",
-  minHeight: 22,
-  border: "1px solid rgba(100, 116, 139, 0.22)",
-  borderRadius: 5,
-  background: "#f8fafc",
-  color: "#334155",
-  font: "inherit",
-  fontSize: 10,
-  fontWeight: 800,
-  cursor: "pointer",
-  padding: "0 7px",
-};
+function myWorkInlineActionButtonStyle(role: LogicGateGVICRole): React.CSSProperties {
+  const accent = homeGVICRoleAccent(role);
+  return {
+    minWidth: 0,
+    width: "max-content",
+    minHeight: 22,
+    border: `1px solid ${homeColorWithAlpha(accent, 0.22)}`,
+    borderRadius: 5,
+    background: `linear-gradient(135deg, rgba(255,255,255,0.96), ${homeColorWithAlpha(accent, 0.10)})`,
+    color: accent,
+    font: "inherit",
+    fontSize: 10,
+    fontWeight: 800,
+    cursor: "pointer",
+    padding: "0 7px",
+  };
+}

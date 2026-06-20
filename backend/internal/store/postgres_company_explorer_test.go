@@ -96,3 +96,38 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndNativeChildren(t *testin
 		}
 	}
 }
+
+func TestPostgresCompanyExplorerV2RootRowsUseContiguousRootArgs(t *testing.T) {
+	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_company_explorer_v2.go: %v", err)
+	}
+	source := string(raw)
+	rootArgs := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func companyExplorerRootArgs")), " "))
+	for _, want := range []string{
+		"query.companyid",
+		"companyexplorerlazynullable(query.permissionuserid)",
+		"entitypermissionview",
+	} {
+		if !strings.Contains(rootArgs, want) {
+			t.Fatalf("companyExplorerRootArgs missing %q", want)
+		}
+	}
+	if strings.Contains(rootArgs, "parententityid") {
+		t.Fatalf("companyExplorerRootArgs must not include ParentEntityID")
+	}
+
+	rootRows := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) ListCompanyExplorerV2RootRows")), " "))
+	for _, want := range []string{
+		"companyexplorerrooteffectiveaccessselect",
+		"companyexplorerrootaccesspredicate",
+		"companyexplorerrootargs(query)...",
+	} {
+		if !strings.Contains(rootRows, want) {
+			t.Fatalf("ListCompanyExplorerV2RootRows missing %q", want)
+		}
+	}
+	if strings.Contains(rootRows, "companyexplorerfinalargs(query)") {
+		t.Fatalf("ListCompanyExplorerV2RootRows must not use child-row args with an unused parent parameter")
+	}
+}

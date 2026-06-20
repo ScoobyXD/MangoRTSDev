@@ -55,6 +55,14 @@ const DEFAULT_GVIC_HEADER_PALETTE: GVICHeaderPalette = {
 };
 
 const LOGIC_GATE_GVIC_HEADER_PALETTES: Record<string, GVICHeaderPalette> = {
+  generated: {
+    surface: "linear-gradient(135deg, rgba(236, 253, 245, 0.95), rgba(207, 250, 254, 0.72))",
+    edge: "rgba(8, 145, 178, 0.40)",
+    letterBackground: "linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(209, 250, 229, 0.88) 52%, rgba(207, 250, 254, 0.78))",
+    letterColor: "#0891b2",
+    labelColor: "#164e63",
+    glow: "0 10px 24px rgba(8, 145, 178, 0.12)",
+  },
   verified: {
     surface: "linear-gradient(135deg, rgba(255, 241, 242, 0.94), rgba(254, 249, 195, 0.72))",
     edge: "rgba(225, 29, 72, 0.40)",
@@ -148,6 +156,10 @@ const LOGIC_GATE_GVIC_HEADER_PALETTES: Record<string, GVICHeaderPalette> = {
 function GVICHeaderPalette(tone?: string | number): GVICHeaderPalette {
   const key = typeof tone === "number" ? `priority-${tone}` : tone?.trim();
   return key ? (LOGIC_GATE_GVIC_HEADER_PALETTES[key] ?? DEFAULT_GVIC_HEADER_PALETTE) : DEFAULT_GVIC_HEADER_PALETTE;
+}
+
+export function homeGVICRoleAccent(tone?: string | number): string {
+  return GVICHeaderPalette(tone).letterColor;
 }
 
 export function homeColorWithAlpha(color: string, alpha: number): string {
