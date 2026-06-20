@@ -9,6 +9,7 @@ import (
 	htmlpkg "html"
 	"log"
 	"miraeopus/backend/internal/domain"
+	"miraeopus/backend/internal/notifications"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"regexp"
@@ -19,27 +20,30 @@ import (
 )
 
 type realtimeNotificationCreatedMessage struct {
-	Type         string              `json:"type"`
-	CompanyID    string              `json:"company_id,omitempty"`
-	Scope        string              `json:"scope"`
-	Notification domain.Notification `json:"notification"`
-	TS           time.Time           `json:"ts"`
+	Type           string              `json:"type"`
+	CompanyID      string              `json:"company_id,omitempty"`
+	Scope          string              `json:"scope"`
+	AffectedScopes []string            `json:"affected_scopes,omitempty"`
+	Notification   domain.Notification `json:"notification"`
+	TS             time.Time           `json:"ts"`
 }
 
 type realtimeNotificationDeletedMessage struct {
 	Type           string    `json:"type"`
 	CompanyID      string    `json:"company_id,omitempty"`
 	Scope          string    `json:"scope"`
+	AffectedScopes []string  `json:"affected_scopes,omitempty"`
 	NotificationID string    `json:"notification_id"`
 	TS             time.Time `json:"ts"`
 }
 
 type realtimeNotificationsClearedMessage struct {
-	Type         string    `json:"type"`
-	CompanyID    string    `json:"company_id,omitempty"`
-	Scope        string    `json:"scope"`
-	DeletedCount int       `json:"deleted_count"`
-	TS           time.Time `json:"ts"`
+	Type           string    `json:"type"`
+	CompanyID      string    `json:"company_id,omitempty"`
+	Scope          string    `json:"scope"`
+	AffectedScopes []string  `json:"affected_scopes,omitempty"`
+	DeletedCount   int       `json:"deleted_count"`
+	TS             time.Time `json:"ts"`
 }
 
 const editorRichTextPrefix = "<!-- mango-editor-html-v1 -->"
@@ -451,11 +455,12 @@ func (s *Server) publishNotificationCreatedRealtime(item domain.Notification) {
 		return
 	}
 	payload, err := json.Marshal(realtimeNotificationCreatedMessage{
-		Type:         realtimeMessageNotificationCreated,
-		CompanyID:    item.CompanyID,
-		Scope:        scope,
-		Notification: item,
-		TS:           time.Now().UTC(),
+		Type:           realtimeMessageNotificationCreated,
+		CompanyID:      item.CompanyID,
+		Scope:          scope,
+		AffectedScopes: notifications.UpdateFeedAffectedScopes(item),
+		Notification:   item,
+		TS:             time.Now().UTC(),
 	})
 	if err != nil {
 		return
@@ -475,6 +480,7 @@ func (s *Server) publishNotificationDeletedRealtime(item domain.Notification) {
 		Type:           realtimeMessageNotificationDeleted,
 		CompanyID:      item.CompanyID,
 		Scope:          scope,
+		AffectedScopes: notifications.UpdateFeedAffectedScopes(item),
 		NotificationID: item.NotificationID,
 		TS:             time.Now().UTC(),
 	})
@@ -494,11 +500,12 @@ func (s *Server) publishNotificationsClearedRealtime(companyID, recipientUserID 
 		return
 	}
 	payload, err := json.Marshal(realtimeNotificationsClearedMessage{
-		Type:         realtimeMessageNotificationsCleared,
-		CompanyID:    companyID,
-		Scope:        scope,
-		DeletedCount: deletedCount,
-		TS:           time.Now().UTC(),
+		Type:           realtimeMessageNotificationsCleared,
+		CompanyID:      companyID,
+		Scope:          scope,
+		AffectedScopes: store.UpdatesAffectedScopes(companyID, recipientUserID),
+		DeletedCount:   deletedCount,
+		TS:             time.Now().UTC(),
 	})
 	if err != nil {
 		return

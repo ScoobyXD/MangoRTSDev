@@ -986,6 +986,7 @@ func (h *localWorkspaceEventBus) publishUser(companyID, userID string, payload [
 }
 
 func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[string]any) (domain.DomainEvent, bool) {
+	data = workspaceEventPayloadWithAffectedScopes(companyID, eventType, data)
 	event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
 		CompanyID:  companyID,
 		StreamType: workspaceDomainStreamType,
@@ -999,6 +1000,19 @@ func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[str
 	}
 	s.publishCommittedWorkspaceEvent(event)
 	return event, true
+}
+
+func workspaceEventPayloadWithAffectedScopes(companyID, eventType string, data map[string]any) map[string]any {
+	scopes := store.CompanyExplorerAffectedScopes(companyID, eventType, data)
+	if len(scopes) == 0 {
+		return data
+	}
+	out := make(map[string]any, len(data)+1)
+	for key, value := range data {
+		out[key] = value
+	}
+	out["affected_scopes"] = scopes
+	return out
 }
 
 func (s *Server) publishCommittedWorkspaceEvents(events []domain.DomainEvent) {
