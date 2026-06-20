@@ -69,11 +69,24 @@ func companyExplorerRootArgs(query CompanyExplorerV2RowsQuery) []any {
 	}
 }
 
+func companyExplorerNativeChildrenArgs(query CompanyExplorerV2RowsQuery, parentEntityID string) []any {
+	return []any{
+		query.CompanyID,
+		companyExplorerLazyNullable(query.PermissionUserID),
+		EntityPermissionView,
+		parentEntityID,
+	}
+}
+
 func companyExplorerFinalEffectiveAccessSelect(entityTypeExpr, entityIDExpr string) string {
 	return companyExplorerEffectiveAccessSelect(entityTypeExpr, entityIDExpr, "$3")
 }
 
 func companyExplorerRootEffectiveAccessSelect(entityTypeExpr, entityIDExpr string) string {
+	return companyExplorerEffectiveAccessSelect(entityTypeExpr, entityIDExpr, "$2")
+}
+
+func companyExplorerNativeChildrenEffectiveAccessSelect(entityTypeExpr, entityIDExpr string) string {
 	return companyExplorerEffectiveAccessSelect(entityTypeExpr, entityIDExpr, "$2")
 }
 
@@ -103,6 +116,10 @@ func companyExplorerFinalAccessPredicate(entityTypeExpr, entityIDExpr string) st
 }
 
 func companyExplorerRootAccessPredicate(entityTypeExpr, entityIDExpr string) string {
+	return companyExplorerAccessPredicate(entityTypeExpr, entityIDExpr, "$2", "$3")
+}
+
+func companyExplorerNativeChildrenAccessPredicate(entityTypeExpr, entityIDExpr string) string {
 	return companyExplorerAccessPredicate(entityTypeExpr, entityIDExpr, "$2", "$3")
 }
 
@@ -493,7 +510,7 @@ order by all_rows.position asc, all_rows.created_timestamp asc, all_rows.name as
 }
 
 func (r *PostgresRepo) queryCompanyExplorerFinalProjectChildren(ctx context.Context, query CompanyExplorerV2RowsQuery, projectID string) ([]CompanyExplorerV2Row, error) {
-	args := append(companyExplorerFinalArgs(query), projectID)
+	args := companyExplorerNativeChildrenArgs(query, projectID)
 	rows, err := r.db.QueryContext(ctx, `
 with project_rows as (
   select projection.company_id,
@@ -520,7 +537,7 @@ with project_rows as (
    and node.company_id=projection.company_id
    and node.node_id=projection.resource_id
   where projection.company_id=$1::uuid
-    and projection.project_id=$5::uuid
+    and projection.project_id=$4::uuid
 )
 select project_rows.company_id::text,
        project_rows.entity_id::text,
@@ -531,12 +548,12 @@ select project_rows.company_id::text,
        project_rows.edge_id::text,
        project_rows.position,
        `+companyExplorerFinalHasChildrenExpr("project_rows.entity_type", "project_rows.entity_id")+` as has_children,
-       `+companyExplorerFinalEffectiveAccessSelect("project_rows.entity_type", "project_rows.entity_id")+` as effective_access,
+       `+companyExplorerNativeChildrenEffectiveAccessSelect("project_rows.entity_type", "project_rows.entity_id")+` as effective_access,
        `+companyExplorerFinalNativeContext("project_rows.entity_type", "project_rows.entity_id", "project_rows.resource_id")+` as native_context,
        project_rows.created_timestamp,
        project_rows.updated_timestamp
 from project_rows
-where `+companyExplorerFinalAccessPredicate("project_rows.entity_type", "project_rows.entity_id")+`
+where `+companyExplorerNativeChildrenAccessPredicate("project_rows.entity_type", "project_rows.entity_id")+`
 order by project_rows.position asc, project_rows.created_timestamp asc, project_rows.name asc, project_rows.entity_id asc`, args...)
 	if err != nil {
 		return nil, err
@@ -545,7 +562,7 @@ order by project_rows.position asc, project_rows.created_timestamp asc, project_
 }
 
 func (r *PostgresRepo) queryCompanyExplorerFinalLogicGateChildren(ctx context.Context, query CompanyExplorerV2RowsQuery, logicGateID string) ([]CompanyExplorerV2Row, error) {
-	args := append(companyExplorerFinalArgs(query), logicGateID)
+	args := companyExplorerNativeChildrenArgs(query, logicGateID)
 	rows, err := r.db.QueryContext(ctx, `
 with logic_gate_rows as (
   select assignment.company_id,
@@ -563,7 +580,7 @@ with logic_gate_rows as (
     on node.company_id=assignment.company_id
    and node.node_id=assignment.node_id
   where assignment.company_id=$1::uuid
-    and assignment.logic_gate_id=$5::uuid
+    and assignment.logic_gate_id=$4::uuid
 )
 select logic_gate_rows.company_id::text,
        logic_gate_rows.entity_id::text,
@@ -574,12 +591,12 @@ select logic_gate_rows.company_id::text,
        logic_gate_rows.edge_id::text,
        logic_gate_rows.position,
        `+companyExplorerFinalHasChildrenExpr("logic_gate_rows.entity_type", "logic_gate_rows.entity_id")+` as has_children,
-       `+companyExplorerFinalEffectiveAccessSelect("logic_gate_rows.entity_type", "logic_gate_rows.entity_id")+` as effective_access,
+       `+companyExplorerNativeChildrenEffectiveAccessSelect("logic_gate_rows.entity_type", "logic_gate_rows.entity_id")+` as effective_access,
        `+companyExplorerFinalNativeContext("logic_gate_rows.entity_type", "logic_gate_rows.entity_id", "logic_gate_rows.resource_id")+` as native_context,
        logic_gate_rows.created_timestamp,
        logic_gate_rows.updated_timestamp
 from logic_gate_rows
-where `+companyExplorerFinalAccessPredicate("logic_gate_rows.entity_type", "logic_gate_rows.entity_id")+`
+where `+companyExplorerNativeChildrenAccessPredicate("logic_gate_rows.entity_type", "logic_gate_rows.entity_id")+`
 order by logic_gate_rows.position asc, logic_gate_rows.created_timestamp asc, logic_gate_rows.name asc, logic_gate_rows.entity_id asc`, args...)
 	if err != nil {
 		return nil, err
