@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -1338,6 +1339,74 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMultipleV2Edges(t *testing.T) {
 	}
 	if removed != 2 {
 		t.Fatalf("company_explorer_item_removed events = %d, want 2; events=%+v", removed, events)
+	}
+}
+
+func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-explorer-large-batch-delete-test"
+	repo.EnsureCompany(companyID, "Large Batch Delete")
+
+	folder, err := repo.CreateCompanyExplorerV2Folder(store.CompanyExplorerV2FolderInput{
+		CompanyID:      companyID,
+		ParentEntityID: companyID,
+		Name:           "Many placed work items",
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder: %v", err)
+	}
+	count := store.CompanyExplorerFolderItemBatchMaxItems + 25
+	targets := make([]map[string]string, 0, count)
+	for index := 0; index < count; index++ {
+		node, err := repo.CreateNode(companyID, fmt.Sprintf("Large batch node %03d", index))
+		if err != nil {
+			t.Fatalf("CreateNode %d: %v", index, err)
+		}
+		row, err := repo.UpsertCompanyExplorerV2Edge(store.CompanyExplorerV2EdgeInput{
+			CompanyID:       companyID,
+			ParentEntityID:  folder.EntityID,
+			ChildEntityType: store.CompanyExplorerV2EntityNode,
+			ChildResourceID: node.NodeID,
+		})
+		if err != nil {
+			t.Fatalf("UpsertCompanyExplorerV2Edge %d: %v", index, err)
+		}
+		targets = append(targets, map[string]string{"edge_id": row.EdgeID})
+	}
+
+	body, err := json.Marshal(map[string]any{"company_id": companyID, "targets": targets})
+	if err != nil {
+		t.Fatalf("Marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/delete-targets", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST large batch delete status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var response struct {
+		EdgeIDs []string `json:"edge_ids"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Unmarshal response: %v", err)
+	}
+	if len(response.EdgeIDs) != count {
+		t.Fatalf("deleted edge IDs = %d, want %d", len(response.EdgeIDs), count)
+	}
+	children, err := repo.ListCompanyExplorerV2ChildRows(store.CompanyExplorerV2RowsQuery{
+		CompanyID:      companyID,
+		View:           store.CompanyExplorerLazyScopeAll,
+		ParentEntityID: folder.EntityID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows after delete: %v", err)
+	}
+	if len(children.Rows) != 0 {
+		t.Fatalf("children after large batch edge delete = %d, want empty", len(children.Rows))
 	}
 }
 
