@@ -16,6 +16,8 @@ export type WorkspaceReconciliationScopeKind =
   | "kanban_board"
   | "kanban_board_list"
   | "gvic_matrix"
+  | "my_work"
+  | "updates"
   | "node_graph"
   | "logic_gate_graph"
   | "company_explorer"
@@ -36,6 +38,11 @@ export type WorkspaceReconciliationScope = {
   folderKind?: string;
   itemType?: string;
   itemID?: string;
+  semanticScope?: string;
+  semanticTargetType?: string;
+  semanticTargetID?: string;
+  userID?: string;
+  teamID?: string;
 };
 
 export type WorkspaceStreamReplayBoundary = {
@@ -184,8 +191,10 @@ function scopeSignature(scope: WorkspaceReconciliationScope): string {
   return [
     scope.kind,
     scope.eventType,
+    scope.semanticScope ?? "",
     scope.boardID ?? "",
     scope.logicGateID ?? "",
+    scope.projectID ?? "",
     scope.nodeID ?? "",
     scope.assignmentID ?? "",
     scope.cardID ?? "",
@@ -194,6 +203,8 @@ function scopeSignature(scope: WorkspaceReconciliationScope): string {
     scope.folderKind ?? "",
     scope.itemType ?? "",
     scope.itemID ?? "",
+    scope.userID ?? "",
+    scope.teamID ?? "",
   ].join("|");
 }
 
@@ -204,6 +215,48 @@ function addScope(scopes: WorkspaceReconciliationScope[], seen: Set<string>, sco
   scopes.push(scope);
 }
 
+function addSemanticAffectedScope(scopes: WorkspaceReconciliationScope[], seen: Set<string>, eventType: string, rawScope: string): void {
+  const semanticScope = rawScope.trim();
+  const [surface, targetType, ...idParts] = semanticScope.split(":").map((part) => part.trim()).filter(Boolean);
+  const targetID = idParts.join(":");
+  if (!surface || !targetType || !targetID) return;
+
+  if (surface === "my_work") {
+    if (targetType === "user") {
+      addScope(scopes, seen, { kind: "my_work", eventType, semanticScope, semanticTargetType: targetType, semanticTargetID: targetID, userID: targetID });
+    } else if (targetType === "team") {
+      addScope(scopes, seen, { kind: "my_work", eventType, semanticScope, semanticTargetType: targetType, semanticTargetID: targetID, teamID: targetID });
+    } else if (targetType === "company") {
+      addScope(scopes, seen, { kind: "my_work", eventType, semanticScope, semanticTargetType: targetType, semanticTargetID: targetID });
+    }
+    return;
+  }
+
+  if (surface === "updates") {
+    if (targetType === "user") {
+      addScope(scopes, seen, { kind: "updates", eventType, semanticScope, semanticTargetType: targetType, semanticTargetID: targetID, userID: targetID });
+    } else if (targetType === "team") {
+      addScope(scopes, seen, { kind: "updates", eventType, semanticScope, semanticTargetType: targetType, semanticTargetID: targetID, teamID: targetID });
+    } else if (targetType === "company") {
+      addScope(scopes, seen, { kind: "updates", eventType, semanticScope, semanticTargetType: targetType, semanticTargetID: targetID });
+    }
+    return;
+  }
+
+  if (surface !== "company_explorer") return;
+  if (targetType === "root") {
+    addScope(scopes, seen, { kind: "company_explorer", eventType, semanticScope, semanticTargetType: targetType, semanticTargetID: targetID });
+  } else if (targetType === "folder") {
+    addScope(scopes, seen, { kind: "company_explorer", eventType, semanticScope, semanticTargetType: targetType, semanticTargetID: targetID, folderID: targetID });
+  } else if (targetType === "project") {
+    addScope(scopes, seen, { kind: "company_explorer", eventType, semanticScope, semanticTargetType: targetType, semanticTargetID: targetID, itemType: "project", itemID: targetID, projectID: targetID });
+  } else if (targetType === "logic_gate") {
+    addScope(scopes, seen, { kind: "company_explorer", eventType, semanticScope, semanticTargetType: targetType, semanticTargetID: targetID, itemType: "logic_gate", itemID: targetID, logicGateID: targetID });
+  } else if (targetType === "node") {
+    addScope(scopes, seen, { kind: "company_explorer", eventType, semanticScope, semanticTargetType: targetType, semanticTargetID: targetID, itemType: "node", itemID: targetID, nodeID: targetID });
+  }
+}
+
 export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnvelope | undefined): WorkspaceReconciliationScope[] {
   const type = cleanString(envelope?.type);
   if (!type) return [];
@@ -211,6 +264,11 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
   if (type === "editor_collaboration_event" || type === "node_information_created" || type === "logic_gate_information_created") return [];
   const scopes: WorkspaceReconciliationScope[] = [];
   const seen = new Set<string>();
+  const affectedScopes = cleanStringList(data.affected_scopes);
+  if (affectedScopes.length > 0) {
+    for (const scope of affectedScopes) addSemanticAffectedScope(scopes, seen, type, scope);
+    return scopes;
+  }
 
   const board = nestedRecord(data, "board");
   const card = nestedRecord(data, "card");

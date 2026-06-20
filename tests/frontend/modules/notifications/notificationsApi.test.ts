@@ -115,7 +115,7 @@ test("deleteNotifications clears matching notifications with DELETE query scope"
 
 test("read and unread helpers still use notification read endpoints", async () => {
   const originalFetch = globalThis.fetch;
-  const { restore } = installTestWindow();
+  const { events, restore } = installTestWindow();
   const calls: Array<{ url: string; method: string; body?: string }> = [];
   (globalThis as unknown as MutableTestGlobal).fetch = async (input, init) => {
     calls.push({ url: input.toString(), method: init?.method ?? "GET", body: init?.body?.toString() });
@@ -144,6 +144,7 @@ test("read and unread helpers still use notification read endpoints", async () =
     assert.equal(calls[2].method, "POST");
     assert.match(calls[2].body ?? "", /"company_id":"company-1"/);
     assert.match(calls[2].body ?? "", /"type":"mention.created"/);
+    assert.deepEqual(events.map((event) => event.detail.companyID), ["company-1", "company-1", "company-1"]);
   } finally {
     globalThis.fetch = originalFetch;
     restore();

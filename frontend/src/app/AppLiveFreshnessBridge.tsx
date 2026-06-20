@@ -200,6 +200,11 @@ function markWorkspaceCachesStaleForScopes(scopes: WorkspaceReconciliationScope[
         markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "company_explorer" });
         markPanelScope(workspacePanelCacheScopeForCompanyExplorerScope(scope));
         break;
+      case "updates":
+        emitNotificationsUpdated(companyID);
+        break;
+      case "my_work":
+        break;
       case "kanban_board":
         if (scope.boardID) {
           markWorkspaceSnapshotScopeStale(apiBase, companyID, { scope: "kanban", boardID: scope.boardID });
@@ -247,6 +252,7 @@ function markWorkspaceCachesStale(apiBase: string, companyID: string): void {
 }
 
 function workspacePanelCacheScopeForCompanyExplorerScope(scope: WorkspaceReconciliationScope): CommunicationsWorkspacePanelCacheScope {
+  if (scope.semanticScope) return {};
   const eventType = scope.eventType.trim();
   if (eventType === "company_explorer_folder_item_assigned" || eventType === "company_explorer_folder_item_removed") {
     if (scope.itemType === "node") return { nodeFolderItems: true };

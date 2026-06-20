@@ -1,11 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../../modules/communications/communicationsApi";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import { GVICMatrixRealtimeScope } from "../../modules/gvic/gvicMatrixProjectionDeltas";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
+import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { listMyWorkMatrixRows, type MyWorkResourceTree } from "../../modules/work-items/workItemReadApi";
 import { cleanIDList, logicGateTitle } from "./homeUtils";
-import { loadMyWorkMatrixCellsForUsers, type MyWorkMatrixCellWithUser, type MyWorkMatrixLoadFailure } from "./myWorkMatrixLoader";
+import {
+  loadMyWorkMatrixCellsForUsers,
+  myWorkMatrixCacheKey,
+  myWorkProjectionDeltaAffectsTargetUsers,
+  uniqueMyWorkTargetUserIDs,
+  type MyWorkMatrixCellWithUser,
+  type MyWorkMatrixLoadFailure,
+} from "./myWorkMatrixLoader";
 import {
   DEFAULT_MY_WORK_GROUPINGS,
   MY_WORK_GROUPING_FIELDS,
@@ -32,6 +41,7 @@ type MyWorkViewProps = {
   loading: boolean;
   companyID: string;
   currentUserID: string;
+  liveRefreshToken?: number;
   nodes: NodeRecord[];
   logicGates: LogicGateRecord[];
   companyUsers: CompanyUser[];
@@ -77,6 +87,7 @@ export function MyWorkView({
   loading,
   companyID,
   currentUserID,
+  liveRefreshToken = 0,
   nodes,
   logicGates,
   companyUsers,
@@ -150,6 +161,7 @@ export function MyWorkView({
   const [matrixCells, setMatrixCells] = useState<MyWorkMatrixCellWithUser[]>([]);
   const [matrixLoading, setMatrixLoading] = useState(false);
   const [matrixError, setMatrixError] = useState("");
+  const [matrixReloadToken, setMatrixReloadToken] = useState(0);
 
   useEffect(() => {
     const next = readSavedGroupingSettings(storageKey, fallbackSetting, currentUserID);
@@ -168,9 +180,15 @@ export function MyWorkView({
 
   const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
   const targetUserIDs = useMemo(() => userIDsForSelectedScope(selectedSetting.selected_scope, companyUsers, childGroupsByParentID, membersByGroupID), [childGroupsByParentID, companyUsers, membersByGroupID, selectedSetting.selected_scope]);
+  const matrixTargetUserIDs = useMemo(() => uniqueMyWorkTargetUserIDs(targetUserIDs), [targetUserIDs]);
+  const matrixCacheKey = useMemo(() => myWorkMatrixCacheKey({
+    companyID,
+    selectedScope: selectedSetting.selected_scope,
+    targetUserIDs: matrixTargetUserIDs,
+  }), [companyID, matrixTargetUserIDs, selectedSetting.selected_scope]);
 
   useEffect(() => {
-    if (!apiBase || !companyID || targetUserIDs.length === 0) {
+    if (!apiBase || !companyID || matrixTargetUserIDs.length === 0) {
       setMatrixCells([]);
       setMatrixError("");
       setMatrixLoading(false);
@@ -181,17 +199,42 @@ export function MyWorkView({
     setMatrixError("");
     void loadMyWorkMatrixCellsForUsers({
       companyID,
-      targetUserIDs,
+      targetUserIDs: matrixTargetUserIDs,
       fetchMatrix: (targetUserID) => listMyWorkMatrixRows({ apiBase, companyID, targetUserID }),
     }).then(({ cells, failures }) => {
       if (cancelled) return;
       setMatrixCells(cells);
-      setMatrixError(myWorkMatrixFailureMessage(failures, targetUserIDs, userByID));
+      setMatrixError(myWorkMatrixFailureMessage(failures, matrixTargetUserIDs, userByID));
     }).finally(() => {
       if (!cancelled) setMatrixLoading(false);
     });
     return () => { cancelled = true; };
-  }, [apiBase, companyID, targetUserIDs, userByID]);
+  }, [apiBase, companyID, liveRefreshToken, matrixCacheKey, matrixReloadToken, matrixTargetUserIDs, userByID]);
+
+  useEffect(() => {
+    if (!apiBase || !companyID || matrixTargetUserIDs.length === 0) return undefined;
+    let reloadTimer: ReturnType<typeof window.setTimeout> | undefined;
+    const requestMatrixReload = () => {
+      if (reloadTimer !== undefined) window.clearTimeout(reloadTimer);
+      reloadTimer = window.setTimeout(() => {
+        reloadTimer = undefined;
+        setMatrixReloadToken((value) => value + 1);
+      }, 50);
+    };
+    const unsubscribes = matrixTargetUserIDs.map((targetUserID) => subscribeRealtimeScope(apiBase, companyID, GVICMatrixRealtimeScope(targetUserID), {
+      onDelta: (message) => {
+        if (myWorkProjectionDeltaAffectsTargetUsers(message, matrixTargetUserIDs)) requestMatrixReload();
+      },
+      onRejected: requestMatrixReload,
+      onRefetch: requestMatrixReload,
+      onPermissionRevoked: requestMatrixReload,
+      onError: requestMatrixReload,
+    }));
+    return () => {
+      if (reloadTimer !== undefined) window.clearTimeout(reloadTimer);
+      for (const unsubscribe of unsubscribes) unsubscribe();
+    };
+  }, [apiBase, companyID, matrixCacheKey, matrixTargetUserIDs]);
 
   const updateSelectedSetting = useCallback((updater: (setting: MyWorkSavedGroupingSetting) => MyWorkSavedGroupingSetting) => {
     setSettings((current) => current.map((setting) => {

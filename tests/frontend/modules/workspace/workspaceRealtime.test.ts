@@ -198,6 +198,29 @@ test("derives scoped invalidation targets from workspace event types", () => {
   assert.deepEqual(unknownScopes, [{ kind: "workspace", eventType: "future_workspace_event" }]);
 });
 
+test("semantic affected scopes override broad workspace heuristics", () => {
+  const scopes = deriveWorkspaceReconciliationScopes({
+    type: "node_updated",
+    data: {
+      node_id: "node-1",
+      affected_scopes: [
+        "my_work:user:user-1",
+        "updates:user:user-1",
+        "company_explorer:folder:folder-1",
+        "company_explorer:node:node-1",
+      ],
+    },
+  });
+
+  assert.equal(scopes.some((scope) => scope.kind === "my_work" && scope.userID === "user-1" && scope.semanticScope === "my_work:user:user-1"), true);
+  assert.equal(scopes.some((scope) => scope.kind === "updates" && scope.userID === "user-1" && scope.semanticScope === "updates:user:user-1"), true);
+  assert.equal(scopes.some((scope) => scope.kind === "company_explorer" && scope.folderID === "folder-1"), true);
+  assert.equal(scopes.some((scope) => scope.kind === "company_explorer" && scope.nodeID === "node-1" && scope.itemType === "node"), true);
+  assert.equal(scopes.some((scope) => scope.kind === "node_graph"), false);
+  assert.equal(scopes.some((scope) => scope.kind === "gvic_matrix"), false);
+  assert.equal(scopes.some((scope) => scope.kind === "workspace"), false);
+});
+
 test("internal derived projection request events produce no reconciliation scopes", () => {
   for (const type of [
     "workspace_derived_projection_requested",

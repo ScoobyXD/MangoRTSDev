@@ -38,6 +38,7 @@ test("parses realtime accepted, rejected, delta, refetch, and error messages", (
     projection_sequence: 8,
     resource_type: "logic_gate",
     resource_id: "gate-1",
+    affected_scopes: ["my_work:user:user-1", "my_work:user:user-1", ""],
     deltas: [{ operation: "delete", row_key: { board_id: "A", card_id: "card-1" } }],
   })) as RealtimeProjectionDeltaMessage;
   assert.equal(delta.type, "projection.delta");
@@ -46,6 +47,7 @@ test("parses realtime accepted, rejected, delta, refetch, and error messages", (
   assert.equal(delta.projection_sequence, 8);
   assert.equal(delta.resource_type, "logic_gate");
   assert.equal(delta.resource_id, "gate-1");
+  assert.deepEqual(delta.affected_scopes, ["my_work:user:user-1"]);
   assert.equal(delta.deltas.length, 1);
 
   const workspace = parseRealtimeMessage(JSON.stringify({
@@ -71,6 +73,7 @@ test("parses realtime accepted, rejected, delta, refetch, and error messages", (
     type: "notification.created",
     company_id: "company-1",
     scope: "notifications:user:user-1",
+    affected_scopes: ["updates:user:user-1", "updates:user:user-1", ""],
     notification: {
       notification_id: "notification-1",
       company_id: "company-1",
@@ -87,6 +90,7 @@ test("parses realtime accepted, rejected, delta, refetch, and error messages", (
   assert.equal(created.type, "notification.created");
   assert.equal(created.company_id, "company-1");
   assert.equal(created.scope, "notifications:user:user-1");
+  assert.deepEqual(created.affected_scopes, ["updates:user:user-1"]);
   assert.equal(created.notification.notification_id, "notification-1");
   assert.equal(created.ts, "2026-06-03T10:00:01.000Z");
 

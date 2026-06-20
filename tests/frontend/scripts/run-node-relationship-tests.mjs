@@ -13,6 +13,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/notifications/notificationsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeUtils.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkGrouping.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkMatrixLoader.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeCommands.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/workspace/workspaceRealtime.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/workspace/workspaceSnapshotCache.test.js"),
@@ -90,6 +91,7 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../../frontend/src/modules/company-explorer/treePresentation"', '"../../../../frontend/src/modules/company-explorer/treePresentation.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/shared"', '"../../../../frontend/src/modules/kanban/shared.js"');
   contents = contents.replaceAll('"../../../../frontend/src/pages/home/myWorkGrouping"', '"../../../../frontend/src/pages/home/myWorkGrouping.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/pages/home/myWorkMatrixLoader"', '"../../../../frontend/src/pages/home/myWorkMatrixLoader.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/kanbanProjectionDeltas"', '"../../../../frontend/src/modules/kanban/kanbanProjectionDeltas.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/KanbanBoardContentStore"', '"../../../../frontend/src/modules/kanban/KanbanBoardContentStore.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/plainTextEditing"', '"../../../../frontend/src/modules/editor/plainTextEditing.js"');
