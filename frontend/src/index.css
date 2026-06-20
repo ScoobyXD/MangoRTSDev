@@ -615,3 +615,33 @@ button, input, textarea, select {
   height: 0;
   line-height: 0;
 }
+
+@keyframes project-critical-heartbeat {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.10);
+  }
+  45% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 6px rgba(249, 115, 22, 0.18), 0 0 18px rgba(249, 115, 22, 0.42);
+  }
+}
+
+@keyframes project-critical-dot-heartbeat {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.16);
+  }
+  45% {
+    transform: scale(1.28);
+    box-shadow: 0 0 0 7px rgba(249, 115, 22, 0.26), 0 0 14px rgba(249, 115, 22, 0.54);
+  }
+}
+
+.project-critical-pulse-badge {
+  animation: project-critical-heartbeat 1s ease-in-out infinite;
+}
+
+.project-critical-pulse-dot {
+  animation: project-critical-dot-heartbeat 1s ease-in-out infinite;
+}

@@ -49,6 +49,7 @@ import {
   updateProject,
   updateProjectManagementTimelineItem,
   type ProjectRecord,
+  type ProjectHealth,
   type ProjectManagementEntityType,
   type ProjectManagementTimelineRow,
 } from "./projectManagementApi.js";
@@ -161,6 +162,7 @@ const PROJECT_GROUP_FIELDS: Array<{ field: ProjectGroupField; label: string }> =
   { field: "account", label: "Account" },
   { field: "team", label: "Team" },
 ];
+const PROJECT_HEALTH_OPTIONS: ProjectHealth[] = ["On Track", "AT RISK", "Off Track"];
 const EMPTY_WORKSPACE_PANEL: WorkspacePanelState = {
   nodeFolders: [],
   nodeFolderItems: [],
@@ -1267,6 +1269,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         projectID: project.project_id,
         name: nextName,
         status: project.status || "Active",
+        health: normalizeProjectHealth(project.health),
       });
       const renamed = result.project ?? { ...project, name: nextName };
       setProjects((current) => current.map((item) => item.project_id === project.project_id ? renamed : item));
@@ -1287,6 +1290,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         companyID,
         name: "Untitled Project",
         status: "Active",
+        health: "On Track",
       });
       if (result.project) {
         setProjects((current) => [result.project!, ...current.filter((project) => project.project_id !== result.project!.project_id)]);
@@ -1582,6 +1586,10 @@ function ProjectGroupingControls({
   );
 }
 
+function normalizeProjectHealth(value: string | undefined | null): ProjectHealth {
+  return PROJECT_HEALTH_OPTIONS.includes(value as ProjectHealth) ? value as ProjectHealth : "On Track";
+}
+
 function ProjectListTable({
   projects,
   loading,
@@ -1626,6 +1634,7 @@ function ProjectListTable({
             </span>
           </td>
           <td style={projectCellStyle}><span style={projectStatusPillStyle}>{project.status || "Active"}</span></td>
+          <td style={projectCellStyle}><span style={projectHealthPillStyle(normalizeProjectHealth(project.health))}>{normalizeProjectHealth(project.health)}</span></td>
           <td style={projectCellStyle}>{projectAccountLabel(project)}</td>
           <td style={projectCellStyle}>{projectTeamLabel(project)}</td>
         </tr>
@@ -1664,6 +1673,7 @@ function ProjectListTable({
                       <tr>
                         <th style={projectHeaderCellStyle}>Project Name</th>
                         <th style={projectHeaderCellStyle}>Status</th>
+                        <th style={projectHeaderCellStyle}>Health</th>
                         <th style={projectHeaderCellStyle}>Account</th>
                         <th style={projectHeaderCellStyle}>Team</th>
                       </tr>
@@ -1687,6 +1697,7 @@ function ProjectListTable({
           <tr>
             <th style={projectHeaderCellStyle}>Project Name</th>
             <th style={projectHeaderCellStyle}>Status</th>
+            <th style={projectHeaderCellStyle}>Health</th>
             <th style={projectHeaderCellStyle}>Account</th>
             <th style={projectHeaderCellStyle}>Team</th>
           </tr>
@@ -1695,7 +1706,7 @@ function ProjectListTable({
           {renderProjectRows(sortedProjects)}
           {sortedProjects.length === 0 ? (
             <tr>
-              <td colSpan={4} style={projectEmptyCellStyle}>No projects</td>
+              <td colSpan={5} style={projectEmptyCellStyle}>No projects</td>
             </tr>
           ) : null}
         </tbody>
@@ -2414,6 +2425,26 @@ const projectStatusPillStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 900,
 };
+
+function projectHealthPillStyle(health: ProjectHealth): React.CSSProperties {
+  const colors = health === "AT RISK"
+    ? { background: "rgba(249, 115, 22, 0.14)", color: "#c2410c", border: "rgba(249, 115, 22, 0.30)" }
+    : health === "Off Track"
+      ? { background: "rgba(239, 68, 68, 0.13)", color: "#b91c1c", border: "rgba(239, 68, 68, 0.30)" }
+      : { background: "rgba(16, 185, 129, 0.12)", color: "#047857", border: "rgba(16, 185, 129, 0.26)" };
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    minHeight: 24,
+    borderRadius: 999,
+    border: `1px solid ${colors.border}`,
+    padding: "0 9px",
+    background: colors.background,
+    color: colors.color,
+    fontSize: 12,
+    fontWeight: 950,
+  };
+}
 
 const projectEmptyCellStyle: React.CSSProperties = {
   height: 120,

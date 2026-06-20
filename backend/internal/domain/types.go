@@ -471,12 +471,35 @@ type Project struct {
 	ProjectID        string             `json:"project_id"`
 	Name             string             `json:"name"`
 	Status           string             `json:"status"`
+	Health           string             `json:"health"`
 	DefaultAccess    string             `json:"default_access"`
 	Accounts         []Account          `json:"accounts,omitempty"`
 	Teams            []CompanyUserGroup `json:"teams,omitempty"`
 	EffectiveAccess  string             `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time          `json:"created_timestamp"`
 	UpdatedTimestamp time.Time          `json:"updated_timestamp"`
+}
+
+type ProjectCriticalPathStep struct {
+	CompanyID        string    `json:"company_id"`
+	ProjectID        string    `json:"project_id"`
+	StepID           string    `json:"step_id"`
+	Name             string    `json:"name"`
+	RelationshipID   *string   `json:"relationship_id,omitempty"`
+	ResourceType     string    `json:"resource_type,omitempty"`
+	ResourceID       string    `json:"resource_id,omitempty"`
+	LogicGateID      *string   `json:"logic_gate_id,omitempty"`
+	NodeID           *string   `json:"node_id,omitempty"`
+	DisplayTitle     string    `json:"display_title,omitempty"`
+	Status           *string   `json:"status,omitempty"`
+	DueDate          *string   `json:"due_date,omitempty"`
+	OwnerType        string    `json:"owner_type,omitempty"`
+	OwnerID          *string   `json:"owner_id,omitempty"`
+	OwnerLabel       string    `json:"owner_label,omitempty"`
+	Position         int       `json:"position"`
+	IsCurrent        bool      `json:"is_current"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
 type ProjectInformation struct {
@@ -536,9 +559,11 @@ type ProjectView struct {
 	Information       []ProjectInformation            `json:"information"`
 	Projections       []ProjectProjection             `json:"projections"`
 	Relationships     []ProjectRelationshipProjection `json:"relationships"`
+	CriticalPath      []ProjectCriticalPathStep       `json:"critical_path"`
 	InformationCount  int                             `json:"information_count"`
 	ProjectionCount   int                             `json:"projection_count"`
 	RelationshipCount int                             `json:"relationship_count"`
+	CriticalPathCount int                             `json:"critical_path_count"`
 	EffectiveAccessFlags
 }
 

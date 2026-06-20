@@ -2,6 +2,7 @@ import { apiFetchJSON } from "../../auth/cognitoAuth.js";
 import type { Account } from "../accounts/accountsApi.js";
 
 export type ProjectManagementEntityType = "node" | "logic_gate";
+export type ProjectHealth = "On Track" | "AT RISK" | "Off Track";
 
 export type ProjectManagementTimelineRow = {
   company_id: string;
@@ -47,6 +48,7 @@ export type ProjectRecord = {
   project_id: string;
   name: string;
   status: string;
+  health?: ProjectHealth | string;
   default_access?: string;
   accounts?: Account[];
   teams?: ProjectTeam[];
@@ -103,6 +105,28 @@ export type ProjectRelationshipProjection = {
   projection_updated_timestamp: string;
 };
 
+export type ProjectCriticalPathStep = {
+  company_id: string;
+  project_id: string;
+  step_id: string;
+  name: string;
+  relationship_id?: string | null;
+  resource_type?: "logic_gate" | "node" | "";
+  resource_id?: string;
+  logic_gate_id?: string | null;
+  node_id?: string | null;
+  display_title?: string;
+  status?: string | null;
+  due_date?: string | null;
+  owner_type?: "user" | "group" | "";
+  owner_id?: string | null;
+  owner_label?: string;
+  position: number;
+  is_current: boolean;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
 export type ProjectView = {
   company_id: string;
   project_id: string;
@@ -110,8 +134,10 @@ export type ProjectView = {
   information: ProjectInformation[];
   projections: ProjectProjection[];
   relationships: ProjectRelationshipProjection[];
+  critical_path?: ProjectCriticalPathStep[];
   information_count?: number;
   projection_count?: number;
+  critical_path_count?: number;
   can_view?: boolean;
   can_edit?: boolean;
   can_admin?: boolean;
@@ -199,6 +225,7 @@ export async function createProject(input: {
   companyID: string;
   name: string;
   status?: string;
+  health?: ProjectHealth;
   accountIDs?: string[];
   teamIDs?: string[];
 }): Promise<ProjectMutationResponse> {
@@ -206,6 +233,7 @@ export async function createProject(input: {
     company_id: input.companyID,
     name: input.name,
     status: input.status ?? "Active",
+    health: input.health ?? "On Track",
   };
   if (input.accountIDs !== undefined) body.account_ids = input.accountIDs;
   if (input.teamIDs !== undefined) body.team_ids = input.teamIDs;
@@ -220,6 +248,7 @@ export async function updateProject(input: {
   projectID: string;
   name: string;
   status: string;
+  health?: ProjectHealth | string;
   accountIDs?: string[];
   teamIDs?: string[];
 }): Promise<ProjectMutationResponse> {
@@ -227,6 +256,7 @@ export async function updateProject(input: {
     company_id: input.companyID,
     name: input.name,
     status: input.status,
+    health: input.health ?? "On Track",
   };
   if (input.accountIDs !== undefined) body.account_ids = input.accountIDs;
   if (input.teamIDs !== undefined) body.team_ids = input.teamIDs;
@@ -276,6 +306,46 @@ export async function deleteProjectProjection(input: {
   const params = new URLSearchParams();
   params.set("company_id", input.companyID);
   return apiFetchJSON<{ status: string }>(`/v1/projects/${encodeURIComponent(input.projectID)}/projection/${encodeURIComponent(input.informationID)}?${params.toString()}`, {
+    method: "DELETE",
+  });
+}
+
+export async function upsertProjectCriticalPathStep(input: {
+  companyID: string;
+  projectID: string;
+  stepID?: string;
+  name: string;
+  relationshipID?: string;
+  dueDate?: string;
+  ownerType?: "user" | "group" | "";
+  ownerID?: string;
+  position: number;
+  isCurrent: boolean;
+}): Promise<{ step: ProjectCriticalPathStep }> {
+  return apiFetchJSON<{ step: ProjectCriticalPathStep }>(`/v1/projects/${encodeURIComponent(input.projectID)}/critical-path`, {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      step_id: input.stepID,
+      name: input.name,
+      relationship_id: input.relationshipID ?? "",
+      due_date: input.dueDate ?? "",
+      owner_type: input.ownerType ?? "",
+      owner_id: input.ownerID ?? "",
+      position: input.position,
+      is_current: input.isCurrent,
+    }),
+  });
+}
+
+export async function deleteProjectCriticalPathStep(input: {
+  companyID: string;
+  projectID: string;
+  stepID: string;
+}): Promise<{ deleted_step_id: string }> {
+  const params = new URLSearchParams();
+  params.set("company_id", input.companyID);
+  return apiFetchJSON<{ deleted_step_id: string }>(`/v1/projects/${encodeURIComponent(input.projectID)}/critical-path/${encodeURIComponent(input.stepID)}?${params.toString()}`, {
     method: "DELETE",
   });
 }

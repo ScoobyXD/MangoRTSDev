@@ -63,13 +63,17 @@ import {
   addProjectInformation,
   deleteProjectManagementLogicGate,
   deleteProjectManagementNode,
+  deleteProjectCriticalPathStep,
   createProjectLogicGate,
   createProjectNode,
   deleteProjectProjection,
   deleteProjectRelationship,
   fetchProjectView,
   updateProject,
+  upsertProjectCriticalPathStep,
   upsertProjectRelationship,
+  type ProjectCriticalPathStep,
+  type ProjectHealth,
   type ProjectProjection,
   type ProjectRecord,
   type ProjectRelationshipProjection,
@@ -140,11 +144,23 @@ type SummarySplitResizeState = {
   width: number;
 };
 
+type CriticalPathStepUpdates = Partial<{
+  name: string;
+  relationshipID: string;
+  dueDate: string;
+  ownerType: "user" | "group" | "";
+  ownerID: string;
+  position: number;
+  isCurrent: boolean;
+}>;
+
 const PROJECT_SUMMARY_SURFACE_TEXT = "#172033";
 const PROJECT_SUMMARY_RULE = "rgba(91, 141, 239, 0.24)";
 const PROJECT_SUMMARY_SPLIT_MIN = 42;
 const PROJECT_SUMMARY_SPLIT_MAX = 74;
 const PROJECT_RELATIONSHIP_NODE_DRAG_MIME = "application/x-mangorts-project-relationship-node";
+const PROJECT_CRITICAL_STEP_DRAG_MIME = "application/x-mangorts-project-critical-step";
+const PROJECT_HEALTH_OPTIONS: ProjectHealth[] = ["On Track", "AT RISK", "Off Track"];
 
 export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   projectID,
@@ -169,6 +185,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [chatMessages, setChatMessages] = useState<EditorTextBlockChatMessage[]>([]);
   const [attachedEmails, setAttachedEmails] = useState<EditorAttachedEmail[]>([]);
   const [relationships, setRelationships] = useState<ProjectRelationshipProjection[]>([]);
+  const [criticalPath, setCriticalPath] = useState<ProjectCriticalPathStep[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
   const [currentUserID, setCurrentUserID] = useState("");
@@ -202,6 +219,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [hoveredRelationshipNodeID, setHoveredRelationshipNodeID] = useState("");
   const [selectedRelationshipNodeIDs, setSelectedRelationshipNodeIDs] = useState<Set<string>>(() => new Set());
   const [selectionAnchorRelationshipNodeID, setSelectionAnchorRelationshipNodeID] = useState("");
+  const [activeRightPanelTab, setActiveRightPanelTab] = useState<"relationships" | "critical-path">("relationships");
+  const [criticalPathDropStepID, setCriticalPathDropStepID] = useState("");
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
 
   const loadProject = useCallback(async (options: { showLoading?: boolean } = {}) => {
@@ -219,6 +238,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setProject(view.project);
       setProjectTitleDraft(view.project.name || "");
       setRelationships(view.relationships ?? []);
+      setCriticalPath(orderCriticalPathSteps(view.critical_path ?? []));
       setCompanyUsers(users);
       setGroups(userGroups.groups);
       setAssignmentAccountIDs(projectAccountIDs(view.project));
@@ -298,6 +318,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     ordered.push(...ungroupedNodes.map((node) => node.relationship_id));
     return ordered;
   }, [collapsedGateRelationshipIDs, relationshipGroups, ungroupedNodes]);
+  const currentCriticalStep = useMemo(() => criticalPath.find((step) => step.is_current) ?? null, [criticalPath]);
+  const currentCriticalRelationshipID = currentCriticalStep?.relationship_id?.trim() ?? "";
   const chatMessagesByBlockID = useMemo(() => {
     const grouped = new Map<string, EditorTextBlockChatMessage[]>();
     for (const message of chatMessages) {
@@ -545,17 +567,24 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [companyID, loadProject, projectID]);
 
-  const addRelationshipTargets = useCallback(async (targets: ProjectRelationshipDropTarget[]) => {
-    const existing = new Set(relationships.map((item) => `${item.resource_type}:${item.resource_id}`));
+  const addRelationshipTargets = useCallback(async (targets: ProjectRelationshipDropTarget[]): Promise<ProjectRelationshipProjection[]> => {
+    const existingByKey = new Map(relationships.map((item) => [`${item.resource_type}:${item.resource_id}`, item]));
+    const ensuredRelationships: ProjectRelationshipProjection[] = [];
     const uniqueTargets: ProjectRelationshipDropTarget[] = [];
     const incoming = new Set<string>();
     for (const target of targets) {
       const key = `${target.resourceType}:${target.resourceID}`;
-      if (!target.resourceID || existing.has(key) || incoming.has(key)) continue;
+      if (!target.resourceID || incoming.has(key)) continue;
+      const existing = existingByKey.get(key);
+      if (existing) {
+        ensuredRelationships.push(existing);
+        incoming.add(key);
+        continue;
+      }
       incoming.add(key);
       uniqueTargets.push(target);
     }
-    if (uniqueTargets.length === 0) return;
+    if (uniqueTargets.length === 0) return ensuredRelationships;
     setError("");
     try {
       const results = await Promise.all(uniqueTargets.map((target, index) => upsertProjectRelationship({
@@ -571,8 +600,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       } else {
         await loadProject({ showLoading: false });
       }
+      return [...ensuredRelationships, ...nextRelationships];
     } catch (relationshipError) {
       setError(relationshipError instanceof Error ? relationshipError.message : "Failed to add relationships");
+      return ensuredRelationships;
     }
   }, [companyID, loadProject, projectID, relationships]);
 
@@ -588,6 +619,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         projectID,
         name: project.name || "Untitled Project",
         status: project.status || "Active",
+        health: normalizeProjectHealth(project.health),
         accountIDs,
         teamIDs,
       });
@@ -605,6 +637,29 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setAssignmentsSaving(false);
     }
   }, [assignmentAccountIDs, assignmentTeamIDs, companyID, loadProject, project, projectID]);
+
+  const saveProjectHealth = useCallback(async (health: ProjectHealth) => {
+    if (!project) return;
+    const nextHealth = normalizeProjectHealth(health);
+    const previous = project;
+    setProject({ ...project, health: nextHealth });
+    setError("");
+    try {
+      const result = await updateProject({
+        companyID,
+        projectID,
+        name: project.name || "Untitled Project",
+        status: project.status || "Active",
+        health: nextHealth,
+        accountIDs: projectAccountIDs(project),
+        teamIDs: projectTeamIDs(project),
+      });
+      if (result.project) setProject(result.project);
+    } catch (healthError) {
+      setProject(previous);
+      setError(healthError instanceof Error ? healthError.message : "Failed to update project health");
+    }
+  }, [companyID, project, projectID]);
 
   const selectRelationshipNode = useCallback((relationshipID: string, event: React.MouseEvent<HTMLElement>) => {
     const next = buildProjectRelationshipNodeSelectionUpdate({
@@ -751,6 +806,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         projectID,
         name: nextName,
         status: project.status || "Active",
+        health: normalizeProjectHealth(project.health),
       });
       if (result.project) {
         setProject(result.project);
@@ -795,6 +851,89 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const payload = readExplorerDragPayload(dataTransfer);
     return resolveProjectRelationshipDropTargets(payload, workspace);
   }, [workspace]);
+
+  const saveCriticalPathStep = useCallback(async (
+    step: ProjectCriticalPathStep,
+    updates: Partial<{
+      name: string;
+      relationshipID: string;
+      dueDate: string;
+      ownerType: "user" | "group" | "";
+      ownerID: string;
+      position: number;
+      isCurrent: boolean;
+    }>,
+  ) => {
+    const nextName = updates.name ?? step.name ?? "";
+    const nextRelationshipID = updates.relationshipID ?? step.relationship_id?.trim() ?? "";
+    const nextDueDate = updates.dueDate ?? step.due_date?.trim() ?? "";
+    const nextOwnerType = updates.ownerType ?? step.owner_type ?? "";
+    const nextOwnerID = updates.ownerID ?? step.owner_id?.trim() ?? "";
+    const nextPosition = updates.position ?? step.position ?? 0;
+    const nextIsCurrent = updates.isCurrent ?? Boolean(step.is_current);
+    setError("");
+    try {
+      const result = await upsertProjectCriticalPathStep({
+        companyID,
+        projectID,
+        stepID: step.step_id,
+        name: nextName,
+        relationshipID: nextRelationshipID,
+        dueDate: nextDueDate,
+        ownerType: nextOwnerType,
+        ownerID: nextOwnerID,
+        position: nextPosition,
+        isCurrent: nextIsCurrent,
+      });
+      setCriticalPath((current) => mergeCriticalPathStep(current, result.step));
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Failed to save critical path step");
+      await loadProject({ showLoading: false });
+    }
+  }, [companyID, loadProject, projectID]);
+
+  const addCriticalPathStep = useCallback(async () => {
+    setError("");
+    try {
+      const result = await upsertProjectCriticalPathStep({
+        companyID,
+        projectID,
+        name: "New critical step",
+        position: criticalPath.length + 1,
+        isCurrent: !criticalPath.some((step) => step.is_current),
+      });
+      setCriticalPath((current) => mergeCriticalPathStep(current, result.step));
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Failed to add critical path step");
+    }
+  }, [companyID, criticalPath, projectID]);
+
+  const removeCriticalPathStep = useCallback(async (step: ProjectCriticalPathStep) => {
+    const previous = criticalPath;
+    setCriticalPath((current) => current.filter((item) => item.step_id !== step.step_id));
+    setError("");
+    try {
+      await deleteProjectCriticalPathStep({ companyID, projectID, stepID: step.step_id });
+    } catch (deleteError) {
+      setCriticalPath(previous);
+      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete critical path step");
+    }
+  }, [companyID, criticalPath, projectID]);
+
+  const dropCriticalPathRelationship = useCallback(async (step: ProjectCriticalPathStep, dataTransfer: DataTransfer) => {
+    const target = relationshipTargetsFromTransfer(dataTransfer)[0];
+    if (!target) return;
+    const ensured = await addRelationshipTargets([target]);
+    const relationship = ensured.find((item) => item.resource_type === target.resourceType && item.resource_id === target.resourceID);
+    if (!relationship) return;
+    await saveCriticalPathStep(step, { relationshipID: relationship.relationship_id });
+  }, [addRelationshipTargets, relationshipTargetsFromTransfer, saveCriticalPathStep]);
+
+  const setCurrentCriticalStep = useCallback(async (step: ProjectCriticalPathStep) => {
+    if (step.is_current) return;
+    setCriticalPath((current) => orderCriticalPathSteps(current.map((item) => ({ ...item, is_current: item.step_id === step.step_id }))));
+    await saveCriticalPathStep(step, { isCurrent: true });
+  }, [saveCriticalPathStep]);
 
   const toggleGateCollapsed = useCallback((relationshipID: string) => {
     setCollapsedGateRelationshipIDs((current) => {
@@ -893,6 +1032,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             Permissions
           </button>
           <span style={statusPillStyle(accent)}>{project?.status || "Active"}</span>
+          <select
+            aria-label="Project health"
+            value={normalizeProjectHealth(project?.health)}
+            style={healthSelectStyle(normalizeProjectHealth(project?.health))}
+            onChange={(event) => void saveProjectHealth(event.currentTarget.value as ProjectHealth)}
+          >
+            {PROJECT_HEALTH_OPTIONS.map((health) => <option key={health} value={health}>{health}</option>)}
+          </select>
           {projectAccountLabels(project).map((label) => <span key={`account:${label}`} style={plainPillStyle}>{label}</span>)}
           {projectTeamLabels(project).map((label) => <span key={`team:${label}`} style={plainPillStyle}>{label}</span>)}
         </div>
@@ -1143,8 +1290,28 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         <div role="separator" aria-orientation="vertical" style={summarySplitHandleStyle} onPointerDown={startSummarySplitResize} />
         <aside style={relationshipsColumnStyle(summarySplitPct)}>
           <div style={columnToolbarStyle}>
-            <div style={columnTitleStyle}>Logic Gates / Nodes</div>
+            <div role="tablist" aria-label="Project work panel" style={rightPanelTabsStyle}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeRightPanelTab === "relationships"}
+                style={rightPanelTabStyle(activeRightPanelTab === "relationships")}
+                onClick={() => setActiveRightPanelTab("relationships")}
+              >
+                Logic Gates / Nodes
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeRightPanelTab === "critical-path"}
+                style={rightPanelTabStyle(activeRightPanelTab === "critical-path")}
+                onClick={() => setActiveRightPanelTab("critical-path")}
+              >
+                Critical Path
+              </button>
+            </div>
           </div>
+          {activeRightPanelTab === "relationships" ? (
           <div
             className="kanban-board-scroll"
             style={relationshipScrollStyle(relationshipDropActive)}
@@ -1180,6 +1347,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             {relationshipGroups.map((group) => {
               const collapsed = collapsedGateRelationshipIDs.has(group.gate.relationship_id);
               const gateLogicGateID = group.gate.logic_gate_id?.trim() ?? "";
+              const gateIsCurrentCritical = currentCriticalRelationshipID === group.gate.relationship_id;
               return (
                 <div
                   key={group.gate.relationship_id}
@@ -1224,6 +1392,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                     >
                       {group.gate.display_title}
                     </span>
+                    <CriticalPulseBeacon visible={gateIsCurrentCritical} />
                     <button
                       type="button"
                       aria-label={collapsed ? "Expand logic gate" : "Collapse logic gate"}
@@ -1241,7 +1410,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   </div>
                   {!collapsed ? (
                     <div style={logicGateNodeListStyle}>
-                      {group.nodes.map((node) => (
+                      {group.nodes.map((node) => {
+                        const nodeIsCurrentCritical = currentCriticalRelationshipID === node.relationship_id;
+                        return (
                         <button
                           key={node.relationship_id}
                           type="button"
@@ -1256,9 +1427,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         >
                           <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
                           <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
+                          <CriticalPulseBeacon visible={nodeIsCurrentCritical} compact />
                           {node.status ? <span style={nodeStatusDotStyle(node.status)} /> : null}
                         </button>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : null}
                 </div>
@@ -1267,7 +1440,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             {ungroupedNodes.length > 0 ? (
               <div style={gateGroupStyle(false)}>
                 <div style={ungroupedHeaderStyle}>Nodes</div>
-                {ungroupedNodes.map((node) => (
+                {ungroupedNodes.map((node) => {
+                  const nodeIsCurrentCritical = currentCriticalRelationshipID === node.relationship_id;
+                  return (
                   <button
                     key={node.relationship_id}
                     type="button"
@@ -1280,15 +1455,35 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   >
                     <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
                     <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
+                    <CriticalPulseBeacon visible={nodeIsCurrentCritical} compact />
                     {node.status ? <span style={nodeStatusDotStyle(node.status)} /> : null}
                   </button>
-                ))}
+                  );
+                })}
               </div>
             ) : null}
             {relationshipGroups.length === 0 && ungroupedNodes.length === 0 ? (
               <div style={emptyRelationshipStyle}>No relationships</div>
             ) : null}
           </div>
+          ) : (
+            <CriticalPathTable
+              accent={accent}
+              steps={criticalPath}
+              relationships={relationships}
+              companyUsers={companyUsers}
+              groups={groups}
+              dropStepID={criticalPathDropStepID}
+              onSetDropStepID={setCriticalPathDropStepID}
+              onAddStep={() => void addCriticalPathStep()}
+              onSaveStep={(step, updates) => void saveCriticalPathStep(step, updates)}
+              onDeleteStep={(step) => void removeCriticalPathStep(step)}
+              onDropRelationship={(step, dataTransfer) => void dropCriticalPathRelationship(step, dataTransfer)}
+              onSetCurrent={(step) => void setCurrentCriticalStep(step)}
+              onNodeOpen={onNodeOpen}
+              onLogicGateOpen={onLogicGateOpen}
+            />
+          )}
           {relationshipContextMenu ? (
             <div
               role="menu"
@@ -1370,6 +1565,234 @@ function blockDraftsFromProjections(projections: ProjectProjection[]): ProjectTe
       updatedTimestamp: projection.updated_timestamp ?? projection.created_timestamp ?? "",
     };
   });
+}
+
+function CriticalPathTable({
+  accent,
+  steps,
+  relationships,
+  companyUsers,
+  groups,
+  dropStepID,
+  onSetDropStepID,
+  onAddStep,
+  onSaveStep,
+  onDeleteStep,
+  onDropRelationship,
+  onSetCurrent,
+  onNodeOpen,
+  onLogicGateOpen,
+}: {
+  accent: string;
+  steps: ProjectCriticalPathStep[];
+  relationships: ProjectRelationshipProjection[];
+  companyUsers: CompanyUser[];
+  groups: CompanyUserGroup[];
+  dropStepID: string;
+  onSetDropStepID: (stepID: string) => void;
+  onAddStep: () => void;
+  onSaveStep: (step: ProjectCriticalPathStep, updates: CriticalPathStepUpdates) => void;
+  onDeleteStep: (step: ProjectCriticalPathStep) => void;
+  onDropRelationship: (step: ProjectCriticalPathStep, dataTransfer: DataTransfer) => void;
+  onSetCurrent: (step: ProjectCriticalPathStep) => void;
+  onNodeOpen?: (nodeID: string) => void;
+  onLogicGateOpen?: (logicGateID: string) => void;
+}) {
+  const relationshipByID = useMemo(() => new Map(relationships.map((relationship) => [relationship.relationship_id, relationship])), [relationships]);
+  const orderedSteps = useMemo(() => orderCriticalPathSteps(steps), [steps]);
+  return (
+    <div style={criticalPathPanelStyle}>
+      <div style={criticalPathActionsStyle}>
+        <button type="button" style={criticalPathAddButtonStyle(accent)} onClick={onAddStep}>Add Step</button>
+      </div>
+      <div role="table" aria-label="Critical path" className="kanban-board-scroll" style={criticalPathTableStyle}>
+        <div role="row" style={criticalPathHeaderRowStyle}>
+          <div style={criticalPathHeaderCellStyle}>Name</div>
+          <div style={criticalPathHeaderCellStyle}>Node / Logic Gate</div>
+          <div style={criticalPathHeaderCellStyle}>Status</div>
+          <div style={criticalPathHeaderCellStyle}>Due Date</div>
+          <div style={criticalPathHeaderCellStyle}>Owner</div>
+        </div>
+        {orderedSteps.map((step) => {
+          const relationship = step.relationship_id ? relationshipByID.get(step.relationship_id) : undefined;
+          const resourceType = (step.resource_type || relationship?.resource_type || "") as "logic_gate" | "node" | "";
+          const resourceID = step.resource_id || relationship?.resource_id || "";
+          const logicGateID = step.logic_gate_id?.trim() || relationship?.logic_gate_id?.trim() || (resourceType === "logic_gate" ? resourceID : "");
+          const nodeID = step.node_id?.trim() || relationship?.node_id?.trim() || (resourceType === "node" ? resourceID : "");
+          const title = step.display_title || relationship?.display_title || "";
+          const status = step.status ?? relationship?.status ?? (resourceType === "logic_gate" ? "Logic Gate" : "");
+          const ownerValue = step.owner_type && step.owner_id ? `${step.owner_type}:${step.owner_id}` : "";
+          const isDropTarget = dropStepID === step.step_id;
+          return (
+            <div
+              key={step.step_id}
+              role="row"
+              style={criticalPathRowStyle(step.is_current, isDropTarget)}
+              onDragOver={(event) => {
+                if (!Array.from(event.dataTransfer.types).includes(PROJECT_CRITICAL_STEP_DRAG_MIME)) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => {
+                if (!Array.from(event.dataTransfer.types).includes(PROJECT_CRITICAL_STEP_DRAG_MIME)) return;
+                event.preventDefault();
+                onSetCurrent(step);
+              }}
+            >
+              <div role="cell" style={criticalPathNameCellStyle}>
+                <button type="button" aria-label="Delete step" title="Delete step" style={criticalPathDeleteButtonStyle} onClick={() => onDeleteStep(step)}>x</button>
+                <input
+                  defaultValue={step.name}
+                  style={criticalPathNameInputStyle}
+                  onBlur={(event) => {
+                    const nextName = event.currentTarget.value.trim();
+                    if (nextName !== (step.name ?? "")) onSaveStep(step, { name: nextName });
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
+                  }}
+                />
+              </div>
+              <div
+                role="cell"
+                style={criticalPathDropCellStyle(isDropTarget)}
+                onDragOver={(event) => {
+                  if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME)) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.dataTransfer.dropEffect = "copy";
+                  onSetDropStepID(step.step_id);
+                }}
+                onDragLeave={(event) => {
+                  if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                  onSetDropStepID("");
+                }}
+                onDrop={(event) => {
+                  if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME)) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onSetDropStepID("");
+                  onDropRelationship(step, event.dataTransfer);
+                }}
+              >
+                {title ? (
+                  <button
+                    type="button"
+                    style={criticalPathLinkedResourceStyle(resourceType)}
+                    onClick={() => {
+                      if (resourceType === "logic_gate" && logicGateID) onLogicGateOpen?.(logicGateID);
+                      if (resourceType === "node" && nodeID) onNodeOpen?.(nodeID);
+                    }}
+                  >
+                    <span style={criticalPathResourceIconStyle(resourceType)}>
+                      <ExplorerRowIcon kind={resourceType === "logic_gate" ? "logic_gate" : "node"} />
+                    </span>
+                    <span style={criticalPathResourceTitleStyle}>{title}</span>
+                  </button>
+                ) : (
+                  <span style={criticalPathEmptyDropStyle}>Drop node or logic gate</span>
+                )}
+              </div>
+              <div role="cell" style={criticalPathCellStyle}>
+                <span style={criticalPathStatusPillStyle(status || "No status")}>{status || "No status"}</span>
+              </div>
+              <div role="cell" style={criticalPathCellStyle}>
+                <input
+                  type="date"
+                  value={step.due_date ?? ""}
+                  style={criticalPathDateInputStyle}
+                  onChange={(event) => onSaveStep(step, { dueDate: event.currentTarget.value })}
+                />
+              </div>
+              <div role="cell" style={criticalPathOwnerCellStyle}>
+                <select
+                  value={ownerValue}
+                  style={criticalPathOwnerSelectStyle}
+                  onChange={(event) => {
+                    const [ownerType, ownerID] = event.currentTarget.value.split(":");
+                    onSaveStep(step, { ownerType: ownerType === "user" || ownerType === "group" ? ownerType : "", ownerID: ownerID ?? "" });
+                  }}
+                >
+                  <option value="">Unassigned</option>
+                  {companyUsers.map((user) => (
+                    <option key={`user:${user.user_id}`} value={`user:${user.user_id}`}>
+                      {`Person: ${user.display_name || user.email || user.user_id}`}
+                    </option>
+                  ))}
+                  {groups.map((group) => (
+                    <option key={`group:${group.group_id}`} value={`group:${group.group_id}`}>
+                      {`Org: ${group.name || group.group_id}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {step.is_current ? (
+                <button
+                  type="button"
+                  draggable
+                  aria-label="Current Critical Step"
+                  title="Drag current critical step"
+                  style={criticalPathCurrentMarkerStyle}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData(PROJECT_CRITICAL_STEP_DRAG_MIME, step.step_id);
+                    event.dataTransfer.setData("text/plain", "Current Critical Step");
+                  }}
+                >
+                  <span className="project-critical-pulse-dot" style={criticalPathCurrentDotStyle} />
+                  Current Critical Step
+                </button>
+              ) : (
+                <button type="button" style={criticalPathSetCurrentButtonStyle} onClick={() => onSetCurrent(step)}>
+                  Set current
+                </button>
+              )}
+            </div>
+          );
+        })}
+        {orderedSteps.length === 0 ? (
+          <button type="button" style={criticalPathEmptyButtonStyle} onClick={onAddStep}>
+            Add Step
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CriticalPulseBeacon({ visible, compact = false }: { visible: boolean; compact?: boolean }) {
+  if (!visible) return <span aria-hidden="true" style={compact ? criticalPulsePlaceholderCompactStyle : criticalPulsePlaceholderStyle} />;
+  return (
+    <span className="project-critical-pulse-badge" title="Current Critical Step" aria-label="Current Critical Step" style={criticalPulseBadgeStyle(compact)}>
+      <span className="project-critical-pulse-dot" style={criticalPulseBadgeDotStyle} />
+      {!compact ? <span style={criticalPulseBadgeTextStyle}>Current</span> : null}
+    </span>
+  );
+}
+
+function orderCriticalPathSteps(steps: ProjectCriticalPathStep[]): ProjectCriticalPathStep[] {
+  return [...steps].sort((left, right) => (
+    (Number.isFinite(Number(left.position)) ? Number(left.position) : 0) -
+    (Number.isFinite(Number(right.position)) ? Number(right.position) : 0) ||
+    (left.created_timestamp ?? "").localeCompare(right.created_timestamp ?? "") ||
+    left.step_id.localeCompare(right.step_id)
+  ));
+}
+
+function mergeCriticalPathStep(current: ProjectCriticalPathStep[], incoming: ProjectCriticalPathStep): ProjectCriticalPathStep[] {
+  const next = current.map((step) => {
+    if (step.step_id === incoming.step_id) return incoming;
+    return incoming.is_current ? { ...step, is_current: false } : step;
+  });
+  if (!next.some((step) => step.step_id === incoming.step_id)) next.push(incoming);
+  return orderCriticalPathSteps(next);
+}
+
+function normalizeProjectHealth(value: string | undefined | null): ProjectHealth {
+  return PROJECT_HEALTH_OPTIONS.includes(value as ProjectHealth) ? value as ProjectHealth : "On Track";
 }
 
 function compareRelationshipProjection(left: ProjectRelationshipProjection, right: ProjectRelationshipProjection): number {
@@ -2063,6 +2486,403 @@ const toolbarActionsStyle: React.CSSProperties = {
   justifyContent: "flex-end",
 };
 
+const rightPanelTabsStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: 3,
+  borderRadius: 999,
+  background: "#e2e8f0",
+  gap: 2,
+};
+
+const rightPanelTabStyle = (active: boolean): React.CSSProperties => ({
+  minHeight: 28,
+  border: 0,
+  borderRadius: 999,
+  padding: "0 11px",
+  background: active ? "#ffffff" : "transparent",
+  color: active ? "#0f172a" : "#64748b",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+});
+
+function healthSelectStyle(health: ProjectHealth): React.CSSProperties {
+  const colors = health === "AT RISK"
+    ? { background: "#fff7ed", color: "#c2410c", border: "rgba(249, 115, 22, 0.42)" }
+    : health === "Off Track"
+      ? { background: "#fef2f2", color: "#b91c1c", border: "rgba(239, 68, 68, 0.42)" }
+      : { background: "#ecfdf5", color: "#047857", border: "rgba(16, 185, 129, 0.34)" };
+  return {
+    minHeight: 28,
+    border: `1px solid ${colors.border}`,
+    borderRadius: 999,
+    background: colors.background,
+    color: colors.color,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: 12,
+    fontWeight: 950,
+    padding: "0 28px 0 10px",
+    outline: "none",
+  };
+}
+
+const criticalPathPanelStyle: React.CSSProperties = {
+  minHeight: 0,
+  flex: "1 1 auto",
+  display: "grid",
+  gridTemplateRows: "auto minmax(0, 1fr)",
+  gap: 8,
+};
+
+const criticalPathActionsStyle: React.CSSProperties = {
+  minHeight: 30,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+};
+
+const criticalPathAddButtonStyle = (accent: string): React.CSSProperties => ({
+  minHeight: 30,
+  border: 0,
+  borderRadius: 8,
+  background: accent,
+  color: "#ffffff",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  padding: "0 11px",
+  boxShadow: "0 8px 18px rgba(37, 99, 235, 0.15)",
+});
+
+const criticalPathTableStyle: React.CSSProperties = {
+  minHeight: 0,
+  overflow: "auto",
+  display: "grid",
+  alignContent: "start",
+  border: "1px solid rgba(148, 163, 184, 0.24)",
+  borderRadius: 8,
+  background: "rgba(255, 255, 255, 0.68)",
+};
+
+const criticalPathGridColumns = "minmax(130px, 1.15fr) minmax(150px, 1fr) minmax(92px, 0.68fr) 128px minmax(132px, 0.9fr)";
+
+const criticalPathHeaderRowStyle: React.CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 4,
+  display: "grid",
+  gridTemplateColumns: criticalPathGridColumns,
+  minWidth: 760,
+  minHeight: 36,
+  background: "#f8fafc",
+  borderBottom: "1px solid rgba(148, 163, 184, 0.24)",
+};
+
+const criticalPathHeaderCellStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  padding: "0 10px",
+  borderRight: "1px solid rgba(148, 163, 184, 0.18)",
+  color: "#475569",
+  fontSize: 11,
+  fontWeight: 950,
+  boxSizing: "border-box",
+};
+
+function criticalPathRowStyle(current: boolean, dropActive: boolean): React.CSSProperties {
+  return {
+    position: "relative",
+    display: "grid",
+    gridTemplateColumns: criticalPathGridColumns,
+    minWidth: 760,
+    minHeight: 54,
+    paddingRight: current ? 160 : 92,
+    borderBottom: "1px solid rgba(226, 232, 240, 0.9)",
+    background: current
+      ? "linear-gradient(90deg, rgba(255, 247, 237, 0.96), rgba(255, 255, 255, 0.94))"
+      : dropActive
+        ? "rgba(239, 246, 255, 0.90)"
+        : "#ffffff",
+    outline: current ? "2px solid rgba(249, 115, 22, 0.58)" : dropActive ? "2px solid rgba(37, 99, 235, 0.28)" : "2px solid transparent",
+    outlineOffset: -2,
+    boxSizing: "border-box",
+  };
+}
+
+const criticalPathCellStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  padding: "7px 9px",
+  borderRight: "1px solid rgba(226, 232, 240, 0.88)",
+  boxSizing: "border-box",
+};
+
+const criticalPathNameCellStyle: React.CSSProperties = {
+  ...criticalPathCellStyle,
+  gap: 6,
+};
+
+const criticalPathDeleteButtonStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  border: "1px solid rgba(148, 163, 184, 0.24)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#64748b",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  padding: 0,
+  flex: "0 0 auto",
+};
+
+const criticalPathNameInputStyle: React.CSSProperties = {
+  minWidth: 0,
+  width: "100%",
+  height: 32,
+  border: "1px solid transparent",
+  borderRadius: 7,
+  background: "transparent",
+  color: "#0f172a",
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 850,
+  outline: "none",
+  padding: "0 6px",
+  boxSizing: "border-box",
+};
+
+function criticalPathDropCellStyle(active: boolean): React.CSSProperties {
+  return {
+    ...criticalPathCellStyle,
+    border: active ? "1px dashed rgba(37, 99, 235, 0.52)" : criticalPathCellStyle.border,
+    background: active ? "rgba(239, 246, 255, 0.86)" : "transparent",
+  };
+}
+
+function criticalPathLinkedResourceStyle(resourceType: "logic_gate" | "node" | ""): React.CSSProperties {
+  return {
+    minWidth: 0,
+    width: "100%",
+    height: 32,
+    display: "grid",
+    gridTemplateColumns: "20px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 7,
+    border: resourceType === "logic_gate" ? "1px solid rgba(34, 197, 94, 0.34)" : "1px solid rgba(14, 165, 233, 0.28)",
+    borderRadius: 8,
+    background: resourceType === "logic_gate" ? "#f0fdf4" : "#f0f9ff",
+    color: "#0f172a",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    padding: "0 8px",
+    textAlign: "left",
+    boxSizing: "border-box",
+  };
+}
+
+function criticalPathResourceIconStyle(resourceType: "logic_gate" | "node" | ""): React.CSSProperties {
+  return {
+    width: 18,
+    height: 18,
+    display: "grid",
+    placeItems: "center",
+    color: resourceType === "logic_gate" ? "#16a34a" : "#0284c7",
+  };
+}
+
+const criticalPathResourceTitleStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 11,
+  fontWeight: 900,
+};
+
+const criticalPathEmptyDropStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 30,
+  display: "grid",
+  placeItems: "center",
+  border: "1px dashed rgba(148, 163, 184, 0.38)",
+  borderRadius: 8,
+  color: "#64748b",
+  fontSize: 11,
+  fontWeight: 850,
+};
+
+function criticalPathStatusPillStyle(status: string): React.CSSProperties {
+  const normalized = status.toLowerCase();
+  const color = normalized.includes("done") || normalized.includes("complete")
+    ? { bg: "#ecfdf5", fg: "#047857", border: "rgba(16, 185, 129, 0.25)" }
+    : normalized.includes("progress")
+      ? { bg: "#eff6ff", fg: "#1d4ed8", border: "rgba(59, 130, 246, 0.24)" }
+      : normalized.includes("review") || normalized.includes("verify")
+        ? { bg: "#f5f3ff", fg: "#6d28d9", border: "rgba(124, 58, 237, 0.24)" }
+        : normalized.includes("block") || normalized.includes("issue")
+          ? { bg: "#fef2f2", fg: "#b91c1c", border: "rgba(239, 68, 68, 0.24)" }
+          : { bg: "#f8fafc", fg: "#475569", border: "rgba(148, 163, 184, 0.26)" };
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    minHeight: 24,
+    maxWidth: "100%",
+    border: `1px solid ${color.border}`,
+    borderRadius: 999,
+    background: color.bg,
+    color: color.fg,
+    padding: "0 8px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: 11,
+    fontWeight: 900,
+  };
+}
+
+const criticalPathDateInputStyle: React.CSSProperties = {
+  width: "100%",
+  height: 30,
+  border: "1px solid rgba(148, 163, 184, 0.26)",
+  borderRadius: 7,
+  background: "#ffffff",
+  color: "#334155",
+  fontFamily: "inherit",
+  fontSize: 11,
+  fontWeight: 800,
+  padding: "0 6px",
+  boxSizing: "border-box",
+};
+
+const criticalPathOwnerCellStyle: React.CSSProperties = {
+  ...criticalPathCellStyle,
+  borderRight: 0,
+};
+
+const criticalPathOwnerSelectStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  height: 30,
+  border: "1px solid rgba(148, 163, 184, 0.26)",
+  borderRadius: 7,
+  background: "#ffffff",
+  color: "#334155",
+  fontFamily: "inherit",
+  fontSize: 11,
+  fontWeight: 850,
+  padding: "0 6px",
+  boxSizing: "border-box",
+};
+
+const criticalPathCurrentMarkerStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  right: 8,
+  transform: "translateY(-50%)",
+  height: 32,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 7,
+  border: "1px solid rgba(249, 115, 22, 0.70)",
+  borderRadius: 999,
+  background: "#fff7ed",
+  color: "#c2410c",
+  cursor: "grab",
+  fontFamily: "inherit",
+  fontSize: 11,
+  fontWeight: 950,
+  padding: "0 10px",
+  boxShadow: "0 0 0 4px rgba(249, 115, 22, 0.08), 0 8px 18px rgba(249, 115, 22, 0.16)",
+};
+
+const criticalPathCurrentDotStyle: React.CSSProperties = {
+  width: 9,
+  height: 9,
+  borderRadius: 999,
+  background: "#f97316",
+  boxShadow: "0 0 0 4px rgba(249, 115, 22, 0.18)",
+};
+
+const criticalPathSetCurrentButtonStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  right: 8,
+  transform: "translateY(-50%)",
+  height: 28,
+  border: "1px solid rgba(148, 163, 184, 0.22)",
+  borderRadius: 999,
+  background: "#ffffff",
+  color: "#64748b",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 10,
+  fontWeight: 900,
+  padding: "0 8px",
+};
+
+const criticalPathEmptyButtonStyle: React.CSSProperties = {
+  minHeight: 96,
+  border: "1px dashed rgba(91, 141, 239, 0.42)",
+  borderRadius: 8,
+  background: "#ffffff",
+  color: "#1d4ed8",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  margin: 10,
+};
+
+const criticalPulsePlaceholderStyle: React.CSSProperties = {
+  width: 84,
+  height: 22,
+  justifySelf: "end",
+};
+
+const criticalPulsePlaceholderCompactStyle: React.CSSProperties = {
+  width: 18,
+  height: 18,
+};
+
+function criticalPulseBadgeStyle(compact: boolean): React.CSSProperties {
+  return {
+    minWidth: compact ? 18 : 84,
+    height: compact ? 18 : 22,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: compact ? 0 : 5,
+    border: "1px solid rgba(249, 115, 22, 0.72)",
+    borderRadius: 999,
+    background: "#fff7ed",
+    color: "#c2410c",
+    boxShadow: "0 0 0 3px rgba(249, 115, 22, 0.10)",
+    justifySelf: "end",
+    pointerEvents: "none",
+  };
+}
+
+const criticalPulseBadgeDotStyle: React.CSSProperties = {
+  width: 8,
+  height: 8,
+  borderRadius: 999,
+  background: "#f97316",
+  boxShadow: "0 0 0 4px rgba(249, 115, 22, 0.16)",
+};
+
+const criticalPulseBadgeTextStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 950,
+  lineHeight: 1,
+};
+
 const outlineToggleStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -2318,7 +3138,7 @@ const logicGateCardHeaderStyle: React.CSSProperties = {
   width: "100%",
   minHeight: 40,
   display: "grid",
-  gridTemplateColumns: "28px minmax(0, 1fr) 42px",
+  gridTemplateColumns: "28px minmax(0, 1fr) auto 42px",
   alignItems: "center",
   gap: 8,
   padding: 0,
@@ -2381,7 +3201,7 @@ const logicGateNodeRowStyle = (hovered: boolean, selected: boolean): React.CSSPr
   background: selected ? "#eff6ff" : hovered ? "#f8fbff" : "rgba(255, 255, 255, 0.94)",
   color: "#111827",
   display: "grid",
-  gridTemplateColumns: "16px minmax(0, 1fr) auto",
+  gridTemplateColumns: "16px minmax(0, 1fr) auto auto",
   alignItems: "center",
   gap: 4,
   padding: "3px 5px",

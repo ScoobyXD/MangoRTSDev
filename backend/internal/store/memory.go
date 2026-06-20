@@ -32,6 +32,7 @@ type MemoryRepo struct {
 	projectText                    map[string]map[string]domain.ProjectProjection
 	projectRelationships           map[string]domain.ProjectRelationship
 	projectRelationshipProjection  map[string]domain.ProjectRelationshipProjection
+	projectCriticalPathSteps       map[string]domain.ProjectCriticalPathStep
 	sharedInboxGVIC                map[string][]domain.SharedInboxGVICAssignment
 	folders                        map[string]domain.CompanyExplorerFolder
 	folderItems                    map[string]domain.CompanyExplorerFolderItem
@@ -100,6 +101,7 @@ func NewMemoryRepo() *MemoryRepo {
 		projectText:                    map[string]map[string]domain.ProjectProjection{},
 		projectRelationships:           map[string]domain.ProjectRelationship{},
 		projectRelationshipProjection:  map[string]domain.ProjectRelationshipProjection{},
+		projectCriticalPathSteps:       map[string]domain.ProjectCriticalPathStep{},
 		sharedInboxGVIC:                map[string][]domain.SharedInboxGVICAssignment{},
 		folders:                        map[string]domain.CompanyExplorerFolder{},
 		folderItems:                    map[string]domain.CompanyExplorerFolderItem{},

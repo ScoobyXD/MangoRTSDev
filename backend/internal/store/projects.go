@@ -8,6 +8,9 @@ import (
 
 const (
 	ProjectDefaultStatus             = "Active"
+	ProjectHealthOnTrack             = "On Track"
+	ProjectHealthAtRisk              = "AT RISK"
+	ProjectHealthOffTrack            = "Off Track"
 	ProjectMaxStatusLen              = 80
 	ProjectScopedNodeDefaultPriority = 3
 )
@@ -17,6 +20,7 @@ func NormalizeProjectInput(input ProjectInput, requireProjectID bool) (ProjectIn
 	input.ProjectID = cleanUUIDText(input.ProjectID)
 	input.Name = strings.TrimSpace(input.Name)
 	input.Status = NormalizeProjectStatus(input.Status)
+	input.Health = NormalizeProjectHealth(input.Health)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.AccountIDs = cleanProjectIDList(input.AccountIDs)
 	input.TeamIDs = cleanProjectIDList(input.TeamIDs)
@@ -49,6 +53,78 @@ func NormalizeProjectStatus(status string) string {
 		return status[:ProjectMaxStatusLen]
 	}
 	return status
+}
+
+func NormalizeProjectHealth(health string) string {
+	switch strings.TrimSpace(health) {
+	case "", ProjectHealthOnTrack:
+		return ProjectHealthOnTrack
+	case ProjectHealthAtRisk:
+		return ProjectHealthAtRisk
+	case ProjectHealthOffTrack:
+		return ProjectHealthOffTrack
+	default:
+		return ProjectHealthOnTrack
+	}
+}
+
+func NormalizeProjectCriticalPathStepInput(input ProjectCriticalPathStepInput) (ProjectCriticalPathStepInput, error) {
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.ProjectID = cleanUUIDText(input.ProjectID)
+	input.StepID = cleanUUIDText(input.StepID)
+	input.Name = strings.TrimSpace(input.Name)
+	input.RelationshipID = cleanUUIDText(input.RelationshipID)
+	input.DueDate = strings.TrimSpace(input.DueDate)
+	input.OwnerType = strings.TrimSpace(input.OwnerType)
+	input.OwnerID = cleanUUIDText(input.OwnerID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	if input.CompanyID == "" || input.ProjectID == "" {
+		return ProjectCriticalPathStepInput{}, ErrInvalid
+	}
+	if input.StepID == "" {
+		input.StepID = newUUIDv7String()
+	}
+	if input.DueDate != "" && !validISODate(input.DueDate) {
+		return ProjectCriticalPathStepInput{}, ErrInvalid
+	}
+	if input.OwnerType == "" {
+		input.OwnerID = ""
+	} else if input.OwnerType != "user" && input.OwnerType != "group" {
+		return ProjectCriticalPathStepInput{}, ErrInvalid
+	} else if input.OwnerID == "" {
+		return ProjectCriticalPathStepInput{}, ErrInvalid
+	}
+	return input, nil
+}
+
+func NormalizeProjectCriticalPathStepDeleteInput(input ProjectCriticalPathStepDeleteInput) (ProjectCriticalPathStepDeleteInput, error) {
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.ProjectID = cleanUUIDText(input.ProjectID)
+	input.StepID = cleanUUIDText(input.StepID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	if input.CompanyID == "" || input.ProjectID == "" || input.StepID == "" {
+		return ProjectCriticalPathStepDeleteInput{}, ErrInvalid
+	}
+	return input, nil
+}
+
+func validISODate(value string) bool {
+	if len(value) != 10 {
+		return false
+	}
+	for index, ch := range value {
+		switch index {
+		case 4, 7:
+			if ch != '-' {
+				return false
+			}
+		default:
+			if ch < '0' || ch > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func NormalizeProjectInformationInput(input ProjectInformationInput) (ProjectInformationInput, error) {
@@ -208,6 +284,16 @@ func cloneBoolPointer(value *bool) *bool {
 func cloneProject(item domain.Project) domain.Project {
 	item.Accounts = append([]domain.Account{}, item.Accounts...)
 	item.Teams = append([]domain.CompanyUserGroup{}, item.Teams...)
+	return item
+}
+
+func cloneProjectCriticalPathStep(item domain.ProjectCriticalPathStep) domain.ProjectCriticalPathStep {
+	item.RelationshipID = cloneStringPointer(item.RelationshipID)
+	item.LogicGateID = cloneStringPointer(item.LogicGateID)
+	item.NodeID = cloneStringPointer(item.NodeID)
+	item.Status = cloneStringPointer(item.Status)
+	item.DueDate = cloneStringPointer(item.DueDate)
+	item.OwnerID = cloneStringPointer(item.OwnerID)
 	return item
 }
 

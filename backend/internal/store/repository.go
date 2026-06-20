@@ -176,6 +176,9 @@ type ProjectRepository interface {
 	AddProjectInformation(input ProjectInformationInput) (domain.ProjectInformation, error)
 	ListProjectProjections(companyID, projectID string) ([]domain.ProjectProjection, error)
 	DeleteProjectProjection(input ProjectProjectionDeleteInput) error
+	ListProjectCriticalPathSteps(companyID, projectID, viewerUserID string) ([]domain.ProjectCriticalPathStep, error)
+	UpsertProjectCriticalPathStep(input ProjectCriticalPathStepInput) (domain.ProjectCriticalPathStep, error)
+	DeleteProjectCriticalPathStep(input ProjectCriticalPathStepDeleteInput) error
 	UpsertProjectRelationship(input ProjectRelationshipInput) (ProjectRelationshipMutationResult, error)
 	DeleteProjectRelationship(input ProjectRelationshipDeleteInput) (ProjectRelationshipMutationResult, error)
 	CreateNodeAssociatedWithProject(input ProjectScopedNodeCreateInput) (ProjectScopedNodeCreateResult, error)
@@ -735,6 +738,7 @@ type ProjectInput struct {
 	ProjectID     string
 	Name          string
 	Status        string
+	Health        string
 	AccountIDs    []string
 	AccountIDsSet bool
 	TeamIDs       []string
@@ -798,6 +802,27 @@ type ProjectProjectionDeleteInput struct {
 	ProjectID     string
 	InformationID string
 	ActorUserID   string
+}
+
+type ProjectCriticalPathStepInput struct {
+	CompanyID      string
+	ProjectID      string
+	StepID         string
+	Name           string
+	RelationshipID string
+	DueDate        string
+	OwnerType      string
+	OwnerID        string
+	Position       int
+	IsCurrent      bool
+	ActorUserID    string
+}
+
+type ProjectCriticalPathStepDeleteInput struct {
+	CompanyID   string
+	ProjectID   string
+	StepID      string
+	ActorUserID string
 }
 
 type ProjectRelationshipInput struct {
