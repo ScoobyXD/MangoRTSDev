@@ -159,7 +159,7 @@ func (s *Server) handleCompanyExplorerV2Folders(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "failed_to_create_company_explorer_v2_folder")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_v2_entity_created", map[string]any{"entity_id": row.EntityID, "entity_type": row.EntityType, "parent_entity_id": row.ParentEntityID, "edge_id": row.EdgeID, "entity": row})
+	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_v2_entity_created", map[string]any{"entity_id": row.EntityID, "entity_type": row.EntityType, "resource_id": row.ResourceID, "parent_entity_id": row.ParentEntityID, "edge_id": row.EdgeID, "entity": row})
 	writeJSON(w, http.StatusCreated, row)
 }
 
@@ -197,7 +197,7 @@ func (s *Server) handleCompanyExplorerV2EntityUpdate(w http.ResponseWriter, r *h
 			return
 		}
 		changed = true
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_v2_entity_updated", map[string]any{"entity_id": row.EntityID, "entity_type": row.EntityType, "entity": row})
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_v2_entity_updated", map[string]any{"entity_id": row.EntityID, "entity_type": row.EntityType, "resource_id": row.ResourceID, "entity": row})
 	}
 	if strings.TrimSpace(req.EdgeID) != "" || strings.TrimSpace(req.ParentEntityID) != "" || req.Position > 0 {
 		row, err = s.repo.MoveCompanyExplorerV2Edge(store.CompanyExplorerV2MoveEdgeInput{
@@ -213,7 +213,7 @@ func (s *Server) handleCompanyExplorerV2EntityUpdate(w http.ResponseWriter, r *h
 			return
 		}
 		changed = true
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_v2_edge_moved", map[string]any{"entity_id": row.EntityID, "entity_type": row.EntityType, "parent_entity_id": row.ParentEntityID, "edge_id": row.EdgeID, "entity": row})
+		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_v2_edge_moved", map[string]any{"entity_id": row.EntityID, "entity_type": row.EntityType, "resource_id": row.ResourceID, "parent_entity_id": row.ParentEntityID, "edge_id": row.EdgeID, "entity": row})
 	}
 	if !changed {
 		writeError(w, http.StatusBadRequest, "company_explorer_v2_entity_update_required")
@@ -399,7 +399,7 @@ func (s *Server) handleCompanyExplorerV2Edges(w http.ResponseWriter, r *http.Req
 		s.writeCompanyExplorerV2WriteError(w, err, "failed_to_upsert_company_explorer_v2_edge")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_v2_edge_upserted", map[string]any{"entity_id": row.EntityID, "entity_type": row.EntityType, "parent_entity_id": row.ParentEntityID, "edge_id": row.EdgeID, "entity": row})
+	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_v2_edge_upserted", map[string]any{"entity_id": row.EntityID, "entity_type": row.EntityType, "resource_id": row.ResourceID, "parent_entity_id": row.ParentEntityID, "edge_id": row.EdgeID, "entity": row})
 	writeJSON(w, http.StatusOK, row)
 }
 
@@ -483,7 +483,7 @@ func (s *Server) moveCompanyExplorerV2EdgeFromRequest(w http.ResponseWriter, r *
 		s.writeCompanyExplorerV2WriteError(w, err, "failed_to_move_company_explorer_v2_edge")
 		return
 	}
-	s.publishWorkspaceEvent(companyID, "company_explorer_v2_edge_moved", map[string]any{"entity_id": row.EntityID, "entity_type": row.EntityType, "parent_entity_id": row.ParentEntityID, "edge_id": row.EdgeID, "entity": row})
+	s.publishWorkspaceEvent(companyID, "company_explorer_v2_edge_moved", map[string]any{"entity_id": row.EntityID, "entity_type": row.EntityType, "resource_id": row.ResourceID, "parent_entity_id": row.ParentEntityID, "edge_id": row.EdgeID, "entity": row})
 	writeJSON(w, http.StatusOK, row)
 }
 

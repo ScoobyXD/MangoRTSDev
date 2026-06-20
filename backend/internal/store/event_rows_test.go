@@ -154,12 +154,46 @@ func TestGVICMatrixMutationInsertsEventRowWithProjectionDelta(t *testing.T) {
 	if row.EventID == "" || row.PrimaryScope != wantScope || row.SequenceScope != wantSequenceScope || row.Sequence != 1 {
 		t.Fatalf("GVICMatrix event row = %+v, want scope=%s sequence_scope=%s", row, wantScope, wantSequenceScope)
 	}
+	if !eventRowTestScopeContains(row.AffectedScopes, wantScope) {
+		t.Fatalf("GVICMatrix affected scopes = %+v, want %s", row.AffectedScopes, wantScope)
+	}
+	if myWorkScope := MyWorkUserScope(user.UserID); !eventRowTestScopeContains(row.AffectedScopes, myWorkScope) {
+		t.Fatalf("GVICMatrix affected scopes = %+v, want %s", row.AffectedScopes, myWorkScope)
+	}
+	if companyScope := MyWorkCompanyScope(companyID); eventRowTestScopeContains(row.AffectedScopes, companyScope) {
+		t.Fatalf("GVICMatrix affected scopes = %+v, should not include broad %s when user scope is known", row.AffectedScopes, companyScope)
+	}
 	payload, err := DecodeGVICMatrixProjectionDeltaEventPayload(row)
 	if err != nil {
 		t.Fatalf("DecodeGVICMatrixProjectionDeltaEventPayload: %v", err)
 	}
 	if payload.Projection != ProjectionNameGVICMatrix || payload.Scope != wantScope || payload.ProjectionScope != wantSequenceScope || len(payload.Deltas) == 0 {
 		t.Fatalf("payload = %+v, want GVICMatrix projection deltas", payload)
+	}
+}
+
+func TestGVICEffectiveProjectionDeltaEventInputsRecordMyWorkUserScope(t *testing.T) {
+	companyID := "99999999-9999-4999-8999-999999999111"
+	userID := "11111111-1111-4111-8111-111111111111"
+	inputs := GVICProjectionDeltaEventInputs(companyID, "", "", []ProjectionDelta{{
+		Projection: ProjectionNameGVICEffectiveAssignments,
+		Operation:  ProjectionDeltaOperationUpsert,
+		RowKey: ProjectionRowKey{
+			UserID: userID,
+		},
+	}})
+	if len(inputs) != 1 {
+		t.Fatalf("GVICProjectionDeltaEventInputs returned %d rows, want 1", len(inputs))
+	}
+	row := inputs[0]
+	if row.PrimaryScope != "gvic:user:"+userID {
+		t.Fatalf("GVIC effective event row primary scope = %q, want user scope", row.PrimaryScope)
+	}
+	if !eventRowTestScopeContains(row.AffectedScopes, MyWorkUserScope(userID)) {
+		t.Fatalf("GVIC effective affected scopes = %+v, want %s", row.AffectedScopes, MyWorkUserScope(userID))
+	}
+	if eventRowTestScopeContains(row.AffectedScopes, MyWorkCompanyScope(companyID)) {
+		t.Fatalf("GVIC effective affected scopes = %+v, should not include company scope when user scope is known", row.AffectedScopes)
 	}
 }
 
@@ -217,6 +251,15 @@ func TestGVICMatrixMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
 	if !assignments.Changed {
 		t.Fatalf("GVICMatrix assignment was not rolled back")
 	}
+}
+
+func eventRowTestScopeContains(scopes []string, want string) bool {
+	for _, scope := range scopes {
+		if scope == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestGVICMatrixNodeCreateForExistingLogicGateWritesProjectionEventRows(t *testing.T) {

@@ -11,6 +11,63 @@ import (
 	"miraeopus/backend/internal/store"
 )
 
+func TestUpdateFeedEventFromDomainEventDefinesDedicatedFeedRows(t *testing.T) {
+	logicGateID := "11111111-1111-4111-8111-555555555501"
+	nodeID := "22222222-2222-4222-8222-555555555502"
+
+	rule, ok := UpdateFeedEventFromDomainEvent(domain.DomainEvent{
+		Type: store.WorkItemLogicGateAssignmentSavedEventType,
+		Payload: map[string]any{
+			"logic_gate_id": logicGateID,
+			"node_id":       nodeID,
+		},
+	})
+	if !ok {
+		t.Fatalf("work item assignment event did not create an update feed rule")
+	}
+	if rule.NotificationType != store.WorkItemLogicGateAssignmentSavedEventType || rule.EntityType != store.EntityTypeLogicGate || rule.EntityID != logicGateID {
+		t.Fatalf("work item update rule = %+v, want logic gate assignment rule", rule)
+	}
+
+	rule, ok = UpdateFeedEventFromDomainEvent(domain.DomainEvent{
+		Type: "node_updated",
+		Payload: map[string]any{
+			"node_id":                 nodeID,
+			"notification_event_type": domain.NotificationEventNodeAssigned,
+		},
+	})
+	if !ok {
+		t.Fatalf("node assignment event did not create an update feed rule")
+	}
+	if rule.NotificationType != domain.NotificationEventNodeAssigned || rule.EntityType != store.EntityTypeNode || rule.EntityID != nodeID {
+		t.Fatalf("node assignment update rule = %+v, want node assignment rule", rule)
+	}
+
+	if _, ok := UpdateFeedEventFromDomainEvent(domain.DomainEvent{
+		Type: "kanban_card_moved",
+		Payload: map[string]any{
+			"node_id": nodeID,
+		},
+	}); ok {
+		t.Fatalf("low-level kanban_card_moved event should not create an update feed row directly")
+	}
+}
+
+func TestUpdateFeedAffectedScopesTargetsRecipientUser(t *testing.T) {
+	companyID := "11111111-1111-4111-8111-555555555511"
+	userID := "22222222-2222-4222-8222-555555555512"
+	scopes := UpdateFeedAffectedScopes(domain.Notification{
+		CompanyID:       companyID,
+		RecipientUserID: userID,
+	})
+	if !notificationScopeContains(scopes, store.UpdatesUserScope(userID)) {
+		t.Fatalf("update feed scopes = %+v, want user scope", scopes)
+	}
+	if notificationScopeContains(scopes, store.UpdatesCompanyScope(companyID)) {
+		t.Fatalf("update feed scopes = %+v, should not include company scope when recipient user is known", scopes)
+	}
+}
+
 func TestPhase6NotificationRecipientsUseGVICRouting(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)
@@ -101,6 +158,15 @@ func TestPhase6NotificationRecipientsUseGVICRouting(t *testing.T) {
 	if got := byUser[responsible.UserID]; got.Surface != domain.NotificationSurfaceRInbox || got.Role != domain.GVICRoleGenerated {
 		t.Fatalf("responsible metadata = %+v, want R inbox responsible", got)
 	}
+}
+
+func notificationScopeContains(scopes []string, want string) bool {
+	for _, scope := range scopes {
+		if scope == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestProcessDomainEventsLogicGateWorkUsesGVICMatrixnly(t *testing.T) {

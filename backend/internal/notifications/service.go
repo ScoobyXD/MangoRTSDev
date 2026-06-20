@@ -46,6 +46,12 @@ type notificationProjectionEvent struct {
 	Payload     map[string]any
 }
 
+type UpdateFeedEventRule struct {
+	NotificationType string
+	EntityType       string
+	EntityID         string
+}
+
 func NewService(repo store.Repository) *Service {
 	return &Service{Repo: repo}
 }
@@ -99,6 +105,22 @@ func (s *Service) processDomainEvent(ctx context.Context, event domain.DomainEve
 		return []domain.Notification{}, nil
 	}
 	return s.Repo.CreateNotifications(store.CreateNotificationsInput{Notifications: candidates, TimingRecorder: recorder})
+}
+
+func UpdateFeedEventFromDomainEvent(event domain.DomainEvent) (UpdateFeedEventRule, bool) {
+	notificationEvent, ok := notificationEventFromDomainEvent(event)
+	if !ok {
+		return UpdateFeedEventRule{}, false
+	}
+	return UpdateFeedEventRule{
+		NotificationType: notificationEvent.Type,
+		EntityType:       notificationEvent.EntityType,
+		EntityID:         notificationEvent.EntityID,
+	}, true
+}
+
+func UpdateFeedAffectedScopes(item domain.Notification) []string {
+	return store.UpdatesAffectedScopes(item.CompanyID, item.RecipientUserID)
 }
 
 func observeNotificationTiming(recorder store.TimingRecorder, label string) func() {
