@@ -959,6 +959,19 @@ function replaceDocumentWithPlainText(root: HTMLElement, text: string, selection
   setEditorSelectionByOffsets(root, selectionStart, selectionEnd);
 }
 
+function replaceSelectionWithSimplePlainTextEdit(
+  root: HTMLElement,
+  currentText: string,
+  offsets: { start: number; end: number },
+  edit: { value: string; selectionStart: number },
+  fallbackInsertedText = "",
+): boolean {
+  const insertedText = edit.value.slice(offsets.start, edit.selectionStart);
+  const simpleReplacement = `${currentText.slice(0, offsets.start)}${insertedText}${currentText.slice(offsets.end)}`;
+  if (simpleReplacement !== edit.value) return false;
+  return replaceSelectionWithText(root, insertedText || fallbackInsertedText);
+}
+
 function deleteTextByOffsets(root: HTMLElement, start: number, end: number, options: { preserveTrailingNewline?: boolean } = {}): boolean {
   if (start < 0 || end < start) return false;
   removeEditorTerminalBreaks(root);
@@ -2428,18 +2441,19 @@ export function useEditorDocumentSurfaceHandlers({
 
         if (outlineStyle === "automatic-outline-numbering") {
           const offsets = getEditorSelectionOffsets(root);
-          const currentText = offsets ? readEditorDocumentText(root) : "";
-          const edit = offsets
-            ? insertAutomaticOutlineFirstText(currentText, offsets.start, offsets.end, inputEvent.data)
-            : null;
-          if (edit) {
-            event.preventDefault();
-            pendingEditorFontSizeRef.current = null;
-            const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
-            replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
-            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
-            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
-            return;
+          if (offsets) {
+            const currentText = readEditorDocumentText(root);
+            const edit = insertAutomaticOutlineFirstText(currentText, offsets.start, offsets.end, inputEvent.data);
+            if (edit) {
+              event.preventDefault();
+              pendingEditorFontSizeRef.current = null;
+              const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
+              const appliedLocalEdit = replaceSelectionWithSimplePlainTextEdit(root, currentText, offsets, edit, inputEvent.data);
+              if (!appliedLocalEdit) replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
+              recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
+              commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+              return;
+            }
           }
         }
 
