@@ -11,8 +11,9 @@ import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadProjectManagementSurface } from "./preloadDashboardModules";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-explorer/CompanyExplorerIcons";
 import type { CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
+import { EXPLORER_DRAG_MIME } from "../modules/company-explorer/companyExplorerDragDrop";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
-import type { SidebarPin } from "./sidebarPins";
+import { sidebarPinExplorerDropPayload, type SidebarPin } from "./sidebarPins";
 import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, OpenInNewTabIcon, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
 import {
   createCommunicationsSharedInbox,
@@ -1338,8 +1339,10 @@ export function AppSidebar({
                 draggable
                 style={appSidebarPinRowStyle(dropPlacement)}
                 onDragStart={(event) => {
-                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.effectAllowed = "copyMove";
                   event.dataTransfer.setData(APP_SIDEBAR_PIN_DRAG_MIME, JSON.stringify({ kind: pin.kind, id: pin.id }));
+                  const explorerPayload = sidebarPinExplorerDropPayload(pin);
+                  if (explorerPayload) event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(explorerPayload));
                   event.dataTransfer.setData("text/plain", pin.label);
                   setPinDropTarget(null);
                 }}

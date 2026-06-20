@@ -22,6 +22,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/app/frameLinking.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/framePointerRouting.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/deepLinkRoutes.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPins.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/preloadDashboardPlan.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/timelineState.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/linkingGraph.test.js"),
