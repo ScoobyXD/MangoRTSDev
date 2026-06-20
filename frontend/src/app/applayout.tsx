@@ -353,7 +353,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   }, [initialPage, loaded.activeId, loaded.tabs, overrideContent]);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(initialActiveTabId);
-  const [homeViewID, setHomeViewID] = useState<HomeSidebarView>(() => (deepLink?.kind === "gvic" ? deepLink.viewID : "my-triage"));
+  const [homeViewID, setHomeViewID] = useState<HomeSidebarView>(() => (deepLink?.kind === "gvic" ? deepLink.viewID : "my-work"));
   const [movingTabId, setMovingTabId] = useState<string | null>(null);
   const [isDraggingTab, setIsDraggingTab] = useState(false);
 
@@ -1319,20 +1319,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     if (onNavigate) onNavigate("/", { replace: true });
   }, [onNavigate, upsertDockTab]);
 
-  const openNotificationNodePopup = useCallback((node: { nodeID: string; nodeTitle: string; focusInformationID?: string }) => {
-    const cleanNodeID = node.nodeID.trim();
-    if (!cleanNodeID) return;
-    closeMenus();
-    setActiveDockTabID(null);
-    routeManagedExplorerNodePopupRef.current = false;
-    setExplorerNodePopup({
-      nodeID: cleanNodeID,
-      nodeTitle: node.nodeTitle.trim() || cleanNodeID,
-      focusInformationID: node.focusInformationID?.trim() || undefined,
-      focusRequestID: Date.now(),
-    });
-  }, [closeMenus]);
-
   const closeHomeNodeRoute = useCallback(() => {
     if (!onNavigate) return;
     const role = (gvicDeepLink as GvicDeepLinkRoute | null)?.role ?? gvicRoleForViewID(homeViewID);
@@ -1643,7 +1629,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           explorerSelectionTargetFrameIDs={sidebarExplorerSelectionTargetFrameIDs}
           onHomeViewSelect={selectHomeSidebarView}
           onPageSelect={selectPrimaryPage}
-          onNotificationNodeOpen={openNotificationNodePopup}
           onPinOpen={openSidebarPin}
           onPinRemove={removeSidebarPin}
           onPinReorder={reorderSidebarPin}

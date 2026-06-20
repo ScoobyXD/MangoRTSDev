@@ -102,6 +102,7 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
   const [branchLoadingIDs, setBranchLoadingIDs] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<UpdateFeedFilter>("all");
+  const [showProjectGroups, setShowProjectGroups] = useState(true);
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const fallbackSetting = useMemo(() => createDefaultUpdateGroupingSetting(companyID, currentUserID), [companyID, currentUserID]);
   const [settings, setSettings] = useState<UpdateSavedGroupingSetting[]>(() => [fallbackSetting]);
@@ -341,13 +342,14 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
 
   const sourceGroups = useMemo(() => rootGroups.map((root) => branchByRootID[root.id] ?? root), [branchByRootID, rootGroups]);
   const updateRows = useMemo(() => flattenUpdateRows(sourceGroups, hiddenNotificationIDs), [hiddenNotificationIDs, sourceGroups]);
-  const displayGroups = useMemo(() => buildUpdateDisplayGroups(updateRows, selectedSetting.groupings), [selectedSetting.groupings, updateRows]);
+  const displayGroups = useMemo(() => buildUpdateDisplayGroups(updateRows, selectedSetting.groupings, showProjectGroups), [selectedSetting.groupings, showProjectGroups, updateRows]);
   const visibleNotifications = useMemo(() => flattenDisplayNotifications(displayGroups), [displayGroups]);
   const groupingSignature = useMemo(() => JSON.stringify({
     setting: selectedSetting.setting_id,
     groupings: selectedSetting.groupings,
+    showProjectGroups,
     rows: updateRows.map((row) => row.rowKey).sort(),
-  }), [selectedSetting.groupings, selectedSetting.setting_id, updateRows]);
+  }), [selectedSetting.groupings, selectedSetting.setting_id, showProjectGroups, updateRows]);
   const activeFieldSet = new Set(selectedSetting.groupings.map((grouping) => grouping.field));
   const addableFields = UPDATE_GROUPING_FIELDS.filter((field) => !activeFieldSet.has(field.value));
 
@@ -436,9 +438,11 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
             setting={selectedSetting}
             settings={settings}
             addableFields={addableFields}
+            showProjectGroups={showProjectGroups}
             addGroupingOpen={addGroupingOpen}
             groupingFieldMenuIndex={groupingFieldMenuIndex}
             onSelectSetting={setSelectedSettingID}
+            onShowProjectGroupsChange={setShowProjectGroups}
             onAddSavedView={addSavedView}
             onDeleteSavedView={deleteSavedView}
             onToggleCollapsed={toggleSelectedSettingCollapsed}
@@ -484,9 +488,11 @@ function UpdateGroupingPanel({
   setting,
   settings,
   addableFields,
+  showProjectGroups,
   addGroupingOpen,
   groupingFieldMenuIndex,
   onSelectSetting,
+  onShowProjectGroupsChange,
   onAddSavedView,
   onDeleteSavedView,
   onToggleCollapsed,
@@ -499,9 +505,11 @@ function UpdateGroupingPanel({
   setting: UpdateSavedGroupingSetting;
   settings: UpdateSavedGroupingSetting[];
   addableFields: ReadonlyArray<{ value: UpdateGroupingField; label: string }>;
+  showProjectGroups: boolean;
   addGroupingOpen: boolean;
   groupingFieldMenuIndex: number | null;
   onSelectSetting: (settingID: string) => void;
+  onShowProjectGroupsChange: (show: boolean) => void;
   onAddSavedView: () => void;
   onDeleteSavedView: (settingID: string) => void;
   onToggleCollapsed: () => void;
@@ -533,6 +541,15 @@ function UpdateGroupingPanel({
             <button type="button" style={updatesNewViewButtonStyle} onClick={onAddSavedView}>+ New View</button>
           </div>
           <div style={updatesGroupingStackStyle}>
+            <label style={updatesProjectGroupToggleStyle}>
+              <input
+                type="checkbox"
+                checked={showProjectGroups}
+                style={updatesProjectGroupCheckboxStyle}
+                onChange={(event) => onShowProjectGroupsChange(event.currentTarget.checked)}
+              />
+              <span style={updatesProjectGroupToggleTextStyle}>Projects</span>
+            </label>
             {setting.groupings.map((grouping, index) => (
               <div key={`${grouping.field}:${index}`} style={updatesGroupingRowStyle(index)}>
                 <button
@@ -899,10 +916,13 @@ function updatePathWithGroup(path: { project?: UpdateRowResource; logicGate?: Up
   return path;
 }
 
-function buildUpdateDisplayGroups(rows: UpdateFeedRow[], groupings: UpdateGroupingSetting[]): UpdateGroup[] {
+function buildUpdateDisplayGroups(rows: UpdateFeedRow[], groupings: UpdateGroupingSetting[], showProjectGroups: boolean): UpdateGroup[] {
+  const resourceGroupings = showProjectGroups
+    ? UPDATE_RESOURCE_GROUPINGS
+    : UPDATE_RESOURCE_GROUPINGS.filter((grouping) => grouping.field !== "project");
   const displayGroupings: UpdateDisplayGroupingSetting[] = [
     ...normalizeUpdateGroupingStack(groupings),
-    ...UPDATE_RESOURCE_GROUPINGS,
+    ...resourceGroupings,
   ];
   const groups = buildUniversalNestedGroups(rows, displayGroupings, {
     rootID: "updates",
@@ -1096,9 +1116,9 @@ const updatesShellStyle: React.CSSProperties = {
   height: "100%",
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
-  gap: 8,
-  padding: "8px 14px 14px",
-  background: "#ffffff",
+  gap: 10,
+  padding: "10px 14px 14px",
+  background: "radial-gradient(circle at 18% 12%, rgba(20, 184, 166, 0.16), transparent 34%), radial-gradient(circle at 88% 18%, rgba(251, 146, 60, 0.12), transparent 30%), linear-gradient(135deg, rgba(240, 253, 250, 0.94), rgba(255, 247, 237, 0.78) 48%, rgba(248, 250, 252, 0.96))",
   color: "#111827",
   overflow: "hidden",
 };
@@ -1120,18 +1140,19 @@ const updatesGroupingPanelTitleStyle: React.CSSProperties = {
 };
 
 const updatesGroupingTriggerStyle: React.CSSProperties = {
-  minWidth: 112,
-  height: 28,
+  minWidth: 124,
+  height: 30,
   display: "inline-grid",
   gridTemplateColumns: "minmax(0, 1fr) 16px",
   alignItems: "center",
   gap: 6,
-  border: "1px solid rgba(15, 23, 42, 0.18)",
+  border: "1px solid rgba(15, 23, 42, 0.22)",
   borderRadius: 6,
-  background: "#ffffff",
-  color: "#334155",
+  background: "rgba(255, 255, 255, 0.94)",
+  color: "#111827",
   font: "inherit",
-  padding: "0 8px",
+  boxShadow: "0 1px 0 rgba(255, 255, 255, 0.92), 0 6px 14px rgba(15, 23, 42, 0.08)",
+  padding: "0 9px",
   cursor: "pointer",
 };
 
@@ -1140,9 +1161,10 @@ const updatesGroupingBodyStyle: React.CSSProperties = {
   top: "calc(100% + 6px)",
   right: 0,
   zIndex: 24,
-  width: 330,
+  width: "min(430px, 68vw)",
   minWidth: 0,
   display: "grid",
+  gridTemplateColumns: "112px minmax(0, 1fr)",
   gap: 8,
   padding: 8,
   border: "1px solid rgba(15, 23, 42, 0.18)",
@@ -1154,9 +1176,10 @@ const updatesGroupingBodyStyle: React.CSSProperties = {
 const updatesSavedViewsStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
+  gridTemplateRows: "minmax(0, 1fr) auto",
   gap: 6,
-  paddingBottom: 7,
-  borderBottom: "1px solid rgba(148, 163, 184, 0.22)",
+  paddingRight: 7,
+  borderRight: "1px solid rgba(15, 23, 42, 0.12)",
 };
 
 const updatesSavedViewsListStyle: React.CSSProperties = {
@@ -1164,6 +1187,7 @@ const updatesSavedViewsListStyle: React.CSSProperties = {
   maxHeight: 112,
   overflow: "auto",
   display: "grid",
+  alignContent: "start",
   gap: 4,
 };
 
@@ -1175,9 +1199,9 @@ function updatesSavedViewRowStyle(active: boolean): React.CSSProperties {
     gridTemplateColumns: "minmax(0, 1fr) 24px",
     alignItems: "center",
     gap: 4,
-    border: `1px solid ${active ? "rgba(37, 99, 235, 0.42)" : "rgba(15, 23, 42, 0.14)"}`,
+    border: "1px solid transparent",
     borderRadius: 5,
-    background: active ? "rgba(37, 99, 235, 0.08)" : "#f8fafc",
+    background: active ? "rgba(71, 85, 105, 0.12)" : "transparent",
     padding: "2px 3px 2px 7px",
   };
 }
@@ -1225,6 +1249,35 @@ const updatesNewViewButtonStyle: React.CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
   padding: "0 8px",
+};
+
+const updatesProjectGroupToggleStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 30,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 7,
+  border: "1px solid rgba(15, 23, 42, 0.16)",
+  borderRadius: 5,
+  background: "rgba(248, 250, 252, 0.96)",
+  color: "#334155",
+  fontSize: 11,
+  fontWeight: 800,
+  padding: "0 8px",
+};
+
+const updatesProjectGroupCheckboxStyle: React.CSSProperties = {
+  width: 13,
+  height: 13,
+  margin: 0,
+  accentColor: "#0f766e",
+};
+
+const updatesProjectGroupToggleTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 };
 
 const updatesGroupingStackStyle: React.CSSProperties = {
@@ -1370,14 +1423,25 @@ const updatesHeaderStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "minmax(0, 1fr) auto",
   gap: 12,
-  alignItems: "start",
+  alignItems: "center",
+  border: "1px solid rgba(15, 23, 42, 0.12)",
+  borderRadius: 8,
+  background: "linear-gradient(90deg, rgba(236, 253, 245, 0.92), rgba(255, 251, 235, 0.78), rgba(240, 249, 255, 0.86))",
+  boxShadow: "0 12px 28px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.82)",
+  padding: "9px 10px",
 };
 
 const updatesTitleStackStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 4 };
 const updatesTitleStyle: React.CSSProperties = { margin: 0, color: "#111827", fontSize: 16, lineHeight: 1.2, fontWeight: 800, letterSpacing: 0 };
 const updatesMetaStyle: React.CSSProperties = { color: "#64748b", fontSize: 11, fontWeight: 700 };
-const updatesHeaderControlsStyle: React.CSSProperties = { minWidth: 0, display: "inline-flex", alignItems: "flex-start", justifyContent: "flex-end", gap: 8 };
-const updatesFilterRowStyle: React.CSSProperties = { display: "inline-flex", border: "1px solid rgba(15, 23, 42, 0.18)", borderRadius: 6, overflow: "hidden" };
+const updatesHeaderControlsStyle: React.CSSProperties = { minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 8 };
+const updatesFilterRowStyle: React.CSSProperties = {
+  display: "inline-flex",
+  border: "1px solid rgba(15, 23, 42, 0.18)",
+  borderRadius: 6,
+  overflow: "hidden",
+  boxShadow: "0 6px 14px rgba(15, 23, 42, 0.06)",
+};
 
 function updatesFilterButtonStyle(active: boolean): React.CSSProperties {
   return {
@@ -1385,7 +1449,7 @@ function updatesFilterButtonStyle(active: boolean): React.CSSProperties {
     minHeight: 28,
     border: "none",
     borderRight: "1px solid rgba(15, 23, 42, 0.12)",
-    background: active ? "#e2e8f0" : "#ffffff",
+    background: active ? "#dbeafe" : "rgba(255, 255, 255, 0.94)",
     color: "#111827",
     font: "inherit",
     fontSize: 12,
@@ -1395,7 +1459,7 @@ function updatesFilterButtonStyle(active: boolean): React.CSSProperties {
   };
 }
 
-const updatesListStyle: React.CSSProperties = { minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", padding: "2px 16px 32px 0" };
+const updatesListStyle: React.CSSProperties = { minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", padding: "2px 16px 32px 2px" };
 const updatesEmptyStyle: React.CSSProperties = { minHeight: 160, display: "grid", placeItems: "center", color: "#64748b", fontSize: 12, fontWeight: 700 };
 const updateGroupListStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 4 };
 const updateGroupBlockStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 2 };

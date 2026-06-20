@@ -64,8 +64,6 @@ type MyWorkViewProps = {
   onOpenProject: (projectID: string, label: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
-  onCreateNodeInLogicGate?: (input: MyWorkNodeDropInput) => void;
-  onCreateLogicGateInCell?: (input: MyWorkCellCreateInput) => void;
   onCreateNodeInCell?: (input: MyWorkCellCreateInput) => void;
   onDropNodes?: (input: MyWorkNodeDropInput) => void;
   onDropNodesInCell?: (input: MyWorkCellNodeDropInput) => void;
@@ -90,8 +88,14 @@ type MyWorkCellNodeDropInput = MyWorkCellCreateInput & { nodeIDs: string[]; from
 type MyWorkCellLogicGateDropInput = MyWorkCellCreateInput & { logicGateIDs: string[]; nodeIDsByLogicGateID?: Record<string, string[]> };
 type MyWorkNodeDragPayload = { nodeIDs: string[]; fromLogicGateID?: string };
 type MyWorkLogicGateDragPayload = { logicGateIDs: string[]; nodeIDsByLogicGateID?: Record<string, string[]> };
+type MyWorkRoleColumnWidths = Record<LogicGateGVICRole, number>;
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
 const HOME_INBOX_LOGIC_GATE_DRAG_MIME = "application/x-mangorts-home-inbox-logic-gate";
+const MY_WORK_ROLE_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.myWork.roleColumnWidths.v1";
+const MY_WORK_PRIORITY_COLUMN_WIDTH = 104;
+const MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH = 282;
+const MY_WORK_ROLE_COLUMN_MIN_WIDTH = 190;
+const MY_WORK_ROLE_COLUMN_MAX_WIDTH = 620;
 
 export function MyWorkView({
   apiBase,
@@ -109,8 +113,6 @@ export function MyWorkView({
   onOpenProject,
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
-  onCreateNodeInLogicGate,
-  onCreateLogicGateInCell,
   onCreateNodeInCell,
   onDropNodes,
   onDropNodesInCell,
@@ -174,10 +176,15 @@ export function MyWorkView({
   const [matrixError, setMatrixError] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const [matrixReloadToken, setMatrixReloadToken] = useState(0);
+  const [roleColumnWidths, setRoleColumnWidths] = useState<MyWorkRoleColumnWidths>(() => readMyWorkRoleColumnWidths(companyID));
 
   useEffect(() => {
     setSelectedScope(defaultMyWorkSelectedScope(currentUserID));
   }, [currentUserID]);
+
+  useEffect(() => {
+    setRoleColumnWidths(readMyWorkRoleColumnWidths(companyID));
+  }, [companyID]);
 
   useEffect(() => {
     if (!apiBase || !companyID.trim()) {
@@ -387,6 +394,39 @@ export function MyWorkView({
     setAddGroupingOpen(false);
   }, [updateSelectedSetting]);
 
+  const updateRoleColumnWidth = useCallback((role: LogicGateGVICRole, width: number) => {
+    setRoleColumnWidths((current) => {
+      const next = { ...current, [role]: clampMyWorkRoleColumnWidth(width) };
+      storeMyWorkRoleColumnWidths(companyID, next);
+      return next;
+    });
+  }, [companyID]);
+
+  const startRoleColumnResize = useCallback((role: LogicGateGVICRole, event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const ownerDocument = event.currentTarget.ownerDocument;
+    const startX = event.clientX;
+    const startWidth = roleColumnWidths[role];
+    const previousCursor = ownerDocument.body.style.cursor;
+    const previousUserSelect = ownerDocument.body.style.userSelect;
+    ownerDocument.body.style.cursor = "col-resize";
+    ownerDocument.body.style.userSelect = "none";
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      updateRoleColumnWidth(role, startWidth + moveEvent.clientX - startX);
+    };
+    const stopResize = () => {
+      ownerDocument.removeEventListener("pointermove", handlePointerMove);
+      ownerDocument.removeEventListener("pointerup", stopResize);
+      ownerDocument.removeEventListener("pointercancel", stopResize);
+      ownerDocument.body.style.cursor = previousCursor;
+      ownerDocument.body.style.userSelect = previousUserSelect;
+    };
+    ownerDocument.addEventListener("pointermove", handlePointerMove);
+    ownerDocument.addEventListener("pointerup", stopResize);
+    ownerDocument.addEventListener("pointercancel", stopResize);
+  }, [roleColumnWidths, updateRoleColumnWidth]);
+
   const rows = useMemo(() => buildMyWorkRowsFromMatrix({
     matrixCells,
     userByID,
@@ -477,14 +517,14 @@ export function MyWorkView({
             onOpenProject={onOpenProject}
             onOpenNodeBulkMenu={onOpenNodeBulkMenu}
             onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
-            onCreateNodeInLogicGate={onCreateNodeInLogicGate}
-            onCreateLogicGateInCell={onCreateLogicGateInCell}
             onCreateNodeInCell={onCreateNodeInCell}
             onDropNodes={onDropNodes}
             onDropNodesInCell={onDropNodesInCell}
             onDropLogicGates={onDropLogicGates}
             nodeByID={new Map(nodes.map((node) => [node.node_id, node]))}
             logicGateByID={new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]))}
+            roleColumnWidths={roleColumnWidths}
+            onStartRoleColumnResize={startRoleColumnResize}
           />
         )}
       </div>
@@ -671,7 +711,6 @@ function MyWorkGroupList({
   onOpenProject,
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
-  onCreateNodeInLogicGate,
   onDropNodes,
   nodeByID,
   logicGateByID,
@@ -685,7 +724,6 @@ function MyWorkGroupList({
   onOpenProject: (projectID: string, label: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
-  onCreateNodeInLogicGate?: (input: MyWorkNodeDropInput) => void;
   onDropNodes?: (input: MyWorkNodeDropInput) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
@@ -730,14 +768,13 @@ function MyWorkGroupList({
                 onOpenProject={onOpenProject}
                 onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                 onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
-                onCreateNodeInLogicGate={onCreateNodeInLogicGate}
                 onDropNodes={onDropNodes}
                 nodeByID={nodeByID}
                 logicGateByID={logicGateByID}
               />
             )}
             {open && leafRows.length > 0 && (
-              <MyWorkRows rows={leafRows} role={role} depth={group.depth + 1} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu} onCreateNodeInLogicGate={onCreateNodeInLogicGate} onDropNodes={onDropNodes} nodeByID={nodeByID} logicGateByID={logicGateByID} />
+              <MyWorkRows rows={leafRows} role={role} depth={group.depth + 1} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu} onDropNodes={onDropNodes} nodeByID={nodeByID} logicGateByID={logicGateByID} />
             )}
           </div>
         );
@@ -755,7 +792,6 @@ function MyWorkRows({
   onOpenProject,
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
-  onCreateNodeInLogicGate,
   onDropNodes,
   nodeByID,
   logicGateByID,
@@ -768,7 +804,6 @@ function MyWorkRows({
   onOpenProject: (projectID: string, label: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
-  onCreateNodeInLogicGate?: (input: MyWorkNodeDropInput) => void;
   onDropNodes?: (input: MyWorkNodeDropInput) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
@@ -786,7 +821,6 @@ function MyWorkRows({
           onOpenProject={onOpenProject}
           onOpenNodeBulkMenu={onOpenNodeBulkMenu}
           onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
-          onCreateNodeInLogicGate={onCreateNodeInLogicGate}
           onDropNodes={onDropNodes}
           nodeByID={nodeByID}
           logicGateByID={logicGateByID}
@@ -805,7 +839,6 @@ function MyWorkTreeRow({
   onOpenProject,
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
-  onCreateNodeInLogicGate,
   onDropNodes,
   nodeByID,
   logicGateByID,
@@ -818,16 +851,12 @@ function MyWorkTreeRow({
   onOpenProject: (projectID: string, label: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
-  onCreateNodeInLogicGate?: (input: MyWorkNodeDropInput) => void;
   onDropNodes?: (input: MyWorkNodeDropInput) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
 }) {
   const children = row.children ?? [];
-  const primaryPerson = row.people[0]?.label ?? "Unassigned";
   const status = row.status?.trim() || "No status";
-  const priority = Number.isFinite(Number(row.priority)) && Number(row.priority) > 0 ? priorityLabel(Number(row.priority)) : "No priority";
-  const dueDate = row.dueDate?.trim() || "No due date";
   const actionPriority = priorityBucket(row.priority);
   const rowLogicGateID = row.kind === "logic_gate" ? row.id.trim() : row.logicGateIDs[0]?.trim() ?? "";
   return (
@@ -871,15 +900,7 @@ function MyWorkTreeRow({
           <ExplorerRowIcon kind={row.kind} />
           <span style={workRowTitleTextStyle}>{row.title}</span>
         </button>
-        <span style={workRowMetaCellStyle}>{myWorkKindLabel(row.kind)}</span>
-        {row.kind === "logic_gate" && onCreateNodeInLogicGate ? (
-          <button type="button" style={myWorkInlineActionButtonStyle(role)} onClick={() => onCreateNodeInLogicGate({ logicGateID: row.id, nodeIDs: [], priority: actionPriority })}>Node</button>
-        ) : (
-          <span style={workRowMetaCellStyle}>{primaryPerson}</span>
-        )}
-        <span style={workRowMetaCellStyle}>{status}</span>
-        <span style={workRowMetaCellStyle}>{priority}</span>
-        <span style={workRowMetaCellStyle}>{dueDate}</span>
+        <span style={workRowStatusStyle(role)}>{status}</span>
       </div>
       {children.length > 0 && (
         <div style={logicGateNodeListStyle}>
@@ -894,7 +915,6 @@ function MyWorkTreeRow({
               onOpenProject={onOpenProject}
               onOpenNodeBulkMenu={onOpenNodeBulkMenu}
               onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
-              onCreateNodeInLogicGate={onCreateNodeInLogicGate}
               onDropNodes={onDropNodes}
               nodeByID={nodeByID}
               logicGateByID={logicGateByID}
@@ -972,14 +992,14 @@ function MyWorkMatrix({
   onOpenProject,
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
-  onCreateNodeInLogicGate,
-  onCreateLogicGateInCell,
   onCreateNodeInCell,
   onDropNodes,
   onDropNodesInCell,
   onDropLogicGates,
   nodeByID,
   logicGateByID,
+  roleColumnWidths,
+  onStartRoleColumnResize,
 }: {
   rows: MyWorkResourceRow[];
   groupings: MyWorkGroupingSetting[];
@@ -990,22 +1010,29 @@ function MyWorkMatrix({
   onOpenProject: (projectID: string, label: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
-  onCreateNodeInLogicGate?: (input: MyWorkNodeDropInput) => void;
-  onCreateLogicGateInCell?: (input: MyWorkCellCreateInput) => void;
   onCreateNodeInCell?: (input: MyWorkCellCreateInput) => void;
   onDropNodes?: (input: MyWorkNodeDropInput) => void;
   onDropNodesInCell?: (input: MyWorkCellNodeDropInput) => void;
   onDropLogicGates?: (input: MyWorkCellLogicGateDropInput) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
+  roleColumnWidths: MyWorkRoleColumnWidths;
+  onStartRoleColumnResize: (role: LogicGateGVICRole, event: React.PointerEvent<HTMLButtonElement>) => void;
 }) {
   return (
-    <div style={myWorkMatrixGridStyle}>
+    <div style={myWorkMatrixGridStyle(roleColumnWidths)}>
       <div style={myWorkMatrixCornerStyle}>Priority</div>
       {MY_WORK_MATRIX_ROLES.map((role) => (
         <div key={role} style={myWorkMatrixColumnHeaderStyle(role)}>
           <strong style={logicGateGVICColumnLetterStyle(role)}>{myWorkGVICRoleLetter(role)}</strong>
           <span style={logicGateGVICColumnLabelStyle(role)}>{GVICRoleLabel(role)}</span>
+          <button
+            type="button"
+            aria-label={`Resize ${GVICRoleLabel(role)} column`}
+            title={`Resize ${GVICRoleLabel(role)} column`}
+            style={myWorkColumnResizeHandleStyle}
+            onPointerDown={(event) => onStartRoleColumnResize(role, event)}
+          />
         </div>
       ))}
       {MY_WORK_MATRIX_PRIORITIES.map((priority) => (
@@ -1044,12 +1071,6 @@ function MyWorkMatrix({
                   if (nodeIDs.length > 0 && onDropNodesInCell) onDropNodesInCell({ ...createInput, nodeIDs, fromLogicGateID: nodePayload?.fromLogicGateID });
                 }}
               >
-                {(onCreateNodeInCell || onCreateLogicGateInCell) && (
-                  <div style={myWorkCellActionRowStyle}>
-                    {onCreateNodeInCell && <button type="button" style={myWorkCellActionButtonStyle(role)} onClick={() => onCreateNodeInCell(createInput)}>Node</button>}
-                    {onCreateLogicGateInCell && <button type="button" style={myWorkCellActionButtonStyle(role)} onClick={() => onCreateLogicGateInCell(createInput)}>Gate</button>}
-                  </div>
-                )}
                 {cellRows.length === 0 ? (
                   <div style={myWorkMatrixCellEmptyStyle}>No active work</div>
                 ) : groups.length > 0 ? (
@@ -1063,13 +1084,12 @@ function MyWorkMatrix({
                     onOpenProject={onOpenProject}
                     onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                     onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
-                    onCreateNodeInLogicGate={onCreateNodeInLogicGate}
                     onDropNodes={onDropNodes}
                     nodeByID={nodeByID}
                     logicGateByID={logicGateByID}
                   />
                 ) : (
-                  <MyWorkRows rows={cellRows} role={role} depth={0} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu} onCreateNodeInLogicGate={onCreateNodeInLogicGate} onDropNodes={onDropNodes} nodeByID={nodeByID} logicGateByID={logicGateByID} />
+                  <MyWorkRows rows={cellRows} role={role} depth={0} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu} onDropNodes={onDropNodes} nodeByID={nodeByID} logicGateByID={logicGateByID} />
                 )}
               </div>
             );
@@ -1245,6 +1265,50 @@ function myWorkGVICRoleLetter(role: LogicGateGVICRole): string {
   if (role === "verified") return "V";
   if (role === "consulted") return "C";
   return "I";
+}
+
+function defaultMyWorkRoleColumnWidths(): MyWorkRoleColumnWidths {
+  return {
+    generated: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
+    verified: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
+    consulted: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
+    informed: MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH,
+  };
+}
+
+function myWorkRoleColumnWidthsStorageKey(companyID: string): string {
+  const cleanCompanyID = companyID.trim();
+  return cleanCompanyID ? `${MY_WORK_ROLE_COLUMN_WIDTHS_STORAGE_KEY}:${cleanCompanyID}` : MY_WORK_ROLE_COLUMN_WIDTHS_STORAGE_KEY;
+}
+
+function clampMyWorkRoleColumnWidth(width: number): number {
+  return Math.max(MY_WORK_ROLE_COLUMN_MIN_WIDTH, Math.min(MY_WORK_ROLE_COLUMN_MAX_WIDTH, Math.round(width)));
+}
+
+function normalizeMyWorkRoleColumnWidths(value: unknown): MyWorkRoleColumnWidths {
+  const fallback = defaultMyWorkRoleColumnWidths();
+  if (!value || typeof value !== "object") return fallback;
+  const candidate = value as Partial<Record<LogicGateGVICRole, unknown>>;
+  return {
+    generated: typeof candidate.generated === "number" && Number.isFinite(candidate.generated) ? clampMyWorkRoleColumnWidth(candidate.generated) : fallback.generated,
+    verified: typeof candidate.verified === "number" && Number.isFinite(candidate.verified) ? clampMyWorkRoleColumnWidth(candidate.verified) : fallback.verified,
+    consulted: typeof candidate.consulted === "number" && Number.isFinite(candidate.consulted) ? clampMyWorkRoleColumnWidth(candidate.consulted) : fallback.consulted,
+    informed: typeof candidate.informed === "number" && Number.isFinite(candidate.informed) ? clampMyWorkRoleColumnWidth(candidate.informed) : fallback.informed,
+  };
+}
+
+function readMyWorkRoleColumnWidths(companyID: string): MyWorkRoleColumnWidths {
+  try {
+    return normalizeMyWorkRoleColumnWidths(JSON.parse(localStorage.getItem(myWorkRoleColumnWidthsStorageKey(companyID)) ?? "null"));
+  } catch {
+    return defaultMyWorkRoleColumnWidths();
+  }
+}
+
+function storeMyWorkRoleColumnWidths(companyID: string, widths: MyWorkRoleColumnWidths): void {
+  try {
+    localStorage.setItem(myWorkRoleColumnWidthsStorageKey(companyID), JSON.stringify(widths));
+  } catch {}
 }
 
 function userIDsForSelectedScope(
@@ -1586,16 +1650,19 @@ const myWorkMatrixScrollStyle: React.CSSProperties = {
   ["--kanban-board-scroll-track" as string]: "rgba(71, 85, 105, 0.10)",
 };
 
-const myWorkMatrixGridStyle: React.CSSProperties = {
-  minWidth: 1120,
-  display: "grid",
-  gridTemplateColumns: "142px repeat(4, minmax(220px, 1fr))",
-  alignItems: "stretch",
-  borderTop: "1px solid rgba(148, 163, 184, 0.34)",
-  borderLeft: "1px solid rgba(148, 163, 184, 0.34)",
-  background: "rgba(255, 255, 255, 0.16)",
-  filter: "drop-shadow(0 8px 18px rgba(96, 165, 250, 0.08))",
-};
+function myWorkMatrixGridStyle(roleColumnWidths: MyWorkRoleColumnWidths): React.CSSProperties {
+  const columns = MY_WORK_MATRIX_ROLES.map((role) => `${roleColumnWidths[role]}px`);
+  return {
+    minWidth: MY_WORK_PRIORITY_COLUMN_WIDTH + MY_WORK_MATRIX_ROLES.reduce((sum, role) => sum + roleColumnWidths[role], 0),
+    display: "grid",
+    gridTemplateColumns: `${MY_WORK_PRIORITY_COLUMN_WIDTH}px ${columns.join(" ")}`,
+    alignItems: "stretch",
+    borderTop: "1px solid rgba(148, 163, 184, 0.34)",
+    borderLeft: "1px solid rgba(148, 163, 184, 0.34)",
+    background: "rgba(255, 255, 255, 0.16)",
+    filter: "drop-shadow(0 8px 18px rgba(96, 165, 250, 0.08))",
+  };
+}
 
 const myWorkMatrixCornerStyle: React.CSSProperties = {
   ...logicGateGVICCornerStyle,
@@ -1623,8 +1690,22 @@ function myWorkMatrixColumnHeaderStyle(role: LogicGateGVICRole): React.CSSProper
     minHeight: 54,
     borderRight: "1px solid rgba(148, 163, 184, 0.34)",
     borderBottom: "1px solid rgba(148, 163, 184, 0.34)",
+    paddingRight: 22,
   };
 }
+
+const myWorkColumnResizeHandleStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 0,
+  right: -4,
+  width: 8,
+  height: "100%",
+  border: "none",
+  background: "transparent",
+  cursor: "col-resize",
+  padding: 0,
+  zIndex: 4,
+};
 
 function myWorkMatrixPriorityHeaderStyle(priority: MyWorkMatrixPriority): React.CSSProperties {
   return {
@@ -1632,7 +1713,7 @@ function myWorkMatrixPriorityHeaderStyle(priority: MyWorkMatrixPriority): React.
     position: "sticky",
     left: 0,
     zIndex: 1,
-    minHeight: 104,
+    minHeight: 96,
     borderRight: "1px solid rgba(148, 163, 184, 0.34)",
     borderBottom: "1px solid rgba(148, 163, 184, 0.34)",
   };
@@ -1642,7 +1723,7 @@ function myWorkMatrixCellStyle(role: LogicGateGVICRole): React.CSSProperties {
   const accent = homeGVICRoleAccent(role);
   return {
     minWidth: 0,
-    minHeight: 104,
+    minHeight: 96,
     borderRight: "1px solid rgba(148, 163, 184, 0.34)",
     borderBottom: "1px solid rgba(148, 163, 184, 0.34)",
     background: `linear-gradient(180deg, rgba(255,255,255,0.90), ${homeColorWithAlpha(accent, 0.055)})`,
@@ -1659,30 +1740,6 @@ const myWorkMatrixCellEmptyStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
 };
-
-const myWorkCellActionRowStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: 5,
-  marginBottom: 6,
-};
-
-function myWorkCellActionButtonStyle(role: LogicGateGVICRole): React.CSSProperties {
-  const accent = homeGVICRoleAccent(role);
-  return {
-    minHeight: 22,
-    border: `1px solid ${homeColorWithAlpha(accent, 0.24)}`,
-    borderRadius: 5,
-    background: `linear-gradient(135deg, rgba(255,255,255,0.96), ${homeColorWithAlpha(accent, 0.10)})`,
-    color: accent,
-    font: "inherit",
-    fontSize: 10,
-    fontWeight: 800,
-    cursor: "pointer",
-    padding: "0 7px",
-  };
-}
 
 const myWorkEmptyStyle: React.CSSProperties = {
   minHeight: 160,
@@ -2149,13 +2206,13 @@ const logicGateNodeListStyle: React.CSSProperties = {
 function workRowStyle(depth: number, role: LogicGateGVICRole): React.CSSProperties {
   const accent = homeGVICRoleAccent(role);
   return {
-    width: "min(980px, calc(100% - 16px))",
+    width: "min(620px, calc(100% - 8px))",
     minHeight: 34,
     display: "grid",
-    gridTemplateColumns: "minmax(220px, 1.4fr) 92px minmax(120px, 0.8fr) 92px minmax(126px, 0.9fr) 96px",
+    gridTemplateColumns: "minmax(120px, 1fr) max-content",
     alignItems: "center",
-    gap: 10,
-    marginLeft: depth * 28 + 42,
+    gap: 8,
+    marginLeft: depth * 28,
     marginBottom: 3,
     border: `1px solid ${homeColorWithAlpha(accent, 0.15)}`,
     borderLeft: `3px solid ${homeColorWithAlpha(accent, 0.62)}`,
@@ -2192,30 +2249,20 @@ const workRowTitleTextStyle: React.CSSProperties = {
   fontWeight: 780,
 };
 
-const workRowMetaCellStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  color: "#475569",
-  fontSize: 11,
-  fontWeight: 650,
-};
-
-function myWorkInlineActionButtonStyle(role: LogicGateGVICRole): React.CSSProperties {
+function workRowStatusStyle(role: LogicGateGVICRole): React.CSSProperties {
   const accent = homeGVICRoleAccent(role);
   return {
     minWidth: 0,
-    width: "max-content",
-    minHeight: 22,
-    border: `1px solid ${homeColorWithAlpha(accent, 0.22)}`,
+    maxWidth: 120,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    border: `1px solid ${homeColorWithAlpha(accent, 0.18)}`,
     borderRadius: 5,
-    background: `linear-gradient(135deg, rgba(255,255,255,0.96), ${homeColorWithAlpha(accent, 0.10)})`,
-    color: accent,
-    font: "inherit",
-    fontSize: 10,
-    fontWeight: 800,
-    cursor: "pointer",
-    padding: "0 7px",
+    background: homeColorWithAlpha(accent, 0.08),
+    color: "#334155",
+    fontSize: 11,
+    fontWeight: 750,
+    padding: "3px 7px",
   };
 }

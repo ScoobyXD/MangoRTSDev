@@ -884,7 +884,6 @@ export function HomeSidebar({
   sharedInboxes,
   loadingSharedInboxes,
   busy,
-  notificationSummary,
   onSelectView,
   onCreateSharedInbox,
   onRenameSharedInbox,
@@ -897,7 +896,6 @@ export function HomeSidebar({
   sharedInboxes: CommunicationsSharedInbox[];
   loadingSharedInboxes: boolean;
   busy: string;
-  notificationSummary: NotificationSummary;
   onSelectView: (viewID: HomeViewID, mailbox?: EmailMailbox) => void;
   onCreateSharedInbox: (parentFolderID: string, name?: string, accountEmail?: string) => Promise<CommunicationsSharedInbox | null>;
   onRenameSharedInbox: (folderID: string, name: string) => Promise<void>;
@@ -925,9 +923,6 @@ export function HomeSidebar({
   const cleanConnectedAccountEmail = connectedAccountEmail?.trim().toLowerCase() ?? "";
   const sharedRows = useMemo(() => sharedRootOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [], [expandedSharedFolderIDs, sharedInboxes, sharedRootOpen]);
   const sharedBusy = busy === "shared-inbox";
-  const GVICInboxNotificationCount = (role: GVICInboxRole): number => (
-    notificationCountForRole(notificationSummary, role === "generated" ? "r_inbox" : "aci_inbox", role)
-  );
 
   useEffect(() => {
     setExpandedSharedFolderIDs((previous) => {
@@ -1353,23 +1348,8 @@ export function HomeSidebar({
             </div>
           )}
         </section>
-        {GVIC_INBOX_SECTIONS.map((section) => {
-          const changedNodeCount = GVICInboxNotificationCount(section.role);
-          const active = activeViewID === section.viewID;
-          return (
-            <HomeNavButton
-              key={section.viewID}
-              label={section.title}
-              active={active}
-              meta={changedNodeCount > 0 ? <span style={mentionNotificationBadgeStyle}>{formatInboxNotificationCount(changedNodeCount)}</span> : undefined}
-              onClick={() => onSelectView(section.viewID, "all")}
-            />
-          );
-        })}
         <HomeNavButton label="My Work" active={activeViewID === "my-work"} onClick={() => onSelectView("my-work", "all")} />
         <HomeNavButton label="Updates" active={activeViewID === "updates"} onClick={() => onSelectView("updates", "all")} />
-        <HomeNavButton label="My Nodes" active={activeViewID === "my-nodes"} onClick={() => onSelectView("my-nodes", "all")} />
-        <HomeNavButton label="My Logic Gates" active={activeViewID === "my-logic-gates"} onClick={() => onSelectView("my-logic-gates", "all")} />
       </nav>
       {sharedContextMenu && (() => {
         const contextFolder = sharedContextMenu.folder;
@@ -3820,13 +3800,6 @@ const GVICMatrixHeaderTitleStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-function notificationCountForRole(summary: NotificationSummary, surface: string, role: NotificationGVICRole): number {
-  return (summary.role_counts ?? []).reduce((count, item) => {
-    if (item.surface !== surface || item.role !== role) return count;
-    return count + (typeof item.count === "number" && Number.isFinite(item.count) ? Math.max(0, Math.floor(item.count)) : 0);
-  }, 0);
-}
-
 function formatInboxNotificationCount(count: number): string {
   const normalized = typeof count === "number" && Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
   return normalized > 99 ? "99+" : String(normalized);
@@ -3899,20 +3872,6 @@ function InboxNotificationMenu({
     />
   );
 }
-
-const mentionNotificationBadgeStyle: React.CSSProperties = {
-  minWidth: 22,
-  height: 18,
-  display: "inline-grid",
-  placeItems: "center",
-  border: "1px solid rgba(100, 116, 139, 0.28)",
-  borderRadius: 999,
-  background: "#f8fafc",
-  color: "#334155",
-  fontSize: 10,
-  fontWeight: 800,
-  padding: "0 6px",
-};
 
 export function GVICRoleInboxMatrix({
   section,
