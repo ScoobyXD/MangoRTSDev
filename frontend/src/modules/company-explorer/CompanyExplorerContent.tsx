@@ -1523,9 +1523,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     () => companyExplorerLazyScopeForView(scopeView, scopeViewsEnabled),
     [scopeView, scopeViewsEnabled],
   );
-  const companyExplorerV2RootEntityID = useMemo(() => (
-    companyExplorerV2Rows.find((row) => !(row.parent_entity_id ?? "").trim())?.entity_id ?? ""
-  ), [companyExplorerV2Rows]);
+  const companyExplorerV2Active = folderSnapshotLoaded;
+  const companyExplorerV2RootEntityID = useMemo(() => companyID.trim(), [companyID]);
   const companyExplorerV2RowByEntityID = useMemo(() => {
     const byID = new Map<string, CompanyExplorerV2Row>();
     for (const row of companyExplorerV2Rows) {
@@ -1536,6 +1535,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const companyExplorerV2TreeIDForEntityID = useCallback((entityID: string): string => {
     const cleanEntityID = cleanExplorerID(entityID);
     if (!cleanEntityID) return "folder-root";
+    if (cleanEntityID === companyExplorerV2RootEntityID) return "folder-root";
     const row = companyExplorerV2RowByEntityID.get(cleanEntityID);
     if (!row) return `workspace-folder-${cleanEntityID}`;
     const resourceID = row.resource_id || row.entity_id;
@@ -1545,7 +1545,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (row.entity_type === "node") return `node-${resourceID}`;
     if (row.entity_type === "project") return `project-${resourceID}`;
     return `workspace-folder-${cleanEntityID}`;
-  }, [companyExplorerV2RowByEntityID]);
+  }, [companyExplorerV2RootEntityID, companyExplorerV2RowByEntityID]);
   const loadedCompanyExplorerBranchesRef = useRef<Set<string>>(new Set());
   const inflightCompanyExplorerBranchesRef = useRef<Set<string>>(new Set());
 
@@ -1996,6 +1996,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     folders: scopedExplorerData.folders,
     folderItems: scopedExplorerData.folderItems,
     rows: companyExplorerV2Rows,
+    useV2Rows: companyExplorerV2Active,
     rootRowOrder,
     selectedTreeID,
     treeViewportHeight,
@@ -2098,7 +2099,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [baseTreeRows, effectiveExpanded, explorerSearchActive, folderSnapshotLoaded, loadCompanyExplorerChildren]);
   const allExpandedSearchTreeRows = useMemo(() => {
     const expandedForSearch = new Set<string>(["folder-root"]);
-    if (companyExplorerV2Rows.length > 0) {
+    if (companyExplorerV2Active) {
       expandedForSearch.add("*");
       return buildCompanyExplorerV2TreeRows({ expanded: expandedForSearch, rows: companyExplorerV2Rows });
     }
@@ -2139,7 +2140,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       }),
       ...logicGatesByFunctionSearchRows,
     ];
-  }, [companyExplorerV2Rows, companyGroupSections, companyID, currentUserID, folderItems, folders, kanbanBoards, logicGates, logicGatesByFunctionRootFolder, nodes, projects, GVICProjectionByUserID, rootRowOrder, scopedExplorerActive, scopedRootFolder, scopeViewsEnabled]);
+  }, [companyExplorerV2Active, companyExplorerV2Rows, companyGroupSections, companyID, currentUserID, folderItems, folders, kanbanBoards, logicGates, logicGatesByFunctionRootFolder, nodes, projects, GVICProjectionByUserID, rootRowOrder, scopedExplorerActive, scopedRootFolder, scopeViewsEnabled]);
   const explorerSearchViewRows = useMemo(() => (
     buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery })
   ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
@@ -2412,7 +2413,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   ) => {
     setError("");
     try {
-      if (companyExplorerV2Rows.length > 0) {
+      if (companyExplorerV2Active) {
         const parentEntityID = parentFolderID || companyExplorerV2RootEntityID;
         if (!parentEntityID) throw new Error("company_explorer_v2_parent_missing");
         const row = await requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/folders", {
@@ -2478,7 +2479,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_folder");
     }
-  }, [apiBase, companyExplorerV2RootEntityID, companyExplorerV2Rows.length, companyExplorerV2TreeIDForEntityID, companyID, requestJSON, resolveCreateFolderScope]);
+  }, [apiBase, companyExplorerV2Active, companyExplorerV2RootEntityID, companyExplorerV2TreeIDForEntityID, companyID, requestJSON, resolveCreateFolderScope]);
 
   const assignItemsToFolders = useCallback(async (assignments: CompanyExplorerFolderItemAssignment[], options: { expandTarget?: boolean } = {}) => {
     const normalizedAssignments = assignments.filter((assignment) => (
@@ -2490,7 +2491,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (normalizedAssignments.length === 0) return true;
     setError("");
     try {
-      if (companyExplorerV2Rows.length > 0) {
+      if (companyExplorerV2Active) {
         const updatedRows: CompanyExplorerV2Row[] = [];
         for (const assignment of normalizedAssignments) {
           const existing = companyExplorerV2Rows.find((row) => (
@@ -2580,14 +2581,14 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const expandCreatedItemTarget = useCallback((parentFolderID: string) => {
     setExpanded((previous) => {
       const next = new Set(previous);
-      if (companyExplorerV2Rows.length > 0) {
+      if (companyExplorerV2Active) {
         next.add(companyExplorerV2TreeIDForEntityID(parentFolderID || companyExplorerV2RootEntityID));
       } else {
         next.add(parentFolderID ? `workspace-folder-${parentFolderID}` : "folder-root");
       }
       return next;
     });
-  }, [companyExplorerV2RootEntityID, companyExplorerV2Rows.length, companyExplorerV2TreeIDForEntityID]);
+  }, [companyExplorerV2Active, companyExplorerV2RootEntityID, companyExplorerV2TreeIDForEntityID]);
 
   const createNodeAtFolder = useCallback(async (parentFolderID: string, position?: number, logicGateID?: string, logicGateTreeID?: string, priority?: number) => {
     setError("");
@@ -2602,7 +2603,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       const response = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
         companyID,
         entityKind: "node",
-        folderID: targetLogicGateID || companyExplorerV2Rows.length > 0 ? "" : parentFolderID,
+        folderID: (targetLogicGateID || companyExplorerV2Active) ? "" : parentFolderID,
         mutationOrigin: "company_explorer",
         items: [{
           client_id: createWorkspaceEntityBatchClientID("explorer-node"),
@@ -2617,7 +2618,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (!node) throw new Error("node_batch_create_missing_node");
       for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
       let createdFolderID = response.folder_items?.find((item) => item.item_type === "node" && item.item_id === node.node_id)?.folder_id ?? parentFolderID;
-      if (companyExplorerV2Rows.length > 0 && !targetLogicGateID) {
+      if (companyExplorerV2Active && !targetLogicGateID) {
         const parentEntityID = parentFolderID || companyExplorerV2RootEntityID;
         if (parentEntityID) {
           const row = await requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
@@ -2657,7 +2658,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node");
     }
-  }, [apiBase, companyExplorerV2RootEntityID, companyExplorerV2Rows.length, companyID, expandCreatedItemTarget, requestJSON, upsertOptimisticFolderItem]);
+  }, [apiBase, companyExplorerV2Active, companyExplorerV2RootEntityID, companyID, expandCreatedItemTarget, requestJSON, upsertOptimisticFolderItem]);
 
   const createLogicGateAtFolder = useCallback(async (parentFolderID: string, position?: number, GVICRole?: string) => {
     setError("");
@@ -2666,7 +2667,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       const response = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
         companyID,
         entityKind: "logic_gate",
-        folderID: companyExplorerV2Rows.length > 0 ? "" : parentFolderID,
+        folderID: companyExplorerV2Active ? "" : parentFolderID,
         mutationOrigin: "company_explorer",
         creatorLogicGateGVICRole,
         items: [{
@@ -2684,7 +2685,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       logicGate.gvic_assignments = created.gvic_assignments ?? [];
       for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
       let createdFolderID = response.folder_items?.find((item) => item.item_type === "logic_gate" && item.item_id === logicGate.logic_gate_id)?.folder_id ?? parentFolderID;
-      if (companyExplorerV2Rows.length > 0) {
+      if (companyExplorerV2Active) {
         const parentEntityID = parentFolderID || companyExplorerV2RootEntityID;
         if (parentEntityID) {
           const row = await requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
@@ -2719,7 +2720,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_logic_gate");
     }
-  }, [apiBase, companyExplorerV2RootEntityID, companyExplorerV2Rows.length, companyID, expandCreatedItemTarget, requestJSON, upsertOptimisticFolderItem]);
+  }, [apiBase, companyExplorerV2Active, companyExplorerV2RootEntityID, companyID, expandCreatedItemTarget, requestJSON, upsertOptimisticFolderItem]);
 
   const createProjectAtFolder = useCallback(async (parentFolderID: string, position?: number) => {
     setError("");
@@ -2732,7 +2733,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       const project = response.project;
       if (!project) throw new Error("project_create_missing_project");
       let createdFolderID = parentFolderID;
-      if (companyExplorerV2Rows.length > 0) {
+      if (companyExplorerV2Active) {
         const parentEntityID = parentFolderID || companyExplorerV2RootEntityID;
         if (parentEntityID) {
           const row = await requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
@@ -2772,7 +2773,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_project");
     }
-  }, [assignItemsToFolders, companyExplorerV2RootEntityID, companyExplorerV2Rows.length, companyID, expandCreatedItemTarget, requestJSON]);
+  }, [assignItemsToFolders, companyExplorerV2Active, companyExplorerV2RootEntityID, companyID, expandCreatedItemTarget, requestJSON]);
 
   // Delete through one canonical batch request, then patch local/shared caches
   // once so multi-select deletes do not visibly collapse one row at a time.

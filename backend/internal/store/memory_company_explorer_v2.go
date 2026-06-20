@@ -58,13 +58,7 @@ func (r *MemoryRepo) ListCompanyExplorerV2RootRows(query CompanyExplorerV2RowsQu
 	defer r.mu.Unlock()
 
 	r.ensureCompanyExplorerV2CompanyGraphLocked(query.CompanyID)
-	rows := CompanyExplorerV2Rows{Rows: []CompanyExplorerV2Row{}}
-	entity, ok := r.companyExplorerV2EntityForNativeLocked(query.CompanyID, CompanyExplorerV2EntityCompany, query.CompanyID)
-	if ok && r.companyExplorerV2EntityVisibleLocked(query, entity) {
-		rows.Rows = append(rows.Rows, r.companyExplorerV2RowLocked(query, entity, nil))
-	}
-	sortCompanyExplorerV2Rows(rows.Rows)
-	return rows, nil
+	return r.listCompanyExplorerV2RootRowsLocked(query), nil
 }
 
 func (r *MemoryRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error) {
@@ -80,6 +74,9 @@ func (r *MemoryRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQ
 	if !ok || !r.companyExplorerV2EntityVisibleLocked(query, parent) {
 		return CompanyExplorerV2Rows{}, ErrNotFound
 	}
+	if parent.EntityType == CompanyExplorerV2EntityCompany {
+		return r.listCompanyExplorerV2RootRowsLocked(query), nil
+	}
 	rows := CompanyExplorerV2Rows{Rows: []CompanyExplorerV2Row{}}
 	for _, edge := range r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, parent.EntityID) {
 		child, ok := r.companyExplorerV2Entities[key(query.CompanyID, edge.ChildEntityID)]
@@ -92,6 +89,24 @@ func (r *MemoryRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQ
 	sortCompanyExplorerV2Rows(rows.Rows)
 	return rows, nil
 }
+
+func (r *MemoryRepo) listCompanyExplorerV2RootRowsLocked(query CompanyExplorerV2RowsQuery) CompanyExplorerV2Rows {
+	rows := CompanyExplorerV2Rows{Rows: []CompanyExplorerV2Row{}}
+	companyRootID := companyExplorerV2NativeEntityID(query.CompanyID, CompanyExplorerV2EntityCompany, query.CompanyID)
+	for _, edge := range r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, companyRootID) {
+		child, ok := r.companyExplorerV2Entities[key(query.CompanyID, edge.ChildEntityID)]
+		if !ok || !r.companyExplorerV2EntityVisibleLocked(query, child) {
+			continue
+		}
+		rowEdge := edge.memoryEdge()
+		row := r.companyExplorerV2RowLocked(query, child, &rowEdge)
+		row.ParentEntityID = ""
+		rows.Rows = append(rows.Rows, row)
+	}
+	sortCompanyExplorerV2Rows(rows.Rows)
+	return rows
+}
+
 func (edge memoryCompanyExplorerV2TreeEdge) memoryEdge() memoryCompanyExplorerV2Edge {
 	return memoryCompanyExplorerV2Edge{
 		CompanyID:        edge.CompanyID,
@@ -795,6 +810,9 @@ func (r *MemoryRepo) companyExplorerV2RowLocked(query CompanyExplorerV2RowsQuery
 		row.Position = edge.Position
 		row.CreatedTimestamp = edge.CreatedTimestamp
 		row.UpdatedTimestamp = edge.UpdatedTimestamp
+		if row.ParentEntityID == query.CompanyID {
+			row.ParentEntityID = ""
+		}
 	}
 	row.HasChildren = r.companyExplorerV2HasChildrenLocked(query.CompanyID, entity)
 	return row

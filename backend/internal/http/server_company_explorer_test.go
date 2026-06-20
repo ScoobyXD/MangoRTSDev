@@ -1171,9 +1171,15 @@ func TestCompanyExplorerLazyRootsReturnOnlyRootRows(t *testing.T) {
 		t.Fatalf("GET lazy roots status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	payload := decodeCompanyExplorerLazyRowsForTest(t, rec)
-	companies := companyExplorerLazyCompanyIDSet(payload)
-	if !companies[companyID] {
-		t.Fatalf("lazy roots = %v, want company root %s", payload.Rows, companyID)
+	rootFolders := companyExplorerLazyFolderIDSet(payload)
+	if !rootFolders[root.FolderID] {
+		t.Fatalf("lazy roots = %v, want root folder %s", payload.Rows, root.FolderID)
+	}
+	if rootFolders[child.FolderID] {
+		t.Fatalf("lazy roots included child folder %s", child.FolderID)
+	}
+	if companies := companyExplorerLazyCompanyIDSet(payload); companies[companyID] {
+		t.Fatalf("lazy roots included synthetic company root %s: %+v", companyID, payload.Rows)
 	}
 
 	childReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/children?company_id="+companyID+"&scope=all&parent_id="+companyID, nil)
