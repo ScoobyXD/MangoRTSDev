@@ -6,6 +6,10 @@ Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: 0% (rule IDs are not mapped to automated tests yet)
 
+## Definitions:
+Active Work: Nodes and Projects that are not in "Done" status. 
+            if there is a node that is "Done" but inside of a logic gate or a project that is not in "Done" status, then the node is still active because its "parent", the project is still going. Logic gates by themselves do not have these statuses. 
+
 ## Business Logic
 
 MW1 - My Work shows active work derived from effective GVIC assignments, not the Updates notification feed.
@@ -34,6 +38,7 @@ MW23 - Malformed or duplicate saved grouping settings are normalized before use.
 MW24 - Opening a My Work row routes to the corresponding project, logic gate, or node surface.
 MW25 - Expanding/collapsing grouping rows is separate from opening the work item.
 MW26 - Drag/drop or empty-cell creation from My Work carries the selected priority and creator GVIC role into the created work item.
+MW27-
 
 ## Scenarios
 
