@@ -150,6 +150,7 @@ func (r *MemoryRepo) createRecycleBinItemsLocked(companyID string, targets []Com
 			ObjectID:         target.ID,
 			ObjectLabel:      r.recycleTargetLabelLocked(companyID, target),
 			ObjectFolderKind: target.FolderKind,
+			ContainedItems:   recycleContainedItemsFromMemorySnapshot(domain.RecycleBinItem{CompanyID: companyID, ObjectKind: target.Kind, ObjectID: target.ID}, snapshot),
 			DeletedTimestamp: now,
 		}
 		if strings.TrimSpace(item.ObjectLabel) == "" {

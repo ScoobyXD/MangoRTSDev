@@ -838,6 +838,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 			}
 		}
 	}
+	r.expandCompanyExplorerDeleteScopeLocked(companyID, folderIDs, nodeIDs, logicGateIDs, projectIDs)
 
 	for _, board := range r.kanbanBoards {
 		if board.CompanyID != companyID || board.LogicGateID == nil || !logicGateIDs[*board.LogicGateID] {
@@ -941,6 +942,64 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 		}
 	}
 	return result, nil
+}
+
+func (r *MemoryRepo) expandCompanyExplorerDeleteScopeLocked(companyID string, folderIDs, nodeIDs, logicGateIDs, projectIDs map[string]bool) {
+	changed := true
+	for changed {
+		changed = false
+		for _, item := range r.folderItems {
+			if item.CompanyID != companyID || !folderIDs[item.FolderID] {
+				continue
+			}
+			switch item.ItemType {
+			case "node":
+				if !nodeIDs[item.ItemID] {
+					nodeIDs[item.ItemID] = true
+					changed = true
+				}
+			case "logic_gate":
+				if !logicGateIDs[item.ItemID] {
+					logicGateIDs[item.ItemID] = true
+					changed = true
+				}
+			case "project":
+				if !projectIDs[item.ItemID] {
+					projectIDs[item.ItemID] = true
+					changed = true
+				}
+			}
+		}
+		for _, relationship := range r.projectRelationships {
+			if relationship.CompanyID != companyID || !projectIDs[relationship.ProjectID] {
+				continue
+			}
+			switch relationship.ResourceType {
+			case EntityTypeNode:
+				if !nodeIDs[relationship.ResourceID] {
+					nodeIDs[relationship.ResourceID] = true
+					changed = true
+				}
+			case EntityTypeLogicGate:
+				if !logicGateIDs[relationship.ResourceID] {
+					logicGateIDs[relationship.ResourceID] = true
+					changed = true
+				}
+			case EntityTypeProject:
+				if !projectIDs[relationship.ResourceID] {
+					projectIDs[relationship.ResourceID] = true
+					changed = true
+				}
+			}
+		}
+		for _, assignment := range r.nodeLogicGateAssignments {
+			if assignment.CompanyID != companyID || !logicGateIDs[assignment.LogicGateID] || nodeIDs[assignment.NodeID] {
+				continue
+			}
+			nodeIDs[assignment.NodeID] = true
+			changed = true
+		}
+	}
 }
 
 func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error) {

@@ -330,6 +330,142 @@ func TestMemoryProjectRelationshipMovesResourceBetweenProjects(t *testing.T) {
 		t.Fatalf("bravo relationships after move = %+v, want moved relationship", bravoRows)
 	}
 }
+
+func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesContainerDescendants(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-220000000004"
+	repo.EnsureCompany(companyID, "Recycle Summary Co")
+
+	folder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
+		CompanyID:      companyID,
+		ParentEntityID: companyID,
+		Name:           "Root Folder",
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder root: %v", err)
+	}
+	childFolder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
+		CompanyID:      companyID,
+		ParentEntityID: folder.EntityID,
+		Name:           "Child Folder",
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder child: %v", err)
+	}
+	projectResult, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Contained Project", Status: "Active"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	project := projectResult.Project
+	if project == nil {
+		t.Fatalf("CreateProject returned nil project")
+	}
+	if _, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:       companyID,
+		ParentEntityID:  childFolder.EntityID,
+		ChildEntityType: CompanyExplorerV2EntityProject,
+		ChildResourceID: project.ProjectID,
+	}); err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge project: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Contained Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID:    companyID,
+		ProjectID:    project.ProjectID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+	}); err != nil {
+		t.Fatalf("UpsertProjectRelationship: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Contained Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	assignmentPriority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Priority:    &assignmentPriority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+
+	result, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folder.EntityID}})
+	if err != nil {
+		t.Fatalf("DeleteCompanyExplorerTargets folder: %v", err)
+	}
+	requireDeletedTarget(t, result.Targets, "folder", childFolder.EntityID)
+	requireDeletedTarget(t, result.Targets, EntityTypeProject, project.ProjectID)
+	requireDeletedTarget(t, result.Targets, EntityTypeLogicGate, logicGate.LogicGateID)
+	requireDeletedTarget(t, result.Targets, EntityTypeNode, node.NodeID)
+
+	items, err := repo.ListRecycleBinItems(companyID)
+	if err != nil {
+		t.Fatalf("ListRecycleBinItems: %v", err)
+	}
+	rootItem := requireRecycleItem(t, items, "folder", folder.EntityID)
+	requireContainedRecycleItem(t, rootItem.ContainedItems, "folder", childFolder.EntityID, "Child Folder")
+	requireContainedRecycleItem(t, rootItem.ContainedItems, EntityTypeProject, project.ProjectID, "Contained Project")
+	requireContainedRecycleItem(t, rootItem.ContainedItems, EntityTypeLogicGate, logicGate.LogicGateID, "Contained Gate")
+	requireContainedRecycleItem(t, rootItem.ContainedItems, EntityTypeNode, node.NodeID, "Contained Node")
+}
+
+func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesProjectAndLogicGateChildren(t *testing.T) {
+	t.Run("project", func(t *testing.T) {
+		repo := NewMemoryRepo()
+		companyID := "11111111-1111-4111-8111-220000000005"
+		repo.EnsureCompany(companyID, "Recycle Project Summary Co")
+		project, logicGate, node := createProjectGateNodeTree(t, repo, companyID)
+
+		result, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: EntityTypeProject, ID: project.ProjectID}})
+		if err != nil {
+			t.Fatalf("DeleteCompanyExplorerTargets project: %v", err)
+		}
+		requireDeletedTarget(t, result.Targets, EntityTypeLogicGate, logicGate.LogicGateID)
+		requireDeletedTarget(t, result.Targets, EntityTypeNode, node.NodeID)
+		if _, err := repo.GetLogicGate(companyID, logicGate.LogicGateID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetLogicGate after project delete err = %v, want ErrNotFound", err)
+		}
+		if _, err := repo.GetNode(companyID, node.NodeID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetNode after project delete err = %v, want ErrNotFound", err)
+		}
+		items, err := repo.ListRecycleBinItems(companyID)
+		if err != nil {
+			t.Fatalf("ListRecycleBinItems project: %v", err)
+		}
+		projectItem := requireRecycleItem(t, items, EntityTypeProject, project.ProjectID)
+		requireContainedRecycleItem(t, projectItem.ContainedItems, EntityTypeLogicGate, logicGate.LogicGateID, "Project Gate")
+		requireContainedRecycleItem(t, projectItem.ContainedItems, EntityTypeNode, node.NodeID, "Project Node")
+	})
+
+	t.Run("logic_gate", func(t *testing.T) {
+		repo := NewMemoryRepo()
+		companyID := "11111111-1111-4111-8111-220000000006"
+		repo.EnsureCompany(companyID, "Recycle Gate Summary Co")
+		_, logicGate, node := createProjectGateNodeTree(t, repo, companyID)
+
+		result, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: EntityTypeLogicGate, ID: logicGate.LogicGateID}})
+		if err != nil {
+			t.Fatalf("DeleteCompanyExplorerTargets logic gate: %v", err)
+		}
+		requireDeletedTarget(t, result.Targets, EntityTypeNode, node.NodeID)
+		if _, err := repo.GetNode(companyID, node.NodeID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetNode after logic gate delete err = %v, want ErrNotFound", err)
+		}
+		items, err := repo.ListRecycleBinItems(companyID)
+		if err != nil {
+			t.Fatalf("ListRecycleBinItems logic gate: %v", err)
+		}
+		logicGateItem := requireRecycleItem(t, items, EntityTypeLogicGate, logicGate.LogicGateID)
+		requireContainedRecycleItem(t, logicGateItem.ContainedItems, EntityTypeNode, node.NodeID, "Project Node")
+	})
+}
+
 func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000002"
@@ -486,6 +622,75 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	if _, err := repo.GetCompanyExplorerV2FolderDefaultAccess(companyID, privateFolder.EntityID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetCompanyExplorerV2FolderDefaultAccess after delete err = %v, want ErrNotFound", err)
 	}
+}
+
+func createProjectGateNodeTree(t *testing.T, repo *MemoryRepo, companyID string) (domain.Project, domain.LogicGate, domain.Node) {
+	t.Helper()
+	projectResult, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Project Parent", Status: "Active"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if projectResult.Project == nil {
+		t.Fatalf("CreateProject returned nil project")
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Project Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
+		CompanyID:    companyID,
+		ProjectID:    projectResult.Project.ProjectID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+	}); err != nil {
+		t.Fatalf("UpsertProjectRelationship: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Project Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	assignmentPriority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Priority:    &assignmentPriority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	return *projectResult.Project, logicGate, node
+}
+
+func requireDeletedTarget(t *testing.T, targets []CompanyExplorerDeletedTarget, kind, id string) {
+	t.Helper()
+	for _, target := range targets {
+		if target.Kind == kind && target.ID == id {
+			return
+		}
+	}
+	t.Fatalf("missing deleted target kind=%s id=%s in %+v", kind, id, targets)
+}
+
+func requireRecycleItem(t *testing.T, items []domain.RecycleBinItem, kind, id string) domain.RecycleBinItem {
+	t.Helper()
+	for _, item := range items {
+		if item.ObjectKind == kind && item.ObjectID == id {
+			return item
+		}
+	}
+	t.Fatalf("missing recycle item kind=%s id=%s in %+v", kind, id, items)
+	return domain.RecycleBinItem{}
+}
+
+func requireContainedRecycleItem(t *testing.T, items []domain.RecycleBinContainedItem, kind, id, label string) {
+	t.Helper()
+	for _, item := range items {
+		if item.Kind == kind && item.ID == id && item.Label == label {
+			return
+		}
+	}
+	t.Fatalf("missing contained recycle item kind=%s id=%s label=%q in %+v", kind, id, label, items)
 }
 
 func requireCompanyExplorerV2Row(t *testing.T, rows []CompanyExplorerV2Row, entityType, id string) CompanyExplorerV2Row {
