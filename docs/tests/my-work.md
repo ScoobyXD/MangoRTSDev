@@ -47,6 +47,17 @@ MW32 - The projection table should store the relationship path needed to render 
 MW33 - Frontend should not recursively derive this or lazy-fetch branches for My Work.
 
 
+Node rename/status/due date/priority/accounts changed: update/rebuild rows where node_id = X.
+Logic gate renamed: update all rows where logic_gate_id = X.
+Project renamed: update all rows where project_id = X.
+Node moved into/out of a logic gate: rebuild all projection rows for that node.
+Logic gate GVIC assignment changed: rebuild rows for all current nodes in that logic gate.
+Node GVIC assignment changed: rebuild rows for that node, but only matters when the node is not deferring to a logic gate.
+Project relationship changed: rebuild affected node rows under that project/gate relationship.
+Project/logic gate/node deleted or archived/done: delete or rebuild affected rows.
+Realtime: emit deltas keyed by projection_row_id; for big fanout changes, emit a scoped refetch for affected users instead of thousands of row patches.
+
+
 ## Scenarios
 
 ### Scenario MW-S1: Scope Loading And Partial Failure
