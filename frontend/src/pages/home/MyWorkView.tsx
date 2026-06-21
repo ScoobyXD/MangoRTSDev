@@ -41,6 +41,7 @@ import {
   publishMyWorkDebugSnapshot,
   recordMyWorkDebugCause,
 } from "./myWorkPerformanceDebug";
+import { buildMyWorkDisplayRows, type MyWorkDisplayRow } from "./myWorkDisplayRows";
 import {
   DEFAULT_MY_WORK_GROUPINGS,
   MY_WORK_GROUPING_FIELDS,
@@ -172,9 +173,7 @@ export function MyWorkView({
   onOpenLogicGate,
   onOpenProject,
   onOpenNodeBulkMenu,
-  onOpenLogicGateBulkMenu,
   onCreateNodeInCell,
-  onDropNodes,
   onDropNodesInCell,
   onDropLogicGates,
   onDropProjects,
@@ -792,9 +791,7 @@ export function MyWorkView({
             onOpenLogicGate={onOpenLogicGate}
             onOpenProject={onOpenProject}
             onOpenNodeBulkMenu={onOpenNodeBulkMenu}
-            onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
             onCreateNodeInCell={onCreateNodeInCell}
-            onDropNodes={onDropNodes}
             onDropNodesInCell={onDropNodesInCell}
             onDropLogicGates={onDropLogicGates}
             onDropProjects={onDropProjects}
@@ -987,10 +984,9 @@ function MyWorkGroupList({
   onOpenLogicGate,
   onOpenProject,
   onOpenNodeBulkMenu,
-  onOpenLogicGateBulkMenu,
-  onDropNodes,
   nodeByID,
   logicGateByID,
+  projectGroupAncestor = false,
 }: {
   groups: MyWorkNestedGroup[];
   role: LogicGateGVICRole;
@@ -1000,10 +996,9 @@ function MyWorkGroupList({
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
-  onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
-  onDropNodes?: (input: MyWorkNodeDropInput) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
+  projectGroupAncestor?: boolean;
 }) {
   return (
     <div style={groupListStyle}>
@@ -1011,6 +1006,7 @@ function MyWorkGroupList({
         const open = expandedGroupIDs.has(group.id);
         const leafRows = group.groups.length === 0 ? group.rows : [];
         const resourceTarget = myWorkGroupResourceTarget(group);
+        const nextProjectGroupAncestor = projectGroupAncestor || group.field === "project";
         return (
           <div key={group.id} style={groupBlockStyle}>
             <div style={groupHeaderStyle(group.depth, role)}>
@@ -1044,14 +1040,13 @@ function MyWorkGroupList({
                 onOpenLogicGate={onOpenLogicGate}
                 onOpenProject={onOpenProject}
                 onOpenNodeBulkMenu={onOpenNodeBulkMenu}
-                onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
-                onDropNodes={onDropNodes}
                 nodeByID={nodeByID}
                 logicGateByID={logicGateByID}
+                projectGroupAncestor={nextProjectGroupAncestor}
               />
             )}
             {open && leafRows.length > 0 && (
-              <MyWorkRows rows={leafRows} role={role} depth={group.depth + 1} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu} onDropNodes={onDropNodes} nodeByID={nodeByID} logicGateByID={logicGateByID} />
+              <MyWorkRows rows={leafRows} role={role} depth={group.depth + 1} showProjectHeaders={!nextProjectGroupAncestor} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} nodeByID={nodeByID} logicGateByID={logicGateByID} />
             )}
           </div>
         );
@@ -1068,10 +1063,10 @@ function MyWorkRows({
   onOpenLogicGate,
   onOpenProject,
   onOpenNodeBulkMenu,
-  onOpenLogicGateBulkMenu,
-  onDropNodes,
   nodeByID,
   logicGateByID,
+  showProjectHeaders = true,
+  showLogicGateHeaders = true,
 }: {
   rows: MyWorkResourceRow[];
   role: LogicGateGVICRole;
@@ -1080,25 +1075,29 @@ function MyWorkRows({
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
-  onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
-  onDropNodes?: (input: MyWorkNodeDropInput) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
+  showProjectHeaders?: boolean;
+  showLogicGateHeaders?: boolean;
 }) {
+  const sortedRows = useMemo(() => sortMyWorkRows(rows), [rows]);
+  const displayRows = useMemo(() => buildMyWorkDisplayRows(sortedRows, {
+    baseDepth: depth,
+    showProjectHeaders,
+    showLogicGateHeaders,
+  }), [depth, showLogicGateHeaders, showProjectHeaders, sortedRows]);
+
   return (
     <div style={rowListStyle}>
-      {sortMyWorkRows(rows).map((row) => (
-        <MyWorkTreeRow
-          key={row.rowKey ?? `${row.kind}:${row.id}`}
-          row={row}
+      {displayRows.map((displayRow) => (
+        <MyWorkDisplayRowItem
+          key={displayRow.key}
+          displayRow={displayRow}
           role={role}
-          depth={depth}
           onOpenNode={onOpenNode}
           onOpenLogicGate={onOpenLogicGate}
           onOpenProject={onOpenProject}
           onOpenNodeBulkMenu={onOpenNodeBulkMenu}
-          onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
-          onDropNodes={onDropNodes}
           nodeByID={nodeByID}
           logicGateByID={logicGateByID}
         />
@@ -1107,77 +1106,71 @@ function MyWorkRows({
   );
 }
 
-function MyWorkTreeRow({
-  row,
+function MyWorkDisplayRowItem({
+  displayRow,
   role,
-  depth,
   onOpenNode,
   onOpenLogicGate,
   onOpenProject,
   onOpenNodeBulkMenu,
-  onOpenLogicGateBulkMenu,
-  onDropNodes,
   nodeByID,
   logicGateByID,
 }: {
-  row: MyWorkResourceRow;
+  displayRow: MyWorkDisplayRow;
   role: LogicGateGVICRole;
-  depth: number;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
-  onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
-  onDropNodes?: (input: MyWorkNodeDropInput) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
 }) {
-  const children = row.children ?? [];
-  const displayDepth = Number.isFinite(Number(row.depth)) ? Number(row.depth) : depth;
+  if (displayRow.kind !== "node") {
+    const kind = displayRow.kind === "project_header" ? "project" : "logic_gate";
+    const canOpen = displayRow.kind === "project_header"
+      ? Boolean(displayRow.projectID.trim())
+      : Boolean(displayRow.logicGateID.trim());
+    const content = (
+      <>
+        <ExplorerRowIcon kind={kind} />
+        <span style={workRowTitleTextStyle(true)}>{displayRow.title}</span>
+      </>
+    );
+    return (
+      <div style={logicGateSectionBlockStyle}>
+        <div style={workRowStyle(displayRow.depth, role, kind, true)}>
+          {canOpen ? (
+            <button
+              type="button"
+              style={workRowTitleCellButtonStyle}
+              onClick={() => {
+                if (displayRow.kind === "project_header") onOpenProject(displayRow.projectID, displayRow.title);
+                else onOpenLogicGate(displayRow.logicGateID, displayRow.title);
+              }}
+            >
+              {content}
+            </button>
+          ) : (
+            <span style={workRowTitleStaticCellStyle}>{content}</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const row = displayRow.row;
   const status = row.status?.trim() || "No status";
-  const actionPriority = priorityBucket(row.priority);
-  const rowLogicGateID = row.kind === "logic_gate" ? row.id.trim() : row.logicGateIDs[0]?.trim() ?? "";
+  const rowLogicGateID = row.logicGateIDs[0]?.trim() ?? "";
   return (
     <div style={logicGateSectionBlockStyle}>
       <div
-        style={workRowStyle(displayDepth, role)}
-        draggable={row.kind === "node" || row.kind === "logic_gate" || row.kind === "project"}
+        style={workRowStyle(displayRow.depth, role, row.kind, false)}
+        draggable
         onContextMenu={(event) => {
-          if (row.kind === "node" && onOpenNodeBulkMenu) onOpenNodeBulkMenu(row.id, event);
-          if (row.kind === "logic_gate" && onOpenLogicGateBulkMenu) onOpenLogicGateBulkMenu(row.id, event);
+          if (onOpenNodeBulkMenu) onOpenNodeBulkMenu(row.id, event);
         }}
         onDragStart={(event) => {
-          if (row.kind === "node") {
-            writeMyWorkDragPayload(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME, { nodeIDs: [row.id], fromLogicGateID: rowLogicGateID });
-          } else if (row.kind === "logic_gate") {
-            writeMyWorkDragPayload(event.dataTransfer, HOME_INBOX_LOGIC_GATE_DRAG_MIME, { logicGateIDs: [row.id], nodeIDsByLogicGateID: { [row.id]: collectMyWorkNodeIDs(row) } });
-          } else if (row.kind === "project") {
-            const projectID = row.projectID?.trim() || row.id.trim();
-            if (!projectID) return;
-            const logicGateIDs = collectMyWorkLogicGateIDs(row);
-            const nodeIDs = collectMyWorkNodeIDs(row);
-            writeMyWorkDragPayload(event.dataTransfer, HOME_INBOX_PROJECT_DRAG_MIME, {
-              projectIDs: [projectID],
-              logicGateIDsByProjectID: logicGateIDs.length > 0 ? { [projectID]: logicGateIDs } : undefined,
-              nodeIDsByProjectID: nodeIDs.length > 0 ? { [projectID]: nodeIDs } : undefined,
-              nodeIDsByLogicGateID: collectMyWorkNodeIDsByLogicGateID(row),
-            });
-          }
-        }}
-        onDragOver={(event) => {
-          if (row.kind !== "logic_gate" || !onDropNodes) return;
-          if (!hasMyWorkDragType(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME)) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "move";
-        }}
-        onDrop={(event) => {
-          if (row.kind !== "logic_gate" || !onDropNodes) return;
-          const payload = readMyWorkDragPayload<MyWorkNodeDragPayload>(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME);
-          const nodeIDs = cleanIDList(payload?.nodeIDs ?? []);
-          if (nodeIDs.length === 0) return;
-          event.preventDefault();
-          event.stopPropagation();
-          onDropNodes({ logicGateID: row.id, nodeIDs, priority: actionPriority, fromLogicGateID: payload?.fromLogicGateID });
+          writeMyWorkDragPayload(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME, { nodeIDs: [row.id], fromLogicGateID: rowLogicGateID });
         }}
       >
         <button
@@ -1186,30 +1179,10 @@ function MyWorkTreeRow({
           onClick={() => openMyWorkRowResource(row, nodeByID, logicGateByID, onOpenNode, onOpenLogicGate, onOpenProject)}
         >
           <ExplorerRowIcon kind={row.kind} />
-          <span style={workRowTitleTextStyle}>{row.title}</span>
+          <span style={workRowTitleTextStyle(false)}>{row.title}</span>
         </button>
         <span style={workRowStatusStyle(role)}>{status}</span>
       </div>
-      {children.length > 0 && (
-        <div style={logicGateNodeListStyle}>
-          {sortMyWorkRows(children).map((child) => (
-            <MyWorkTreeRow
-              key={child.rowKey ?? `${row.rowKey}:${child.kind}:${child.id}`}
-              row={child}
-              role={role}
-              depth={depth + 1}
-              onOpenNode={onOpenNode}
-              onOpenLogicGate={onOpenLogicGate}
-              onOpenProject={onOpenProject}
-              onOpenNodeBulkMenu={onOpenNodeBulkMenu}
-              onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
-              onDropNodes={onDropNodes}
-              nodeByID={nodeByID}
-              logicGateByID={logicGateByID}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -1281,7 +1254,6 @@ function addMyWorkResourceRowStats(stats: MyWorkTreeStats, row: MyWorkResourceRo
   if (row.kind === "project") stats.projects += 1;
   else if (row.kind === "logic_gate") stats.logicGates += 1;
   else if (row.kind === "node") stats.nodes += 1;
-  for (const child of row.children ?? []) addMyWorkResourceRowStats(stats, child, depth + 1);
 }
 
 function openMyWorkRowResource(
@@ -1317,9 +1289,7 @@ function MyWorkMatrix({
   onOpenLogicGate,
   onOpenProject,
   onOpenNodeBulkMenu,
-  onOpenLogicGateBulkMenu,
   onCreateNodeInCell,
-  onDropNodes,
   onDropNodesInCell,
   onDropLogicGates,
   onDropProjects,
@@ -1336,9 +1306,7 @@ function MyWorkMatrix({
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
-  onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
   onCreateNodeInCell?: (input: MyWorkCellCreateInput) => void;
-  onDropNodes?: (input: MyWorkNodeDropInput) => void;
   onDropNodesInCell?: (input: MyWorkCellNodeDropInput) => void;
   onDropLogicGates?: (input: MyWorkCellLogicGateDropInput) => void;
   onDropProjects?: (input: MyWorkCellProjectDropInput) => void;
@@ -1533,13 +1501,11 @@ function MyWorkMatrix({
                     onOpenLogicGate={onOpenLogicGate}
                     onOpenProject={onOpenProject}
                     onOpenNodeBulkMenu={onOpenNodeBulkMenu}
-                    onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
-                    onDropNodes={onDropNodes}
                     nodeByID={nodeByID}
                     logicGateByID={logicGateByID}
                   />
                 ) : (
-                  <MyWorkRows rows={cellRows} role={role} depth={0} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu} onDropNodes={onDropNodes} nodeByID={nodeByID} logicGateByID={logicGateByID} />
+                  <MyWorkRows rows={cellRows} role={role} depth={0} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} nodeByID={nodeByID} logicGateByID={logicGateByID} />
                 )}
               </div>
             );
@@ -1604,8 +1570,6 @@ function buildMyWorkRowsFromMatrix({
       nodeLeafID: nodeID,
       depth: 0,
       sortOrder: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
-      isContainerRow: false,
-      children: [],
     });
   }
 
@@ -1655,42 +1619,6 @@ function readMyWorkDragPayload<T>(dataTransfer: DataTransfer, mime: string): T |
 
 function hasMyWorkDragType(dataTransfer: DataTransfer, mime: string): boolean {
   return Array.from(dataTransfer.types ?? []).includes(mime);
-}
-
-function collectMyWorkNodeIDs(row: MyWorkResourceRow): string[] {
-  const ids: string[] = [];
-  const visit = (item: MyWorkResourceRow) => {
-    const nodeLeafID = item.nodeLeafID?.trim() ?? "";
-    if (nodeLeafID) ids.push(nodeLeafID);
-    else if (item.kind === "node" && item.id.trim()) ids.push(item.id.trim());
-    for (const child of item.children ?? []) visit(child);
-  };
-  visit(row);
-  return cleanIDList(ids);
-}
-
-function collectMyWorkLogicGateIDs(row: MyWorkResourceRow): string[] {
-  const ids: string[] = [];
-  const visit = (item: MyWorkResourceRow) => {
-    if (item.kind === "logic_gate" && item.id.trim()) ids.push(item.id.trim());
-    for (const child of item.children ?? []) visit(child);
-  };
-  visit(row);
-  return cleanIDList(ids);
-}
-
-function collectMyWorkNodeIDsByLogicGateID(row: MyWorkResourceRow): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
-  const visit = (item: MyWorkResourceRow) => {
-    if (item.kind === "logic_gate") {
-      const logicGateID = item.id.trim();
-      const nodeIDs = collectMyWorkNodeIDs(item);
-      if (logicGateID && nodeIDs.length > 0) out[logicGateID] = nodeIDs;
-    }
-    for (const child of item.children ?? []) visit(child);
-  };
-  visit(row);
-  return out;
 }
 
 function normalizeGVICRole(role: string | null | undefined): LogicGateGVICRole | "" {
@@ -2639,31 +2567,26 @@ const logicGateSectionBlockStyle: React.CSSProperties = {
   justifyItems: "start",
 };
 
-const logicGateNodeListStyle: React.CSSProperties = {
-  minWidth: 0,
-  maxWidth: "100%",
-  display: "grid",
-  alignContent: "start",
-  justifyItems: "start",
-};
-
-function workRowStyle(depth: number, role: LogicGateGVICRole): React.CSSProperties {
+function workRowStyle(depth: number, role: LogicGateGVICRole, kind: MyWorkResourceRow["kind"], displayHeader: boolean): React.CSSProperties {
   const accent = homeGVICRoleAccent(role);
+  const headerAccent = kind === "project" ? "#64748b" : accent;
   return {
     width: "fit-content",
     minWidth: "min(230px, calc(100% - 18px))",
     maxWidth: "calc(100% - 18px)",
-    minHeight: 34,
+    minHeight: displayHeader ? 31 : 34,
     display: "grid",
-    gridTemplateColumns: "minmax(120px, max-content) max-content",
+    gridTemplateColumns: displayHeader ? "minmax(120px, max-content)" : "minmax(120px, max-content) max-content",
     alignItems: "center",
     gap: 8,
     marginLeft: depth * 28,
     marginBottom: 3,
-    border: `1px solid ${homeColorWithAlpha(accent, 0.15)}`,
-    borderLeft: `3px solid ${homeColorWithAlpha(accent, 0.62)}`,
+    border: `1px solid ${homeColorWithAlpha(displayHeader ? headerAccent : accent, displayHeader ? 0.28 : 0.15)}`,
+    borderLeft: `3px solid ${homeColorWithAlpha(displayHeader ? headerAccent : accent, displayHeader ? 0.74 : 0.62)}`,
     borderRadius: 6,
-    background: `linear-gradient(135deg, rgba(255,255,255,0.96), ${homeColorWithAlpha(accent, 0.06)})`,
+    background: displayHeader
+      ? `linear-gradient(135deg, rgba(248,250,252,0.98), ${homeColorWithAlpha(headerAccent, 0.08)})`
+      : `linear-gradient(135deg, rgba(255,255,255,0.96), ${homeColorWithAlpha(accent, 0.06)})`,
     color: "#111827",
     font: "inherit",
     textAlign: "left",
@@ -2686,14 +2609,23 @@ const workRowTitleCellButtonStyle: React.CSSProperties = {
   padding: 0,
 };
 
-const workRowTitleTextStyle: React.CSSProperties = {
+const workRowTitleStaticCellStyle: React.CSSProperties = {
   minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  fontSize: 12,
-  fontWeight: 780,
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
 };
+
+function workRowTitleTextStyle(displayHeader: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: 12,
+    fontWeight: displayHeader ? 850 : 780,
+  };
+}
 
 function workRowStatusStyle(role: LogicGateGVICRole): React.CSSProperties {
   const accent = homeGVICRoleAccent(role);

@@ -75,13 +75,9 @@ export type MyWorkResourceRow = {
   projectName?: string;
   logicGateLabels: string[];
   logicGateIDs: string[];
-  parentResourceType?: string;
-  parentResourceID?: string;
   nodeLeafID?: string;
   depth?: number;
   sortOrder?: number;
-  isContainerRow?: boolean;
-  children?: MyWorkResourceRow[];
 };
 
 export type MyWorkGroupValue = UniversalGroupValue;
