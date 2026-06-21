@@ -112,6 +112,24 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 		}
 	case GVICAssignmentCommandAdd:
 		for _, assignment := range assignments {
+			if keyValue.resourceType == EntityTypeNode || keyValue.resourceType == EntityTypeLogicGate {
+				deleted, err := tx.ExecContext(ctx, `
+delete from resource_gvic_assignments
+where company_id=$1::uuid
+  and resource_type=$2
+  and resource_id=$3::uuid
+  and principal_type=$4
+  and principal_id=$5::uuid
+  and role<>$6`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID, assignment.principalType, assignment.principalID, assignment.role)
+				if err != nil {
+					return ResourceGVICAssignmentMutationResult{}, err
+				}
+				if affected, err := deleted.RowsAffected(); err == nil && affected > 0 {
+					changed = true
+				} else if err != nil {
+					return ResourceGVICAssignmentMutationResult{}, err
+				}
+			}
 			inserted, err := tx.ExecContext(ctx, `
 insert into resource_gvic_assignments (
   company_id,

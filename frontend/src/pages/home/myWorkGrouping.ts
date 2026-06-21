@@ -75,6 +75,12 @@ export type MyWorkResourceRow = {
   projectName?: string;
   logicGateLabels: string[];
   logicGateIDs: string[];
+  parentResourceType?: string;
+  parentResourceID?: string;
+  nodeLeafID?: string;
+  depth?: number;
+  sortOrder?: number;
+  isContainerRow?: boolean;
   children?: MyWorkResourceRow[];
 };
 
@@ -282,10 +288,14 @@ export function applyManualExpandedState(defaultExpanded: Set<string>, manualSta
 
 export function sortMyWorkRows(rows: MyWorkResourceRow[]): MyWorkResourceRow[] {
   return [...rows].sort((left, right) => {
+    const leftSortOrder = Number.isFinite(Number(left.sortOrder)) && Number(left.sortOrder) > 0 ? Number(left.sortOrder) : Number.MAX_SAFE_INTEGER;
+    const rightSortOrder = Number.isFinite(Number(right.sortOrder)) && Number(right.sortOrder) > 0 ? Number(right.sortOrder) : Number.MAX_SAFE_INTEGER;
     const leftPriority = Number.isFinite(Number(left.priority)) && Number(left.priority) > 0 ? Number(left.priority) : Number.MAX_SAFE_INTEGER;
     const rightPriority = Number.isFinite(Number(right.priority)) && Number(right.priority) > 0 ? Number(right.priority) : Number.MAX_SAFE_INTEGER;
-    return leftPriority - rightPriority
+    return leftSortOrder - rightSortOrder
+      || leftPriority - rightPriority
       || dueDateSortValue(left.dueDate) - dueDateSortValue(right.dueDate)
+      || Number(left.depth ?? 0) - Number(right.depth ?? 0)
       || myWorkKindSort(left.kind) - myWorkKindSort(right.kind)
       || left.title.localeCompare(right.title, undefined, { numeric: true, sensitivity: "base" })
       || left.kind.localeCompare(right.kind)

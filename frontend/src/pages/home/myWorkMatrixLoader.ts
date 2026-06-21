@@ -1,9 +1,20 @@
-import type { MyWorkMatrixCell, MyWorkMatrixResponse } from "../../modules/work-items/workItemReadApi.js";
+import type { MyWorkMatrixResponse, MyWorkMatrixRow } from "../../modules/work-items/workItemReadApi.js";
 import { GVIC_MATRIX_PROJECTION_NAME, GVICMatrixRealtimeScope } from "../../modules/gvic/gvicMatrixProjectionDeltas.js";
 import type { RealtimeProjectionDeltaMessage } from "../../modules/realtime/realtimeWebSocket.js";
 import type { MyWorkSelectedScope } from "./myWorkGrouping.js";
+import {
+  myWorkDebugDurationMs,
+  myWorkDebugEnabled,
+  myWorkDebugLog,
+  myWorkDebugTimestampMs,
+  publishMyWorkDebugSnapshot,
+  recordMyWorkDebugCause,
+  type MyWorkDebugCacheSummary,
+} from "./myWorkPerformanceDebug.js";
 
-export type MyWorkMatrixCellWithUser = MyWorkMatrixCell & { companyID: string; userID: string };
+export { MY_WORK_DEBUG_STORAGE_KEY, myWorkDebugDurationMs, myWorkDebugEnabled, myWorkDebugLog, myWorkDebugTimestampMs } from "./myWorkPerformanceDebug.js";
+
+export type MyWorkMatrixCellWithUser = MyWorkMatrixRow & { companyID: string; userID: string };
 
 export type MyWorkMatrixLoadFailure = {
   userID: string;
@@ -16,6 +27,20 @@ export type MyWorkMatrixLoadResult = {
 };
 
 export type MyWorkMatrixFetcher = (targetUserID: string) => Promise<MyWorkMatrixResponse>;
+
+export type MyWorkMatrixCacheState = MyWorkMatrixLoadResult & {
+  companyID: string;
+  targetUserIDs: string[];
+  loading: boolean;
+  stale: boolean;
+  hasValue: boolean;
+  fetchedAt: number;
+  promise?: Promise<MyWorkMatrixLoadResult>;
+};
+
+const MY_WORK_MATRIX_CACHE_TTL_MS = 30_000;
+const MY_WORK_MATRIX_CACHE_MAX_ENTRIES = 30;
+const myWorkMatrixCache = new Map<string, MyWorkMatrixCacheState>();
 
 export async function loadMyWorkMatrixCellsForUsers({
   companyID,
@@ -35,7 +60,7 @@ export async function loadMyWorkMatrixCellsForUsers({
       const payload = await fetchMatrix(targetUserID);
       return {
         ok: true as const,
-        cells: (payload.cells ?? []).map((cell) => ({
+        cells: (payload.rows ?? []).map((cell) => ({
           ...cell,
           companyID: payload.company_id?.trim() || cleanCompanyID,
           userID: payload.user_id?.trim() || targetUserID,
@@ -65,6 +90,176 @@ export function uniqueMyWorkTargetUserIDs(values: string[]): string[] {
   return uniqueNonEmptyStrings(values);
 }
 
+export function readMyWorkMatrixCache(cacheKey: string): MyWorkMatrixCacheState | null {
+  const entry = myWorkMatrixCache.get(cacheKey.trim());
+  return entry ? cloneMyWorkMatrixCacheState(entry) : null;
+}
+
+export function readMyWorkMatrixCacheSummary(cacheKey: string, hit = "unknown"): MyWorkDebugCacheSummary {
+  const cleanCacheKey = cacheKey.trim();
+  return summarizeMyWorkMatrixCache(cleanCacheKey, cleanCacheKey ? myWorkMatrixCache.get(cleanCacheKey) : undefined, hit);
+}
+
+export function markMyWorkMatrixCacheStale(cacheKey: string): void {
+  const cleanCacheKey = cacheKey.trim();
+  if (!cleanCacheKey) return;
+  const entry = myWorkMatrixCache.get(cleanCacheKey);
+  if (entry) {
+    const next = { ...entry, stale: true };
+    myWorkMatrixCache.set(cleanCacheKey, next);
+    recordMyWorkDebugCause("cache stale", { cacheKey: cleanCacheKey, targetUserCount: next.targetUserIDs.length });
+    publishMyWorkMatrixCacheSummary(cleanCacheKey, next, "stale");
+    myWorkDebugLog("cache.markStale.exact", { cacheKey: cleanCacheKey, hadValue: entry.hasValue, targetUserIDs: entry.targetUserIDs });
+  }
+}
+
+export function markMyWorkMatrixCachesStaleForCompany(companyID: string): void {
+  const cleanCompanyID = companyID.trim();
+  if (!cleanCompanyID) return;
+  let matched = 0;
+  for (const [cacheKey, entry] of myWorkMatrixCache.entries()) {
+    if (entry.companyID !== cleanCompanyID) continue;
+    matched += 1;
+    const next = { ...entry, stale: true };
+    myWorkMatrixCache.set(cacheKey, next);
+    publishMyWorkMatrixCacheSummary(cacheKey, next, "stale");
+  }
+  recordMyWorkDebugCause("cache stale", { companyID: cleanCompanyID, matched });
+  myWorkDebugLog("cache.markStale.company", { companyID: cleanCompanyID, matched });
+}
+
+export function markMyWorkMatrixCachesStaleForTargetUsers(targetUserIDs: string[]): void {
+  const targets = new Set(uniqueNonEmptyStrings(targetUserIDs));
+  if (targets.size === 0) return;
+  let matched = 0;
+  for (const [cacheKey, entry] of myWorkMatrixCache.entries()) {
+    if (!entryAffectsTargetUsers(entry, targets)) continue;
+    matched += 1;
+    const next = { ...entry, stale: true };
+    myWorkMatrixCache.set(cacheKey, next);
+    publishMyWorkMatrixCacheSummary(cacheKey, next, "stale");
+  }
+  recordMyWorkDebugCause("cache stale", { targetUserIDs: Array.from(targets), matched });
+  myWorkDebugLog("cache.markStale.targets", { targetUserIDs: Array.from(targets), matched });
+}
+
+export function loadMyWorkMatrixCacheEntry({
+  cacheKey,
+  companyID,
+  targetUserIDs,
+  fetchMatrix,
+  force = false,
+  now = Date.now(),
+}: {
+  cacheKey: string;
+  companyID: string;
+  targetUserIDs: string[];
+  fetchMatrix: MyWorkMatrixFetcher;
+  force?: boolean;
+  now?: number;
+}): Promise<MyWorkMatrixLoadResult> {
+  const cleanCacheKey = cacheKey.trim();
+  const cleanCompanyID = companyID.trim();
+  const cleanTargetUserIDs = uniqueNonEmptyStrings(targetUserIDs);
+  const current = cleanCacheKey ? myWorkMatrixCache.get(cleanCacheKey) : undefined;
+  const debugEnabled = myWorkDebugEnabled();
+  if (current?.promise) {
+    recordMyWorkDebugCause("in-flight request joined", { cacheKey: cleanCacheKey, targetUserCount: cleanTargetUserIDs.length });
+    publishMyWorkMatrixCacheSummary(cleanCacheKey, current, "in-flight request joined", cleanTargetUserIDs);
+    myWorkDebugLog("cache.load.joinInFlight", { cacheKey: cleanCacheKey, targetUserIDs: cleanTargetUserIDs, hasValue: current.hasValue });
+    return current.promise;
+  }
+  if (!force && current?.hasValue && !current.stale && now - current.fetchedAt < MY_WORK_MATRIX_CACHE_TTL_MS) {
+    recordMyWorkDebugCause("cache fresh hit", { cacheKey: cleanCacheKey, ageMs: Math.round(now - current.fetchedAt) });
+    publishMyWorkMatrixCacheSummary(cleanCacheKey, current, "fresh hit", cleanTargetUserIDs);
+    myWorkDebugLog("cache.load.freshHit", {
+      cacheKey: cleanCacheKey,
+      targetUserIDs: cleanTargetUserIDs,
+      ageMs: Math.round(now - current.fetchedAt),
+      cells: current.cells.length,
+      failures: current.failures.length,
+    });
+    return Promise.resolve({ cells: current.cells, failures: current.failures });
+  }
+
+  const startedAt = debugEnabled ? myWorkDebugTimestampMs() : 0;
+  const loadCause = current?.hasValue && current.stale ? "cache stale" : "cache miss";
+  recordMyWorkDebugCause(loadCause, { cacheKey: cleanCacheKey, targetUserCount: cleanTargetUserIDs.length, force });
+  myWorkDebugLog("cache.load.start", {
+    cacheKey: cleanCacheKey,
+    targetUserIDs: cleanTargetUserIDs,
+    targetUserCount: cleanTargetUserIDs.length,
+    hadValue: current?.hasValue ?? false,
+    stale: current?.stale ?? true,
+    force,
+  });
+  const promise = loadMyWorkMatrixCellsForUsers({
+    companyID,
+    targetUserIDs: cleanTargetUserIDs,
+    fetchMatrix,
+  }).then((result) => {
+    const durationMs = debugEnabled ? myWorkDebugDurationMs(startedAt) : 0;
+    if (cleanCacheKey) {
+      myWorkMatrixCache.set(cleanCacheKey, {
+        ...result,
+        companyID: cleanCompanyID,
+        targetUserIDs: cleanTargetUserIDs,
+        loading: false,
+        stale: false,
+        hasValue: true,
+        fetchedAt: Date.now(),
+      });
+      pruneMyWorkMatrixCache();
+      publishMyWorkMatrixCacheSummary(cleanCacheKey, myWorkMatrixCache.get(cleanCacheKey), "loaded", cleanTargetUserIDs);
+    }
+    if (debugEnabled) publishMyWorkDebugSnapshot({ timings: { matrixFetchCacheLoadMs: durationMs } });
+    myWorkDebugLog("cache.load.done", {
+      cacheKey: cleanCacheKey,
+      durationMs,
+      cells: result.cells.length,
+      failures: result.failures.length,
+      targetUserCount: cleanTargetUserIDs.length,
+    });
+    return result;
+  }).catch((error) => {
+    const durationMs = debugEnabled ? myWorkDebugDurationMs(startedAt) : 0;
+    if (cleanCacheKey) {
+      const latest = myWorkMatrixCache.get(cleanCacheKey);
+      if (latest) {
+        const next = {
+          ...latest,
+          loading: false,
+          stale: true,
+          promise: undefined,
+        };
+        myWorkMatrixCache.set(cleanCacheKey, next);
+        publishMyWorkMatrixCacheSummary(cleanCacheKey, next, "error", cleanTargetUserIDs);
+      }
+    }
+    myWorkDebugLog("cache.load.error", {
+      cacheKey: cleanCacheKey,
+      durationMs,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  });
+
+  if (cleanCacheKey) {
+    const fallback = current ?? { cells: [], failures: [], companyID: cleanCompanyID, targetUserIDs: cleanTargetUserIDs, fetchedAt: 0, stale: true, hasValue: false, loading: false };
+    const next = {
+      ...fallback,
+      companyID: cleanCompanyID,
+      targetUserIDs: cleanTargetUserIDs,
+      loading: true,
+      stale: force ? true : fallback.stale,
+      promise,
+    };
+    myWorkMatrixCache.set(cleanCacheKey, next);
+    publishMyWorkMatrixCacheSummary(cleanCacheKey, next, loadCause, cleanTargetUserIDs);
+  }
+  return promise;
+}
+
 export function myWorkMatrixCacheKey({
   companyID,
   selectedScope,
@@ -79,7 +274,7 @@ export function myWorkMatrixCacheKey({
   const subjectType = selectedScope.subject_type.trim() || "subject";
   const subjectID = selectedScope.subject_id.trim() || "subject";
   const targets = uniqueNonEmptyStrings(targetUserIDs).join(",");
-  return `my_work:${cleanCompanyID}:${level}:${subjectType}:${subjectID}:targets:${targets}`;
+  return "my_work:" + cleanCompanyID + ":" + level + ":" + subjectType + ":" + subjectID + ":targets:" + targets;
 }
 
 export function myWorkProjectionDeltaAffectsTargetUsers(
@@ -123,6 +318,53 @@ function uniqueNonEmptyStrings(values: string[]): string[] {
     out.push(clean);
   }
   return out;
+}
+
+function cloneMyWorkMatrixCacheState(entry: MyWorkMatrixCacheState): MyWorkMatrixCacheState {
+  return {
+    ...entry,
+    cells: entry.cells,
+    failures: entry.failures,
+  };
+}
+
+function publishMyWorkMatrixCacheSummary(cacheKey: string, entry: MyWorkMatrixCacheState | undefined, hit: string, targetUserIDs: string[] = []): void {
+  if (!myWorkDebugEnabled()) return;
+  publishMyWorkDebugSnapshot({ cache: summarizeMyWorkMatrixCache(cacheKey, entry, hit, targetUserIDs) });
+}
+
+function summarizeMyWorkMatrixCache(cacheKey: string, entry: MyWorkMatrixCacheState | undefined, hit: string, targetUserIDs: string[] = []): MyWorkDebugCacheSummary {
+  const cleanTargets = uniqueNonEmptyStrings(targetUserIDs);
+  const entryTargets = entry?.targetUserIDs ?? cleanTargets;
+  return {
+    cacheKey,
+    hit,
+    loading: entry?.loading ?? false,
+    stale: entry?.stale ?? true,
+    hasValue: entry?.hasValue ?? false,
+    ageMs: entry?.fetchedAt ? Math.max(0, Math.round(Date.now() - entry.fetchedAt)) : null,
+    cellCount: entry?.cells.length ?? 0,
+    failureCount: entry?.failures.length ?? 0,
+    targetUserCount: entryTargets.length,
+    targetUserIDs: entryTargets,
+  };
+}
+
+function entryAffectsTargetUsers(entry: MyWorkMatrixCacheState, targetUsers: Set<string>): boolean {
+  if (entry.targetUserIDs.some((userID) => targetUsers.has(userID.trim()))) return true;
+  if (entry.cells.some((cell) => targetUsers.has(cell.userID.trim()))) return true;
+  return entry.failures.some((failure) => targetUsers.has(failure.userID.trim()));
+}
+
+function pruneMyWorkMatrixCache(): void {
+  if (myWorkMatrixCache.size <= MY_WORK_MATRIX_CACHE_MAX_ENTRIES) return;
+  const entries = Array.from(myWorkMatrixCache.entries())
+    .sort((left, right) => left[1].fetchedAt - right[1].fetchedAt);
+  for (const [cacheKey, entry] of entries) {
+    if (myWorkMatrixCache.size <= MY_WORK_MATRIX_CACHE_MAX_ENTRIES) return;
+    if (entry.loading) continue;
+    myWorkMatrixCache.delete(cacheKey);
+  }
 }
 
 function cleanString(value: unknown): string {

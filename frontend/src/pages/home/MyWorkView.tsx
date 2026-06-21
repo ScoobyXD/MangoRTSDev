@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../../modules/communications/communicationsApi";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
@@ -6,7 +6,7 @@ import { GVICMatrixRealtimeScope } from "../../modules/gvic/gvicMatrixProjection
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
-import { listMyWorkMatrixRows, type MyWorkResourceTree } from "../../modules/work-items/workItemReadApi";
+import { listMyWorkMatrixRows } from "../../modules/work-items/workItemReadApi";
 import { cleanIDList, logicGateTitle } from "./homeUtils";
 import {
   homeColorWithAlpha,
@@ -21,13 +21,26 @@ import {
   sharedInboxContextMenuButtonStyle,
 } from "./homeStyles";
 import {
-  loadMyWorkMatrixCellsForUsers,
+  loadMyWorkMatrixCacheEntry,
+  markMyWorkMatrixCacheStale,
+  markMyWorkMatrixCachesStaleForTargetUsers,
   myWorkMatrixCacheKey,
   myWorkProjectionDeltaAffectsTargetUsers,
+  readMyWorkMatrixCache,
+  readMyWorkMatrixCacheSummary,
   uniqueMyWorkTargetUserIDs,
   type MyWorkMatrixCellWithUser,
   type MyWorkMatrixLoadFailure,
 } from "./myWorkMatrixLoader";
+import {
+  MY_WORK_DEBUG_STORAGE_KEY,
+  myWorkDebugDurationMs,
+  myWorkDebugEnabled,
+  myWorkDebugLog,
+  myWorkDebugTimestampMs,
+  publishMyWorkDebugSnapshot,
+  recordMyWorkDebugCause,
+} from "./myWorkPerformanceDebug";
 import {
   DEFAULT_MY_WORK_GROUPINGS,
   MY_WORK_GROUPING_FIELDS,
@@ -67,8 +80,6 @@ type MyWorkViewProps = {
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
   onCreateNodeInCell?: (input: MyWorkCellCreateInput) => void;
-  onCreateLogicGateInCell?: (input: MyWorkCellCreateInput) => void;
-  onCreateProjectInCell?: (input: MyWorkCellCreateInput) => void;
   onDropNodes?: (input: MyWorkNodeDropInput) => void;
   onDropNodesInCell?: (input: MyWorkCellNodeDropInput) => void;
   onDropLogicGates?: (input: MyWorkCellLogicGateDropInput) => void;
@@ -104,6 +115,47 @@ const MY_WORK_PRIORITY_COLUMN_WIDTH = 104;
 const MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH = 282;
 const MY_WORK_ROLE_COLUMN_MIN_WIDTH = 190;
 const MY_WORK_ROLE_COLUMN_MAX_WIDTH = 620;
+const MyWorkPerformanceDebugPanel = React.lazy(() => import("./MyWorkPerformanceDebugPanel"));
+type MyWorkTreeStats = {
+  topLevel: number;
+  total: number;
+  maxDepth: number;
+  projects: number;
+  logicGates: number;
+  nodes: number;
+};
+type MyWorkNestedGroupStats = {
+  topLevel: number;
+  total: number;
+  maxDepth: number;
+};
+type MyWorkMatrixCellRenderMetric = {
+  priority: MyWorkMatrixPriority;
+  role: LogicGateGVICRole;
+  rows: number;
+  totalRows: number;
+  groups: number;
+  filterMs: number;
+  sortMs: number;
+  groupMs: number;
+  totalMs: number;
+};
+type MyWorkMatrixRenderMetrics = {
+  renderID: number;
+  startedAt: number;
+  rows: number;
+  totalRows: number;
+  expandedGroupCount: number;
+  groupings: string[];
+  filterMs: number;
+  sortMs: number;
+  groupMs: number;
+  nonEmptyCells: number;
+  cellRows: number;
+  cellTotalRows: number;
+  cells: MyWorkMatrixCellRenderMetric[];
+};
+let myWorkMatrixDebugRenderSequence = 0;
 
 export function MyWorkView({
   apiBase,
@@ -122,8 +174,6 @@ export function MyWorkView({
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
   onCreateNodeInCell,
-  onCreateLogicGateInCell,
-  onCreateProjectInCell,
   onDropNodes,
   onDropNodesInCell,
   onDropLogicGates,
@@ -183,11 +233,14 @@ export function MyWorkView({
   const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const [matrixCells, setMatrixCells] = useState<MyWorkMatrixCellWithUser[]>([]);
+  const [matrixStateCacheKey, setMatrixStateCacheKey] = useState("");
   const [matrixLoading, setMatrixLoading] = useState(false);
   const [matrixError, setMatrixError] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const [matrixReloadToken, setMatrixReloadToken] = useState(0);
   const [roleColumnWidths, setRoleColumnWidths] = useState<MyWorkRoleColumnWidths>(() => readMyWorkRoleColumnWidths(companyID));
+  const matrixRefreshTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const lastLiveRefreshTokenRef = useRef(liveRefreshToken);
 
   useEffect(() => {
     setSelectedScope(defaultMyWorkSelectedScope(currentUserID));
@@ -233,55 +286,152 @@ export function MyWorkView({
     selectedScope,
     targetUserIDs: matrixTargetUserIDs,
   }), [companyID, matrixTargetUserIDs, selectedScope]);
+  const cachedMatrixState = readMyWorkMatrixCache(matrixCacheKey);
+  const matrixStateMatchesCacheKey = matrixStateCacheKey === matrixCacheKey;
+  const displayedMatrixCells = matrixStateMatchesCacheKey
+    ? matrixCells
+    : cachedMatrixState?.hasValue
+      ? cachedMatrixState.cells
+      : [];
+  const displayedMatrixError = matrixStateMatchesCacheKey
+    ? matrixError
+    : cachedMatrixState?.hasValue
+      ? myWorkMatrixFailureMessage(cachedMatrixState.failures, matrixTargetUserIDs, userByID)
+      : "";
+  const displayedMatrixLoading = matrixStateMatchesCacheKey
+    ? matrixLoading
+    : Boolean(cachedMatrixState?.loading || (!cachedMatrixState?.hasValue && apiBase && companyID.trim() && matrixTargetUserIDs.length > 0));
+
+  const requestMatrixRefresh = useCallback((targetUserIDs = matrixTargetUserIDs, reason = "manual") => {
+    const affectedTargetUserIDs = uniqueMyWorkTargetUserIDs(targetUserIDs);
+    if (affectedTargetUserIDs.length > 0) markMyWorkMatrixCachesStaleForTargetUsers(affectedTargetUserIDs);
+    else markMyWorkMatrixCacheStale(matrixCacheKey);
+    myWorkDebugLog("view.refresh.request", {
+      reason,
+      cacheKey: matrixCacheKey,
+      targetUserIDs: affectedTargetUserIDs,
+      targetUserCount: affectedTargetUserIDs.length,
+    });
+    recordMyWorkDebugCause(reason, { cacheKey: matrixCacheKey, targetUserCount: affectedTargetUserIDs.length });
+    if (matrixRefreshTimerRef.current !== null) window.clearTimeout(matrixRefreshTimerRef.current);
+    matrixRefreshTimerRef.current = window.setTimeout(() => {
+      matrixRefreshTimerRef.current = null;
+      myWorkDebugLog("view.refresh.fire", { reason, cacheKey: matrixCacheKey });
+      setMatrixReloadToken((value) => value + 1);
+    }, 80);
+  }, [matrixCacheKey, matrixTargetUserIDs]);
+
+  useEffect(() => () => {
+    if (matrixRefreshTimerRef.current !== null) {
+      window.clearTimeout(matrixRefreshTimerRef.current);
+      matrixRefreshTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!apiBase || !companyID || matrixTargetUserIDs.length === 0) {
       setMatrixCells([]);
+      setMatrixStateCacheKey("");
       setMatrixError("");
       setMatrixLoading(false);
       return;
     }
     let cancelled = false;
-    setMatrixLoading(true);
-    setMatrixError("");
-    void loadMyWorkMatrixCellsForUsers({
+    const cached = readMyWorkMatrixCache(matrixCacheKey);
+    const debugEnabled = myWorkDebugEnabled();
+    const loadStartedAt = debugEnabled ? myWorkDebugTimestampMs() : 0;
+    if (debugEnabled) {
+      publishMyWorkDebugSnapshot({ cache: readMyWorkMatrixCacheSummary(matrixCacheKey) });
+      myWorkDebugLog("view.loadEffect.start", {
+        cacheKey: matrixCacheKey,
+        targetUserIDs: matrixTargetUserIDs,
+        targetUserCount: matrixTargetUserIDs.length,
+        cached: cached ? {
+          hasValue: cached.hasValue,
+          stale: cached.stale,
+          loading: cached.loading,
+          ageMs: cached.fetchedAt ? Math.round(Date.now() - cached.fetchedAt) : null,
+          cells: cached.cells.length,
+          failures: cached.failures.length,
+        } : null,
+      });
+    }
+    if (cached?.hasValue) {
+      setMatrixCells(cached.cells);
+      setMatrixStateCacheKey(matrixCacheKey);
+      setMatrixError(myWorkMatrixFailureMessage(cached.failures, matrixTargetUserIDs, userByID));
+      setMatrixLoading(cached.loading || cached.stale);
+    } else {
+      setMatrixCells([]);
+      setMatrixStateCacheKey(matrixCacheKey);
+      setMatrixError("");
+      setMatrixLoading(true);
+    }
+    void loadMyWorkMatrixCacheEntry({
+      cacheKey: matrixCacheKey,
       companyID,
       targetUserIDs: matrixTargetUserIDs,
       fetchMatrix: (targetUserID) => listMyWorkMatrixRows({ apiBase, companyID, targetUserID }),
     }).then(({ cells, failures }) => {
       if (cancelled) return;
       setMatrixCells(cells);
+      setMatrixStateCacheKey(matrixCacheKey);
       setMatrixError(myWorkMatrixFailureMessage(failures, matrixTargetUserIDs, userByID));
+      if (debugEnabled) {
+        const durationMs = myWorkDebugDurationMs(loadStartedAt);
+        const treeStats = myWorkMatrixCellTreeStats(cells);
+        publishMyWorkDebugSnapshot({
+          cache: readMyWorkMatrixCacheSummary(matrixCacheKey, "loaded"),
+          matrixPayloadStats: treeStats,
+          timings: { matrixFetchCacheLoadMs: durationMs },
+        });
+        myWorkDebugLog("view.loadEffect.done", {
+          cacheKey: matrixCacheKey,
+          durationMs,
+          cells: cells.length,
+          failures: failures.length,
+          treeStats,
+        });
+      }
+    }).catch((error) => {
+      if (cancelled) return;
+      setMatrixStateCacheKey(matrixCacheKey);
+      setMatrixError(savedViewErrorMessage(error, "Failed to load My Work"));
+      if (debugEnabled) {
+        myWorkDebugLog("view.loadEffect.error", {
+          cacheKey: matrixCacheKey,
+          durationMs: myWorkDebugDurationMs(loadStartedAt),
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     }).finally(() => {
       if (!cancelled) setMatrixLoading(false);
     });
     return () => { cancelled = true; };
-  }, [apiBase, companyID, liveRefreshToken, matrixCacheKey, matrixReloadToken, matrixTargetUserIDs, userByID]);
+  }, [apiBase, companyID, matrixCacheKey, matrixReloadToken, matrixTargetUserIDs, userByID]);
+
+  useEffect(() => {
+    if (liveRefreshToken === lastLiveRefreshTokenRef.current) return;
+    lastLiveRefreshTokenRef.current = liveRefreshToken;
+    if (!apiBase || !companyID.trim() || matrixTargetUserIDs.length === 0) return;
+    requestMatrixRefresh(matrixTargetUserIDs, "liveRefreshToken");
+  }, [apiBase, companyID, liveRefreshToken, matrixTargetUserIDs, requestMatrixRefresh]);
 
   useEffect(() => {
     if (!apiBase || !companyID || matrixTargetUserIDs.length === 0) return undefined;
-    let reloadTimer: ReturnType<typeof window.setTimeout> | undefined;
-    const requestMatrixReload = () => {
-      if (reloadTimer !== undefined) window.clearTimeout(reloadTimer);
-      reloadTimer = window.setTimeout(() => {
-        reloadTimer = undefined;
-        setMatrixReloadToken((value) => value + 1);
-      }, 50);
-    };
     const unsubscribes = matrixTargetUserIDs.map((targetUserID) => subscribeRealtimeScope(apiBase, companyID, GVICMatrixRealtimeScope(targetUserID), {
       onDelta: (message) => {
-        if (myWorkProjectionDeltaAffectsTargetUsers(message, matrixTargetUserIDs)) requestMatrixReload();
+        if (myWorkProjectionDeltaAffectsTargetUsers(message, matrixTargetUserIDs)) requestMatrixRefresh(matrixTargetUserIDs, "realtime.delta");
       },
-      onRejected: requestMatrixReload,
-      onRefetch: requestMatrixReload,
-      onPermissionRevoked: requestMatrixReload,
-      onError: requestMatrixReload,
+      onRejected: () => requestMatrixRefresh(matrixTargetUserIDs, "realtime.rejected"),
+      onRefetch: () => requestMatrixRefresh(matrixTargetUserIDs, "realtime.refetch"),
+      onPermissionRevoked: () => requestMatrixRefresh(matrixTargetUserIDs, "realtime.permissionRevoked"),
+      onError: () => requestMatrixRefresh(matrixTargetUserIDs, "realtime.error"),
     }));
     return () => {
-      if (reloadTimer !== undefined) window.clearTimeout(reloadTimer);
       for (const unsubscribe of unsubscribes) unsubscribe();
     };
-  }, [apiBase, companyID, matrixCacheKey, matrixTargetUserIDs]);
+  }, [apiBase, companyID, matrixCacheKey, matrixTargetUserIDs, requestMatrixRefresh]);
 
   const persistSavedSetting = useCallback((setting: MyWorkSavedGroupingSetting) => {
     if (!apiBase || !companyID.trim()) return;
@@ -438,24 +588,97 @@ export function MyWorkView({
     ownerDocument.addEventListener("pointercancel", stopResize);
   }, [roleColumnWidths, updateRoleColumnWidth]);
 
-  const rows = useMemo(() => buildMyWorkRowsFromMatrix({
-    matrixCells,
-    userByID,
-    groupByID,
-    groupIDsByUserID,
-  }), [groupByID, groupIDsByUserID, matrixCells, userByID]);
+  const rows = useMemo(() => {
+    const debugEnabled = myWorkDebugEnabled();
+    const startedAt = debugEnabled ? myWorkDebugTimestampMs() : 0;
+    const result = buildMyWorkRowsFromMatrix({
+      matrixCells: displayedMatrixCells,
+      userByID,
+      groupByID,
+      groupIDsByUserID,
+    });
+    if (debugEnabled) {
+      const durationMs = myWorkDebugDurationMs(startedAt);
+      const matrixTreeStats = myWorkMatrixCellTreeStats(displayedMatrixCells);
+      const rowStats = myWorkResourceRowStats(result);
+      publishMyWorkDebugSnapshot({
+        matrixPayloadStats: matrixTreeStats,
+        rowStats,
+        timings: { rowsFromMatrixMs: durationMs },
+      });
+      myWorkDebugLog("client.rowsFromMatrix", {
+        durationMs,
+        matrixCells: displayedMatrixCells.length,
+        matrixTreeStats,
+        rowStats,
+      });
+    }
+    return result;
+  }, [displayedMatrixCells, groupByID, groupIDsByUserID, userByID]);
 
   const visibleRows = rows;
-  const nestedGroups = useMemo(() => buildNestedGroups(visibleRows, selectedSetting.groupings), [selectedSetting.groupings, visibleRows]);
-  const groupingSignature = useMemo(() => JSON.stringify({
-    setting: selectedSetting.setting_id,
-    scope: selectedScope,
-    groupings: selectedSetting.groupings,
-    rows: visibleRows.map((row) => row.rowKey ?? `${row.kind}:${row.id}`).sort(),
-  }), [selectedScope, selectedSetting.groupings, selectedSetting.setting_id, visibleRows]);
+  const nestedGroups = useMemo(() => {
+    const debugEnabled = myWorkDebugEnabled();
+    const startedAt = debugEnabled ? myWorkDebugTimestampMs() : 0;
+    const result = buildNestedGroups(visibleRows, selectedSetting.groupings);
+    if (debugEnabled) {
+      const durationMs = myWorkDebugDurationMs(startedAt);
+      const rowStats = myWorkResourceRowStats(visibleRows);
+      const groupStats = myWorkNestedGroupStats(result);
+      publishMyWorkDebugSnapshot({
+        rowStats,
+        topLevelGroupStats: groupStats,
+        timings: { topLevelGroupingMs: durationMs },
+      });
+      myWorkDebugLog("client.topLevelGroups", {
+        durationMs,
+        rowStats,
+        groupStats,
+        groupings: selectedSetting.groupings.map((grouping) => `${grouping.field}:${grouping.direction}`),
+      });
+    }
+    return result;
+  }, [selectedSetting.groupings, visibleRows]);
+  const groupingSignature = useMemo(() => {
+    const debugEnabled = myWorkDebugEnabled();
+    const startedAt = debugEnabled ? myWorkDebugTimestampMs() : 0;
+    const result = JSON.stringify({
+      setting: selectedSetting.setting_id,
+      scope: selectedScope,
+      groupings: selectedSetting.groupings,
+      rows: visibleRows.map((row) => row.rowKey ?? `${row.kind}:${row.id}`).sort(),
+    });
+    if (debugEnabled) {
+      const durationMs = myWorkDebugDurationMs(startedAt);
+      const rowStats = myWorkResourceRowStats(visibleRows);
+      publishMyWorkDebugSnapshot({ rowStats, timings: { groupingSignatureMs: durationMs } });
+      myWorkDebugLog("client.groupingSignature", {
+        durationMs,
+        rowStats,
+        signatureLength: result.length,
+      });
+    }
+    return result;
+  }, [selectedScope, selectedSetting.groupings, selectedSetting.setting_id, visibleRows]);
 
   useEffect(() => {
-    setExpandedGroupIDs(computeAllExpandedGroupIDs(nestedGroups));
+    const debugEnabled = myWorkDebugEnabled();
+    const startedAt = debugEnabled ? myWorkDebugTimestampMs() : 0;
+    const next = computeAllExpandedGroupIDs(nestedGroups);
+    if (debugEnabled) {
+      const durationMs = myWorkDebugDurationMs(startedAt);
+      const groupStats = myWorkNestedGroupStats(nestedGroups);
+      publishMyWorkDebugSnapshot({
+        topLevelGroupStats: groupStats,
+        timings: { defaultExpansionMs: durationMs },
+      });
+      myWorkDebugLog("client.defaultExpandedGroups", {
+        durationMs,
+        expandedGroupCount: next.size,
+        groupStats,
+      });
+    }
+    setExpandedGroupIDs(next);
   }, [groupingSignature, nestedGroups]);
 
   const scopeRows = useMemo(() => buildScopePickerRows({
@@ -471,6 +694,36 @@ export function MyWorkView({
   const scopeLabel = selectedScopeLabel(selectedScope, userByID, groupByID);
   const activeFieldSet = new Set(selectedSetting.groupings.map((grouping) => grouping.field));
   const addableFields = MY_WORK_GROUPING_FIELDS.filter((field) => !activeFieldSet.has(field.value));
+  useEffect(() => {
+    if (!myWorkDebugEnabled()) return;
+    const displayedRowStats = myWorkResourceRowStats(visibleRows);
+    publishMyWorkDebugSnapshot({
+      activeHomeView: "my-work",
+      companyID,
+      currentUserID,
+      selectedScope,
+      selectedScopeLabel: scopeLabel,
+      targetUserIDs: matrixTargetUserIDs,
+      targetUserCount: matrixTargetUserIDs.length,
+      cache: readMyWorkMatrixCacheSummary(matrixCacheKey),
+      rowStats: displayedRowStats,
+    });
+    myWorkDebugLog("view.state", {
+      debugFlag: MY_WORK_DEBUG_STORAGE_KEY,
+      scope: selectedScope,
+      scopeLabel,
+      cacheKey: matrixCacheKey,
+      targetUserIDs: matrixTargetUserIDs,
+      targetUserCount: matrixTargetUserIDs.length,
+      matrixStateCacheKey,
+      displayedRows: visibleRows.length,
+      displayedRowStats,
+      expandedGroupCount: expandedGroupIDs.size,
+      loading,
+      matrixLoading: displayedMatrixLoading,
+      matrixError: displayedMatrixError,
+    });
+  }, [companyID, currentUserID, displayedMatrixError, displayedMatrixLoading, expandedGroupIDs.size, loading, matrixCacheKey, matrixStateCacheKey, matrixTargetUserIDs, scopeLabel, selectedScope, visibleRows]);
 
   return (
     <section style={myWorkShellStyle}>
@@ -479,8 +732,8 @@ export function MyWorkView({
           <h2 style={myWorkTitleStyle}>My Work</h2>
           <div style={myWorkMetaStyle}>
             {scopeLabel}
-            {loading || matrixLoading ? " - Loading" : ""}
-            {matrixError ? ` - ${matrixError}` : ""}
+            {loading || displayedMatrixLoading ? " - Loading" : ""}
+            {displayedMatrixError ? ` - ${displayedMatrixError}` : ""}
             {settingsError ? ` - ${settingsError}` : ""}
           </div>
         </div>
@@ -507,8 +760,13 @@ export function MyWorkView({
           onAddGrouping={addGrouping}
         />
       </div>
+      {myWorkDebugEnabled() ? (
+        <React.Suspense fallback={null}>
+          <MyWorkPerformanceDebugPanel />
+        </React.Suspense>
+      ) : null}
       <div className="mango-home-scroll" style={myWorkMatrixScrollStyle}>
-        {visibleRows.length === 0 && !loading && !matrixLoading ? (
+        {visibleRows.length === 0 && !loading && !displayedMatrixLoading ? (
           <div style={myWorkEmptyStyle}>No active work for this scope</div>
         ) : (
           <MyWorkMatrix
@@ -518,8 +776,15 @@ export function MyWorkView({
             onToggleGroup={(groupID) => {
               setExpandedGroupIDs((current) => {
                 const next = new Set(current);
+                const wasExpanded = next.has(groupID);
                 if (next.has(groupID)) next.delete(groupID);
                 else next.add(groupID);
+                myWorkDebugLog("view.groupToggle", {
+                  groupID,
+                  wasExpanded,
+                  expandedGroupCountBefore: current.size,
+                  expandedGroupCountAfter: next.size,
+                });
                 return next;
               });
             }}
@@ -529,8 +794,6 @@ export function MyWorkView({
             onOpenNodeBulkMenu={onOpenNodeBulkMenu}
             onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
             onCreateNodeInCell={onCreateNodeInCell}
-            onCreateLogicGateInCell={onCreateLogicGateInCell}
-            onCreateProjectInCell={onCreateProjectInCell}
             onDropNodes={onDropNodes}
             onDropNodesInCell={onDropNodesInCell}
             onDropLogicGates={onDropLogicGates}
@@ -870,13 +1133,14 @@ function MyWorkTreeRow({
   logicGateByID: Map<string, LogicGateRecord>;
 }) {
   const children = row.children ?? [];
+  const displayDepth = Number.isFinite(Number(row.depth)) ? Number(row.depth) : depth;
   const status = row.status?.trim() || "No status";
   const actionPriority = priorityBucket(row.priority);
   const rowLogicGateID = row.kind === "logic_gate" ? row.id.trim() : row.logicGateIDs[0]?.trim() ?? "";
   return (
     <div style={logicGateSectionBlockStyle}>
       <div
-        style={workRowStyle(depth, role)}
+        style={workRowStyle(displayDepth, role)}
         draggable={row.kind === "node" || row.kind === "logic_gate" || row.kind === "project"}
         onContextMenu={(event) => {
           if (row.kind === "node" && onOpenNodeBulkMenu) onOpenNodeBulkMenu(row.id, event);
@@ -977,6 +1241,50 @@ function collectMyWorkGroupRows(group: MyWorkNestedGroup): MyWorkResourceRow[] {
   return rows;
 }
 
+function myWorkMatrixCellTreeStats(cells: MyWorkMatrixCellWithUser[]): MyWorkTreeStats {
+  const stats = emptyMyWorkTreeStats(cells.length);
+  for (const row of cells) {
+    const depth = Number.isFinite(Number(row.depth)) ? Number(row.depth) + 1 : 1;
+    stats.maxDepth = Math.max(stats.maxDepth, depth);
+    if (row.resource_type === "project") stats.projects += 1;
+    else if (row.resource_type === "logic_gate") stats.logicGates += 1;
+    else if (row.resource_type === "node") stats.nodes += 1;
+    stats.total += 1;
+  }
+  return stats;
+}
+function myWorkResourceRowStats(rows: MyWorkResourceRow[]): MyWorkTreeStats {
+  const stats = emptyMyWorkTreeStats(rows.length);
+  for (const row of rows) addMyWorkResourceRowStats(stats, row, 1);
+  return stats;
+}
+
+function myWorkNestedGroupStats(groups: MyWorkNestedGroup[]): MyWorkNestedGroupStats {
+  const stats: MyWorkNestedGroupStats = { topLevel: groups.length, total: 0, maxDepth: 0 };
+  const visit = (group: MyWorkNestedGroup, depth: number) => {
+    stats.total += 1;
+    stats.maxDepth = Math.max(stats.maxDepth, depth);
+    for (const child of group.groups) visit(child, depth + 1);
+  };
+  for (const group of groups) visit(group, 1);
+  return stats;
+}
+
+function emptyMyWorkTreeStats(topLevel: number): MyWorkTreeStats {
+  return { topLevel, total: 0, maxDepth: 0, projects: 0, logicGates: 0, nodes: 0 };
+}
+
+
+
+function addMyWorkResourceRowStats(stats: MyWorkTreeStats, row: MyWorkResourceRow, depth: number): void {
+  stats.total += 1;
+  stats.maxDepth = Math.max(stats.maxDepth, depth);
+  if (row.kind === "project") stats.projects += 1;
+  else if (row.kind === "logic_gate") stats.logicGates += 1;
+  else if (row.kind === "node") stats.nodes += 1;
+  for (const child of row.children ?? []) addMyWorkResourceRowStats(stats, child, depth + 1);
+}
+
 function openMyWorkRowResource(
   row: MyWorkResourceRow,
   nodeByID: Map<string, NodeRecord>,
@@ -1000,11 +1308,6 @@ function openMyWorkRowResource(
   onOpenLogicGate(logicGateID, row.title?.trim() || logicGateTitle(logicGateByID.get(logicGateID)));
 }
 
-function myWorkKindLabel(kind: MyWorkResourceRow["kind"]): string {
-  if (kind === "project") return "Project";
-  if (kind === "logic_gate") return "Logic Gate";
-  return "Node";
-}
 
 function MyWorkMatrix({
   rows,
@@ -1017,8 +1320,6 @@ function MyWorkMatrix({
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
   onCreateNodeInCell,
-  onCreateLogicGateInCell,
-  onCreateProjectInCell,
   onDropNodes,
   onDropNodesInCell,
   onDropLogicGates,
@@ -1038,8 +1339,6 @@ function MyWorkMatrix({
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
   onCreateNodeInCell?: (input: MyWorkCellCreateInput) => void;
-  onCreateLogicGateInCell?: (input: MyWorkCellCreateInput) => void;
-  onCreateProjectInCell?: (input: MyWorkCellCreateInput) => void;
   onDropNodes?: (input: MyWorkNodeDropInput) => void;
   onDropNodesInCell?: (input: MyWorkCellNodeDropInput) => void;
   onDropLogicGates?: (input: MyWorkCellLogicGateDropInput) => void;
@@ -1050,7 +1349,85 @@ function MyWorkMatrix({
   onStartRoleColumnResize: (role: LogicGateGVICRole, event: React.PointerEvent<HTMLButtonElement>) => void;
 }) {
   const [createMenu, setCreateMenu] = useState<{ x: number; y: number; input: MyWorkCellCreateInput } | null>(null);
-  const hasCreateCellActions = Boolean(onCreateNodeInCell || onCreateLogicGateInCell || onCreateProjectInCell);
+  const hasCreateCellActions = Boolean(onCreateNodeInCell);
+  const renderMetricsRef = useRef<MyWorkMatrixRenderMetrics | null>(null);
+  const debugEnabled = myWorkDebugEnabled();
+  const renderMetrics: MyWorkMatrixRenderMetrics | null = debugEnabled
+    ? {
+      renderID: ++myWorkMatrixDebugRenderSequence,
+      startedAt: myWorkDebugTimestampMs(),
+      rows: rows.length,
+      totalRows: myWorkResourceRowStats(rows).total,
+      expandedGroupCount: expandedGroupIDs.size,
+      groupings: groupings.map((grouping) => `${grouping.field}:${grouping.direction}`),
+      filterMs: 0,
+      sortMs: 0,
+      groupMs: 0,
+      nonEmptyCells: 0,
+      cellRows: 0,
+      cellTotalRows: 0,
+      cells: [],
+    }
+    : null;
+  renderMetricsRef.current = renderMetrics;
+  useEffect(() => {
+    const metrics = renderMetricsRef.current;
+    if (!metrics) return;
+    const slowestCells = [...metrics.cells]
+      .sort((left, right) => right.totalMs - left.totalMs)
+      .slice(0, 8);
+    const commitDurationMs = myWorkDebugDurationMs(metrics.startedAt);
+    const filterMs = Math.round(metrics.filterMs * 10) / 10;
+    const sortMs = Math.round(metrics.sortMs * 10) / 10;
+    const groupMs = Math.round(metrics.groupMs * 10) / 10;
+    publishMyWorkDebugSnapshot({
+      timings: {
+        matrixRenderCommitMs: commitDurationMs,
+        perCellFilterMs: filterMs,
+        perCellSortMs: sortMs,
+        perCellGroupingMs: groupMs,
+      },
+      matrixRender: {
+        renderID: metrics.renderID,
+        rows: metrics.rows,
+        totalRows: metrics.totalRows,
+        expandedGroupCount: metrics.expandedGroupCount,
+        groupings: metrics.groupings,
+        nonEmptyCells: metrics.nonEmptyCells,
+        cellRows: metrics.cellRows,
+        cellTotalRows: metrics.cellTotalRows,
+        slowestCells,
+      },
+    });
+    myWorkDebugLog("matrix.render", {
+      renderID: metrics.renderID,
+      commitDurationMs,
+      rows: metrics.rows,
+      totalRows: metrics.totalRows,
+      expandedGroupCount: metrics.expandedGroupCount,
+      groupings: metrics.groupings,
+      filterMs,
+      sortMs,
+      groupMs,
+      nonEmptyCells: metrics.nonEmptyCells,
+      cellRows: metrics.cellRows,
+      cellTotalRows: metrics.cellTotalRows,
+      slowestCells,
+    });
+  });
+  const rowsByCell = useMemo(() => {
+    const out = new Map<string, MyWorkResourceRow[]>();
+    for (const row of rows) {
+      const role = row.primaryGVICRole;
+      if (!role) continue;
+      const key = myWorkCellBucketKey(role, priorityBucket(row.priority));
+      const list = out.get(key) ?? [];
+      list.push(row);
+      out.set(key, list);
+    }
+    for (const [key, list] of out.entries()) out.set(key, sortMyWorkRows(list));
+    return out;
+  }, [rows]);
 
   return (
     <>
@@ -1073,8 +1450,37 @@ function MyWorkMatrix({
         <React.Fragment key={priority}>
           <div style={myWorkMatrixPriorityHeaderStyle(priority)}>{priorityLabel(priority)}</div>
           {MY_WORK_MATRIX_ROLES.map((role) => {
-            const cellRows = sortMyWorkRows(rows.filter((row) => row.primaryGVICRole === role && priorityBucket(row.priority) === priority));
+            const filterStartedAt = renderMetrics ? myWorkDebugTimestampMs() : 0;
+            const filteredRows = rowsByCell.get(myWorkCellBucketKey(role, priority)) ?? [];
+            const filterMs = renderMetrics ? myWorkDebugDurationMs(filterStartedAt) : 0;
+            const sortStartedAt = renderMetrics ? myWorkDebugTimestampMs() : 0;
+            const cellRows = filteredRows;
+            const sortMs = renderMetrics ? myWorkDebugDurationMs(sortStartedAt) : 0;
+            const groupStartedAt = renderMetrics ? myWorkDebugTimestampMs() : 0;
             const groups = buildNestedGroups(cellRows, groupings);
+            const groupMs = renderMetrics ? myWorkDebugDurationMs(groupStartedAt) : 0;
+            if (renderMetrics) {
+              const totalMs = Math.round((filterMs + sortMs + groupMs) * 10) / 10;
+              const rowStats = myWorkResourceRowStats(cellRows);
+              const groupStats = myWorkNestedGroupStats(groups);
+              renderMetrics.filterMs += filterMs;
+              renderMetrics.sortMs += sortMs;
+              renderMetrics.groupMs += groupMs;
+              renderMetrics.cellRows += cellRows.length;
+              renderMetrics.cellTotalRows += rowStats.total;
+              if (cellRows.length > 0) renderMetrics.nonEmptyCells += 1;
+              renderMetrics.cells.push({
+                priority,
+                role,
+                rows: cellRows.length,
+                totalRows: rowStats.total,
+                groups: groupStats.total,
+                filterMs,
+                sortMs,
+                groupMs,
+                totalMs,
+              });
+            }
             const createInput = { priority, creatorGVICRole: role };
             return (
               <div
@@ -1146,14 +1552,7 @@ function MyWorkMatrix({
         <FrameRightClickMenu x={createMenu.x} y={createMenu.y} onClose={() => setCreateMenu(null)} minWidth={190}>
           {onCreateNodeInCell && (
             <button type="button" style={sharedInboxContextMenuButtonStyle} onClick={() => { onCreateNodeInCell(createMenu.input); setCreateMenu(null); }}>Create Node</button>
-          )}
-          {onCreateLogicGateInCell && (
-            <button type="button" style={sharedInboxContextMenuButtonStyle} onClick={() => { onCreateLogicGateInCell(createMenu.input); setCreateMenu(null); }}>Create Logic Gate</button>
-          )}
-          {onCreateProjectInCell && (
-            <button type="button" style={sharedInboxContextMenuButtonStyle} onClick={() => { onCreateProjectInCell(createMenu.input); setCreateMenu(null); }}>Create Project</button>
-          )}
-        </FrameRightClickMenu>
+          )}        </FrameRightClickMenu>
       )}
     </>
   );
@@ -1171,102 +1570,58 @@ function buildMyWorkRowsFromMatrix({
   groupIDsByUserID: Map<string, string[]>;
 }): MyWorkResourceRow[] {
   const rows: MyWorkResourceRow[] = [];
-  for (const cell of matrixCells) {
-    const role = normalizeGVICRole(cell.role);
+  for (const item of matrixCells) {
+    const role = normalizeGVICRole(item.gvic_assignment ?? item.role);
     if (!role) continue;
-    const userID = cell.userID.trim();
-    for (const root of cell.roots ?? []) {
-      rows.push(myWorkTreeToRow({
-        tree: root,
-        companyID: cell.companyID,
-        role,
-        userID,
-        cellPriority: cell.priority,
-        userByID,
-        groupByID,
-        groupIDsByUserID,
-      }));
-    }
+    const kind = normalizeMyWorkResourceKind(item.resource_type);
+    if (!kind) continue;
+    const userID = item.userID.trim() || item.user_id?.trim() || "";
+    const resourceID = item.resource_id?.trim() || "";
+    if (!resourceID) continue;
+    const logicGateID = (typeof item.logic_gate_id === "string" ? item.logic_gate_id : "")?.trim() || (kind === "logic_gate" ? resourceID : "");
+    const projectID = item.project_id?.trim() || (kind === "project" ? resourceID : "");
+    const nodeLeafID = item.node_leaf_id?.trim() || (kind === "node" ? resourceID : "");
+    const title = item.display_title?.trim() || resourceID;
+    const projectName = kind === "project" ? title : item.project_name?.trim() || projectID;
+    const logicGateName = kind === "logic_gate" ? title : logicGateID;
+    const people = userID ? [personForUserID(userID, userByID)] : [];
+    rows.push({
+      rowKey: item.item_id?.trim() || `${userID}:${role}:${item.resource_type}:${resourceID}:${nodeLeafID}`,
+      companyID: item.companyID || item.company_id,
+      kind,
+      id: resourceID,
+      title,
+      status: item.status,
+      dueDate: item.due_date,
+      priority: item.priority,
+      accounts: item.accounts ?? [],
+      projectLabels: projectName ? [projectName] : [],
+      people,
+      teams: teamsForUsers(userID ? [userID] : [], groupIDsByUserID, groupByID),
+      gvicRoles: [role],
+      primaryGVICRole: role,
+      participantUserIDs: userID ? [userID] : [],
+      projectID,
+      projectName,
+      logicGateLabels: logicGateName ? [logicGateName] : [],
+      logicGateIDs: logicGateID ? [logicGateID] : [],
+      parentResourceType: item.parent_resource_type,
+      parentResourceID: item.parent_resource_id,
+      nodeLeafID,
+      depth: Number.isFinite(Number(item.depth)) ? Number(item.depth) : 0,
+      sortOrder: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
+      isContainerRow: item.is_container_row === true,
+      children: [],
+    });
   }
 
   return sortMyWorkRows(rows);
 }
 
-function myWorkTreeToRow({
-  tree,
-  companyID,
-  role,
-  userID,
-  cellPriority,
-  userByID,
-  groupByID,
-  groupIDsByUserID,
-  inheritedProjectID = "",
-  inheritedProjectName = "",
-  inheritedLogicGateID = "",
-  inheritedLogicGateName = "",
-  path = "",
-}: {
-  tree: MyWorkResourceTree;
-  companyID: string;
-  role: LogicGateGVICRole;
-  userID: string;
-  cellPriority: number | null;
-  userByID: Map<string, CompanyUser>;
-  groupByID: Map<string, CompanyUserGroup>;
-  groupIDsByUserID: Map<string, string[]>;
-  inheritedProjectID?: string;
-  inheritedProjectName?: string;
-  inheritedLogicGateID?: string;
-  inheritedLogicGateName?: string;
-  path?: string;
-}): MyWorkResourceRow {
-  const kind = tree.kind;
-  const id = tree.resource_id?.trim() || tree.project_id?.trim() || tree.logic_gate_id?.trim() || tree.node_id?.trim() || "";
-  const projectID = kind === "project" ? (tree.project_id?.trim() || id) : inheritedProjectID;
-  const projectName = kind === "project" ? (tree.name?.trim() || id) : inheritedProjectName;
-  const logicGateID = kind === "logic_gate" ? (tree.logic_gate_id?.trim() || id) : inheritedLogicGateID;
-  const logicGateName = kind === "logic_gate" ? (tree.name?.trim() || id) : inheritedLogicGateName;
-  const people = userID ? [personForUserID(userID, userByID)] : [];
-  const nextPath = `${path}/${kind}:${id}`;
-  return {
-    rowKey: `${userID}:${role}:${cellPriority ?? "none"}:${nextPath}`,
-    companyID,
-    kind,
-    id,
-    title: tree.name?.trim() || myWorkKindLabel(kind),
-    status: tree.status,
-    dueDate: tree.due_date,
-    priority: tree.priority ?? cellPriority,
-    accounts: tree.accounts ?? [],
-    projectLabels: projectName ? [projectName] : [],
-    people,
-    teams: teamsForUsers(userID ? [userID] : [], groupIDsByUserID, groupByID),
-    gvicRoles: [role],
-    primaryGVICRole: role,
-    participantUserIDs: userID ? [userID] : [],
-    projectID,
-    projectName,
-    logicGateLabels: logicGateName ? [logicGateName] : [],
-    logicGateIDs: logicGateID ? [logicGateID] : [],
-    children: (tree.children ?? []).map((child) => myWorkTreeToRow({
-      tree: child,
-      companyID,
-      role,
-      userID,
-      cellPriority,
-      userByID,
-      groupByID,
-      groupIDsByUserID,
-      inheritedProjectID: projectID,
-      inheritedProjectName: projectName,
-      inheritedLogicGateID: logicGateID,
-      inheritedLogicGateName: logicGateName,
-      path: nextPath,
-    })),
-  };
+function normalizeMyWorkResourceKind(value: string | null | undefined): MyWorkResourceRow["kind"] | "" {
+  if (value === "project" || value === "logic_gate" || value === "node") return value;
+  return "";
 }
-
 function nodeRecordFromMyWorkRow(row: MyWorkResourceRow): NodeRecord | null {
   if (row.kind !== "node") return null;
   return {
@@ -1280,6 +1635,10 @@ function nodeRecordFromMyWorkRow(row: MyWorkResourceRow): NodeRecord | null {
     accounts: row.accounts,
     created_timestamp: new Date().toISOString(),
   };
+}
+
+function myWorkCellBucketKey(role: LogicGateGVICRole, priority: MyWorkMatrixPriority): string {
+  return role + ":" + String(priority);
 }
 
 function priorityBucket(priority: number | null | undefined): typeof MY_WORK_MATRIX_PRIORITIES[number] {
@@ -1311,7 +1670,9 @@ function hasMyWorkDragType(dataTransfer: DataTransfer, mime: string): boolean {
 function collectMyWorkNodeIDs(row: MyWorkResourceRow): string[] {
   const ids: string[] = [];
   const visit = (item: MyWorkResourceRow) => {
-    if (item.kind === "node" && item.id.trim()) ids.push(item.id.trim());
+    const nodeLeafID = item.nodeLeafID?.trim() ?? "";
+    if (nodeLeafID) ids.push(nodeLeafID);
+    else if (item.kind === "node" && item.id.trim()) ids.push(item.id.trim());
     for (const child of item.children ?? []) visit(child);
   };
   visit(row);

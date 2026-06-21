@@ -216,7 +216,7 @@ func (s *Server) handleWorkItemMyWorkMatrix(w http.ResponseWriter, r *http.Reque
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 		"company_id": query.CompanyID,
 		"user_id":    query.UserID,
-		"cells":      matrix.Cells,
+		"rows":       matrix.Rows,
 	})
 }
 

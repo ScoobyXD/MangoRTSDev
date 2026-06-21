@@ -171,9 +171,20 @@ export async function upsertKanbanCard(args: {
 export type GVICMatrixProjectionRow = {
   company_id: string;
   user_id: string;
-  resource_type: "node" | "logic_gate";
+  item_id?: string;
+  gvic_assignment?: string;
+  role?: string;
+  resource_type: "project" | "node" | "logic_gate";
   resource_id: string;
+  project_id?: string;
+  project_name?: string;
   logic_gate_id?: string;
+  node_leaf_id?: string;
+  parent_resource_type?: string;
+  parent_resource_id?: string;
+  depth?: number;
+  sort_order?: number;
+  is_container_row?: boolean;
   display_title: string;
   status?: string;
   due_date?: string;

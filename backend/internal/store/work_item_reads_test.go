@@ -70,7 +70,7 @@ func TestMemoryRepoWorkItemInboxReadContracts(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: accountableGate.LogicGateID,
 		NodeID:      olderNode.NodeID,
-		Status:      "done",
+		Status:      "In Progress",
 		Priority:    testPriority(5),
 		PrioritySet: true,
 	}); err != nil {
@@ -260,7 +260,7 @@ func TestMemoryRepoMyWorkMatrixRowsMoveResourceBetweenActiveProjectRelationships
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		NodeID:      node.NodeID,
-		Status:      "done",
+		Status:      "In Progress",
 		Priority:    &priority,
 		PrioritySet: true,
 	}); err != nil {
@@ -284,23 +284,20 @@ func TestMemoryRepoMyWorkMatrixRowsMoveResourceBetweenActiveProjectRelationships
 	if err != nil {
 		t.Fatalf("ListMyWorkMatrix: %v", err)
 	}
-	cell := findMyWorkTestCell(matrix, domain.GVICRoleGenerated, 3)
-	if cell == nil {
-		t.Fatalf("generated priority 3 cell missing: %+v", matrix.Cells)
-	}
-	if alpha := findMyWorkTestTree(cell.Roots, EntityTypeProject, "Alpha Project"); alpha != nil {
+	if alpha := findMyWorkTestRow(matrix.Rows, EntityTypeProject, alpha.ProjectID); alpha != nil {
 		t.Fatalf("alpha project still contains moved resource: %+v", alpha)
 	}
-	project := findMyWorkTestTree(cell.Roots, EntityTypeProject, "Bravo Project")
-	if project == nil {
-		t.Fatalf("bravo project missing from roots: %+v", cell.Roots)
+	projectRow := findMyWorkTestRow(matrix.Rows, EntityTypeProject, bravo.ProjectID)
+	if projectRow == nil || projectRow.GVICAssignment != domain.GVICRoleGenerated || projectRow.NodeLeafID != node.NodeID || projectRow.Depth != 0 || !projectRow.IsContainerRow {
+		t.Fatalf("bravo project row = %+v; rows=%+v", projectRow, matrix.Rows)
 	}
-	gate := findMyWorkTestTree(project.Children, EntityTypeLogicGate, logicGate.LogicGateID)
-	if gate == nil {
-		t.Fatalf("logic gate missing under bravo project: %+v", project.Children)
+	gateRow := findMyWorkTestRow(matrix.Rows, EntityTypeLogicGate, logicGate.LogicGateID)
+	if gateRow == nil || gateRow.ParentResourceType != EntityTypeProject || gateRow.ParentResourceID != bravo.ProjectID || gateRow.NodeLeafID != node.NodeID || gateRow.Depth != 1 || !gateRow.IsContainerRow {
+		t.Fatalf("logic gate path row = %+v; rows=%+v", gateRow, matrix.Rows)
 	}
-	if nodeTree := findMyWorkTestTree(gate.Children, EntityTypeNode, node.NodeID); nodeTree == nil {
-		t.Fatalf("node missing under bravo project/%s: %+v", logicGate.LogicGateID, gate.Children)
+	nodeRow := findMyWorkTestRow(matrix.Rows, EntityTypeNode, node.NodeID)
+	if nodeRow == nil || nodeRow.ParentResourceType != EntityTypeLogicGate || nodeRow.ParentResourceID != logicGate.LogicGateID || nodeRow.NodeLeafID != node.NodeID || nodeRow.Depth != 2 || nodeRow.IsContainerRow {
+		t.Fatalf("node leaf path row = %+v; rows=%+v", nodeRow, matrix.Rows)
 	}
 }
 
@@ -321,7 +318,7 @@ func TestMemoryRepoMyWorkMatrixRowsApplyProjectActiveRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNode project done: %v", err)
 	}
-	mustUpdateInboxReadNodeStatus(t, repo, companyID, activeProjectDone.NodeID, "Done", user.UserID)
+	mustUpdateInboxReadNodeStatus(t, repo, companyID, activeProjectDone.NodeID, "In Progress", user.UserID)
 	mustSetInboxReadNodeGVIC(t, repo, companyID, activeProjectDone.NodeID, user.UserID)
 	activeProject := mustCreateInboxReadProject(t, repo, companyID, "Active Project", "Active", user.UserID)
 	mustLinkInboxReadProjectResource(t, repo, companyID, activeProject.ProjectID, EntityTypeNode, activeProjectDone.NodeID, 1, user.UserID)
@@ -344,7 +341,7 @@ func TestMemoryRepoMyWorkMatrixRowsApplyProjectActiveRules(t *testing.T) {
 	assertMyWorkProjectNames(t, rows, EntityTypeNode, doneProjectNode.NodeID, nil)
 }
 
-func TestMemoryRepoMyWorkMatrixIncludesProjectAsFirstClassRoot(t *testing.T) {
+func TestMemoryRepoMyWorkMatrixExcludesProjectWithoutNodeLeaf(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "66666666-6666-4666-8666-666666666666"
 	repo.EnsureCompany(companyID, "My Work Project Root Company")
@@ -356,13 +353,8 @@ func TestMemoryRepoMyWorkMatrixIncludesProjectAsFirstClassRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListMyWorkMatrix: %v", err)
 	}
-	cell := findMyWorkTestCell(matrix, domain.GVICRoleVerified, 0)
-	if cell == nil {
-		t.Fatalf("verified no-priority cell missing: %+v", matrix.Cells)
-	}
-	root := findMyWorkTestTree(cell.Roots, EntityTypeProject, project.ProjectID)
-	if root == nil || root.Name != "First Class Project" {
-		t.Fatalf("project root = %+v, want First Class Project", root)
+	if len(matrix.Rows) != 0 {
+		t.Fatalf("project-only GVIC assignment produced My Work rows: %+v", matrix.Rows)
 	}
 }
 
@@ -475,28 +467,11 @@ func assertMyWorkProjectNames(t *testing.T, rows []GVICMatrixProjectionRow, reso
 	}
 }
 
-func findMyWorkTestCell(matrix MyWorkMatrixResponse, role string, priority int) *MyWorkMatrixCell {
-	for index := range matrix.Cells {
-		cell := &matrix.Cells[index]
-		gotPriority := 0
-		if cell.Priority != nil {
-			gotPriority = *cell.Priority
-		}
-		if cell.Role == role && gotPriority == priority {
-			return cell
-		}
-	}
-	return nil
-}
-
-func findMyWorkTestTree(items []MyWorkResourceTree, kind, idOrName string) *MyWorkResourceTree {
-	for index := range items {
-		item := &items[index]
-		if item.Kind == kind && (item.ResourceID == idOrName || item.Name == idOrName) {
-			return item
-		}
-		if child := findMyWorkTestTree(item.Children, kind, idOrName); child != nil {
-			return child
+func findMyWorkTestRow(rows []GVICMatrixProjectionRow, resourceType, resourceID string) *GVICMatrixProjectionRow {
+	for index := range rows {
+		row := &rows[index]
+		if row.ResourceType == resourceType && row.ResourceID == resourceID {
+			return row
 		}
 	}
 	return nil

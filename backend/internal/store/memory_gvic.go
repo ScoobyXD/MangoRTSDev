@@ -116,6 +116,15 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 		}
 	case GVICAssignmentCommandAdd:
 		for _, assignment := range assignments {
+			if keyValue.resourceType == EntityTypeNode || keyValue.resourceType == EntityTypeLogicGate {
+				for sourceKey, existing := range r.gvicAssignments {
+					if existing.CompanyID == keyValue.companyID && existing.ResourceType == keyValue.resourceType && existing.ResourceID == keyValue.resourceID && existing.PrincipalType == assignment.principalType && existing.PrincipalID == assignment.principalID && existing.Role != assignment.role {
+						delete(r.gvicAssignments, sourceKey)
+						changed = true
+					}
+				}
+			}
+
 			item := r.resourceGVICAssignmentForPrincipalLocked(keyValue, assignment, now)
 			sourceKey := gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)
 			if _, ok := r.gvicAssignments[sourceKey]; ok {

@@ -96,6 +96,17 @@ func (r *MemoryRepo) applyLogicGateGVICAssignmentCommand(input LogicGateGVICAssi
 	switch operation {
 	case LogicGateGVICCommandAdd:
 		for _, commandAssignment := range commandAssignments {
+			principalKey := commandAssignment.principalType + ":" + commandAssignment.principalID
+			filtered := assignments[:0]
+			for _, existingAssignment := range assignments {
+				existingPrincipalType, existingPrincipalID := logicGateGVICAssignmentPrincipal(existingAssignment)
+				if existingPrincipalType+":"+existingPrincipalID == principalKey && existingAssignment.Role != commandAssignment.role {
+					changed = true
+					continue
+				}
+				filtered = append(filtered, existingAssignment)
+			}
+			assignments = filtered
 			assignmentKey := commandAssignment.role + ":" + commandAssignment.principalType + ":" + commandAssignment.principalID
 			if existing[assignmentKey] {
 				continue

@@ -66,7 +66,6 @@ import { removeNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeR
 import { removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type GVICMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
-import { createProject, upsertProjectRelationship } from "../../modules/project-management/projectManagementApi";
 import { applyGVICMatrixProjectionEnvelope, parseGVICMatrixProjectionSequence, GVICMatrixRealtimeScope, type GVICMatrixProjectionDeltaEnvelope } from "../../modules/gvic/gvicMatrixProjectionDeltas";
 import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../../modules/realtime/realtimeWebSocket";
 import { listMyLogicGates, listGVICMatrixProjectionRows } from "../../modules/work-items/workItemReadApi";
@@ -77,6 +76,8 @@ import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGa
 import { buildLogicGateRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
 import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, GVICMatrixViewerSelector, GVICRoleInboxMatrix, SharedInboxGVICSettingsModal, type GVICMatrixViewerListEntry } from "./HomeParts";
 import { MyWorkView } from "./MyWorkView";
+import { markMyWorkMatrixCachesStaleForCompany, markMyWorkMatrixCachesStaleForTargetUsers } from "./myWorkMatrixLoader";
+import { myWorkDebugLog, recordMyWorkDebugCause } from "./myWorkPerformanceDebug";
 import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
@@ -413,6 +414,7 @@ export function HomePage({
   const folderReloadTimerRef = useRef<number | null>(null);
   const workspacePanelReloadTimerRef = useRef<number | null>(null);
   const messageListRefreshTimerRef = useRef<number | null>(null);
+  const myWorkLiveRefreshTimerRef = useRef<number | null>(null);
   const GVICMatrixProjectionSequenceRef = useRef(0);
   const GVICMatrixProjectionRefetchInFlightRef = useRef(false);
   const GVICMatrixProjectionInitializedRef = useRef(false);
@@ -448,6 +450,54 @@ export function HomePage({
       : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!hideNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
   const activeGVICMatrixUserID = isInboxMatrixView ? (GVICMatrixTargetUserID.trim() || currentUserID) : currentUserID;
+  const scheduleMyWorkLiveRefresh = useCallback((scopes?: WorkspaceReconciliationScope[]) => {
+    const myWorkScopes = (scopes ?? []).filter((scope) => scope.kind === "my_work");
+    const targetUserIDs = cleanIDList(myWorkScopes.map((scope) => (
+      scope.userID ?? (scope.semanticTargetType === "user" ? scope.semanticTargetID ?? "" : "")
+    )));
+    if (targetUserIDs.length > 0) markMyWorkMatrixCachesStaleForTargetUsers(targetUserIDs);
+    if (
+      myWorkScopes.length === 0 ||
+      myWorkScopes.some((scope) => scope.semanticTargetType !== "user" && !scope.userID)
+    ) {
+      markMyWorkMatrixCachesStaleForCompany(companyID);
+    }
+    myWorkDebugLog("home.scheduleMyWorkRefresh", {
+      companyID,
+      targetUserIDs,
+      scopeKinds: myWorkScopes.map((scope) => ({
+        eventType: scope.eventType,
+        semanticScope: scope.semanticScope,
+        semanticTargetType: scope.semanticTargetType,
+        semanticTargetID: scope.semanticTargetID,
+        userID: scope.userID,
+        teamID: scope.teamID,
+      })),
+      broadCompanyRefresh: myWorkScopes.length === 0 || myWorkScopes.some((scope) => scope.semanticTargetType !== "user" && !scope.userID),
+    });
+    recordMyWorkDebugCause(myWorkScopes[0]?.eventType ?? (myWorkScopes.length > 0 ? "realtime delta" : "realtime refetch"), {
+      companyID,
+      targetUserCount: targetUserIDs.length,
+      broadCompanyRefresh: myWorkScopes.length === 0 || myWorkScopes.some((scope) => scope.semanticTargetType !== "user" && !scope.userID),
+    });
+    if (myWorkLiveRefreshTimerRef.current !== null) window.clearTimeout(myWorkLiveRefreshTimerRef.current);
+    myWorkLiveRefreshTimerRef.current = window.setTimeout(() => {
+      myWorkLiveRefreshTimerRef.current = null;
+      myWorkDebugLog("home.fireMyWorkRefreshToken", { companyID, targetUserIDs });
+      setMyWorkLiveRefreshToken((value) => value + 1);
+    }, 80);
+  }, [companyID]);
+  const scheduleCurrentUserMyWorkRefresh = useCallback(() => {
+    scheduleMyWorkLiveRefresh(currentUserID
+      ? [{ kind: "my_work", eventType: "local_mutation", userID: currentUserID }]
+      : undefined);
+  }, [currentUserID, scheduleMyWorkLiveRefresh]);
+  useEffect(() => () => {
+    if (myWorkLiveRefreshTimerRef.current !== null) {
+      window.clearTimeout(myWorkLiveRefreshTimerRef.current);
+      myWorkLiveRefreshTimerRef.current = null;
+    }
+  }, []);
   useEffect(() => {
     setMailDrafts(readHomeMailDrafts(companyID, currentUserID));
     setEmailSignature(readHomeMailSignature(companyID, currentUserID));
@@ -1567,7 +1617,7 @@ export function HomePage({
         const touchesSharedInbox = gap.scopes.some(workspaceScopeTouchesSharedInbox);
         const touchesWorkspacePanel = gap.scopes.some(workspaceScopeTouchesHomeWorkspacePanel);
         const touchesGVICMatrix = gap.scopes.some((scope) => !scope.semanticScope && (scope.kind === "gvic_matrix" || scope.kind === "workspace"));
-        if (gap.scopes.some((scope) => scope.kind === "my_work")) setMyWorkLiveRefreshToken((value) => value + 1);
+        if (gap.scopes.some((scope) => scope.kind === "my_work")) scheduleMyWorkLiveRefresh(gap.scopes);
         if (gap.scopes.some((scope) => scope.kind === "updates")) setUpdatesLiveRefreshToken((value) => value + 1);
         if (touchesSharedInbox) void loadSharedInboxes();
         if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
@@ -1592,7 +1642,7 @@ export function HomePage({
         const touchesGVICMatrix = scopes.some((scope) => !scope.semanticScope && (scope.kind === "gvic_matrix" || scope.kind === "workspace"));
         const touchesMyWork = scopes.some((scope) => scope.kind === "my_work");
         const touchesUpdates = scopes.some((scope) => scope.kind === "updates");
-        if (touchesMyWork) setMyWorkLiveRefreshToken((value) => value + 1);
+        if (touchesMyWork) scheduleMyWorkLiveRefresh(scopes);
         if (touchesUpdates) setUpdatesLiveRefreshToken((value) => value + 1);
         if (touchesSharedInbox) {
           void loadSharedInboxes();
@@ -1703,7 +1753,7 @@ export function HomePage({
         workspacePanelReloadTimerRef.current = null;
       }
     };
-  }, [apiBase, companyID, currentUserID, isInboxMatrixView, loadSharedInboxes, refreshNodeRelationshipsForMatrix, scheduleWorkspacePanelReload]);
+  }, [apiBase, companyID, currentUserID, isInboxMatrixView, loadSharedInboxes, refreshNodeRelationshipsForMatrix, scheduleMyWorkLiveRefresh, scheduleWorkspacePanelReload]);
   useEffect(() => {
     if (!selectedMessageID) return;
     if (mailbox === "drafts" || selectedMessageID.startsWith("draft:")) {
@@ -3162,8 +3212,8 @@ export function HomePage({
   }, [apiBase, companyID, mergeCreatedLogicGate, openLogicGateArena]);
   const createLogicGateInInboxCell = useCallback(async (input: { creatorGVICRole?: LogicGateGVICRole }) => {
     const logicGate = await createHomeLogicGate({ creatorGVICRole: input.creatorGVICRole, openArena: false });
-    if (logicGate) setMyWorkLiveRefreshToken((value) => value + 1);
-  }, [createHomeLogicGate]);
+    if (logicGate) scheduleCurrentUserMyWorkRefresh();
+  }, [createHomeLogicGate, scheduleCurrentUserMyWorkRefresh]);
   const createNodeInInboxCell = useCallback(async (input: { priority: InboxPriority; status?: GVICInboxStatus; creatorGVICRole?: LogicGateGVICRole }) => {
     setBusy("create-node");
     setError("");
@@ -3180,59 +3230,14 @@ export function HomePage({
       mergeCreatedFolderItems(result.folderItems.filter((item) => item.item_type !== "logic_gate"));
       applyGVICMatrixProjectionRows(result.gvic_projection_rows);
       mergeUpdatedNode(result.node);
-      setMyWorkLiveRefreshToken((value) => value + 1);
+      scheduleCurrentUserMyWorkRefresh();
       setNotice("Note created in a new Logic Gate.");
     } catch (createError) {
       setError(formatError(createError, "Failed to create note in matrix cell"));
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyGVICMatrixProjectionRows, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode]);
-
-  const createProjectInInboxCell = useCallback(async (input: { priority: InboxPriority; status?: GVICInboxStatus; creatorGVICRole?: LogicGateGVICRole }) => {
-    setBusy("create-project");
-    setError("");
-    try {
-      const projectResult = await createProject({ companyID, name: "New Project" });
-      const projectID = projectResult.project?.project_id?.trim() ?? "";
-      if (!projectID) throw new Error("project_create_missing_project");
-      const result = await createHomeGVICMatrixNodeCommand({
-        apiBase,
-        companyID,
-        title: "new node",
-        priority: input.priority,
-        status: input.status,
-        creatorGVICRole: input.creatorGVICRole,
-        createLogicGateTitle: "new logic gate",
-      });
-      if (result.logicGate) {
-        mergeCreatedLogicGate(result.logicGate, result.folderItems.filter((item) => item.item_type === "logic_gate"));
-        await upsertProjectRelationship({
-          companyID,
-          projectID,
-          resourceType: "logic_gate",
-          resourceID: result.logicGate.logic_gate_id,
-          position: 0,
-        });
-      }
-      mergeCreatedFolderItems(result.folderItems.filter((item) => item.item_type !== "logic_gate"));
-      applyGVICMatrixProjectionRows(result.gvic_projection_rows);
-      mergeUpdatedNode(result.node);
-      await upsertProjectRelationship({
-        companyID,
-        projectID,
-        resourceType: "node",
-        resourceID: result.node.node_id,
-        position: 1,
-      });
-      setMyWorkLiveRefreshToken((value) => value + 1);
-      setNotice("Project created in matrix cell.");
-    } catch (createError) {
-      setError(formatError(createError, "Failed to create project in matrix cell"));
-    } finally {
-      setBusy("");
-    }
-  }, [apiBase, applyGVICMatrixProjectionRows, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode]);
+  }, [apiBase, applyGVICMatrixProjectionRows, companyID, mergeCreatedFolderItems, mergeCreatedLogicGate, mergeUpdatedNode, scheduleCurrentUserMyWorkRefresh]);
   const openNodeBulkEditMenu = useCallback((nodeID: string, event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -3291,7 +3296,7 @@ export function HomePage({
       for (const node of dropResult.nodes) {
         if (node) mergeUpdatedNode(node);
       }
-      setMyWorkLiveRefreshToken((value) => value + 1);
+      scheduleCurrentUserMyWorkRefresh();
       const action = fromLogicGateID ? "moved" : "added";
       setNotice(nodeIDs.length === 1 ? `Node ${action} to Logic Gate.` : `${nodeIDs.length} nodes ${action} to Logic Gate.`);
     } catch (dropError) {
@@ -3299,7 +3304,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyGVICMatrixProjectionRows, companyID, mergeUpdatedNode, nodeByID]);
+  }, [apiBase, applyGVICMatrixProjectionRows, companyID, mergeUpdatedNode, nodeByID, scheduleCurrentUserMyWorkRefresh]);
   const dropNodesIntoNewInboxLogicGate = useCallback(async (input: { nodeIDs: string[]; priority: InboxPriority; status?: GVICInboxStatus; creatorGVICRole?: LogicGateGVICRole; fromLogicGateID?: string }) => {
     const nodeIDs = cleanIDList(input.nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
     if (nodeIDs.length === 0) return;
@@ -3322,14 +3327,14 @@ export function HomePage({
       });
       applyGVICMatrixProjectionRows(dropResult.gvic_projection_rows);
       for (const node of dropResult.nodes) mergeUpdatedNode(node);
-      setMyWorkLiveRefreshToken((value) => value + 1);
+      scheduleCurrentUserMyWorkRefresh();
       setNotice(nodeIDs.length === 1 ? "Node moved into a new Logic Gate." : `${nodeIDs.length} nodes moved into a new Logic Gate.`);
     } catch (dropError) {
       setError(formatError(dropError, "Failed to move nodes into a new Logic Gate"));
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyGVICMatrixProjectionRows, companyID, mergeCreatedLogicGate, mergeUpdatedNode, nodeByID]);
+  }, [apiBase, applyGVICMatrixProjectionRows, companyID, mergeCreatedLogicGate, mergeUpdatedNode, nodeByID, scheduleCurrentUserMyWorkRefresh]);
   const moveLogicGatesIntoInboxCell = useCallback(async (input: { logicGateIDs: string[]; priority: InboxPriority; status?: GVICInboxStatus; creatorGVICRole?: LogicGateGVICRole; nodeIDsByLogicGateID?: Record<string, string[]> }) => {
     const logicGateIDs = cleanIDList(input.logicGateIDs).filter((logicGateID) => logicGateByID.has(logicGateID));
     if (logicGateIDs.length === 0) return;
@@ -3385,7 +3390,7 @@ export function HomePage({
         movedNodeCount += dropResult.nodes.length;
         for (const node of dropResult.nodes) mergeUpdatedNode(node);
       }
-      setMyWorkLiveRefreshToken((value) => value + 1);
+      scheduleCurrentUserMyWorkRefresh();
       setNotice(logicGateIDs.length === 1
         ? (movedNodeCount > 0 ? "Logic Gate moved." : "Logic Gate assignment updated.")
         : `${logicGateIDs.length} Logic Gates moved.`);
@@ -3394,7 +3399,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, applyGVICMatrixProjectionRows, companyID, currentUserID, logicGateByID, mergeUpdatedNode, nodeByID, nodes]);
+  }, [apiBase, applyGVICMatrixProjectionRows, companyID, currentUserID, logicGateByID, mergeUpdatedNode, nodeByID, nodes, scheduleCurrentUserMyWorkRefresh]);
 
   const moveProjectsIntoInboxCell = useCallback(async (input: { projectIDs: string[]; priority: InboxPriority; status?: GVICInboxStatus; creatorGVICRole?: LogicGateGVICRole; logicGateIDsByProjectID?: Record<string, string[]>; nodeIDsByProjectID?: Record<string, string[]>; nodeIDsByLogicGateID?: Record<string, string[]> }) => {
     const projectIDs = cleanIDList(input.projectIDs);
@@ -3428,9 +3433,9 @@ export function HomePage({
       setNotice(projectIDs.length === 1 ? "Project has no movable work items." : "Projects have no movable work items.");
       return;
     }
-    setMyWorkLiveRefreshToken((value) => value + 1);
+    scheduleCurrentUserMyWorkRefresh();
     setNotice(projectIDs.length === 1 ? "Project moved." : `${projectIDs.length} projects moved.`);
-  }, [dropNodesIntoNewInboxLogicGate, logicGateByID, moveLogicGatesIntoInboxCell, nodeByID]);
+  }, [dropNodesIntoNewInboxLogicGate, logicGateByID, moveLogicGatesIntoInboxCell, nodeByID, scheduleCurrentUserMyWorkRefresh]);
 
   const addNodesToLogicGate = useCallback(async (nodeIDs: string[], logicGateID: string) => {
     const cleanLogicGateID = logicGateID.trim();
@@ -3849,8 +3854,6 @@ export function HomePage({
               onOpenNodeBulkMenu={openNodeBulkEditMenu}
               onOpenLogicGateBulkMenu={openLogicGateBulkEditMenu}
               onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
-              onCreateLogicGateInCell={(input) => { void createLogicGateInInboxCell(input); }}
-              onCreateProjectInCell={(input) => { void createProjectInInboxCell(input); }}
               onDropNodes={(input) => { void dropNodesIntoInboxLogicGate(input); }}
               onDropNodesInCell={(input) => { void dropNodesIntoNewInboxLogicGate(input); }}
               onDropLogicGates={(input) => { void moveLogicGatesIntoInboxCell(input); }}
@@ -3898,8 +3901,8 @@ export function HomePage({
                   onOpenLogicGateBulkMenuAt={openLogicGateBulkEditMenuAt}
                   onRequestDeleteLogicGate={requestDeleteLogicGateContext}
                   onCreateNodeInLogicGate={(input) => { void createHomeNode(input); }}
-                  onCreateLogicGateInCell={(input) => { void createLogicGateInInboxCell(input); }}
                   onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
+                  onCreateLogicGateInCell={(input) => { void createLogicGateInInboxCell(input); }}
                   onDropNodes={(input) => { void dropNodesIntoInboxLogicGate(input); }}
                   onDropNodesInCell={(input) => { void dropNodesIntoNewInboxLogicGate(input); }}
                   onDropLogicGates={(input) => { void moveLogicGatesIntoInboxCell(input); }}

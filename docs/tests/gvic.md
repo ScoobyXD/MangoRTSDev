@@ -28,6 +28,7 @@ GVIC17 - Removing a user from a group removes the user's effective GVIC access t
 GVIC18 - Removing a GVIC assignment removes the effective access/projection rows that were produced only by that assignment.
 GVIC19 - A resource can have multiple GVIC roles across different principals without collapsing the role meaning.
 GVIC20 - Shared inbox GVIC assignments must remain GVIC assignments and must not be converted into ordinary resource permission grants.
+GVIC21 - A person or group can only have one GVIC assignment per each node or for each logic gate. So the same person/group can not be in, for example, Generated and Informed for the same node (same rule applies for logic gates). However of course, when a node is assigned to a logic gate, then we defer the GVIC assignment of the node, to the logic gate's.
 
 ## Scenarios
 

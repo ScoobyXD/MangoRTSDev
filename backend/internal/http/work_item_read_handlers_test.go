@@ -171,17 +171,13 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 		CompanyID string                          `json:"company_id"`
 		UserID    string                          `json:"user_id"`
 		Rows      []store.GVICMatrixProjectionRow `json:"rows"`
-		Cells     []store.MyWorkMatrixCell        `json:"cells"`
 	}
 	decodeWorkItemInboxReadPayload(t, myWorkRec, &myWorkPayload)
 	if myWorkPayload.CompanyID != companyID || myWorkPayload.UserID != user.UserID {
 		t.Fatalf("my work metadata = %+v", myWorkPayload)
 	}
-	if len(myWorkPayload.Rows) != 0 {
-		t.Fatalf("my work still returned flat rows: %+v", myWorkPayload.Rows)
-	}
-	if !inboxReadHTTPMyWorkHasNode(myWorkPayload.Cells, responsibleNode.NodeID) {
-		t.Fatalf("my work cells missing responsible node %s: %+v", responsibleNode.NodeID, myWorkPayload.Cells)
+	if !inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, responsibleNode.NodeID) {
+		t.Fatalf("my work rows missing responsible node %s: %+v", responsibleNode.NodeID, myWorkPayload.Rows)
 	}
 }
 
@@ -586,23 +582,9 @@ func inboxReadHTTPNodesExactly(nodes []domain.Node, nodeID string) bool {
 	return len(nodes) == 1 && nodes[0].NodeID == nodeID
 }
 
-func inboxReadHTTPMyWorkHasNode(cells []store.MyWorkMatrixCell, nodeID string) bool {
-	for _, cell := range cells {
-		for _, root := range cell.Roots {
-			if inboxReadHTTPMyWorkTreeHasNode(root, nodeID) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func inboxReadHTTPMyWorkTreeHasNode(root store.MyWorkResourceTree, nodeID string) bool {
-	if root.Kind == store.EntityTypeNode && root.NodeID == nodeID {
-		return true
-	}
-	for _, child := range root.Children {
-		if inboxReadHTTPMyWorkTreeHasNode(child, nodeID) {
+func inboxReadHTTPMyWorkHasNode(rows []store.GVICMatrixProjectionRow, nodeID string) bool {
+	for _, row := range rows {
+		if row.ResourceType == store.EntityTypeNode && row.ResourceID == nodeID && row.NodeLeafID == nodeID && !row.IsContainerRow {
 			return true
 		}
 	}

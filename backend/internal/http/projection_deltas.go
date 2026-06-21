@@ -496,9 +496,25 @@ func (s *Server) authorizedGVICMatrixProjectionDeltaForUser(delta store.Projecti
 	default:
 		return store.ProjectionDelta{}, false
 	}
-	allowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, resourceType, resourceID, store.EntityPermissionEdit)
+	nodeLeafID := strings.TrimSpace(delta.RowKey.NodeLeafID)
+	if nodeLeafID == "" {
+		nodeLeafID = strings.TrimSpace(delta.RowKey.NodeID)
+	}
+	if nodeLeafID == "" && delta.Row != nil {
+		nodeLeafID = strings.TrimSpace(delta.Row.NodeLeafID)
+		if nodeLeafID == "" {
+			nodeLeafID = strings.TrimSpace(delta.Row.NodeID)
+		}
+	}
+	accessResourceType := resourceType
+	accessResourceID := resourceID
+	if nodeLeafID != "" {
+		accessResourceType = store.EntityTypeNode
+		accessResourceID = nodeLeafID
+	}
+	allowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, accessResourceType, accessResourceID, store.EntityPermissionEdit)
 	if err != nil {
-		log.Printf("failed to check projection delta access company_id=%s user_id=%s resource_type=%s resource_id=%s: %v", delta.CompanyID, userID, resourceType, resourceID, err)
+		log.Printf("failed to check projection delta access company_id=%s user_id=%s resource_type=%s resource_id=%s: %v", delta.CompanyID, userID, accessResourceType, accessResourceID, err)
 		return store.ProjectionDelta{}, false
 	}
 	if !allowed {
@@ -515,7 +531,6 @@ func (s *Server) authorizedGVICMatrixProjectionDeltaForUser(delta store.Projecti
 	}
 	return delta, true
 }
-
 func (s *Server) authorizedKanbanProjectionDeltaForUser(delta store.ProjectionDelta, userID string) (store.ProjectionDelta, bool) {
 	userID = strings.TrimSpace(userID)
 	delta = cloneProjectionDelta(delta)

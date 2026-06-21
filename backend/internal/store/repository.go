@@ -609,32 +609,10 @@ type WorkItemLogicGateInboxItem struct {
 }
 
 type MyWorkMatrixResponse struct {
-	CompanyID string             `json:"company_id"`
-	UserID    string             `json:"user_id"`
-	Cells     []MyWorkMatrixCell `json:"cells"`
+	CompanyID string                    `json:"company_id"`
+	UserID    string                    `json:"user_id"`
+	Rows      []GVICMatrixProjectionRow `json:"rows"`
 }
-
-type MyWorkMatrixCell struct {
-	Priority *int                 `json:"priority"`
-	Role     string               `json:"role"`
-	Roots    []MyWorkResourceTree `json:"roots"`
-}
-
-type MyWorkResourceTree struct {
-	Kind                     string               `json:"kind"`
-	ResourceID               string               `json:"resource_id"`
-	ProjectID                string               `json:"project_id,omitempty"`
-	LogicGateID              string               `json:"logic_gate_id,omitempty"`
-	NodeID                   string               `json:"node_id,omitempty"`
-	Name                     string               `json:"name"`
-	Status                   *string              `json:"status,omitempty"`
-	DueDate                  *string              `json:"due_date,omitempty"`
-	Priority                 *int                 `json:"priority,omitempty"`
-	Accounts                 []domain.Account     `json:"accounts,omitempty"`
-	ResourceCreatedTimestamp time.Time            `json:"resource_created_timestamp,omitempty"`
-	Children                 []MyWorkResourceTree `json:"children"`
-}
-
 type ProjectionRow struct {
 	CompanyID                    string           `json:"company_id"`
 	ItemID                       string           `json:"item_id,omitempty"`
@@ -644,6 +622,13 @@ type ProjectionRow struct {
 	RelationshipID               string           `json:"relationship_id,omitempty"`
 	ResourceType                 string           `json:"resource_type,omitempty"`
 	ResourceID                   string           `json:"resource_id,omitempty"`
+	GVICAssignment               string           `json:"gvic_assignment,omitempty"`
+	ParentResourceType           string           `json:"parent_resource_type,omitempty"`
+	ParentResourceID             string           `json:"parent_resource_id,omitempty"`
+	NodeLeafID                   string           `json:"node_leaf_id,omitempty"`
+	Depth                        int              `json:"depth,omitempty"`
+	SortOrder                    int              `json:"sort_order,omitempty"`
+	IsContainerRow               bool             `json:"is_container_row,omitempty"`
 	Role                         string           `json:"role,omitempty"`
 	PrincipalType                string           `json:"principal_type,omitempty"`
 	PrincipalID                  string           `json:"principal_id,omitempty"`
@@ -711,6 +696,13 @@ type ProjectionRowKey struct {
 	RelationshipID      string `json:"relationship_id,omitempty"`
 	ResourceType        string `json:"resource_type,omitempty"`
 	ResourceID          string `json:"resource_id,omitempty"`
+	GVICAssignment      string `json:"gvic_assignment,omitempty"`
+	ParentResourceType  string `json:"parent_resource_type,omitempty"`
+	ParentResourceID    string `json:"parent_resource_id,omitempty"`
+	NodeLeafID          string `json:"node_leaf_id,omitempty"`
+	Depth               int    `json:"depth,omitempty"`
+	SortOrder           int    `json:"sort_order,omitempty"`
+	IsContainerRow      bool   `json:"is_container_row,omitempty"`
 	Role                string `json:"role,omitempty"`
 	SourceResourceType  string `json:"source_resource_type,omitempty"`
 	SourceResourceID    string `json:"source_resource_id,omitempty"`

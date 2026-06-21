@@ -5,8 +5,10 @@ export type GVICMatrixProjectionDeltaOperation = "upsert" | "delete" | "patch";
 export type GVICMatrixProjectionRowKey = {
   company_id?: string;
   user_id?: string;
+  item_id?: string;
   resource_type?: GVICMatrixProjectionRow["resource_type"] | string;
   resource_id?: string;
+  node_leaf_id?: string;
 };
 
 export type GVICMatrixProjectionDelta = {
@@ -79,11 +81,12 @@ function cleanString(value: unknown): string {
 
 function rowResourceType(value: unknown): GVICMatrixProjectionRow["resource_type"] | "" {
   const clean = cleanString(value);
-  return clean === "node" || clean === "logic_gate" ? clean : "";
+  return clean === "project" || clean === "node" || clean === "logic_gate" ? clean : "";
 }
 
-function rowKey(resourceType: string, resourceID: string): string {
-  return `${resourceType}\u0000${resourceID}`;
+function rowKey(resourceType: string, resourceID: string, itemID = ""): string {
+  const cleanItemID = cleanString(itemID);
+  return cleanItemID || `${resourceType}\u0000${resourceID}`;
 }
 
 function deltaUserID(delta: GVICMatrixProjectionDelta): string {
@@ -154,7 +157,7 @@ export function applyGVICMatrixProjectionEnvelope(input: GVICMatrixProjectionApp
   const deltas = deltaList(input.envelope);
   if (!deltas) return requestFallback(result, "invalid_envelope");
 
-  const byKey = new Map(input.rows.map((row) => [rowKey(row.resource_type, row.resource_id), row]));
+  const byKey = new Map(input.rows.map((row) => [rowKey(row.resource_type, row.resource_id, row.item_id), row]));
   for (const delta of deltas) {
     if (!delta || typeof delta !== "object") return requestFallback(result, "invalid_delta");
     if (cleanString(delta.company_id) && cleanString(delta.company_id) !== companyID) {
@@ -171,12 +174,12 @@ export function applyGVICMatrixProjectionEnvelope(input: GVICMatrixProjectionApp
     const resourceType = deltaResourceType(delta);
     const resourceID = deltaResourceID(delta);
     if (!resourceType || !resourceID) return requestFallback(result, "missing_row_key");
-    const key = rowKey(resourceType, resourceID);
+    const key = rowKey(resourceType, resourceID, cleanString(delta.row?.item_id) || cleanString(delta.row_key?.item_id));
 
     if (operation === "delete") {
       if (byKey.delete(key)) {
         result.changed = true;
-        result.removedRowKeys.push({ user_id: userID, resource_type: resourceType, resource_id: resourceID });
+        result.removedRowKeys.push({ user_id: userID, item_id: cleanString(delta.row_key?.item_id), resource_type: resourceType, resource_id: resourceID, node_leaf_id: cleanString(delta.row_key?.node_leaf_id) });
       }
       continue;
     }

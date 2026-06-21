@@ -110,16 +110,19 @@ test("My Work scoped matrix loading preserves successful users when another user
       return {
         company_id: "company-1",
         user_id: targetUserID,
-        cells: [{
+        rows: [{
+          company_id: "company-1",
+          user_id: targetUserID,
+          item_id: `${targetUserID}:generated:node-1`,
+          gvic_assignment: "generated",
           role: "generated",
+          resource_type: "node" as const,
+          resource_id: "node-1",
+          node_leaf_id: "node-1",
+          display_title: "Still visible",
           priority: 1,
-          roots: [{
-            kind: "node",
-            resource_id: "node-1",
-            node_id: "node-1",
-            name: "Still visible",
-            children: [],
-          }],
+          resource_created_timestamp: "2026-01-01T00:00:00Z",
+          updated_timestamp: "2026-01-01T00:00:00Z",
         }],
       };
     },
@@ -127,6 +130,6 @@ test("My Work scoped matrix loading preserves successful users when another user
 
   assert.equal(result.cells.length, 1);
   assert.equal(result.cells[0].userID, "user-ok");
-  assert.equal(result.cells[0].roots[0].name, "Still visible");
+  assert.equal(result.cells[0].display_title, "Still visible");
   assert.deepEqual(result.failures, [{ userID: "user-fail", message: "failed_to_list_my_work_matrix" }]);
 });

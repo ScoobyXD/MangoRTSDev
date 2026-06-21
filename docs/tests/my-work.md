@@ -27,7 +27,7 @@ MW12 - My Work matrix cells group work by GVIC role and priority bucket.
 MW13 - Role buckets sort generated, verified, consulted, then informed.
 MW14 - Priority buckets sort 1, 2, 3, 4, 5, then no priority.
 MW15 - Active project rows are included in My Work, while done, complete, completed, closed, and archived projects are excluded.
-MW16 - Direct project GVIC assignments can appear as project rows even when the project has no logic gate or node children.
+MW16 - 
 MW17 - Nodes and logic gates nest under their project and logic gate context when that context exists.
 MW18 - Logic gates and nodes without project context can appear as root-level work rows.
 MW19 - Resources the viewer cannot view are filtered out of My Work.
@@ -38,7 +38,14 @@ MW23 - Malformed or duplicate saved grouping settings are normalized before use.
 MW24 - Opening a My Work row routes to the corresponding project, logic gate, or node surface.
 MW25 - Expanding/collapsing grouping rows is separate from opening the work item.
 MW26 - Drag/drop or empty-cell creation from My Work carries the selected priority and creator GVIC role into the created work item.
-MW27-
+MW27- A person/group can only have one GVIC assignment per node or logic gate.
+MW28 - My Work is node-leaf driven only.
+MW29 - Projects and logic gates are display containers only.
+MW30 - A node leaf determines gvic_assignment and priority
+MW31 - If a node is assigned to a logic gate, the node defers to the logic gate’s GVIC assignment.
+MW32 - The projection table should store the relationship path needed to render My Work directly.
+MW33 - Frontend should not recursively derive this or lazy-fetch branches for My Work.
+
 
 ## Scenarios
 

@@ -290,6 +290,19 @@ select exists(
 		var result sql.Result
 		switch operation {
 		case LogicGateGVICCommandAdd:
+			if _, err = tx.ExecContext(ctx, `
+delete from resource_gvic_assignments
+where company_id=$1::uuid
+  and resource_type=$2
+  and resource_id=$3::uuid
+  and principal_type=$4
+  and principal_id::text=$5
+  and role<>$6`, companyID, EntityTypeLogicGate, logicGateID, assignment.principalType, assignment.principalID, assignment.role); err != nil {
+				if isPostgresUndefinedTable(err, "resource_gvic_assignments") {
+					return LogicGateGVICAssignmentCommandResult{}, ErrGVICStorageUnavailable
+				}
+				return LogicGateGVICAssignmentCommandResult{}, err
+			}
 			result, err = tx.ExecContext(ctx, `
 insert into resource_gvic_assignments (
   company_id,

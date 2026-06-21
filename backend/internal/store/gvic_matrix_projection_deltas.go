@@ -9,16 +9,27 @@ import (
 
 func GVICMatrixProjectionRowKey(row GVICMatrixProjectionRow) ProjectionRowKey {
 	return ProjectionRowKey{
-		UserID:       strings.TrimSpace(row.UserID),
-		ResourceType: strings.TrimSpace(row.ResourceType),
-		ResourceID:   strings.TrimSpace(row.ResourceID),
+		ItemID:             strings.TrimSpace(row.ItemID),
+		UserID:             strings.TrimSpace(row.UserID),
+		ResourceType:       strings.TrimSpace(row.ResourceType),
+		ResourceID:         strings.TrimSpace(row.ResourceID),
+		GVICAssignment:     strings.TrimSpace(firstNonEmpty(row.GVICAssignment, row.Role)),
+		ProjectID:          strings.TrimSpace(row.ProjectID),
+		LogicGateID:        strings.TrimSpace(pointerStringValue(row.LogicGateID)),
+		NodeID:             strings.TrimSpace(firstNonEmpty(row.NodeLeafID, row.NodeID)),
+		NodeLeafID:         strings.TrimSpace(firstNonEmpty(row.NodeLeafID, row.NodeID)),
+		ParentResourceType: strings.TrimSpace(row.ParentResourceType),
+		ParentResourceID:   strings.TrimSpace(row.ParentResourceID),
 	}
 }
 
 func GVICMatrixProjectionRowKeyString(key ProjectionRowKey) string {
+	itemID := strings.TrimSpace(key.ItemID)
+	if itemID != "" {
+		return strings.TrimSpace(key.UserID) + ":" + itemID
+	}
 	return strings.TrimSpace(key.UserID) + ":" + strings.TrimSpace(key.ResourceType) + ":" + strings.TrimSpace(key.ResourceID)
 }
-
 func cloneGVICMatrixProjectionRow(row GVICMatrixProjectionRow) GVICMatrixProjectionRow {
 	out := row
 	out.LogicGateID = cloneStringPointer(row.LogicGateID)
