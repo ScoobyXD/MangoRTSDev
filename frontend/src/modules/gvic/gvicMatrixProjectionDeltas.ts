@@ -5,10 +5,11 @@ export type GVICMatrixProjectionDeltaOperation = "upsert" | "delete" | "patch";
 export type GVICMatrixProjectionRowKey = {
   company_id?: string;
   user_id?: string;
-  item_id?: string;
-  resource_type?: GVICMatrixProjectionRow["resource_type"] | string;
-  resource_id?: string;
-  node_leaf_id?: string;
+  projection_row_id?: string;
+  node_id?: string;
+  gvic_assignment?: string;
+  project_id?: string;
+  logic_gate_id?: string;
 };
 
 export type GVICMatrixProjectionDelta = {
@@ -79,26 +80,16 @@ function cleanString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function rowResourceType(value: unknown): GVICMatrixProjectionRow["resource_type"] | "" {
-  const clean = cleanString(value);
-  return clean === "project" || clean === "node" || clean === "logic_gate" ? clean : "";
-}
-
-function rowKey(resourceType: string, resourceID: string, itemID = ""): string {
-  const cleanItemID = cleanString(itemID);
-  return cleanItemID || `${resourceType}\u0000${resourceID}`;
+function rowKey(projectionRowID: string): string {
+  return cleanString(projectionRowID);
 }
 
 function deltaUserID(delta: GVICMatrixProjectionDelta): string {
   return cleanString(delta.row?.user_id) || cleanString(delta.row_key?.user_id);
 }
 
-function deltaResourceType(delta: GVICMatrixProjectionDelta): GVICMatrixProjectionRow["resource_type"] | "" {
-  return rowResourceType(delta.row?.resource_type) || rowResourceType(delta.row_key?.resource_type);
-}
-
-function deltaResourceID(delta: GVICMatrixProjectionDelta): string {
-  return cleanString(delta.row?.resource_id) || cleanString(delta.row_key?.resource_id);
+function deltaProjectionRowID(delta: GVICMatrixProjectionDelta): string {
+  return cleanString(delta.row?.projection_row_id) || cleanString(delta.row_key?.projection_row_id);
 }
 
 function requestFallback(result: GVICMatrixProjectionApplyResult, reason: GVICMatrixProjectionFallbackReason): GVICMatrixProjectionApplyResult {
@@ -110,15 +101,19 @@ function applyPatchToRow(row: GVICMatrixProjectionRow, patch: Partial<GVICMatrix
     ...row,
     ...patch,
     company_id: cleanString(patch.company_id) || row.company_id,
+    projection_row_id: cleanString(patch.projection_row_id) || row.projection_row_id,
     user_id: cleanString(patch.user_id) || row.user_id,
-    resource_type: rowResourceType(patch.resource_type) || row.resource_type,
-    resource_id: cleanString(patch.resource_id) || row.resource_id,
-    display_title: typeof patch.display_title === "string" ? patch.display_title : row.display_title,
+    node_name: typeof patch.node_name === "string" ? patch.node_name : row.node_name,
+    gvic_assignment: typeof patch.gvic_assignment === "string" ? patch.gvic_assignment : row.gvic_assignment,
+    project_id: Object.prototype.hasOwnProperty.call(patch, "project_id") ? patch.project_id : row.project_id,
+    project_name: Object.prototype.hasOwnProperty.call(patch, "project_name") ? patch.project_name : row.project_name,
     logic_gate_id: Object.prototype.hasOwnProperty.call(patch, "logic_gate_id") ? patch.logic_gate_id : row.logic_gate_id,
+    logic_gate_name: Object.prototype.hasOwnProperty.call(patch, "logic_gate_name") ? patch.logic_gate_name : row.logic_gate_name,
+    node_id: cleanString(patch.node_id) || row.node_id,
     status: Object.prototype.hasOwnProperty.call(patch, "status") ? patch.status : row.status,
     due_date: Object.prototype.hasOwnProperty.call(patch, "due_date") ? patch.due_date : row.due_date,
     priority: Object.prototype.hasOwnProperty.call(patch, "priority") ? patch.priority : row.priority,
-    resource_created_timestamp: typeof patch.resource_created_timestamp === "string" ? patch.resource_created_timestamp : row.resource_created_timestamp,
+    created_timestamp: typeof patch.created_timestamp === "string" ? patch.created_timestamp : row.created_timestamp,
     updated_timestamp: typeof patch.updated_timestamp === "string" ? patch.updated_timestamp : row.updated_timestamp,
   };
 }
@@ -157,7 +152,7 @@ export function applyGVICMatrixProjectionEnvelope(input: GVICMatrixProjectionApp
   const deltas = deltaList(input.envelope);
   if (!deltas) return requestFallback(result, "invalid_envelope");
 
-  const byKey = new Map(input.rows.map((row) => [rowKey(row.resource_type, row.resource_id, row.item_id), row]));
+  const byKey = new Map(input.rows.map((row) => [rowKey(row.projection_row_id), row]));
   for (const delta of deltas) {
     if (!delta || typeof delta !== "object") return requestFallback(result, "invalid_delta");
     if (cleanString(delta.company_id) && cleanString(delta.company_id) !== companyID) {
@@ -171,25 +166,24 @@ export function applyGVICMatrixProjectionEnvelope(input: GVICMatrixProjectionApp
     if (operation !== "upsert" && operation !== "delete" && operation !== "patch") {
       return requestFallback(result, "unknown_delta_operation");
     }
-    const resourceType = deltaResourceType(delta);
-    const resourceID = deltaResourceID(delta);
-    if (!resourceType || !resourceID) return requestFallback(result, "missing_row_key");
-    const key = rowKey(resourceType, resourceID, cleanString(delta.row?.item_id) || cleanString(delta.row_key?.item_id));
+    const projectionRowID = deltaProjectionRowID(delta);
+    if (!projectionRowID) return requestFallback(result, "missing_row_key");
+    const key = rowKey(projectionRowID);
 
     if (operation === "delete") {
       if (byKey.delete(key)) {
         result.changed = true;
-        result.removedRowKeys.push({ user_id: userID, item_id: cleanString(delta.row_key?.item_id), resource_type: resourceType, resource_id: resourceID, node_leaf_id: cleanString(delta.row_key?.node_leaf_id) });
+        result.removedRowKeys.push({ user_id: userID, projection_row_id: projectionRowID, node_id: cleanString(delta.row_key?.node_id) || cleanString(delta.row?.node_id) });
       }
       continue;
     }
 
     if (operation === "upsert") {
       const row = delta.row;
-      if (!row || row.company_id?.trim() !== companyID || row.user_id?.trim() !== userID) {
+      if (!row || row.company_id?.trim() !== companyID || row.user_id?.trim() !== userID || !cleanString(row.projection_row_id) || !cleanString(row.node_id)) {
         return requestFallback(result, "missing_row");
       }
-      byKey.set(key, row);
+      byKey.set(rowKey(row.projection_row_id), row);
       result.changed = true;
       result.upsertedRows.push(row);
       continue;

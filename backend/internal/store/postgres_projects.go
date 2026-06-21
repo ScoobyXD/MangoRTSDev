@@ -256,6 +256,14 @@ func (r *PostgresRepo) UpdateProject(input ProjectInput) (ProjectMutationResult,
 		return ProjectMutationResult{}, err
 	}
 	defer tx.Rollback()
+	GVICMatrixNodeIDs, GVICMatrixLogicGateIDs, err := postgresGVICMatrixProjectAffectedResourceIDsTx(ctx, tx, input.CompanyID, input.ProjectID)
+	if err != nil {
+		return ProjectMutationResult{}, err
+	}
+	GVICMatrixBefore, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, GVICMatrixNodeIDs, GVICMatrixLogicGateIDs)
+	if err != nil {
+		return ProjectMutationResult{}, err
+	}
 	args := []any{input.CompanyID, input.ProjectID, input.Name, input.Status, input.Health}
 	query := `
 with updated as (
@@ -291,10 +299,21 @@ from updated project`
 	if err != nil {
 		return ProjectMutationResult{}, err
 	}
+	if err := syncPostgresGVICMatrixProjectionForProjectResourcesTx(ctx, tx, input.CompanyID, GVICMatrixNodeIDs, GVICMatrixLogicGateIDs); err != nil {
+		return ProjectMutationResult{}, err
+	}
+	GVICMatrixAfter, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, GVICMatrixNodeIDs, GVICMatrixLogicGateIDs)
+	if err != nil {
+		return ProjectMutationResult{}, err
+	}
+	projectionDeltas := diffGVICMatrixProjectionRows(GVICMatrixBefore, GVICMatrixAfter)
+	if _, err := r.appendEventRowsTx(ctx, tx, GVICMatrixProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
+		return ProjectMutationResult{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return ProjectMutationResult{}, err
 	}
-	return ProjectMutationResult{Project: &project}, nil
+	return ProjectMutationResult{Project: &project, ProjectionDeltas: projectionDeltas}, nil
 }
 
 func (r *PostgresRepo) DeleteProject(companyID, projectID, actorUserID string) (ProjectMutationResult, error) {
@@ -309,13 +328,86 @@ func (r *PostgresRepo) DeleteProject(companyID, projectID, actorUserID string) (
 		return ProjectMutationResult{}, err
 	}
 	defer tx.Rollback()
+	GVICMatrixNodeIDs, GVICMatrixLogicGateIDs, err := postgresGVICMatrixProjectAffectedResourceIDsTx(ctx, tx, companyID, projectID)
+	if err != nil {
+		return ProjectMutationResult{}, err
+	}
+	GVICMatrixBefore, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, GVICMatrixNodeIDs, GVICMatrixLogicGateIDs)
+	if err != nil {
+		return ProjectMutationResult{}, err
+	}
 	if err := postgresDeleteProjectTx(ctx, tx, companyID, projectID); err != nil {
+		return ProjectMutationResult{}, err
+	}
+	if err := syncPostgresGVICMatrixProjectionForProjectResourcesTx(ctx, tx, companyID, GVICMatrixNodeIDs, GVICMatrixLogicGateIDs); err != nil {
+		return ProjectMutationResult{}, err
+	}
+	GVICMatrixAfter, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, GVICMatrixNodeIDs, GVICMatrixLogicGateIDs)
+	if err != nil {
+		return ProjectMutationResult{}, err
+	}
+	projectionDeltas := diffGVICMatrixProjectionRows(GVICMatrixBefore, GVICMatrixAfter)
+	if _, err := r.appendEventRowsTx(ctx, tx, GVICMatrixProjectionDeltaEventInputs(companyID, actorUserID, "", projectionDeltas)); err != nil {
 		return ProjectMutationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return ProjectMutationResult{}, err
 	}
-	return ProjectMutationResult{DeletedID: projectID}, nil
+	return ProjectMutationResult{DeletedID: projectID, ProjectionDeltas: projectionDeltas}, nil
+}
+
+func postgresGVICMatrixProjectAffectedResourceIDsTx(ctx context.Context, tx *sql.Tx, companyID, projectID string) ([]string, []string, error) {
+	companyID = cleanUUIDText(companyID)
+	projectID = cleanUUIDText(projectID)
+	if ctx == nil || tx == nil || companyID == "" || projectID == "" {
+		return nil, nil, ErrInvalid
+	}
+	rows, err := tx.QueryContext(ctx, `
+select distinct node_id::text, logic_gate_id::text
+from project_relationship_projection
+where company_id=$1::uuid
+  and project_id=$2::uuid`, companyID, projectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	nodeSet := map[string]bool{}
+	logicGateSet := map[string]bool{}
+	for rows.Next() {
+		var nodeID sql.NullString
+		var logicGateID sql.NullString
+		if err := rows.Scan(&nodeID, &logicGateID); err != nil {
+			return nil, nil, err
+		}
+		if nodeID.Valid {
+			if clean := cleanUUIDText(nodeID.String); clean != "" {
+				nodeSet[clean] = true
+			}
+		}
+		if logicGateID.Valid {
+			if clean := cleanUUIDText(logicGateID.String); clean != "" {
+				logicGateSet[clean] = true
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return mapKeys(nodeSet), mapKeys(logicGateSet), nil
+}
+
+func syncPostgresGVICMatrixProjectionForProjectResourcesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs, logicGateIDs []string) error {
+	for _, nodeID := range cleanUUIDTextSlice(nodeIDs) {
+		if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return err
+		}
+	}
+	for _, logicGateID := range cleanUUIDTextSlice(logicGateIDs) {
+		if err := syncPostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *PostgresRepo) GetProject(companyID, projectID string) (domain.Project, error) {
@@ -943,7 +1035,9 @@ returning relationship_id::text`, input.CompanyID, input.RelationshipID, input.P
 	if err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
+	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)
+	eventInputs = append(eventInputs, GVICMatrixProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)...)
+	if _, err := r.appendEventRowsTx(ctx, tx, eventInputs); err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -991,7 +1085,9 @@ where company_id=$1::uuid
 	if err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
+	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)
+	eventInputs = append(eventInputs, GVICMatrixProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)...)
+	if _, err := r.appendEventRowsTx(ctx, tx, eventInputs); err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {

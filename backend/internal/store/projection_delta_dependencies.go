@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -358,6 +359,33 @@ func applyProjectRelationshipProjectionDeltaDependenciesTx(ctx context.Context, 
 			return nil, err
 		}
 	}
+	gvicNodeSet := map[string]bool{}
+	gvicLogicGateSet := map[string]bool{}
+	addProjectRelationshipGVICMatrixResourceIDs(gvicNodeSet, gvicLogicGateSet, before)
+	if nodeID != "" {
+		gvicNodeSet[nodeID] = true
+	}
+	if logicGateID != "" {
+		gvicLogicGateSet[logicGateID] = true
+	}
+	if relationshipID != "" && !input.Delete {
+		resourceType, resourceID, err := projectRelationshipSourceResourceTx(ctx, tx, companyID, relationshipID)
+		if err != nil {
+			return nil, err
+		}
+		switch resourceType {
+		case EntityTypeNode:
+			gvicNodeSet[resourceID] = true
+		case EntityTypeLogicGate:
+			gvicLogicGateSet[resourceID] = true
+		}
+	}
+	gvicNodeIDs := mapKeys(gvicNodeSet)
+	gvicLogicGateIDs := mapKeys(gvicLogicGateSet)
+	gvicBefore, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, gvicNodeIDs, gvicLogicGateIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	switch {
 	case input.Delete:
@@ -405,7 +433,53 @@ func applyProjectRelationshipProjectionDeltaDependenciesTx(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	return diffProjectRelationshipProjectionRows(before, after), nil
+	addProjectRelationshipGVICMatrixResourceIDs(gvicNodeSet, gvicLogicGateSet, after)
+	gvicNodeIDs = mapKeys(gvicNodeSet)
+	gvicLogicGateIDs = mapKeys(gvicLogicGateSet)
+	if err := syncPostgresGVICMatrixProjectionForProjectResourcesTx(ctx, tx, companyID, gvicNodeIDs, gvicLogicGateIDs); err != nil {
+		return nil, err
+	}
+	gvicAfter, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, gvicNodeIDs, gvicLogicGateIDs)
+	if err != nil {
+		return nil, err
+	}
+	deltas := diffProjectRelationshipProjectionRows(before, after)
+	deltas = append(deltas, diffGVICMatrixProjectionRows(gvicBefore, gvicAfter)...)
+	return deltas, nil
+}
+
+func addProjectRelationshipGVICMatrixResourceIDs(nodeSet, logicGateSet map[string]bool, rows []ProjectRelationshipProjectionRow) {
+	for _, row := range rows {
+		resourceType := strings.TrimSpace(row.ResourceType)
+		resourceID := strings.TrimSpace(row.ResourceID)
+		switch resourceType {
+		case EntityTypeNode:
+			if resourceID != "" {
+				nodeSet[resourceID] = true
+			}
+		case EntityTypeLogicGate:
+			if resourceID != "" {
+				logicGateSet[resourceID] = true
+			}
+		}
+	}
+}
+
+func projectRelationshipSourceResourceTx(ctx context.Context, tx *sql.Tx, companyID, relationshipID string) (string, string, error) {
+	var resourceType string
+	var resourceID string
+	err := tx.QueryRowContext(ctx, `
+select resource_type, resource_id::text
+from project_relationships
+where company_id=$1::uuid
+  and relationship_id=$2::uuid`, companyID, relationshipID).Scan(&resourceType, &resourceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", ErrNotFound
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(resourceType), strings.TrimSpace(resourceID), nil
 }
 
 func syncProjectRelationshipProjectionForRelationshipTx(ctx context.Context, tx *sql.Tx, companyID, relationshipID string) error {

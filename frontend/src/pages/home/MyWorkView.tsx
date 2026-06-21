@@ -1244,11 +1244,10 @@ function collectMyWorkGroupRows(group: MyWorkNestedGroup): MyWorkResourceRow[] {
 function myWorkMatrixCellTreeStats(cells: MyWorkMatrixCellWithUser[]): MyWorkTreeStats {
   const stats = emptyMyWorkTreeStats(cells.length);
   for (const row of cells) {
-    const depth = Number.isFinite(Number(row.depth)) ? Number(row.depth) + 1 : 1;
-    stats.maxDepth = Math.max(stats.maxDepth, depth);
-    if (row.resource_type === "project") stats.projects += 1;
-    else if (row.resource_type === "logic_gate") stats.logicGates += 1;
-    else if (row.resource_type === "node") stats.nodes += 1;
+    stats.maxDepth = Math.max(stats.maxDepth, 1);
+    if (row.project_id?.trim()) stats.projects += 1;
+    if (row.logic_gate_id?.trim()) stats.logicGates += 1;
+    if (row.node_id?.trim()) stats.nodes += 1;
     stats.total += 1;
   }
   return stats;
@@ -1571,25 +1570,22 @@ function buildMyWorkRowsFromMatrix({
 }): MyWorkResourceRow[] {
   const rows: MyWorkResourceRow[] = [];
   for (const item of matrixCells) {
-    const role = normalizeGVICRole(item.gvic_assignment ?? item.role);
+    const role = normalizeGVICRole(item.gvic_assignment);
     if (!role) continue;
-    const kind = normalizeMyWorkResourceKind(item.resource_type);
-    if (!kind) continue;
     const userID = item.userID.trim() || item.user_id?.trim() || "";
-    const resourceID = item.resource_id?.trim() || "";
-    if (!resourceID) continue;
-    const logicGateID = (typeof item.logic_gate_id === "string" ? item.logic_gate_id : "")?.trim() || (kind === "logic_gate" ? resourceID : "");
-    const projectID = item.project_id?.trim() || (kind === "project" ? resourceID : "");
-    const nodeLeafID = item.node_leaf_id?.trim() || (kind === "node" ? resourceID : "");
-    const title = item.display_title?.trim() || resourceID;
-    const projectName = kind === "project" ? title : item.project_name?.trim() || projectID;
-    const logicGateName = kind === "logic_gate" ? title : logicGateID;
+    const nodeID = item.node_id?.trim() || "";
+    if (!nodeID) continue;
+    const logicGateID = item.logic_gate_id?.trim() || "";
+    const projectID = item.project_id?.trim() || "";
+    const title = item.node_name?.trim() || nodeID;
+    const projectName = item.project_name?.trim() || projectID;
+    const logicGateName = item.logic_gate_name?.trim() || logicGateID;
     const people = userID ? [personForUserID(userID, userByID)] : [];
     rows.push({
-      rowKey: item.item_id?.trim() || `${userID}:${role}:${item.resource_type}:${resourceID}:${nodeLeafID}`,
+      rowKey: item.projection_row_id?.trim() || `${userID}:${role}:node:${nodeID}:project:${projectID || "none"}:logic_gate:${logicGateID || "none"}`,
       companyID: item.companyID || item.company_id,
-      kind,
-      id: resourceID,
+      kind: "node",
+      id: nodeID,
       title,
       status: item.status,
       dueDate: item.due_date,
@@ -1605,12 +1601,10 @@ function buildMyWorkRowsFromMatrix({
       projectName,
       logicGateLabels: logicGateName ? [logicGateName] : [],
       logicGateIDs: logicGateID ? [logicGateID] : [],
-      parentResourceType: item.parent_resource_type,
-      parentResourceID: item.parent_resource_id,
-      nodeLeafID,
-      depth: Number.isFinite(Number(item.depth)) ? Number(item.depth) : 0,
+      nodeLeafID: nodeID,
+      depth: 0,
       sortOrder: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : 0,
-      isContainerRow: item.is_container_row === true,
+      isContainerRow: false,
       children: [],
     });
   }
@@ -1618,10 +1612,6 @@ function buildMyWorkRowsFromMatrix({
   return sortMyWorkRows(rows);
 }
 
-function normalizeMyWorkResourceKind(value: string | null | undefined): MyWorkResourceRow["kind"] | "" {
-  if (value === "project" || value === "logic_gate" || value === "node") return value;
-  return "";
-}
 function nodeRecordFromMyWorkRow(row: MyWorkResourceRow): NodeRecord | null {
   if (row.kind !== "node") return null;
   return {

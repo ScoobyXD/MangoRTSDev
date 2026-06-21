@@ -9,6 +9,7 @@ import (
 
 func GVICMatrixProjectionRowKey(row GVICMatrixProjectionRow) ProjectionRowKey {
 	return ProjectionRowKey{
+		ProjectionRowID:    strings.TrimSpace(row.ProjectionRowID),
 		ItemID:             strings.TrimSpace(row.ItemID),
 		UserID:             strings.TrimSpace(row.UserID),
 		ResourceType:       strings.TrimSpace(row.ResourceType),
@@ -16,7 +17,7 @@ func GVICMatrixProjectionRowKey(row GVICMatrixProjectionRow) ProjectionRowKey {
 		GVICAssignment:     strings.TrimSpace(firstNonEmpty(row.GVICAssignment, row.Role)),
 		ProjectID:          strings.TrimSpace(row.ProjectID),
 		LogicGateID:        strings.TrimSpace(pointerStringValue(row.LogicGateID)),
-		NodeID:             strings.TrimSpace(firstNonEmpty(row.NodeLeafID, row.NodeID)),
+		NodeID:             strings.TrimSpace(firstNonEmpty(row.NodeID, row.NodeLeafID)),
 		NodeLeafID:         strings.TrimSpace(firstNonEmpty(row.NodeLeafID, row.NodeID)),
 		ParentResourceType: strings.TrimSpace(row.ParentResourceType),
 		ParentResourceID:   strings.TrimSpace(row.ParentResourceID),
@@ -24,9 +25,17 @@ func GVICMatrixProjectionRowKey(row GVICMatrixProjectionRow) ProjectionRowKey {
 }
 
 func GVICMatrixProjectionRowKeyString(key ProjectionRowKey) string {
+	projectionRowID := strings.TrimSpace(key.ProjectionRowID)
+	if projectionRowID != "" {
+		return strings.TrimSpace(key.UserID) + ":" + projectionRowID
+	}
 	itemID := strings.TrimSpace(key.ItemID)
 	if itemID != "" {
 		return strings.TrimSpace(key.UserID) + ":" + itemID
+	}
+	nodeID := strings.TrimSpace(firstNonEmpty(key.NodeID, key.NodeLeafID))
+	if nodeID != "" {
+		return strings.TrimSpace(key.UserID) + ":" + strings.TrimSpace(key.GVICAssignment) + ":" + nodeID + ":" + strings.TrimSpace(key.ProjectID) + ":" + strings.TrimSpace(key.LogicGateID)
 	}
 	return strings.TrimSpace(key.UserID) + ":" + strings.TrimSpace(key.ResourceType) + ":" + strings.TrimSpace(key.ResourceID)
 }

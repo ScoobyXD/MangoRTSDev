@@ -13,16 +13,13 @@ function myWorkProjectionRow(userID: string, gvicAssignment: string, priority: n
   const nodeID = `${userID}:node-1`;
   return {
     company_id: "company-cache-test",
+    projection_row_id: `my_work_node_leaf:company-cache-test:${userID}:${gvicAssignment}:${priority}:node:${nodeID}:project:none:logic_gate:none`,
     user_id: userID,
-    item_id: `${userID}:${gvicAssignment}:${nodeID}`,
+    node_name: "Node",
     gvic_assignment: gvicAssignment,
-    role: gvicAssignment,
-    resource_type: "node" as const,
-    resource_id: nodeID,
-    node_leaf_id: nodeID,
-    display_title: "Node",
     priority,
-    resource_created_timestamp: "2026-01-01T00:00:00Z",
+    node_id: nodeID,
+    created_timestamp: "2026-01-01T00:00:00Z",
     updated_timestamp: "2026-01-01T00:00:00Z",
   };
 }

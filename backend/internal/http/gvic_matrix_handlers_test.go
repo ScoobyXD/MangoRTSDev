@@ -48,11 +48,8 @@ func TestGVICMatrixNodeCreateAndMoveV2(t *testing.T) {
 		t.Fatalf("create response projection rows = %+v, want fast-return response without projection rows", createPayload.GVICMatrixProjectionRows)
 	}
 	createProjectionRows := getGVICMatrixProjectionRowsForTest(t, handler, companyID, editor)
-	if !projectionRowsContainResource(createProjectionRows, "logic_gate", createPayload.LogicGate.LogicGateID) {
-		t.Fatalf("projection refetch rows missing created gate row: %+v", createProjectionRows)
-	}
-	if !projectionRowsContainResource(createProjectionRows, "node", createPayload.Node.NodeID) {
-		t.Fatalf("projection refetch rows missing created node row: %+v", createProjectionRows)
+	if !projectionRowsContainNodeGate(createProjectionRows, createPayload.Node.NodeID, createPayload.LogicGate.LogicGateID) {
+		t.Fatalf("projection refetch rows missing created node leaf path: %+v", createProjectionRows)
 	}
 
 	targetGate, err := repo.CreateGVICMatrixNode(store.GVICMatrixNodeCreateInput{
@@ -92,8 +89,8 @@ func TestGVICMatrixNodeCreateAndMoveV2(t *testing.T) {
 		t.Fatalf("move response projection rows = %+v, want fast-return response without projection rows", movePayload.GVICMatrixProjectionRows)
 	}
 	moveProjectionRows := getGVICMatrixProjectionRowsForTest(t, handler, companyID, editor)
-	if !projectionRowsContainNodeGate(moveProjectionRows, createPayload.Node.NodeID, targetGate.LogicGate.LogicGateID) {
-		t.Fatalf("move projection refetch rows = %+v, want node projected under target gate", moveProjectionRows)
+	if projectionRowsContainNodeGate(moveProjectionRows, createPayload.Node.NodeID, targetGate.LogicGate.LogicGateID) {
+		t.Fatalf("move projection refetch rows = %+v, want done node removed from active My Work projection", moveProjectionRows)
 	}
 }
 
@@ -212,18 +209,9 @@ func getGVICMatrixProjectionRowsForTest(t *testing.T, handler http.Handler, comp
 	return payload.Rows
 }
 
-func projectionRowsContainResource(rows []store.GVICMatrixProjectionRow, resourceType, resourceID string) bool {
-	for _, row := range rows {
-		if row.ResourceType == resourceType && row.ResourceID == resourceID {
-			return true
-		}
-	}
-	return false
-}
-
 func projectionRowsContainNodeGate(rows []store.GVICMatrixProjectionRow, nodeID, logicGateID string) bool {
 	for _, row := range rows {
-		if row.ResourceType == "node" && row.ResourceID == nodeID && row.LogicGateID != nil && *row.LogicGateID == logicGateID {
+		if row.NodeID == nodeID && row.LogicGateID != nil && *row.LogicGateID == logicGateID {
 			return true
 		}
 	}

@@ -53,15 +53,10 @@ export type GVICMatrixProjectionResponse = {
 
 export type MyWorkMatrixRow = GVICMatrixProjectionRow & {
   gvic_assignment?: LogicGateGVICRole | string;
-  role?: LogicGateGVICRole | string;
   project_id?: string;
   project_name?: string;
-  parent_resource_type?: "project" | "logic_gate" | "node" | string;
-  parent_resource_id?: string;
-  node_leaf_id?: string;
-  depth?: number;
-  sort_order?: number;
-  is_container_row?: boolean;
+  logic_gate_id?: string;
+  logic_gate_name?: string;
 };
 
 export type MyWorkMatrixResponse = {

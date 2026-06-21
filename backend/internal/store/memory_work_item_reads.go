@@ -4,6 +4,7 @@ import (
 	"context"
 	"miraeopus/backend/internal/domain"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -333,52 +334,61 @@ func (r *MemoryRepo) GVICMatrixProjectionRowsForResourcesLocked(companyID string
 		}
 	}
 	items := make([]GVICMatrixProjectionRow, 0)
+	seen := map[string]bool{}
 	for _, row := range r.GVICMatrixProjectionRows {
-		if row.CompanyID != companyID {
+		if row.CompanyID != companyID || row.ResourceType != GVICMatrixProjectionResourceNode {
 			continue
 		}
-		if row.ResourceType == GVICMatrixProjectionResourceNode && !nodeSet[row.ResourceID] {
+		nodeMatches := len(nodeSet) > 0 && nodeSet[row.ResourceID]
+		logicGateMatches := len(logicGateSet) > 0 && logicGateSet[row.LogicGateID]
+		if !nodeMatches && !logicGateMatches {
 			continue
 		}
-		if row.ResourceType == GVICMatrixProjectionResourceLogicGate && !logicGateSet[row.ResourceID] {
-			continue
+		for _, item := range r.myWorkFlatPathRowsForNodeProjectionLocked(row) {
+			key := GVICMatrixProjectionRowKeyString(GVICMatrixProjectionRowKey(item))
+			if key == ":" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			items = append(items, item)
 		}
-		if row.ResourceType != GVICMatrixProjectionResourceNode && row.ResourceType != GVICMatrixProjectionResourceLogicGate {
-			continue
-		}
-		items = append(items, memoryGVICMatrixProjectionRowToDTO(row))
 	}
 	sort.Slice(items, func(i, j int) bool {
-		if items[i].ResourceType != items[j].ResourceType {
-			return items[i].ResourceType < items[j].ResourceType
+		if items[i].UserID != items[j].UserID {
+			return items[i].UserID < items[j].UserID
 		}
-		if items[i].ResourceID != items[j].ResourceID {
-			return items[i].ResourceID < items[j].ResourceID
+		if items[i].ProjectionRowID != items[j].ProjectionRowID {
+			return items[i].ProjectionRowID < items[j].ProjectionRowID
 		}
-		return items[i].UserID < items[j].UserID
+		return items[i].NodeID < items[j].NodeID
 	})
 	return items
 }
 
 func (r *MemoryRepo) GVICMatrixProjectionRowsForLogicGateLocked(companyID, logicGateID string) []GVICMatrixProjectionRow {
 	items := make([]GVICMatrixProjectionRow, 0)
+	seen := map[string]bool{}
 	for _, row := range r.GVICMatrixProjectionRows {
-		if row.CompanyID != companyID || row.LogicGateID != logicGateID {
+		if row.CompanyID != companyID || row.ResourceType != GVICMatrixProjectionResourceNode || row.LogicGateID != logicGateID {
 			continue
 		}
-		if row.ResourceType != GVICMatrixProjectionResourceNode && row.ResourceType != GVICMatrixProjectionResourceLogicGate {
-			continue
+		for _, item := range r.myWorkFlatPathRowsForNodeProjectionLocked(row) {
+			key := GVICMatrixProjectionRowKeyString(GVICMatrixProjectionRowKey(item))
+			if key == ":" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			items = append(items, item)
 		}
-		items = append(items, memoryGVICMatrixProjectionRowToDTO(row))
 	}
 	sort.Slice(items, func(i, j int) bool {
-		if items[i].ResourceType != items[j].ResourceType {
-			return items[i].ResourceType < items[j].ResourceType
+		if items[i].UserID != items[j].UserID {
+			return items[i].UserID < items[j].UserID
 		}
-		if items[i].ResourceID != items[j].ResourceID {
-			return items[i].ResourceID < items[j].ResourceID
+		if items[i].ProjectionRowID != items[j].ProjectionRowID {
+			return items[i].ProjectionRowID < items[j].ProjectionRowID
 		}
-		return items[i].UserID < items[j].UserID
+		return items[i].NodeID < items[j].NodeID
 	})
 	return items
 }
@@ -402,26 +412,33 @@ func (r *MemoryRepo) ListGVICMatrixProjectionRowsForUser(query WorkItemInboxQuer
 	defer r.mu.RUnlock()
 	items := make([]GVICMatrixProjectionRow, 0)
 	for _, row := range r.GVICMatrixProjectionRows {
-		if row.CompanyID != query.CompanyID || row.UserID != query.UserID {
+		if row.CompanyID != query.CompanyID || row.UserID != query.UserID || row.ResourceType != GVICMatrixProjectionResourceNode {
 			continue
 		}
-		if row.ResourceType != GVICMatrixProjectionResourceNode && row.ResourceType != GVICMatrixProjectionResourceLogicGate {
+		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, EntityTypeNode, row.ResourceID, EntityPermissionEdit) {
 			continue
 		}
-		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, row.ResourceType, row.ResourceID, EntityPermissionEdit) {
-			continue
+		for _, item := range r.myWorkFlatPathRowsForNodeProjectionLocked(row) {
+			if !r.userCanReadMyWorkProjectionContextLocked(query.CompanyID, query.ViewerUserID, item) {
+				continue
+			}
+			items = append(items, item)
 		}
-		items = append(items, memoryGVICMatrixProjectionRowToDTO(row))
 	}
 	sort.Slice(items, func(i, j int) bool {
-		if items[i].ResourceType != items[j].ResourceType {
-			return items[i].ResourceType < items[j].ResourceType
+		if GVICRoleSortValue(items[i].GVICAssignment) != GVICRoleSortValue(items[j].GVICAssignment) {
+			return GVICRoleSortValue(items[i].GVICAssignment) < GVICRoleSortValue(items[j].GVICAssignment)
 		}
-		if !items[i].ResourceCreatedTimestamp.Equal(items[j].ResourceCreatedTimestamp) {
-			return items[i].ResourceCreatedTimestamp.Before(items[j].ResourceCreatedTimestamp)
+		leftPriority := myWorkProjectionPrioritySort(items[i].Priority)
+		rightPriority := myWorkProjectionPrioritySort(items[j].Priority)
+		if leftPriority != rightPriority {
+			return leftPriority < rightPriority
 		}
-		return items[i].ResourceID < items[j].ResourceID
+		return items[i].ProjectionRowID < items[j].ProjectionRowID
 	})
+	for index := range items {
+		items[index].SortOrder = index + 1
+	}
 	if query.Limit > 0 && len(items) > query.Limit {
 		items = items[:query.Limit]
 	}
@@ -454,7 +471,12 @@ func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatri
 		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, EntityTypeNode, row.ResourceID, EntityPermissionEdit) {
 			continue
 		}
-		items = append(items, r.myWorkFlatPathRowsForNodeProjectionLocked(row)...)
+		for _, item := range r.myWorkFlatPathRowsForNodeProjectionLocked(row) {
+			if !r.userCanReadMyWorkProjectionContextLocked(query.CompanyID, query.ViewerUserID, item) {
+				continue
+			}
+			items = append(items, item)
+		}
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if GVICRoleSortValue(items[i].GVICAssignment) != GVICRoleSortValue(items[j].GVICAssignment) {
@@ -479,13 +501,10 @@ func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatri
 		if leftGate != rightGate {
 			return leftGate < rightGate
 		}
-		if items[i].NodeLeafID != items[j].NodeLeafID {
-			return items[i].NodeLeafID < items[j].NodeLeafID
+		if strings.ToLower(items[i].NodeName) != strings.ToLower(items[j].NodeName) {
+			return strings.ToLower(items[i].NodeName) < strings.ToLower(items[j].NodeName)
 		}
-		if items[i].Depth != items[j].Depth {
-			return items[i].Depth < items[j].Depth
-		}
-		return items[i].ItemID < items[j].ItemID
+		return items[i].ProjectionRowID < items[j].ProjectionRowID
 	})
 	for index := range items {
 		items[index].SortOrder = index + 1
@@ -496,7 +515,27 @@ func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatri
 	return items, nil
 }
 
+func (r *MemoryRepo) userCanReadMyWorkProjectionContextLocked(companyID, viewerUserID string, row GVICMatrixProjectionRow) bool {
+	if row.LogicGateID != nil && strings.TrimSpace(*row.LogicGateID) != "" {
+		if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeLogicGate, strings.TrimSpace(*row.LogicGateID), EntityPermissionView) {
+			return false
+		}
+	}
+	if strings.TrimSpace(row.ProjectID) != "" {
+		if !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, strings.TrimSpace(row.ProjectID), EntityPermissionView) {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *MemoryRepo) myWorkFlatPathRowsForNodeProjectionLocked(row memoryGVICMatrixProjectionRow) []GVICMatrixProjectionRow {
+	if row.ResourceType != GVICMatrixProjectionResourceNode || strings.TrimSpace(row.ResourceID) == "" || strings.TrimSpace(row.Node.NodeID) == "" {
+		return nil
+	}
+	if workItemStatusDone(row.Node.Status) {
+		return nil
+	}
 	roles := r.myWorkRolesForProjectionRowLocked(row)
 	if len(roles) == 0 {
 		return nil
@@ -508,88 +547,77 @@ func (r *MemoryRepo) myWorkFlatPathRowsForNodeProjectionLocked(row memoryGVICMat
 	if len(projectContexts) == 0 {
 		projectContexts = []myWorkProjectContext{{}}
 	}
-	out := make([]GVICMatrixProjectionRow, 0, len(roles)*len(projectContexts)*3)
+	out := make([]GVICMatrixProjectionRow, 0, len(roles)*len(projectContexts))
 	for _, role := range roles {
 		for _, project := range projectContexts {
-			out = append(out, r.myWorkFlatPathRowsForNodeRoleLocked(row, role, project)...)
+			out = append(out, r.myWorkFlatPathRowForNodeRoleLocked(row, role, project))
 		}
 	}
 	return out
 }
 
-func (r *MemoryRepo) myWorkFlatPathRowsForNodeRoleLocked(row memoryGVICMatrixProjectionRow, role string, project myWorkProjectContext) []GVICMatrixProjectionRow {
+func (r *MemoryRepo) myWorkFlatPathRowForNodeRoleLocked(row memoryGVICMatrixProjectionRow, role string, project myWorkProjectContext) GVICMatrixProjectionRow {
 	nodeID := strings.TrimSpace(row.ResourceID)
 	logicGateID := strings.TrimSpace(row.LogicGateID)
 	projectID := strings.TrimSpace(project.projectID)
 	projectName := strings.TrimSpace(project.projectName)
-	nodeBase := memoryGVICMatrixProjectionRowToDTO(row)
-	nodeBase.GVICAssignment = role
-	nodeBase.Role = role
-	nodeBase.NodeLeafID = nodeID
-	nodeBase.ProjectID = projectID
-	nodeBase.ProjectName = projectName
-	nodeBase.IsContainerRow = false
-	if projectID != "" {
-		nodeBase.ParentResourceType = EntityTypeProject
-		nodeBase.ParentResourceID = projectID
-		nodeBase.Depth = 1
-	}
+	logicGateName := ""
 	if logicGateID != "" {
-		nodeBase.ParentResourceType = EntityTypeLogicGate
-		nodeBase.ParentResourceID = logicGateID
-		if projectID != "" {
-			nodeBase.Depth = 2
-		} else {
-			nodeBase.Depth = 1
-		}
-	}
-	nodeBase.ItemID = memoryMyWorkItemID(row, role, projectID, EntityTypeNode, nodeID)
-	rows := make([]GVICMatrixProjectionRow, 0, 3)
-	if projectID != "" {
-		projectRow := nodeBase
-		projectRow.ItemID = memoryMyWorkItemID(row, role, projectID, EntityTypeProject, projectID)
-		projectRow.ResourceType = EntityTypeProject
-		projectRow.ResourceID = projectID
-		projectRow.DisplayTitle = firstNonEmpty(projectName, projectID, "Project")
-		projectRow.ParentResourceType = ""
-		projectRow.ParentResourceID = ""
-		projectRow.Depth = 0
-		projectRow.IsContainerRow = true
-		rows = append(rows, projectRow)
-	}
-	if logicGateID != "" {
-		logicGateTitle := logicGateID
 		if gate, ok := r.logicGates[key(row.CompanyID, logicGateID)]; ok && strings.TrimSpace(gate.Header) != "" {
-			logicGateTitle = gate.Header
+			logicGateName = strings.TrimSpace(gate.Header)
 		}
-		gateRow := nodeBase
-		gateRow.ItemID = memoryMyWorkItemID(row, role, projectID, EntityTypeLogicGate, logicGateID)
-		gateRow.ResourceType = EntityTypeLogicGate
-		gateRow.ResourceID = logicGateID
-		gateRow.DisplayTitle = logicGateTitle
-		gateRow.LogicGateID = stringPointer(logicGateID)
-		gateRow.ParentResourceType = ""
-		gateRow.ParentResourceID = ""
-		gateRow.Depth = 0
-		if projectID != "" {
-			gateRow.ParentResourceType = EntityTypeProject
-			gateRow.ParentResourceID = projectID
-			gateRow.Depth = 1
-		}
-		gateRow.IsContainerRow = true
-		rows = append(rows, gateRow)
 	}
-	rows = append(rows, nodeBase)
-	return rows
+	item := GVICMatrixProjectionRow{
+		CompanyID:        row.CompanyID,
+		ProjectionRowID:  memoryMyWorkProjectionRowID(row, role, projectID),
+		UserID:           row.UserID,
+		NodeName:         row.Node.Title,
+		GVICAssignment:   role,
+		ProjectID:        projectID,
+		ProjectName:      projectName,
+		LogicGateName:    logicGateName,
+		NodeID:           nodeID,
+		Status:           cloneStringPointer(row.Node.Status),
+		DueDate:          cloneStringPointer(row.Node.DueDate),
+		Priority:         cloneIntPointer(row.Node.Priority),
+		Accounts:         cloneAccountSnapshots(row.Node.Accounts),
+		CreatedTimestamp: row.Node.CreatedTimestamp,
+		UpdatedTimestamp: row.UpdatedTimestamp,
+	}
+	if strings.TrimSpace(item.NodeName) == "" {
+		item.NodeName = nodeID
+	}
+	if logicGateID != "" {
+		item.LogicGateID = stringPointer(logicGateID)
+	}
+	return item
 }
 
-func memoryMyWorkItemID(row memoryGVICMatrixProjectionRow, role, projectID, resourceType, resourceID string) string {
-	parts := []string{"my_work", strings.TrimSpace(row.UserID), strings.TrimSpace(role), strings.TrimSpace(row.ResourceID), strings.TrimSpace(resourceType), strings.TrimSpace(resourceID)}
-	if strings.TrimSpace(projectID) != "" {
-		parts = append(parts, "project", strings.TrimSpace(projectID))
+func memoryMyWorkProjectionRowID(row memoryGVICMatrixProjectionRow, role, projectID string) string {
+	priority := "none"
+	if row.Node.Priority != nil {
+		priority = strconv.Itoa(*row.Node.Priority)
 	}
-	if strings.TrimSpace(row.LogicGateID) != "" {
-		parts = append(parts, "logic_gate", strings.TrimSpace(row.LogicGateID))
+	project := strings.TrimSpace(projectID)
+	if project == "" {
+		project = "none"
+	}
+	logicGateID := strings.TrimSpace(row.LogicGateID)
+	if logicGateID == "" {
+		logicGateID = "none"
+	}
+	parts := []string{
+		"my_work_node_leaf",
+		strings.TrimSpace(row.CompanyID),
+		strings.TrimSpace(row.UserID),
+		strings.TrimSpace(role),
+		priority,
+		"node",
+		strings.TrimSpace(row.ResourceID),
+		"project",
+		project,
+		"logic_gate",
+		logicGateID,
 	}
 	return strings.Join(parts, ":")
 }

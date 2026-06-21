@@ -277,7 +277,6 @@ func TestMemoryRepoMyWorkMatrixRowsMoveResourceBetweenActiveProjectRelationships
 	if err != nil {
 		t.Fatalf("ListMyWorkMatrixRows: %v", err)
 	}
-	assertMyWorkProjectNames(t, rows, EntityTypeLogicGate, logicGate.LogicGateID, []string{"Bravo Project"})
 	assertMyWorkProjectNames(t, rows, EntityTypeNode, node.NodeID, []string{"Bravo Project"})
 
 	matrix, err := repo.ListMyWorkMatrix(WorkItemInboxQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID})
@@ -287,16 +286,18 @@ func TestMemoryRepoMyWorkMatrixRowsMoveResourceBetweenActiveProjectRelationships
 	if alpha := findMyWorkTestRow(matrix.Rows, EntityTypeProject, alpha.ProjectID); alpha != nil {
 		t.Fatalf("alpha project still contains moved resource: %+v", alpha)
 	}
-	projectRow := findMyWorkTestRow(matrix.Rows, EntityTypeProject, bravo.ProjectID)
-	if projectRow == nil || projectRow.GVICAssignment != domain.GVICRoleGenerated || projectRow.NodeLeafID != node.NodeID || projectRow.Depth != 0 || !projectRow.IsContainerRow {
-		t.Fatalf("bravo project row = %+v; rows=%+v", projectRow, matrix.Rows)
-	}
-	gateRow := findMyWorkTestRow(matrix.Rows, EntityTypeLogicGate, logicGate.LogicGateID)
-	if gateRow == nil || gateRow.ParentResourceType != EntityTypeProject || gateRow.ParentResourceID != bravo.ProjectID || gateRow.NodeLeafID != node.NodeID || gateRow.Depth != 1 || !gateRow.IsContainerRow {
-		t.Fatalf("logic gate path row = %+v; rows=%+v", gateRow, matrix.Rows)
-	}
 	nodeRow := findMyWorkTestRow(matrix.Rows, EntityTypeNode, node.NodeID)
-	if nodeRow == nil || nodeRow.ParentResourceType != EntityTypeLogicGate || nodeRow.ParentResourceID != logicGate.LogicGateID || nodeRow.NodeLeafID != node.NodeID || nodeRow.Depth != 2 || nodeRow.IsContainerRow {
+	if nodeRow == nil ||
+		nodeRow.ProjectionRowID == "" ||
+		nodeRow.ProjectID != bravo.ProjectID ||
+		nodeRow.ProjectName != "Bravo Project" ||
+		nodeRow.LogicGateID == nil ||
+		*nodeRow.LogicGateID != logicGate.LogicGateID ||
+		nodeRow.LogicGateName != "Single Project Gate" ||
+		nodeRow.NodeID != node.NodeID ||
+		nodeRow.NodeName != "Done node under active project gate" ||
+		nodeRow.GVICAssignment != domain.GVICRoleGenerated ||
+		nodeRow.IsContainerRow {
 		t.Fatalf("node leaf path row = %+v; rows=%+v", nodeRow, matrix.Rows)
 	}
 }
@@ -450,7 +451,7 @@ func assertMyWorkProjectNames(t *testing.T, rows []GVICMatrixProjectionRow, reso
 	t.Helper()
 	got := make([]string, 0)
 	for _, row := range rows {
-		if row.ResourceType == resourceType && row.ResourceID == resourceID {
+		if myWorkTestRowMatches(row, resourceType, resourceID) {
 			got = append(got, row.ProjectName)
 		}
 	}
@@ -470,11 +471,24 @@ func assertMyWorkProjectNames(t *testing.T, rows []GVICMatrixProjectionRow, reso
 func findMyWorkTestRow(rows []GVICMatrixProjectionRow, resourceType, resourceID string) *GVICMatrixProjectionRow {
 	for index := range rows {
 		row := &rows[index]
-		if row.ResourceType == resourceType && row.ResourceID == resourceID {
+		if myWorkTestRowMatches(*row, resourceType, resourceID) {
 			return row
 		}
 	}
 	return nil
+}
+
+func myWorkTestRowMatches(row GVICMatrixProjectionRow, resourceType, resourceID string) bool {
+	switch resourceType {
+	case EntityTypeNode:
+		return row.NodeID == resourceID
+	case EntityTypeProject:
+		return row.ProjectID == resourceID
+	case EntityTypeLogicGate:
+		return row.LogicGateID != nil && *row.LogicGateID == resourceID
+	default:
+		return false
+	}
 }
 
 func setMemoryInboxReadNodeCreatedTimestamp(t *testing.T, repo *MemoryRepo, companyID, nodeID string, created time.Time) {

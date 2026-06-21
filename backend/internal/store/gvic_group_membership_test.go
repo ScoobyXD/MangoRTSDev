@@ -390,7 +390,14 @@ func mustFindGVICMembershipProjectionRow(t *testing.T, repo *MemoryRepo, company
 		t.Fatalf("ListGVICMatrixProjectionRowsForResources %s/%s: %v", resourceType, resourceID, err)
 	}
 	for _, row := range rows {
-		if row.ResourceType == resourceType && row.ResourceID == resourceID && row.UserID == userID {
+		rowMatches := false
+		switch resourceType {
+		case EntityTypeNode:
+			rowMatches = row.NodeID == resourceID
+		case EntityTypeLogicGate:
+			rowMatches = row.LogicGateID != nil && *row.LogicGateID == resourceID
+		}
+		if rowMatches && row.UserID == userID {
 			return row
 		}
 	}

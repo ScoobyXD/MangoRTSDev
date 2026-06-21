@@ -52,7 +52,7 @@ func TestGVICMatrixProjectionDeltaFanoutIsScopedAndPermissionFiltered(t *testing
 	if envelope.ProjectionSequence <= 0 || len(envelope.Deltas) != 1 {
 		t.Fatalf("viewer envelope = %+v, want one sequenced delta", envelope)
 	}
-	if envelope.Deltas[0].Operation != store.ProjectionDeltaOperationUpsert || envelope.Deltas[0].Row == nil || envelope.Deltas[0].Row.ResourceID != visibleNode.NodeID {
+	if envelope.Deltas[0].Operation != store.ProjectionDeltaOperationUpsert || envelope.Deltas[0].Row == nil || envelope.Deltas[0].Row.NodeID != visibleNode.NodeID {
 		t.Fatalf("viewer delta = %+v, want upsert row for visible node", envelope.Deltas[0])
 	}
 	assertNoProjectionPayloadForTest(t, otherCh)
@@ -443,23 +443,26 @@ func TestProjectRelationshipProjectionPermissionRevocationPublishesDeleteWithout
 }
 
 func GVICMatrixProjectionDeltaForTest(companyID, userID, nodeID, title string, created time.Time) store.ProjectionDelta {
+	projectionRowID := "my_work_node_leaf:" + companyID + ":" + userID + ":generated:none:node:" + nodeID + ":project:none:logic_gate:none"
 	row := store.GVICMatrixProjectionRow{
-		CompanyID:                companyID,
-		UserID:                   userID,
-		ResourceType:             store.EntityTypeNode,
-		ResourceID:               nodeID,
-		DisplayTitle:             title,
-		ResourceCreatedTimestamp: created,
-		UpdatedTimestamp:         time.Now().UTC(),
+		CompanyID:        companyID,
+		ProjectionRowID:  projectionRowID,
+		UserID:           userID,
+		NodeName:         title,
+		GVICAssignment:   "generated",
+		NodeID:           nodeID,
+		CreatedTimestamp: created,
+		UpdatedTimestamp: time.Now().UTC(),
 	}
 	return store.ProjectionDelta{
 		CompanyID:  companyID,
 		Projection: store.ProjectionNameGVICMatrix,
 		Operation:  store.ProjectionDeltaOperationUpsert,
 		RowKey: store.ProjectionRowKey{
-			UserID:       userID,
-			ResourceType: store.EntityTypeNode,
-			ResourceID:   nodeID,
+			UserID:          userID,
+			ProjectionRowID: projectionRowID,
+			NodeID:          nodeID,
+			GVICAssignment:  "generated",
 		},
 		Row:                &row,
 		ProjectedTimestamp: time.Now().UTC(),

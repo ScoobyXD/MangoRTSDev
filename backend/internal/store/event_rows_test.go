@@ -124,6 +124,21 @@ func TestGVICMatrixMutationInsertsEventRowWithProjectionDelta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
+	node, err := repo.CreateNode(companyID, "GVICMatrix event row node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      LogicGateWorkStatusPending,
+		Priority:    &priority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
 
 	if _, err := repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
 		CompanyID:      companyID,
@@ -211,6 +226,21 @@ func TestGVICMatrixMutationEventRowRollbackLeavesNoEventRow(t *testing.T) {
 	logicGate, err := repo.CreateLogicGate(companyID, "GVICMatrix rollback gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "GVICMatrix rollback node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      LogicGateWorkStatusPending,
+		Priority:    &priority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
 	beforeRows, err := repo.ListEventRows(companyID, 10)
 	if err != nil {
@@ -315,7 +345,7 @@ func TestGVICMatrixNodeCreateForExistingLogicGateWritesProjectionEventRows(t *te
 		t.Fatalf("new event rows = %+v, want exactly one Kanban and one GVICMatrix row", newRows)
 	}
 	assertKanbanProjectionEventRowForLogicGate(t, kanbanRows[0], logicGate.LogicGateID, 1)
-	assertGVICMatrixProjectionEventRowForUser(t, GVICMatrixRows[0], user.UserID, 2, []string{EntityTypeNode})
+	assertGVICMatrixProjectionEventRowForUser(t, GVICMatrixRows[0], user.UserID, 1, []string{EntityTypeNode})
 }
 
 func TestGVICMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *testing.T) {
@@ -361,7 +391,7 @@ func TestGVICMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *te
 		t.Fatalf("event rows = %+v, want one Kanban row and one GVICMatrix row for created logic-gate projection", rows)
 	}
 	assertKanbanProjectionEventRowForLogicGate(t, kanbanRows[0], result.LogicGate.LogicGateID, 1)
-	assertGVICMatrixProjectionEventRowForUser(t, GVICMatrixRows[0], user.UserID, 1, []string{EntityTypeLogicGate})
+	assertGVICMatrixProjectionEventRowForUser(t, GVICMatrixRows[0], user.UserID, 1, []string{EntityTypeNode})
 	if current, err := repo.CurrentEventRowSequence(companyID, GVICMatrixProjectionUserScope(user.UserID)); err != nil || current != 1 {
 		t.Fatalf("CurrentEventRowSequence GVICMatrix = %d err=%v, want 1", current, err)
 	}
@@ -442,8 +472,8 @@ func TestUpdateNodeAndWorkspaceEventWritesProjectionEventRowsForTitleChange(t *t
 	if err != nil {
 		t.Fatalf("DecodeGVICMatrixProjectionDeltaEventPayload: %v", err)
 	}
-	if len(GVICMatrixPayload.Deltas) != 1 || GVICMatrixPayload.Deltas[0].Row == nil || GVICMatrixPayload.Deltas[0].Row.DisplayTitle != updatedTitle {
-		t.Fatalf("GVICMatrix title delta = %+v, want display_title %q", GVICMatrixPayload.Deltas, updatedTitle)
+	if len(GVICMatrixPayload.Deltas) != 1 || GVICMatrixPayload.Deltas[0].Row == nil || GVICMatrixPayload.Deltas[0].Row.NodeName != updatedTitle {
+		t.Fatalf("GVICMatrix title delta = %+v, want node_name %q", GVICMatrixPayload.Deltas, updatedTitle)
 	}
 }
 
@@ -1053,7 +1083,10 @@ func assertGVICMatrixProjectionEventRowForUser(t *testing.T, row EventRow, userI
 	}
 	gotResourceTypes := make([]string, 0, len(payload.Deltas))
 	for _, delta := range payload.Deltas {
-		gotResourceTypes = append(gotResourceTypes, delta.RowKey.ResourceType)
+		if delta.RowKey.ProjectionRowID == "" || delta.RowKey.NodeID == "" {
+			t.Fatalf("GVICMatrix payload row key = %+v, want projection_row_id and node_id", delta.RowKey)
+		}
+		gotResourceTypes = append(gotResourceTypes, EntityTypeNode)
 	}
 	if !sameStringSet(gotResourceTypes, wantResourceTypes) {
 		t.Fatalf("GVICMatrix payload resource types = %+v, want %+v", gotResourceTypes, wantResourceTypes)

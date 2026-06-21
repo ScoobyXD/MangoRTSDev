@@ -164,6 +164,21 @@ func TestEventWorkerPublishesGVICMatrixDeltaToUserScopeOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
+	node, err := repo.CreateNode(companyID, "Worker GVICMatrix node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      store.LogicGateWorkStatusPending,
+		Priority:    &priority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
 	server := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
@@ -219,6 +234,21 @@ func TestEventWorkerGVICMatrixPermissionLossSendsDeleteWithoutRowPayload(t *test
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
+	node, err := repo.CreateNode(companyID, "Worker GVICMatrix delete node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      store.LogicGateWorkStatusPending,
+		Priority:    &priority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
 	if _, err := repo.AddLogicGateGVICAssignments(store.LogicGateGVICAssignmentCommandInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
@@ -257,7 +287,7 @@ func TestEventWorkerGVICMatrixPermissionLossSendsDeleteWithoutRowPayload(t *test
 		t.Fatalf("GVICMatrix permission delta = %+v, want one scoped delta", delta)
 	}
 	got := delta.Deltas[0]
-	if got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.ResourceType != store.EntityTypeLogicGate || got.RowKey.ResourceID != logicGate.LogicGateID {
+	if got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.ProjectionRowID == "" || got.RowKey.NodeID != node.NodeID {
 		t.Fatalf("GVICMatrix permission delta payload = %+v, want delete without row payload", got)
 	}
 }
