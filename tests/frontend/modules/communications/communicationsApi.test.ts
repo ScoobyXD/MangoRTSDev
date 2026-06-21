@@ -13,6 +13,7 @@ import {
   invalidateCommunicationsCache,
   listCompanyUsers,
   listLogicGates,
+  listLogicGateFolderItems,
   listCommunicationsSharedInboxes,
   listEmailMessages,
   listNodeFolderItems,
@@ -173,6 +174,62 @@ test("workspace panel scoped stale refetches only matching resource caches", asy
       "/v1/company-explorer/roots?company_id=company-1",
       "/v1/nodes?company_id=company-1",
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("company explorer folder item helpers do not walk collapsed child branches", async () => {
+  invalidateCommunicationsCache();
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const path = input.toString();
+    calls.push(path);
+    if (path.startsWith("/v1/company-explorer/children?")) {
+      assert.fail(`unexpected company explorer children request: ${path}`);
+    }
+    if (path.startsWith("/v1/company-explorer/roots?")) {
+      return jsonResponse({
+        rows: [
+          {
+            company_id: "company-1",
+            entity_id: "folder-1",
+            entity_type: "folder",
+            name: "Folder",
+            position: 1000,
+            has_children: true,
+            created_timestamp: "2026-01-01T00:00:00Z",
+            updated_timestamp: "2026-01-01T00:00:00Z",
+          },
+          {
+            company_id: "company-1",
+            entity_id: "gate-entity-1",
+            entity_type: "logic_gate",
+            resource_id: "gate-1",
+            name: "Gate 1",
+            parent_entity_id: "folder-1",
+            edge_id: "edge-gate-1",
+            position: 1000,
+            has_children: false,
+            created_timestamp: "2026-01-01T00:00:00Z",
+            updated_timestamp: "2026-01-01T00:00:00Z",
+          },
+        ],
+      });
+    }
+    return jsonResponse({});
+  };
+  try {
+    const [nodeItems, logicGateItems] = await Promise.all([
+      listNodeFolderItems("company-1"),
+      listLogicGateFolderItems("company-1"),
+    ]);
+
+    assert.deepEqual(nodeItems, []);
+    assert.deepEqual(logicGateItems.map((item) => [item.folder_id, item.item_id]), [["folder-1", "gate-1"]]);
+    assert.deepEqual(calls, ["/v1/company-explorer/roots?company_id=company-1"]);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();

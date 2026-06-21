@@ -38,6 +38,7 @@ import {
 import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFrameRegistry, saveSettings, saveViews } from "./useFramePersistence";
 import { preloadAccountManagerSurface, preloadDefaultDashboardModules, preloadHomeSurface, preloadLogicGateArenaSurface, preloadProjectManagementSurface, preloadTeamsSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
 import { LazyAccountManagerPage, LazyHomePage, LazyLogicGateArenaPage, LazyProjectManagementPage, LazyTeamsPage } from "../pages/lazyPages";
+import type { HomeViewID } from "../pages/home/homeTypes";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
 import { AppLiveFreshnessBridge } from "./AppLiveFreshnessBridge";
 import { useFrameDragResize } from "./useFrameDragResize";
@@ -67,6 +68,7 @@ const APP_SIDEBAR_MAX_W = 420;
 const APP_RESIZE_HANDLE_W = 10;
 const SIDEBAR_PINS_KEY = "mangorts.app-sidebar-pins.v1";
 const SIDEBAR_WIDTH_KEY = "mangorts.app-sidebar-width.v1";
+const HOME_VIEW_STORAGE_PREFIX = "mangorts.app.home-view.v1";
 const SHOW_LEGACY_HEADER = false;
 
 type PrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams";
@@ -312,6 +314,52 @@ function routeForPage(page: PrimaryPage): string {
   return "/";
 }
 
+const STATIC_HOME_SIDEBAR_VIEWS = new Set<HomeSidebarView>([
+  "my-triage",
+  "shared-root",
+  "r-inbox",
+  "a-inbox",
+  "c-inbox",
+  "i-inbox",
+  "o-inbox",
+  "my-work",
+  "updates",
+]);
+
+function coerceHomeSidebarView(value: unknown): HomeSidebarView | null {
+  if (typeof value !== "string") return null;
+  const view = value.trim();
+  if (!view) return null;
+  if (STATIC_HOME_SIDEBAR_VIEWS.has(view as HomeSidebarView)) return view as HomeSidebarView;
+  if (view.startsWith("shared:") && view.slice("shared:".length).trim()) return view as HomeSidebarView;
+  return null;
+}
+
+function homeSidebarViewFromHomeView(viewID: HomeViewID): HomeSidebarView | null {
+  if (viewID === "primary") return "my-triage";
+  return coerceHomeSidebarView(viewID);
+}
+
+function homeViewStorageKey(scope: string): string {
+  return `${HOME_VIEW_STORAGE_PREFIX}:${scope.trim() || "user:local:company:global"}`;
+}
+
+function readStoredHomeSidebarView(scope: string): HomeSidebarView {
+  if (typeof localStorage === "undefined") return "my-work";
+  try {
+    return coerceHomeSidebarView(localStorage.getItem(homeViewStorageKey(scope))) ?? "my-work";
+  } catch {
+    return "my-work";
+  }
+}
+
+function saveStoredHomeSidebarView(scope: string, view: HomeSidebarView): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(homeViewStorageKey(scope), view);
+  } catch {}
+}
+
 type AppProps = {
   accountChrome?: React.ReactNode;
   initialPage?: PrimaryPage;
@@ -359,7 +407,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   }, [initialPage, loaded.activeId, loaded.tabs, overrideContent]);
   const [tabs, setTabs] = useState<ViewTab[]>(loaded.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(initialActiveTabId);
-  const [homeViewID, setHomeViewID] = useState<HomeSidebarView>(() => (deepLink?.kind === "gvic" ? deepLink.viewID : "my-work"));
+  const [homeViewID, setHomeViewID] = useState<HomeSidebarView>(() => (deepLink?.kind === "gvic" ? deepLink.viewID : readStoredHomeSidebarView(taskbarScope)));
   const [movingTabId, setMovingTabId] = useState<string | null>(null);
   const [isDraggingTab, setIsDraggingTab] = useState(false);
 
@@ -1004,8 +1052,16 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     }
   }, [activatePrimaryPage, closeMenus, onNavigate]);
 
+  const handleHomeActiveViewChange = useCallback((viewID: HomeViewID) => {
+    const sidebarView = homeSidebarViewFromHomeView(viewID);
+    if (!sidebarView) return;
+    setHomeViewID(sidebarView);
+    saveStoredHomeSidebarView(taskbarScope, sidebarView);
+  }, [taskbarScope]);
+
   const selectHomeSidebarView = useCallback((view: HomeSidebarView) => {
     setHomeViewID(view);
+    saveStoredHomeSidebarView(taskbarScope, view);
     const ensured = activatePrimaryPage("home");
     closeMenus();
     if (onNavigate) {
@@ -1013,7 +1069,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       const role = gvicRoleForViewID(view);
       onNavigate(role ? buildGvicRoute(role) : routeForPage("home"));
     }
-  }, [activatePrimaryPage, closeMenus, onNavigate]);
+  }, [activatePrimaryPage, closeMenus, onNavigate, taskbarScope]);
 
   const deepLinkLogicGateID = deepLink?.kind === "logic_gate" ? deepLink.logicGateID : "";
   const deepLinkLogicGateNodeID = deepLink?.kind === "logic_gate" ? deepLink.nodeID ?? "" : "";
@@ -1082,8 +1138,9 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     routeManagedExplorerNodePopupRef.current = false;
     setExplorerNodePopup(null);
     setHomeViewID(gvicDeepLinkViewID);
+    saveStoredHomeSidebarView(taskbarScope, gvicDeepLinkViewID);
     activatePrimaryPage("home");
-  }, [activatePrimaryPage, gvicDeepLinkViewID]);
+  }, [activatePrimaryPage, gvicDeepLinkViewID, taskbarScope]);
 
   useEffect(() => {
     if (overrideContent || deepLink || !initialPage) return;
@@ -1732,6 +1789,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               embedded
               hideNavigation
               initialViewID={homeViewID}
+              onActiveViewChange={handleHomeActiveViewChange}
               deepLinkNodeID={gvicDeepLink ? gvicDeepLink.nodeID ?? "" : undefined}
               me={me}
               onNavigate={onNavigate}

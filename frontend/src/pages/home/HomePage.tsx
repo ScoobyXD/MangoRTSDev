@@ -293,6 +293,7 @@ export function HomePage({
   embedded = false,
   hideNavigation = false,
   initialViewID = "my-work",
+  onActiveViewChange,
   deepLinkNodeID,
   onNodeOverlayOpen,
   onNodeOverlayClose,
@@ -1782,8 +1783,9 @@ export function HomePage({
   }, [mailbox, selectMailbox]);
   const selectHomeView = useCallback((viewID: HomeViewID, nextMailbox: EmailMailbox = "primary") => {
     setActiveViewID(viewID);
+    onActiveViewChange?.(viewID);
     selectMailbox(nextMailbox);
-  }, [selectMailbox]);
+  }, [onActiveViewChange, selectMailbox]);
   useEffect(() => {
     if (initialViewIDRef.current === initialViewID) return;
     initialViewIDRef.current = initialViewID;

@@ -833,23 +833,7 @@ export async function listLogicGateFolderItems(companyID: string): Promise<Compa
 }
 
 async function listCompanyExplorerReferenceItems(companyID: string, itemType: "node" | "logic_gate" | "project"): Promise<CompanyExplorerFolderItem[]> {
-  const rows: CompanyExplorerV2Row[] = [];
-  const visitedParents = new Set<string>();
-  const normalizeRows = (payload: CompanyExplorerV2Row[] | { rows?: CompanyExplorerV2Row[] }): CompanyExplorerV2Row[] => (
-    Array.isArray(payload) ? payload : (payload.rows ?? [])
-  );
-  const visit = async (parentID: string) => {
-    if (visitedParents.has(parentID)) return;
-    visitedParents.add(parentID);
-    const params = new URLSearchParams({ company_id: companyID });
-    const endpoint = parentID
-      ? `/v1/company-explorer/children?${params.toString()}&parent_id=${encodeURIComponent(parentID)}`
-      : `/v1/company-explorer/roots?${params.toString()}`;
-    const children = normalizeRows(await apiFetchJSON<CompanyExplorerV2Row[] | { rows?: CompanyExplorerV2Row[] }>(endpoint));
-    rows.push(...children);
-    await Promise.all(children.filter((row) => row.entity_type === "folder" && row.has_children).map((row) => visit(row.entity_id)));
-  };
-  await visit("");
+  const rows = await listCompanyExplorerRootReferenceRows(companyID);
   return rows
     .filter((row) => row.entity_type === itemType && row.edge_id && row.parent_entity_id)
     .map((row) => ({
@@ -861,6 +845,19 @@ async function listCompanyExplorerReferenceItems(companyID: string, itemType: "n
       created_timestamp: row.created_timestamp,
       updated_timestamp: row.updated_timestamp,
     }));
+}
+
+async function listCompanyExplorerRootReferenceRows(companyID: string): Promise<CompanyExplorerV2Row[]> {
+  const cleanCompanyID = companyID.trim();
+  return cachedRead(`company-explorer-root-reference-rows:${cleanCompanyID}`, WORKSPACE_PANEL_CACHE_TTL_MS, async () => {
+    const params = new URLSearchParams({ company_id: cleanCompanyID });
+    const payload = await apiFetchJSON<CompanyExplorerV2Row[] | { rows?: CompanyExplorerV2Row[] }>(`/v1/company-explorer/roots?${params.toString()}`);
+    return normalizeCompanyExplorerRows(payload);
+  }, cloneCompanyExplorerRows);
+}
+
+function normalizeCompanyExplorerRows(payload: CompanyExplorerV2Row[] | { rows?: CompanyExplorerV2Row[] }): CompanyExplorerV2Row[] {
+  return Array.isArray(payload) ? payload : (payload.rows ?? []);
 }
 
 export async function listMyLogicGateShortcuts(companyID: string): Promise<UserLogicGateShortcut[]> {
@@ -1067,9 +1064,15 @@ export function markCommunicationsWorkspacePanelStale(companyID: string, scope?:
     if (scope.logicGates) invalidateCacheKey(`logic-gates:${cleanCompanyID}`);
     if (scope.nodes) invalidateCacheKey(`nodes:${cleanCompanyID}`);
     if (scope.nodeFolders) invalidateCacheKey(`node-folders:${cleanCompanyID}`);
-    if (scope.nodeFolderItems) invalidateCacheKey(`node-folder-items:${cleanCompanyID}`);
+    if (scope.nodeFolderItems) {
+      invalidateCacheKey(`node-folder-items:${cleanCompanyID}`);
+      invalidateCacheKey(`company-explorer-root-reference-rows:${cleanCompanyID}`);
+    }
     if (scope.logicGateFolders) invalidateCacheKey(`logic-gate-folders:${cleanCompanyID}`);
-    if (scope.logicGateFolderItems) invalidateCacheKey(`logic-gate-folder-items:${cleanCompanyID}`);
+    if (scope.logicGateFolderItems) {
+      invalidateCacheKey(`logic-gate-folder-items:${cleanCompanyID}`);
+      invalidateCacheKey(`company-explorer-root-reference-rows:${cleanCompanyID}`);
+    }
     if (scope.companyUsers) invalidateCacheKey(`company-users:${cleanCompanyID}`);
     if (scope.userGroups) invalidateCacheKey(`company-user-groups:${cleanCompanyID}`);
     return;
@@ -1623,6 +1626,7 @@ function clearWorkspacePanelReadCache(cleanCompanyID: string): void {
     `node-folder-items:${cleanCompanyID}`,
     `logic-gate-folders:${cleanCompanyID}`,
     `logic-gate-folder-items:${cleanCompanyID}`,
+    `company-explorer-root-reference-rows:${cleanCompanyID}`,
     `company-users:${cleanCompanyID}`,
     `company-user-groups:${cleanCompanyID}`,
   ]) {
@@ -1794,6 +1798,13 @@ function cloneCompanyExplorerFolders(folders: CompanyExplorerFolder[]): CompanyE
 
 function cloneCompanyExplorerFolderItems(items: CompanyExplorerFolderItem[]): CompanyExplorerFolderItem[] {
   return items.map((item) => ({ ...item }));
+}
+
+function cloneCompanyExplorerRows(rows: CompanyExplorerV2Row[]): CompanyExplorerV2Row[] {
+  return rows.map((row) => ({
+    ...row,
+    native_context: row.native_context ? { ...row.native_context } : undefined,
+  }));
 }
 
 function cloneLogicGates(logicGates: LogicGateRecord[]): LogicGateRecord[] {

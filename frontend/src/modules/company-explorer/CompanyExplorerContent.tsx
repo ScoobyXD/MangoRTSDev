@@ -1596,12 +1596,16 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     return `workspace-folder-${cleanEntityID}`;
   }, [companyExplorerV2RootEntityID, companyExplorerV2RowByEntityID]);
   const loadedCompanyExplorerBranchesRef = useRef<Set<string>>(new Set());
+  const activeCompanyExplorerBranchesRef = useRef<Set<string>>(new Set([`roots:${companyExplorerLazyScope}`]));
+  const staleCompanyExplorerBranchesRef = useRef<Set<string>>(new Set());
   const inflightCompanyExplorerBranchesRef = useRef<Set<string>>(new Set());
 
   const resetCompanyExplorerLazyCache = useCallback(() => {
     loadedCompanyExplorerBranchesRef.current.clear();
+    activeCompanyExplorerBranchesRef.current = new Set([`roots:${companyExplorerLazyScope}`]);
+    staleCompanyExplorerBranchesRef.current.clear();
     inflightCompanyExplorerBranchesRef.current.clear();
-  }, []);
+  }, [companyExplorerLazyScope]);
 
   const refreshCompanyExplorerSnapshot = useCallback(async () => {
     resetCompanyExplorerLazyCache();
@@ -1616,12 +1620,18 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const cleanParentEntityID = parentEntityID.trim();
     if (!cleanParentEntityID) return;
     const branchKey = `${companyExplorerLazyScope}:entity:${cleanParentEntityID}`;
-    if (loadedCompanyExplorerBranchesRef.current.has(branchKey) || inflightCompanyExplorerBranchesRef.current.has(branchKey)) return;
+    const branchStale = staleCompanyExplorerBranchesRef.current.has(branchKey);
+    if ((!branchStale && loadedCompanyExplorerBranchesRef.current.has(branchKey)) || inflightCompanyExplorerBranchesRef.current.has(branchKey)) return;
     inflightCompanyExplorerBranchesRef.current.add(branchKey);
     try {
       const snapshot = await fetchCompanyExplorerChildren(apiBase, companyID, companyExplorerLazyScope, cleanParentEntityID);
-      dispatchExplorerStore({ type: "mergeSnapshot", snapshot: snapshot ?? {} });
+      if (branchStale) {
+        dispatchExplorerStore({ type: "replaceV2Children", parentEntityID: cleanParentEntityID, rows: snapshot?.rows ?? [] });
+      } else {
+        dispatchExplorerStore({ type: "mergeSnapshot", snapshot: snapshot ?? {} });
+      }
       loadedCompanyExplorerBranchesRef.current.add(branchKey);
+      staleCompanyExplorerBranchesRef.current.delete(branchKey);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_load_company_explorer_children");
@@ -1636,6 +1646,18 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       const next = typeof action === "function"
         ? (action as (current: Set<string>) => Set<string>)(previous)
         : action;
+      const nextActiveBranches = new Set<string>([`roots:${companyExplorerLazyScope}`]);
+      let collapsedDepth: number | null = null;
+      for (const row of treeRowsRef.current) {
+        if (collapsedDepth !== null) {
+          if (row.depth > collapsedDepth) continue;
+          collapsedDepth = null;
+        }
+        const rowExpanded = next.has(row.id) || next.has("*");
+        if (row.entityID && row.hasChildren && rowExpanded) nextActiveBranches.add(`${companyExplorerLazyScope}:entity:${row.entityID}`);
+        if (row.hasChildren && !rowExpanded) collapsedDepth = row.depth;
+      }
+      activeCompanyExplorerBranchesRef.current = nextActiveBranches;
       for (const rowID of next) {
         if (previous.has(rowID)) continue;
         const row = treeRowsRef.current.find((candidate) => candidate.id === rowID);
@@ -1643,11 +1665,17 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       }
       return next;
     });
-  }, [loadCompanyExplorerChildren]);
+  }, [companyExplorerLazyScope, loadCompanyExplorerChildren]);
 
   const companyExplorerBranchKey = useCallback((parentEntityID: string) => {
     const cleanParentEntityID = cleanExplorerID(parentEntityID);
     return cleanParentEntityID ? `${companyExplorerLazyScope}:entity:${cleanParentEntityID}` : `roots:${companyExplorerLazyScope}`;
+  }, [companyExplorerLazyScope]);
+
+  const companyExplorerBranchParentEntityID = useCallback((branchKey: string): string | null => {
+    if (branchKey === `roots:${companyExplorerLazyScope}`) return "";
+    const prefix = `${companyExplorerLazyScope}:entity:`;
+    return branchKey.startsWith(prefix) ? branchKey.slice(prefix.length) : null;
   }, [companyExplorerLazyScope]);
 
   const isCompanyExplorerBranchLoaded = useCallback((parentEntityID: string) => (
@@ -1665,6 +1693,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         : await fetchCompanyExplorerRoots(apiBase, companyID, companyExplorerLazyScope);
       dispatchExplorerStore({ type: "replaceV2Children", parentEntityID: cleanParentEntityID, rows: snapshot?.rows ?? [] });
       loadedCompanyExplorerBranchesRef.current.add(branchKey);
+      staleCompanyExplorerBranchesRef.current.delete(branchKey);
       setError("");
     } catch {
       // Realtime branch refresh is best effort; explicit expansion reloads the same bounded branch.
@@ -1673,25 +1702,28 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     }
   }, [apiBase, companyExplorerBranchKey, companyExplorerLazyScope, companyID]);
 
-  const refreshLoadedCompanyExplorerBranch = useCallback((parentEntityID: string) => {
+  const refreshActiveCompanyExplorerBranch = useCallback((parentEntityID: string) => {
+    const branchKey = companyExplorerBranchKey(parentEntityID);
     if (!isCompanyExplorerBranchLoaded(parentEntityID)) return;
+    if (!activeCompanyExplorerBranchesRef.current.has(branchKey)) {
+      staleCompanyExplorerBranchesRef.current.add(branchKey);
+      return;
+    }
     void refreshCompanyExplorerBranch(parentEntityID);
-  }, [isCompanyExplorerBranchLoaded, refreshCompanyExplorerBranch]);
+  }, [companyExplorerBranchKey, isCompanyExplorerBranchLoaded, refreshCompanyExplorerBranch]);
 
-  const refreshLoadedCompanyExplorerBranches = useCallback(() => {
-    const parentEntityIDs = new Set<string>();
-    for (const branchKey of loadedCompanyExplorerBranchesRef.current) {
-      if (branchKey === `roots:${companyExplorerLazyScope}`) {
-        parentEntityIDs.add("");
-        continue;
+  const refreshActiveCompanyExplorerBranches = useCallback((options: { markInactiveLoadedStale?: boolean } = {}) => {
+    if (options.markInactiveLoadedStale) {
+      for (const branchKey of loadedCompanyExplorerBranchesRef.current) {
+        if (!activeCompanyExplorerBranchesRef.current.has(branchKey)) staleCompanyExplorerBranchesRef.current.add(branchKey);
       }
-      const prefix = `${companyExplorerLazyScope}:entity:`;
-      if (branchKey.startsWith(prefix)) parentEntityIDs.add(branchKey.slice(prefix.length));
     }
-    for (const parentEntityID of parentEntityIDs) {
-      refreshLoadedCompanyExplorerBranch(parentEntityID);
+    for (const branchKey of activeCompanyExplorerBranchesRef.current) {
+      if (!loadedCompanyExplorerBranchesRef.current.has(branchKey)) continue;
+      const parentEntityID = companyExplorerBranchParentEntityID(branchKey);
+      if (parentEntityID !== null) void refreshCompanyExplorerBranch(parentEntityID);
     }
-  }, [companyExplorerLazyScope, refreshLoadedCompanyExplorerBranch]);
+  }, [companyExplorerBranchParentEntityID, refreshCompanyExplorerBranch]);
 
   const refreshCompanyExplorerBranchesForEnvelope = useCallback((envelope: CompanyExplorerWorkspaceStreamEnvelope) => {
     if (envelope.company_id !== companyID) return;
@@ -1701,10 +1733,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (affectedScopes.length > 0) {
       const plan = companyExplorerRefreshPlanFromAffectedScopes({ companyID, affectedScopes, rows: companyExplorerV2RowsRef.current });
       if (!plan.hasCompanyExplorerScopes) return;
-      if (plan.refreshRoot) refreshLoadedCompanyExplorerBranch("");
-      for (const parentEntityID of plan.parentEntityIDs) refreshLoadedCompanyExplorerBranch(parentEntityID);
+      if (plan.refreshRoot) refreshActiveCompanyExplorerBranch("");
+      for (const parentEntityID of plan.parentEntityIDs) refreshActiveCompanyExplorerBranch(parentEntityID);
       const payloadParentEntityID = companyExplorerEnvelopeParentEntityID(data);
-      if (payloadParentEntityID !== null) refreshLoadedCompanyExplorerBranch(payloadParentEntityID);
+      if (payloadParentEntityID !== null) refreshActiveCompanyExplorerBranch(payloadParentEntityID);
       return;
     }
     const refreshAllLoadedBranchTypes = new Set([
@@ -1726,7 +1758,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       "project_deleted",
     ]);
     if (refreshAllLoadedBranchTypes.has(type)) {
-      refreshLoadedCompanyExplorerBranches();
+      refreshActiveCompanyExplorerBranches({ markInactiveLoadedStale: true });
       return;
     }
     if (
@@ -1741,19 +1773,19 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       : typeof data.entity === "object" && data.entity && typeof (data.entity as { parent_entity_id?: unknown }).parent_entity_id === "string"
         ? cleanExplorerID((data.entity as { parent_entity_id: string }).parent_entity_id)
         : "";
-    refreshLoadedCompanyExplorerBranch(parentEntityID);
-  }, [companyExplorerLazyScope, companyID, refreshLoadedCompanyExplorerBranch, refreshLoadedCompanyExplorerBranches]);
+    refreshActiveCompanyExplorerBranch(parentEntityID);
+  }, [companyID, refreshActiveCompanyExplorerBranch, refreshActiveCompanyExplorerBranches]);
   const reconcileCompanyExplorerGap = useCallback((gap: WorkspaceStreamGapSignal) => {
     if (gap.envelope) {
       const affectedScopes = companyExplorerAffectedScopesFromEnvelope(gap.envelope);
       if (affectedScopes.length > 0) {
         const plan = companyExplorerRefreshPlanFromAffectedScopes({ companyID, affectedScopes, rows: companyExplorerV2RowsRef.current });
         if (!plan.hasCompanyExplorerScopes) return;
-        if (plan.refreshRoot) refreshLoadedCompanyExplorerBranch("");
-        for (const parentEntityID of plan.parentEntityIDs) refreshLoadedCompanyExplorerBranch(parentEntityID);
+        if (plan.refreshRoot) refreshActiveCompanyExplorerBranch("");
+        for (const parentEntityID of plan.parentEntityIDs) refreshActiveCompanyExplorerBranch(parentEntityID);
         const data: Record<string, unknown> = gap.envelope.data ?? {};
         const payloadParentEntityID = companyExplorerEnvelopeParentEntityID(data);
-        if (payloadParentEntityID !== null) refreshLoadedCompanyExplorerBranch(payloadParentEntityID);
+        if (payloadParentEntityID !== null) refreshActiveCompanyExplorerBranch(payloadParentEntityID);
         return;
       }
     }
@@ -1761,7 +1793,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     void refreshCompanyExplorerSnapshot().catch(() => {
       // Stream recovery is best effort; the next explicit Explorer action can retry the same bounded reads.
     });
-  }, [companyID, refreshCompanyExplorerSnapshot, refreshLoadedCompanyExplorerBranch]);
+  }, [companyID, refreshCompanyExplorerSnapshot, refreshActiveCompanyExplorerBranch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2276,6 +2308,26 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   useEffect(() => {
     treeRowsRef.current = treeRows;
   }, [treeRows]);
+
+  useEffect(() => {
+    const nextActiveBranches = new Set<string>([companyExplorerBranchKey("")]);
+    let collapsedDepth: number | null = null;
+    for (const row of baseTreeRows) {
+      if (collapsedDepth !== null) {
+        if (row.depth > collapsedDepth) continue;
+        collapsedDepth = null;
+      }
+      const rowExpanded = effectiveExpanded.has(row.id) || effectiveExpanded.has("*");
+      if (row.entityID && row.hasChildren && rowExpanded) nextActiveBranches.add(companyExplorerBranchKey(row.entityID));
+      if (row.hasChildren && !rowExpanded) collapsedDepth = row.depth;
+    }
+    activeCompanyExplorerBranchesRef.current = nextActiveBranches;
+    for (const branchKey of staleCompanyExplorerBranchesRef.current) {
+      if (!nextActiveBranches.has(branchKey) || !loadedCompanyExplorerBranchesRef.current.has(branchKey)) continue;
+      const parentEntityID = companyExplorerBranchParentEntityID(branchKey);
+      if (parentEntityID !== null) void refreshCompanyExplorerBranch(parentEntityID);
+    }
+  }, [baseTreeRows, companyExplorerBranchKey, companyExplorerBranchParentEntityID, effectiveExpanded, refreshCompanyExplorerBranch]);
 
   useEffect(() => {
     latestSelectionRef.current = { selectedNodeID, selectedTreeID };

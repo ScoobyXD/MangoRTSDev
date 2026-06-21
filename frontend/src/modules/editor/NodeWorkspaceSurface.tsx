@@ -1065,21 +1065,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const params = new URLSearchParams({ company_id: companyID, assigned_to_me: "1" });
     const folderParams = new URLSearchParams({ company_id: companyID, folder_kind: "logic_gate" });
     const listLogicGateExplorerItems = async (): Promise<CompanyExplorerFolderItem[]> => {
-      const rows: CompanyExplorerV2Row[] = [];
-      const visited = new Set<string>();
-      const normalizeRows = (payload: { rows?: CompanyExplorerV2Row[] } | CompanyExplorerV2Row[]) => Array.isArray(payload) ? payload : (payload.rows ?? []);
-      const visit = async (parentID: string) => {
-        if (visited.has(parentID)) return;
-        visited.add(parentID);
-        const query = new URLSearchParams({ company_id: companyID });
-        const endpoint = parentID
-          ? `/v1/company-explorer/children?${query.toString()}&parent_id=${encodeURIComponent(parentID)}`
-          : `/v1/company-explorer/roots?${query.toString()}`;
-        const children = normalizeRows(await requestJSON<{ rows?: CompanyExplorerV2Row[] } | CompanyExplorerV2Row[]>(endpoint));
-        rows.push(...children);
-        await Promise.all(children.filter((row) => row.entity_type === "folder" && row.has_children).map((row) => visit(row.entity_id)));
-      };
-      await visit("");
+      const query = new URLSearchParams({ company_id: companyID });
+      const payload = await requestJSON<{ rows?: CompanyExplorerV2Row[] } | CompanyExplorerV2Row[]>(`/v1/company-explorer/roots?${query.toString()}`);
+      const rows = Array.isArray(payload) ? payload : (payload.rows ?? []);
       return rows
         .filter((row) => row.entity_type === "logic_gate" && row.parent_entity_id && row.edge_id)
         .map((row) => ({

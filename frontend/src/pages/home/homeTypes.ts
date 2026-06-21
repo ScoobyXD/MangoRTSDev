@@ -8,6 +8,7 @@ export type HomePageProps = {
   embedded?: boolean;
   hideNavigation?: boolean;
   initialViewID?: HomeViewID;
+  onActiveViewChange?: (viewID: HomeViewID) => void;
   deepLinkNodeID?: string;
   onNodeOverlayOpen?: (nodeID: string) => void;
   onNodeOverlayClose?: () => void;
