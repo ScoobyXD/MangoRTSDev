@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { buildLogicGateRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
+import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks";
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { getNodeTitle as getNodeRecordTitle, type NodeRecord } from "../node-map/shared";
@@ -50,7 +51,7 @@ import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog"
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { createRequestJSON } from "../api/requestJSON";
-import { listCompanyUserGroups, listCompanyUsers, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
+import { convertTriageMessagesToExplorerTarget, listCompanyUserGroups, listCompanyUsers, type CommunicationsTriageConversionTarget, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
 import { createProject, type ProjectRecord } from "../project-management/projectManagementApi";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { listMyLogicGates, listGVICMatrixProjectionRows, type WorkItemLogicGateInboxItem } from "../work-items/workItemReadApi";
@@ -62,6 +63,8 @@ import {
   type CompanyExplorerContentProps,
   type CompanyExplorerFolderItemAssignment,
   type CompanyExplorerSearchResultSummary,
+  type CompanyExplorerTriageMessageDropHandler,
+  type CompanyExplorerTriageMessageDropTarget,
   type CompanyExplorerWorkspaceEntityBatchResponse,
 } from "./CompanyExplorerContentModel";
 import {
@@ -80,6 +83,20 @@ import { shouldIncludeGVICCustomRootFolder, shouldShowGVICCompanyScopedFolderShe
 const scopedRootCreationKeys = new Set<string>();
 const GVICVisualRootCreationKeys = new Set<string>();
 const LIGHT_EXPLORER_CYAN_ACCENT = "rgb(71, 85, 105)";
+const COMPANY_EXPLORER_TRIAGE_DROP_PRIORITIES = [1, 2, 3, 4, 5] as const;
+const companyExplorerTriageDropMenuButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 31,
+  border: "none",
+  background: "transparent",
+  color: "#111827",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 600,
+  textAlign: "left",
+  padding: "0 12px",
+};
 const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_LABELS = ["logic gates by function", "logic gates by person"] as const;
 const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_NAMES = new Set<string>(HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_LABELS);
 type CompanyExplorerScopeView = "mine" | "team" | "company";
@@ -88,6 +105,7 @@ type CompanyExplorerGVICFolderRole = LogicGateGVICRole | "other";
 type GVICProjectionCacheEntry = { rows: GVICMatrixProjectionRow[]; logicGates: ExplorerLogicGateRecord[]; loaded: boolean };
 type ExplorerUserSummary = { userID: string; label: string; email?: string };
 type ExplorerGroupSummary = { groupID: string; label: string; users: ExplorerUserSummary[]; children: ExplorerGroupSummary[] };
+type CompanyExplorerInternalTriageDropMenu = { target: CompanyExplorerTriageMessageDropTarget; messageIDs: string[]; x: number; y: number };
 
 function getOpenInNewTabTargetForExplorerRow(row?: ExplorerTreeNode | null): CompanyExplorerOpenInNewTabTarget | null {
   if (!row) return null;
@@ -206,6 +224,35 @@ function shouldRefreshGVICExplorerProjectionForEnvelope(companyID: string, envel
 
 function cleanExplorerID(value: string | null | undefined): string {
   return value?.trim() ?? "";
+}
+
+function cleanExplorerIDs(values: string[]): string[] {
+  return Array.from(new Set(values.map(cleanExplorerID).filter(Boolean)));
+}
+
+function companyExplorerTriageConversionTarget(target: CompanyExplorerTriageMessageDropTarget): CommunicationsTriageConversionTarget | null {
+  switch (target.kind) {
+    case "folder": {
+      const folderID = cleanExplorerID(target.folderID);
+      const parentEntityID = cleanExplorerID(target.parentEntityID);
+      return { mode: "folder", folderID: folderID || undefined, parentEntityID: parentEntityID || undefined };
+    }
+    case "project": {
+      const projectID = cleanExplorerID(target.projectID);
+      return projectID ? { mode: "project", projectID } : null;
+    }
+    case "logic_gate": {
+      const logicGateID = cleanExplorerID(target.logicGateID);
+      return logicGateID ? { mode: "existing_logic_gate", logicGateID } : null;
+    }
+    case "node": {
+      const nodeID = cleanExplorerID(target.nodeID);
+      const logicGateID = cleanExplorerID(target.logicGateID);
+      return nodeID ? { mode: "existing_node", nodeID, logicGateID: logicGateID || undefined } : null;
+    }
+    default:
+      return null;
+  }
 }
 
 function companyExplorerEnvelopeParentEntityID(data: Record<string, unknown>): string | null {
@@ -1458,6 +1505,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const [selectedLogicGateID, setSelectedLogicGateID] = useState("");
   const [selectedKanbanBoardID, setSelectedKanbanBoardID] = useState("");
   const [error, setError] = useState("");
+  const [internalTriageDropMenu, setInternalTriageDropMenu] = useState<CompanyExplorerInternalTriageDropMenu | null>(null);
+  const [internalTriageDropBusy, setInternalTriageDropBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(createInitialCompanyExplorerExpandedRows);
   const selectedTreeIDRef = useRef(selectedTreeID);
   const expandedRef = useRef(expanded);
@@ -1581,6 +1630,20 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       inflightCompanyExplorerBranchesRef.current.delete(branchKey);
     }
   }, [apiBase, companyExplorerLazyScope, companyID]);
+
+  const setExpandedAndLoadChildren = useCallback((action: React.SetStateAction<Set<string>>) => {
+    setExpanded((previous) => {
+      const next = typeof action === "function"
+        ? (action as (current: Set<string>) => Set<string>)(previous)
+        : action;
+      for (const rowID of next) {
+        if (previous.has(rowID)) continue;
+        const row = treeRowsRef.current.find((candidate) => candidate.id === rowID);
+        if (row?.entityID && row.hasChildren) void loadCompanyExplorerChildren(row.entityID).catch(() => undefined);
+      }
+      return next;
+    });
+  }, [loadCompanyExplorerChildren]);
 
   const companyExplorerBranchKey = useCallback((parentEntityID: string) => {
     const cleanParentEntityID = cleanExplorerID(parentEntityID);
@@ -2090,13 +2153,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [companyGroupSections, companyHistoryRows, companyID, currentUserID, effectiveExpanded, folderItems, folders, fullTreeRows, logicGates, logicGatesByFunctionRows, nodes, projects, GVICExplorerActive, GVICExplorerData, GVICProjectionByUserID, scopedExplorerActive, scopedRootFolder, scopeView, teamCompanyExplorerActive, teamUsers]);
   const explorerSearchText = effectiveExplorerSearchQuery.trim();
   const explorerSearchActive = explorerSearchText.length > 0;
-  useEffect(() => {
-    if (!folderSnapshotLoaded || explorerSearchActive) return;
-    for (const row of baseTreeRows) {
-      if (!effectiveExpanded.has(row.id) && !effectiveExpanded.has("*")) continue;
-      if (row.entityID && row.hasChildren) void loadCompanyExplorerChildren(row.entityID).catch(() => undefined);
-    }
-  }, [baseTreeRows, effectiveExpanded, explorerSearchActive, folderSnapshotLoaded, loadCompanyExplorerChildren]);
+
   const allExpandedSearchTreeRows = useMemo(() => {
     const expandedForSearch = new Set<string>(["folder-root"]);
     if (companyExplorerV2Active) {
@@ -3309,7 +3366,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     selectedTreeIDRef,
     expandedRef,
     treeRowsRef,
-    setExpanded,
+    setExpanded: setExpandedAndLoadChildren,
     selectSingleTreeRow,
     scrollTreeRowIntoView,
     onRequestDeleteSelection: requestDeleteSelection,
@@ -3728,6 +3785,44 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     applyExplorerFindSelection,
   });
 
+  const requestCompanyExplorerTriageMessagesDrop = useCallback<CompanyExplorerTriageMessageDropHandler>((target, messageIDs, point) => {
+    if (onTriageMessagesDrop) {
+      onTriageMessagesDrop(target, messageIDs, point);
+      return;
+    }
+    const cleanMessageIDs = cleanExplorerIDs(messageIDs);
+    if (cleanMessageIDs.length === 0) return;
+    setInternalTriageDropMenu({ target, messageIDs: cleanMessageIDs, x: point.x, y: point.y });
+  }, [onTriageMessagesDrop]);
+
+  const pickCompanyExplorerTriageDropPriority = useCallback(async (priority: number) => {
+    if (!internalTriageDropMenu) return;
+    const target = companyExplorerTriageConversionTarget(internalTriageDropMenu.target);
+    if (!target) {
+      setError("invalid_triage_drop_target");
+      setInternalTriageDropMenu(null);
+      return;
+    }
+    setInternalTriageDropBusy(true);
+    setError("");
+    try {
+      const result = await convertTriageMessagesToExplorerTarget({
+        companyID,
+        target,
+        messageIDs: internalTriageDropMenu.messageIDs,
+        priority,
+      });
+      for (const node of result.nodes ?? []) dispatchExplorerStore({ type: "upsertNode", node });
+      if (result.folder_items && result.folder_items.length > 0) dispatchExplorerStore({ type: "upsertFolderItems", folderItems: result.folder_items });
+      if (result.explorer_v2_rows && result.explorer_v2_rows.length > 0) dispatchExplorerStore({ type: "upsertV2Rows", rows: result.explorer_v2_rows });
+      setInternalTriageDropMenu(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_convert_triage_messages");
+    } finally {
+      setInternalTriageDropBusy(false);
+    }
+  }, [companyID, internalTriageDropMenu]);
+
   const deleteSummary = useMemo(() => (
     deleteConfirmation
       ? buildDeleteConfirmationSummary({ targets: deleteConfirmation.targets, folders, folderItems })
@@ -3805,13 +3900,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         onStartRenamingRow={startRenamingRow}
         onCommitRename={commitRename}
         onSetRenaming={setRenaming}
-        onSetExpanded={setExpanded}
+        onSetExpanded={setExpandedAndLoadChildren}
         onSetDraggingTreeID={setDraggingTreeID}
         onSetDragOverTreeID={setDragOverTreeID}
         onSetDragOverPlacement={setDragOverPlacement}
         onSetDragPayload={setDragPayload}
         onSetTriageDropTreeID={setTriageDropTreeID}
-        onTriageMessagesDrop={onTriageMessagesDrop}
+        onTriageMessagesDrop={requestCompanyExplorerTriageMessagesDrop}
         getKanbanDragItemsForRow={getKanbanDragItemsForRow}
         getExplorerItemRowsForPayload={getExplorerItemRowsForPayload}
         getReorderRowsForTarget={getReorderRowsForTarget}
@@ -3825,6 +3920,22 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         moveFolder={moveFolder}
         assignExplorerPayloadItemsToFolder={assignExplorerPayloadItemsToFolder}
       />
+
+      {internalTriageDropMenu && (
+        <FrameRightClickMenu x={internalTriageDropMenu.x} y={internalTriageDropMenu.y} onClose={() => setInternalTriageDropMenu(null)} minWidth={190}>
+          {COMPANY_EXPLORER_TRIAGE_DROP_PRIORITIES.map((priority) => (
+            <button
+              key={priority}
+              type="button"
+              style={companyExplorerTriageDropMenuButtonStyle}
+              disabled={internalTriageDropBusy}
+              onClick={() => { void pickCompanyExplorerTriageDropPriority(priority); }}
+            >
+              Priority {priority}
+            </button>
+          ))}
+        </FrameRightClickMenu>
+      )}
 
       <CompanyExplorerContextMenu
         menu={explorerContextMenu}

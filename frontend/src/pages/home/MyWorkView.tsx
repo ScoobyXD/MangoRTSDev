@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import FrameRightClickMenu from "../../app/framerightclickmenu";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../../modules/communications/communicationsApi";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import { GVICMatrixRealtimeScope } from "../../modules/gvic/gvicMatrixProjectionDeltas";
@@ -17,6 +18,7 @@ import {
   logicGateGVICHeaderStyle,
   logicGateGVICMatrixSurfaceStyle,
   logicGateGVICPriorityHeaderStyle,
+  sharedInboxContextMenuButtonStyle,
 } from "./homeStyles";
 import {
   loadMyWorkMatrixCellsForUsers,
@@ -65,9 +67,12 @@ type MyWorkViewProps = {
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
   onCreateNodeInCell?: (input: MyWorkCellCreateInput) => void;
+  onCreateLogicGateInCell?: (input: MyWorkCellCreateInput) => void;
+  onCreateProjectInCell?: (input: MyWorkCellCreateInput) => void;
   onDropNodes?: (input: MyWorkNodeDropInput) => void;
   onDropNodesInCell?: (input: MyWorkCellNodeDropInput) => void;
   onDropLogicGates?: (input: MyWorkCellLogicGateDropInput) => void;
+  onDropProjects?: (input: MyWorkCellProjectDropInput) => void;
 };
 
 type ScopePickerRow = {
@@ -86,11 +91,14 @@ type MyWorkCellCreateInput = { priority: MyWorkMatrixPriority; creatorGVICRole?:
 type MyWorkNodeDropInput = { logicGateID: string; nodeIDs: string[]; priority: MyWorkMatrixPriority; fromLogicGateID?: string };
 type MyWorkCellNodeDropInput = MyWorkCellCreateInput & { nodeIDs: string[]; fromLogicGateID?: string };
 type MyWorkCellLogicGateDropInput = MyWorkCellCreateInput & { logicGateIDs: string[]; nodeIDsByLogicGateID?: Record<string, string[]> };
+type MyWorkCellProjectDropInput = MyWorkCellCreateInput & { projectIDs: string[]; logicGateIDsByProjectID?: Record<string, string[]>; nodeIDsByProjectID?: Record<string, string[]>; nodeIDsByLogicGateID?: Record<string, string[]> };
 type MyWorkNodeDragPayload = { nodeIDs: string[]; fromLogicGateID?: string };
 type MyWorkLogicGateDragPayload = { logicGateIDs: string[]; nodeIDsByLogicGateID?: Record<string, string[]> };
+type MyWorkProjectDragPayload = { projectIDs: string[]; logicGateIDsByProjectID?: Record<string, string[]>; nodeIDsByProjectID?: Record<string, string[]>; nodeIDsByLogicGateID?: Record<string, string[]> };
 type MyWorkRoleColumnWidths = Record<LogicGateGVICRole, number>;
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
 const HOME_INBOX_LOGIC_GATE_DRAG_MIME = "application/x-mangorts-home-inbox-logic-gate";
+const HOME_INBOX_PROJECT_DRAG_MIME = "application/x-mangorts-home-inbox-project";
 const MY_WORK_ROLE_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.myWork.roleColumnWidths.v1";
 const MY_WORK_PRIORITY_COLUMN_WIDTH = 104;
 const MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH = 282;
@@ -114,9 +122,12 @@ export function MyWorkView({
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
   onCreateNodeInCell,
+  onCreateLogicGateInCell,
+  onCreateProjectInCell,
   onDropNodes,
   onDropNodesInCell,
   onDropLogicGates,
+  onDropProjects,
 }: MyWorkViewProps) {
   const userByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id.trim(), user])), [companyUsers]);
   const groupByID = useMemo(() => new Map(companyUserGroups.map((group) => [group.group_id.trim(), group])), [companyUserGroups]);
@@ -518,9 +529,12 @@ export function MyWorkView({
             onOpenNodeBulkMenu={onOpenNodeBulkMenu}
             onOpenLogicGateBulkMenu={onOpenLogicGateBulkMenu}
             onCreateNodeInCell={onCreateNodeInCell}
+            onCreateLogicGateInCell={onCreateLogicGateInCell}
+            onCreateProjectInCell={onCreateProjectInCell}
             onDropNodes={onDropNodes}
             onDropNodesInCell={onDropNodesInCell}
             onDropLogicGates={onDropLogicGates}
+            onDropProjects={onDropProjects}
             nodeByID={new Map(nodes.map((node) => [node.node_id, node]))}
             logicGateByID={new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]))}
             roleColumnWidths={roleColumnWidths}
@@ -863,7 +877,7 @@ function MyWorkTreeRow({
     <div style={logicGateSectionBlockStyle}>
       <div
         style={workRowStyle(depth, role)}
-        draggable={row.kind === "node" || row.kind === "logic_gate"}
+        draggable={row.kind === "node" || row.kind === "logic_gate" || row.kind === "project"}
         onContextMenu={(event) => {
           if (row.kind === "node" && onOpenNodeBulkMenu) onOpenNodeBulkMenu(row.id, event);
           if (row.kind === "logic_gate" && onOpenLogicGateBulkMenu) onOpenLogicGateBulkMenu(row.id, event);
@@ -873,12 +887,22 @@ function MyWorkTreeRow({
             writeMyWorkDragPayload(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME, { nodeIDs: [row.id], fromLogicGateID: rowLogicGateID });
           } else if (row.kind === "logic_gate") {
             writeMyWorkDragPayload(event.dataTransfer, HOME_INBOX_LOGIC_GATE_DRAG_MIME, { logicGateIDs: [row.id], nodeIDsByLogicGateID: { [row.id]: collectMyWorkNodeIDs(row) } });
+          } else if (row.kind === "project") {
+            const projectID = row.projectID?.trim() || row.id.trim();
+            if (!projectID) return;
+            const logicGateIDs = collectMyWorkLogicGateIDs(row);
+            const nodeIDs = collectMyWorkNodeIDs(row);
+            writeMyWorkDragPayload(event.dataTransfer, HOME_INBOX_PROJECT_DRAG_MIME, {
+              projectIDs: [projectID],
+              logicGateIDsByProjectID: logicGateIDs.length > 0 ? { [projectID]: logicGateIDs } : undefined,
+              nodeIDsByProjectID: nodeIDs.length > 0 ? { [projectID]: nodeIDs } : undefined,
+              nodeIDsByLogicGateID: collectMyWorkNodeIDsByLogicGateID(row),
+            });
           }
         }}
         onDragOver={(event) => {
           if (row.kind !== "logic_gate" || !onDropNodes) return;
-          const payload = readMyWorkDragPayload<MyWorkNodeDragPayload>(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME);
-          if (!payload || cleanIDList(payload.nodeIDs).length === 0) return;
+          if (!hasMyWorkDragType(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME)) return;
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
         }}
@@ -993,9 +1017,12 @@ function MyWorkMatrix({
   onOpenNodeBulkMenu,
   onOpenLogicGateBulkMenu,
   onCreateNodeInCell,
+  onCreateLogicGateInCell,
+  onCreateProjectInCell,
   onDropNodes,
   onDropNodesInCell,
   onDropLogicGates,
+  onDropProjects,
   nodeByID,
   logicGateByID,
   roleColumnWidths,
@@ -1011,16 +1038,23 @@ function MyWorkMatrix({
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
   onCreateNodeInCell?: (input: MyWorkCellCreateInput) => void;
+  onCreateLogicGateInCell?: (input: MyWorkCellCreateInput) => void;
+  onCreateProjectInCell?: (input: MyWorkCellCreateInput) => void;
   onDropNodes?: (input: MyWorkNodeDropInput) => void;
   onDropNodesInCell?: (input: MyWorkCellNodeDropInput) => void;
   onDropLogicGates?: (input: MyWorkCellLogicGateDropInput) => void;
+  onDropProjects?: (input: MyWorkCellProjectDropInput) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
   roleColumnWidths: MyWorkRoleColumnWidths;
   onStartRoleColumnResize: (role: LogicGateGVICRole, event: React.PointerEvent<HTMLButtonElement>) => void;
 }) {
+  const [createMenu, setCreateMenu] = useState<{ x: number; y: number; input: MyWorkCellCreateInput } | null>(null);
+  const hasCreateCellActions = Boolean(onCreateNodeInCell || onCreateLogicGateInCell || onCreateProjectInCell);
+
   return (
-    <div style={myWorkMatrixGridStyle(roleColumnWidths)}>
+    <>
+      <div style={myWorkMatrixGridStyle(roleColumnWidths)}>
       <div style={myWorkMatrixCornerStyle}>Priority</div>
       {MY_WORK_MATRIX_ROLES.map((role) => (
         <div key={role} style={myWorkMatrixColumnHeaderStyle(role)}>
@@ -1047,26 +1081,37 @@ function MyWorkMatrix({
                 key={`${priority}:${role}`}
                 style={myWorkMatrixCellStyle(role)}
                 onContextMenu={(event) => {
-                  if (!onCreateNodeInCell) return;
+                  if (!hasCreateCellActions) return;
                   event.preventDefault();
-                  onCreateNodeInCell(createInput);
+                  event.stopPropagation();
+                  setCreateMenu({ x: event.clientX, y: event.clientY, input: createInput });
                 }}
                 onDragOver={(event) => {
-                  if (!onDropNodesInCell && !onDropLogicGates) return;
-                  const nodePayload = readMyWorkDragPayload<MyWorkNodeDragPayload>(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME);
-                  const gatePayload = readMyWorkDragPayload<MyWorkLogicGateDragPayload>(event.dataTransfer, HOME_INBOX_LOGIC_GATE_DRAG_MIME);
-                  if (cleanIDList(nodePayload?.nodeIDs ?? []).length === 0 && cleanIDList(gatePayload?.logicGateIDs ?? []).length === 0) return;
+                  if (!onDropNodesInCell && !onDropLogicGates && !onDropProjects) return;
+                  const hasNodeDrag = hasMyWorkDragType(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME);
+                  const hasLogicGateDrag = hasMyWorkDragType(event.dataTransfer, HOME_INBOX_LOGIC_GATE_DRAG_MIME);
+                  const hasProjectDrag = hasMyWorkDragType(event.dataTransfer, HOME_INBOX_PROJECT_DRAG_MIME);
+                  if (!hasNodeDrag && !hasLogicGateDrag && !hasProjectDrag) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
                 }}
                 onDrop={(event) => {
                   const nodePayload = readMyWorkDragPayload<MyWorkNodeDragPayload>(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME);
                   const gatePayload = readMyWorkDragPayload<MyWorkLogicGateDragPayload>(event.dataTransfer, HOME_INBOX_LOGIC_GATE_DRAG_MIME);
+                  const projectPayload = readMyWorkDragPayload<MyWorkProjectDragPayload>(event.dataTransfer, HOME_INBOX_PROJECT_DRAG_MIME);
                   const nodeIDs = cleanIDList(nodePayload?.nodeIDs ?? []);
                   const logicGateIDs = cleanIDList(gatePayload?.logicGateIDs ?? []);
-                  if (nodeIDs.length === 0 && logicGateIDs.length === 0) return;
+                  const projectIDs = cleanIDList(projectPayload?.projectIDs ?? []);
+                  if (nodeIDs.length === 0 && logicGateIDs.length === 0 && projectIDs.length === 0) return;
                   event.preventDefault();
                   event.stopPropagation();
+                  if (projectIDs.length > 0 && onDropProjects) onDropProjects({
+                    ...createInput,
+                    projectIDs,
+                    logicGateIDsByProjectID: projectPayload?.logicGateIDsByProjectID,
+                    nodeIDsByProjectID: projectPayload?.nodeIDsByProjectID,
+                    nodeIDsByLogicGateID: projectPayload?.nodeIDsByLogicGateID,
+                  });
                   if (logicGateIDs.length > 0 && onDropLogicGates) onDropLogicGates({ ...createInput, logicGateIDs, nodeIDsByLogicGateID: gatePayload?.nodeIDsByLogicGateID });
                   if (nodeIDs.length > 0 && onDropNodesInCell) onDropNodesInCell({ ...createInput, nodeIDs, fromLogicGateID: nodePayload?.fromLogicGateID });
                 }}
@@ -1096,7 +1141,21 @@ function MyWorkMatrix({
           })}
         </React.Fragment>
       ))}
-    </div>
+      </div>
+      {createMenu && (
+        <FrameRightClickMenu x={createMenu.x} y={createMenu.y} onClose={() => setCreateMenu(null)} minWidth={190}>
+          {onCreateNodeInCell && (
+            <button type="button" style={sharedInboxContextMenuButtonStyle} onClick={() => { onCreateNodeInCell(createMenu.input); setCreateMenu(null); }}>Create Node</button>
+          )}
+          {onCreateLogicGateInCell && (
+            <button type="button" style={sharedInboxContextMenuButtonStyle} onClick={() => { onCreateLogicGateInCell(createMenu.input); setCreateMenu(null); }}>Create Logic Gate</button>
+          )}
+          {onCreateProjectInCell && (
+            <button type="button" style={sharedInboxContextMenuButtonStyle} onClick={() => { onCreateProjectInCell(createMenu.input); setCreateMenu(null); }}>Create Project</button>
+          )}
+        </FrameRightClickMenu>
+      )}
+    </>
   );
 }
 
@@ -1245,6 +1304,10 @@ function readMyWorkDragPayload<T>(dataTransfer: DataTransfer, mime: string): T |
   }
 }
 
+function hasMyWorkDragType(dataTransfer: DataTransfer, mime: string): boolean {
+  return Array.from(dataTransfer.types ?? []).includes(mime);
+}
+
 function collectMyWorkNodeIDs(row: MyWorkResourceRow): string[] {
   const ids: string[] = [];
   const visit = (item: MyWorkResourceRow) => {
@@ -1253,6 +1316,30 @@ function collectMyWorkNodeIDs(row: MyWorkResourceRow): string[] {
   };
   visit(row);
   return cleanIDList(ids);
+}
+
+function collectMyWorkLogicGateIDs(row: MyWorkResourceRow): string[] {
+  const ids: string[] = [];
+  const visit = (item: MyWorkResourceRow) => {
+    if (item.kind === "logic_gate" && item.id.trim()) ids.push(item.id.trim());
+    for (const child of item.children ?? []) visit(child);
+  };
+  visit(row);
+  return cleanIDList(ids);
+}
+
+function collectMyWorkNodeIDsByLogicGateID(row: MyWorkResourceRow): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const visit = (item: MyWorkResourceRow) => {
+    if (item.kind === "logic_gate") {
+      const logicGateID = item.id.trim();
+      const nodeIDs = collectMyWorkNodeIDs(item);
+      if (logicGateID && nodeIDs.length > 0) out[logicGateID] = nodeIDs;
+    }
+    for (const child of item.children ?? []) visit(child);
+  };
+  visit(row);
+  return out;
 }
 
 function normalizeGVICRole(role: string | null | undefined): LogicGateGVICRole | "" {
@@ -1651,9 +1738,10 @@ const myWorkMatrixScrollStyle: React.CSSProperties = {
 };
 
 function myWorkMatrixGridStyle(roleColumnWidths: MyWorkRoleColumnWidths): React.CSSProperties {
-  const columns = MY_WORK_MATRIX_ROLES.map((role) => `${roleColumnWidths[role]}px`);
+  const columns = MY_WORK_MATRIX_ROLES.map((role) => `minmax(${MY_WORK_ROLE_COLUMN_MIN_WIDTH}px, ${Math.max(MY_WORK_ROLE_COLUMN_MIN_WIDTH, roleColumnWidths[role])}fr)`);
   return {
-    minWidth: MY_WORK_PRIORITY_COLUMN_WIDTH + MY_WORK_MATRIX_ROLES.reduce((sum, role) => sum + roleColumnWidths[role], 0),
+    width: "100%",
+    minWidth: MY_WORK_PRIORITY_COLUMN_WIDTH + (MY_WORK_ROLE_COLUMN_MIN_WIDTH * MY_WORK_MATRIX_ROLES.length),
     display: "grid",
     gridTemplateColumns: `${MY_WORK_PRIORITY_COLUMN_WIDTH}px ${columns.join(" ")}`,
     alignItems: "stretch",
@@ -2189,27 +2277,34 @@ const rowListStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   alignContent: "start",
+  justifyItems: "start",
 };
 
 const logicGateSectionBlockStyle: React.CSSProperties = {
   minWidth: 0,
+  maxWidth: "100%",
   display: "grid",
   alignContent: "start",
+  justifyItems: "start",
 };
 
 const logicGateNodeListStyle: React.CSSProperties = {
   minWidth: 0,
+  maxWidth: "100%",
   display: "grid",
   alignContent: "start",
+  justifyItems: "start",
 };
 
 function workRowStyle(depth: number, role: LogicGateGVICRole): React.CSSProperties {
   const accent = homeGVICRoleAccent(role);
   return {
-    width: "min(620px, calc(100% - 8px))",
+    width: "fit-content",
+    minWidth: "min(230px, calc(100% - 18px))",
+    maxWidth: "calc(100% - 18px)",
     minHeight: 34,
     display: "grid",
-    gridTemplateColumns: "minmax(120px, 1fr) max-content",
+    gridTemplateColumns: "minmax(120px, max-content) max-content",
     alignItems: "center",
     gap: 8,
     marginLeft: depth * 28,
