@@ -177,16 +177,19 @@ func TestPostgresMyWorkMatrixReadsFlatNodeLeafProjectionRows(t *testing.T) {
 	}
 	sql := normalizeProjectionSource(string(postgresProjectionRaw))
 	for _, needle := range []string{
-		"node_leaf_id",
-		"is_container_row",
-		"'project'::text as resource_type",
-		"mangorts_user_can_access_resource(entry.company_id, 'node', entry.node_leaf_id",
+		"projection_row_id",
+		"node_name",
+		"logic_gate_name",
+		"mangorts_user_can_access_resource(entry.company_id, 'node', entry.node_id",
 	} {
 		if !strings.Contains(sql, needle) {
 			t.Fatalf("Postgres My Work flat projection path missing %q", needle)
 		}
 	}
 	for _, forbidden := range []string{
+		"node_leaf_id",
+		"is_container_row",
+		"'project'::text as resource_type",
 		"postgresMyWorkProjectRowsSQL",
 		"project_rows",
 		"effective.resource_type='project'",

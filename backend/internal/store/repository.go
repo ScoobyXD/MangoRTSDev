@@ -615,8 +615,10 @@ type MyWorkMatrixResponse struct {
 }
 type ProjectionRow struct {
 	CompanyID                    string           `json:"company_id"`
+	ProjectionRowID              string           `json:"projection_row_id,omitempty"`
 	ItemID                       string           `json:"item_id,omitempty"`
 	UserID                       string           `json:"user_id,omitempty"`
+	NodeName                     string           `json:"node_name,omitempty"`
 	ProjectID                    string           `json:"project_id,omitempty"`
 	ProjectName                  string           `json:"project_name,omitempty"`
 	RelationshipID               string           `json:"relationship_id,omitempty"`
@@ -638,6 +640,7 @@ type ProjectionRow struct {
 	SourcePrincipalID            string           `json:"source_principal_id,omitempty"`
 	InheritanceType              string           `json:"inheritance_type,omitempty"`
 	LogicGateID                  *string          `json:"logic_gate_id,omitempty"`
+	LogicGateName                string           `json:"logic_gate_name,omitempty"`
 	DisplayTitle                 string           `json:"display_title,omitempty"`
 	Status                       *string          `json:"status,omitempty"`
 	DueDate                      *string          `json:"due_date,omitempty"`
@@ -690,6 +693,7 @@ const (
 )
 
 type ProjectionRowKey struct {
+	ProjectionRowID     string `json:"projection_row_id,omitempty"`
 	ItemID              string `json:"item_id,omitempty"`
 	UserID              string `json:"user_id,omitempty"`
 	ProjectID           string `json:"project_id,omitempty"`
@@ -814,9 +818,10 @@ type ResourceGVICAssignmentMutationResult struct {
 }
 
 type ProjectMutationResult struct {
-	Project    *domain.Project                   `json:"project,omitempty"`
-	DeletedID  string                            `json:"deleted_project_id,omitempty"`
-	FolderItem *domain.CompanyExplorerFolderItem `json:"folder_item,omitempty"`
+	Project          *domain.Project                   `json:"project,omitempty"`
+	DeletedID        string                            `json:"deleted_project_id,omitempty"`
+	FolderItem       *domain.CompanyExplorerFolderItem `json:"folder_item,omitempty"`
+	ProjectionDeltas []ProjectionDelta                 `json:"-"`
 }
 
 type ProjectInformationInput struct {

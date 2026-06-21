@@ -170,28 +170,22 @@ export async function upsertKanbanCard(args: {
 
 export type GVICMatrixProjectionRow = {
   company_id: string;
+  projection_row_id: string;
   user_id: string;
-  item_id?: string;
+  node_name: string;
   gvic_assignment?: string;
-  role?: string;
-  resource_type: "project" | "node" | "logic_gate";
-  resource_id: string;
+  priority?: number;
   project_id?: string;
   project_name?: string;
   logic_gate_id?: string;
-  node_leaf_id?: string;
-  parent_resource_type?: string;
-  parent_resource_id?: string;
-  depth?: number;
-  sort_order?: number;
-  is_container_row?: boolean;
-  display_title: string;
+  logic_gate_name?: string;
+  node_id: string;
   status?: string;
   due_date?: string;
-  priority?: number;
   accounts?: Account[];
-  resource_created_timestamp: string;
+  created_timestamp: string;
   updated_timestamp: string;
+  sort_order?: number;
 };
 
 export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord; gvic_projection_rows: GVICMatrixProjectionRow[] };

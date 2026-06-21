@@ -176,8 +176,8 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	if myWorkPayload.CompanyID != companyID || myWorkPayload.UserID != user.UserID {
 		t.Fatalf("my work metadata = %+v", myWorkPayload)
 	}
-	if !inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, responsibleNode.NodeID) {
-		t.Fatalf("my work rows missing responsible node %s: %+v", responsibleNode.NodeID, myWorkPayload.Rows)
+	if !inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, responsibleNode.NodeID, domain.GVICRoleGenerated) {
+		t.Fatalf("my work rows missing generated node %s: %+v", responsibleNode.NodeID, myWorkPayload.Rows)
 	}
 }
 
@@ -582,9 +582,9 @@ func inboxReadHTTPNodesExactly(nodes []domain.Node, nodeID string) bool {
 	return len(nodes) == 1 && nodes[0].NodeID == nodeID
 }
 
-func inboxReadHTTPMyWorkHasNode(rows []store.GVICMatrixProjectionRow, nodeID string) bool {
+func inboxReadHTTPMyWorkHasNode(rows []store.GVICMatrixProjectionRow, nodeID string, role string) bool {
 	for _, row := range rows {
-		if row.ResourceType == store.EntityTypeNode && row.ResourceID == nodeID && row.NodeLeafID == nodeID && !row.IsContainerRow {
+		if row.NodeID == nodeID && row.GVICAssignment == role && !row.IsContainerRow {
 			return true
 		}
 	}

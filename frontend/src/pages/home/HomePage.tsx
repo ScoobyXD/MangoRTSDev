@@ -2951,22 +2951,24 @@ export function HomePage({
     const cleanRows = rows.filter((row) => (
       row.company_id?.trim() === companyID &&
       row.user_id?.trim() === activeGVICMatrixUserID &&
-      (row.resource_type === "node" || row.resource_type === "logic_gate") &&
-      row.resource_id?.trim()
+      row.projection_row_id?.trim() &&
+      row.node_id?.trim()
     ));
     if (cleanRows.length === 0 && mode !== "replace") return;
     if (mode === "replace") {
       GVICMatrixProjectionRowsRef.current = cleanRows;
     } else {
-      const byKey = new Map(GVICMatrixProjectionRowsRef.current.map((row) => [`${row.resource_type}\u0000${row.resource_id}`, row]));
-      for (const row of cleanRows) byKey.set(`${row.resource_type}\u0000${row.resource_id}`, row);
+      const byKey = new Map(GVICMatrixProjectionRowsRef.current.map((row) => [row.projection_row_id, row]));
+      for (const row of cleanRows) byKey.set(row.projection_row_id, row);
       GVICMatrixProjectionRowsRef.current = Array.from(byKey.values());
     }
     const projectedLogicGateByID = new Map((options.logicGates ?? []).map((logicGate) => [logicGate.logic_gate_id, logicGate]));
-    const nodeRows = cleanRows.filter((row) => row.resource_type === "node");
-    const logicGateRows = cleanRows.filter((row) => row.resource_type === "logic_gate");
-    const nextProjectedNodeIDs = new Set(nodeRows.map((row) => row.resource_id.trim()).filter(Boolean));
-    const nextProjectedLogicGateIDs = new Set(logicGateRows.map((row) => row.resource_id.trim()).filter(Boolean));
+    const nodeRows = cleanRows;
+    const nextProjectedNodeIDs = new Set(nodeRows.map((row) => row.node_id.trim()).filter(Boolean));
+    const nextProjectedLogicGateIDs = new Set([
+      ...nodeRows.map((row) => row.logic_gate_id?.trim() ?? "").filter(Boolean),
+      ...(options.logicGates ?? []).map((logicGate) => logicGate.logic_gate_id.trim()).filter(Boolean),
+    ]);
 
     setNodes((previous) => {
       const byID = new Map(previous.map((node) => [node.node_id, node]));
@@ -2983,19 +2985,19 @@ export function HomePage({
         if (!nextProjectedNodeIDs.has(nodeID)) byID.delete(nodeID);
       }
       for (const row of nodeRows) {
-        const nodeID = row.resource_id.trim();
+        const nodeID = row.node_id.trim();
         const previousNode = byID.get(nodeID);
         byID.set(nodeID, {
           ...previousNode,
           company_id: row.company_id,
           node_id: nodeID,
-          name: row.display_title || previousNode?.name || "Untitled node",
+          name: row.node_name || previousNode?.name || "Untitled node",
           status: row.status ?? null,
           due_date: row.due_date ?? null,
           priority: row.priority ?? null,
           logic_gate_ids: row.logic_gate_id?.trim() ? [row.logic_gate_id.trim()] : [],
           accounts: row.accounts ?? previousNode?.accounts ?? [],
-          created_timestamp: row.resource_created_timestamp || previousNode?.created_timestamp || new Date().toISOString(),
+          created_timestamp: row.created_timestamp || previousNode?.created_timestamp || new Date().toISOString(),
           effective_access_level: previousNode?.effective_access_level ?? "edit",
           can_view: previousNode?.can_view ?? true,
           can_edit: previousNode?.can_edit ?? true,
@@ -3018,17 +3020,17 @@ export function HomePage({
       for (const logicGateID of removeIDs) {
         if (!nextProjectedLogicGateIDs.has(logicGateID)) byID.delete(logicGateID);
       }
-      for (const row of logicGateRows) {
-        const logicGateID = row.resource_id.trim();
+      for (const logicGateID of nextProjectedLogicGateIDs) {
         const previousLogicGate = byID.get(logicGateID);
         const projectedLogicGate = projectedLogicGateByID.get(logicGateID);
+        const contextRow = nodeRows.find((row) => row.logic_gate_id?.trim() === logicGateID);
         byID.set(logicGateID, {
           ...previousLogicGate,
           ...projectedLogicGate,
-          company_id: row.company_id,
+          company_id: projectedLogicGate?.company_id || contextRow?.company_id || companyID,
           logic_gate_id: logicGateID,
-          header: row.display_title || projectedLogicGate?.header || previousLogicGate?.header || "Untitled Logic Gate",
-          created_timestamp: row.resource_created_timestamp || projectedLogicGate?.created_timestamp || previousLogicGate?.created_timestamp || new Date().toISOString(),
+          header: contextRow?.logic_gate_name || projectedLogicGate?.header || previousLogicGate?.header || "Untitled Logic Gate",
+          created_timestamp: projectedLogicGate?.created_timestamp || previousLogicGate?.created_timestamp || new Date().toISOString(),
           gvic_assignments: projectedLogicGate?.gvic_assignments ?? previousLogicGate?.gvic_assignments ?? [],
           effective_access_level: projectedLogicGate?.effective_access_level ?? previousLogicGate?.effective_access_level ?? "edit",
           can_view: projectedLogicGate?.can_view ?? previousLogicGate?.can_view ?? true,
@@ -3074,10 +3076,10 @@ export function HomePage({
       GVICMatrixProjectionRefetchInFlightRef.current = false;
     }
   }, [activeGVICMatrixUserID, apiBase, applyGVICMatrixProjectionRows, companyID, currentUserID]);
-  const removeGVICMatrixProjectionNode = useCallback((nodeID: string) => {
+  const removeGVICMatrixProjectionNodeIfGone = useCallback((nodeID: string) => {
     const cleanNodeID = nodeID.trim();
     if (!cleanNodeID) return;
-    GVICMatrixProjectionRowsRef.current = GVICMatrixProjectionRowsRef.current.filter((row) => row.resource_type !== "node" || row.resource_id.trim() !== cleanNodeID);
+    if (GVICMatrixProjectionRowsRef.current.some((row) => row.node_id?.trim() === cleanNodeID)) return;
     GVICMatrixProjectedNodeIDsRef.current.delete(cleanNodeID);
     setNodes((previous) => previous.filter((node) => node.node_id !== cleanNodeID));
     removeNodeRelationshipGraphNode(apiBase, companyID, cleanNodeID);
@@ -3106,16 +3108,10 @@ export function HomePage({
     if (!result.changed) return;
 
     for (const key of result.removedRowKeys) {
-      if (key.resource_type === "node" && key.resource_id) removeGVICMatrixProjectionNode(key.resource_id);
+      if (key.node_id) removeGVICMatrixProjectionNodeIfGone(key.node_id);
     }
-    const upsertedNodeRows = result.upsertedRows.filter((row) => row.resource_type === "node");
-    const upsertedLogicGateRows = result.upsertedRows.filter((row) => row.resource_type === "logic_gate");
-    if (upsertedNodeRows.length > 0) applyGVICMatrixProjectionRows(upsertedNodeRows);
-    if (upsertedLogicGateRows.length > 0) applyGVICMatrixProjectionRows(upsertedLogicGateRows);
-    if (upsertedLogicGateRows.length > 0 || result.removedRowKeys.some((key) => key.resource_type === "logic_gate")) {
-      requestGVICMatrixProjectionRefresh(result.lastSequence ?? 0);
-    }
-  }, [activeGVICMatrixUserID, applyGVICMatrixProjectionRows, companyID, currentUserID, removeGVICMatrixProjectionNode, requestGVICMatrixProjectionRefresh]);
+    if (result.upsertedRows.length > 0) applyGVICMatrixProjectionRows(result.upsertedRows);
+  }, [activeGVICMatrixUserID, applyGVICMatrixProjectionRows, companyID, currentUserID, removeGVICMatrixProjectionNodeIfGone, requestGVICMatrixProjectionRefresh]);
   useEffect(() => {
     if (!companyID || !activeGVICMatrixUserID || !isInboxMatrixView) return undefined;
     void refreshGVICMatrixProjection();

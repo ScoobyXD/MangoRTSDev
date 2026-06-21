@@ -251,7 +251,7 @@ func (s *Server) publishProjectionDeltasAsync(deltas []store.ProjectionDelta) {
 			realtimeConnections := s.realtimeRegistry.connectionsForScope(delta.CompanyID, realtimeScope)
 			hasRealtimeSubscribers := len(realtimeConnections) > 0
 			hasProjectionSubscribers := s.projectionHub.hasSubscribers(delta.CompanyID, delta.Projection, projectionScope)
-			log.Printf("gvic_matrix_projection_delta_targets company_id=%s user_id=%s realtime_scope=%s realtime_subscribers=%d projection_subscribers=%t operation=%s resource_type=%s resource_id=%s", delta.CompanyID, userID, realtimeScope, len(realtimeConnections), hasProjectionSubscribers, delta.Operation, delta.RowKey.ResourceType, delta.RowKey.ResourceID)
+			log.Printf("gvic_matrix_projection_delta_targets company_id=%s user_id=%s realtime_scope=%s realtime_subscribers=%d projection_subscribers=%t operation=%s projection_row_id=%s node_id=%s", delta.CompanyID, userID, realtimeScope, len(realtimeConnections), hasProjectionSubscribers, delta.Operation, delta.RowKey.ProjectionRowID, delta.RowKey.NodeID)
 			if !hasRealtimeSubscribers && !hasProjectionSubscribers {
 				continue
 			}
@@ -482,11 +482,16 @@ func (s *Server) authorizedGVICMatrixProjectionDeltaForUser(delta store.Projecti
 	userID = strings.TrimSpace(userID)
 	delta = cloneProjectionDelta(delta)
 	delta.RowKey.UserID = userID
-	resourceType := strings.TrimSpace(delta.RowKey.ResourceType)
-	resourceID := strings.TrimSpace(delta.RowKey.ResourceID)
-	if resourceType == "" || resourceID == "" {
+	projectionRowID := strings.TrimSpace(delta.RowKey.ProjectionRowID)
+	if projectionRowID == "" && delta.Row != nil {
+		projectionRowID = strings.TrimSpace(delta.Row.ProjectionRowID)
+	}
+	nodeID := projectionDeltaNodeID(delta)
+	if projectionRowID == "" || nodeID == "" {
 		return store.ProjectionDelta{}, false
 	}
+	delta.RowKey.ProjectionRowID = projectionRowID
+	delta.RowKey.NodeID = nodeID
 	switch delta.Operation {
 	case store.ProjectionDeltaOperationDelete:
 		delta.Row = nil
@@ -496,26 +501,26 @@ func (s *Server) authorizedGVICMatrixProjectionDeltaForUser(delta store.Projecti
 	default:
 		return store.ProjectionDelta{}, false
 	}
-	nodeLeafID := strings.TrimSpace(delta.RowKey.NodeLeafID)
-	if nodeLeafID == "" {
-		nodeLeafID = strings.TrimSpace(delta.RowKey.NodeID)
+	allowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeNode, nodeID, store.EntityPermissionEdit)
+	if err != nil {
+		log.Printf("failed to check GVIC matrix projection delta access company_id=%s user_id=%s projection_row_id=%s node_id=%s: %v", delta.CompanyID, userID, projectionRowID, nodeID, err)
+		return store.ProjectionDelta{}, false
 	}
-	if nodeLeafID == "" && delta.Row != nil {
-		nodeLeafID = strings.TrimSpace(delta.Row.NodeLeafID)
-		if nodeLeafID == "" {
-			nodeLeafID = strings.TrimSpace(delta.Row.NodeID)
+	logicGateID := projectionDeltaLogicGateID(delta)
+	if allowed && logicGateID != "" {
+		allowed, err = s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
+		if err != nil {
+			log.Printf("failed to check GVIC matrix projection delta logic gate access company_id=%s user_id=%s projection_row_id=%s logic_gate_id=%s: %v", delta.CompanyID, userID, projectionRowID, logicGateID, err)
+			return store.ProjectionDelta{}, false
 		}
 	}
-	accessResourceType := resourceType
-	accessResourceID := resourceID
-	if nodeLeafID != "" {
-		accessResourceType = store.EntityTypeNode
-		accessResourceID = nodeLeafID
-	}
-	allowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, accessResourceType, accessResourceID, store.EntityPermissionEdit)
-	if err != nil {
-		log.Printf("failed to check projection delta access company_id=%s user_id=%s resource_type=%s resource_id=%s: %v", delta.CompanyID, userID, accessResourceType, accessResourceID, err)
-		return store.ProjectionDelta{}, false
+	projectID := projectionDeltaProjectID(delta)
+	if allowed && projectID != "" {
+		allowed, err = s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeProject, projectID, store.EntityPermissionView)
+		if err != nil {
+			log.Printf("failed to check GVIC matrix projection delta project access company_id=%s user_id=%s projection_row_id=%s project_id=%s: %v", delta.CompanyID, userID, projectionRowID, projectID, err)
+			return store.ProjectionDelta{}, false
+		}
 	}
 	if !allowed {
 		return store.ProjectionDelta{
@@ -528,6 +533,8 @@ func (s *Server) authorizedGVICMatrixProjectionDeltaForUser(delta store.Projecti
 	}
 	if delta.Row != nil {
 		delta.Row.UserID = userID
+		delta.Row.ProjectionRowID = projectionRowID
+		delta.Row.NodeID = nodeID
 	}
 	return delta, true
 }
@@ -700,14 +707,10 @@ func (s *Server) publishGVICMatrixPermissionProjectionDeltasAsync(companyID, ent
 	for _, row := range rows {
 		copied := row
 		deltas = append(deltas, store.ProjectionDelta{
-			CompanyID:  companyID,
-			Projection: store.ProjectionNameGVICMatrix,
-			Operation:  store.ProjectionDeltaOperationUpsert,
-			RowKey: store.ProjectionRowKey{
-				UserID:       copied.UserID,
-				ResourceType: copied.ResourceType,
-				ResourceID:   copied.ResourceID,
-			},
+			CompanyID:          companyID,
+			Projection:         store.ProjectionNameGVICMatrix,
+			Operation:          store.ProjectionDeltaOperationUpsert,
+			RowKey:             store.GVICMatrixProjectionRowKey(copied),
 			Row:                &copied,
 			ProjectedTimestamp: now,
 		})

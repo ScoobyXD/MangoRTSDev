@@ -61,6 +61,8 @@ func (r *MemoryRepo) UpdateProject(input ProjectInput) (ProjectMutationResult, e
 	if !ok {
 		return ProjectMutationResult{}, ErrNotFound
 	}
+	gvicNodeIDs, gvicLogicGateIDs := r.gvicMatrixProjectAffectedResourceIDsLocked(input.CompanyID, input.ProjectID)
+	gvicBefore := r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
 	project.Name = input.Name
 	project.Status = input.Status
 	project.Health = input.Health
@@ -72,8 +74,14 @@ func (r *MemoryRepo) UpdateProject(input ProjectInput) (ProjectMutationResult, e
 	}
 	project.UpdatedTimestamp = time.Now().UTC()
 	r.projects[k] = project
+	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
+	gvicAfter := r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
 	project = r.withProjectReadModelLocked(project)
-	return ProjectMutationResult{Project: &project}, nil
+	projectionDeltas := diffGVICMatrixProjectionRows(gvicBefore, gvicAfter)
+	if _, err := r.appendEventRowsLocked(GVICMatrixProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
+		return ProjectMutationResult{}, err
+	}
+	return ProjectMutationResult{Project: &project, ProjectionDeltas: projectionDeltas}, nil
 }
 
 func (r *MemoryRepo) DeleteProject(companyID, projectID, actorUserID string) (ProjectMutationResult, error) {
@@ -84,10 +92,48 @@ func (r *MemoryRepo) DeleteProject(companyID, projectID, actorUserID string) (Pr
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	gvicNodeIDs, gvicLogicGateIDs := r.gvicMatrixProjectAffectedResourceIDsLocked(companyID, projectID)
+	gvicBefore := r.GVICMatrixProjectionRowsForResourcesLocked(companyID, gvicNodeIDs, gvicLogicGateIDs)
 	if err := r.deleteProjectLocked(companyID, projectID); err != nil {
 		return ProjectMutationResult{}, err
 	}
-	return ProjectMutationResult{DeletedID: projectID}, nil
+	r.syncGVICMatrixProjectionForProjectResourcesLocked(companyID, gvicNodeIDs, gvicLogicGateIDs)
+	gvicAfter := r.GVICMatrixProjectionRowsForResourcesLocked(companyID, gvicNodeIDs, gvicLogicGateIDs)
+	projectionDeltas := diffGVICMatrixProjectionRows(gvicBefore, gvicAfter)
+	if _, err := r.appendEventRowsLocked(GVICMatrixProjectionDeltaEventInputs(companyID, actorUserID, "", projectionDeltas)); err != nil {
+		return ProjectMutationResult{}, err
+	}
+	return ProjectMutationResult{DeletedID: projectID, ProjectionDeltas: projectionDeltas}, nil
+}
+
+func (r *MemoryRepo) gvicMatrixProjectAffectedResourceIDsLocked(companyID, projectID string) ([]string, []string) {
+	nodeSet := map[string]bool{}
+	logicGateSet := map[string]bool{}
+	for _, projection := range r.projectRelationshipProjection {
+		if projection.CompanyID != companyID || projection.ProjectID != projectID {
+			continue
+		}
+		if projection.NodeID != nil {
+			if nodeID := strings.TrimSpace(*projection.NodeID); nodeID != "" {
+				nodeSet[nodeID] = true
+			}
+		}
+		if projection.LogicGateID != nil {
+			if logicGateID := strings.TrimSpace(*projection.LogicGateID); logicGateID != "" {
+				logicGateSet[logicGateID] = true
+			}
+		}
+	}
+	return mapKeys(nodeSet), mapKeys(logicGateSet)
+}
+
+func (r *MemoryRepo) syncGVICMatrixProjectionForProjectResourcesLocked(companyID string, nodeIDs, logicGateIDs []string) {
+	for _, nodeID := range cleanUUIDTextSlice(nodeIDs) {
+		r.syncGVICMatrixProjectionForNodeLocked(companyID, nodeID)
+	}
+	for _, logicGateID := range cleanUUIDTextSlice(logicGateIDs) {
+		r.syncGVICMatrixProjectionForLogicGateLocked(companyID, logicGateID)
+	}
 }
 
 func (r *MemoryRepo) GetProject(companyID, projectID string) (domain.Project, error) {
@@ -452,6 +498,16 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 	previousRelationship, hadPreviousRelationship := r.projectRelationships[relationshipKey]
 	previousProjection, hadPreviousProjection := r.projectRelationshipProjection[relationshipKey]
 	before := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, input.RelationshipID)
+	gvicNodeSet := map[string]bool{}
+	gvicLogicGateSet := map[string]bool{}
+	addProjectRelationshipGVICMatrixResourceIDs(gvicNodeSet, gvicLogicGateSet, before)
+	switch input.ResourceType {
+	case EntityTypeNode:
+		gvicNodeSet[input.ResourceID] = true
+	case EntityTypeLogicGate:
+		gvicLogicGateSet[input.ResourceID] = true
+	}
+	gvicBefore := r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, mapKeys(gvicNodeSet), mapKeys(gvicLogicGateSet))
 	now := time.Now().UTC()
 	existing := r.projectRelationships[relationshipKey]
 	created := now
@@ -483,8 +539,16 @@ func (r *MemoryRepo) UpsertProjectRelationship(input ProjectRelationshipInput) (
 		return ProjectRelationshipMutationResult{}, err
 	}
 	after := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, input.RelationshipID)
+	addProjectRelationshipGVICMatrixResourceIDs(gvicNodeSet, gvicLogicGateSet, after)
+	gvicNodeIDs := mapKeys(gvicNodeSet)
+	gvicLogicGateIDs := mapKeys(gvicLogicGateSet)
+	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
+	gvicAfter := r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
 	deltas := diffProjectRelationshipProjectionRows(before, after)
-	if _, err := r.appendEventRowsLocked(ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)); err != nil {
+	deltas = append(deltas, diffGVICMatrixProjectionRows(gvicBefore, gvicAfter)...)
+	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)
+	eventInputs = append(eventInputs, GVICMatrixProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)...)
+	if _, err := r.appendEventRowsLocked(eventInputs); err != nil {
 		if hadPreviousRelationship {
 			r.projectRelationships[relationshipKey] = previousRelationship
 		} else {
@@ -514,11 +578,22 @@ func (r *MemoryRepo) DeleteProjectRelationship(input ProjectRelationshipDeleteIn
 		return ProjectRelationshipMutationResult{}, ErrNotFound
 	}
 	before := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, input.RelationshipID)
+	gvicNodeSet := map[string]bool{}
+	gvicLogicGateSet := map[string]bool{}
+	addProjectRelationshipGVICMatrixResourceIDs(gvicNodeSet, gvicLogicGateSet, before)
+	gvicNodeIDs := mapKeys(gvicNodeSet)
+	gvicLogicGateIDs := mapKeys(gvicLogicGateSet)
+	gvicBefore := r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
 	previousProjection, hadPreviousProjection := r.projectRelationshipProjection[relationshipKey]
 	delete(r.projectRelationships, relationshipKey)
 	delete(r.projectRelationshipProjection, relationshipKey)
+	r.syncGVICMatrixProjectionForProjectResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
+	gvicAfter := r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, gvicNodeIDs, gvicLogicGateIDs)
 	deltas := diffProjectRelationshipProjectionRows(before, nil)
-	if _, err := r.appendEventRowsLocked(ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)); err != nil {
+	deltas = append(deltas, diffGVICMatrixProjectionRows(gvicBefore, gvicAfter)...)
+	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)
+	eventInputs = append(eventInputs, GVICMatrixProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)...)
+	if _, err := r.appendEventRowsLocked(eventInputs); err != nil {
 		r.projectRelationships[relationshipKey] = relationship
 		if hadPreviousProjection {
 			r.projectRelationshipProjection[relationshipKey] = previousProjection

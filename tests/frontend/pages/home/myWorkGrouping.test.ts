@@ -112,16 +112,13 @@ test("My Work scoped matrix loading preserves successful users when another user
         user_id: targetUserID,
         rows: [{
           company_id: "company-1",
+          projection_row_id: `my_work_node_leaf:company-1:${targetUserID}:generated:1:node:node-1:project:none:logic_gate:none`,
           user_id: targetUserID,
-          item_id: `${targetUserID}:generated:node-1`,
+          node_name: "Still visible",
           gvic_assignment: "generated",
-          role: "generated",
-          resource_type: "node" as const,
-          resource_id: "node-1",
-          node_leaf_id: "node-1",
-          display_title: "Still visible",
           priority: 1,
-          resource_created_timestamp: "2026-01-01T00:00:00Z",
+          node_id: "node-1",
+          created_timestamp: "2026-01-01T00:00:00Z",
           updated_timestamp: "2026-01-01T00:00:00Z",
         }],
       };
@@ -130,6 +127,6 @@ test("My Work scoped matrix loading preserves successful users when another user
 
   assert.equal(result.cells.length, 1);
   assert.equal(result.cells[0].userID, "user-ok");
-  assert.equal(result.cells[0].display_title, "Still visible");
+  assert.equal(result.cells[0].node_name, "Still visible");
   assert.deepEqual(result.failures, [{ userID: "user-fail", message: "failed_to_list_my_work_matrix" }]);
 });

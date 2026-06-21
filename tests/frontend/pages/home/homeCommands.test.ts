@@ -37,13 +37,15 @@ function card(input: { nodeID: string; boardID?: string; columnID?: string }): K
 }
 
 function projectionRow(resourceID: string, overrides: Partial<GVICMatrixProjectionRow> = {}): GVICMatrixProjectionRow {
+  const logicGateID = overrides.logic_gate_id ?? "none";
   return {
     company_id: "company-1",
+    projection_row_id: `my_work_node_leaf:company-1:user-1:generated:none:node:${resourceID}:project:none:logic_gate:${logicGateID}`,
     user_id: "user-1",
-    resource_type: "node",
-    resource_id: resourceID,
-    display_title: `Node ${resourceID}`,
-    resource_created_timestamp: timestamp,
+    node_name: `Node ${resourceID}`,
+    gvic_assignment: "generated",
+    node_id: resourceID,
+    created_timestamp: timestamp,
     updated_timestamp: timestamp,
     ...overrides,
   };
@@ -177,7 +179,7 @@ test("Home node drop uses one work-item assignment command for status and priori
     position: 0,
   });
   assert.deepEqual(updated.nodes.map((item) => [item.node_id, item.status, item.priority]), [["node-1", "In Progress", 2]]);
-  assert.deepEqual(updated.gvic_projection_rows.map((row) => row.resource_id), ["node-1"]);
+  assert.deepEqual(updated.gvic_projection_rows.map((row) => row.node_id), ["node-1"]);
   assert.deepEqual(invalidatedBoards, ["logic-gate:gate-1"]);
 });
 
@@ -234,7 +236,7 @@ test("Home matrix node drop moves into a different Logic Gate with the move comm
     position: 0,
   });
   assert.deepEqual(updated.nodes.map((item) => [item.node_id, item.status, item.priority, item.logic_gate_ids]), [["node-1", "Done", 4, ["target-gate"]]]);
-  assert.deepEqual(updated.gvic_projection_rows.map((row) => [row.resource_id, row.logic_gate_id]), [["node-1", "target-gate"]]);
+  assert.deepEqual(updated.gvic_projection_rows.map((row) => [row.node_id, row.logic_gate_id]), [["node-1", "target-gate"]]);
   assert.deepEqual(invalidatedBoards, ["logic-gate:target-gate", "logic-gate:source-gate"]);
 });
 
@@ -351,7 +353,7 @@ test("Home node drop dedupes selected nodes and falls back to each node status",
   });
 
   assert.deepEqual(updated.nodes.map((item) => item.node_id), ["node-1", "node-2"]);
-  assert.deepEqual(updated.gvic_projection_rows.map((row) => row.resource_id), ["node-1", "node-2"]);
+  assert.deepEqual(updated.gvic_projection_rows.map((row) => row.node_id), ["node-1", "node-2"]);
   assert.deepEqual(statuses, ["done", "pending"]);
   assert.deepEqual(priorities, [null, null]);
 });

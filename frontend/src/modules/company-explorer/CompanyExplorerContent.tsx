@@ -496,24 +496,25 @@ function logicGateGVICRolesForUser(logicGate: ExplorerLogicGateRecord, userID: s
 function projectionRowMatchesUser(row: GVICMatrixProjectionRow, companyID: string, userID: string): boolean {
   return cleanExplorerID(row.company_id) === cleanExplorerID(companyID)
     && cleanExplorerID(row.user_id) === cleanExplorerID(userID)
-    && Boolean(cleanExplorerID(row.resource_id));
+    && Boolean(cleanExplorerID(row.projection_row_id))
+    && Boolean(cleanExplorerID(row.node_id));
 }
 
 function materializeProjectionNode(row: GVICMatrixProjectionRow, previous: NodeRecord | undefined): NodeRecord | null {
-  const nodeID = cleanExplorerID(row.resource_id);
-  if (row.resource_type !== "node" || !nodeID) return null;
+  const nodeID = cleanExplorerID(row.node_id);
+  if (!nodeID) return null;
   const logicGateID = cleanExplorerID(row.logic_gate_id);
   return {
     ...previous,
     company_id: cleanExplorerID(row.company_id) || previous?.company_id || "",
     node_id: nodeID,
-    name: row.display_title || previous?.name || "Untitled node",
+    name: row.node_name || previous?.name || "Untitled node",
     status: row.status ?? null,
     due_date: row.due_date ?? null,
     priority: row.priority ?? null,
     accounts: (row.accounts ?? previous?.accounts ?? []).map((account) => ({ ...account })),
     logic_gate_ids: logicGateID ? [logicGateID] : [],
-    created_timestamp: row.resource_created_timestamp || previous?.created_timestamp || "",
+    created_timestamp: row.created_timestamp || previous?.created_timestamp || "",
     effective_access_level: previous?.effective_access_level ?? "edit",
     can_view: previous?.can_view ?? true,
     can_edit: previous?.can_edit ?? true,
@@ -522,22 +523,23 @@ function materializeProjectionNode(row: GVICMatrixProjectionRow, previous: NodeR
 }
 
 function materializeProjectionLogicGate(
-  row: GVICMatrixProjectionRow,
+  logicGateID: string,
+  logicGateName: string,
   previous: ExplorerLogicGateRecord | undefined,
   projected: ExplorerLogicGateRecord | undefined,
 ): ExplorerLogicGateRecord | null {
-  const logicGateID = cleanExplorerID(row.resource_id);
-  if (row.resource_type !== "logic_gate" || !logicGateID) return null;
-  const header = row.display_title || projected?.header || previous?.header || previous?.title || "Untitled Logic Gate";
+  logicGateID = cleanExplorerID(logicGateID);
+  if (!logicGateID) return null;
+  const header = logicGateName || projected?.header || previous?.header || previous?.title || "Untitled Logic Gate";
   return {
     ...previous,
     ...projected,
-    company_id: cleanExplorerID(row.company_id) || projected?.company_id || previous?.company_id || "",
+    company_id: projected?.company_id || previous?.company_id || "",
     logic_gate_id: logicGateID,
     node_id: logicGateID,
     title: header,
     header,
-    created_timestamp: row.resource_created_timestamp || projected?.created_timestamp || previous?.created_timestamp || "",
+    created_timestamp: projected?.created_timestamp || previous?.created_timestamp || "",
     gvic_assignments: projected?.gvic_assignments ?? previous?.gvic_assignments ?? [],
     effective_access_level: projected?.effective_access_level ?? previous?.effective_access_level ?? "edit",
     can_view: projected?.can_view ?? previous?.can_view ?? true,
@@ -562,23 +564,13 @@ function materializeGVICProjectionExplorerData(input: {
 
   for (const row of input.projectionRows) {
     if (!projectionRowMatchesUser(row, input.companyID, input.currentUserID)) continue;
-    if (row.resource_type === "node") {
-      const node = materializeProjectionNode(row, fallbackNodeByID.get(cleanExplorerID(row.resource_id)));
-      if (node) {
-        nodeByID.set(node.node_id, node);
-        const logicGateID = cleanExplorerID(row.logic_gate_id);
-        const projected = projectedLogicGateByID.get(logicGateID);
-        const fallback = fallbackLogicGateByID.get(logicGateID);
-        if (logicGateID && !logicGateByID.has(logicGateID) && (projected || fallback)) {
-          logicGateByID.set(logicGateID, projected ?? fallback!);
-        }
-      }
-      continue;
-    }
-    if (row.resource_type === "logic_gate") {
-      const logicGateID = cleanExplorerID(row.resource_id);
+    const node = materializeProjectionNode(row, fallbackNodeByID.get(cleanExplorerID(row.node_id)));
+    if (node) nodeByID.set(node.node_id, node);
+    const logicGateID = cleanExplorerID(row.logic_gate_id);
+    if (logicGateID && !logicGateByID.has(logicGateID)) {
       const logicGate = materializeProjectionLogicGate(
-        row,
+        logicGateID,
+        row.logic_gate_name ?? "",
         fallbackLogicGateByID.get(logicGateID),
         projectedLogicGateByID.get(logicGateID),
       );
