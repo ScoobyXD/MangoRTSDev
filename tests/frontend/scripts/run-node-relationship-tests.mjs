@@ -13,6 +13,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/notifications/notificationsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeUtils.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkGrouping.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkDisplayRows.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkMatrixLoader.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeCommands.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/workspace/workspaceRealtime.test.js"),
