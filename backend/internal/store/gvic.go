@@ -69,6 +69,30 @@ func normalizeResourceGVICAssignmentInputs(assignments []ResourceGVICAssignmentI
 	return out, nil
 }
 
+func validateResourceGVICAssignmentInputsForOperation(keyValue resourceGVICKey, assignments []normalizedGVICAssignmentInput, operation string) error {
+	if keyValue.resourceType != EntityTypeNode || operation == GVICAssignmentCommandRemove {
+		return nil
+	}
+	roleCounts := map[string]int{}
+	for _, assignment := range assignments {
+		if !isNodePrimaryGVICRole(assignment.role) {
+			continue
+		}
+		if assignment.principalType != EntityPermissionSubjectUser {
+			return ErrInvalid
+		}
+		roleCounts[assignment.role]++
+		if roleCounts[assignment.role] > 1 {
+			return ErrInvalid
+		}
+	}
+	return nil
+}
+
+func isNodePrimaryGVICRole(role string) bool {
+	return role == domain.GVICRoleGenerated || role == domain.GVICRoleVerified
+}
+
 func gvicAssignmentInputKey(input normalizedGVICAssignmentInput) string {
 	return input.role + ":" + input.principalType + ":" + input.principalID
 }
