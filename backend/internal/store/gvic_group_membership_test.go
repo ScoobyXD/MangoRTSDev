@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"miraeopus/backend/internal/domain"
 	"os"
 	"sort"
@@ -62,8 +63,8 @@ func TestMemoryGroupMembershipGVICSyncIsAffectedGroupScoped(t *testing.T) {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
 
-	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, parentNode.NodeID, parent.GroupID, domain.GVICRoleGenerated)
-	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, childNode.NodeID, child.GroupID, domain.GVICRoleVerified)
+	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, parentNode.NodeID, parent.GroupID, domain.GVICRoleConsulted)
+	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, childNode.NodeID, child.GroupID, domain.GVICRoleInformed)
 	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeNode, unrelatedNode.NodeID, unrelatedGroup.GroupID, domain.GVICRoleConsulted)
 	mustSetGVICMembershipGroupAssignment(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, child.GroupID, domain.GVICRoleInformed)
 
@@ -103,6 +104,101 @@ func TestMemoryGroupMembershipGVICSyncIsAffectedGroupScoped(t *testing.T) {
 
 	if _, err := repo.SetCompanyUserGroupMembers(companyID, unassignedGroup.GroupID, []string{first.UserID}); err != nil {
 		t.Fatalf("SetCompanyUserGroupMembers unassigned: %v", err)
+	}
+}
+
+func TestMemoryNodePrimaryGVICAllowsOnlyOneUserPerRole(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "company-gvic-node-primary-user"
+	repo.EnsureCompany(companyID, "GVIC Node Primary User")
+
+	first := mustCreateGVICMembershipUser(t, repo, "gvic-node-primary-first", companyID)
+	next := mustCreateGVICMembershipUser(t, repo, "gvic-node-primary-next", companyID)
+	verified := mustCreateGVICMembershipUser(t, repo, "gvic-node-primary-verified", companyID)
+	group, err := repo.CreateCompanyUserGroup(companyID, "", "Primary Group")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup: %v", err)
+	}
+	node := mustCreateGVICMembershipNode(t, repo, companyID, "node primary slots")
+
+	_, err = repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeNode,
+		ResourceID:   node.NodeID,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: EntityPermissionSubjectGroup,
+			PrincipalID:   group.GroupID,
+		}},
+	})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("node generated group assignment error = %v, want %v", err, ErrInvalid)
+	}
+
+	_, err = repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeNode,
+		ResourceID:   node.NodeID,
+		Assignments: []ResourceGVICAssignmentInput{
+			{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: next.UserID},
+		},
+	})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("node generated multi-user assignment error = %v, want %v", err, ErrInvalid)
+	}
+
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeNode,
+		ResourceID:   node.NodeID,
+		Assignments: []ResourceGVICAssignmentInput{
+			{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: first.UserID},
+			{Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verified.UserID},
+			{Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID},
+		},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments valid node GVIC: %v", err)
+	}
+
+	result, err := repo.AddResourceGVICAssignments(ResourceGVICAssignmentCommandInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeNode,
+		ResourceID:   node.NodeID,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: EntityPermissionSubjectUser,
+			PrincipalID:   next.UserID,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("AddResourceGVICAssignments replacement: %v", err)
+	}
+	generatedUsers := []string{}
+	for _, assignment := range result.GVICAssignments {
+		if assignment.Role == domain.GVICRoleGenerated {
+			generatedUsers = append(generatedUsers, assignment.UserID)
+		}
+	}
+	if len(generatedUsers) != 1 || generatedUsers[0] != next.UserID {
+		t.Fatalf("generated users after replacement = %+v, want only %s", generatedUsers, next.UserID)
+	}
+
+	logicGate, err := repo.CreateLogicGate(companyID, "logic gate keeps group primary")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: EntityPermissionSubjectGroup,
+			PrincipalID:   group.GroupID,
+		}},
+	}); err != nil {
+		t.Fatalf("logic gate generated group assignment should remain valid: %v", err)
 	}
 }
 

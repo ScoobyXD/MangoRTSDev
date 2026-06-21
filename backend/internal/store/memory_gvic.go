@@ -76,6 +76,9 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 	if err != nil {
 		return ResourceGVICAssignmentMutationResult{}, err
 	}
+	if err := validateResourceGVICAssignmentInputsForOperation(keyValue, assignments, operation); err != nil {
+		return ResourceGVICAssignmentMutationResult{}, err
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -119,6 +122,14 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 			if keyValue.resourceType == EntityTypeNode || keyValue.resourceType == EntityTypeLogicGate {
 				for sourceKey, existing := range r.gvicAssignments {
 					if existing.CompanyID == keyValue.companyID && existing.ResourceType == keyValue.resourceType && existing.ResourceID == keyValue.resourceID && existing.PrincipalType == assignment.principalType && existing.PrincipalID == assignment.principalID && existing.Role != assignment.role {
+						delete(r.gvicAssignments, sourceKey)
+						changed = true
+					}
+				}
+			}
+			if keyValue.resourceType == EntityTypeNode && isNodePrimaryGVICRole(assignment.role) {
+				for sourceKey, existing := range r.gvicAssignments {
+					if existing.CompanyID == keyValue.companyID && existing.ResourceType == keyValue.resourceType && existing.ResourceID == keyValue.resourceID && existing.Role == assignment.role && (existing.PrincipalType != assignment.principalType || existing.PrincipalID != assignment.principalID) {
 						delete(r.gvicAssignments, sourceKey)
 						changed = true
 					}

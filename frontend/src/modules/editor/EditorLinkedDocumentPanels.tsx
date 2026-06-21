@@ -101,6 +101,10 @@ type LogicGateGVICPrincipalPickerOption = {
   label: string;
   meta: string;
   depth: number;
+  rowType: "group" | "user";
+  selectable: boolean;
+  expandable: boolean;
+  expanded: boolean;
 };
 
 function companyUserOptionLabel(user: { user_id: string; email?: string; display_name?: string }): string {
@@ -112,37 +116,6 @@ function companyUserOptionLabel(user: { user_id: string; email?: string; display
 
 function companyGroupLabel(group: { group_id: string; name?: string } | undefined, fallbackID: string): string {
   return group?.name?.trim() || fallbackID || "Group";
-}
-
-function companyUserGroupSubtreeIDs(groups: Array<{ group_id: string; parent_group_id?: string }>, rootGroupID: string): Set<string> {
-  const cleanRootID = rootGroupID.trim();
-  const ids = new Set<string>();
-  if (!cleanRootID || !groups.some((group) => group.group_id === cleanRootID)) return ids;
-  ids.add(cleanRootID);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const group of groups) {
-      const parentID = group.parent_group_id?.trim() ?? "";
-      if (parentID && ids.has(parentID) && !ids.has(group.group_id)) {
-        ids.add(group.group_id);
-        changed = true;
-      }
-    }
-  }
-  return ids;
-}
-
-function companyUserIDsForGroupSubtree(groups: Array<{ group_id: string; parent_group_id?: string }>, members: Array<{ group_id: string; user_id: string }>, rootGroupID: string): string[] {
-  const groupIDs = companyUserGroupSubtreeIDs(groups, rootGroupID);
-  if (groupIDs.size === 0) return [];
-  const userIDs = new Set<string>();
-  for (const member of members) {
-    const groupID = member.group_id.trim();
-    const userID = member.user_id.trim();
-    if (groupIDs.has(groupID) && userID) userIDs.add(userID);
-  }
-  return Array.from(userIDs).sort((left, right) => left.localeCompare(right));
 }
 
 function logicGateGVICAssignmentPrincipalType(assignment: LogicGateGVICAssignment): LogicGateGVICPrincipalType {
@@ -772,6 +745,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   key={column.role}
                   role={column.role}
                   label={column.label}
+                  linkedEntityKind={linkedEntityKind}
                   assignments={gvicFields.assignments.filter((assignment) => assignment.role === column.role)}
                   companyUsers={companyUsers}
                   companyUserGroups={companyUserGroups}
@@ -819,6 +793,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
 function GVICRoleEditor({
   role,
   label,
+  linkedEntityKind,
   assignments,
   companyUsers,
   companyUserGroups,
@@ -832,6 +807,7 @@ function GVICRoleEditor({
 }: {
   role: LogicGateGVICRole;
   label: string;
+  linkedEntityKind: "" | "node" | "logic_gate";
   assignments: LogicGateGVICAssignment[];
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
@@ -847,10 +823,28 @@ function GVICRoleEditor({
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState(false);
   const [assignedOpen, setAssignedOpen] = useState(false);
+  const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(() => new Set());
   const containerRef = useRef<HTMLDivElement | null>(null);
   const assignedPrincipalKeys = useMemo(() => new Set(assignments.map(logicGateGVICAssignmentSubjectKey)), [assignments]);
   const roleAccent = GVIC_ROLE_ACCENTS[role];
-  const subjectMatches = useMemo(() => {
+  const singleUserOnly = linkedEntityKind === "node" && (role === "generated" || role === "verified");
+  const inputPlaceholder = singleUserOnly ? "Add user" : "Add user or team";
+  const pickerAriaLabel = singleUserOnly ? `${label} users` : `${label} users and teams`;
+  const assignedSummary = singleUserOnly
+    ? (assignments.length === 0 ? "" : assignments.length === 1 ? GVICAssignmentLabel(assignments[0]) : `${GVICAssignmentLabel(assignments[0])} +${assignments.length - 1}`)
+    : `People (${assignments.length})`;
+  const showAssignedButton = !singleUserOnly || assignments.length > 0;
+  const toggleGroupExpanded = (groupID: string) => {
+    const cleanGroupID = groupID.trim();
+    if (!cleanGroupID) return;
+    setExpandedGroupIDs((current) => {
+      const next = new Set(current);
+      if (next.has(cleanGroupID)) next.delete(cleanGroupID);
+      else next.add(cleanGroupID);
+      return next;
+    });
+  };
+  const { pickerRows, selectableOptions } = useMemo(() => {
     const query = draft.trim().toLowerCase();
     const childrenByParent = new Map<string, Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>>();
     for (const group of companyUserGroups) {
@@ -862,46 +856,132 @@ function GVICRoleEditor({
     for (const bucket of childrenByParent.values()) {
       bucket.sort((left, right) => (left.position - right.position) || companyGroupLabel(left, left.group_id).localeCompare(companyGroupLabel(right, right.group_id), undefined, { numeric: true, sensitivity: "base" }) || left.group_id.localeCompare(right.group_id));
     }
-    const options: LogicGateGVICPrincipalPickerOption[] = [];
-    for (const user of companyUsers) {
-      if (assignedPrincipalKeys.has(`user:${user.user_id}`)) continue;
-      const label = companyUserOptionLabel(user);
+
+    const userByID = new Map(companyUsers.map((user) => [user.user_id.trim(), user]));
+    const groupedUserIDs = new Set<string>();
+    const membersByGroup = new Map<string, string[]>();
+    for (const member of companyUserGroupMembers) {
+      const groupID = member.group_id.trim();
+      const userID = member.user_id.trim();
+      if (!groupID || !userID) continue;
+      groupedUserIDs.add(userID);
+      const bucket = membersByGroup.get(groupID) ?? [];
+      if (!bucket.includes(userID)) bucket.push(userID);
+      membersByGroup.set(groupID, bucket);
+    }
+
+    const userMatches = (user: { user_id: string; email?: string; display_name?: string }) => {
+      if (!query) return true;
+      const userLabel = companyUserOptionLabel(user);
       const name = (user.display_name ?? "").trim();
       const email = (user.email ?? "").trim();
-      const fields = [label, name, email, user.user_id].map((field) => field.trim().toLowerCase());
-      if (!query || fields.some((field) => field.includes(query))) {
-        options.push({
-          principalType: "user",
-          principalID: user.user_id,
-          label: name || label,
-          meta: email,
-          depth: 0,
-        });
-      }
-    }
-    const visit = (parentID: string, depth: number) => {
-      for (const group of childrenByParent.get(parentID) ?? []) {
-        const memberUserIDs = companyUserIDsForGroupSubtree(companyUserGroups, companyUserGroupMembers, group.group_id);
-        const hasUnassignedMember = memberUserIDs.some((userID) => !assignedPrincipalKeys.has(`user:${userID}`));
-        if (!assignedPrincipalKeys.has(`group:${group.group_id}`) && hasUnassignedMember) {
-          const groupLabel = companyGroupLabel(group, group.group_id);
-          const fields = [groupLabel, group.group_id].map((field) => field.trim().toLowerCase());
-          if (!query || fields.some((field) => field.includes(query))) {
-            options.push({
-              principalType: "group",
-              principalID: group.group_id,
-              label: groupLabel,
-              meta: "User group",
-              depth,
-            });
-          }
-        }
-        visit(group.group_id, depth + 1);
-      }
+      const fields = [userLabel, name, email, user.user_id].map((field) => field.trim().toLowerCase());
+      return fields.some((field) => field.includes(query));
     };
-    visit("", 0);
-    return options.slice(0, 10);
-  }, [assignedPrincipalKeys, companyUserGroupMembers, companyUserGroups, companyUsers, draft]);
+    const groupMatches = (group: { group_id: string; name: string }) => {
+      if (!query) return true;
+      const groupLabel = companyGroupLabel(group, group.group_id);
+      const fields = [groupLabel, group.group_id].map((field) => field.trim().toLowerCase());
+      return fields.some((field) => field.includes(query));
+    };
+    const userRowsForGroup = (groupID: string, depth: number): LogicGateGVICPrincipalPickerOption[] => {
+      const seen = new Set<string>();
+      const users = (membersByGroup.get(groupID) ?? [])
+        .map((userID) => userByID.get(userID) ?? { user_id: userID })
+        .filter((user) => {
+          const userID = user.user_id.trim();
+          if (!userID || seen.has(userID)) return false;
+          seen.add(userID);
+          return userMatches(user);
+        })
+        .sort((left, right) => companyUserOptionLabel(left).localeCompare(companyUserOptionLabel(right), undefined, { numeric: true, sensitivity: "base" }));
+      return users.map((user) => {
+        const userID = user.user_id.trim();
+        const userLabel = companyUserOptionLabel(user);
+        const name = (user.display_name ?? "").trim();
+        const email = (user.email ?? "").trim();
+        return {
+          principalType: "user",
+          principalID: userID,
+          label: name || userLabel,
+          meta: assignedPrincipalKeys.has(`user:${userID}`) ? "Added" : email,
+          depth,
+          rowType: "user",
+          selectable: !assignedPrincipalKeys.has(`user:${userID}`),
+          expandable: false,
+          expanded: false,
+        };
+      });
+    };
+    const buildGroupRows = (group: { group_id: string; parent_group_id?: string; name: string; position: number }, depth: number, seenGroups: Set<string>): { rows: LogicGateGVICPrincipalPickerOption[]; matched: boolean } => {
+      const groupID = group.group_id.trim();
+      if (!groupID || seenGroups.has(groupID)) return { rows: [], matched: false };
+      const nextSeen = new Set(seenGroups);
+      nextSeen.add(groupID);
+      const childGroups = childrenByParent.get(groupID) ?? [];
+      const childResults = childGroups.map((child) => buildGroupRows(child, depth + 1, nextSeen));
+      const memberRows = userRowsForGroup(groupID, depth + 1);
+      const childRows = childResults.flatMap((result) => result.rows);
+      const descendantMatched = childResults.some((result) => result.matched) || memberRows.length > 0;
+      const ownMatched = groupMatches(group);
+      const matched = ownMatched || descendantMatched;
+      if (query && !matched) return { rows: [], matched: false };
+
+      const expanded = query ? true : expandedGroupIDs.has(groupID);
+      const hasChildren = childGroups.length > 0 || (membersByGroup.get(groupID) ?? []).length > 0;
+      const assigned = assignedPrincipalKeys.has(`group:${groupID}`);
+      const rows: LogicGateGVICPrincipalPickerOption[] = [{
+        principalType: "group",
+        principalID: groupID,
+        label: companyGroupLabel(group, groupID),
+        meta: singleUserOnly ? "Group" : assigned ? "Team added" : "Team",
+        depth,
+        rowType: "group",
+        selectable: !singleUserOnly && !assigned,
+        expandable: hasChildren,
+        expanded,
+      }];
+      if (expanded) rows.push(...childRows, ...memberRows);
+      return { rows, matched: true };
+    };
+
+    const rows: LogicGateGVICPrincipalPickerOption[] = [];
+    for (const group of childrenByParent.get("") ?? []) {
+      rows.push(...buildGroupRows(group, 0, new Set()).rows);
+    }
+    const ungroupedUsers = companyUsers
+      .filter((user) => {
+        const userID = user.user_id.trim();
+        return userID && !groupedUserIDs.has(userID) && userMatches(user);
+      })
+      .sort((left, right) => companyUserOptionLabel(left).localeCompare(companyUserOptionLabel(right), undefined, { numeric: true, sensitivity: "base" }));
+    for (const user of ungroupedUsers) {
+      const userID = user.user_id.trim();
+      const userLabel = companyUserOptionLabel(user);
+      const name = (user.display_name ?? "").trim();
+      const email = (user.email ?? "").trim();
+      rows.push({
+        principalType: "user",
+        principalID: userID,
+        label: name || userLabel,
+        meta: assignedPrincipalKeys.has(`user:${userID}`) ? "Added" : email,
+        depth: 0,
+        rowType: "user",
+        selectable: !assignedPrincipalKeys.has(`user:${userID}`),
+        expandable: false,
+        expanded: false,
+      });
+    }
+    return {
+      pickerRows: rows,
+      selectableOptions: rows.filter((row) => row.selectable),
+    };
+  }, [assignedPrincipalKeys, companyUserGroupMembers, companyUserGroups, companyUsers, draft, expandedGroupIDs, singleUserOnly]);
+
+  useEffect(() => {
+    if (!singleUserOnly || assignments.length > 0) return;
+    setAssignedOpen(false);
+  }, [assignments.length, singleUserOnly]);
 
   useEffect(() => {
     if (!open && !assignedOpen) return;
@@ -927,11 +1007,13 @@ function GVICRoleEditor({
   useEffect(() => {
     if (canEdit) return;
     setOpen(false);
+    setAssignedOpen(false);
     setDraft("");
   }, [canEdit]);
 
   const addPrincipalOption = (option: LogicGateGVICPrincipalPickerOption) => {
-    if (!canEdit || assignedPrincipalKeys.has(`${option.principalType}:${option.principalID}`)) return;
+    if (!canEdit || !option.selectable || assignedPrincipalKeys.has(`${option.principalType}:${option.principalID}`)) return;
+    if (singleUserOnly && option.principalType !== "user") return;
     onAddPrincipal(role, option.principalType, option.principalID);
     setDraft("");
     setOpen(false);
@@ -941,11 +1023,11 @@ function GVICRoleEditor({
   const commitDraft = () => {
     if (!canEdit) return;
     const value = draft.trim().toLowerCase();
-    const selected = subjectMatches.find((option) => (
+    const selected = selectableOptions.find((option) => (
       option.label.trim().toLowerCase() === value
       || option.meta.trim().toLowerCase() === value
       || option.principalID.trim().toLowerCase() === value
-    )) ?? subjectMatches[0] ?? null;
+    )) ?? selectableOptions[0] ?? null;
     if (!selected) return;
     addPrincipalOption(selected);
   };
@@ -957,44 +1039,46 @@ function GVICRoleEditor({
         position: "relative",
         minWidth: 0,
         display: "grid",
-        gap: 6,
+        gap: 5,
         alignContent: "start",
         border: "1px solid transparent",
-        borderRadius: 12,
+        borderRadius: 9,
         background: `linear-gradient(145deg, rgba(255,255,255,0.96), ${hexWithAlpha(roleAccent, "12")}) padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "aa")}, rgba(255,255,255,0.84)) border-box`,
-        boxShadow: "7px 7px 18px rgba(174,174,192,0.22), -7px -7px 18px rgba(255,255,255,0.88), inset 1px 1px 0 rgba(255,255,255,0.86)",
-        padding: 7,
+        boxShadow: "4px 4px 12px rgba(174,174,192,0.16), -4px -4px 12px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.84)",
+        padding: 6,
       }}
     >
       <strong style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#111827" }}>
-        <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: roleAccent, boxShadow: `0 0 12px ${hexWithAlpha(roleAccent, "66")}` }} />
+        <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, background: roleAccent, boxShadow: `0 0 10px ${hexWithAlpha(roleAccent, "66")}` }} />
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
       </strong>
-      <div style={{ position: "relative", minHeight: 28, minWidth: 0 }}>
-        <button
-          type="button"
-          aria-label={`${label} people`}
-          aria-haspopup="listbox"
-          aria-expanded={assignedOpen}
-          aria-controls={`${inputID}-assigned-users`}
-          onClick={() => {
-            setAssignedOpen((current) => !current);
-            setOpen(false);
-          }}
-          style={{ width: "fit-content", maxWidth: "100%", minHeight: 27, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedOpen ? "7a" : "34")}`, borderRadius: 999, background: assignedOpen ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: "pointer", padding: "3px 8px", font: "inherit", fontSize: 11, fontWeight: 800, boxShadow: assignedOpen ? `0 8px 18px ${hexWithAlpha(roleAccent, "1f")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "3px 3px 9px rgba(174,174,192,0.17), -3px -3px 9px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
-        >
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>People ({assignments.length})</span>
-          <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: 9, fontWeight: 900 }}>{assignedOpen ? "^" : "v"}</span>
-        </button>
-        {assignedOpen && (
+      <div style={{ position: "relative", minHeight: 25, minWidth: 0 }}>
+        {showAssignedButton && (
+          <button
+            type="button"
+            aria-label={singleUserOnly ? `${label} user` : `${label} people`}
+            aria-haspopup="listbox"
+            aria-expanded={assignedOpen}
+            aria-controls={`${inputID}-assigned-users`}
+            onClick={() => {
+              setAssignedOpen((current) => !current);
+              setOpen(false);
+            }}
+            style={{ width: "fit-content", maxWidth: "100%", minHeight: 25, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedOpen ? "70" : "2f")}`, borderRadius: 999, background: assignedOpen ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: "pointer", padding: "2px 8px", font: "inherit", fontSize: 11, fontWeight: 800, boxShadow: assignedOpen ? `0 7px 15px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 7px rgba(174,174,192,0.15), -2px -2px 7px rgba(255,255,255,0.74), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
+          >
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assignedSummary}</span>
+            <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: 9, fontWeight: 900 }}>{assignedOpen ? "^" : "v"}</span>
+          </button>
+        )}
+        {assignedOpen && showAssignedButton && (
           <div
             id={`${inputID}-assigned-users`}
             role="listbox"
-            aria-label={`${label} people and groups`}
-            style={{ position: "absolute", zIndex: 32, top: "calc(100% + 6px)", left: 0, width: "min(320px, 86vw)", maxHeight: 240, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 13, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
+            aria-label={singleUserOnly ? `${label} user` : `${label} people and groups`}
+            style={{ position: "absolute", zIndex: 32, top: "calc(100% + 6px)", left: 0, width: "min(320px, 86vw)", maxHeight: 240, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
           >
             {assignments.length === 0 ? (
-              <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 650 }}>No people</div>
+              <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 650 }}>{singleUserOnly ? "No user" : "No people"}</div>
             ) : assignments.map((assignment) => {
               const principalType = logicGateGVICAssignmentPrincipalType(assignment);
               const principalID = logicGateGVICAssignmentPrincipalID(assignment);
@@ -1031,7 +1115,7 @@ function GVICRoleEditor({
           </div>
         )}
       </div>
-      <div style={{ position: "relative", minWidth: 0, width: "min(156px, 100%)", justifySelf: "start" }}>
+      <div style={{ position: "relative", minWidth: 0, width: "min(174px, 100%)", justifySelf: "start" }}>
         <input
           id={inputID}
           name={`${inputID}-GVIC-person`}
@@ -1065,44 +1149,67 @@ function GVICRoleEditor({
               commitDraft();
             }
           }}
-          placeholder="Add"
-          aria-label={`Add ${label} person or group`}
+          placeholder={inputPlaceholder}
+          aria-label={`Add ${label} ${singleUserOnly ? "user" : "user or team"}`}
           aria-haspopup="listbox"
           aria-expanded={canEdit && open}
           aria-controls={`${inputID}-options`}
-          style={{ width: "100%", minWidth: 0, minHeight: 29, boxSizing: "border-box", border: open ? "1px solid transparent" : `1px solid ${hexWithAlpha(roleAccent, "46")}`, borderRadius: 10, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "cc")}, rgba(255,255,255,0.86)) border-box` : EDITOR_NEU_SURFACE, color: "#111827", font: "inherit", fontSize: 11, fontWeight: 750, padding: "4px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default", boxShadow: open ? `0 10px 22px ${hexWithAlpha(roleAccent, "1f")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "4px 4px 12px rgba(174,174,192,0.20), -4px -4px 12px rgba(255,255,255,0.84), inset 1px 1px 0 rgba(255,255,255,0.86)" }}
+          style={{ width: "100%", minWidth: 0, minHeight: 27, boxSizing: "border-box", border: open ? "1px solid transparent" : `1px solid ${hexWithAlpha(roleAccent, "3f")}`, borderRadius: 8, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "bb")}, rgba(255,255,255,0.86)) border-box` : EDITOR_NEU_SURFACE, color: "#111827", font: "inherit", fontSize: 11, fontWeight: 750, padding: "3px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default", boxShadow: open ? `0 8px 18px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 8px rgba(174,174,192,0.18), -2px -2px 8px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.86)" }}
         />
         {canEdit && open && (
           <div
             id={`${inputID}-options`}
             role="listbox"
-            aria-label={`${label} people and groups`}
-            style={{ position: "absolute", zIndex: 30, top: "calc(100% + 6px)", left: 0, width: "min(330px, 86vw)", maxHeight: 250, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 13, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
+            aria-label={pickerAriaLabel}
+            style={{ position: "absolute", zIndex: 30, top: "calc(100% + 6px)", left: 0, width: "min(360px, 86vw)", maxHeight: 290, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
           >
-            {subjectMatches.length === 0 ? (
+            {pickerRows.length === 0 ? (
               <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>
-                {companyUsers.every((user) => assignedPrincipalKeys.has(`user:${user.user_id}`)) && companyUserGroups.every((group) => assignedPrincipalKeys.has(`group:${group.group_id}`)) ? "All people added" : "No matches"}
+                {draft.trim() ? "No matches" : singleUserOnly ? "No users available" : "No users or teams available"}
               </div>
-            ) : subjectMatches.map((option) => {
+            ) : pickerRows.map((option) => {
               const optionAccent = option.principalType === "group" ? roleAccent : userAccentForName(option.label || option.principalID);
+              const canAct = option.selectable || (option.rowType === "group" && option.expandable);
               return (
-                <button
+                <div
                   key={`${option.principalType}:${option.principalID}`}
-                  type="button"
                   role="option"
                   aria-selected={false}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => addPrincipalOption(option)}
-                  style={{ width: "100%", minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr)", alignItems: "center", gap: 8, border: "1px solid transparent", borderRadius: 10, background: "transparent", color: "#111827", cursor: "pointer", padding: "5px 8px", textAlign: "left", font: "inherit", boxShadow: `inset 0 0 0 1px ${ruleColor || "transparent"}` }}
+                  aria-disabled={!option.selectable}
+                  style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "18px 24px minmax(0, 1fr)", alignItems: "center", gap: 7, border: "1px solid transparent", borderRadius: 8, background: "transparent", color: "#111827", padding: "4px 7px", boxShadow: `inset 0 0 0 1px ${ruleColor || "transparent"}`, opacity: canAct ? 1 : 0.58 }}
                 >
-                  <span style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: option.principalType === "group" ? hexWithAlpha(roleAccent, "bb") : avatarBackgroundForName(option.label || option.principalID), color: "#ffffff", fontSize: 9, fontWeight: 900, boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.76)" }}>
+                  <button
+                    type="button"
+                    aria-label={option.expandable ? `${option.expanded ? "Collapse" : "Expand"} ${option.label}` : undefined}
+                    tabIndex={option.expandable ? 0 : -1}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (option.expandable) toggleGroupExpanded(option.principalID);
+                    }}
+                    style={{ width: 18, height: 22, display: "grid", placeItems: "center", border: "none", borderRadius: 6, background: option.expandable ? hexWithAlpha(roleAccent, "12") : "transparent", color: roleAccent, cursor: option.expandable ? "pointer" : "default", padding: 0, font: "inherit", fontSize: 10, fontWeight: 900 }}
+                  >
+                    {option.expandable ? (option.expanded ? "^" : ">") : ""}
+                  </button>
+                  <span style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: option.principalType === "group" ? hexWithAlpha(roleAccent, "bb") : avatarBackgroundForName(option.label || option.principalID), color: "#ffffff", fontSize: 9, fontWeight: 900, boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.72)" }}>
                     {option.principalType === "group" ? "GR" : initialsForName(option.label || option.principalID)}
                   </span>
-                  <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800, color: optionAccent, paddingLeft: option.principalType === "group" ? option.depth * 8 : 0 }}>{option.label}</span>
+                  <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      if (option.selectable) {
+                        addPrincipalOption(option);
+                        return;
+                      }
+                      if (option.rowType === "group" && option.expandable) toggleGroupExpanded(option.principalID);
+                    }}
+                    style={{ minWidth: 0, display: "grid", gap: 1, border: "none", background: "transparent", color: "inherit", cursor: canAct ? "pointer" : "default", padding: 0, textAlign: "left", font: "inherit" }}
+                  >
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800, color: optionAccent, paddingLeft: option.depth * 8 }}>{option.label}</span>
                     {option.meta && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 500 }}>{option.meta}</span>}
-                  </span>
-                </button>
+                  </button>
+                </div>
               );
             })}
           </div>
