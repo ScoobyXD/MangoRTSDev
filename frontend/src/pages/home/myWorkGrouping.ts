@@ -305,18 +305,6 @@ function myWorkKindSort(kind: MyWorkResourceKind): number {
   return 3;
 }
 
-export function myWorkNodeIsActive(input: { status?: string | null; due_date?: string | null }, today = new Date()): boolean {
-  const normalizedStatus = normalizeStatus(input.status ?? "");
-  if (normalizedStatus === "done" || normalizedStatus === "complete" || normalizedStatus === "completed" || normalizedStatus === "closed" || normalizedStatus === "archived") return false;
-  const dueDate = parseDateOnly(input.due_date);
-  if (!dueDate) return true;
-  const todayStart = new Date(today);
-  todayStart.setHours(0, 0, 0, 0);
-  const staleBoundary = new Date(todayStart);
-  staleBoundary.setDate(staleBoundary.getDate() - 14);
-  return dueDate.getTime() >= staleBoundary.getTime();
-}
-
 export function priorityLabel(priority: number): string {
   if (priority === 1) return "1 URGENT(<1hr)";
   if (priority === 2) return "2 By end of day";

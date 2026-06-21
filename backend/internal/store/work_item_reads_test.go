@@ -319,10 +319,29 @@ func TestMemoryRepoMyWorkMatrixRowsApplyProjectActiveRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNode project done: %v", err)
 	}
-	mustUpdateInboxReadNodeStatus(t, repo, companyID, activeProjectDone.NodeID, "In Progress", user.UserID)
+	mustUpdateInboxReadNodeStatus(t, repo, companyID, activeProjectDone.NodeID, "Done", user.UserID)
 	mustSetInboxReadNodeGVIC(t, repo, companyID, activeProjectDone.NodeID, user.UserID)
 	activeProject := mustCreateInboxReadProject(t, repo, companyID, "Active Project", "Active", user.UserID)
 	mustLinkInboxReadProjectResource(t, repo, companyID, activeProject.ProjectID, EntityTypeNode, activeProjectDone.NodeID, 1, user.UserID)
+
+	doneViaGate, err := repo.CreateNode(companyID, "Project logic gate done node")
+	if err != nil {
+		t.Fatalf("CreateNode project logic gate done: %v", err)
+	}
+	logicGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Active Project Gate")
+	gatePriority := 2
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      doneViaGate.NodeID,
+		Status:      "Done",
+		Priority:    &gatePriority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, logicGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}})
+	mustLinkInboxReadProjectResource(t, repo, companyID, activeProject.ProjectID, EntityTypeLogicGate, logicGate.LogicGateID, 2, user.UserID)
 
 	doneProjectNode, err := repo.CreateNode(companyID, "Done project active node")
 	if err != nil {
@@ -339,6 +358,7 @@ func TestMemoryRepoMyWorkMatrixRowsApplyProjectActiveRules(t *testing.T) {
 	}
 	assertMyWorkProjectNames(t, rows, EntityTypeNode, standaloneDone.NodeID, nil)
 	assertMyWorkProjectNames(t, rows, EntityTypeNode, activeProjectDone.NodeID, []string{"Active Project"})
+	assertMyWorkProjectNames(t, rows, EntityTypeNode, doneViaGate.NodeID, []string{"Active Project"})
 	assertMyWorkProjectNames(t, rows, EntityTypeNode, doneProjectNode.NodeID, nil)
 }
 

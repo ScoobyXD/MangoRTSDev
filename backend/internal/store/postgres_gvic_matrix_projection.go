@@ -80,7 +80,6 @@ with latest_assignment as (
      or (node_row.logic_gate_id is null and effective.resource_type='node' and effective.resource_id=node_row.node_id)
    )
   where effective.role in ('generated', 'verified', 'consulted', 'informed')
-    and lower(regexp_replace(coalesce(node_row.status, ''), '[\s_-]+', '_', 'g')) not in ('done', 'complete', 'completed', 'closed', 'archived')
 ), project_matches as (
   select distinct on (
     assignment_rows.company_id,
@@ -181,6 +180,7 @@ with latest_assignment as (
       and match.node_id=assignment_rows.node_id
       and match.logic_gate_id is not distinct from assignment_rows.logic_gate_id
   )
+    and lower(regexp_replace(coalesce(assignment_rows.status, ''), '[\s_-]+', '_', 'g')) not in ('done', 'complete', 'completed', 'closed', 'archived')
 ), projected as (
   select
     company_id,

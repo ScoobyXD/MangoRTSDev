@@ -465,9 +465,6 @@ func (r *MemoryRepo) ListMyWorkMatrixRows(query WorkItemInboxQuery) ([]GVICMatri
 		if strings.TrimSpace(row.ResourceID) == "" || strings.TrimSpace(row.Node.NodeID) == "" {
 			continue
 		}
-		if workItemStatusDone(row.Node.Status) {
-			continue
-		}
 		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, EntityTypeNode, row.ResourceID, EntityPermissionEdit) {
 			continue
 		}
@@ -533,15 +530,15 @@ func (r *MemoryRepo) myWorkFlatPathRowsForNodeProjectionLocked(row memoryGVICMat
 	if row.ResourceType != GVICMatrixProjectionResourceNode || strings.TrimSpace(row.ResourceID) == "" || strings.TrimSpace(row.Node.NodeID) == "" {
 		return nil
 	}
-	if workItemStatusDone(row.Node.Status) {
-		return nil
-	}
 	roles := r.myWorkRolesForProjectionRowLocked(row)
 	if len(roles) == 0 {
 		return nil
 	}
 	projectContexts, hasProject := r.myWorkProjectContextsLocked(row)
 	if hasProject && len(projectContexts) == 0 {
+		return nil
+	}
+	if !hasProject && workItemStatusDone(row.Node.Status) {
 		return nil
 	}
 	if len(projectContexts) == 0 {
