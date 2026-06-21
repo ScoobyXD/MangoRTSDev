@@ -1191,48 +1191,51 @@ create table if not exists company_projection_sequences (
   constraint company_projection_sequences_sequence_nonnegative_chk check (sequence >= 0)
 );
 
--- Targeted read model for GVIC matrix and work-item inbox endpoints.
+-- Targeted My Work read model for GVIC assignment/priority cells.
 -- Source of truth remains nodes, node_logic_gate_assignments, logic_gates,
--- resource_gvic_effective_assignments, users, and company_memberships.
--- Application writes maintain only affected rows; there are intentionally no
--- whole-table rebuild triggers or database-side rebuild functions for this projection.
+-- projects/project_relationship_projection, resource_gvic_effective_assignments,
+-- and node_account_assignments.
 create table if not exists gvic_matrix_projection_table (
   company_id uuid not null,
+  projection_row_id text not null,
   user_id uuid not null,
-  resource_type text not null,
-  resource_id uuid not null,
+  node_name text not null,
+  gvic_assignment text not null,
+  priority smallint,
+  project_id uuid,
+  project_name text,
   logic_gate_id uuid,
-  display_title text not null default '',
+  logic_gate_name text,
+  node_id uuid not null,
   status text,
   due_date date,
-  priority smallint,
   accounts jsonb not null default '[]'::jsonb,
-  resource_created_timestamp timestamptz not null default now(),
+  created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint gvic_matrix_projection_resource_type_chk check (resource_type in ('node', 'logic_gate')),
-  constraint gvic_matrix_projection_accounts_array_chk check (jsonb_typeof(accounts) = 'array'),
-  constraint gvic_matrix_projection_shape_chk check (
-    (resource_type = 'node')
-    or (resource_type = 'logic_gate' and logic_gate_id = resource_id)
+  sort_order integer not null default 1,
+  constraint gvic_matrix_projection_table_clean_pkey primary key (company_id, projection_row_id),
+  constraint gvic_matrix_projection_gvic_assignment_chk check (
+    gvic_assignment in ('generated', 'verified', 'consulted', 'informed')
   ),
-  primary key (company_id, user_id, resource_type, resource_id),
+  constraint gvic_matrix_projection_accounts_array_chk check (jsonb_typeof(accounts) = 'array'),
+  constraint gvic_matrix_projection_priority_chk check (priority is null or priority between 1 and 5),
+  constraint gvic_matrix_projection_sort_order_positive_chk check (sort_order > 0),
   foreign key (company_id) references companies (company_id) on delete cascade,
-  foreign key (user_id) references users (user_id) on delete cascade
+  foreign key (company_id, user_id) references company_memberships (company_id, user_id) on delete cascade,
+  foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade
 );
 
-create index if not exists idx_gvic_matrix_projection_node_read
-  on gvic_matrix_projection_table(company_id, user_id, resource_type, logic_gate_id, resource_created_timestamp, resource_id)
-  where resource_type = 'node';
+create index if not exists idx_gvic_matrix_projection_leaf_user_cell
+  on gvic_matrix_projection_table(company_id, user_id, gvic_assignment, priority, sort_order, projection_row_id);
 
-create index if not exists idx_gvic_matrix_projection_logic_gate_read
-  on gvic_matrix_projection_table(company_id, user_id, resource_type, lower(display_title), resource_id)
-  where resource_type = 'logic_gate';
+create index if not exists idx_gvic_matrix_projection_leaf_node
+  on gvic_matrix_projection_table(company_id, node_id);
 
-create index if not exists idx_gvic_matrix_projection_logic_gate_user
-  on gvic_matrix_projection_table(company_id, logic_gate_id, user_id);
+create index if not exists idx_gvic_matrix_projection_leaf_project
+  on gvic_matrix_projection_table(company_id, project_id);
 
-create index if not exists idx_gvic_matrix_projection_resource
-  on gvic_matrix_projection_table(company_id, resource_type, resource_id);
+create index if not exists idx_gvic_matrix_projection_leaf_logic_gate
+  on gvic_matrix_projection_table(company_id, logic_gate_id);
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
 create index if not exists idx_node_projection_table_node_updated on node_projection_table(company_id, node_id, updated_timestamp desc);
 drop index if exists idx_node_projection_table_one_text_box;
