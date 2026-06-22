@@ -114,6 +114,7 @@ export function sortExplorerRowsByPosition(rows: ExplorerTreeNode[]): ExplorerTr
 
 export function getExplorerRowContainerID(row: ExplorerTreeNode): string | null {
   if (row.kind === "folder") return row.parentEntityID ?? row.parentFolderID ?? "";
+  if (row.kind === "node" && row.parentLogicGateID) return row.parentLogicGateID;
   if (row.folderKind || row.parentEntityID) return row.parentEntityID ?? row.folderID ?? "";
   return null;
 }
