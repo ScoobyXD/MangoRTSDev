@@ -406,7 +406,8 @@ func TestPhase2MutationPathsUseProjectionDependencyHelpers(t *testing.T) {
 			name: "GVICMatrix assignment commands",
 			path: "postgres_logic_gate_gvic_commands.go",
 			required: []string{
-				"applylogicgateprojectiondeltadependenciestx",
+				"syncresourcegviceffectiveassignmentstx",
+				"syncpostgresgvicmatrixprojectionforlogicgateassignmentsdeltastx",
 				"projectiondeltaeventinputs",
 			},
 		},

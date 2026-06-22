@@ -229,6 +229,211 @@ with latest_assignment as (
   from leaf_contexts
 )`
 
+var postgresGVICMatrixLogicGateUsersProjectionCTE = `
+with input_users as (
+  select distinct btrim(value)::uuid as user_id
+  from unnest(string_to_array($3::text, ',')) as value
+  where btrim(value) <> ''
+), node_row as (
+  select
+    node.company_id,
+    node.node_id,
+    node.name as node_name,
+    coalesce(
+      case
+        when assignment.is_issue then 'Issue'
+        when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusTitleSQL + `
+      end,
+      nullif(node.status, '')
+    ) as status,
+    node.due_date,
+    node.priority,
+    node.created_timestamp as node_created_timestamp,
+    assignment.logic_gate_id,
+    gate.header as logic_gate_name,
+    gate.created_timestamp as logic_gate_created_timestamp,
+    coalesce(account_snapshot.accounts_json, '[]'::jsonb) as accounts
+  from node_logic_gate_assignments assignment
+  join nodes node
+    on node.company_id=assignment.company_id
+   and node.node_id=assignment.node_id
+  left join logic_gates gate
+    on gate.company_id=node.company_id
+   and gate.logic_gate_id=assignment.logic_gate_id
+  ` + postgresAccountSnapshotsForNodeLateralSQL("node") + `
+  where assignment.company_id=$1::uuid
+    and assignment.logic_gate_id=$2::uuid
+), assignment_rows as (
+  select distinct
+    node_row.company_id,
+    effective.user_id,
+    effective.role as gvic_assignment,
+    node_row.node_id,
+    node_row.node_name,
+    node_row.status,
+    node_row.due_date,
+    node_row.priority,
+    node_row.node_created_timestamp,
+    node_row.logic_gate_id,
+    node_row.logic_gate_name,
+    node_row.logic_gate_created_timestamp,
+    node_row.accounts
+  from node_row
+  join resource_gvic_effective_assignments effective
+    on effective.company_id=node_row.company_id
+   and effective.resource_type='logic_gate'
+   and effective.resource_id=node_row.logic_gate_id
+  join input_users
+    on input_users.user_id=effective.user_id
+  where effective.role in ('generated', 'verified', 'consulted', 'informed')), project_matches as (
+  select distinct on (
+    assignment_rows.company_id,
+    assignment_rows.user_id,
+    assignment_rows.gvic_assignment,
+    assignment_rows.priority,
+    assignment_rows.node_id,
+    assignment_rows.logic_gate_id,
+    project.project_id
+  )
+    assignment_rows.company_id,
+    assignment_rows.user_id,
+    assignment_rows.gvic_assignment,
+    assignment_rows.priority,
+    assignment_rows.node_id,
+    assignment_rows.node_name,
+    assignment_rows.status,
+    assignment_rows.due_date,
+    assignment_rows.node_created_timestamp,
+    assignment_rows.logic_gate_id,
+    assignment_rows.logic_gate_name,
+    assignment_rows.logic_gate_created_timestamp,
+    assignment_rows.accounts,
+    project.project_id,
+    project.name as project_name,
+    relationship.position as project_position,
+    relationship.relationship_created_timestamp,
+    lower(regexp_replace(coalesce(project.status, ''), '[\s_-]+', '_', 'g')) in ('done', 'complete', 'completed', 'closed', 'archived') as project_done
+  from assignment_rows
+  join project_relationship_projection relationship
+    on relationship.company_id=assignment_rows.company_id
+   and (
+     relationship.node_id=assignment_rows.node_id
+     or (assignment_rows.logic_gate_id is not null and relationship.logic_gate_id=assignment_rows.logic_gate_id)
+   )
+  join projects project
+    on project.company_id=relationship.company_id
+   and project.project_id=relationship.project_id
+  order by
+    assignment_rows.company_id,
+    assignment_rows.user_id,
+    assignment_rows.gvic_assignment,
+    assignment_rows.priority,
+    assignment_rows.node_id,
+    assignment_rows.logic_gate_id,
+    project.project_id,
+    relationship.position asc,
+    relationship.relationship_created_timestamp asc,
+    relationship.relationship_id asc
+), leaf_contexts as (
+  select
+    company_id,
+    user_id,
+    gvic_assignment,
+    priority,
+    node_id,
+    node_name,
+    status,
+    due_date,
+    node_created_timestamp,
+    logic_gate_id,
+    logic_gate_name,
+    logic_gate_created_timestamp,
+    accounts,
+    project_id,
+    project_name,
+    project_position,
+    relationship_created_timestamp
+  from project_matches
+  where not project_done
+  union all
+  select
+    assignment_rows.company_id,
+    assignment_rows.user_id,
+    assignment_rows.gvic_assignment,
+    assignment_rows.priority,
+    assignment_rows.node_id,
+    assignment_rows.node_name,
+    assignment_rows.status,
+    assignment_rows.due_date,
+    assignment_rows.node_created_timestamp,
+    assignment_rows.logic_gate_id,
+    assignment_rows.logic_gate_name,
+    assignment_rows.logic_gate_created_timestamp,
+    assignment_rows.accounts,
+    null::uuid as project_id,
+    null::text as project_name,
+    null::integer as project_position,
+    null::timestamptz as relationship_created_timestamp
+  from assignment_rows
+  where not exists (
+    select 1
+    from project_matches match
+    where match.company_id=assignment_rows.company_id
+      and match.user_id=assignment_rows.user_id
+      and match.gvic_assignment=assignment_rows.gvic_assignment
+      and match.priority is not distinct from assignment_rows.priority
+      and match.node_id=assignment_rows.node_id
+      and match.logic_gate_id is not distinct from assignment_rows.logic_gate_id
+  )
+    and lower(regexp_replace(coalesce(assignment_rows.status, ''), '[\s_-]+', '_', 'g')) not in ('done', 'complete', 'completed', 'closed', 'archived')
+), projected as (
+  select
+    company_id,
+    concat_ws(
+      ':',
+      'my_work_node_leaf',
+      company_id::text,
+      user_id::text,
+      gvic_assignment,
+      coalesce(priority::text, 'none'),
+      'node',
+      node_id::text,
+      'project',
+      coalesce(project_id::text, 'none'),
+      'logic_gate',
+      coalesce(logic_gate_id::text, 'none')
+    ) as projection_row_id,
+    user_id,
+    node_name,
+    gvic_assignment,
+    priority,
+    project_id,
+    project_name,
+    logic_gate_id,
+    logic_gate_name,
+    node_id,
+    status,
+    due_date,
+    accounts,
+    node_created_timestamp as created_timestamp,
+    now() as updated_timestamp,
+    row_number() over (
+      partition by company_id, user_id, gvic_assignment, priority
+      order by
+        coalesce(project_position, 2147483647),
+        lower(coalesce(project_name, '')),
+        relationship_created_timestamp nulls last,
+        lower(coalesce(logic_gate_name, '')),
+        logic_gate_created_timestamp nulls last,
+        lower(node_name),
+        node_created_timestamp,
+        node_id::text,
+        coalesce(project_id::text, ''),
+        coalesce(logic_gate_id::text, '')
+    )::integer as sort_order
+  from leaf_contexts
+)`
+
 func syncPostgresGVICMatrixProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
 	defer observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForNodeTx.total")()
 	companyID = cleanUUIDText(companyID)
@@ -376,14 +581,26 @@ func syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx(ctx context.Conte
 }
 
 func syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateGVICAssignment) ([]ProjectionDelta, error) {
-	beforeRows, err := postgresGVICMatrixProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	users, err := postgresGVICMatrixProjectionUsersForLogicGateTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return nil, err
 	}
-	if err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx(ctx, tx, companyID, logicGateID, before, after); err != nil {
+	current, err := postgresGVICMatrixAssignmentUserIDsTx(ctx, tx, companyID, logicGateID)
+	if err != nil {
 		return nil, err
 	}
-	afterRows, err := postgresGVICMatrixProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
+	for userID := range current {
+		users[userID] = true
+	}
+	userIDs := mapKeys(users)
+	beforeRows, err := postgresGVICMatrixProjectionRowsForLogicGateUsersTx(ctx, tx, companyID, logicGateID, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	if err := syncPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx, tx, companyID, logicGateID, userIDs); err != nil {
+		return nil, err
+	}
+	afterRows, err := postgresGVICMatrixProjectionRowsForLogicGateUsersTx(ctx, tx, companyID, logicGateID, userIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -398,28 +615,138 @@ func syncPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx context.Context, tx
 		return ErrInvalid
 	}
 	userIDs = cleanUUIDTextSlice(userIDs)
-	sort.Strings(userIDs)
-	for _, userID := range userIDs {
-		if _, err := tx.ExecContext(ctx, `
-delete from gvic_matrix_projection_table
-where company_id=$1::uuid
-  and logic_gate_id=$2::uuid
-  and user_id=$3::uuid`, companyID, logicGateID, userID); err != nil {
-			return err
-		}
+	if len(userIDs) == 0 {
+		return nil
 	}
-	nodeIDs, err := postgresNodeIDsForLogicGateProjectionSyncTx(ctx, tx, companyID, logicGateID)
-	if err != nil {
+	sort.Strings(userIDs)
+	userIDsArg := strings.Join(userIDs, ",")
+	stop := observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForLogicGateUsersTx.delete_stale")
+	if _, err := tx.ExecContext(ctx, postgresGVICMatrixLogicGateUsersProjectionCTE+`
+delete from gvic_matrix_projection_table entry
+where entry.company_id=$1::uuid
+  and entry.logic_gate_id=$2::uuid
+  and entry.user_id in (select user_id from input_users)
+  and not exists (
+    select 1
+    from projected
+    where projected.company_id=entry.company_id
+      and projected.projection_row_id=entry.projection_row_id
+  )`, companyID, logicGateID, userIDsArg); err != nil {
+		stop()
 		return err
 	}
-	for _, nodeID := range nodeIDs {
-		if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return err
-		}
-	}
-	return nil
+	stop()
+	return upsertPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx, tx, companyID, logicGateID, userIDs)
 }
 
+func upsertPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) error {
+	userIDs = cleanUUIDTextSlice(userIDs)
+	if len(userIDs) == 0 {
+		return nil
+	}
+	sort.Strings(userIDs)
+	userIDsArg := strings.Join(userIDs, ",")
+	stop := observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForLogicGateUsersTx.upsert")
+	_, err := tx.ExecContext(ctx, postgresGVICMatrixLogicGateUsersProjectionCTE+`
+insert into gvic_matrix_projection_table (
+  company_id,
+  projection_row_id,
+  user_id,
+  node_name,
+  gvic_assignment,
+  priority,
+  project_id,
+  project_name,
+  logic_gate_id,
+  logic_gate_name,
+  node_id,
+  status,
+  due_date,
+  accounts,
+  created_timestamp,
+  updated_timestamp,
+  sort_order
+)
+select
+  company_id,
+  projection_row_id,
+  user_id,
+  node_name,
+  gvic_assignment,
+  priority,
+  project_id,
+  project_name,
+  logic_gate_id,
+  logic_gate_name,
+  node_id,
+  status,
+  due_date,
+  accounts,
+  created_timestamp,
+  updated_timestamp,
+  sort_order
+from projected
+on conflict (company_id, projection_row_id)
+do update set
+  user_id=excluded.user_id,
+  node_name=excluded.node_name,
+  gvic_assignment=excluded.gvic_assignment,
+  priority=excluded.priority,
+  project_id=excluded.project_id,
+  project_name=excluded.project_name,
+  logic_gate_id=excluded.logic_gate_id,
+  logic_gate_name=excluded.logic_gate_name,
+  node_id=excluded.node_id,
+  status=excluded.status,
+  due_date=excluded.due_date,
+  accounts=excluded.accounts,
+  created_timestamp=excluded.created_timestamp,
+  sort_order=excluded.sort_order,
+  updated_timestamp=now()`, companyID, logicGateID, userIDsArg)
+	stop()
+	return err
+}
+
+func postgresGVICMatrixProjectionRowsForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) ([]GVICMatrixProjectionRow, error) {
+	companyID = cleanUUIDText(companyID)
+	logicGateID = cleanUUIDText(logicGateID)
+	if ctx == nil || tx == nil || companyID == "" || logicGateID == "" {
+		return nil, ErrInvalid
+	}
+	userIDs = cleanUUIDTextSlice(userIDs)
+	if len(userIDs) == 0 {
+		return []GVICMatrixProjectionRow{}, nil
+	}
+	sort.Strings(userIDs)
+	return postgresGVICMatrixProjectionRowsForQueryTx(ctx, tx, `
+with input_users as (
+  select distinct btrim(value)::uuid as user_id
+  from unnest(string_to_array($3::text, ',')) as value
+  where btrim(value) <> ''
+)
+select company_id::text,
+       projection_row_id,
+       user_id::text,
+       node_name,
+       gvic_assignment,
+       priority,
+       project_id::text,
+       project_name,
+       logic_gate_id::text,
+       logic_gate_name,
+       node_id::text,
+       status,
+       due_date::text,
+       accounts::text,
+       created_timestamp,
+       updated_timestamp,
+       sort_order
+from gvic_matrix_projection_table
+where company_id=$1::uuid
+  and logic_gate_id=$2::uuid
+  and user_id in (select user_id from input_users)
+order by user_id::text asc, projection_row_id asc`, companyID, logicGateID, strings.Join(userIDs, ","))
+}
 func postgresNodeIDsForLogicGateProjectionSyncTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `
 select node_id::text

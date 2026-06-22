@@ -748,13 +748,16 @@ on conflict (company_id, resource_type, resource_id, role, principal_type, princ
 		return nil, err
 	}
 	assignments := cloneLogicGateGVICAssignments(assignmentsByGate[logicGateID])
-	projectionDeltas, err := applyLogicGateProjectionDeltaDependenciesTx(ctx, tx, LogicGateProjectionDeltaDependencyInput{
-		CompanyID:   companyID,
-		LogicGateID: logicGateID,
-	})
+	keyValue := resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}
+	projectionDeltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{keyValue})
 	if err != nil {
 		return nil, err
 	}
+	logicGateDeltas, err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, companyID, logicGateID, nil, assignments)
+	if err != nil {
+		return nil, err
+	}
+	projectionDeltas = append(projectionDeltas, logicGateDeltas...)
 	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
 		return nil, err
 	}

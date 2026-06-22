@@ -160,7 +160,10 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 		changed = true
 	}
 
-	affected := r.affectedGVICResourceKeysLocked(keyValue)
+	affected := []resourceGVICKey{keyValue}
+	if keyValue.resourceType != EntityTypeLogicGate {
+		affected = r.affectedGVICResourceKeysLocked(keyValue)
+	}
 	deltas := r.syncGVICResourceKeysLocked(keyValue.companyID, affected)
 	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(keyValue.companyID, input.ActorUserID, input.IdempotencyKey, deltas)); err != nil {
 		restore()
@@ -275,6 +278,22 @@ func (r *MemoryRepo) gvicAssignmentsForResourceLocked(companyID, resourceType, r
 
 func (r *MemoryRepo) gvicEffectiveAssignmentsForResourceLocked(companyID, resourceType, resourceID string) []domain.ResourceGVICEffectiveAssignment {
 	items := make([]domain.ResourceGVICEffectiveAssignment, 0)
+	if resourceType == EntityTypeNode {
+		if assignment, ok := r.nodeLogicGateAssignments[nodeLogicGateAssignmentKey(companyID, resourceID)]; ok && strings.TrimSpace(assignment.LogicGateID) != "" {
+			for _, effective := range r.gvicEffectiveAssignments {
+				if effective.CompanyID != companyID || effective.ResourceType != EntityTypeLogicGate || effective.ResourceID != assignment.LogicGateID {
+					continue
+				}
+				item := effective
+				item.ResourceType = EntityTypeNode
+				item.ResourceID = resourceID
+				item.InheritanceType = GVICInheritanceLogicGateInherited
+				items = append(items, item)
+			}
+			sortResourceGVICEffectiveAssignments(items)
+			return items
+		}
+	}
 	for _, assignment := range r.gvicEffectiveAssignments {
 		if assignment.CompanyID == companyID && assignment.ResourceType == resourceType && assignment.ResourceID == resourceID {
 			items = append(items, assignment)
@@ -283,7 +302,6 @@ func (r *MemoryRepo) gvicEffectiveAssignmentsForResourceLocked(companyID, resour
 	sortResourceGVICEffectiveAssignments(items)
 	return items
 }
-
 func (r *MemoryRepo) affectedGVICResourceKeysLocked(keyValue resourceGVICKey) []resourceGVICKey {
 	seen := map[resourceGVICKey]bool{keyValue: true}
 	if keyValue.resourceType == EntityTypeLogicGate {
@@ -328,16 +346,14 @@ func (r *MemoryRepo) syncResourceGVICEffectiveAssignmentsLocked(keys []resourceG
 }
 
 func (r *MemoryRepo) deriveResourceGVICEffectiveAssignmentsLocked(keyValue resourceGVICKey, now time.Time) []domain.ResourceGVICEffectiveAssignment {
+	if keyValue.resourceType == EntityTypeNode {
+		if assignment, ok := r.nodeLogicGateAssignments[nodeLogicGateAssignmentKey(keyValue.companyID, keyValue.resourceID)]; ok && strings.TrimSpace(assignment.LogicGateID) != "" {
+			return nil
+		}
+	}
 	sourceType := keyValue.resourceType
 	sourceID := keyValue.resourceID
 	inheritance := GVICInheritanceDirect
-	if keyValue.resourceType == EntityTypeNode {
-		if assignment, ok := r.nodeLogicGateAssignments[nodeLogicGateAssignmentKey(keyValue.companyID, keyValue.resourceID)]; ok {
-			sourceType = EntityTypeLogicGate
-			sourceID = assignment.LogicGateID
-			inheritance = GVICInheritanceLogicGateInherited
-		}
-	}
 
 	outByKey := map[string]domain.ResourceGVICEffectiveAssignment{}
 	for _, assignment := range r.gvicAssignments {
@@ -381,7 +397,6 @@ func (r *MemoryRepo) deriveResourceGVICEffectiveAssignmentsLocked(keyValue resou
 	sortResourceGVICEffectiveAssignments(out)
 	return out
 }
-
 func (r *MemoryRepo) syncGVICGroupDependentResourcesLocked(companyID string) []ProjectionDelta {
 	return r.syncGVICGroupDependentResourcesForGroupSetLocked(companyID, nil)
 }
@@ -410,11 +425,6 @@ func (r *MemoryRepo) gvicResourceKeysForGroupSetLocked(companyID string, affecte
 		}
 		keyValue := resourceGVICKey{companyID: assignment.CompanyID, resourceType: assignment.ResourceType, resourceID: assignment.ResourceID}
 		seen[keyValue] = true
-		if keyValue.resourceType == EntityTypeLogicGate {
-			for _, affected := range r.affectedGVICResourceKeysLocked(keyValue) {
-				seen[affected] = true
-			}
-		}
 	}
 	keys := make([]resourceGVICKey, 0, len(seen))
 	for keyValue := range seen {
@@ -428,7 +438,6 @@ func (r *MemoryRepo) gvicResourceKeysForGroupSetLocked(companyID string, affecte
 	})
 	return keys
 }
-
 func (r *MemoryRepo) syncGVICResourceKeysLocked(companyID string, keys []resourceGVICKey) []ProjectionDelta {
 	companyID = strings.TrimSpace(companyID)
 	seen := map[resourceGVICKey]bool{}

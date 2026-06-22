@@ -194,7 +194,7 @@ func (r *MemoryRepo) syncGVICMatrixProjectionForNodeDeltasLocked(companyID, node
 }
 
 func (r *MemoryRepo) syncGVICMatrixProjectionForLogicGateLocked(companyID, logicGateID string) {
-	r.syncResourceGVICEffectiveAssignmentsLocked(r.affectedGVICResourceKeysLocked(resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}))
+	r.syncResourceGVICEffectiveAssignmentsLocked([]resourceGVICKey{{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}})
 	users := r.GVICMatrixProjectionUsersForLogicGateLocked(companyID, logicGateID)
 	for userID := range r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeLogicGate, logicGateID, nil) {
 		users[userID] = true
@@ -979,10 +979,7 @@ func (r *MemoryRepo) logicGateGVICRolesForUserLocked(companyID string, assignmen
 
 func (r *MemoryRepo) gvicEffectiveUsersForResourceLocked(companyID, resourceType, resourceID string, allowedRoles map[string]bool) map[string]bool {
 	users := map[string]bool{}
-	for _, assignment := range r.gvicEffectiveAssignments {
-		if assignment.CompanyID != companyID || assignment.ResourceType != resourceType || assignment.ResourceID != resourceID {
-			continue
-		}
+	for _, assignment := range r.gvicEffectiveAssignmentsForResourceLocked(companyID, resourceType, resourceID) {
 		role := strings.TrimSpace(assignment.Role)
 		if allowedRoles != nil && !allowedRoles[role] {
 			continue
@@ -994,7 +991,6 @@ func (r *MemoryRepo) gvicEffectiveUsersForResourceLocked(companyID, resourceType
 	}
 	return users
 }
-
 func (r *MemoryRepo) gvicEffectiveUserHasRoleLocked(companyID, resourceType, resourceID, userID, role string) bool {
 	userID = strings.TrimSpace(userID)
 	role, ok := NormalizeGVICRole(role)
@@ -1010,8 +1006,8 @@ func (r *MemoryRepo) gvicEffectiveRolesForUserLocked(companyID, resourceType, re
 		return nil
 	}
 	seen := map[string]bool{}
-	for _, assignment := range r.gvicEffectiveAssignments {
-		if assignment.CompanyID != companyID || assignment.ResourceType != resourceType || assignment.ResourceID != resourceID || assignment.UserID != userID {
+	for _, assignment := range r.gvicEffectiveAssignmentsForResourceLocked(companyID, resourceType, resourceID) {
+		if assignment.UserID != userID {
 			continue
 		}
 		role := strings.TrimSpace(assignment.Role)
@@ -1032,7 +1028,6 @@ func (r *MemoryRepo) gvicEffectiveRolesForUserLocked(companyID, resourceType, re
 	})
 	return roles
 }
-
 func mapKeys(values map[string]bool) []string {
 	out := make([]string, 0, len(values))
 	for value := range values {

@@ -48,12 +48,17 @@ func TestPostgresAffectedGroupGVICResourceKeyQueryIsScoped(t *testing.T) {
 		"input_groups(group_id) as ( select distinct unnest($2::text[])::uuid )",
 		"join input_groups input_group on assignment.principal_id=input_group.group_id",
 		"assignment.company_id=$1::uuid and assignment.principal_type='group'",
-		"join node_logic_gate_assignments link on direct_key.resource_type='logic_gate'",
-		"link.logic_gate_id=direct_key.resource_id",
-		"union select link.company_id, 'node'::text as resource_type, link.node_id as resource_id",
 	} {
 		if !strings.Contains(exact, needle) {
 			t.Fatalf("gvicResourceKeysForGroupPrincipalIDsTx missing scoped SQL fragment %q", needle)
+		}
+	}
+	for _, forbidden := range []string{
+		"join node_logic_gate_assignments link",
+		"union select link.company_id, 'node'::text as resource_type, link.node_id as resource_id",
+	} {
+		if strings.Contains(exact, forbidden) {
+			t.Fatalf("gvicResourceKeysForGroupPrincipalIDsTx still expands Logic Gate GVIC to child node keys via %q", forbidden)
 		}
 	}
 	for _, needle := range []string{

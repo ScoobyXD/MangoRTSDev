@@ -381,14 +381,16 @@ where company_id=$1::uuid
 	assignments := cloneLogicGateGVICAssignments(assignmentsByGate[logicGateID])
 	projectionDeltas := []ProjectionDelta{}
 	if changed {
-		deltas, err := applyLogicGateProjectionDeltaDependenciesTx(ctx, tx, LogicGateProjectionDeltaDependencyInput{
-			CompanyID:   companyID,
-			LogicGateID: logicGateID,
-		})
+		keyValue := resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}
+		deltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{keyValue})
 		if err != nil {
 			return LogicGateGVICAssignmentCommandResult{}, err
 		}
-		projectionDeltas = deltas
+		logicGateDeltas, err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, companyID, logicGateID, before, assignments)
+		if err != nil {
+			return LogicGateGVICAssignmentCommandResult{}, err
+		}
+		projectionDeltas = append(deltas, logicGateDeltas...)
 	}
 	result := LogicGateGVICAssignmentCommandResult{
 		CompanyID:         companyID,

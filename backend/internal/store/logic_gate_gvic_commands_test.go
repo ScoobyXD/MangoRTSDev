@@ -106,6 +106,125 @@ func TestMemoryLogicGateGVICCommandsAreIdempotentAndInvalidateReadVersions(t *te
 	assertWorkspaceReadVersion(t, repo, companyID, "logic-gates", "", 2, true)
 }
 
+func TestMemoryLogicGateResourceGVICUsesPointerEffectiveRowsForLinkedNodes(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepo()
+	companyID := "company-GVIC-pointer-inheritance"
+	repo.EnsureCompany(companyID, "GVIC Pointer Company")
+	directUser := mustCreateGVICMembershipUser(t, repo, "GVIC-pointer-direct", companyID)
+	gateUser := mustCreateGVICMembershipUser(t, repo, "GVIC-pointer-gate", companyID)
+	node := mustCreateGVICMembershipNode(t, repo, companyID, "pointer node")
+	logicGate, err := repo.CreateLogicGate(companyID, "Pointer Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeNode,
+		ResourceID:   node.NodeID,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: EntityPermissionSubjectUser,
+			PrincipalID:   directUser.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments node direct: %v", err)
+	}
+
+	priority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    &priority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+
+	if _, err := repo.AddResourceGVICAssignments(ResourceGVICAssignmentCommandInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: EntityPermissionSubjectUser,
+			PrincipalID:   gateUser.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("AddResourceGVICAssignments logic gate: %v", err)
+	}
+
+	effective, err := repo.ListResourceGVICEffectiveAssignments(companyID, EntityTypeNode, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListResourceGVICEffectiveAssignments linked node: %v", err)
+	}
+	if len(effective) != 1 || effective[0].UserID != gateUser.UserID || effective[0].InheritanceType != GVICInheritanceLogicGateInherited || effective[0].SourceResourceID != logicGate.LogicGateID {
+		t.Fatalf("linked node effective = %+v, want pointer-inherited gate user", effective)
+	}
+	assertMemoryNoMaterializedNodeGVICEffectiveRows(t, repo, companyID, node.NodeID)
+
+	rows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: gateUser.UserID, ViewerUserID: gateUser.UserID, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListMyWorkMatrixRows gate user: %v", err)
+	}
+	if findMyWorkTestRow(rows, EntityTypeNode, node.NodeID) == nil {
+		t.Fatalf("gate user My Work rows = %+v, want linked node", rows)
+	}
+	directRows, err := repo.ListMyWorkMatrixRows(WorkItemInboxQuery{CompanyID: companyID, UserID: directUser.UserID, ViewerUserID: directUser.UserID, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListMyWorkMatrixRows direct user while linked: %v", err)
+	}
+	if findMyWorkTestRow(directRows, EntityTypeNode, node.NodeID) != nil {
+		t.Fatalf("direct user My Work rows while linked = %+v, want node direct GVIC dormant", directRows)
+	}
+
+	if _, err := repo.RemoveResourceGVICAssignments(ResourceGVICAssignmentCommandInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: EntityPermissionSubjectUser,
+			PrincipalID:   gateUser.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("RemoveResourceGVICAssignments logic gate: %v", err)
+	}
+	effective, err = repo.ListResourceGVICEffectiveAssignments(companyID, EntityTypeNode, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListResourceGVICEffectiveAssignments after gate remove: %v", err)
+	}
+	if len(effective) != 0 {
+		t.Fatalf("linked node effective after gate remove = %+v, want none", effective)
+	}
+	assertMemoryNoMaterializedNodeGVICEffectiveRows(t, repo, companyID, node.NodeID)
+
+	if _, err := repo.RemoveLogicGateNodeAssignment(LogicGateNodeAssignmentRemoveInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, NodeID: node.NodeID}); err != nil {
+		t.Fatalf("RemoveLogicGateNodeAssignment: %v", err)
+	}
+	effective, err = repo.ListResourceGVICEffectiveAssignments(companyID, EntityTypeNode, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListResourceGVICEffectiveAssignments after unlink: %v", err)
+	}
+	if len(effective) != 1 || effective[0].UserID != directUser.UserID || effective[0].InheritanceType != GVICInheritanceDirect {
+		t.Fatalf("unlinked node effective = %+v, want stored direct user", effective)
+	}
+}
+
+func assertMemoryNoMaterializedNodeGVICEffectiveRows(t *testing.T, repo *MemoryRepo, companyID, nodeID string) {
+	t.Helper()
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+	for _, assignment := range repo.gvicEffectiveAssignments {
+		if assignment.CompanyID == companyID && assignment.ResourceType == EntityTypeNode && assignment.ResourceID == nodeID {
+			t.Fatalf("materialized node effective assignment = %+v, want pointer-only inheritance", assignment)
+		}
+	}
+}
 func TestMemoryLogicGateGVICCommandsReplacePrimaryUsers(t *testing.T) {
 	t.Parallel()
 

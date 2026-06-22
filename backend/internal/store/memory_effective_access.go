@@ -307,8 +307,8 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 		if defaultAccess == ResourceDefaultAccessNoAccess && !hasOverride {
 			return false
 		}
-		for _, assignment := range r.gvicEffectiveAssignments {
-			if assignment.CompanyID != companyID || assignment.UserID != userID || assignment.ResourceType != resourceType || assignment.ResourceID != resourceID {
+		for _, assignment := range r.gvicEffectiveAssignmentsForResourceLocked(companyID, resourceType, resourceID) {
+			if assignment.UserID != userID {
 				continue
 			}
 			gvicAccess, ok := GVICRoleAccessLevel(assignment.Role)
@@ -321,7 +321,6 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 		return false
 	}
 }
-
 func (r *MemoryRepo) userHasDefaultResourceAccessLocked(companyID, userID, resourceType, resourceID string) bool {
 	return r.userHasResourcePermissionLocked(companyID, userID, resourceType, resourceID, EntityPermissionEdit)
 }

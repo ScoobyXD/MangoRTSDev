@@ -196,9 +196,13 @@ where company_id=$1::uuid
 		return ResourceGVICAssignmentMutationResult{}, ErrInvalid
 	}
 
-	affected, err := postgresAffectedGVICResourceKeysTx(ctx, tx, keyValue)
-	if err != nil {
-		return ResourceGVICAssignmentMutationResult{}, err
+	affected := []resourceGVICKey{keyValue}
+	if keyValue.resourceType != EntityTypeLogicGate {
+		var err error
+		affected, err = postgresAffectedGVICResourceKeysTx(ctx, tx, keyValue)
+		if err != nil {
+			return ResourceGVICAssignmentMutationResult{}, err
+		}
 	}
 	deltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, keyValue.companyID, affected)
 	if err != nil {
@@ -394,25 +398,49 @@ order by
 
 func postgresResourceGVICEffectiveAssignmentsForResource(ctx context.Context, queryer postgresGVICQueryer, keyValue resourceGVICKey) ([]domain.ResourceGVICEffectiveAssignment, error) {
 	rows, err := queryer.QueryContext(ctx, `
+with requested as (
+  select $1::uuid as company_id, $2::text as resource_type, $3::uuid as resource_id
+),
+linked_node as (
+  select assignment.logic_gate_id
+  from node_logic_gate_assignments assignment
+  join requested req
+    on req.resource_type='node'
+   and assignment.company_id=req.company_id
+   and assignment.node_id=req.resource_id
+  order by assignment.updated_timestamp desc, assignment.created_timestamp desc, assignment.assignment_id desc
+  limit 1
+),
+effective_source as (
+  select
+    req.company_id,
+    req.resource_type,
+    req.resource_id,
+    case when req.resource_type='node' and exists(select 1 from linked_node) then 'logic_gate' else req.resource_type end as lookup_resource_type,
+    case when req.resource_type='node' and exists(select 1 from linked_node) then (select logic_gate_id from linked_node) else req.resource_id end as lookup_resource_id,
+    case when req.resource_type='node' and exists(select 1 from linked_node) then 'logic_gate_inherited'::text else null::text end as pointer_inheritance_type
+  from requested req
+)
 select
   assignment.company_id::text,
-  assignment.resource_type,
-  assignment.resource_id::text,
+  effective_source.resource_type,
+  effective_source.resource_id::text,
   assignment.role,
   assignment.user_id::text,
   assignment.source_resource_type,
   assignment.source_resource_id::text,
   assignment.source_principal_type,
   assignment.source_principal_id::text,
-  assignment.inheritance_type,
+  coalesce(effective_source.pointer_inheritance_type, assignment.inheritance_type),
   nullif(app_user.display_name, ''),
   nullif(app_user.email, ''),
   assignment.updated_timestamp
-from resource_gvic_effective_assignments assignment
+from effective_source
+join resource_gvic_effective_assignments assignment
+  on assignment.company_id=effective_source.company_id
+ and assignment.resource_type=effective_source.lookup_resource_type
+ and assignment.resource_id=effective_source.lookup_resource_id
 left join users app_user on app_user.user_id=assignment.user_id
-where assignment.company_id=$1::uuid
-  and assignment.resource_type=$2
-  and assignment.resource_id=$3::uuid
 order by assignment.user_id::text, assignment.role, assignment.source_resource_type, assignment.source_resource_id::text, assignment.source_principal_type, assignment.source_principal_id::text`,
 		keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
 	if err != nil {
@@ -455,7 +483,6 @@ order by assignment.user_id::text, assignment.role, assignment.source_resource_t
 	sortResourceGVICEffectiveAssignments(items)
 	return items, nil
 }
-
 func postgresAffectedGVICResourceKeysTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey) ([]resourceGVICKey, error) {
 	seen := map[resourceGVICKey]bool{keyValue: true}
 	if keyValue.resourceType == EntityTypeLogicGate {
@@ -640,10 +667,11 @@ source_resource as (
     req.company_id,
     req.resource_type,
     req.resource_id,
-    case when req.resource_type='node' and exists(select 1 from linked_node) then 'logic_gate' else req.resource_type end as source_resource_type,
-    case when req.resource_type='node' and exists(select 1 from linked_node) then (select logic_gate_id from linked_node) else req.resource_id end as source_resource_id,
-    case when req.resource_type='node' and exists(select 1 from linked_node) then 'logic_gate_inherited' else 'direct' end as inheritance_type
+    req.resource_type as source_resource_type,
+    req.resource_id as source_resource_id,
+    'direct'::text as inheritance_type
   from requested req
+  where not (req.resource_type='node' and exists(select 1 from linked_node))
 ),
 configured as (
   select
@@ -821,29 +849,14 @@ func gvicResourceKeysForGroupPrincipalIDsTx(ctx context.Context, tx *sql.Tx, com
 	rows, err := tx.QueryContext(ctx, `
 with input_groups(group_id) as (
   select distinct unnest($2::text[])::uuid
-),
-direct_keys as (
-  select distinct assignment.company_id, assignment.resource_type, assignment.resource_id
-  from resource_gvic_assignments assignment
-  join input_groups input_group
-    on assignment.principal_id=input_group.group_id
-  where assignment.company_id=$1::uuid
-    and assignment.principal_type='group'
-),
-affected_keys as (
-  select company_id, resource_type, resource_id
-  from direct_keys
-  union
-  select link.company_id, 'node'::text as resource_type, link.node_id as resource_id
-  from direct_keys direct_key
-  join node_logic_gate_assignments link
-    on direct_key.resource_type='logic_gate'
-   and link.company_id=direct_key.company_id
-   and link.logic_gate_id=direct_key.resource_id
 )
-select company_id::text, resource_type, resource_id::text
-from affected_keys
-order by resource_type asc, resource_id::text asc`, companyID, groupIDs)
+select distinct assignment.company_id::text, assignment.resource_type, assignment.resource_id::text
+from resource_gvic_assignments assignment
+join input_groups input_group
+  on assignment.principal_id=input_group.group_id
+where assignment.company_id=$1::uuid
+  and assignment.principal_type='group'
+order by assignment.resource_type asc, assignment.resource_id::text asc`, companyID, groupIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -858,7 +871,6 @@ order by resource_type asc, resource_id::text asc`, companyID, groupIDs)
 	}
 	return out, rows.Err()
 }
-
 func gvicResourceKeysForAffectedGroupsTx(ctx context.Context, tx *sql.Tx, companyID string, groupIDs []string) ([]resourceGVICKey, error) {
 	affectedGroupIDs, err := gvicAncestorGroupIDsForGroupsTx(ctx, tx, companyID, groupIDs)
 	if err != nil {
@@ -886,15 +898,6 @@ where company_id=$1::uuid
 			return nil, err
 		}
 		seen[keyValue] = true
-		if keyValue.resourceType == EntityTypeLogicGate {
-			affected, err := postgresAffectedGVICResourceKeysTx(ctx, tx, keyValue)
-			if err != nil {
-				return nil, err
-			}
-			for _, item := range affected {
-				seen[item] = true
-			}
-		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -911,7 +914,6 @@ where company_id=$1::uuid
 	})
 	return out, nil
 }
-
 func syncPostgresGVICForAffectedGroupsTx(ctx context.Context, tx *sql.Tx, companyID string, groupIDs []string) error {
 	if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
 		return err
@@ -944,50 +946,22 @@ func postgresGVICEffectiveAssignmentsForAccess(ctx context.Context, queryer post
 	if err != nil {
 		return nil, nil
 	}
-	rows, err := queryer.QueryContext(ctx, `
-select company_id::text,
-       resource_type,
-       resource_id::text,
-       role,
-       user_id::text,
-       source_resource_type,
-       source_resource_id::text,
-       source_principal_type,
-       source_principal_id::text,
-       inheritance_type,
-       updated_timestamp
-from resource_gvic_effective_assignments
-where company_id=$1::uuid
-  and resource_type=$2
-  and resource_id=$3::uuid
-  and user_id=$4::uuid`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID, userID)
+	userID = cleanUUIDText(userID)
+	if userID == "" {
+		return nil, nil
+	}
+	assignments, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, queryer, keyValue)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	items := make([]domain.ResourceGVICEffectiveAssignment, 0)
-	for rows.Next() {
-		var item domain.ResourceGVICEffectiveAssignment
-		if err := rows.Scan(
-			&item.CompanyID,
-			&item.ResourceType,
-			&item.ResourceID,
-			&item.Role,
-			&item.UserID,
-			&item.SourceResourceType,
-			&item.SourceResourceID,
-			&item.SourcePrincipalType,
-			&item.SourcePrincipalID,
-			&item.InheritanceType,
-			&item.UpdatedTimestamp,
-		); err != nil {
-			return nil, err
+	items := make([]domain.ResourceGVICEffectiveAssignment, 0, len(assignments))
+	for _, assignment := range assignments {
+		if assignment.UserID == userID {
+			items = append(items, assignment)
 		}
-		items = append(items, item)
 	}
-	return items, rows.Err()
+	return items, nil
 }
-
 func userHasGVICAccess(ctx context.Context, queryer postgresGVICQueryer, companyID, userID, resourceType, resourceID, accessLevel string) (bool, error) {
 	assignments, err := postgresGVICEffectiveAssignmentsForAccess(ctx, queryer, companyID, resourceType, resourceID, userID)
 	if err != nil {

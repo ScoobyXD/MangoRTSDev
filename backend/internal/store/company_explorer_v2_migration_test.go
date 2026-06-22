@@ -124,10 +124,23 @@ func TestCompanyExplorerAccessHelperCutoverUsesFinalFolderStorage(t *testing.T) 
 			"from shared_inboxes inbox",
 			"from resource_permissions access",
 			"from resource_gvic_effective_assignments gvic",
-			"normalized.resource_type = 'shared_inbox_folder' and gvic.resource_type = 'shared_triage_folder'",
 		} {
 			if !strings.Contains(normalized, want) {
 				t.Fatalf("%s missing access helper marker %q", path, want)
+			}
+		}
+		if strings.Contains(path, companyExplorerAccessHelperCutoverMigration) {
+			if !strings.Contains(normalized, "normalized.resource_type = 'shared_inbox_folder' and gvic.resource_type = 'shared_triage_folder'") {
+				t.Fatalf("%s missing legacy shared triage GVIC join marker", path)
+			}
+		} else {
+			for _, want := range []string{
+				"when normalized.resource_type='shared_inbox_folder' then 'shared_triage_folder'",
+				"join gvic_resource_lookup lookup",
+			} {
+				if !strings.Contains(normalized, want) {
+					t.Fatalf("%s missing pointer access helper marker %q", path, want)
+				}
 			}
 		}
 		for _, forbidden := range []string{
