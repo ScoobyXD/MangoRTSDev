@@ -1199,10 +1199,10 @@ func postgresDeleteProjectTx(ctx context.Context, tx *sql.Tx, companyID, project
 	if _, err := tx.ExecContext(ctx, `delete from company_explorer_items where company_id=$1::uuid and target_type='project' and target_id=$2::uuid`, companyID, projectID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `delete from resource_access_grants where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid`, companyID, projectID); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_access_grants", `delete from resource_access_grants where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid`, companyID, projectID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `delete from resource_permissions where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid`, companyID, projectID); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_permissions", `delete from resource_permissions where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid`, companyID, projectID); err != nil {
 		return err
 	}
 	deleted, err := tx.ExecContext(ctx, `delete from projects where company_id=$1::uuid and project_id=$2::uuid`, companyID, projectID)
