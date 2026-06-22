@@ -510,6 +510,7 @@ export function MyWorkView({
       principal_id: currentUserID,
       name: `View ${nextNumber}`,
       selected_scope: selectedScope,
+      panel_collapsed: true,
       created_timestamp: now,
       updated_timestamp: now,
     };
@@ -2003,7 +2004,7 @@ function createDefaultGroupingSetting(companyID: string, currentUserID: string):
     name: "Project",
     selected_scope: defaultMyWorkSelectedScope(currentUserID),
     groupings: [...DEFAULT_MY_WORK_GROUPINGS],
-    panel_collapsed: false,
+    panel_collapsed: true,
     created_timestamp: now,
     updated_timestamp: now,
   };
