@@ -14,7 +14,7 @@ Node leaf: The actual work item. `node_id` is the resource that opens as work. P
 
 Path context: `project_id/project_name` and `logic_gate_id/logic_gate_name` are denormalized display context for the node leaf.
 
-Active row: A projected node path whose row status does not normalize to `done`, `complete`, `completed`, `closed`, or `archived`. Project path contexts with those same normalized statuses are excluded. Logic gates do not add their own active status.
+Active work: A standalone node is active when its node status is not `Done`. A node in a relationship with an active project, directly or through a logic gate, remains active while the project is active even if the node status is `Done`. A project is active when its project status is not `Done`. Logic gates do not add their own active status.
 
 Projection identity: `projection_row_id` is the row identity used by reads, deltas, realtime payloads, and frontend reconciliation.
 
@@ -55,6 +55,9 @@ MW32 - Semantic backend mutations write canonical/source rows and update affecte
 MW33 - Normal mutations prefer exact projection row upsert/delete over broad rebuilds.
 MW34 - Large fanout changes may emit bounded refetch signals instead of many row deltas.
 MW35 - Realtime sends exact row deltas when safe; permission-sensitive delivery must re-check access before sending rows.
+MW36 - My Work pulls only active work: standalone nodes not in `Done`, plus node paths under active projects even when the node itself is `Done`.
+MW37 - Expanding or collapsing a grouping row is scoped to the exact matrix cell where the user clicked; the same grouping label/path in another role or priority cell must not change.
+MW38 - The My Work grouping UI includes a Projects toggle. Turning Projects off hides project grouping/path display while preserving node leaves and logic-gate display context.
 
 ## Projection Sync Events
 
@@ -100,7 +103,7 @@ Expected:
 ### Scenario MW-S2: Flat Rows, Roles, Priority, And Visibility
 
 Business logic covered:
-- MW12 through MW24
+- MW12 through MW24, MW36
 
 Given:
 - A user has GVIC assignments on nodes and logic gates.
@@ -114,6 +117,9 @@ Expected:
 - Priorities sort 1 through 5, then no priority.
 - Closed, archived, done, complete, and completed node paths are excluded.
 - Closed, archived, done, complete, and completed project contexts are excluded.
+- A standalone `Done` node is excluded.
+- A node marked `Done` remains visible when it is in a relationship with an active project.
+- A node under a `Done` project is excluded.
 - Direct project assignments do not create My Work rows.
 - Direct logic-gate assignments do not create My Work rows without a node leaf.
 - Logic gate GVIC assignment controls a node path when the node is assigned to that logic gate.
@@ -123,7 +129,7 @@ Expected:
 ### Scenario MW-S3: Grouping, Open Behavior, And Creation
 
 Business logic covered:
-- MW25 through MW31
+- MW25 through MW31, MW37 through MW38
 
 Given:
 - A user changes My Work grouping settings.
@@ -137,6 +143,8 @@ Expected:
 - Malformed or duplicate settings are normalized.
 - Opening a row navigates to the node with available path context.
 - Expanding a group does not accidentally open the work item.
+- Collapsing or expanding a group in one matrix cell does not collapse or expand matching groups in any other cell.
+- The Projects toggle hides project group/path display without removing node leaves or logic-gate context.
 - Created work receives the selected priority and creator GVIC role.
 
 ### Scenario MW-S4: Transactional Projection And Realtime

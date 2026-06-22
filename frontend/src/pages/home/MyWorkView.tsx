@@ -46,10 +46,12 @@ import {
   DEFAULT_MY_WORK_GROUPINGS,
   MY_WORK_GROUPING_FIELDS,
   buildNestedGroups,
-  computeAllExpandedGroupIDs,
+  computeAllExpandedCellGroupIDs,
   defaultMyWorkSelectedScope,
   GVICRoleLabel,
   myWorkGroupingFieldLabel,
+  myWorkCellGroupStateID,
+  myWorkDisplayGroupingStack,
   normalizeMyWorkGroupingStack,
   normalizeMyWorkSavedGroupingSetting,
   priorityLabel,
@@ -230,6 +232,7 @@ export function MyWorkView({
   const [scopeMenuLevel, setScopeMenuLevel] = useState<MyWorkScopeLevel | null>(null);
   const [addGroupingOpen, setAddGroupingOpen] = useState(false);
   const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
+  const [showProjectGroups, setShowProjectGroups] = useState(true);
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const [matrixCells, setMatrixCells] = useState<MyWorkMatrixCellWithUser[]>([]);
   const [matrixStateCacheKey, setMatrixStateCacheKey] = useState("");
@@ -616,35 +619,49 @@ export function MyWorkView({
   }, [displayedMatrixCells, groupByID, groupIDsByUserID, userByID]);
 
   const visibleRows = rows;
-  const nestedGroups = useMemo(() => {
+  const displayGroupings = useMemo(
+    () => myWorkDisplayGroupingStack(selectedSetting.groupings, showProjectGroups),
+    [selectedSetting.groupings, showProjectGroups],
+  );
+  const matrixRowsByCell = useMemo(() => buildMyWorkRowsByMatrixCell(visibleRows), [visibleRows]);
+  const defaultExpandedGroupIDs = useMemo(() => {
     const debugEnabled = myWorkDebugEnabled();
     const startedAt = debugEnabled ? myWorkDebugTimestampMs() : 0;
-    const result = buildNestedGroups(visibleRows, selectedSetting.groupings);
+    const cellGroups: Array<{ cellKey: string; groups: MyWorkNestedGroup[] }> = [];
+    let groupStats: MyWorkNestedGroupStats = { topLevel: 0, total: 0, maxDepth: 0 };
+    for (const [cellKey, cellRows] of matrixRowsByCell.entries()) {
+      const groups = buildNestedGroups(cellRows, displayGroupings);
+      if (groups.length === 0) continue;
+      cellGroups.push({ cellKey, groups });
+      groupStats = mergeMyWorkNestedGroupStats(groupStats, myWorkNestedGroupStats(groups));
+    }
+    const result = computeAllExpandedCellGroupIDs(cellGroups);
     if (debugEnabled) {
       const durationMs = myWorkDebugDurationMs(startedAt);
       const rowStats = myWorkResourceRowStats(visibleRows);
-      const groupStats = myWorkNestedGroupStats(result);
       publishMyWorkDebugSnapshot({
         rowStats,
         topLevelGroupStats: groupStats,
-        timings: { topLevelGroupingMs: durationMs },
+        timings: { defaultExpansionMs: durationMs },
       });
-      myWorkDebugLog("client.topLevelGroups", {
+      myWorkDebugLog("client.defaultExpandedGroups", {
         durationMs,
         rowStats,
         groupStats,
-        groupings: selectedSetting.groupings.map((grouping) => `${grouping.field}:${grouping.direction}`),
+        expandedGroupCount: result.size,
+        groupings: displayGroupings.map((grouping) => `${grouping.field}:${grouping.direction}`),
       });
     }
     return result;
-  }, [selectedSetting.groupings, visibleRows]);
+  }, [displayGroupings, matrixRowsByCell, visibleRows]);
   const groupingSignature = useMemo(() => {
     const debugEnabled = myWorkDebugEnabled();
     const startedAt = debugEnabled ? myWorkDebugTimestampMs() : 0;
     const result = JSON.stringify({
       setting: selectedSetting.setting_id,
       scope: selectedScope,
-      groupings: selectedSetting.groupings,
+      groupings: displayGroupings,
+      showProjectGroups,
       rows: visibleRows.map((row) => row.rowKey ?? `${row.kind}:${row.id}`).sort(),
     });
     if (debugEnabled) {
@@ -658,27 +675,11 @@ export function MyWorkView({
       });
     }
     return result;
-  }, [selectedScope, selectedSetting.groupings, selectedSetting.setting_id, visibleRows]);
+  }, [displayGroupings, selectedScope, selectedSetting.setting_id, showProjectGroups, visibleRows]);
 
   useEffect(() => {
-    const debugEnabled = myWorkDebugEnabled();
-    const startedAt = debugEnabled ? myWorkDebugTimestampMs() : 0;
-    const next = computeAllExpandedGroupIDs(nestedGroups);
-    if (debugEnabled) {
-      const durationMs = myWorkDebugDurationMs(startedAt);
-      const groupStats = myWorkNestedGroupStats(nestedGroups);
-      publishMyWorkDebugSnapshot({
-        topLevelGroupStats: groupStats,
-        timings: { defaultExpansionMs: durationMs },
-      });
-      myWorkDebugLog("client.defaultExpandedGroups", {
-        durationMs,
-        expandedGroupCount: next.size,
-        groupStats,
-      });
-    }
-    setExpandedGroupIDs(next);
-  }, [groupingSignature, nestedGroups]);
+    setExpandedGroupIDs(defaultExpandedGroupIDs);
+  }, [defaultExpandedGroupIDs, groupingSignature]);
 
   const scopeRows = useMemo(() => buildScopePickerRows({
     level: scopeMenuLevel ?? selectedScope.level,
@@ -743,9 +744,11 @@ export function MyWorkView({
           scopeMenuLevel={scopeMenuLevel}
           scopeRows={scopeRows}
           addableFields={addableFields}
+          showProjectGroups={showProjectGroups}
           addGroupingOpen={addGroupingOpen}
           groupingFieldMenuIndex={groupingFieldMenuIndex}
           onSelectSetting={setSelectedSettingID}
+          onShowProjectGroupsChange={setShowProjectGroups}
           onAddSavedView={addSavedView}
           onDeleteSavedView={deleteSavedView}
           onSelectScopeLevel={selectScopeLevel}
@@ -770,7 +773,9 @@ export function MyWorkView({
         ) : (
           <MyWorkMatrix
             rows={visibleRows}
-            groupings={selectedSetting.groupings}
+            rowsByCell={matrixRowsByCell}
+            groupings={displayGroupings}
+            showProjectGroups={showProjectGroups}
             expandedGroupIDs={expandedGroupIDs}
             onToggleGroup={(groupID) => {
               setExpandedGroupIDs((current) => {
@@ -814,9 +819,11 @@ function GroupingPanel({
   scopeMenuLevel,
   scopeRows,
   addableFields,
+  showProjectGroups,
   addGroupingOpen,
   groupingFieldMenuIndex,
   onSelectSetting,
+  onShowProjectGroupsChange,
   onAddSavedView,
   onDeleteSavedView,
   onSelectScopeLevel,
@@ -835,9 +842,11 @@ function GroupingPanel({
   scopeMenuLevel: MyWorkScopeLevel | null;
   scopeRows: ScopePickerRow[];
   addableFields: ReadonlyArray<{ value: MyWorkGroupingField; label: string }>;
+  showProjectGroups: boolean;
   addGroupingOpen: boolean;
   groupingFieldMenuIndex: number | null;
   onSelectSetting: (settingID: string) => void;
+  onShowProjectGroupsChange: (show: boolean) => void;
   onAddSavedView: () => void;
   onDeleteSavedView: (settingID: string) => void;
   onSelectScopeLevel: (level: MyWorkScopeLevel) => void;
@@ -905,6 +914,15 @@ function GroupingPanel({
             <button type="button" style={newViewButtonStyle} onClick={onAddSavedView}>+ New View</button>
           </div>
           <div style={groupingStackStyle}>
+            <label style={projectGroupToggleStyle}>
+              <input
+                type="checkbox"
+                checked={showProjectGroups}
+                style={projectGroupCheckboxStyle}
+                onChange={(event) => onShowProjectGroupsChange(event.currentTarget.checked)}
+              />
+              <span style={projectGroupToggleTextStyle}>Projects</span>
+            </label>
             {setting.groupings.map((grouping, index) => (
               <div key={`${grouping.field}:${index}`} style={groupingRowStyle(index)}>
                 <button
@@ -977,6 +995,7 @@ function GroupingPanel({
 
 function MyWorkGroupList({
   groups,
+  cellKey,
   role,
   expandedGroupIDs,
   onToggleGroup,
@@ -986,9 +1005,11 @@ function MyWorkGroupList({
   onOpenNodeBulkMenu,
   nodeByID,
   logicGateByID,
+  showProjectGroups,
   projectGroupAncestor = false,
 }: {
   groups: MyWorkNestedGroup[];
+  cellKey: string;
   role: LogicGateGVICRole;
   expandedGroupIDs: Set<string>;
   onToggleGroup: (groupID: string) => void;
@@ -998,12 +1019,14 @@ function MyWorkGroupList({
   onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
+  showProjectGroups: boolean;
   projectGroupAncestor?: boolean;
 }) {
   return (
     <div style={groupListStyle}>
       {groups.map((group) => {
-        const open = expandedGroupIDs.has(group.id);
+        const groupStateID = myWorkCellGroupStateID(cellKey, group.id);
+        const open = expandedGroupIDs.has(groupStateID);
         const leafRows = group.groups.length === 0 ? group.rows : [];
         const resourceTarget = myWorkGroupResourceTarget(group);
         const nextProjectGroupAncestor = projectGroupAncestor || group.field === "project";
@@ -1014,7 +1037,7 @@ function MyWorkGroupList({
                 type="button"
                 aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`}
                 style={disclosureButtonStyle}
-                onClick={() => onToggleGroup(group.id)}
+                onClick={() => onToggleGroup(groupStateID)}
               >
                 <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.66)" />
               </button>
@@ -1033,6 +1056,7 @@ function MyWorkGroupList({
             {open && group.groups.length > 0 && (
               <MyWorkGroupList
                 groups={group.groups}
+                cellKey={cellKey}
                 role={role}
                 expandedGroupIDs={expandedGroupIDs}
                 onToggleGroup={onToggleGroup}
@@ -1042,11 +1066,12 @@ function MyWorkGroupList({
                 onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                 nodeByID={nodeByID}
                 logicGateByID={logicGateByID}
+                showProjectGroups={showProjectGroups}
                 projectGroupAncestor={nextProjectGroupAncestor}
               />
             )}
             {open && leafRows.length > 0 && (
-              <MyWorkRows rows={leafRows} role={role} depth={group.depth + 1} showProjectHeaders={!nextProjectGroupAncestor} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} nodeByID={nodeByID} logicGateByID={logicGateByID} />
+              <MyWorkRows rows={leafRows} role={role} depth={group.depth + 1} showProjectHeaders={showProjectGroups && !nextProjectGroupAncestor} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} nodeByID={nodeByID} logicGateByID={logicGateByID} />
             )}
           </div>
         );
@@ -1242,6 +1267,28 @@ function myWorkNestedGroupStats(groups: MyWorkNestedGroup[]): MyWorkNestedGroupS
   return stats;
 }
 
+function mergeMyWorkNestedGroupStats(left: MyWorkNestedGroupStats, right: MyWorkNestedGroupStats): MyWorkNestedGroupStats {
+  return {
+    topLevel: left.topLevel + right.topLevel,
+    total: left.total + right.total,
+    maxDepth: Math.max(left.maxDepth, right.maxDepth),
+  };
+}
+
+function buildMyWorkRowsByMatrixCell(rows: MyWorkResourceRow[]): Map<string, MyWorkResourceRow[]> {
+  const out = new Map<string, MyWorkResourceRow[]>();
+  for (const row of rows) {
+    const role = row.primaryGVICRole;
+    if (!role) continue;
+    const key = myWorkCellBucketKey(role, priorityBucket(row.priority));
+    const list = out.get(key) ?? [];
+    list.push(row);
+    out.set(key, list);
+  }
+  for (const [key, list] of out.entries()) out.set(key, sortMyWorkRows(list));
+  return out;
+}
+
 function emptyMyWorkTreeStats(topLevel: number): MyWorkTreeStats {
   return { topLevel, total: 0, maxDepth: 0, projects: 0, logicGates: 0, nodes: 0 };
 }
@@ -1282,7 +1329,9 @@ function openMyWorkRowResource(
 
 function MyWorkMatrix({
   rows,
+  rowsByCell,
   groupings,
+  showProjectGroups,
   expandedGroupIDs,
   onToggleGroup,
   onOpenNode,
@@ -1299,7 +1348,9 @@ function MyWorkMatrix({
   onStartRoleColumnResize,
 }: {
   rows: MyWorkResourceRow[];
+  rowsByCell: Map<string, MyWorkResourceRow[]>;
   groupings: MyWorkGroupingSetting[];
+  showProjectGroups: boolean;
   expandedGroupIDs: Set<string>;
   onToggleGroup: (groupID: string) => void;
   onOpenNode: (node: NodeRecord) => void;
@@ -1382,20 +1433,6 @@ function MyWorkMatrix({
       slowestCells,
     });
   });
-  const rowsByCell = useMemo(() => {
-    const out = new Map<string, MyWorkResourceRow[]>();
-    for (const row of rows) {
-      const role = row.primaryGVICRole;
-      if (!role) continue;
-      const key = myWorkCellBucketKey(role, priorityBucket(row.priority));
-      const list = out.get(key) ?? [];
-      list.push(row);
-      out.set(key, list);
-    }
-    for (const [key, list] of out.entries()) out.set(key, sortMyWorkRows(list));
-    return out;
-  }, [rows]);
-
   return (
     <>
       <div style={myWorkMatrixGridStyle(roleColumnWidths)}>
@@ -1417,8 +1454,9 @@ function MyWorkMatrix({
         <React.Fragment key={priority}>
           <div style={myWorkMatrixPriorityHeaderStyle(priority)}>{priorityLabel(priority)}</div>
           {MY_WORK_MATRIX_ROLES.map((role) => {
+            const cellKey = myWorkCellBucketKey(role, priority);
             const filterStartedAt = renderMetrics ? myWorkDebugTimestampMs() : 0;
-            const filteredRows = rowsByCell.get(myWorkCellBucketKey(role, priority)) ?? [];
+            const filteredRows = rowsByCell.get(cellKey) ?? [];
             const filterMs = renderMetrics ? myWorkDebugDurationMs(filterStartedAt) : 0;
             const sortStartedAt = renderMetrics ? myWorkDebugTimestampMs() : 0;
             const cellRows = filteredRows;
@@ -1494,6 +1532,7 @@ function MyWorkMatrix({
                 ) : groups.length > 0 ? (
                   <MyWorkGroupList
                     groups={groups}
+                    cellKey={cellKey}
                     role={role}
                     expandedGroupIDs={expandedGroupIDs}
                     onToggleGroup={onToggleGroup}
@@ -1503,9 +1542,10 @@ function MyWorkMatrix({
                     onOpenNodeBulkMenu={onOpenNodeBulkMenu}
                     nodeByID={nodeByID}
                     logicGateByID={logicGateByID}
+                    showProjectGroups={showProjectGroups}
                   />
                 ) : (
-                  <MyWorkRows rows={cellRows} role={role} depth={0} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} nodeByID={nodeByID} logicGateByID={logicGateByID} />
+                  <MyWorkRows rows={cellRows} role={role} depth={0} showProjectHeaders={showProjectGroups} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} nodeByID={nodeByID} logicGateByID={logicGateByID} />
                 )}
               </div>
             );
@@ -2335,6 +2375,35 @@ const groupingStackStyle: React.CSSProperties = {
   display: "grid",
   alignContent: "start",
   gap: 5,
+};
+
+const projectGroupToggleStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 30,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 7,
+  border: "1px solid rgba(15, 23, 42, 0.16)",
+  borderRadius: 5,
+  background: "rgba(248, 250, 252, 0.96)",
+  color: "#334155",
+  fontSize: 11,
+  fontWeight: 800,
+  padding: "0 8px",
+};
+
+const projectGroupCheckboxStyle: React.CSSProperties = {
+  width: 13,
+  height: 13,
+  margin: 0,
+  accentColor: "#0f766e",
+};
+
+const projectGroupToggleTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 };
 
 function groupingRowStyle(index: number): React.CSSProperties {

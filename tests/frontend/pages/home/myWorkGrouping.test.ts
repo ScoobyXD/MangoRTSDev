@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildNestedGroups,
+  computeAllExpandedCellGroupIDs,
   computeDefaultExpandedGroupIDs,
   getMyWorkGroupValues,
+  myWorkCellGroupStateID,
+  myWorkDisplayGroupingStack,
   normalizeMyWorkGroupingStack,
   normalizeMyWorkSelectedScope,
+  type MyWorkGroupingSetting,
   type MyWorkResourceRow,
 } from "../../../../frontend/src/pages/home/myWorkGrouping.js";
 import { loadMyWorkMatrixCellsForUsers } from "../../../../frontend/src/pages/home/myWorkMatrixLoader.js";
@@ -100,6 +104,46 @@ test("default expansion opens the first N groups at level N", () => {
   assert.equal(expanded.has(groups[0].groups[2].id), false);
 });
 
+test("My Work project display toggle filters project grouping without mutating saved grouping", () => {
+  const savedGroupings: MyWorkGroupingSetting[] = [
+    { field: "person", direction: "asc" },
+    { field: "project", direction: "asc" },
+    { field: "status", direction: "desc" },
+  ];
+
+  assert.deepEqual(myWorkDisplayGroupingStack([...savedGroupings], true), savedGroupings);
+  assert.deepEqual(myWorkDisplayGroupingStack([...savedGroupings], false), [
+    { field: "person", direction: "asc" },
+    { field: "status", direction: "desc" },
+  ]);
+  assert.equal(savedGroupings[1].field, "project");
+});
+
+test("My Work expanded group state is scoped to the matrix cell", () => {
+  const rows = [
+    row({ id: "node-1", title: "Node 1", people: [{ userID: "u1", label: "Person 1" }], status: "Pending" }),
+  ];
+  const groups = buildNestedGroups(rows, [
+    { field: "person", direction: "asc" },
+    { field: "status", direction: "asc" },
+  ]);
+  const pendingGroupID = groups[0]?.groups[0]?.id ?? "";
+  const generatedPendingID = myWorkCellGroupStateID("generated:1", pendingGroupID);
+  const consultedPendingID = myWorkCellGroupStateID("consulted:1", pendingGroupID);
+
+  const expanded = computeAllExpandedCellGroupIDs([
+    { cellKey: "generated:1", groups },
+    { cellKey: "consulted:1", groups },
+  ]);
+  const afterConsultedCollapse = new Set(expanded);
+  afterConsultedCollapse.delete(consultedPendingID);
+
+  assert.notEqual(generatedPendingID, consultedPendingID);
+  assert.equal(expanded.has(generatedPendingID), true);
+  assert.equal(expanded.has(consultedPendingID), true);
+  assert.equal(afterConsultedCollapse.has(generatedPendingID), true);
+  assert.equal(afterConsultedCollapse.has(consultedPendingID), false);
+});
 
 test("My Work scoped matrix loading preserves successful users when another user fails", async () => {
   const result = await loadMyWorkMatrixCellsForUsers({

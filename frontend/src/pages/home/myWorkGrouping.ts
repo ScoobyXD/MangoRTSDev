@@ -253,6 +253,11 @@ export function buildNestedGroups(
   });
 }
 
+export function myWorkDisplayGroupingStack(groupings: MyWorkGroupingSetting[], showProjectGroups: boolean): MyWorkGroupingSetting[] {
+  const normalized = normalizeMyWorkGroupingStack(groupings);
+  return showProjectGroups ? normalized : normalized.filter((grouping) => grouping.field !== "project");
+}
+
 export function sortGroups<T extends MyWorkGroupValue>(groups: T[], direction: MyWorkGroupingDirection): T[] {
   const regular = groups.filter((group) => !group.sortLast).sort(compareGroupValues);
   const trailing = groups.filter((group) => group.sortLast).sort(compareGroupValues);
@@ -270,6 +275,22 @@ export function computeAllExpandedGroupIDs(groups: MyWorkNestedGroup[]): Set<str
     for (const child of group.groups) visit(child);
   };
   for (const group of groups) visit(group);
+  return expanded;
+}
+
+export function myWorkCellGroupStateID(cellKey: string, groupID: string): string {
+  return `${cellKey.trim() || "cell"}/${groupID}`;
+}
+
+export function computeAllExpandedCellGroupIDs(cellGroups: Iterable<{ cellKey: string; groups: MyWorkNestedGroup[] }>): Set<string> {
+  const expanded = new Set<string>();
+  const visit = (cellKey: string, group: MyWorkNestedGroup) => {
+    expanded.add(myWorkCellGroupStateID(cellKey, group.id));
+    for (const child of group.groups) visit(cellKey, child);
+  };
+  for (const item of cellGroups) {
+    for (const group of item.groups) visit(item.cellKey, group);
+  }
   return expanded;
 }
 
