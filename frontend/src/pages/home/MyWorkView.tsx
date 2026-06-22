@@ -2461,7 +2461,7 @@ const scopePickerEmptyStyle: React.CSSProperties = {
 const groupingBodyStyle: React.CSSProperties = {
   position: "absolute",
   zIndex: 70,
-  top: "calc(100% + 8px)",
+  top: "100%",
   right: 0,
   width: "min(432px, calc(100vw - 96px))",
   maxHeight: "min(520px, calc(100vh - 190px))",

@@ -325,6 +325,7 @@ const STATIC_HOME_SIDEBAR_VIEWS = new Set<HomeSidebarView>([
   "my-work",
   "updates",
 ]);
+const DEFAULT_HOME_SIDEBAR_VIEW: HomeSidebarView = "my-triage";
 
 function coerceHomeSidebarView(value: unknown): HomeSidebarView | null {
   if (typeof value !== "string") return null;
@@ -345,11 +346,17 @@ function homeViewStorageKey(scope: string): string {
 }
 
 function readStoredHomeSidebarView(scope: string): HomeSidebarView {
-  if (typeof localStorage === "undefined") return "my-work";
+  if (typeof localStorage === "undefined") return DEFAULT_HOME_SIDEBAR_VIEW;
   try {
-    return coerceHomeSidebarView(localStorage.getItem(homeViewStorageKey(scope))) ?? "my-work";
+    const storageKey = homeViewStorageKey(scope);
+    const storedView = coerceHomeSidebarView(localStorage.getItem(storageKey));
+    if (storedView === "my-work") {
+      localStorage.removeItem(storageKey);
+      return DEFAULT_HOME_SIDEBAR_VIEW;
+    }
+    return storedView ?? DEFAULT_HOME_SIDEBAR_VIEW;
   } catch {
-    return "my-work";
+    return DEFAULT_HOME_SIDEBAR_VIEW;
   }
 }
 
