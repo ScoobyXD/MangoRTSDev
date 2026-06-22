@@ -224,9 +224,6 @@ func (r *PostgresRepo) CreateCompany(name string) (domain.Company, error) {
 	if err != nil {
 		return domain.Company{}, err
 	}
-	if err := ensureCompanyExplorerDefaultFoldersSQL(ctx, tx, company.CompanyID); err != nil {
-		return domain.Company{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return domain.Company{}, err
 	}

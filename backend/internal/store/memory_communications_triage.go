@@ -230,10 +230,6 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 	}
 	input.Target.Header = logicGate.Header
 
-	activeNodeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(input.CompanyID, CompanyExplorerSystemActiveNodesKey)
-	if !ok {
-		return CommunicationsTriageConversionResult{}, ErrNotFound
-	}
 	board := r.ensureLogicGateKanbanBoardLocked(input.CompanyID, input.LogicGateID, logicGate.Header)
 	column, err := resolveLogicGateAssignmentColumn(r.kanbanColumns[boardKey(input.CompanyID, board.BoardID)], input.ColumnID, input.Status)
 	if err != nil {
@@ -263,10 +259,6 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			CreatedTimestamp: now,
 		}
 		r.nodes[key(input.CompanyID, nodeID)] = node
-		folderItem, _, err := r.assignCompanyExplorerFolderItemLocked(input.CompanyID, activeNodeFolder.FolderID, "node", nodeID, 0)
-		if err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
 		r.nodeMapPositions[key(input.CompanyID, nodeID)] = domain.NodeMapPosition{
 			CompanyID:        input.CompanyID,
 			NodeID:           nodeID,
@@ -349,7 +341,6 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 		result.Assignments = append(result.Assignments, assignment)
 		result.EmailPlacements = append(result.EmailPlacements, placement)
 		result.EmailProvenance = append(result.EmailProvenance, provenance)
-		result.FolderItems = append(result.FolderItems, folderItem)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
 	events, err := r.appendDomainEventsLocked(communicationsEmailConversionWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
@@ -394,22 +385,18 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToStandaloneNodeLocked(input
 }
 
 func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
-	activeNodeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(input.CompanyID, CompanyExplorerSystemActiveNodesKey)
-	if !ok {
-		return CommunicationsTriageConversionResult{}, ErrNotFound
-	}
-	legacyFolderID := activeNodeFolder.FolderID
-	if input.Target.Mode == CommunicationsEmailConversionTargetFolder && input.Target.ParentEntityID == "" && input.Target.FolderID != "" {
-		legacyFolderID = input.Target.FolderID
+	targetParentEntityID := communicationsExplorerTargetParentEntityID(input.Target)
+	if targetParentEntityID != "" {
+		input.Target.ParentEntityID = targetParentEntityID
 	}
 	if input.Target.Mode == CommunicationsEmailConversionTargetProject {
 		if _, ok := r.projects[key(input.CompanyID, input.Target.ProjectID)]; !ok {
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
 	}
-	if input.Target.ParentEntityID != "" {
+	if targetParentEntityID != "" {
 		r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
-		if _, ok := r.companyExplorerV2Entities[key(input.CompanyID, input.Target.ParentEntityID)]; !ok {
+		if _, ok := r.companyExplorerV2Entities[key(input.CompanyID, targetParentEntityID)]; !ok {
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
 	}
@@ -431,10 +418,6 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 			CreatedTimestamp: now,
 		}
 		r.nodes[key(input.CompanyID, nodeID)] = node
-		folderItem, _, err := r.assignCompanyExplorerFolderItemLocked(input.CompanyID, legacyFolderID, "node", nodeID, 0)
-		if err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
 		r.nodeMapPositions[key(input.CompanyID, nodeID)] = domain.NodeMapPosition{
 			CompanyID:        input.CompanyID,
 			NodeID:           nodeID,
@@ -444,16 +427,16 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 		}
 		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
-		if input.Target.ParentEntityID != "" {
+		if targetParentEntityID != "" {
 			entity := r.ensureCompanyExplorerV2NativeEntityLocked(input.CompanyID, CompanyExplorerV2EntityNode, nodeID, node.Title, now, now)
 			position := input.Target.Position
 			if position <= 0 {
-				position = r.nextCompanyExplorerV2EdgePositionLocked(input.CompanyID, input.Target.ParentEntityID)
+				position = r.nextCompanyExplorerV2EdgePositionLocked(input.CompanyID, targetParentEntityID)
 			}
 			edge := memoryCompanyExplorerV2Edge{
 				CompanyID:        input.CompanyID,
-				EdgeID:           companyExplorerV2EdgeID(input.CompanyID, input.Target.ParentEntityID, entity.EntityID),
-				ParentEntityID:   input.Target.ParentEntityID,
+				EdgeID:           companyExplorerV2EdgeID(input.CompanyID, targetParentEntityID, entity.EntityID),
+				ParentEntityID:   targetParentEntityID,
 				ChildEntityID:    entity.EntityID,
 				Position:         position,
 				CreatedTimestamp: now,
@@ -487,7 +470,6 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 			ThreadID:  strings.TrimSpace(triageItem.Message.ThreadID),
 			NodeID:    nodeID,
 		})
-		result.FolderItems = append(result.FolderItems, folderItem)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
 	return result, nil

@@ -120,8 +120,6 @@ func normalizeTimingLabel(label string) string {
 		return "source.normalize_input"
 	case "repo.CreateWorkspaceEntityBatch.folder_setup":
 		return "explorer.folder_setup"
-	case "repo.ensureCompanyExplorerSystemFolderSQL":
-		return "explorer.folder_setup"
 	case "repo.CreateWorkspaceEntityBatch.folder_item_writes",
 		"repo.createGVICMatrixLogicGateTx.folder_item_writes":
 		return "explorer.folder_item_write"

@@ -77,19 +77,18 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 	if semantic.Data["actor_user_id"] != user.UserID || semantic.Data["idempotency_key"] != "http-email-convert-key" {
 		t.Fatalf("email conversion metadata = %+v", semantic.Data)
 	}
-	folderEvent := readWorkspaceEventForTest(t, stream)
 	nodeCreated := readWorkspaceEventForTest(t, stream)
 	assignmentEvent := readWorkspaceEventForTest(t, stream)
 	cardEvent := readWorkspaceEventForTest(t, stream)
 	nodeUpdated := readWorkspaceEventForTest(t, stream)
-	if folderEvent.Type != "company_explorer_folder_item_assigned" || nodeCreated.Type != "node_created" || assignmentEvent.Type != store.WorkItemLogicGateAssignmentSavedEventType || cardEvent.Type != "kanban_card_upserted" || nodeUpdated.Type != "node_updated" {
-		t.Fatalf("compatibility hub events = %s / %s / %s / %s / %s", folderEvent.Type, nodeCreated.Type, assignmentEvent.Type, cardEvent.Type, nodeUpdated.Type)
+	if nodeCreated.Type != "node_created" || assignmentEvent.Type != store.WorkItemLogicGateAssignmentSavedEventType || cardEvent.Type != "kanban_card_upserted" || nodeUpdated.Type != "node_updated" {
+		t.Fatalf("compatibility hub events = %s / %s / %s / %s", nodeCreated.Type, assignmentEvent.Type, cardEvent.Type, nodeUpdated.Type)
 	}
 	durable, err := repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, AfterSequence: 0, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	if len(durable) != 6 || durable[0].Type != store.WorkItemEmailConvertedEventType || durable[3].Type != store.WorkItemLogicGateAssignmentSavedEventType {
+	if len(durable) != 5 || durable[0].Type != store.WorkItemEmailConvertedEventType || durable[2].Type != store.WorkItemLogicGateAssignmentSavedEventType {
 		t.Fatalf("durable events = %+v, want committed conversion events", durable)
 	}
 }

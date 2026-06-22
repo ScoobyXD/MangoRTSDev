@@ -150,6 +150,14 @@ func normalizeCommunicationsEmailConversionTargetMode(mode string) string {
 	}
 }
 
+func communicationsExplorerTargetParentEntityID(target CommunicationsTriageConversionTarget) string {
+	parentEntityID := strings.TrimSpace(target.ParentEntityID)
+	if parentEntityID == "" && target.Mode == CommunicationsEmailConversionTargetFolder {
+		parentEntityID = strings.TrimSpace(target.FolderID)
+	}
+	return parentEntityID
+}
+
 func communicationsEmailConversionWorkspaceEventInputs(result CommunicationsTriageConversionResult, meta workItemAssignmentEventMetadata) []DomainEventInput {
 	inputs := make([]DomainEventInput, 0, len(result.Nodes)*6+1)
 	if result.CreatedLogicGate {

@@ -36,16 +36,8 @@ func (r *MemoryRepo) CreateProject(input ProjectInput) (ProjectMutationResult, e
 	r.setProjectAccountAssignmentsLocked(input.CompanyID, input.ProjectID, input.AccountIDs)
 	r.setProjectTeamAssignmentsLocked(input.CompanyID, input.ProjectID, input.TeamIDs)
 
-	var folderItem *domain.CompanyExplorerFolderItem
-	if activeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(input.CompanyID, CompanyExplorerSystemActiveProjectsKey); ok {
-		item, _, err := r.assignCompanyExplorerFolderItemLocked(input.CompanyID, activeFolder.FolderID, EntityTypeProject, input.ProjectID, 0)
-		if err != nil {
-			return ProjectMutationResult{}, err
-		}
-		folderItem = &item
-	}
 	project = r.withProjectReadModelLocked(project)
-	return ProjectMutationResult{Project: &project, FolderItem: folderItem}, nil
+	return ProjectMutationResult{Project: &project}, nil
 }
 
 func (r *MemoryRepo) UpdateProject(input ProjectInput) (ProjectMutationResult, error) {

@@ -231,18 +231,10 @@ from inserted project
 	if err != nil {
 		return ProjectMutationResult{}, err
 	}
-	activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveProjectsKey)
-	if err != nil {
-		return ProjectMutationResult{}, err
-	}
-	folderItem, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, input.CompanyID, activeFolder.FolderID, EntityTypeProject, project.ProjectID, 0)
-	if err != nil {
-		return ProjectMutationResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return ProjectMutationResult{}, err
 	}
-	return ProjectMutationResult{Project: &project, FolderItem: &folderItem}, nil
+	return ProjectMutationResult{Project: &project}, nil
 }
 
 func (r *PostgresRepo) UpdateProject(input ProjectInput) (ProjectMutationResult, error) {

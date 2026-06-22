@@ -55,10 +55,6 @@ func (r *MemoryRepo) createNodeWithIDLocked(companyID, nodeID, title string) (do
 		CreatedTimestamp: time.Now().UTC(),
 	}
 	r.nodes[key(companyID, n.NodeID)] = n
-	if _, err := r.assignNodeToActiveNodesFolderLocked(companyID, n.NodeID, 0); err != nil {
-		delete(r.nodes, key(companyID, n.NodeID))
-		return domain.Node{}, err
-	}
 	r.syncGVICMatrixProjectionForNodeLocked(companyID, n.NodeID)
 	return r.withNodeReadModelLocked(n), nil
 }

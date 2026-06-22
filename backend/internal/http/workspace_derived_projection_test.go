@@ -53,7 +53,7 @@ func TestWorkspaceDerivedReplayCheckpointsMissingTargets(t *testing.T) {
 		StreamID:   companyID,
 		Type:       store.WorkspaceDeferredFolderItemAssignEventType,
 		Payload: map[string]any{
-			"system_folder_key": store.CompanyExplorerSystemActiveNodesKey,
+			"system_folder_key": "active_nodes",
 			"item_type":         "node",
 			"item_id":           "22222222-2222-4222-8222-222222222222",
 		},

@@ -276,15 +276,6 @@ func (r *PostgresRepo) createNodeWithIDProjectionAndFolderTx(ctx context.Context
 	).Scan(&item.CompanyID, &item.NodeID, &item.Title, &item.CreatedTimestamp); err != nil {
 		return domain.Node{}, err
 	}
-	if syncFolderItem {
-		activeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, companyID, CompanyExplorerSystemActiveNodesKey)
-		if err != nil {
-			return domain.Node{}, err
-		}
-		if _, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, activeFolder.FolderID, "node", item.NodeID, 0); err != nil {
-			return domain.Node{}, err
-		}
-	}
 	item.LogicGateIDs = []string{}
 	item.Accounts = []domain.Account{}
 	if syncProjection {

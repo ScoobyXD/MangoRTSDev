@@ -189,7 +189,7 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	if err != nil {
 		t.Fatalf("ListVisibleCompanyExplorerFolderItems: %v", err)
 	}
-	assertVisibleQueryFolderItemIDs(t, folderItems, "node", visibleNode.NodeID, "node", responsibleNode.NodeID, "logic_gate", visibleGate.LogicGateID)
+	assertVisibleQueryFolderItemIDs(t, folderItems, "node", visibleNode.NodeID, "logic_gate", visibleGate.LogicGateID)
 	assertVisibleQueryFolderItemsDoNotContain(t, folderItems, "node", hiddenNode.NodeID, "logic_gate", hiddenGate.LogicGateID)
 
 	nodeSummaries, err := repo.ListVisibleCompanyExplorerNodeSummaries(companyID, viewer.UserID)

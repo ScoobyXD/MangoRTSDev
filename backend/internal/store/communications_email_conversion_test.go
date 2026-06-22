@@ -98,7 +98,7 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	wantTypes := []string{WorkItemEmailConvertedEventType, "company_explorer_folder_item_assigned", "node_created", WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated"}
+	wantTypes := []string{WorkItemEmailConvertedEventType, "node_created", WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated"}
 	if gotTypes := domainEventTypes(durable); !reflect.DeepEqual(gotTypes, wantTypes) {
 		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
 	}
@@ -304,7 +304,7 @@ func TestMemoryEmailConversionCommandCreatesNodeInExplorerFolderTarget(t *testin
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	wantTypes := []string{WorkItemEmailConvertedEventType, "company_explorer_folder_item_assigned", "node_created", "node_updated", "company_explorer_item_placed"}
+	wantTypes := []string{WorkItemEmailConvertedEventType, "node_created", "node_updated", "company_explorer_item_placed"}
 	if gotTypes := domainEventTypes(durable); !reflect.DeepEqual(gotTypes, wantTypes) {
 		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
 	}
@@ -372,7 +372,7 @@ func TestMemoryEmailConversionCommandCreatesNodeInProjectTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	wantTypes := []string{WorkItemEmailConvertedEventType, "company_explorer_folder_item_assigned", "node_created", "node_updated", "project_relationship_upserted"}
+	wantTypes := []string{WorkItemEmailConvertedEventType, "node_created", "node_updated", "project_relationship_upserted"}
 	if gotTypes := domainEventTypes(durable); !reflect.DeepEqual(gotTypes, wantTypes) {
 		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
 	}
