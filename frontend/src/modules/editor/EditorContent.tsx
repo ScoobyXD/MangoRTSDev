@@ -218,8 +218,44 @@ function logicGateGVICAssignmentPrincipalType(assignment: LogicGateGVICAssignmen
 function logicGateGVICAssignmentPrincipalID(assignment: LogicGateGVICAssignment): string {
   const principalType = logicGateGVICAssignmentPrincipalType(assignment);
   const principalID = assignment.principal_id?.trim() || "";
-  if (principalType === "user") return principalID || assignment.user_id.trim();
+  const userID = assignment.user_id?.trim() || "";
+  if (principalType === "user") return principalID || userID;
   return principalID;
+}
+
+type EditorGVICAssignmentInput = {
+  role: LogicGateGVICRole;
+  principal_type?: LogicGateGVICPrincipalType;
+  principal_id?: string;
+  user_id?: string;
+};
+
+function toResourceGVICAssignmentInput(assignment: EditorGVICAssignmentInput): {
+  role: LogicGateGVICRole;
+  principal_type: LogicGateGVICPrincipalType;
+  principal_id: string;
+} {
+  const principalType = assignment.principal_type?.trim() === "group" ? "group" : "user";
+  return {
+    role: assignment.role,
+    principal_type: principalType,
+    principal_id: (assignment.principal_id ?? assignment.user_id ?? "").trim(),
+  };
+}
+
+function normalizeLogicGateGVICAssignments(assignments: LogicGateGVICAssignment[], logicGateID: string): LogicGateGVICAssignment[] {
+  const fallbackLogicGateID = logicGateID.trim();
+  return assignments.map((assignment) => {
+    const principalType = logicGateGVICAssignmentPrincipalType(assignment);
+    const principalID = logicGateGVICAssignmentPrincipalID(assignment);
+    return {
+      ...assignment,
+      logic_gate_id: assignment.logic_gate_id?.trim() || assignment.resource_id?.trim() || fallbackLogicGateID,
+      principal_type: principalType,
+      principal_id: principalID,
+      user_id: assignment.user_id?.trim() || (principalType === "user" ? principalID : ""),
+    };
+  });
 }
 
 function mergeAccountLists(primary: Account[], secondary: Account[]): Account[] {
@@ -419,6 +455,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const remoteRevisionByClientRef = useRef(new Map<string, number>());
   const nodeWorkspaceProjectionsRef = useRef<NodeProjectionItem[]>([]);
   const logicGateWorkspaceProjectionsRef = useRef<LogicGateProjectionItem[]>([]);
+  const logicGateGVICAssignmentsRef = useRef<LogicGateGVICAssignment[]>([]);
+  const logicGateGVICMutationSequenceRef = useRef(0);
   const editorProjectionSequenceByScopeRef = useRef(new Map<string, number>());
   const editorSnapshotRefreshTokenRef = useRef(0);
   const nodeContentChangesRefreshTokenRef = useRef(0);
@@ -868,6 +906,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     return logicGate ? getLogicGateTitle(logicGate) : "";
   }, [apiBase, companyID]);
 
+  const applyLogicGateGVICAssignments = useCallback((assignments: LogicGateGVICAssignment[], logicGateID: string): LogicGateGVICAssignment[] => {
+    const normalized = normalizeLogicGateGVICAssignments(assignments, logicGateID);
+    logicGateGVICAssignmentsRef.current = normalized;
+    setLogicGateGVICAssignments(normalized);
+    return normalized;
+  }, []);
+
   const clearVisibleDocumentForSelection = useCallback(() => {
     setLinkedEntityCanEdit(true);
     setLinkedEntityCanAdmin(true);
@@ -881,6 +926,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setNodePriorityDraft("");
     setNodeDueDateDraft("");
     setNodeGVICAssignments([]);
+    applyLogicGateGVICAssignments([], "");
     documentDraftRef.current = "";
     persistedDocumentRef.current = "";
     documentInformationIDRef.current = "";
@@ -898,7 +944,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
     setDocumentScrollTop(0);
     scheduleIndentGuideUpdate("");
-  }, [scheduleIndentGuideUpdate]);
+  }, [applyLogicGateGVICAssignments, scheduleIndentGuideUpdate]);
 
   const applyLinkedNode = useCallback((nodeID: string, label = "", options: { focusEditor?: boolean } = {}) => {
     const shouldFocusEditor = options.focusEditor !== false;
@@ -1259,11 +1305,25 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       method: "PUT",
       body: JSON.stringify({
         company_id: companyID,
-        gvic_assignments: nextAssignments.map((assignment) => ({
-          role: assignment.role,
-          principal_type: logicGateGVICAssignmentPrincipalType(assignment),
-          principal_id: logicGateGVICAssignmentPrincipalID(assignment),
-        })),
+        gvic_assignments: nextAssignments.map(toResourceGVICAssignmentInput),
+      }),
+    });
+    return payload.gvic_assignments ?? [];
+  }, [companyID, requestJSON]);
+
+  const commandResourceGVICAssignments = useCallback(async (
+    resourceType: "node" | "logic_gate",
+    resourceID: string,
+    operation: "add" | "remove",
+    assignments: EditorGVICAssignmentInput[],
+  ) => {
+    const cleanResourceID = resourceID.trim();
+    if (!cleanResourceID) return [];
+    const payload = await requestJSON<{ gvic_assignments?: LogicGateGVICAssignment[] }>(`/v1/resources/${resourceType}/${cleanResourceID}/gvic/${operation}`, {
+      method: "POST",
+      body: JSON.stringify({
+        company_id: companyID,
+        gvic_assignments: assignments.map(toResourceGVICAssignmentInput),
       }),
     });
     return payload.gvic_assignments ?? [];
@@ -1282,18 +1342,32 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
   }, [apiBase, companyID, linkedEntityKind, linkedNodeID, saveResourceGVICAssignments]);
 
-  const saveLogicGateGVICAssignments = useCallback(async (nextAssignments: LogicGateGVICAssignment[]) => {
-    if (!linkedNodeID || linkedEntityKind !== "logic_gate") return;
+  const commandLogicGateGVICAssignments = useCallback((
+    operation: "add" | "remove",
+    assignment: EditorGVICAssignmentInput,
+    optimisticAssignments: LogicGateGVICAssignment[],
+  ) => {
+    const logicGateID = linkedNodeID.trim();
+    if (!logicGateID || linkedEntityKind !== "logic_gate") return;
+    const previousAssignments = logicGateGVICAssignmentsRef.current;
+    const mutationSequence = ++logicGateGVICMutationSequenceRef.current;
+    editorSnapshotRefreshTokenRef.current += 1;
+    applyLogicGateGVICAssignments(optimisticAssignments, logicGateID);
     setError("");
-    try {
-      const assignments = await saveResourceGVICAssignments("logic_gate", linkedNodeID, nextAssignments);
-      setLogicGateGVICAssignments(assignments);
-      invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
+    void commandResourceGVICAssignments("logic_gate", logicGateID, operation, [assignment]).then((assignments) => {
+      const currentTarget = linkedEditorTargetRef.current;
+      if (logicGateGVICMutationSequenceRef.current !== mutationSequence || currentTarget.kind !== "logic_gate" || currentTarget.id !== logicGateID) return;
+      applyLogicGateGVICAssignments(assignments, logicGateID);
+      invalidateLogicGateRecordStoreCaches(apiBase, companyID, logicGateID);
       invalidateWorkspaceSnapshot(apiBase, companyID);
-    } catch (err) {
+    }).catch((err) => {
+      const currentTarget = linkedEditorTargetRef.current;
+      if (logicGateGVICMutationSequenceRef.current === mutationSequence && currentTarget.kind === "logic_gate" && currentTarget.id === logicGateID) {
+        applyLogicGateGVICAssignments(previousAssignments, logicGateID);
+      }
       setError(err instanceof Error ? err.message : "failed_to_update_logic_gate_gvic");
-    }
-  }, [apiBase, companyID, linkedEntityKind, linkedNodeID, saveResourceGVICAssignments]);
+    });
+  }, [apiBase, applyLogicGateGVICAssignments, commandResourceGVICAssignments, companyID, linkedEntityKind, linkedNodeID]);
 
   const addNodeGVICPrincipal = useCallback((role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => {
     const cleanPrincipalID = principalID.trim();
@@ -1376,55 +1450,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const addLogicGateGVICPrincipal = useCallback((role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => {
     const cleanPrincipalID = principalID.trim();
     if (!cleanPrincipalID) return;
+    const currentAssignments = logicGateGVICAssignmentsRef.current;
     const singleUserRole = role === "generated" || role === "verified";
     if (singleUserRole) {
       if (principalType !== "user") return;
-      const existing = logicGateGVICAssignments.filter((assignment) => assignment.role === role);
+      const existing = currentAssignments.filter((assignment) => assignment.role === role);
       if (existing.length === 1 && logicGateGVICAssignmentPrincipalType(existing[0]) === "user" && logicGateGVICAssignmentPrincipalID(existing[0]) === cleanPrincipalID) return;
       const user = companyUsers.find((candidate) => candidate.user_id === cleanPrincipalID);
-      void saveLogicGateGVICAssignments([
-        ...logicGateGVICAssignments.filter((assignment) => assignment.role !== role),
-        {
-          company_id: companyID,
-          logic_gate_id: linkedNodeID,
-          role,
-          principal_type: "user",
-          principal_id: cleanPrincipalID,
-          principal_name: user?.display_name ?? user?.email,
-          user_id: cleanPrincipalID,
-          user_display_name: user?.display_name,
-          user_email: user?.email,
-          created_timestamp: new Date().toISOString(),
-        },
-      ]);
-      return;
-    }
-    const existingPrincipalIDsForRole = new Set(logicGateGVICAssignments
-      .filter((assignment) => assignment.role === role && logicGateGVICAssignmentPrincipalType(assignment) === principalType)
-      .map((assignment) => logicGateGVICAssignmentPrincipalID(assignment))
-      .filter(Boolean));
-    if (existingPrincipalIDsForRole.has(cleanPrincipalID)) return;
-    if (principalType === "group") {
-      const group = companyUserGroups.find((candidate) => candidate.group_id === cleanPrincipalID);
-      void saveLogicGateGVICAssignments([
-        ...logicGateGVICAssignments,
-        {
-          company_id: companyID,
-          logic_gate_id: linkedNodeID,
-          role,
-          principal_type: "group",
-          principal_id: cleanPrincipalID,
-          principal_name: group?.name ?? cleanPrincipalID,
-          user_id: "",
-          created_timestamp: new Date().toISOString(),
-        },
-      ]);
-      return;
-    }
-    const user = companyUsers.find((candidate) => candidate.user_id === cleanPrincipalID);
-    void saveLogicGateGVICAssignments([
-      ...logicGateGVICAssignments,
-      {
+      const optimisticAssignment: LogicGateGVICAssignment = {
         company_id: companyID,
         logic_gate_id: linkedNodeID,
         role,
@@ -1435,21 +1468,72 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         user_display_name: user?.display_name,
         user_email: user?.email,
         created_timestamp: new Date().toISOString(),
-      },
+      };
+      commandLogicGateGVICAssignments("add", { role, principal_type: "user", principal_id: cleanPrincipalID, user_id: cleanPrincipalID }, [
+        ...currentAssignments.filter((assignment) => assignment.role !== role),
+        optimisticAssignment,
+      ]);
+      return;
+    }
+    const existingPrincipalIDsForRole = new Set(currentAssignments
+      .filter((assignment) => assignment.role === role && logicGateGVICAssignmentPrincipalType(assignment) === principalType)
+      .map((assignment) => logicGateGVICAssignmentPrincipalID(assignment))
+      .filter(Boolean));
+    if (existingPrincipalIDsForRole.has(cleanPrincipalID)) return;
+    if (principalType === "group") {
+      const group = companyUserGroups.find((candidate) => candidate.group_id === cleanPrincipalID);
+      const optimisticAssignment: LogicGateGVICAssignment = {
+        company_id: companyID,
+        logic_gate_id: linkedNodeID,
+        role,
+        principal_type: "group",
+        principal_id: cleanPrincipalID,
+        principal_name: group?.name ?? cleanPrincipalID,
+        user_id: "",
+        created_timestamp: new Date().toISOString(),
+      };
+      commandLogicGateGVICAssignments("add", { role, principal_type: "group", principal_id: cleanPrincipalID }, [
+        ...currentAssignments,
+        optimisticAssignment,
+      ]);
+      return;
+    }
+    const user = companyUsers.find((candidate) => candidate.user_id === cleanPrincipalID);
+    const optimisticAssignment: LogicGateGVICAssignment = {
+      company_id: companyID,
+      logic_gate_id: linkedNodeID,
+      role,
+      principal_type: "user",
+      principal_id: cleanPrincipalID,
+      principal_name: user?.display_name ?? user?.email,
+      user_id: cleanPrincipalID,
+      user_display_name: user?.display_name,
+      user_email: user?.email,
+      created_timestamp: new Date().toISOString(),
+    };
+    commandLogicGateGVICAssignments("add", { role, principal_type: "user", principal_id: cleanPrincipalID, user_id: cleanPrincipalID }, [
+      ...currentAssignments,
+      optimisticAssignment,
     ]);
-  }, [companyID, companyUserGroups, companyUsers, linkedNodeID, logicGateGVICAssignments, saveLogicGateGVICAssignments]);
+  }, [commandLogicGateGVICAssignments, companyID, companyUserGroups, companyUsers, linkedNodeID]);
 
   const removeLogicGateGVICPrincipal = useCallback((role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => {
     const cleanPrincipalID = principalID.trim();
     if (!cleanPrincipalID) return;
-    const next = logicGateGVICAssignments.filter((assignment) => !(
+    const currentAssignments = logicGateGVICAssignmentsRef.current;
+    const next = currentAssignments.filter((assignment) => !(
       assignment.role === role
       && logicGateGVICAssignmentPrincipalType(assignment) === principalType
       && logicGateGVICAssignmentPrincipalID(assignment) === cleanPrincipalID
     ));
-    if (next.length === logicGateGVICAssignments.length) return;
-    void saveLogicGateGVICAssignments(next);
-  }, [logicGateGVICAssignments, saveLogicGateGVICAssignments]);
+    if (next.length === currentAssignments.length) return;
+    commandLogicGateGVICAssignments("remove", {
+      role,
+      principal_type: principalType,
+      principal_id: cleanPrincipalID,
+      user_id: principalType === "user" ? cleanPrincipalID : undefined,
+    }, next);
+  }, [commandLogicGateGVICAssignments]);
 
   useEffect(() => {
     setIsEditingTitle(false);
@@ -1946,7 +2030,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodeDueDateDraft("");
       setNodeAccounts([]);
       setNodeGVICAssignments([]);
-      setLogicGateGVICAssignments([]);
+      applyLogicGateGVICAssignments([], "");
       documentDraftRef.current = "";
       persistedDocumentRef.current = "";
       documentInformationIDRef.current = "";
@@ -1992,7 +2076,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodeLogicGateIDs([]);
           setNodeAccounts([]);
           setNodeGVICAssignments([]);
-          setLogicGateGVICAssignments(details.logic_gate.gvic_assignments ?? details.logic_gate.gvic_assignments ?? []);
+          applyLogicGateGVICAssignments(details.logic_gate.gvic_assignments ?? [], linkedNodeID);
           setNodeWorkspaceProjections([]);
           setLogicGateWorkspaceProjections(projections);
           setNodeWorkspaceLoadedNodeID("");
@@ -2042,7 +2126,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodeLogicGateIDs(details.node.logic_gate_ids ?? []);
         setNodeAccounts(details.node.accounts ?? []);
         setNodeGVICAssignments(gvicPayload.gvic_assignments ?? []);
-        setLogicGateGVICAssignments([]);
+        applyLogicGateGVICAssignments([], "");
         setNodeWorkspaceProjections(projections);
         setNodeWorkspaceLoadedNodeID(linkedNodeID);
         setNodeContentChanges(contentChanges);
@@ -2080,7 +2164,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, companyID, focusInformationID, focusRequestID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence, requestJSON, scheduleIndentGuideUpdate]);
+  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, companyID, focusInformationID, focusRequestID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence, requestJSON, scheduleIndentGuideUpdate]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : EDITOR_NEU_PANEL_BACKGROUND;
