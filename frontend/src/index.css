@@ -247,6 +247,87 @@ button, input, textarea, select {
 .mango-home-scroll::-webkit-scrollbar-corner {
   background: transparent;
 }
+.mango-my-work-header-controls button,
+.mango-my-work-header-controls label,
+.mango-my-work-header-controls .mango-my-work-menu-option {
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 170ms ease, transform 170ms ease, color 150ms ease, filter 150ms ease;
+}
+
+.mango-my-work-header-controls button:not(:disabled):hover,
+.mango-my-work-project-toggle:hover,
+.mango-my-work-header-controls .mango-my-work-menu-option:hover {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(224, 242, 254, 0.66) 42%, rgba(204, 251, 241, 0.56)) padding-box,
+    linear-gradient(135deg, rgba(14, 165, 233, 0.72), rgba(15, 118, 110, 0.60) 56%, rgba(124, 58, 237, 0.52)) border-box !important;
+  border-color: transparent !important;
+  box-shadow:
+    0 9px 22px rgba(15, 23, 42, 0.12),
+    0 0 16px rgba(14, 165, 233, 0.16),
+    inset 1px 1px 0 rgba(255, 255, 255, 0.90) !important;
+  color: #0f172a !important;
+  transform: translateY(-1px);
+}
+
+.mango-my-work-header-controls button:focus-visible,
+.mango-my-work-project-toggle:focus-within {
+  outline: 2px solid rgba(14, 165, 233, 0.34);
+  outline-offset: 2px;
+}
+
+.mango-my-work-header-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
+}
+
+.mango-my-work-scope-tab.is-active {
+  filter: saturate(1.12);
+}
+
+.mango-my-work-menu-option:not(:disabled):hover {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(219, 234, 254, 0.64)) padding-box,
+    linear-gradient(135deg, rgba(37, 99, 235, 0.54), rgba(14, 165, 233, 0.46)) border-box !important;
+}
+
+.mango-my-work-scope-picker {
+  --mango-home-scroll-accent: rgba(37, 99, 235, 0.48);
+  --mango-home-scroll-track: rgba(148, 163, 184, 0.10);
+  -webkit-backdrop-filter: blur(18px) saturate(1.16);
+}
+
+.mango-my-work-scope-picker .mango-my-work-menu-option:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.30);
+  outline-offset: 2px;
+}
+
+@media (max-width: 980px) {
+  .mango-my-work-header {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .mango-my-work-title-stack {
+    min-height: 0 !important;
+  }
+
+  .mango-my-work-header-controls {
+    justify-self: start !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .mango-my-work-header-controls {
+    width: min(100%, 352px) !important;
+  }
+
+  .mango-my-work-grouping-body {
+    width: min(420px, calc(100vw - 48px)) !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .mango-my-work-scope-picker {
+    width: min(352px, calc(100vw - 48px)) !important;
+  }
+}
 
 /* Individual Kanban columns use slimmer color-matched scrollbars for card lanes. */
 .kanban-column-scroll {

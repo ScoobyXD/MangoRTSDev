@@ -727,8 +727,8 @@ export function MyWorkView({
 
   return (
     <section style={myWorkShellStyle}>
-      <div style={myWorkHeaderStyle}>
-        <div style={myWorkTitleStackStyle}>
+      <div className="mango-my-work-header" style={myWorkHeaderStyle}>
+        <div className="mango-my-work-title-stack" style={myWorkTitleStackStyle}>
           <h2 style={myWorkTitleStyle}>My Work</h2>
           <div style={myWorkMetaStyle}>
             {scopeLabel}
@@ -753,6 +753,7 @@ export function MyWorkView({
           onDeleteSavedView={deleteSavedView}
           onSelectScopeLevel={selectScopeLevel}
           onSelectScope={selectScope}
+          onSetScopeMenuLevel={setScopeMenuLevel}
           selectedScope={selectedScope}
           onToggleCollapsed={toggleSelectedSettingCollapsed}
           onUpdateGrouping={updateGrouping}
@@ -828,6 +829,7 @@ function GroupingPanel({
   onDeleteSavedView,
   onSelectScopeLevel,
   onSelectScope,
+  onSetScopeMenuLevel,
   onToggleCollapsed,
   onUpdateGrouping,
   onRemoveGrouping,
@@ -851,6 +853,7 @@ function GroupingPanel({
   onDeleteSavedView: (settingID: string) => void;
   onSelectScopeLevel: (level: MyWorkScopeLevel) => void;
   onSelectScope: (scope: MyWorkSelectedScope) => void;
+  onSetScopeMenuLevel: (level: MyWorkScopeLevel | null) => void;
   onToggleCollapsed: () => void;
   onUpdateGrouping: (index: number, grouping: MyWorkGroupingSetting) => void;
   onRemoveGrouping: (index: number) => void;
@@ -858,137 +861,216 @@ function GroupingPanel({
   onSetGroupingFieldMenuIndex: (index: number | null) => void;
   onAddGrouping: (field: MyWorkGroupingField) => void;
 }) {
+  const [collapsedScopeRowKeys, setCollapsedScopeRowKeys] = useState<Set<string>>(new Set());
+  const scopeRowsWithChildren = useMemo(() => scopeRows.map((row, index) => ({
+    ...row,
+    hasChildren: Boolean(scopeRows[index + 1] && scopeRows[index + 1].depth > row.depth),
+  })), [scopeRows]);
+  const visibleScopeRows = useMemo(() => {
+    const out: Array<ScopePickerRow & { hasChildren: boolean }> = [];
+    const collapsedAncestorDepths: number[] = [];
+    for (const row of scopeRowsWithChildren) {
+      while (collapsedAncestorDepths.length > 0 && row.depth <= collapsedAncestorDepths[collapsedAncestorDepths.length - 1]) {
+        collapsedAncestorDepths.pop();
+      }
+      if (collapsedAncestorDepths.length > 0) continue;
+      out.push(row);
+      if (row.hasChildren && collapsedScopeRowKeys.has(row.key)) collapsedAncestorDepths.push(row.depth);
+    }
+    return out;
+  }, [collapsedScopeRowKeys, scopeRowsWithChildren]);
+  const toggleScopeRowCollapsed = useCallback((rowKey: string) => {
+    setCollapsedScopeRowKeys((current) => {
+      const next = new Set(current);
+      if (next.has(rowKey)) next.delete(rowKey);
+      else next.add(rowKey);
+      return next;
+    });
+  }, []);
+
   return (
-    <div style={groupingPanelStyle}>
+    <div
+      className="mango-my-work-header-controls"
+      style={groupingPanelStyle}
+      onMouseLeave={() => onSetScopeMenuLevel(null)}
+      onBlur={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!nextTarget || !event.currentTarget.contains(nextTarget)) onSetScopeMenuLevel(null);
+      }}
+    >
       <div style={scopeControlRowStyle}>
-        <div style={scopeTabsStyle}>
-          {(["me", "team", "all"] as const).map((level) => (
-            <button
-              key={level}
-              type="button"
-              style={scopeTabStyle(selectedScope.level === level)}
-              onClick={() => onSelectScopeLevel(level)}
-            >
-              {level === "me" ? "Me" : level === "team" ? "Team" : "All"}
-            </button>
-          ))}
-        </div>
-        <button type="button" title={setting.panel_collapsed ? "Expand grouping settings" : "Collapse grouping settings"} style={collapseButtonStyle} onClick={onToggleCollapsed}>
-          <ExplorerDisclosureIcon open={!setting.panel_collapsed} color="currentColor" />
-        </button>
-      </div>
-      <div style={scopeLabelStyle}>{scopeLabel}</div>
-      {scopeMenuLevel && (
-        <div style={scopePickerStyle}>
-          {scopeRows.length === 0 ? (
-            <div style={scopePickerEmptyStyle}>No people or groups</div>
-          ) : scopeRows.map((row) => (
-            <button
-              key={row.key}
-              type="button"
-              style={scopePickerRowStyle(row.depth, scopesEqual(row.scope, selectedScope))}
-              onClick={() => onSelectScope(row.scope)}
-            >
-              <ScopeIcon icon={row.icon} />
-              <span style={scopePickerTextStyle}>
-                <span style={scopePickerLabelStyle}>{row.label}</span>
-                {row.detail && <span style={scopePickerDetailStyle}>{row.detail}</span>}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-      {!setting.panel_collapsed && (
-        <div style={groupingBodyStyle}>
-          <div style={savedViewsStyle}>
-            <div style={savedViewsListStyle}>
-              {settings.map((item) => (
-                <div key={item.setting_id} style={savedViewRowStyle(item.setting_id === setting.setting_id)}>
-                  <button type="button" style={savedViewButtonStyle} onClick={() => onSelectSetting(item.setting_id)}>
-                    {item.name}
-                  </button>
-                  <button type="button" title="Delete view" style={savedViewDeleteStyle} disabled={settings.length <= 1} onClick={() => onDeleteSavedView(item.setting_id)}>x</button>
-                </div>
-              ))}
-            </div>
-            <button type="button" style={newViewButtonStyle} onClick={onAddSavedView}>+ New View</button>
+        <div style={scopeTabsAnchorStyle}>
+          <div style={scopeTabsStyle}>
+            {(["me", "team", "all"] as const).map((level) => (
+              <button
+                key={level}
+                type="button"
+                className={`mango-my-work-scope-tab${selectedScope.level === level ? " is-active" : ""}`}
+                style={scopeTabStyle(level, selectedScope.level === level)}
+                onMouseEnter={() => onSetScopeMenuLevel(level)}
+                onFocus={() => onSetScopeMenuLevel(level)}
+                onClick={() => onSelectScopeLevel(level)}
+              >
+                {level === "me" ? "Me" : level === "team" ? "Team" : "All"}
+              </button>
+            ))}
           </div>
-          <div style={groupingStackStyle}>
-            <label style={projectGroupToggleStyle}>
-              <input
-                type="checkbox"
-                checked={showProjectGroups}
-                style={projectGroupCheckboxStyle}
-                onChange={(event) => onShowProjectGroupsChange(event.currentTarget.checked)}
-              />
-              <span style={projectGroupToggleTextStyle}>Projects</span>
-            </label>
-            {setting.groupings.map((grouping, index) => (
-              <div key={`${grouping.field}:${index}`} style={groupingRowStyle(index)}>
-                <button
-                  type="button"
-                  style={groupingFieldButtonStyle}
-                  onClick={() => {
-                    onSetAddGroupingOpen(false);
-                    onSetGroupingFieldMenuIndex(groupingFieldMenuIndex === index ? null : index);
-                  }}
-                >
-                  {myWorkGroupingFieldLabel(grouping.field)}
-                </button>
-                {groupingFieldMenuIndex === index && (
-                  <div style={groupingFieldMenuStyle}>
-                    {MY_WORK_GROUPING_FIELDS
-                      .filter((field) => field.value === grouping.field || !setting.groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
-                      .map((field) => (
-                        <button
-                          key={field.value}
-                          type="button"
-                          style={groupingFieldOptionStyle(field.value === grouping.field)}
-                          onClick={() => {
-                            onUpdateGrouping(index, { ...grouping, field: field.value });
-                            onSetGroupingFieldMenuIndex(null);
-                          }}
-                        >
+          {scopeMenuLevel && (
+            <div className="mango-my-work-scope-picker mango-home-scroll" style={scopePickerStyle}>
+              {scopeRows.length === 0 ? (
+                <div style={scopePickerEmptyStyle}>No people or groups</div>
+              ) : visibleScopeRows.map((row) => {
+                const collapsed = collapsedScopeRowKeys.has(row.key);
+                return (
+                  <div
+                    key={row.key}
+                    role="button"
+                    tabIndex={0}
+                    className="mango-my-work-menu-option"
+                    style={scopePickerRowStyle(row.depth, scopesEqual(row.scope, selectedScope))}
+                    onClick={() => onSelectScope(row.scope)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      onSelectScope(row.scope);
+                    }}
+                  >
+                    {row.hasChildren ? (
+                      <button
+                        type="button"
+                        className="mango-my-work-scope-disclosure"
+                        aria-label={collapsed ? `Expand ${row.label}` : `Collapse ${row.label}`}
+                        style={scopePickerDisclosureStyle}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleScopeRowCollapsed(row.key);
+                        }}
+                      >
+                        <ExplorerDisclosureIcon open={!collapsed} color="currentColor" />
+                      </button>
+                    ) : <span style={scopePickerDisclosureSpacerStyle} />}
+                    <ScopeIcon icon={row.icon} />
+                    <span style={scopePickerTextStyle}>
+                      <span style={scopePickerLabelStyle}>{row.label}</span>
+                      {row.detail && <span style={scopePickerDetailStyle}>{row.detail}</span>}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div style={groupingMenuAnchorStyle}>
+          <button
+            type="button"
+            className="mango-my-work-icon-button"
+            title={setting.panel_collapsed ? "Expand grouping settings" : "Collapse grouping settings"}
+            style={collapseButtonStyle}
+            onClick={() => {
+              onSetScopeMenuLevel(null);
+              onToggleCollapsed();
+            }}
+          >
+            <ExplorerDisclosureIcon open={!setting.panel_collapsed} color="currentColor" />
+          </button>
+          {!setting.panel_collapsed && (
+            <div className="mango-my-work-grouping-body" style={groupingBodyStyle}>
+              <div style={savedViewsStyle}>
+                <div style={savedViewsListStyle}>
+                  {settings.map((item) => (
+                    <div key={item.setting_id} style={savedViewRowStyle(item.setting_id === setting.setting_id)}>
+                      <button type="button" className="mango-my-work-subtle-button" style={savedViewButtonStyle} onClick={() => onSelectSetting(item.setting_id)}>
+                        {item.name}
+                      </button>
+                      <button type="button" className="mango-my-work-icon-button" title="Delete view" style={savedViewDeleteStyle} disabled={settings.length <= 1} onClick={() => onDeleteSavedView(item.setting_id)}>x</button>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" className="mango-my-work-action-button" style={newViewButtonStyle} onClick={onAddSavedView}>+ New View</button>
+              </div>
+              <div style={groupingStackStyle}>
+                <label className="mango-my-work-project-toggle" style={projectGroupToggleStyle}>
+                  <input
+                    type="checkbox"
+                    checked={showProjectGroups}
+                    style={projectGroupCheckboxStyle}
+                    onChange={(event) => onShowProjectGroupsChange(event.currentTarget.checked)}
+                  />
+                  <span style={projectGroupToggleTextStyle}>Projects</span>
+                </label>
+                {setting.groupings.map((grouping, index) => (
+                  <div key={`${grouping.field}:${index}`} style={groupingRowStyle(index)}>
+                    <button
+                      type="button"
+                      className="mango-my-work-subtle-button"
+                      style={groupingFieldButtonStyle}
+                      onClick={() => {
+                        onSetAddGroupingOpen(false);
+                        onSetGroupingFieldMenuIndex(groupingFieldMenuIndex === index ? null : index);
+                      }}
+                    >
+                      {myWorkGroupingFieldLabel(grouping.field)}
+                    </button>
+                    {groupingFieldMenuIndex === index && (
+                      <div style={groupingFieldMenuStyle}>
+                        {MY_WORK_GROUPING_FIELDS
+                          .filter((field) => field.value === grouping.field || !setting.groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
+                          .map((field) => (
+                            <button
+                              key={field.value}
+                              type="button"
+                              className="mango-my-work-menu-option"
+                              style={groupingFieldOptionStyle(field.value === grouping.field)}
+                              onClick={() => {
+                                onUpdateGrouping(index, { ...grouping, field: field.value });
+                                onSetGroupingFieldMenuIndex(null);
+                              }}
+                            >
+                              {field.label}
+                            </button>
+                          ))}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="mango-my-work-action-button"
+                      style={groupingDirectionButtonStyle}
+                      onClick={() => onUpdateGrouping(index, { ...grouping, direction: grouping.direction === "asc" ? "desc" : "asc" })}
+                    >
+                      {grouping.direction === "asc" ? "Asc" : "Desc"}
+                    </button>
+                    <button type="button" className="mango-my-work-icon-button" title="Remove grouping" style={groupingRemoveButtonStyle} onClick={() => onRemoveGrouping(index)}>x</button>
+                  </div>
+                ))}
+                <div style={{ position: "relative" }}>
+                  <button
+                    type="button"
+                    className="mango-my-work-action-button"
+                    style={addGroupingButtonStyle}
+                    disabled={addableFields.length === 0}
+                    onClick={() => {
+                      onSetGroupingFieldMenuIndex(null);
+                      onSetAddGroupingOpen(!addGroupingOpen);
+                    }}
+                  >
+                    + Add Grouping
+                  </button>
+                  {addGroupingOpen && (
+                    <div style={addGroupingMenuStyle}>
+                      {addableFields.map((field) => (
+                        <button key={field.value} type="button" className="mango-my-work-menu-option" style={addGroupingOptionStyle} onClick={() => onAddGrouping(field.value)}>
                           {field.label}
                         </button>
                       ))}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  style={groupingDirectionButtonStyle}
-                  onClick={() => onUpdateGrouping(index, { ...grouping, direction: grouping.direction === "asc" ? "desc" : "asc" })}
-                >
-                  {grouping.direction === "asc" ? "Asc" : "Desc"}
-                </button>
-                <button type="button" title="Remove grouping" style={groupingRemoveButtonStyle} onClick={() => onRemoveGrouping(index)}>x</button>
-              </div>
-            ))}
-            <div style={{ position: "relative" }}>
-              <button
-                type="button"
-                style={addGroupingButtonStyle}
-                disabled={addableFields.length === 0}
-                onClick={() => {
-                  onSetGroupingFieldMenuIndex(null);
-                  onSetAddGroupingOpen(!addGroupingOpen);
-                }}
-              >
-                + Add Grouping
-              </button>
-              {addGroupingOpen && (
-                <div style={addGroupingMenuStyle}>
-                  {addableFields.map((field) => (
-                    <button key={field.value} type="button" style={addGroupingOptionStyle} onClick={() => onAddGrouping(field.value)}>
-                      {field.label}
-                    </button>
-                  ))}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
+      <div style={scopeLabelStyle}>{scopeLabel}</div>
     </div>
   );
 }
@@ -2022,30 +2104,54 @@ const myWorkHeaderStyle: React.CSSProperties = {
   ...logicGateGVICHeaderStyle,
   minWidth: 0,
   minHeight: 54,
+  display: "grid",
+  gridTemplateColumns: "minmax(180px, 1fr) auto",
+  alignItems: "center",
+  gap: 10,
   position: "relative",
-  alignItems: "flex-start",
+  zIndex: 6,
+  overflow: "visible",
+  padding: "10px 12px",
+  border: "1px solid rgba(255, 255, 255, 0.74)",
+  borderRadius: 10,
+  background: "linear-gradient(110deg, rgba(255, 241, 242, 0.82), rgba(254, 249, 195, 0.58) 30%, rgba(236, 253, 245, 0.66) 62%, rgba(239, 246, 255, 0.82))",
+  boxShadow: "0 12px 28px rgba(15, 23, 42, 0.10), inset 1px 1px 0 rgba(255, 255, 255, 0.92)",
 };
 
 const myWorkTitleStackStyle: React.CSSProperties = {
   minWidth: 0,
+  minHeight: 44,
   display: "grid",
-  gap: 4,
-  paddingRight: "min(448px, 48vw)",
+  alignContent: "center",
+  gap: 6,
+  padding: "4px 0",
 };
 
 const myWorkTitleStyle: React.CSSProperties = {
   margin: 0,
-  color: "#111827",
-  fontSize: 16,
-  lineHeight: 1.2,
-  fontWeight: 800,
+  color: "#0f172a",
+  fontSize: 17,
+  lineHeight: 1.18,
+  fontWeight: 850,
   letterSpacing: 0,
 };
 
 const myWorkMetaStyle: React.CSSProperties = {
-  color: "#64748b",
+  width: "fit-content",
+  maxWidth: "100%",
+  minHeight: 22,
+  display: "inline-flex",
+  alignItems: "center",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  border: "1px solid rgba(14, 165, 233, 0.22)",
+  borderRadius: 999,
+  background: "rgba(255, 255, 255, 0.68)",
+  color: "#475569",
   fontSize: 11,
-  fontWeight: 700,
+  fontWeight: 760,
+  padding: "0 9px",
 };
 
 const myWorkMatrixScrollStyle: React.CSSProperties = {
@@ -2158,49 +2264,82 @@ const myWorkEmptyStyle: React.CSSProperties = {
 };
 
 const groupingPanelStyle: React.CSSProperties = {
-  position: "absolute",
-  top: 0,
-  right: 0,
-  zIndex: 3,
+  position: "relative",
+  zIndex: 8,
   justifySelf: "end",
-  width: "min(430px, 44vw)",
-  minWidth: 280,
+  alignSelf: "center",
+  width: 352,
+  maxWidth: "min(352px, 100%)",
+  minWidth: 0,
   display: "grid",
-  gap: 6,
-  border: "1px solid rgba(15, 23, 42, 0.18)",
-  borderRadius: 6,
-  background: "#ffffff",
-  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.10)",
+  gap: 7,
+  border: "1px solid rgba(37, 99, 235, 0.14)",
+  borderRadius: 10,
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(240, 249, 255, 0.58) 44%, rgba(236, 253, 245, 0.46))",
+  boxShadow: "7px 7px 18px rgba(148, 163, 184, 0.20), -6px -6px 16px rgba(255, 255, 255, 0.86), inset 1px 1px 0 rgba(255, 255, 255, 0.88)",
   padding: 8,
+  overflow: "visible",
 };
 
 const scopeControlRowStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 28px",
+  gridTemplateColumns: "minmax(0, 294px) 28px",
+  justifyContent: "end",
   gap: 6,
   alignItems: "center",
 };
 
+const scopeTabsAnchorStyle: React.CSSProperties = {
+  position: "relative",
+  minWidth: 0,
+};
+
+const groupingMenuAnchorStyle: React.CSSProperties = {
+  position: "relative",
+  width: 28,
+  height: 28,
+  justifySelf: "end",
+};
+
 const scopeTabsStyle: React.CSSProperties = {
+  width: "100%",
   minWidth: 0,
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-  border: "1px solid rgba(15, 23, 42, 0.18)",
-  borderRadius: 6,
+  gap: 3,
+  border: "1px solid rgba(15, 23, 42, 0.08)",
+  borderRadius: 8,
+  background: "linear-gradient(145deg, rgba(255,255,255,0.70), rgba(226,232,240,0.42))",
+  boxShadow: "inset 3px 3px 8px rgba(148, 163, 184, 0.18), inset -3px -3px 8px rgba(255, 255, 255, 0.78)",
+  padding: 3,
   overflow: "hidden",
 };
 
-function scopeTabStyle(active: boolean): React.CSSProperties {
+function myWorkScopeAccent(level: MyWorkScopeLevel): string {
+  if (level === "me") return "#2563eb";
+  if (level === "team") return "#0f766e";
+  return "#7c3aed";
+}
+
+function myWorkGroupingAccent(index: number): string {
+  return ["#0891b2", "#d97706", "#7c3aed", "#059669", "#be123c"][index % 5] ?? "#475569";
+}
+
+function scopeTabStyle(level: MyWorkScopeLevel, active: boolean): React.CSSProperties {
+  const accent = myWorkScopeAccent(level);
   return {
-    minHeight: 28,
-    border: "none",
-    borderRight: "1px solid rgba(15, 23, 42, 0.12)",
-    background: active ? "#e2e8f0" : "#ffffff",
-    color: "#111827",
+    minHeight: 29,
+    border: `1px solid ${homeColorWithAlpha(accent, active ? 0.30 : 0.10)}`,
+    borderRadius: 6,
+    background: active
+      ? `linear-gradient(145deg, rgba(255,255,255,0.92), ${homeColorWithAlpha(accent, 0.15)})`
+      : "rgba(255, 255, 255, 0.54)",
+    color: active ? accent : "#334155",
     font: "inherit",
     fontSize: 12,
-    fontWeight: active ? 800 : 650,
+    fontWeight: active ? 850 : 720,
     cursor: "pointer",
+    boxShadow: active ? `5px 5px 12px ${homeColorWithAlpha(accent, 0.10)}, -4px -4px 10px rgba(255,255,255,0.86), inset 1px 1px 0 rgba(255, 255, 255, 0.78)` : "none",
   };
 }
 
@@ -2209,58 +2348,86 @@ const collapseButtonStyle: React.CSSProperties = {
   height: 28,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(15, 23, 42, 0.18)",
+  border: "1px solid rgba(37, 99, 235, 0.20)",
   borderRadius: 6,
-  background: "#ffffff",
-  color: "#334155",
+  background: "linear-gradient(135deg, rgba(255,255,255,0.94), rgba(219,234,254,0.72))",
+  color: "#1d4ed8",
   cursor: "pointer",
 };
 
 const scopeLabelStyle: React.CSSProperties = {
-  minWidth: 0,
+  width: "fit-content",
+  maxWidth: "100%",
+  minHeight: 22,
+  display: "inline-flex",
+  alignItems: "center",
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  color: "#475569",
+  border: "1px solid rgba(15, 118, 110, 0.18)",
+  borderRadius: 999,
+  background: "rgba(255, 255, 255, 0.72)",
+  color: "#0f766e",
   fontSize: 11,
-  fontWeight: 800,
+  fontWeight: 820,
+  padding: "0 8px",
 };
 
 const scopePickerStyle: React.CSSProperties = {
   position: "absolute",
-  zIndex: 20,
-  top: 43,
-  right: 8,
-  width: "min(360px, 80vw)",
-  maxHeight: 320,
+  zIndex: 60,
+  top: "calc(100% + 4px)",
+  left: 0,
+  width: "min(352px, calc(100vw - 96px))",
+  maxHeight: "min(390px, calc(100vh - 180px))",
   overflow: "auto",
   display: "grid",
-  gap: 1,
-  padding: 6,
-  border: "1px solid rgba(15, 23, 42, 0.18)",
-  borderRadius: 6,
-  background: "#ffffff",
-  boxShadow: "0 18px 46px rgba(15, 23, 42, 0.18)",
+  gap: 4,
+  padding: 8,
+  border: "1px solid rgba(37, 99, 235, 0.16)",
+  borderRadius: 14,
+  background: "linear-gradient(145deg, rgba(248, 252, 255, 0.98), rgba(236, 244, 250, 0.94))",
+  boxShadow: "12px 12px 28px rgba(148, 163, 184, 0.24), -8px -8px 22px rgba(255, 255, 255, 0.86), inset 1px 1px 0 rgba(255, 255, 255, 0.88)",
+  backdropFilter: "blur(18px) saturate(1.16)",
 };
 
 function scopePickerRowStyle(depth: number, active: boolean): React.CSSProperties {
   return {
     width: "100%",
-    minHeight: 28,
+    minHeight: 34,
     display: "grid",
-    gridTemplateColumns: "16px minmax(0, 1fr)",
+    gridTemplateColumns: "18px 16px minmax(0, 1fr)",
     alignItems: "center",
-    gap: 6,
-    border: "1px solid transparent",
-    borderRadius: 5,
-    background: active ? "rgba(71, 85, 105, 0.12)" : "transparent",
+    gap: 7,
+    border: active ? "1px solid rgba(37, 99, 235, 0.22)" : "1px solid rgba(255, 255, 255, 0.58)",
+    borderRadius: 9,
+    background: active ? "linear-gradient(145deg, rgba(255,255,255,0.94), rgba(219,234,254,0.64))" : "rgba(255, 255, 255, 0.44)",
     color: "#111827",
     font: "inherit",
     textAlign: "left",
     cursor: "pointer",
-    padding: `3px 7px 3px ${7 + depth * 14}px`,
+    boxShadow: active ? "5px 5px 14px rgba(148, 163, 184, 0.18), -4px -4px 12px rgba(255, 255, 255, 0.72)" : "inset 1px 1px 0 rgba(255, 255, 255, 0.66)",
+    padding: `4px 8px 4px ${8 + depth * 14}px`,
   };
 }
+
+const scopePickerDisclosureStyle: React.CSSProperties = {
+  width: 18,
+  height: 24,
+  display: "grid",
+  placeItems: "center",
+  border: "none",
+  borderRadius: 6,
+  background: "transparent",
+  color: "#2563eb",
+  cursor: "pointer",
+  padding: 0,
+};
+
+const scopePickerDisclosureSpacerStyle: React.CSSProperties = {
+  width: 18,
+  height: 24,
+};
 
 const scopePickerTextStyle: React.CSSProperties = {
   minWidth: 0,
@@ -2295,10 +2462,25 @@ const scopePickerEmptyStyle: React.CSSProperties = {
 };
 
 const groupingBodyStyle: React.CSSProperties = {
+  position: "absolute",
+  zIndex: 70,
+  top: "calc(100% + 8px)",
+  right: 0,
+  width: "min(522px, calc(100vw - 96px))",
+  maxHeight: "min(520px, calc(100vh - 190px))",
+  overflow: "visible",
   display: "grid",
-  gridTemplateColumns: "112px minmax(0, 1fr)",
-  gap: 8,
+  gridTemplateColumns: "116px minmax(0, 360px)",
+  alignItems: "start",
+  justifyContent: "start",
+  gap: 10,
   minWidth: 0,
+  border: "1px solid rgba(37, 99, 235, 0.14)",
+  borderRadius: 14,
+  background: "linear-gradient(145deg, rgba(248, 252, 255, 0.97), rgba(240, 247, 250, 0.92) 48%, rgba(236, 253, 245, 0.86))",
+  boxShadow: "12px 12px 28px rgba(148, 163, 184, 0.22), -8px -8px 22px rgba(255, 255, 255, 0.84), inset 1px 1px 0 rgba(255, 255, 255, 0.88)",
+  backdropFilter: "blur(18px) saturate(1.14)",
+  padding: 10,
 };
 
 const savedViewsStyle: React.CSSProperties = {
@@ -2306,8 +2488,10 @@ const savedViewsStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateRows: "minmax(0, 1fr) auto",
   gap: 6,
-  borderRight: "1px solid rgba(15, 23, 42, 0.12)",
-  paddingRight: 7,
+  border: "1px solid rgba(15, 118, 110, 0.12)",
+  borderRadius: 7,
+  background: "rgba(255, 255, 255, 0.50)",
+  padding: 6,
 };
 
 const savedViewsListStyle: React.CSSProperties = {
@@ -2323,8 +2507,9 @@ function savedViewRowStyle(active: boolean): React.CSSProperties {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) 18px",
     alignItems: "center",
-    borderRadius: 5,
-    background: active ? "rgba(71, 85, 105, 0.12)" : "transparent",
+    border: active ? "1px solid rgba(15, 118, 110, 0.20)" : "1px solid transparent",
+    borderRadius: 6,
+    background: active ? "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(204,251,241,0.48))" : "transparent",
   };
 }
 
@@ -2360,21 +2545,24 @@ const savedViewDeleteStyle: React.CSSProperties = {
 
 const newViewButtonStyle: React.CSSProperties = {
   minHeight: 26,
-  border: "1px solid rgba(15, 23, 42, 0.16)",
-  borderRadius: 5,
-  background: "#ffffff",
-  color: "#334155",
+  border: "1px solid rgba(15, 118, 110, 0.18)",
+  borderRadius: 6,
+  background: "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(204,251,241,0.48))",
+  color: "#0f766e",
   font: "inherit",
   fontSize: 11,
-  fontWeight: 800,
+  fontWeight: 820,
   cursor: "pointer",
 };
 
 const groupingStackStyle: React.CSSProperties = {
+  width: "min(360px, 100%)",
+  maxWidth: 360,
   minWidth: 0,
   display: "grid",
+  justifySelf: "start",
   alignContent: "start",
-  gap: 5,
+  gap: 6,
 };
 
 const projectGroupToggleStyle: React.CSSProperties = {
@@ -2383,13 +2571,14 @@ const projectGroupToggleStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   gap: 7,
-  border: "1px solid rgba(15, 23, 42, 0.16)",
-  borderRadius: 5,
-  background: "rgba(248, 250, 252, 0.96)",
-  color: "#334155",
+  border: "1px solid rgba(124, 58, 237, 0.18)",
+  borderRadius: 6,
+  background: "linear-gradient(135deg, rgba(255,255,255,0.90), rgba(237,233,254,0.58))",
+  color: "#5b21b6",
   fontSize: 11,
-  fontWeight: 800,
+  fontWeight: 820,
   padding: "0 8px",
+  cursor: "pointer",
 };
 
 const projectGroupCheckboxStyle: React.CSSProperties = {
@@ -2407,18 +2596,21 @@ const projectGroupToggleTextStyle: React.CSSProperties = {
 };
 
 function groupingRowStyle(index: number): React.CSSProperties {
+  const accent = myWorkGroupingAccent(index);
   return {
     position: "relative",
+    width: "min(100%, 346px)",
     minWidth: 0,
     minHeight: 30,
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) 46px 22px",
     alignItems: "center",
     gap: 5,
-    marginLeft: index * 16,
-    border: "1px solid rgba(15, 23, 42, 0.16)",
-    borderRadius: 5,
-    background: "#f8fafc",
+    marginLeft: Math.min(index * 14, 28),
+    border: `1px solid ${homeColorWithAlpha(accent, 0.18)}`,
+    borderRadius: 7,
+    background: `linear-gradient(145deg, rgba(255,255,255,0.92), ${homeColorWithAlpha(accent, 0.12)})`,
+    boxShadow: "4px 4px 12px rgba(148, 163, 184, 0.13), -3px -3px 10px rgba(255, 255, 255, 0.72), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
     padding: "0 5px 0 8px",
   };
 }
@@ -2443,13 +2635,13 @@ const groupingFieldButtonStyle: React.CSSProperties = {
 
 const groupingDirectionButtonStyle: React.CSSProperties = {
   height: 22,
-  border: "1px solid rgba(15, 23, 42, 0.16)",
+  border: "1px solid rgba(37, 99, 235, 0.16)",
   borderRadius: 5,
-  background: "#ffffff",
-  color: "#334155",
+  background: "rgba(255, 255, 255, 0.78)",
+  color: "#1d4ed8",
   font: "inherit",
   fontSize: 10,
-  fontWeight: 800,
+  fontWeight: 820,
   cursor: "pointer",
 };
 
@@ -2466,13 +2658,13 @@ const groupingRemoveButtonStyle: React.CSSProperties = {
 
 const addGroupingButtonStyle: React.CSSProperties = {
   minHeight: 28,
-  border: "1px dashed rgba(15, 23, 42, 0.24)",
-  borderRadius: 5,
-  background: "#ffffff",
-  color: "#334155",
+  border: "1px dashed rgba(14, 165, 233, 0.38)",
+  borderRadius: 6,
+  background: "linear-gradient(135deg, rgba(255,255,255,0.90), rgba(224,242,254,0.56))",
+  color: "#0369a1",
   font: "inherit",
   fontSize: 11,
-  fontWeight: 800,
+  fontWeight: 820,
   cursor: "pointer",
   padding: "0 8px",
 };
