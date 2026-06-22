@@ -357,9 +357,13 @@ func mergeRecyclePayloads(payloads [][]byte) (map[string]json.RawMessage, error)
 }
 
 func postgresSnapshotRecyclePayloadTx(ctx context.Context, tx *sql.Tx, companyID string, scope companyExplorerRecycleScope) (json.RawMessage, error) {
+	return postgresSnapshotRecyclePayloadWithCacheTx(ctx, tx, nil, companyID, scope)
+}
+
+func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, cache *recycleSnapshotCache, companyID string, scope companyExplorerRecycleScope) (json.RawMessage, error) {
 	payload := map[string]json.RawMessage{}
 	addTable := func(tableName, whereClause string, args ...any) error {
-		rows, err := postgresSnapshotRowsTx(ctx, tx, tableName, whereClause, args...)
+		rows, err := postgresSnapshotRowsWithCacheTx(ctx, tx, cache, tableName, whereClause, args...)
 		if err != nil {
 			return err
 		}
@@ -519,32 +523,45 @@ func postgresSnapshotRecyclePayloadTx(ctx context.Context, tx *sql.Tx, companyID
 }
 
 func postgresSnapshotRowsTx(ctx context.Context, tx *sql.Tx, tableName, whereClause string, args ...any) (json.RawMessage, error) {
+	return postgresSnapshotRowsWithCacheTx(ctx, tx, nil, tableName, whereClause, args...)
+}
+
+func postgresSnapshotRowsWithCacheTx(ctx context.Context, tx *sql.Tx, cache *recycleSnapshotCache, tableName, whereClause string, args ...any) (json.RawMessage, error) {
 	if !recycleSnapshotTables[tableName] {
 		return nil, ErrInvalid
 	}
-	exists, err := postgresTableExistsTx(ctx, tx, tableName)
+	exists, err := postgresRecycleSnapshotTableExistsTx(ctx, tx, cache, tableName)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
 		return json.RawMessage("[]"), nil
 	}
+	shapeKey := recycleSnapshotShapeKey(tableName, whereClause)
+	if cache != nil {
+		if cache.shapeBad[shapeKey] {
+			return json.RawMessage("[]"), nil
+		}
+		if cache.shapeOK[shapeKey] {
+			rows, err := postgresSnapshotRowsQueryTx(ctx, tx, tableName, whereClause, args...)
+			if err != nil {
+				return nil, fmt.Errorf("snapshot recycle table %s: %w", tableName, err)
+			}
+			return rows, nil
+		}
+	}
 	const savepoint = "mangorts_recycle_snapshot"
 	if _, err := tx.ExecContext(ctx, `savepoint `+savepoint); err != nil {
 		return nil, fmt.Errorf("create recycle snapshot savepoint: %w", err)
 	}
-	query := fmt.Sprintf(`
-select coalesce(jsonb_agg(to_jsonb(row_data)), '[]'::jsonb)
-from (
-  select *
-  from %s
-  where %s
-) row_data`, tableName, whereClause)
-	var raw []byte
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&raw); err != nil {
+	raw, err := postgresSnapshotRowsQueryTx(ctx, tx, tableName, whereClause, args...)
+	if err != nil {
 		if isRecycleSnapshotShapeError(err) {
 			if rollbackErr := rollbackAndReleaseRecycleSnapshotSavepointTx(ctx, tx, savepoint); rollbackErr != nil {
 				return nil, rollbackErr
+			}
+			if cache != nil {
+				cache.shapeBad[shapeKey] = true
 			}
 			return json.RawMessage("[]"), nil
 		}
@@ -554,7 +571,58 @@ from (
 	if _, err := tx.ExecContext(ctx, `release savepoint `+savepoint); err != nil {
 		return nil, fmt.Errorf("release recycle snapshot savepoint: %w", err)
 	}
+	if cache != nil {
+		cache.shapeOK[shapeKey] = true
+	}
 	return raw, nil
+}
+
+func postgresSnapshotRowsQueryTx(ctx context.Context, tx *sql.Tx, tableName, whereClause string, args ...any) (json.RawMessage, error) {
+	query := fmt.Sprintf(`
+select coalesce(jsonb_agg(to_jsonb(row_data)), '[]'::jsonb)
+from (
+  select *
+  from %s
+  where %s
+) row_data`, tableName, whereClause)
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+type recycleSnapshotCache struct {
+	tableExists map[string]bool
+	shapeOK     map[string]bool
+	shapeBad    map[string]bool
+}
+
+func newRecycleSnapshotCache() *recycleSnapshotCache {
+	return &recycleSnapshotCache{
+		tableExists: map[string]bool{},
+		shapeOK:     map[string]bool{},
+		shapeBad:    map[string]bool{},
+	}
+}
+
+func postgresRecycleSnapshotTableExistsTx(ctx context.Context, tx *sql.Tx, cache *recycleSnapshotCache, tableName string) (bool, error) {
+	if cache == nil {
+		return postgresTableExistsTx(ctx, tx, tableName)
+	}
+	if exists, ok := cache.tableExists[tableName]; ok {
+		return exists, nil
+	}
+	exists, err := postgresTableExistsTx(ctx, tx, tableName)
+	if err != nil {
+		return false, err
+	}
+	cache.tableExists[tableName] = exists
+	return exists, nil
+}
+
+func recycleSnapshotShapeKey(tableName, whereClause string) string {
+	return tableName + "\x00" + whereClause
 }
 
 func isRecycleSnapshotShapeError(err error) bool {
@@ -716,6 +784,7 @@ func postgresCreateRecycleBinItemsTx(ctx context.Context, tx *sql.Tx, companyID 
 	} else if !exists {
 		return nil
 	}
+	snapshotCache := newRecycleSnapshotCache()
 	seen := map[string]bool{}
 	for _, root := range roots {
 		if !root.Scope.hasAnyRows() {
@@ -726,7 +795,7 @@ func postgresCreateRecycleBinItemsTx(ctx context.Context, tx *sql.Tx, companyID 
 			continue
 		}
 		seen[key] = true
-		payload, err := postgresSnapshotRecyclePayloadTx(ctx, tx, companyID, root.Scope)
+		payload, err := postgresSnapshotRecyclePayloadWithCacheTx(ctx, tx, snapshotCache, companyID, root.Scope)
 		if err != nil {
 			return err
 		}

@@ -15,7 +15,7 @@ import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntit
 import { type SelectionIntent } from "../selectionCoordinator";
 import { companyExplorerRealtimeScope, subscribeWorkspaceUserRealtime, type WorkspaceStreamGapSignal } from "../workspace/workspaceRealtime";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand, type WorkspaceEntityBatchCreatorLogicGateGVICRole } from "../workspace/workspaceEntityCommands";
-import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
+import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItemTypes, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerDeleteBlockedDialog, CompanyExplorerDeleteConfirmationDialog } from "./CompanyExplorerDialogs";
 import { CompanyExplorerTree } from "./CompanyExplorerTree";
@@ -2592,36 +2592,60 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (normalizedAssignments.length === 0) return true;
     setError("");
     try {
-      if (companyExplorerV2Active) {
-        const updatedRows: CompanyExplorerV2Row[] = [];
-        for (const assignment of normalizedAssignments) {
+      const placeRows = async (): Promise<CompanyExplorerV2Row[]> => {
+        if (normalizedAssignments.length > 1) {
+          const response = await requestJSON<{ rows?: CompanyExplorerV2Row[] }>("/v1/company-explorer/items", {
+            method: "POST",
+            body: JSON.stringify({
+              company_id: companyID,
+              items: normalizedAssignments.map((assignment) => {
+                const existing = companyExplorerV2Rows.find((row) => (
+                  row.entity_type === assignment.item_type
+                  && (row.resource_id || row.entity_id) === assignment.item_id
+                  && row.edge_id
+                ));
+                return {
+                  edge_id: existing?.edge_id,
+                  parent_entity_id: assignment.folder_id,
+                  target_type: assignment.item_type,
+                  target_id: assignment.item_id,
+                  position: assignment.position,
+                };
+              }),
+            }),
+          });
+          return response.rows ?? [];
+        }
+        return Promise.all(normalizedAssignments.map((assignment) => {
           const existing = companyExplorerV2Rows.find((row) => (
             row.entity_type === assignment.item_type
             && (row.resource_id || row.entity_id) === assignment.item_id
             && row.edge_id
           ));
           if (existing?.edge_id) {
-            updatedRows.push(await requestJSON<CompanyExplorerV2Row>(`/v1/company-explorer/items/${existing.edge_id}`, {
+            return requestJSON<CompanyExplorerV2Row>(`/v1/company-explorer/items/${existing.edge_id}`, {
               method: "PUT",
               body: JSON.stringify({
                 company_id: companyID,
                 parent_entity_id: assignment.folder_id,
                 position: assignment.position,
               }),
-            }));
-          } else {
-            updatedRows.push(await requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
-              method: "POST",
-              body: JSON.stringify({
-                company_id: companyID,
-                parent_entity_id: assignment.folder_id,
-                target_type: assignment.item_type,
-                target_id: assignment.item_id,
-                position: assignment.position,
-              }),
-            }));
+            });
           }
-        }
+          return requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
+            method: "POST",
+            body: JSON.stringify({
+              company_id: companyID,
+              parent_entity_id: assignment.folder_id,
+              target_type: assignment.item_type,
+              target_id: assignment.item_id,
+              position: assignment.position,
+            }),
+          });
+        }));
+      };
+      if (companyExplorerV2Active) {
+        const updatedRows = await placeRows();
         if (updatedRows.length > 0) dispatchExplorerStore({ type: "upsertV2Rows", rows: updatedRows });
         if (options.expandTarget) {
           setExpanded((previous) => {
@@ -2634,16 +2658,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         }
         return true;
       }
-      const rows = await Promise.all(normalizedAssignments.map((assignment) => requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
-        method: "POST",
-        body: JSON.stringify({
-          company_id: companyID,
-          parent_entity_id: assignment.folder_id,
-          target_type: assignment.item_type,
-          target_id: assignment.item_id,
-          position: assignment.position,
-        }),
-      })));
+      const rows = await placeRows();
       const items = rows.map((row) => ({
         company_id: row.company_id,
         folder_id: row.parent_entity_id ?? "",
@@ -3446,14 +3461,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [baseTreeRows]);
 
   const canPlaceExplorerItemsAtTarget = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
-    const itemType = getExplorerDropPayloadItemType(payload);
     if (isProtectedGVICRoleRow(target)) return false;
-    if (itemType === "kanban") return false;
-    if (scopedAllowedItemType && itemType !== scopedAllowedItemType) return false;
+    const itemTypes = getExplorerDropPayloadItemTypes(payload);
+    if (itemTypes.size === 0 || itemTypes.has("kanban")) return false;
+    if (scopedAllowedItemType && (itemTypes.size !== 1 || !itemTypes.has(scopedAllowedItemType))) return false;
     const targetKind = getExplorerRowOrderKind(target);
-    if (isGVICScopedRow(target) && itemType !== targetKind) return false;
-    const targetAcceptsItem = Boolean(itemType && targetKind);
-    if (!itemType || !targetAcceptsItem) return false;
+    if (isGVICScopedRow(target) && (itemTypes.size !== 1 || !itemTypes.has(targetKind as CompanyExplorerItemType))) return false;
+    if (!targetKind) return false;
     const itemRows = getExplorerItemRowsForPayload(payload);
     if (itemRows.length === 0 || itemRows.some((row) => row.id === target.id)) return false;
     const targetContainer = getExplorerRowContainerID(target);
@@ -3630,10 +3644,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [assignItemsToFolders, baseTreeRows, canPlaceExplorerFolderAtTarget, moveFolder]);
 
   const placeExplorerItemsAtTarget = useCallback(async (payload: ExplorerDragPayload | null, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
-    const itemType = getExplorerDropPayloadItemType(payload);
-    if (itemType === "kanban") return false;
+    const items = getExplorerDropPayloadItems(payload);
+    if (items.length === 0 || items.some((item) => item.itemType === "kanban")) return false;
     const targetContainer = getExplorerRowContainerID(target);
-    if (!itemType || targetContainer == null || !canPlaceExplorerItemsAtTarget(payload, target)) return false;
+    if (targetContainer == null || !canPlaceExplorerItemsAtTarget(payload, target)) return false;
 
     const itemRows = getExplorerItemRowsForPayload(payload);
     const targetRows = baseTreeRows.filter((row) => {
@@ -3681,10 +3695,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     return true;
   }, [assignItemsToFolders, baseTreeRows, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, moveFolder]);
 
-  const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => {
-    if (itemType === "kanban") return;
-    if (scopedAllowedItemType && itemType !== scopedAllowedItemType) return;
-    const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemType === itemType);
+  const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, payload: ExplorerDragPayload) => {
+    const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemID.trim() && item.itemType !== "kanban");
+    if (scopedAllowedItemType && items.some((item) => item.itemType !== scopedAllowedItemType)) return;
     if (!targetFolderID || items.length === 0) return;
     const existingRows = baseTreeRows.filter((row) => {
       if (getExplorerRowContainerID(row) !== targetFolderID) return false;
@@ -3695,7 +3708,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const assignments: CompanyExplorerFolderItemAssignment[] = [];
     for (const item of items) {
       position += TREE_ROW_POSITION_STEP;
-      assignments.push({ folder_id: targetFolderID, item_type: itemType, item_id: item.itemID, position });
+      assignments.push({ folder_id: targetFolderID, item_type: item.itemType, item_id: item.itemID, position });
     }
     await assignItemsToFolders(assignments, { expandTarget: true });
   }, [assignItemsToFolders, baseTreeRows, scopedAllowedItemType]);

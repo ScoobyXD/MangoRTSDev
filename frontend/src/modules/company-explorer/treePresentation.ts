@@ -157,6 +157,10 @@ export function getExplorerDropPayloadItemType(payload?: ExplorerDropPayload | n
   return items.every((item) => item.itemType === itemType) ? itemType : null;
 }
 
+export function getExplorerDropPayloadItemTypes(payload?: ExplorerDropPayload | null): Set<CompanyExplorerItemType> {
+  return new Set(getExplorerDropPayloadItems(payload).map((item) => item.itemType));
+}
+
 export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | null, payload?: ExplorerDropPayload | null): ExplorerDropTarget | null {
   if (!row || !payload || !row.folderID) return null;
   if (row.syntheticKind === "default_scope_folder") return null;
@@ -173,10 +177,12 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
     return { folderID: row.folderID, folderKind, treeID: row.id ?? `workspace-folder-${row.folderID}` };
   }
 
-  const itemType = getExplorerDropPayloadItemType(payload);
-  if (!itemType || itemType === "kanban") return null;
-  if (!genericV2Container && itemType !== row.folderKind) return null;
-  return { folderID: row.folderID, folderKind: row.folderKind ?? itemType, treeID: row.id ?? `workspace-folder-${row.folderID}` };
+  const items = getExplorerDropPayloadItems(payload).filter((item): item is ExplorerDropPayloadItem & { itemType: CompanyExplorerFolderKind } => (
+    Boolean(item.itemID.trim()) && item.itemType !== "kanban"
+  ));
+  if (items.length === 0) return null;
+  if (!genericV2Container && items.some((item) => item.itemType !== row.folderKind)) return null;
+  return { folderID: row.folderID, folderKind: row.folderKind ?? items[0].itemType, treeID: row.id ?? `workspace-folder-${row.folderID}` };
 }
 
 export function sortExplorerOrderRows<T extends ExplorerOrderRow>(rows: T[]): T[] {

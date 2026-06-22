@@ -1098,6 +1098,90 @@ func TestCompanyExplorerItemPlacementDoesNotBreakNativeRelationships(t *testing.
 	}
 }
 
+func TestCompanyExplorerBatchItemPlacementSupportsMixedResourceTypes(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "11111111-1111-4111-8111-330000000001"
+	repo.EnsureCompany(companyID, "Batch Placement")
+
+	folder, err := repo.CreateCompanyExplorerV2Folder(store.CompanyExplorerV2FolderInput{
+		CompanyID:      companyID,
+		ParentEntityID: companyID,
+		Name:           "Mixed resources",
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Batch Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Batch Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	projectResult, err := repo.CreateProject(store.ProjectInput{CompanyID: companyID, Name: "Batch Project"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if projectResult.Project == nil {
+		t.Fatalf("CreateProject returned nil project")
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"items": []map[string]any{
+			{"parent_entity_id": folder.EntityID, "target_type": "node", "target_id": node.NodeID, "position": 1000},
+			{"parent_entity_id": folder.EntityID, "target_type": "logic_gate", "target_id": logicGate.LogicGateID, "position": 2000},
+			{"parent_entity_id": folder.EntityID, "target_type": "project", "target_id": projectResult.Project.ProjectID, "position": 3000},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Marshal batch placement request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/items", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST batch company explorer items status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var response struct {
+		Rows []store.CompanyExplorerV2Row `json:"rows"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("Decode batch placement response: %v", err)
+	}
+	if len(response.Rows) != 3 {
+		t.Fatalf("batch placement rows = %d, want 3: %+v", len(response.Rows), response.Rows)
+	}
+
+	children, err := repo.ListCompanyExplorerV2ChildRows(store.CompanyExplorerV2RowsQuery{
+		CompanyID:      companyID,
+		View:           store.CompanyExplorerLazyScopeAll,
+		ParentEntityID: folder.EntityID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, row := range children.Rows {
+		seen[row.EntityType+":"+row.ResourceID] = true
+	}
+	for _, want := range []string{
+		"node:" + node.NodeID,
+		"logic_gate:" + logicGate.LogicGateID,
+		"project:" + projectResult.Project.ProjectID,
+	} {
+		if !seen[want] {
+			t.Fatalf("batch placement children missing %q: %+v", want, children.Rows)
+		}
+	}
+}
+
 func TestCompanyExplorerLazyRootsReturnOnlyRootRows(t *testing.T) {
 	t.Parallel()
 
