@@ -1,5 +1,4 @@
 import type React from "react";
-import type { CompanyExplorerItemType } from "../folders/companyExplorerFolders";
 import type { ExplorerEntityDragItem } from "../kanban/shared";
 import { CompanyExplorerTreeRow } from "./CompanyExplorerTreeRow";
 import type {
@@ -72,7 +71,7 @@ type CompanyExplorerTreeProps = {
   placeExplorerFolderAtTarget: (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => Promise<boolean>;
   placeExplorerItemsAtTarget: (payload: ExplorerDragPayload | null, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => Promise<boolean>;
   moveFolder: (folderID: string, parentFolderID: string | undefined, options?: { position?: number; expandTarget?: boolean; parentProvided?: boolean; targetExpanded?: boolean }) => Promise<void>;
-  assignExplorerPayloadItemsToFolder: (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => Promise<void>;
+  assignExplorerPayloadItemsToFolder: (targetFolderID: string, payload: ExplorerDragPayload) => Promise<void>;
 };
 
 function findScrollableAncestor(element: HTMLElement): HTMLElement {

@@ -346,12 +346,84 @@ func (s *Server) handleCompanyExplorerItems(w http.ResponseWriter, r *http.Reque
 		TargetType     string `json:"target_type"`
 		TargetID       string `json:"target_id"`
 		Position       int    `json:"position"`
+		Items          []struct {
+			EdgeID         string `json:"edge_id"`
+			ParentEntityID string `json:"parent_entity_id"`
+			ParentFolderID string `json:"parent_folder_id"`
+			TargetType     string `json:"target_type"`
+			TargetID       string `json:"target_id"`
+			Position       int    `json:"position"`
+		} `json:"items"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
 	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	actor, _ := authenticatedActor(r)
+	actorUserID := strings.TrimSpace(actor.User.UserID)
+	permissionUserID := s.entityPermissionActorUserID(r, req.CompanyID)
+	if len(req.Items) > 0 {
+		if req.CompanyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		rows := make([]store.CompanyExplorerV2Row, 0, len(req.Items))
+		for _, item := range req.Items {
+			parentEntityID := strings.TrimSpace(item.ParentEntityID)
+			if parentEntityID == "" {
+				parentEntityID = strings.TrimSpace(item.ParentFolderID)
+			}
+			if parentEntityID == "" {
+				parentEntityID = strings.TrimSpace(req.ParentEntityID)
+			}
+			if parentEntityID == "" {
+				parentEntityID = strings.TrimSpace(req.ParentFolderID)
+			}
+			if parentEntityID == "" {
+				parentEntityID = req.CompanyID
+			}
+			edgeID := strings.TrimSpace(item.EdgeID)
+			var row store.CompanyExplorerV2Row
+			var err error
+			if edgeID != "" {
+				row, err = s.repo.MoveCompanyExplorerV2Edge(store.CompanyExplorerV2MoveEdgeInput{
+					CompanyID:        req.CompanyID,
+					EdgeID:           edgeID,
+					ParentEntityID:   parentEntityID,
+					Position:         item.Position,
+					ActorUserID:      actorUserID,
+					PermissionUserID: permissionUserID,
+				})
+			} else {
+				row, err = s.repo.UpsertCompanyExplorerV2Edge(store.CompanyExplorerV2EdgeInput{
+					CompanyID:        req.CompanyID,
+					ParentEntityID:   parentEntityID,
+					ChildEntityType:  item.TargetType,
+					ChildResourceID:  item.TargetID,
+					Position:         item.Position,
+					ActorUserID:      actorUserID,
+					PermissionUserID: permissionUserID,
+				})
+			}
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "invalid_company_explorer_item")
+				return
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				writeAccessResourceNotFound(w)
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_place_company_explorer_item")
+				return
+			}
+			rows = append(rows, row)
+			s.publishWorkspaceEvent(req.CompanyID, "company_explorer_item_placed", map[string]any{"item_id": row.EdgeID, "parent_entity_id": row.ParentEntityID, "target_type": row.EntityType, "target_id": row.ResourceID, "entity": row})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"rows": rows})
+		return
+	}
 	parentEntityID := strings.TrimSpace(req.ParentEntityID)
 	if parentEntityID == "" {
 		parentEntityID = strings.TrimSpace(req.ParentFolderID)
@@ -363,15 +435,14 @@ func (s *Server) handleCompanyExplorerItems(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "company_id_and_parent_required")
 		return
 	}
-	actor, _ := authenticatedActor(r)
 	row, err := s.repo.UpsertCompanyExplorerV2Edge(store.CompanyExplorerV2EdgeInput{
 		CompanyID:        req.CompanyID,
 		ParentEntityID:   parentEntityID,
 		ChildEntityType:  req.TargetType,
 		ChildResourceID:  req.TargetID,
 		Position:         req.Position,
-		ActorUserID:      strings.TrimSpace(actor.User.UserID),
-		PermissionUserID: s.entityPermissionActorUserID(r, req.CompanyID),
+		ActorUserID:      actorUserID,
+		PermissionUserID: permissionUserID,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_company_explorer_item")

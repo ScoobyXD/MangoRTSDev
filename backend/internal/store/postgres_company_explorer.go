@@ -1005,21 +1005,27 @@ where company_id=$1::uuid
   and resource_id=$2::uuid`, companyID, nodeID); err != nil {
 		return nil, err
 	}
-	if err := postgresDeleteNodeTx(ctx, tx, companyID, nodeID); err != nil {
+	if err := postgresDeleteNodeRowsTx(ctx, tx, companyID, nodeID, false); err != nil {
 		return nil, err
 	}
 	return deltas, nil
 }
 
 func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	return postgresDeleteNodeRowsTx(ctx, tx, companyID, nodeID, true)
+}
+
+func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string, deleteProjectionRows bool) error {
 	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
 		return err
 	}
-	if err := deletePostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-		return err
-	}
-	if err := deleteProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-		return err
+	if deleteProjectionRows {
+		if err := deletePostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return err
+		}
+		if err := deleteProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx,
 		`delete from project_management_timeline_items
@@ -1042,12 +1048,14 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 	); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from kanban_board_projection
-		 where company_id=$1 and node_id=$2`,
-		companyID, nodeID,
-	); err != nil {
-		return err
+	if deleteProjectionRows {
+		if _, err := tx.ExecContext(ctx,
+			`delete from kanban_board_projection
+			 where company_id=$1 and node_id=$2`,
+			companyID, nodeID,
+		); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx,
 		`delete from node_information
@@ -1122,7 +1130,7 @@ where company_id=$1::uuid
   and resource_id=$2::uuid`, companyID, logicGateID); err != nil {
 		return nil, err
 	}
-	if err := postgresDeleteLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+	if err := postgresDeleteLogicGateRowsTx(ctx, tx, companyID, logicGateID, false); err != nil {
 		return nil, err
 	}
 	for _, nodeID := range affectedNodeIDs {
@@ -1139,14 +1147,20 @@ where company_id=$1::uuid
 }
 
 func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
+	return postgresDeleteLogicGateRowsTx(ctx, tx, companyID, logicGateID, true)
+}
+
+func postgresDeleteLogicGateRowsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, deleteProjectionRows bool) error {
 	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
 		return err
 	}
-	if err := deletePostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-		return err
-	}
-	if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-		return err
+	if deleteProjectionRows {
+		if err := deletePostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+			return err
+		}
+		if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx,
 		`delete from project_management_timeline_items
@@ -1172,8 +1186,10 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 	); err != nil {
 		return err
 	}
-	if err := deleteKanbanBoardProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-		return err
+	if deleteProjectionRows {
+		if err := deleteKanbanBoardProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx,
 		`delete from logic_gate_information

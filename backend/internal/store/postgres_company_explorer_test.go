@@ -248,16 +248,28 @@ func TestPostgresRecycleSnapshotSkipsOptionalShapeDriftWithSavepoint(t *testing.
 		t.Fatalf("ReadFile postgres_recycle_bin.go: %v", err)
 	}
 	source := string(raw)
-	snapshotRows := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func postgresSnapshotRowsTx")), " "))
+	snapshotRows := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func postgresSnapshotRowsWithCacheTx")), " "))
 	for _, want := range []string{
 		`const savepoint = "mangorts_recycle_snapshot"`,
 		"`savepoint `+savepoint",
+		"cache.shapeok",
+		"cache.shapebad",
+		"postgresrecyclesnapshottableexiststx",
 		"isrecyclesnapshotshapeerror(err)",
 		"rollbackandreleaserecyclesnapshotsavepointtx",
 		`return json.rawmessage("[]"), nil`,
 	} {
 		if !strings.Contains(snapshotRows, want) {
-			t.Fatalf("postgresSnapshotRowsTx missing %q", want)
+			t.Fatalf("postgresSnapshotRowsWithCacheTx missing %q", want)
+		}
+	}
+	createItems := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func postgresCreateRecycleBinItemsTx")), " "))
+	for _, want := range []string{
+		"snapshotcache := newrecyclesnapshotcache()",
+		"postgressnapshotrecyclepayloadwithcachetx",
+	} {
+		if !strings.Contains(createItems, want) {
+			t.Fatalf("postgresCreateRecycleBinItemsTx missing %q", want)
 		}
 	}
 	shapeError := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func isRecycleSnapshotShapeError")), " "))

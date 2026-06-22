@@ -49,6 +49,7 @@ export function getExplorerDragPayloadForSelection(row: ExplorerTreeNode, select
   const basePayload = getExplorerDragPayload(row);
   const baseItem = getExplorerItemPayload(row);
   if (!basePayload || !baseItem) return basePayload;
+  if (baseItem.itemType === "kanban") return basePayload;
 
   const dragIDs = selectedIDs.has(row.id) ? selectedIDs : new Set([row.id]);
   const items: { itemID: string; itemType: CompanyExplorerItemType; treeID?: string }[] = [];
@@ -56,11 +57,14 @@ export function getExplorerDragPayloadForSelection(row: ExplorerTreeNode, select
   for (const candidate of rows) {
     if (!dragIDs.has(candidate.id)) continue;
     const item = getExplorerItemPayload(candidate);
-    if (!item || item.itemType !== baseItem.itemType || seen.has(item.itemID)) continue;
-    seen.add(item.itemID);
+    const key = item ? `${item.itemType}:${item.itemID}` : "";
+    if (!item || item.itemType === "kanban" || seen.has(key)) continue;
+    seen.add(key);
     items.push({ ...item, treeID: candidate.id });
   }
-  return items.length > 1 ? { kind: "batch", itemType: baseItem.itemType, items } : basePayload;
+  if (items.length <= 1) return basePayload;
+  const itemType = items.every((item) => item.itemType === items[0].itemType) ? items[0].itemType : undefined;
+  return { kind: "batch", itemType, items };
 }
 
 export function readExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDragPayload | null {
@@ -76,7 +80,7 @@ export function readExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDra
     if (parsed.kind === "batch") {
       const itemType = getExplorerDropPayloadItemType(parsed);
       const items = getExplorerDropPayloadItems(parsed);
-      if (itemType && items.length > 0) return { kind: "batch", itemType, items };
+      if (items.length > 0) return { kind: "batch", itemType: itemType ?? undefined, items };
     }
   } catch {
     // Drag payloads can come from outside the app; ignore anything we do not own.

@@ -1,5 +1,4 @@
 import React from "react";
-import type { CompanyExplorerItemType } from "../folders/companyExplorerFolders";
 import {
   attachStackedDragPreview,
   EXPLORER_ENTITY_DRAG_MIME,
@@ -29,7 +28,6 @@ import type {
 import type { CompanyExplorerTriageMessageDropHandler, CompanyExplorerTriageMessageDropTarget } from "./CompanyExplorerContentModel";
 import { COMPANY_EXPLORER_TREE_ROW_HEIGHT } from "./useCompanyExplorerVirtualTree";
 import {
-  getExplorerDropPayloadItemType,
   resolveExplorerDropTarget,
   resolveExplorerRootDropTarget,
 } from "./treePresentation";
@@ -81,7 +79,7 @@ type CompanyExplorerTreeRowProps = {
   placeExplorerFolderAtTarget: (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => Promise<boolean>;
   placeExplorerItemsAtTarget: (payload: ExplorerDragPayload | null, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => Promise<boolean>;
   moveFolder: (folderID: string, parentFolderID: string | undefined, options?: { position?: number; expandTarget?: boolean; parentProvided?: boolean; targetExpanded?: boolean }) => Promise<void>;
-  assignExplorerPayloadItemsToFolder: (targetFolderID: string, itemType: CompanyExplorerItemType, payload: ExplorerDragPayload) => Promise<void>;
+  assignExplorerPayloadItemsToFolder: (targetFolderID: string, payload: ExplorerDragPayload) => Promise<void>;
 };
 
 function getTriageMessageDropTarget(row: ExplorerTreeNode, treeRows: ExplorerTreeNode[]): CompanyExplorerTriageMessageDropTarget | null {
@@ -369,7 +367,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
           void moveFolder(payload.folderID, dropTarget.folderID, { targetExpanded: expanded.has(dropTarget.treeID) });
           return;
         }
-        void assignExplorerPayloadItemsToFolder(dropTarget.folderID, getExplorerDropPayloadItemType(payload) ?? dropTarget.folderKind, payload);
+        void assignExplorerPayloadItemsToFolder(dropTarget.folderID, payload);
       }}
       style={{
         position: "relative",
