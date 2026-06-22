@@ -740,7 +740,6 @@ export function MyWorkView({
         <GroupingPanel
           setting={selectedSetting}
           settings={settings}
-          scopeLabel={scopeLabel}
           scopeMenuLevel={scopeMenuLevel}
           scopeRows={scopeRows}
           addableFields={addableFields}
@@ -815,7 +814,6 @@ export function MyWorkView({
 function GroupingPanel({
   setting,
   settings,
-  scopeLabel,
   selectedScope,
   scopeMenuLevel,
   scopeRows,
@@ -839,7 +837,6 @@ function GroupingPanel({
 }: {
   setting: MyWorkSavedGroupingSetting;
   settings: MyWorkSavedGroupingSetting[];
-  scopeLabel: string;
   selectedScope: MyWorkSelectedScope;
   scopeMenuLevel: MyWorkScopeLevel | null;
   scopeRows: ScopePickerRow[];
@@ -862,6 +859,7 @@ function GroupingPanel({
   onAddGrouping: (field: MyWorkGroupingField) => void;
 }) {
   const [collapsedScopeRowKeys, setCollapsedScopeRowKeys] = useState<Set<string>>(new Set());
+  const [groupingFlyoutOpen, setGroupingFlyoutOpen] = useState(false);
   const scopeRowsWithChildren = useMemo(() => scopeRows.map((row, index) => ({
     ...row,
     hasChildren: Boolean(scopeRows[index + 1] && scopeRows[index + 1].depth > row.depth),
@@ -887,6 +885,7 @@ function GroupingPanel({
       return next;
     });
   }, []);
+  const groupingPanelOpen = !setting.panel_collapsed || groupingFlyoutOpen;
 
   return (
     <div
@@ -960,7 +959,22 @@ function GroupingPanel({
             </div>
           )}
         </div>
-        <div style={groupingMenuAnchorStyle}>
+        <div
+          style={groupingMenuAnchorStyle}
+          onMouseEnter={() => {
+            onSetScopeMenuLevel(null);
+            setGroupingFlyoutOpen(true);
+          }}
+          onMouseLeave={() => setGroupingFlyoutOpen(false)}
+          onFocus={() => {
+            onSetScopeMenuLevel(null);
+            setGroupingFlyoutOpen(true);
+          }}
+          onBlur={(event) => {
+            const nextTarget = event.relatedTarget;
+            if (!nextTarget || !event.currentTarget.contains(nextTarget)) setGroupingFlyoutOpen(false);
+          }}
+        >
           <button
             type="button"
             className="mango-my-work-icon-button"
@@ -968,12 +982,13 @@ function GroupingPanel({
             style={collapseButtonStyle}
             onClick={() => {
               onSetScopeMenuLevel(null);
+              setGroupingFlyoutOpen(true);
               onToggleCollapsed();
             }}
           >
-            <ExplorerDisclosureIcon open={!setting.panel_collapsed} color="currentColor" />
+            <ExplorerDisclosureIcon open={groupingPanelOpen} color="currentColor" />
           </button>
-          {!setting.panel_collapsed && (
+          {groupingPanelOpen && (
             <div className="mango-my-work-grouping-body" style={groupingBodyStyle}>
               <div style={savedViewsStyle}>
                 <div style={savedViewsListStyle}>
@@ -1070,7 +1085,6 @@ function GroupingPanel({
           )}
         </div>
       </div>
-      <div style={scopeLabelStyle}>{scopeLabel}</div>
     </div>
   );
 }
@@ -2272,12 +2286,12 @@ const groupingPanelStyle: React.CSSProperties = {
   maxWidth: "min(352px, 100%)",
   minWidth: 0,
   display: "grid",
-  gap: 7,
+  gap: 0,
   border: "1px solid rgba(37, 99, 235, 0.14)",
   borderRadius: 10,
   background: "linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(240, 249, 255, 0.58) 44%, rgba(236, 253, 245, 0.46))",
   boxShadow: "7px 7px 18px rgba(148, 163, 184, 0.20), -6px -6px 16px rgba(255, 255, 255, 0.86), inset 1px 1px 0 rgba(255, 255, 255, 0.88)",
-  padding: 8,
+  padding: "5px 7px",
   overflow: "visible",
 };
 
@@ -2311,7 +2325,7 @@ const scopeTabsStyle: React.CSSProperties = {
   borderRadius: 8,
   background: "linear-gradient(145deg, rgba(255,255,255,0.70), rgba(226,232,240,0.42))",
   boxShadow: "inset 3px 3px 8px rgba(148, 163, 184, 0.18), inset -3px -3px 8px rgba(255, 255, 255, 0.78)",
-  padding: 3,
+  padding: 2,
   overflow: "hidden",
 };
 
@@ -2328,7 +2342,7 @@ function myWorkGroupingAccent(index: number): string {
 function scopeTabStyle(level: MyWorkScopeLevel, active: boolean): React.CSSProperties {
   const accent = myWorkScopeAccent(level);
   return {
-    minHeight: 29,
+    minHeight: 26,
     border: `1px solid ${homeColorWithAlpha(accent, active ? 0.30 : 0.10)}`,
     borderRadius: 6,
     background: active
@@ -2353,24 +2367,6 @@ const collapseButtonStyle: React.CSSProperties = {
   background: "linear-gradient(135deg, rgba(255,255,255,0.94), rgba(219,234,254,0.72))",
   color: "#1d4ed8",
   cursor: "pointer",
-};
-
-const scopeLabelStyle: React.CSSProperties = {
-  width: "fit-content",
-  maxWidth: "100%",
-  minHeight: 22,
-  display: "inline-flex",
-  alignItems: "center",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  border: "1px solid rgba(15, 118, 110, 0.18)",
-  borderRadius: 999,
-  background: "rgba(255, 255, 255, 0.72)",
-  color: "#0f766e",
-  fontSize: 11,
-  fontWeight: 820,
-  padding: "0 8px",
 };
 
 const scopePickerStyle: React.CSSProperties = {
@@ -2466,11 +2462,11 @@ const groupingBodyStyle: React.CSSProperties = {
   zIndex: 70,
   top: "calc(100% + 8px)",
   right: 0,
-  width: "min(522px, calc(100vw - 96px))",
+  width: "min(432px, calc(100vw - 96px))",
   maxHeight: "min(520px, calc(100vh - 190px))",
   overflow: "visible",
   display: "grid",
-  gridTemplateColumns: "116px minmax(0, 360px)",
+  gridTemplateColumns: "108px minmax(0, 294px)",
   alignItems: "start",
   justifyContent: "start",
   gap: 10,
@@ -2556,8 +2552,8 @@ const newViewButtonStyle: React.CSSProperties = {
 };
 
 const groupingStackStyle: React.CSSProperties = {
-  width: "min(360px, 100%)",
-  maxWidth: 360,
+  width: "min(294px, 100%)",
+  maxWidth: 294,
   minWidth: 0,
   display: "grid",
   justifySelf: "start",
@@ -2566,6 +2562,7 @@ const groupingStackStyle: React.CSSProperties = {
 };
 
 const projectGroupToggleStyle: React.CSSProperties = {
+  width: "100%",
   minWidth: 0,
   minHeight: 30,
   display: "inline-flex",
@@ -2599,19 +2596,19 @@ function groupingRowStyle(index: number): React.CSSProperties {
   const accent = myWorkGroupingAccent(index);
   return {
     position: "relative",
-    width: "min(100%, 346px)",
+    width: "min(100%, 294px)",
     minWidth: 0,
     minHeight: 30,
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) 46px 22px",
     alignItems: "center",
     gap: 5,
-    marginLeft: Math.min(index * 14, 28),
+    marginLeft: Math.min(index * 8, 16),
     border: `1px solid ${homeColorWithAlpha(accent, 0.18)}`,
     borderRadius: 7,
     background: `linear-gradient(145deg, rgba(255,255,255,0.92), ${homeColorWithAlpha(accent, 0.12)})`,
     boxShadow: "4px 4px 12px rgba(148, 163, 184, 0.13), -3px -3px 10px rgba(255, 255, 255, 0.72), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
-    padding: "0 5px 0 8px",
+    padding: "0 4px 0 7px",
   };
 }
 

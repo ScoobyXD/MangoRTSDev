@@ -320,7 +320,7 @@ button, input, textarea, select {
   }
 
   .mango-my-work-grouping-body {
-    width: min(420px, calc(100vw - 48px)) !important;
+    width: min(432px, calc(100vw - 48px)) !important;
     grid-template-columns: minmax(0, 1fr) !important;
   }
 
