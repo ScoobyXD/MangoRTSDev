@@ -827,7 +827,7 @@ function GVICRoleEditor({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const assignedPrincipalKeys = useMemo(() => new Set(assignments.map(logicGateGVICAssignmentSubjectKey)), [assignments]);
   const roleAccent = GVIC_ROLE_ACCENTS[role];
-  const singleUserOnly = linkedEntityKind === "node" && (role === "generated" || role === "verified");
+  const singleUserOnly = (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && (role === "generated" || role === "verified");
   const inputPlaceholder = singleUserOnly ? "Add user" : "Add user or team";
   const pickerAriaLabel = singleUserOnly ? `${label} users` : `${label} users and teams`;
   const assignedSummary = singleUserOnly

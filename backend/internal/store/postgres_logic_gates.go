@@ -704,6 +704,9 @@ func (r *PostgresRepo) SetLogicGateGVICAssignments(input LogicGateGVICAssignment
 		seen[key] = true
 		normalized = append(normalized, normalizedAssignment)
 	}
+	if err := validateLogicGateGVICCommandAssignments(normalized, GVICAssignmentCommandSet); err != nil {
+		return nil, err
+	}
 	normalized, err = expandPostgresLogicGateGVICAssignmentsTx(ctx, tx, companyID, normalized)
 	if err != nil {
 		return nil, err

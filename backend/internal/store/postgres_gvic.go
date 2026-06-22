@@ -133,7 +133,7 @@ where company_id=$1::uuid
 					return ResourceGVICAssignmentMutationResult{}, err
 				}
 			}
-			if keyValue.resourceType == EntityTypeNode && isNodePrimaryGVICRole(assignment.role) {
+			if isSingleUserPrimaryGVICResourceType(keyValue.resourceType) && isSingleUserPrimaryGVICRole(assignment.role) {
 				deleted, err := tx.ExecContext(ctx, `
 delete from resource_gvic_assignments
 where company_id=$1::uuid

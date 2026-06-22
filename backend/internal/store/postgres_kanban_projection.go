@@ -52,6 +52,7 @@ projection.compatibility_card_id::text as compatibility_card_id,
 ` + kanbanProjectionCanonicalStatusSQL + ` as column_id,
 projection.node_id::text as node_id,
 projection.logic_gate_id::text as logic_gate_id,
+coalesce(projection.requested_by_user_id::text, '') as requested_by_user_id,
 projection.title as title,
 ''::text as description_snapshot,
 projection.is_issue as is_issue,
@@ -89,6 +90,7 @@ with target_assignment as (
     assignment.updated_timestamp as assignment_updated_timestamp,
     assignment.compatibility_board_id,
     assignment.compatibility_card_id,
+    assignment.requested_by_user_id,
     coalesce(account_snapshot.accounts_json, '[]'::jsonb) as accounts
   from node_logic_gate_assignments assignment
   join nodes node_row
@@ -133,6 +135,7 @@ insert into kanban_board_projection (
   assignment_updated_timestamp,
   compatibility_board_id,
   compatibility_card_id,
+  requested_by_user_id,
   accounts,
   projection_updated_timestamp
 )
@@ -154,6 +157,7 @@ select
   assignment_updated_timestamp,
   compatibility_board_id,
   compatibility_card_id,
+  requested_by_user_id,
   accounts,
   now()
 from target_assignment
@@ -173,6 +177,7 @@ do update set
   assignment_updated_timestamp = excluded.assignment_updated_timestamp,
   compatibility_board_id = excluded.compatibility_board_id,
   compatibility_card_id = excluded.compatibility_card_id,
+  requested_by_user_id = excluded.requested_by_user_id,
   accounts = excluded.accounts,
   projection_updated_timestamp = now()`, companyID, nodeID)
 	return err
@@ -288,6 +293,7 @@ projection.compatibility_card_id::text,
 projection.column_id as source_column_id,
 projection.node_id::text,
 projection.logic_gate_id::text,
+coalesce(projection.requested_by_user_id::text, '') as requested_by_user_id,
 projection.title,
 ''::text as description_snapshot,
 projection.is_issue,
@@ -317,6 +323,7 @@ func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (Kan
 		&status,
 		&item.NodeID,
 		&logicGateID,
+		&item.RequestedByUserID,
 		&item.NodeTitle,
 		&item.DescriptionSnapshot,
 		&item.IsIssue,
@@ -376,6 +383,7 @@ select
   source_column_id,
   node_id,
   logic_gate_id,
+  requested_by_user_id,
   title,
   description_snapshot,
   is_issue,
@@ -491,6 +499,7 @@ inserted as (
     assignment_updated_timestamp,
     compatibility_board_id,
     compatibility_card_id,
+    requested_by_user_id,
     accounts,
     projection_updated_timestamp
   )
@@ -512,6 +521,7 @@ inserted as (
     assignment.updated_timestamp,
     assignment.compatibility_board_id,
     assignment.compatibility_card_id,
+    assignment.requested_by_user_id,
     coalesce(account_snapshot.accounts_json, '[]'::jsonb),
     now()
   from node_logic_gate_assignments assignment

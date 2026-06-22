@@ -45,6 +45,12 @@ type KanbanCardViewProps = {
     onDecline: () => void;
   };
   requestedStatusText?: string;
+  requestedStatusAction?: {
+    label: string;
+    title: string;
+    busy: boolean;
+    onClick: () => void;
+  };
 };
 
 export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
@@ -75,6 +81,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   onDrop,
   requestedActions,
   requestedStatusText,
+  requestedStatusAction,
 }) => {
   const description = (card.description_snapshot ?? "").trim();
   const isIssue = card.is_issue === true;
@@ -226,8 +233,38 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
         )}
       </div>
       {requestedStatusText && (
-        <div style={{ marginTop: 7, color: isIssue ? "#334155" : subtext, fontSize: 10.5, fontWeight: 760, lineHeight: 1.25, overflowWrap: "anywhere" }}>
-          ({requestedStatusText})
+        <div style={{ marginTop: 7, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", color: isIssue ? "#334155" : subtext, fontSize: 10.5, fontWeight: 760, lineHeight: 1.25, overflowWrap: "anywhere" }}>
+          <span>{requestedStatusText}</span>
+          {requestedStatusAction && (
+            <button
+              type="button"
+              title={requestedStatusAction.title}
+              disabled={requestedStatusAction.busy}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                requestedStatusAction.onClick();
+              }}
+              style={{
+                minHeight: 21,
+                border: `1px solid ${hexToRgba(color, 0.30)}`,
+                borderRadius: 7,
+                background: requestedStatusAction.busy ? "rgba(241,245,249,0.78)" : "rgba(255,255,255,0.86)",
+                color: isIssue ? "#334155" : text,
+                cursor: requestedStatusAction.busy ? "wait" : "pointer",
+                padding: "2px 7px",
+                font: "inherit",
+                fontSize: 10,
+                fontWeight: 850,
+                lineHeight: 1,
+                boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.76)",
+                opacity: requestedStatusAction.busy ? 0.64 : 1,
+              }}
+            >
+              {requestedStatusAction.label}
+            </button>
+          )}
         </div>
       )}
       {description && (

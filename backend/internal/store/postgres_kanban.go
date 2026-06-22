@@ -57,6 +57,7 @@ func scanKanbanCard(row interface {
 		&item.ColumnID,
 		&item.NodeID,
 		&item.LogicGateID,
+		&item.RequestedByUserID,
 		&item.NodeTitle,
 		&item.DescriptionSnapshot,
 		&item.IsIssue,
@@ -476,6 +477,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		Position:             position,
 		CompatibilityBoardID: boardID,
 		CompatibilityCardID:  cardID,
+		RequestedByUserID:    input.ActorUserID,
 	})
 	stop()
 	if err != nil {
@@ -624,6 +626,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		Position:             position,
 		CompatibilityBoardID: targetBoardID,
 		CompatibilityCardID:  cardID,
+		RequestedByUserID:    input.ActorUserID,
 	})
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
@@ -764,6 +767,7 @@ func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssign
 		Position:             assignment.Position,
 		CompatibilityBoardID: assignment.CompatibilityBoardID,
 		CompatibilityCardID:  assignment.CompatibilityCardID,
+		RequestedByUserID:    assignment.RequestedByUserID,
 	})
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err

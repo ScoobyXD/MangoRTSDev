@@ -497,6 +497,9 @@ func (r *MemoryRepo) SetLogicGateGVICAssignments(input LogicGateGVICAssignmentUp
 		}
 		normalizedAssignments = append(normalizedAssignments, normalized)
 	}
+	if err := validateLogicGateGVICCommandAssignments(normalizedAssignments, GVICAssignmentCommandSet); err != nil {
+		return nil, err
+	}
 	for _, normalized := range normalizedAssignments {
 		assignmentKey := normalized.role + ":" + normalized.principalType + ":" + normalized.principalID
 		if seen[assignmentKey] {

@@ -18,6 +18,7 @@ export type KanbanBoardProjectionRow = {
   column_id?: string;
   node_id?: string;
   logic_gate_id?: string | null;
+  requested_by_user_id?: string | null;
   node_title?: string;
   description_snapshot?: string;
   is_issue?: boolean | null;
@@ -200,6 +201,7 @@ export function kanbanCardFromProjectionRow(row: KanbanBoardProjectionRow): Kanb
     column_id: columnID,
     node_id: nodeID,
     logic_gate_id: cleanOptionalString(row.logic_gate_id),
+    requested_by_user_id: cleanOptionalString(row.requested_by_user_id) ?? undefined,
     node_title: title || nodeID,
     description_snapshot: cleanString(row.description_snapshot),
     is_issue: row.is_issue === true,
@@ -220,6 +222,7 @@ function requestFallback(result: KanbanProjectionApplyResult, reason: KanbanProj
 function applyPatchToCard(card: KanbanCard, patch: Partial<KanbanBoardProjectionRow>, delta: KanbanProjectionDelta, envelope: KanbanProjectionEnvelope): KanbanCard {
   const patched = { ...card };
   if (typeof patch.column_id === "string") patched.column_id = patch.column_id.trim() || patched.column_id;
+  if (Object.prototype.hasOwnProperty.call(patch, "requested_by_user_id")) patched.requested_by_user_id = cleanOptionalString(patch.requested_by_user_id) ?? undefined;
   if (typeof patch.node_title === "string") patched.node_title = cleanString(patch.node_title) || patched.node_title;
   if (typeof patch.description_snapshot === "string") patched.description_snapshot = patch.description_snapshot;
   if (typeof patch.is_issue === "boolean") patched.is_issue = patch.is_issue;

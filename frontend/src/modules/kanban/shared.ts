@@ -153,6 +153,7 @@ export type KanbanCard = {
   column_id: string;
   node_id: string;
   logic_gate_id?: string | null;
+  requested_by_user_id?: string;
   node_title: string;
   description_snapshot: string;
   is_issue?: boolean;
@@ -163,6 +164,19 @@ export type KanbanCard = {
   projection_updated_timestamp?: string;
   created_timestamp: string;
   updated_timestamp: string;
+};
+
+export type LogicGateArenaGVICAssignment = {
+  company_id?: string;
+  logic_gate_id?: string;
+  role: string;
+  principal_type?: string;
+  principal_id?: string;
+  principal_name?: string;
+  user_id?: string;
+  user_display_name?: string;
+  user_email?: string;
+  created_timestamp?: string;
 };
 
 export type KanbanCardNodeMetadata = {
@@ -176,6 +190,7 @@ export type LogicGateArenaLogicGate = {
   company_id: string;
   logic_gate_id: string;
   header: string;
+  gvic_assignments?: LogicGateArenaGVICAssignment[];
   created_timestamp: string;
 };
 

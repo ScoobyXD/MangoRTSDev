@@ -742,6 +742,7 @@ type KanbanCard struct {
 	ColumnID                   string    `json:"column_id"`
 	NodeID                     string    `json:"node_id"`
 	LogicGateID                *string   `json:"logic_gate_id"`
+	RequestedByUserID          string    `json:"requested_by_user_id,omitempty"`
 	NodeTitle                  string    `json:"node_title"`
 	DescriptionSnapshot        string    `json:"description_snapshot"`
 	IsIssue                    bool      `json:"is_issue"`
@@ -765,6 +766,7 @@ type NodeLogicGateAssignment struct {
 	Position             int       `json:"position"`
 	CompatibilityBoardID string    `json:"compatibility_board_id"`
 	CompatibilityCardID  string    `json:"compatibility_card_id"`
+	RequestedByUserID    string    `json:"requested_by_user_id,omitempty"`
 	Version              int64     `json:"version"`
 	CreatedTimestamp     time.Time `json:"created_timestamp"`
 	UpdatedTimestamp     time.Time `json:"updated_timestamp"`

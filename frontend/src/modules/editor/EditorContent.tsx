@@ -1376,6 +1376,29 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const addLogicGateGVICPrincipal = useCallback((role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => {
     const cleanPrincipalID = principalID.trim();
     if (!cleanPrincipalID) return;
+    const singleUserRole = role === "generated" || role === "verified";
+    if (singleUserRole) {
+      if (principalType !== "user") return;
+      const existing = logicGateGVICAssignments.filter((assignment) => assignment.role === role);
+      if (existing.length === 1 && logicGateGVICAssignmentPrincipalType(existing[0]) === "user" && logicGateGVICAssignmentPrincipalID(existing[0]) === cleanPrincipalID) return;
+      const user = companyUsers.find((candidate) => candidate.user_id === cleanPrincipalID);
+      void saveLogicGateGVICAssignments([
+        ...logicGateGVICAssignments.filter((assignment) => assignment.role !== role),
+        {
+          company_id: companyID,
+          logic_gate_id: linkedNodeID,
+          role,
+          principal_type: "user",
+          principal_id: cleanPrincipalID,
+          principal_name: user?.display_name ?? user?.email,
+          user_id: cleanPrincipalID,
+          user_display_name: user?.display_name,
+          user_email: user?.email,
+          created_timestamp: new Date().toISOString(),
+        },
+      ]);
+      return;
+    }
     const existingPrincipalIDsForRole = new Set(logicGateGVICAssignments
       .filter((assignment) => assignment.role === role && logicGateGVICAssignmentPrincipalType(assignment) === principalType)
       .map((assignment) => logicGateGVICAssignmentPrincipalID(assignment))

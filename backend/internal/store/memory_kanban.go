@@ -142,6 +142,7 @@ func (r *MemoryRepo) kanbanProjectionRowFromCardLocked(card domain.KanbanCard) K
 		ResourceType:               EntityTypeNode,
 		ResourceID:                 card.NodeID,
 		LogicGateID:                cloneStringPointer(card.LogicGateID),
+		RequestedByUserID:          strings.TrimSpace(card.RequestedByUserID),
 		DisplayTitle:               card.NodeTitle,
 		Status:                     &status,
 		DueDate:                    cloneStringPointer(card.DueDate),
@@ -169,6 +170,7 @@ func (r *MemoryRepo) kanbanProjectionRowFromCardLocked(card domain.KanbanCard) K
 	}
 	if assignment, ok := r.nodeLogicGateAssignmentLocked(card.CompanyID, card.NodeID, logicGateID); ok {
 		row.AssignmentID = assignment.AssignmentID
+		row.RequestedByUserID = strings.TrimSpace(assignment.RequestedByUserID)
 		row.AssignmentCreatedTimestamp = assignment.CreatedTimestamp
 		row.AssignmentUpdatedTimestamp = assignment.UpdatedTimestamp
 	}
@@ -670,6 +672,7 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		CreatedTimestamp:    now,
 		UpdatedTimestamp:    now,
 	}
+	card.RequestedByUserID = requestedByUserIDForLogicGateStatus(card.ColumnID, input.RequestedByUserID, "")
 	if board.LogicGateID != nil {
 		value := *board.LogicGateID
 		card.LogicGateID = &value
@@ -748,6 +751,7 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		Position:            input.Position,
 		IsIssue:             input.IsIssue,
 		IsIssueSet:          input.IsIssueSet,
+		RequestedByUserID:   input.ActorUserID,
 	})
 	if err != nil {
 		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
@@ -963,6 +967,7 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	resultCard.ColumnID = columnID
 	resultCard.BoardID = targetBoardID
 	resultCard.LogicGateID = &value
+	resultCard.RequestedByUserID = requestedByUserIDForLogicGateStatus(columnID, input.ActorUserID, assignment.RequestedByUserID)
 	resultCard.IsIssue = assignment.IsIssue
 	resultCard.Position = position
 	if strings.TrimSpace(node.Title) != "" {
@@ -983,6 +988,7 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		Position:             position,
 		CompatibilityBoardID: targetBoardID,
 		CompatibilityCardID:  resultCard.CardID,
+		RequestedByUserID:    resultCard.RequestedByUserID,
 		UpdatedTimestamp:     resultCard.UpdatedTimestamp,
 	})
 	if crossLogicGateMove {
@@ -1126,6 +1132,7 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 		Position:             assignment.Position,
 		CompatibilityBoardID: assignment.CompatibilityBoardID,
 		CompatibilityCardID:  assignment.CompatibilityCardID,
+		RequestedByUserID:    assignment.RequestedByUserID,
 		UpdatedTimestamp:     card.UpdatedTimestamp,
 	})
 	r.kanbanCards[location.mapKey][location.index] = card
@@ -1175,6 +1182,7 @@ func (r *MemoryRepo) MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCar
 		if input.ColumnID != "" {
 			card.ColumnID = input.ColumnID
 		}
+		card.RequestedByUserID = requestedByUserIDForLogicGateStatus(card.ColumnID, card.RequestedByUserID, card.RequestedByUserID)
 		if node, ok := r.nodes[key(input.CompanyID, card.NodeID)]; ok && strings.TrimSpace(node.Title) != "" {
 			card.NodeTitle = node.Title
 		}

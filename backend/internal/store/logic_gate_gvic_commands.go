@@ -71,6 +71,26 @@ func normalizeLogicGateGVICCommandAssignments(assignments []LogicGateGVICAssignm
 	return out, nil
 }
 
+func validateLogicGateGVICCommandAssignments(assignments []normalizedLogicGateGVICCommandAssignment, operation string) error {
+	if operation == LogicGateGVICCommandRemove {
+		return nil
+	}
+	roleCounts := map[string]int{}
+	for _, assignment := range assignments {
+		if !isSingleUserPrimaryGVICRole(assignment.role) {
+			continue
+		}
+		if assignment.principalType != EntityPermissionSubjectUser {
+			return ErrInvalid
+		}
+		roleCounts[assignment.role]++
+		if roleCounts[assignment.role] > 1 {
+			return ErrInvalid
+		}
+	}
+	return nil
+}
+
 func cloneLogicGateGVICAssignments(items []domain.LogicGateGVICAssignment) []domain.LogicGateGVICAssignment {
 	if len(items) == 0 {
 		return []domain.LogicGateGVICAssignment{}

@@ -106,6 +106,45 @@ func TestMemoryLogicGateGVICCommandsAreIdempotentAndInvalidateReadVersions(t *te
 	assertWorkspaceReadVersion(t, repo, companyID, "logic-gates", "", 2, true)
 }
 
+func TestMemoryLogicGateGVICCommandsReplacePrimaryUsers(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepo()
+	companyID := "company-GVIC-command-primary-replace"
+	repo.EnsureCompany(companyID, "GVIC Command Primary Replace Company")
+	logicGate, err := repo.CreateLogicGate(companyID, "Primary Replace Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	first := mustCreateGVICMembershipUser(t, repo, "GVIC-command-primary-first", companyID)
+	next := mustCreateGVICMembershipUser(t, repo, "GVIC-command-primary-next", companyID)
+
+	if _, err := repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: first.UserID}},
+	}); err != nil {
+		t.Fatalf("AddLogicGateGVICAssignments first generated: %v", err)
+	}
+	result, err := repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: next.UserID}},
+	})
+	if err != nil {
+		t.Fatalf("AddLogicGateGVICAssignments replacement generated: %v", err)
+	}
+	generatedUsers := []string{}
+	for _, assignment := range result.GVICAssignments {
+		if assignment.Role == domain.GVICRoleGenerated {
+			generatedUsers = append(generatedUsers, assignment.UserID)
+		}
+	}
+	if len(generatedUsers) != 1 || generatedUsers[0] != next.UserID {
+		t.Fatalf("generated users after replacement = %+v, want only %s", generatedUsers, next.UserID)
+	}
+}
+
 func TestMemoryLogicGateGVICCommandsExpandGroupAssignments(t *testing.T) {
 	t.Parallel()
 
@@ -139,7 +178,7 @@ func TestMemoryLogicGateGVICCommandsExpandGroupAssignments(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:          domain.GVICRoleGenerated,
+			Role:          domain.GVICRoleConsulted,
 			PrincipalType: EntityPermissionSubjectGroup,
 			PrincipalID:   parentGroup.GroupID,
 		}},
@@ -164,7 +203,7 @@ func TestMemoryLogicGateGVICCommandsExpandGroupAssignments(t *testing.T) {
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []LogicGateGVICAssignmentInput{{
-			Role:          domain.GVICRoleGenerated,
+			Role:          domain.GVICRoleConsulted,
 			PrincipalType: EntityPermissionSubjectGroup,
 			PrincipalID:   parentGroup.GroupID,
 		}},
@@ -211,6 +250,14 @@ func TestMemoryLogicGateGVICCommandsRejectInvalidRoleUserAndCompany(t *testing.T
 	_, err = repo.RemoveLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateGVICAssignmentInput{{Role: "owner", UserID: member.UserID}}})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("invalid remove role err = %v, want ErrInvalid", err)
+	}
+	group, err := repo.CreateCompanyUserGroup(companyID, "", "Invalid Primary Group")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup invalid primary: %v", err)
+	}
+	_, err = repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID}}})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("generated group add err = %v, want ErrInvalid", err)
 	}
 	_, err = repo.AddLogicGateGVICAssignments(LogicGateGVICAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: outsider.UserID}}})
 	if !errors.Is(err, ErrPrincipalNotInCompany) {

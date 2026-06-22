@@ -227,6 +227,9 @@ func (r *PostgresRepo) applyLogicGateGVICAssignmentCommand(input LogicGateGVICAs
 	if err != nil {
 		return LogicGateGVICAssignmentCommandResult{}, err
 	}
+	if err := validateLogicGateGVICCommandAssignments(commandAssignments, operation); err != nil {
+		return LogicGateGVICAssignmentCommandResult{}, err
+	}
 
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -290,18 +293,44 @@ select exists(
 		var result sql.Result
 		switch operation {
 		case LogicGateGVICCommandAdd:
-			if _, err = tx.ExecContext(ctx, `
+			deleted, err := tx.ExecContext(ctx, `
 delete from resource_gvic_assignments
 where company_id=$1::uuid
   and resource_type=$2
   and resource_id=$3::uuid
   and principal_type=$4
   and principal_id::text=$5
-  and role<>$6`, companyID, EntityTypeLogicGate, logicGateID, assignment.principalType, assignment.principalID, assignment.role); err != nil {
+  and role<>$6`, companyID, EntityTypeLogicGate, logicGateID, assignment.principalType, assignment.principalID, assignment.role)
+			if err != nil {
 				if isPostgresUndefinedTable(err, "resource_gvic_assignments") {
 					return LogicGateGVICAssignmentCommandResult{}, ErrGVICStorageUnavailable
 				}
 				return LogicGateGVICAssignmentCommandResult{}, err
+			}
+			if affected, err := deleted.RowsAffected(); err != nil {
+				return LogicGateGVICAssignmentCommandResult{}, err
+			} else if affected > 0 {
+				changed = true
+			}
+			if isSingleUserPrimaryGVICRole(assignment.role) {
+				deleted, err = tx.ExecContext(ctx, `
+delete from resource_gvic_assignments
+where company_id=$1::uuid
+  and resource_type=$2
+  and resource_id=$3::uuid
+  and role=$4
+  and not (principal_type=$5 and principal_id::text=$6)`, companyID, EntityTypeLogicGate, logicGateID, assignment.role, assignment.principalType, assignment.principalID)
+				if err != nil {
+					if isPostgresUndefinedTable(err, "resource_gvic_assignments") {
+						return LogicGateGVICAssignmentCommandResult{}, ErrGVICStorageUnavailable
+					}
+					return LogicGateGVICAssignmentCommandResult{}, err
+				}
+				if affected, err := deleted.RowsAffected(); err != nil {
+					return LogicGateGVICAssignmentCommandResult{}, err
+				} else if affected > 0 {
+					changed = true
+				}
 			}
 			result, err = tx.ExecContext(ctx, `
 insert into resource_gvic_assignments (
