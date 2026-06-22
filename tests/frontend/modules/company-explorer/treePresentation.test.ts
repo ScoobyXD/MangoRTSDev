@@ -20,6 +20,7 @@ import {
   shouldAcceptClearedMapSelectionAfterExplorerSelection,
   shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
+import { getExplorerRowContainerID } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { buildCompanyExplorerTreeRows, buildCompanyExplorerV2TreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
 import { buildCompanyExplorerContextMenuSections, createInitialCompanyExplorerExpandedRows, filterExplorerRowsForCustomTopLevel } from "../../../../frontend/src/modules/company-explorer/CompanyExplorerContentModel.js";
 
@@ -51,6 +52,21 @@ run("company explorer starts each page load with collapsed rows", () => {
   assert.deepEqual([...initialExpanded], []);
   initialExpanded.add("workspace-folder-open");
   assert.deepEqual([...createInitialCompanyExplorerExpandedRows()], []);
+});
+
+run("logic gate child node rows use the logic gate as their reorder container", () => {
+  assert.equal(getExplorerRowContainerID({
+    id: "logic-gate-gate-1-node-node-1",
+    label: "Node 1",
+    depth: 1,
+    kind: "node",
+    nodeID: "node-1",
+    scopeLevel: 1,
+    position: 1000,
+    createdTimestamp: "0",
+    parentLogicGateID: "gate-1",
+    syntheticKind: "logic_gate_children",
+  }), "gate-1");
 });
 
 run("company explorer context menu keeps fixed sections with disabled unavailable actions", () => {

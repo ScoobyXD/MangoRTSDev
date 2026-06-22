@@ -3460,6 +3460,75 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     return rows;
   }, [baseTreeRows]);
 
+  const getLogicGateRowForContainerID = useCallback((containerID: string): ExplorerTreeNode | undefined => {
+    const cleanContainerID = containerID.trim();
+    if (!cleanContainerID) return undefined;
+    return baseTreeRows.find((row) => (
+      row.kind === "logic_gate"
+      && (
+        row.logicGateID === cleanContainerID
+        || row.entityID === cleanContainerID
+        || row.resourceID === cleanContainerID
+      )
+    ));
+  }, [baseTreeRows]);
+
+  const moveExplorerNodesToLogicGate = useCallback(async (
+    moves: Array<{ nodeID: string; position?: number; sourceRow?: ExplorerTreeNode }>,
+    logicGateID: string,
+    logicGateTreeID?: string,
+  ): Promise<boolean> => {
+    const targetLogicGateID = logicGateID.trim();
+    if (!targetLogicGateID) return false;
+    const normalizedMoves: Array<{ nodeID: string; position?: number; sourceRow?: ExplorerTreeNode }> = [];
+    const seenNodeIDs = new Set<string>();
+    for (const move of moves) {
+      const nodeID = move.nodeID.trim();
+      if (!nodeID || seenNodeIDs.has(nodeID)) continue;
+      seenNodeIDs.add(nodeID);
+      normalizedMoves.push({ ...move, nodeID });
+    }
+    if (normalizedMoves.length === 0) return false;
+
+    setError("");
+    const sourceLogicGateIDs = new Set<string>();
+    try {
+      for (const move of normalizedMoves) {
+        const sourceParentEntityID = move.sourceRow?.parentEntityID?.trim() ?? "";
+        const fromLogicGateID = move.sourceRow?.parentLogicGateID?.trim()
+          || getLogicGateRowForContainerID(sourceParentEntityID)?.logicGateID?.trim()
+          || "";
+        if (fromLogicGateID) sourceLogicGateIDs.add(fromLogicGateID);
+        const result = await moveLogicGateAssignment({
+          apiBase,
+          companyID,
+          logicGateID: targetLogicGateID,
+          nodeID: move.nodeID,
+          fromLogicGateID: fromLogicGateID || undefined,
+          mutationOrigin: "matrix",
+          position: move.position,
+        });
+        dispatchExplorerStore({ type: "replaceNode", node: result.node });
+        upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
+      }
+      const expandedTreeID = logicGateTreeID || getLogicGateRowForContainerID(targetLogicGateID)?.id || "";
+      if (expandedTreeID) setExpanded((previous) => new Set(previous).add(expandedTreeID));
+      if (companyExplorerV2Active) {
+        const branchIDs = new Set(sourceLogicGateIDs);
+        branchIDs.add(targetLogicGateID);
+        for (const branchID of branchIDs) {
+          activeCompanyExplorerBranchesRef.current.add(companyExplorerBranchKey(branchID));
+          await refreshCompanyExplorerBranch(branchID);
+        }
+      }
+      requestGVICExplorerProjectionRefreshRef.current();
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed_to_move_node_to_logic_gate");
+      return false;
+    }
+  }, [apiBase, companyExplorerBranchKey, companyExplorerV2Active, companyID, getLogicGateRowForContainerID, refreshCompanyExplorerBranch]);
+
   const canPlaceExplorerItemsAtTarget = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
     if (isProtectedGVICRoleRow(target)) return false;
     const itemTypes = getExplorerDropPayloadItemTypes(payload);
@@ -3472,8 +3541,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (itemRows.length === 0 || itemRows.some((row) => row.id === target.id)) return false;
     const targetContainer = getExplorerRowContainerID(target);
     if (targetContainer == null) return false;
+    if (getLogicGateRowForContainerID(targetContainer)) return itemTypes.size === 1 && itemTypes.has("node");
     return targetContainer !== "" || itemRows.every((row) => getExplorerRowContainerID(row) === "");
-  }, [getExplorerItemRowsForPayload, scopedAllowedItemType]);
+  }, [getExplorerItemRowsForPayload, getLogicGateRowForContainerID, scopedAllowedItemType]);
 
   const canDropExplorerPayloadOnRow = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
     const itemType = getExplorerDropPayloadItemType(payload);
@@ -3493,35 +3563,18 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       const nodeRowsByID = new Map(getExplorerItemRowsForPayload(payload).filter((row) => row.kind === "node" && row.nodeID).map((row) => [row.nodeID ?? "", row]));
       const nodeItems = getExplorerDropPayloadItems(payload).filter((item) => item.itemType === "node" && item.itemID.trim());
       if (nodeItems.length === 0) return false;
-      setError("");
-      try {
-        for (const item of nodeItems) {
+      return moveExplorerNodesToLogicGate(
+        nodeItems.map((item) => {
           const nodeID = item.itemID.trim();
-          const sourceRow = nodeRowsByID.get(nodeID);
-          const fromLogicGateID = sourceRow?.parentLogicGateID?.trim() ?? "";
-          if (fromLogicGateID === target.logicGateID) continue;
-          const result = await moveLogicGateAssignment({
-            apiBase,
-            companyID,
-            logicGateID: target.logicGateID,
-            nodeID,
-            fromLogicGateID: fromLogicGateID || undefined,
-            mutationOrigin: "matrix",
-          });
-          dispatchExplorerStore({ type: "replaceNode", node: result.node });
-          upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
-        }
-        setExpanded((previous) => new Set(previous).add(target.id));
-        requestGVICExplorerProjectionRefreshRef.current();
-        return true;
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "failed_to_move_node_to_logic_gate");
-        return false;
-      }
+          return { nodeID, sourceRow: nodeRowsByID.get(nodeID) };
+        }),
+        target.logicGateID,
+        target.id,
+      );
     }
 
     return false;
-  }, [apiBase, companyID, getExplorerItemRowsForPayload]);
+  }, [getExplorerItemRowsForPayload, moveExplorerNodesToLogicGate]);
 
   const isFolderDescendantOf = useCallback((candidateFolderID: string, ancestorFolderID: string): boolean => {
     if (!candidateFolderID || !ancestorFolderID) return false;
@@ -3544,9 +3597,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (isGVICScopedRow(target) && source.folderKind !== targetKind) return false;
     const targetContainer = getExplorerRowContainerID(target);
     if (targetContainer == null) return false;
+    if (getLogicGateRowForContainerID(targetContainer)) return false;
     if (targetContainer === source.folderID || isFolderDescendantOf(targetContainer, source.folderID)) return false;
     return true;
-  }, [isFolderDescendantOf]);
+  }, [getLogicGateRowForContainerID, isFolderDescendantOf]);
 
   const getReorderRowsForTarget = useCallback((source: ExplorerTreeNode, target: ExplorerTreeNode): ExplorerTreeNode[] => {
     if (isProtectedGVICRoleRow(source) || isProtectedGVICRoleRow(target)) return [];
@@ -3583,6 +3637,15 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       });
     }
 
+    const reorderContainer = getExplorerRowContainerID(source);
+    const logicGateContainer = reorderContainer ? getLogicGateRowForContainerID(reorderContainer) : undefined;
+    if (logicGateContainer?.logicGateID) {
+      const nodeMoves = updates
+        .filter(({ row }) => row.kind === "node" && Boolean(row.nodeID))
+        .map(({ row, position }) => ({ nodeID: row.nodeID ?? "", position, sourceRow: row }));
+      return moveExplorerNodesToLogicGate(nodeMoves, logicGateContainer.logicGateID, logicGateContainer.id);
+    }
+
     const itemAssignments: CompanyExplorerFolderItemAssignment[] = [];
     const folderMoves: Array<Promise<void>> = [];
     for (const { row, position } of updates) {
@@ -3597,7 +3660,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     await Promise.all(folderMoves);
     if (itemAssignments.length > 0) await assignItemsToFolders(itemAssignments);
     return true;
-  }, [assignItemsToFolders, getReorderRowsForTarget, moveFolder]);
+  }, [assignItemsToFolders, getLogicGateRowForContainerID, getReorderRowsForTarget, moveExplorerNodesToLogicGate, moveFolder]);
 
   const placeExplorerFolderAtTarget = useCallback(async (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
     if (!source.folderID || !source.folderKind || !canPlaceExplorerFolderAtTarget(source, target)) return false;
@@ -3679,6 +3742,14 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       });
     }
 
+    const logicGateContainer = getLogicGateRowForContainerID(targetContainer);
+    if (logicGateContainer?.logicGateID) {
+      const nodeMoves = updates
+        .filter(({ row }) => row.kind === "node" && Boolean(row.nodeID))
+        .map(({ row, position }) => ({ nodeID: row.nodeID ?? "", position, sourceRow: row }));
+      return moveExplorerNodesToLogicGate(nodeMoves, logicGateContainer.logicGateID, logicGateContainer.id);
+    }
+
     const itemAssignments: CompanyExplorerFolderItemAssignment[] = [];
     const folderMoves: Array<Promise<void>> = [];
     for (const { row, position } of updates) {
@@ -3693,7 +3764,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     await Promise.all(folderMoves);
     if (itemAssignments.length > 0) await assignItemsToFolders(itemAssignments);
     return true;
-  }, [assignItemsToFolders, baseTreeRows, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, moveFolder]);
+  }, [assignItemsToFolders, baseTreeRows, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, getLogicGateRowForContainerID, moveExplorerNodesToLogicGate, moveFolder]);
 
   const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, payload: ExplorerDragPayload) => {
     const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemID.trim() && item.itemType !== "kanban");
