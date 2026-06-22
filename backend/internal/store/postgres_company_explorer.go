@@ -924,18 +924,18 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 		for folderID := range folderIDs {
 			grantFolderIDs = append(grantFolderIDs, folderID)
 		}
-		if _, err := tx.ExecContext(ctx,
+		if err := execOptionalPostgresShapeCleanupTx(tx, "resource_access_grants",
 			`delete from resource_access_grants
 			 where company_id=$1 and resource_type in ($2, $3, $4) and resource_id = any(string_to_array($5, ',')::uuid[])`,
 			companyID, EntityTypeSharedInboxFolder, EntityTypeSharedInbox, EntityTypeSharedTriageFolder, strings.Join(grantFolderIDs, ","),
-		); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+		); err != nil {
 			return CompanyExplorerDeleteResult{}, err
 		}
-		if _, err := tx.ExecContext(ctx,
+		if err := execOptionalPostgresShapeCleanupTx(tx, "resource_permissions",
 			`delete from resource_permissions
 			 where company_id=$1 and resource_type in ($2, $3, $4) and resource_id = any(string_to_array($5, ',')::uuid[])`,
 			companyID, EntityTypeCompanyExplorerFolder, EntityTypeSharedInboxFolder, EntityTypeSharedInbox, strings.Join(grantFolderIDs, ","),
-		); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+		); err != nil {
 			return CompanyExplorerDeleteResult{}, err
 		}
 	}
@@ -981,6 +981,12 @@ func postgresTxExists(ctx context.Context, tx *sql.Tx, query string, args ...any
 		return false, err
 	}
 	return exists, nil
+}
+
+func execOptionalPostgresShapeCleanupTx(tx *sql.Tx, tableName, query string, args ...any) error {
+	return execOptionalPostgresCleanup(tx, query, func(err error) bool {
+		return isOptionalPostgresCleanupShapeError(err, tableName)
+	}, args...)
 }
 
 func postgresDeleteNodeWithProjectionDeltasTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectionDelta, error) {
@@ -1064,18 +1070,18 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 	); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
+	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_access_grants",
 		`delete from resource_access_grants
 		 where company_id=$1 and resource_type='node' and resource_id=$2::uuid`,
 		companyID, nodeID,
-	); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+	); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
+	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_permissions",
 		`delete from resource_permissions
 		 where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid`,
 		companyID, nodeID,
-	); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+	); err != nil {
 		return err
 	}
 	deleted, err := tx.ExecContext(ctx,
@@ -1190,18 +1196,18 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 	); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
+	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_access_grants",
 		`delete from resource_access_grants
 		 where company_id=$1 and resource_type='logic_gate' and resource_id=$2::uuid`,
 		companyID, logicGateID,
-	); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
+	); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx,
+	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_permissions",
 		`delete from resource_permissions
 		 where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		companyID, logicGateID,
-	); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+	); err != nil {
 		return err
 	}
 	deleted, err := tx.ExecContext(ctx,

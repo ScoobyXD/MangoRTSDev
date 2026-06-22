@@ -529,6 +529,10 @@ func postgresSnapshotRowsTx(ctx context.Context, tx *sql.Tx, tableName, whereCla
 	if !exists {
 		return json.RawMessage("[]"), nil
 	}
+	const savepoint = "mangorts_recycle_snapshot"
+	if _, err := tx.ExecContext(ctx, `savepoint `+savepoint); err != nil {
+		return nil, fmt.Errorf("create recycle snapshot savepoint: %w", err)
+	}
 	query := fmt.Sprintf(`
 select coalesce(jsonb_agg(to_jsonb(row_data)), '[]'::jsonb)
 from (
@@ -538,9 +542,33 @@ from (
 ) row_data`, tableName, whereClause)
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(&raw); err != nil {
-		return nil, err
+		if isRecycleSnapshotShapeError(err) {
+			if rollbackErr := rollbackAndReleaseRecycleSnapshotSavepointTx(ctx, tx, savepoint); rollbackErr != nil {
+				return nil, rollbackErr
+			}
+			return json.RawMessage("[]"), nil
+		}
+		_, _ = tx.ExecContext(ctx, `rollback to savepoint `+savepoint)
+		return nil, fmt.Errorf("snapshot recycle table %s: %w", tableName, err)
+	}
+	if _, err := tx.ExecContext(ctx, `release savepoint `+savepoint); err != nil {
+		return nil, fmt.Errorf("release recycle snapshot savepoint: %w", err)
 	}
 	return raw, nil
+}
+
+func isRecycleSnapshotShapeError(err error) bool {
+	return isPostgresUndefinedTable(err, "") || isPostgresUndefinedColumn(err, "")
+}
+
+func rollbackAndReleaseRecycleSnapshotSavepointTx(ctx context.Context, tx *sql.Tx, savepoint string) error {
+	if _, err := tx.ExecContext(ctx, `rollback to savepoint `+savepoint); err != nil {
+		return fmt.Errorf("rollback recycle snapshot savepoint: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `release savepoint `+savepoint); err != nil {
+		return fmt.Errorf("release recycle snapshot savepoint after rollback: %w", err)
+	}
+	return nil
 }
 
 func recycleResourceWhere(companyID string, nodeIDs, logicGateIDs, projectIDs []string, nodeColumn, logicGateColumn, projectColumn string) (string, []any) {

@@ -207,3 +207,66 @@ func TestPostgresCompanyExplorerV2NativeChildrenUseCompactArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestPostgresCompanyExplorerDeleteUsesOptionalAccessCleanup(t *testing.T) {
+	raw, err := os.ReadFile("postgres_company_explorer.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_company_explorer.go: %v", err)
+	}
+	source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+	for _, want := range []string{
+		`execoptionalpostgresshapecleanuptx(tx, "resource_access_grants"`,
+		`execoptionalpostgresshapecleanuptx(tx, "resource_permissions"`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("company explorer delete cleanup missing %q", want)
+		}
+	}
+	if strings.Contains(source, `!ispostgresundefinedtable(err, "resource_access_grants")`) ||
+		strings.Contains(source, `!ispostgresundefinedtable(err, "resource_permissions")`) {
+		t.Fatalf("company explorer delete cleanup must use savepoint-backed optional shape cleanup")
+	}
+
+	projectRaw, err := os.ReadFile("postgres_projects.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_projects.go: %v", err)
+	}
+	projectDelete := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, string(projectRaw), "func postgresDeleteProjectTx")), " "))
+	for _, want := range []string{
+		`execoptionalpostgresshapecleanuptx(tx, "resource_access_grants"`,
+		`execoptionalpostgresshapecleanuptx(tx, "resource_permissions"`,
+	} {
+		if !strings.Contains(projectDelete, want) {
+			t.Fatalf("postgresDeleteProjectTx missing %q", want)
+		}
+	}
+}
+
+func TestPostgresRecycleSnapshotSkipsOptionalShapeDriftWithSavepoint(t *testing.T) {
+	raw, err := os.ReadFile("postgres_recycle_bin.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_recycle_bin.go: %v", err)
+	}
+	source := string(raw)
+	snapshotRows := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func postgresSnapshotRowsTx")), " "))
+	for _, want := range []string{
+		`const savepoint = "mangorts_recycle_snapshot"`,
+		"`savepoint `+savepoint",
+		"isrecyclesnapshotshapeerror(err)",
+		"rollbackandreleaserecyclesnapshotsavepointtx",
+		`return json.rawmessage("[]"), nil`,
+	} {
+		if !strings.Contains(snapshotRows, want) {
+			t.Fatalf("postgresSnapshotRowsTx missing %q", want)
+		}
+	}
+	shapeError := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func isRecycleSnapshotShapeError")), " "))
+	for _, want := range []string{
+		`ispostgresundefinedtable(err, "")`,
+		`ispostgresundefinedcolumn(err, "")`,
+	} {
+		if !strings.Contains(shapeError, want) {
+			t.Fatalf("isRecycleSnapshotShapeError missing %q", want)
+		}
+	}
+}
