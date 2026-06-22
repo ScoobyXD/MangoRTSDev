@@ -55,7 +55,11 @@ MW32 - Semantic backend mutations write canonical/source rows and update affecte
 MW33 - Normal mutations prefer exact projection row upsert/delete over broad rebuilds.
 MW34 - Large fanout changes may emit bounded refetch signals instead of many row deltas.
 MW35 - Realtime sends exact row deltas when safe; permission-sensitive delivery must re-check access before sending rows.
-MW36 - My Work pulls only active work: standalone nodes not in `Done`, plus node paths under active projects even when the node itself is `Done`.
+MW36 - My Work pulls only active work. Standalone nodes are active when they are not in `Done` status. Projects are active when they are not in `Done` status. A node marked `Done` remains active when it is in a relationship with an active project, either directly or through a logic gate, because the parent project is still going. Logic gates do not add their own active status.
+    a. standalone Done nodes are excluded from My Work
+    b. Done nodes under an active project are included
+    c. Done nodes through a logic gate under an active project are included
+    d. Done projects do not make their related nodes visible
 MW37 - Expanding or collapsing a grouping row is scoped to the exact matrix cell where the user clicked; the same grouping label/path in another role or priority cell must not change.
 MW38 - The My Work grouping UI includes a Projects toggle. Turning Projects off hides project grouping/path display while preserving node leaves and logic-gate display context.
 
