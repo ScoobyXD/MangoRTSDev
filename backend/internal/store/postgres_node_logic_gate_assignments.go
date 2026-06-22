@@ -19,6 +19,7 @@ is_issue,
 position,
 compatibility_board_id,
 compatibility_card_id::text,
+coalesce(requested_by_user_id::text, ''),
 version,
 created_timestamp,
 updated_timestamp`
@@ -36,6 +37,7 @@ func scanNodeLogicGateAssignment(row interface{ Scan(dest ...any) error }) (doma
 		&item.Position,
 		&item.CompatibilityBoardID,
 		&item.CompatibilityCardID,
+		&item.RequestedByUserID,
 		&item.Version,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
@@ -79,6 +81,7 @@ type nodeLogicGateAssignmentSQLInput struct {
 	Position             int
 	CompatibilityBoardID string
 	CompatibilityCardID  string
+	RequestedByUserID    string
 }
 
 type nodeLogicGateAssignmentQueryRower interface {
@@ -110,9 +113,24 @@ insert into node_logic_gate_assignments (
   position,
   compatibility_board_id,
   compatibility_card_id,
+  requested_by_user_id,
   created_timestamp,
   updated_timestamp
-) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10::uuid, now(), now())
+) values (
+  $1::uuid,
+  $2::uuid,
+  $3::uuid,
+  $4::uuid,
+  $5,
+  $6,
+  $7,
+  $8,
+  $9,
+  $10::uuid,
+  case when $5 = 'requested' then nullif($11, '')::uuid else null end,
+  now(),
+  now()
+)
 on conflict (company_id, node_id)
 do update set
   logic_gate_id=excluded.logic_gate_id,
@@ -122,6 +140,10 @@ do update set
   position=excluded.position,
   compatibility_board_id=excluded.compatibility_board_id,
   compatibility_card_id=excluded.compatibility_card_id,
+  requested_by_user_id=case
+    when excluded.status_key = 'requested' then coalesce(excluded.requested_by_user_id, node_logic_gate_assignments.requested_by_user_id)
+    else null
+  end,
   version=node_logic_gate_assignments.version + 1,
   updated_timestamp=now()
 returning `+nodeLogicGateAssignmentSelectColumns,
@@ -135,6 +157,7 @@ returning `+nodeLogicGateAssignmentSelectColumns,
 		input.Position,
 		input.CompatibilityBoardID,
 		input.CompatibilityCardID,
+		strings.TrimSpace(input.RequestedByUserID),
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.NodeLogicGateAssignment{}, ErrNotFound
@@ -199,6 +222,7 @@ func syncNodeLogicGateAssignmentFromCardSQL(ctx context.Context, queryer nodeLog
 		Position:             card.Position,
 		CompatibilityBoardID: card.BoardID,
 		CompatibilityCardID:  card.CardID,
+		RequestedByUserID:    card.RequestedByUserID,
 	})
 }
 

@@ -1019,6 +1019,7 @@ create table if not exists node_logic_gate_assignments (
   position integer not null,
   compatibility_board_id text not null,
   compatibility_card_id uuid not null,
+  requested_by_user_id uuid,
   version bigint not null default 1,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
@@ -1026,7 +1027,8 @@ create table if not exists node_logic_gate_assignments (
   constraint node_logic_gate_assignments_version_positive_chk check (version > 0),
   primary key (company_id, assignment_id),
   foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
-  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade
+  foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade,
+  foreign key (company_id, requested_by_user_id) references company_memberships (company_id, user_id) on delete set null
 );
 
 create unique index if not exists idx_node_logic_gate_assignments_one_active_node
@@ -1083,6 +1085,7 @@ create table if not exists kanban_board_projection (
   assignment_updated_timestamp timestamptz not null,
   compatibility_board_id text not null,
   compatibility_card_id uuid not null,
+  requested_by_user_id uuid,
   accounts jsonb not null default '[]'::jsonb,
   projection_updated_timestamp timestamptz not null default now(),
   constraint kanban_board_projection_status_nonblank_chk check (btrim(status) <> ''),
@@ -1112,6 +1115,7 @@ insert into kanban_board_projection (
   assignment_updated_timestamp,
   compatibility_board_id,
   compatibility_card_id,
+  requested_by_user_id,
   accounts,
   projection_updated_timestamp
 )
@@ -1133,6 +1137,7 @@ select
   assignment.updated_timestamp,
   assignment.compatibility_board_id,
   assignment.compatibility_card_id,
+  assignment.requested_by_user_id,
   coalesce(account_snapshot.accounts_json, '[]'::jsonb),
   now()
 from node_logic_gate_assignments assignment
@@ -1175,6 +1180,7 @@ do update set
   assignment_updated_timestamp = excluded.assignment_updated_timestamp,
   compatibility_board_id = excluded.compatibility_board_id,
   compatibility_card_id = excluded.compatibility_card_id,
+  requested_by_user_id = excluded.requested_by_user_id,
   accounts = excluded.accounts,
   projection_updated_timestamp = now();
 

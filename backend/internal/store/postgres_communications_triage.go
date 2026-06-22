@@ -420,6 +420,7 @@ values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28),
 			Position:             position,
 			CompatibilityBoardID: board.BoardID,
 			CompatibilityCardID:  cardID,
+			RequestedByUserID:    input.ActorUserID,
 		})
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err

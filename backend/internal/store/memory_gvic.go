@@ -127,7 +127,7 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 					}
 				}
 			}
-			if keyValue.resourceType == EntityTypeNode && isNodePrimaryGVICRole(assignment.role) {
+			if isSingleUserPrimaryGVICResourceType(keyValue.resourceType) && isSingleUserPrimaryGVICRole(assignment.role) {
 				for sourceKey, existing := range r.gvicAssignments {
 					if existing.CompanyID == keyValue.companyID && existing.ResourceType == keyValue.resourceType && existing.ResourceID == keyValue.resourceID && existing.Role == assignment.role && (existing.PrincipalType != assignment.principalType || existing.PrincipalID != assignment.principalID) {
 						delete(r.gvicAssignments, sourceKey)

@@ -640,6 +640,7 @@ type ProjectionRow struct {
 	SourcePrincipalID            string           `json:"source_principal_id,omitempty"`
 	InheritanceType              string           `json:"inheritance_type,omitempty"`
 	LogicGateID                  *string          `json:"logic_gate_id,omitempty"`
+	RequestedByUserID            string           `json:"requested_by_user_id,omitempty"`
 	LogicGateName                string           `json:"logic_gate_name,omitempty"`
 	DisplayTitle                 string           `json:"display_title,omitempty"`
 	Status                       *string          `json:"status,omitempty"`
@@ -1476,6 +1477,7 @@ type KanbanCardMutationInput struct {
 	Position            int
 	IsIssue             bool
 	IsIssueSet          bool
+	RequestedByUserID   string
 	CardID              string
 }
 

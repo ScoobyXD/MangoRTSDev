@@ -1,4 +1,4 @@
-Last updated: 2026-06-20
+Last updated: 2026-06-22
 
 # GVIC Tests
 
@@ -29,6 +29,7 @@ GVIC18 - Removing a GVIC assignment removes the effective access/projection rows
 GVIC19 - A resource can have multiple GVIC roles across different principals without collapsing the role meaning.
 GVIC20 - Shared inbox GVIC assignments must remain GVIC assignments and must not be converted into ordinary resource permission grants.
 GVIC21 - A person or group can only have one GVIC assignment per each node or for each logic gate. So the same person/group can not be in, for example, Generated and Informed for the same node (same rule applies for logic gates). However of course, when a node is assigned to a logic gate, then we defer the GVIC assignment of the node, to the logic gate's.
+GVIC22 - Node and logic gate generated and verified assignments are single-user slots; they must use user principals, while consulted and informed can still use users or groups.
 
 ## Scenarios
 
@@ -43,6 +44,7 @@ Business logic covered:
 - GVIC6
 - GVIC7
 - GVIC19
+- GVIC22
 
 Given:
 - A company assigns users and groups to nodes, logic gates, projects, and supported shared resources.
@@ -54,6 +56,7 @@ Expected:
 - Generated and verified produce edit-level access.
 - Consulted and informed produce view-level access.
 - Different principals can hold different GVIC roles on the same resource without losing the role meaning.
+- Node and logic gate generated and verified fields reject group principals and keep only one user for each role.
 
 ### Scenario GVIC-S2: Group Expansion And Removal
 

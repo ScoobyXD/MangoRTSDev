@@ -99,6 +99,7 @@ import {
   type KanbanColumnDropPlacement,
   type KanbanGroupField,
   type KanbanGroupSortDirection,
+  type LogicGateArenaGVICAssignment,
   type ExplorerEntityDragItem,
 } from "./shared";
 
@@ -253,6 +254,32 @@ function logicGateIDForKanbanCard(card: Pick<KanbanCard, "logic_gate_id" | "boar
   return (card.logic_gate_id ?? "").trim() || logicGateIDFromKanbanBoardID(card.board_id || fallbackBoardID);
 }
 
+function cleanKanbanText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function logicGateArenaGVICAssignmentsFromUnknown(value: unknown): LogicGateArenaGVICAssignment[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is LogicGateArenaGVICAssignment => Boolean(item) && typeof item === "object");
+}
+
+function logicGateGeneratedUserID(assignments: LogicGateArenaGVICAssignment[]): string {
+  for (const assignment of assignments) {
+    if (cleanKanbanText(assignment.role).toLowerCase() !== "generated") continue;
+    const principalType = cleanKanbanText(assignment.principal_type || "user").toLowerCase() || "user";
+    const userID = cleanKanbanText(assignment.user_id);
+    const principalID = cleanKanbanText(assignment.principal_id);
+    if (principalType === "user") return principalID || userID;
+  }
+  return "";
+}
+
+function companyUserDisplayName(user: CompanyUser | undefined, fallbackID: string): string {
+  const name = cleanKanbanText(user?.display_name);
+  const email = cleanKanbanText(user?.email);
+  return name || email || fallbackID || "this person";
+}
+
 export const KanbanContent: React.FC<KanbanContentProps> = ({
   accent,
   widgetId,
@@ -291,6 +318,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [boards, setBoards] = useState<KanbanBoard[]>([]);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [currentUserID, setCurrentUserID] = useState<string | null>(null);
+  const [activeLogicGateGVICAssignments, setActiveLogicGateGVICAssignments] = useState<LogicGateArenaGVICAssignment[]>([]);
   const [nodeGraphRevision, setNodeGraphRevision] = useState(0);
   const [explorerFolders, setExplorerFolders] = useState<CompanyExplorerFolder[]>([]);
   const [explorerFolderItems, setExplorerFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
@@ -614,6 +642,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, getKanbanColumnDisplayColor(column)])), [orderedColumns]);
   const columnTitleByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, column.title.trim().toLowerCase()])), [orderedColumns]);
   const arenaUserByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id.trim(), user])), [companyUsers]);
+  const activeLogicGateGeneratedUserID = useMemo(() => logicGateGeneratedUserID(activeLogicGateGVICAssignments), [activeLogicGateGVICAssignments]);
+  const activeLogicGateGeneratedUserLabel = useMemo(() => companyUserDisplayName(arenaUserByID.get(activeLogicGateGeneratedUserID), activeLogicGateGeneratedUserID), [activeLogicGateGeneratedUserID, arenaUserByID]);
   const arenaNodeByID = useMemo(() => {
     const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
     const nodeByID = new Map<string, NodeRecord>((snapshot.nodes ?? []).map((node) => [node.node_id, node]));
@@ -807,6 +837,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       setHighlightedEntity(null);
       setActiveLogicGateID("");
       setActiveLogicGateLabel("");
+      setActiveLogicGateGVICAssignments([]);
       setNodeEditorOverlay(null);
       setActiveBoardID(next[0]?.board_id ?? frameBoardIDRef.current);
     }
@@ -825,6 +856,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         const board = { ...view.board, logic_gate_id: view.board.logic_gate_id ?? logicGateID, title: logicGateLabel };
         upsertBoardInList(board);
         setActiveLogicGateLabel(logicGateLabel);
+        setActiveLogicGateGVICAssignments(logicGateArenaGVICAssignmentsFromUnknown(view.logic_gate?.gvic_assignments));
         const nextColumns = sortColumns(view.columns ?? []);
         const nextCards = hydrateKanbanCardsFromNodes(view.cards ?? [], view.nodes ?? []);
         kanbanProjectionSequenceRef.current = nextKanbanProjectionCursor(kanbanProjectionSequenceRef.current, view.projection_sequence);
@@ -850,6 +882,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       if (activeLogicGateID) {
         setActiveLogicGateID("");
         setActiveLogicGateLabel("");
+        setActiveLogicGateGVICAssignments([]);
       }
       return;
     }
@@ -872,6 +905,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setHighlightedEntity(nextHighlightedEntity);
     setActiveLogicGateID(logicGateID);
     setActiveLogicGateLabel(nextLabel);
+    setActiveLogicGateGVICAssignments([]);
     setNodeEditorOverlay(null);
     setActiveBoardID(nextBoardID);
     const cachedBoard = boardsRef.current.find((board) => board.board_id === nextBoardID || board.logic_gate_id === logicGateID);
@@ -1252,11 +1286,21 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             if (activeBoardIDRef.current === boardID) setActiveLogicGateLabel(title);
             return;
           }
+          if (envelope.type === "logic_gate_gvic_updated") {
+            const logicGateID = typeof data.logic_gate_id === "string" ? data.logic_gate_id : "";
+            if (!logicGateID) return;
+            invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
+            const boardID = logicGateKanbanBoardID(logicGateID);
+            if (activeBoardIDRef.current !== boardID && activeLogicGateID !== logicGateID) return;
+            setActiveLogicGateGVICAssignments(logicGateArenaGVICAssignmentsFromUnknown(data.gvic_assignments));
+            return;
+          }
           if (envelope.type === "logic_gate_deleted") {
             const logicGateID = typeof data.logic_gate_id === "string" ? data.logic_gate_id : "";
             if (logicGateID) {
               invalidateKanbanBoardListCache(apiBase, companyID);
               invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
+              if (activeLogicGateID === logicGateID || activeBoardIDRef.current === logicGateKanbanBoardID(logicGateID)) setActiveLogicGateGVICAssignments([]);
               removeBoardFromList(logicGateKanbanBoardID(logicGateID));
             }
             return;
@@ -1383,6 +1427,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         setHighlightedEntity(null);
         setActiveLogicGateID(logicGateID);
         setActiveLogicGateLabel(logicGateID ? humanLabelOrFallback(selection.label, "Logic Gate") : "");
+        if (!logicGateID) setActiveLogicGateGVICAssignments([]);
         setNodeEditorOverlay(null);
         setActiveBoardID(selection.entityID.trim());
         if (logicGateID) loadLogicGateArenaView(logicGateID, selection.entityID.trim());
@@ -1398,6 +1443,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         setHighlightedEntity(null);
         setActiveLogicGateID(logicGateID);
         setActiveLogicGateLabel(humanLabelOrFallback(selection.label, "Logic Gate"));
+        setActiveLogicGateGVICAssignments([]);
         setNodeEditorOverlay(null);
         setActiveBoardID(nextBoardID);
         const cachedBoard = boardsRef.current.find((board) => board.board_id === nextBoardID || board.logic_gate_id === logicGateID);
@@ -2065,7 +2111,24 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const dragAfter = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "after";
     const color = getKanbanConditionalColor(card, columnColorByID);
     const isRequestedCard = activeBoardIsLogicGate && isKanbanRequestedColumn({ column_id: card.column_id, title: columnTitleByID.get(card.column_id) ?? "" });
-    const isRequestedForCurrentUser = false;
+    const viewerUserID = (currentUserID ?? "").trim();
+    const requestedByUserID = (card.requested_by_user_id ?? "").trim();
+    const requestOwnerUserID = activeLogicGateGeneratedUserID.trim();
+    const isRequestedForCurrentUser = isRequestedCard
+      && Boolean(viewerUserID)
+      && Boolean(requestOwnerUserID)
+      && viewerUserID === requestOwnerUserID
+      && requestedByUserID !== viewerUserID;
+    const isRequestedByCurrentUser = isRequestedCard
+      && Boolean(viewerUserID)
+      && Boolean(requestedByUserID)
+      && requestedByUserID === viewerUserID
+      && requestedByUserID !== requestOwnerUserID;
+    const requestedStatusText = isRequestedCard && !isRequestedForCurrentUser
+      ? requestOwnerUserID
+        ? `Request sent to ${activeLogicGateGeneratedUserLabel}`
+        : "Request pending"
+      : undefined;
     return (
       <KanbanCardView
         key={card.card_id}
@@ -2167,7 +2230,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           onAccept: () => void resolveRequestedCard(card, true),
           onDecline: () => void resolveRequestedCard(card, false),
         } : undefined}
-        requestedStatusText={isRequestedCard && currentUserID !== null && !isRequestedForCurrentUser ? "Request pending" : undefined}
+        requestedStatusText={requestedStatusText}
+        requestedStatusAction={isRequestedByCurrentUser ? {
+          label: "Cancel",
+          title: "Cancel request",
+          busy: requestedCardActionID === card.card_id,
+          onClick: () => void resolveRequestedCard(card, false),
+        } : undefined}
       />
     );
   };
@@ -2386,6 +2455,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           const selectedLogicGateID = selectedBoard?.logic_gate_id ?? logicGateIDFromKanbanBoardID(nextBoardID);
           setActiveLogicGateID(selectedLogicGateID);
           setActiveLogicGateLabel(selectedLogicGateID && selectedBoard ? getKanbanBoardDisplayTitle(selectedBoard) : "");
+          setActiveLogicGateGVICAssignments([]);
           publishKanbanBoardSelectionToLinkedFrames(companyID, frameID, nextBoardID, selectedBoard ? getKanbanBoardDisplayTitle(selectedBoard) : nextBoardID);
           void refreshBoard(nextBoardID);
         }}

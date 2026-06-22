@@ -62,6 +62,9 @@ func (r *MemoryRepo) applyLogicGateGVICAssignmentCommand(input LogicGateGVICAssi
 	if err != nil {
 		return LogicGateGVICAssignmentCommandResult{}, err
 	}
+	if err := validateLogicGateGVICCommandAssignments(commandAssignments, operation); err != nil {
+		return LogicGateGVICAssignmentCommandResult{}, err
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -101,6 +104,10 @@ func (r *MemoryRepo) applyLogicGateGVICAssignmentCommand(input LogicGateGVICAssi
 			for _, existingAssignment := range assignments {
 				existingPrincipalType, existingPrincipalID := logicGateGVICAssignmentPrincipal(existingAssignment)
 				if existingPrincipalType+":"+existingPrincipalID == principalKey && existingAssignment.Role != commandAssignment.role {
+					changed = true
+					continue
+				}
+				if isSingleUserPrimaryGVICRole(commandAssignment.role) && existingAssignment.Role == commandAssignment.role && (existingPrincipalType != commandAssignment.principalType || existingPrincipalID != commandAssignment.principalID) {
 					changed = true
 					continue
 				}

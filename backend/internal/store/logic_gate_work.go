@@ -92,6 +92,16 @@ func logicGateWorkStatusRank(status string) int {
 	return 0
 }
 
+func requestedByUserIDForLogicGateStatus(status, requestedByUserID, fallbackUserID string) string {
+	if logicGateWorkStatusKeyOrDefault(status, status) != LogicGateWorkStatusRequested {
+		return ""
+	}
+	if clean := strings.TrimSpace(requestedByUserID); clean != "" {
+		return clean
+	}
+	return strings.TrimSpace(fallbackUserID)
+}
+
 func sortLogicGateWorkAssignments(items []domain.LogicGateWorkAssignment) {
 	sort.Slice(items, func(i, j int) bool {
 		leftRank := logicGateWorkStatusRank(items[i].Assignment.StatusKey)
@@ -203,19 +213,20 @@ func synthesizeLogicGateWorkCard(boardID string, assignment domain.NodeLogicGate
 	}
 	logicGateID := assignment.LogicGateID
 	return domain.KanbanCard{
-		CompanyID:        assignment.CompanyID,
-		BoardID:          boardID,
-		CardID:           cardID,
-		ColumnID:         logicGateWorkStatusKeyOrDefault(assignment.StatusKey, LogicGateWorkStatusPending),
-		NodeID:           assignment.NodeID,
-		LogicGateID:      &logicGateID,
-		NodeTitle:        node.Title,
-		IsIssue:          assignment.IsIssue,
-		Position:         assignment.Position,
-		DueDate:          cloneStringPointer(node.DueDate),
-		Priority:         cloneIntPointer(node.Priority),
-		CreatedTimestamp: assignment.CreatedTimestamp,
-		UpdatedTimestamp: assignment.UpdatedTimestamp,
+		CompanyID:         assignment.CompanyID,
+		BoardID:           boardID,
+		CardID:            cardID,
+		ColumnID:          logicGateWorkStatusKeyOrDefault(assignment.StatusKey, LogicGateWorkStatusPending),
+		NodeID:            assignment.NodeID,
+		LogicGateID:       &logicGateID,
+		RequestedByUserID: strings.TrimSpace(assignment.RequestedByUserID),
+		NodeTitle:         node.Title,
+		IsIssue:           assignment.IsIssue,
+		Position:          assignment.Position,
+		DueDate:           cloneStringPointer(node.DueDate),
+		Priority:          cloneIntPointer(node.Priority),
+		CreatedTimestamp:  assignment.CreatedTimestamp,
+		UpdatedTimestamp:  assignment.UpdatedTimestamp,
 	}
 }
 

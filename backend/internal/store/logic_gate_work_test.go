@@ -1,6 +1,7 @@
 package store
 
 import (
+	"miraeopus/backend/internal/domain"
 	"os"
 	"strings"
 	"testing"
@@ -68,6 +69,87 @@ func TestMemoryLogicGateWorkReadsAssignmentsWithoutKanbanCards(t *testing.T) {
 	}
 	if work.Cards[0].Priority == nil || *work.Cards[0].Priority != 2 || work.Cards[1].Priority == nil || *work.Cards[1].Priority != 4 {
 		t.Fatalf("synthesized card priorities = %+v, want node priorities 2 and 4", work.Cards)
+	}
+}
+
+func TestMemoryLogicGateRequestedAssignmentsTrackRequester(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "55555555-5555-4555-8555-555555555402"
+	repo.EnsureCompany(companyID, "Logic Gate Request Store Co")
+
+	requester := mustCreateGVICMembershipUser(t, repo, "logic-gate-requester", companyID)
+	responsible := mustCreateGVICMembershipUser(t, repo, "logic-gate-responsible", companyID)
+	logicGate, err := repo.CreateLogicGate(companyID, "Request Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: responsible.UserID}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Requested work")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 3
+	requested, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      LogicGateWorkStatusRequested,
+		Priority:    &priority,
+		PrioritySet: true,
+		ActorUserID: requester.UserID,
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus requested: %v", err)
+	}
+	if requested.Card.RequestedByUserID != requester.UserID || requested.Assignment.RequestedByUserID != requester.UserID {
+		t.Fatalf("requested sender card=%q assignment=%q, want %q", requested.Card.RequestedByUserID, requested.Assignment.RequestedByUserID, requester.UserID)
+	}
+
+	accepted, err := repo.MoveLogicGateNodeAssignment(LogicGateNodeAssignmentMoveInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      LogicGateWorkStatusPending,
+		ActorUserID: responsible.UserID,
+	})
+	if err != nil {
+		t.Fatalf("MoveLogicGateNodeAssignment accept: %v", err)
+	}
+	if accepted.Card.ColumnID != LogicGateWorkStatusPending || accepted.Card.RequestedByUserID != "" || accepted.Assignment.RequestedByUserID != "" {
+		t.Fatalf("accepted card=%+v assignment=%+v, want pending with cleared requester", accepted.Card, accepted.Assignment)
+	}
+
+	requestedAgain, err := repo.MoveLogicGateNodeAssignment(LogicGateNodeAssignmentMoveInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      LogicGateWorkStatusRequested,
+		ActorUserID: requester.UserID,
+	})
+	if err != nil {
+		t.Fatalf("MoveLogicGateNodeAssignment request again: %v", err)
+	}
+	if requestedAgain.Card.RequestedByUserID != requester.UserID {
+		t.Fatalf("requested again sender = %q, want %q", requestedAgain.Card.RequestedByUserID, requester.UserID)
+	}
+	denied, err := repo.MoveLogicGateNodeAssignment(LogicGateNodeAssignmentMoveInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      LogicGateWorkStatusBacklog,
+		ActorUserID: responsible.UserID,
+	})
+	if err != nil {
+		t.Fatalf("MoveLogicGateNodeAssignment deny: %v", err)
+	}
+	if denied.Card.ColumnID != LogicGateWorkStatusBacklog || denied.Card.RequestedByUserID != "" || denied.Assignment.RequestedByUserID != "" {
+		t.Fatalf("denied card=%+v assignment=%+v, want backlog with cleared requester", denied.Card, denied.Assignment)
 	}
 }
 
