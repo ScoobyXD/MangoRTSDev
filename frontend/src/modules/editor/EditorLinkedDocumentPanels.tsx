@@ -979,9 +979,9 @@ function GVICRoleEditor({
   }, [assignedPrincipalKeys, companyUserGroupMembers, companyUserGroups, companyUsers, draft, expandedGroupIDs, singleUserOnly]);
 
   useEffect(() => {
-    if (!singleUserOnly || assignments.length > 0) return;
+    if (!singleUserOnly) return;
     setAssignedOpen(false);
-  }, [assignments.length, singleUserOnly]);
+  }, [singleUserOnly]);
 
   useEffect(() => {
     if (!open && !assignedOpen) return;
@@ -1056,21 +1056,30 @@ function GVICRoleEditor({
         {showAssignedButton && (
           <button
             type="button"
-            aria-label={singleUserOnly ? `${label} user` : `${label} people`}
-            aria-haspopup="listbox"
-            aria-expanded={assignedOpen}
-            aria-controls={`${inputID}-assigned-users`}
+            aria-label={singleUserOnly && assignments[0] ? `Remove ${GVICAssignmentLabel(assignments[0])} from ${label}` : `${label} people`}
+            aria-haspopup={singleUserOnly ? undefined : "listbox"}
+            aria-expanded={singleUserOnly ? undefined : assignedOpen}
+            aria-controls={singleUserOnly ? undefined : `${inputID}-assigned-users`}
+            disabled={singleUserOnly && !canEdit}
             onClick={() => {
+              if (singleUserOnly) {
+                const assignment = assignments[0];
+                if (!canEdit || !assignment) return;
+                onRemovePrincipal(role, logicGateGVICAssignmentPrincipalType(assignment), logicGateGVICAssignmentPrincipalID(assignment));
+                setAssignedOpen(false);
+                setOpen(false);
+                return;
+              }
               setAssignedOpen((current) => !current);
               setOpen(false);
             }}
-            style={{ width: "fit-content", maxWidth: "100%", minHeight: 25, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedOpen ? "70" : "2f")}`, borderRadius: 999, background: assignedOpen ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: "pointer", padding: "2px 8px", font: "inherit", fontSize: 11, fontWeight: 800, boxShadow: assignedOpen ? `0 7px 15px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 7px rgba(174,174,192,0.15), -2px -2px 7px rgba(255,255,255,0.74), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
+            style={{ width: "fit-content", maxWidth: "100%", minHeight: 25, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedOpen ? "70" : "2f")}`, borderRadius: 999, background: assignedOpen ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: singleUserOnly && !canEdit ? "default" : "pointer", padding: "2px 8px", font: "inherit", fontSize: 11, fontWeight: 800, opacity: singleUserOnly && !canEdit ? 0.66 : 1, boxShadow: assignedOpen ? `0 7px 15px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 7px rgba(174,174,192,0.15), -2px -2px 7px rgba(255,255,255,0.74), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
           >
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assignedSummary}</span>
-            <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: 9, fontWeight: 900 }}>{assignedOpen ? "^" : "v"}</span>
+            <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: singleUserOnly ? 11 : 9, fontWeight: 900 }}>{singleUserOnly ? "x" : assignedOpen ? "^" : "v"}</span>
           </button>
         )}
-        {assignedOpen && showAssignedButton && (
+        {assignedOpen && showAssignedButton && !singleUserOnly && (
           <div
             id={`${inputID}-assigned-users`}
             role="listbox"
@@ -1170,13 +1179,14 @@ function GVICRoleEditor({
             ) : pickerRows.map((option) => {
               const optionAccent = option.principalType === "group" ? roleAccent : userAccentForName(option.label || option.principalID);
               const canAct = option.selectable || (option.rowType === "group" && option.expandable);
+              const rowIndent = 6 + option.depth * 18;
               return (
                 <div
                   key={`${option.principalType}:${option.principalID}`}
                   role="option"
                   aria-selected={false}
                   aria-disabled={!option.selectable}
-                  style={{ width: "100%", minHeight: 32, display: "grid", gridTemplateColumns: "18px 24px minmax(0, 1fr)", alignItems: "center", gap: 7, border: "1px solid transparent", borderRadius: 8, background: "transparent", color: "#111827", padding: "4px 7px", boxShadow: `inset 0 0 0 1px ${ruleColor || "transparent"}`, opacity: canAct ? 1 : 0.58 }}
+                  style={{ width: `calc(100% - ${rowIndent}px)`, marginLeft: rowIndent, minHeight: 32, display: "grid", gridTemplateColumns: "18px 24px minmax(0, 1fr)", alignItems: "center", gap: 7, border: "1px solid transparent", borderRadius: 8, background: "transparent", color: "#111827", padding: "4px 7px", boxShadow: `inset 0 0 0 1px ${ruleColor || "transparent"}`, opacity: canAct ? 1 : 0.58 }}
                 >
                   <button
                     type="button"
@@ -1206,7 +1216,7 @@ function GVICRoleEditor({
                     }}
                     style={{ minWidth: 0, display: "grid", gap: 1, border: "none", background: "transparent", color: "inherit", cursor: canAct ? "pointer" : "default", padding: 0, textAlign: "left", font: "inherit" }}
                   >
-                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800, color: optionAccent, paddingLeft: option.depth * 8 }}>{option.label}</span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800, color: optionAccent }}>{option.label}</span>
                     {option.meta && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 9.5, fontWeight: 500 }}>{option.meta}</span>}
                   </button>
                 </div>
