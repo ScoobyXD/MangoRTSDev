@@ -30,7 +30,7 @@ func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GV
 	deferCompanyExplorerFolderItems := input.MutationOrigin == MutationOriginMatrix || input.MutationOrigin == MutationOriginKanban
 	if input.CreateLogicGateHeader != "" {
 		stop := observeTiming(ctx, "repo.CreateGVICMatrixNode.logic_gate_writes")
-		logicGate, folderItem, deltas, err := createGVICMatrixLogicGateTx(ctx, tx, input, !deferCompanyExplorerFolderItems)
+		logicGate, _, deltas, err := createGVICMatrixLogicGateTx(ctx, tx, input, !deferCompanyExplorerFolderItems)
 		stop()
 		if err != nil {
 			return GVICMatrixNodeCreateResult{}, err
@@ -40,14 +40,6 @@ func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GV
 		result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
 		ownedProjectionDeltas = append(ownedProjectionDeltas, deltas...)
 		eventInputs := []DomainEventInput{logicGateCreatedWorkspaceEventInput(logicGate, meta)}
-		if deferCompanyExplorerFolderItems {
-			eventInputs = append([]DomainEventInput{
-				DeferredCompanyExplorerFolderItemAssignEventInput(input.CompanyID, "", CompanyExplorerSystemActiveLogicGatesKey, "logic_gate", logicGate.LogicGateID, 0, input.ActorUserID),
-			}, eventInputs...)
-		} else {
-			result.FolderItems = append(result.FolderItems, folderItem)
-			eventInputs = append([]DomainEventInput{folderItemAssignedWorkspaceEventInput(folderItem, meta)}, eventInputs...)
-		}
 		stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.domain_event_append")
 		events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)
 		stop()
@@ -111,16 +103,6 @@ func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GV
 	if err != nil {
 		return GVICMatrixNodeCreateResult{}, err
 	}
-	if !deferCompanyExplorerFolderItems {
-		stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.folder_item_read")
-		folderItem, err := postgresCompanyExplorerFolderItemForEntityTx(ctx, tx, input.CompanyID, "node", node.NodeID)
-		stop()
-		if err == nil {
-			result.FolderItems = append(result.FolderItems, folderItem)
-		} else if !errors.Is(err, ErrNotFound) {
-			return GVICMatrixNodeCreateResult{}, err
-		}
-	}
 	stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.gvic_matrix_projection_delta")
 	rows, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{node.NodeID}, nil)
 	stop()
@@ -128,11 +110,6 @@ func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GV
 		return GVICMatrixNodeCreateResult{}, err
 	}
 	eventInputs := []DomainEventInput{nodeCreatedWorkspaceEventInputWithMetadata(node, meta)}
-	if deferCompanyExplorerFolderItems {
-		eventInputs = append([]DomainEventInput{
-			DeferredCompanyExplorerFolderItemAssignEventInput(input.CompanyID, "", CompanyExplorerSystemActiveNodesKey, "node", node.NodeID, 0, input.ActorUserID),
-		}, eventInputs...)
-	}
 	stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.domain_event_append")
 	events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)
 	stop()

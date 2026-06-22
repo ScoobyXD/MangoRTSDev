@@ -161,19 +161,6 @@ func nextCompanyExplorerSQLRowPosition(ctx context.Context, tx *sql.Tx, companyI
 	return position, err
 }
 
-func createCompanyExplorerDefaultFolderTreeSQL(ctx context.Context, tx *sql.Tx, companyID, folderKind string, parent any, startPosition int, seeds []companyExplorerDefaultFolderDefinition) error {
-	return nil
-}
-
-func ensureCompanyExplorerDefaultFoldersSQL(ctx context.Context, tx *sql.Tx, companyID string) error {
-	return nil
-}
-
-func ensureCompanyExplorerSystemFolderSQL(ctx context.Context, tx *sql.Tx, companyID, systemKey string) (domain.CompanyExplorerFolder, error) {
-	defer observeTiming(ctx, "repo.ensureCompanyExplorerSystemFolderSQL")()
-	return domain.CompanyExplorerFolder{}, ErrNotFound
-}
-
 func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, folderKind, name string) (domain.CompanyExplorerFolder, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -1236,6 +1223,9 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 }
 
 func postgresDeleteKanbanBoardTx(ctx context.Context, tx *sql.Tx, companyID, boardID string) error {
+	if LogicGateIDFromKanbanBoardID(boardID) != "" {
+		return nil
+	}
 	return ErrNotFound
 }
 

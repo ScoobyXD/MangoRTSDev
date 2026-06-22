@@ -2426,16 +2426,11 @@ func TestWorkspaceEntityBatchCreatesNodesRelationshipsAndPositions(t *testing.T)
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode workspace entity batch response: %v", err)
 	}
-	if len(payload.EntityMappings) != 2 || len(payload.Nodes) != 2 || len(payload.Relationships) != 1 || len(payload.NodeMapPositions) != 2 || len(payload.FolderItems) != 2 {
+	if len(payload.EntityMappings) != 2 || len(payload.Nodes) != 2 || len(payload.Relationships) != 1 || len(payload.NodeMapPositions) != 2 || len(payload.FolderItems) != 0 {
 		t.Fatalf("unexpected batch response counts: mappings=%d nodes=%d relationships=%d positions=%d folder_items=%d", len(payload.EntityMappings), len(payload.Nodes), len(payload.Relationships), len(payload.NodeMapPositions), len(payload.FolderItems))
 	}
 	if payload.Relationships[0].NodeIDA == "" || payload.Relationships[0].NodeIDB == "" || payload.Relationships[0].NodeIDA == payload.Relationships[0].NodeIDB {
 		t.Fatalf("relationship did not resolve client ids: %+v", payload.Relationships[0])
-	}
-	for _, item := range payload.FolderItems {
-		if item.FolderID == "" || item.ItemType != "node" || item.ItemID == "" {
-			t.Fatalf("node batch folder item = %+v, want active-node placement", item)
-		}
 	}
 }
 
@@ -2658,22 +2653,8 @@ func TestWorkspaceEntityBatchAssignsCreatedLogicGateGVICToCreator(t *testing.T) 
 	if len(payload.LogicGates) != 1 {
 		t.Fatalf("logic gates = %d, want 1", len(payload.LogicGates))
 	}
-	if len(payload.FolderItems) != 1 || payload.FolderItems[0].ItemType != "logic_gate" || payload.FolderItems[0].ItemID != payload.LogicGates[0].LogicGateID {
-		t.Fatalf("logic gate folder items = %+v, want active Logic Gate placement", payload.FolderItems)
-	}
-	logicFolders, err := repo.ListCompanyExplorerFolders(companyID, "logic_gate")
-	if err != nil {
-		t.Fatalf("ListCompanyExplorerFolders logic_gate error = %v", err)
-	}
-	activeFolderID := ""
-	for _, folder := range logicFolders {
-		if folder.SystemKey != nil && *folder.SystemKey == store.CompanyExplorerSystemActiveLogicGatesKey {
-			activeFolderID = folder.FolderID
-			break
-		}
-	}
-	if activeFolderID == "" || payload.FolderItems[0].FolderID != activeFolderID {
-		t.Fatalf("logic gate folder item folder_id = %q, want active Logic Gates folder %q", payload.FolderItems[0].FolderID, activeFolderID)
+	if len(payload.FolderItems) != 0 {
+		t.Fatalf("logic gate folder items = %+v, want none without explicit folder", payload.FolderItems)
 	}
 	assignments := payload.LogicGates[0].GVICAssignments
 	if len(assignments) != 1 || assignments[0].Role != domain.GVICRoleGenerated || assignments[0].UserID != creator.UserID {

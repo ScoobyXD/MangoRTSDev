@@ -368,7 +368,7 @@ func TestCompanyExplorerFolderGETDoesNotSeedDefaults(t *testing.T) {
 	}
 }
 
-func TestCompanyExplorerDefaultFoldersSeedOnceAndProtectSystemFolders(t *testing.T) {
+func TestCompanyExplorerProvisioningDoesNotCreateDefaultOrSystemFolders(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -407,58 +407,8 @@ func TestCompanyExplorerDefaultFoldersSeedOnceAndProtectSystemFolders(t *testing
 	}
 
 	folders := listFolders()
-	var logicRootID string
-	var systemFolderID string
-	childNames := map[string]bool{}
-	systemNames := map[string]bool{}
-	for _, folder := range folders {
-		if folder.Name == "Logic Gates" && folder.FolderKind == "logic_gate" && folder.ParentFolderID == nil {
-			logicRootID = folder.FolderID
-		}
-		if folder.SystemKey != nil {
-			systemNames[folder.Name] = true
-			if folder.Name == "History" {
-				systemFolderID = folder.FolderID
-			}
-		}
-	}
-	for _, folder := range folders {
-		if folder.ParentFolderID != nil && *folder.ParentFolderID == logicRootID {
-			childNames[folder.Name] = true
-		}
-	}
-	if logicRootID == "" || len(childNames) != 5 || !childNames["Product"] || !childNames["Design"] || !childNames["Production"] || !childNames["Supply Chain"] || !childNames["QA"] {
-		t.Fatalf("default logic gate folders = root:%q children:%v", logicRootID, childNames)
-	}
-	if len(systemNames) != 4 || !systemNames["Active Nodes"] || !systemNames["Active Logic Gates"] || !systemNames["Active Projects"] || !systemNames["History"] || systemFolderID == "" {
-		t.Fatalf("system folders = id:%q names:%v", systemFolderID, systemNames)
-	}
-
-	deleteSystemReq := httptest.NewRequest(http.MethodDelete, "/v1/company-explorer/folders/"+systemFolderID+"?company_id="+companyID, nil)
-	deleteSystemRec := httptest.NewRecorder()
-	handler.ServeHTTP(deleteSystemRec, deleteSystemReq)
-	if deleteSystemRec.Code != http.StatusConflict {
-		t.Fatalf("DELETE system folder status = %d, want %d body=%s", deleteSystemRec.Code, http.StatusConflict, deleteSystemRec.Body.String())
-	}
-
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/company-explorer/folders/"+logicRootID+"?company_id="+companyID, nil)
-	deleteRec := httptest.NewRecorder()
-	handler.ServeHTTP(deleteRec, deleteReq)
-	if deleteRec.Code != http.StatusOK {
-		t.Fatalf("DELETE default folder status = %d, want %d body=%s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
-	}
-	foldersAfterDelete := listFolders()
-	systemCount := 0
-	for _, folder := range foldersAfterDelete {
-		if folder.FolderKind == "logic_gate" && folder.SystemKey == nil {
-			t.Fatalf("logic gate default folder was recreated after delete: %+v", folder)
-		}
-		if folder.SystemKey != nil {
-			systemCount++
-		}
-	}
-	if systemCount != 4 {
-		t.Fatalf("system folder count after default delete = %d, want 4", systemCount)
+	if len(folders) != 0 {
+		t.Fatalf("provisioned folders = %+v, want none", folders)
 	}
 }
 

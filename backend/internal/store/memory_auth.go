@@ -145,7 +145,6 @@ func (r *MemoryRepo) CreateCompany(name string) (domain.Company, error) {
 		UpdatedTimestamp: now,
 	}
 	r.companies[company.CompanyID] = company
-	r.ensureCompanyExplorerDefaultFoldersLocked(company.CompanyID)
 	return company, nil
 }
 
@@ -204,7 +203,6 @@ func (r *MemoryRepo) EnsureCompany(companyID, name string) domain.Company {
 		company.UpdatedTimestamp = now
 	}
 	r.companies[companyID] = company
-	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
 	return company
 }
 

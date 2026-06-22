@@ -343,11 +343,6 @@ where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).S
 		}
 		return result, nil
 	}
-	activeNodeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
-	if err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
-
 	board := synthesizeKanbanBoardFromLogicGate(logicGate, 1000)
 	columns := synthesizeLogicGateWorkColumns(input.CompanyID, board.BoardID, logicGate.CreatedTimestamp)
 	column, err := resolveLogicGateAssignmentColumn(columns, input.ColumnID, input.Status)
@@ -396,10 +391,6 @@ for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrN
 		if _, err := tx.ExecContext(ctx, `
 insert into nodes (company_id, node_id, name, priority, created_timestamp)
 values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, *input.Priority); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
-		folderItem, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, input.CompanyID, activeNodeFolder.FolderID, "node", nodeID, 0)
-		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -486,7 +477,6 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 		result.Assignments = append(result.Assignments, assignment)
 		result.EmailPlacements = append(result.EmailPlacements, placement)
 		result.EmailProvenance = append(result.EmailProvenance, provenance)
-		result.FolderItems = append(result.FolderItems, folderItem)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
 
@@ -581,13 +571,9 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 }
 
 func (r *PostgresRepo) convertCommunicationsTriageItemsToExplorerTargetTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
-	activeNodeFolder, err := ensureCompanyExplorerSystemFolderSQL(ctx, tx, input.CompanyID, CompanyExplorerSystemActiveNodesKey)
-	if err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
-	legacyFolderID := activeNodeFolder.FolderID
-	if input.Target.Mode == CommunicationsEmailConversionTargetFolder && input.Target.ParentEntityID == "" && input.Target.FolderID != "" {
-		legacyFolderID = input.Target.FolderID
+	targetParentEntityID := communicationsExplorerTargetParentEntityID(input.Target)
+	if targetParentEntityID != "" {
+		input.Target.ParentEntityID = targetParentEntityID
 	}
 	if input.Target.Mode == CommunicationsEmailConversionTargetProject {
 		var projectExists bool
@@ -598,8 +584,8 @@ func (r *PostgresRepo) convertCommunicationsTriageItemsToExplorerTargetTx(ctx co
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
 	}
-	if input.Target.ParentEntityID != "" {
-		if err := postgresCompanyExplorerV2ParentExistsAndCanEdit(ctx, tx, input.CompanyID, input.Target.ParentEntityID, input.PermissionUserID); err != nil {
+	if targetParentEntityID != "" {
+		if err := postgresCompanyExplorerV2ParentExistsAndCanEdit(ctx, tx, input.CompanyID, targetParentEntityID, input.PermissionUserID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 	}
@@ -629,10 +615,6 @@ insert into nodes (company_id, node_id, name, priority, created_timestamp)
 values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, *input.Priority); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		folderItem, _, err := assignCompanyExplorerFolderItemSQL(ctx, tx, input.CompanyID, legacyFolderID, "node", nodeID, 0)
-		if err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
 		if _, err := tx.ExecContext(ctx, `
 insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
 values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28), 120+float64(index*28)); err != nil {
@@ -646,7 +628,7 @@ delete from communications_triage_items
 where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if input.Target.ParentEntityID != "" {
+		if targetParentEntityID != "" {
 			row, err := upsertCommunicationsExplorerV2NodeEdgeTx(ctx, tx, input, nodeID, nodeTitle)
 			if err != nil {
 				return CommunicationsTriageConversionResult{}, err
@@ -679,7 +661,6 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 			ThreadID:  strings.TrimSpace(message.ThreadID),
 			NodeID:    nodeID,
 		})
-		result.FolderItems = append(result.FolderItems, folderItem)
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
 	return result, nil
@@ -704,7 +685,7 @@ select exists (
 }
 
 func upsertCommunicationsExplorerV2NodeEdgeTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, nodeID, nodeTitle string) (CompanyExplorerV2Row, error) {
-	parentEntityID := strings.TrimSpace(input.Target.ParentEntityID)
+	parentEntityID := communicationsExplorerTargetParentEntityID(input.Target)
 	var parentFolderID any
 	if parentEntityID == "" || parentEntityID == input.CompanyID {
 		parentEntityID = input.CompanyID

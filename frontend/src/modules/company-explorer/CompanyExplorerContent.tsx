@@ -2750,6 +2750,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         dispatchExplorerStore({ type: "replaceNode", node: assignment.node });
         upsertNodeRelationshipGraphNode(apiBase, companyID, assignment.node);
         if (targetLogicGateTreeID) setExpanded((previous) => new Set(previous).add(targetLogicGateTreeID));
+        if (companyExplorerV2Active) {
+          activeCompanyExplorerBranchesRef.current.add(companyExplorerBranchKey(targetLogicGateID));
+          await refreshCompanyExplorerBranch(targetLogicGateID);
+        }
         requestGVICExplorerProjectionRefreshRef.current();
       }
       if (!createdFolderID && position && position > 0) {
@@ -2759,7 +2763,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_create_node");
     }
-  }, [apiBase, companyExplorerV2Active, companyExplorerV2RootEntityID, companyID, expandCreatedItemTarget, requestJSON, upsertOptimisticFolderItem]);
+  }, [apiBase, companyExplorerBranchKey, companyExplorerV2Active, companyExplorerV2RootEntityID, companyID, expandCreatedItemTarget, refreshCompanyExplorerBranch, requestJSON, upsertOptimisticFolderItem]);
 
   const createLogicGateAtFolder = useCallback(async (parentFolderID: string, position?: number, GVICRole?: string) => {
     setError("");

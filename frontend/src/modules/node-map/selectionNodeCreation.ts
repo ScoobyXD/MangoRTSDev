@@ -1,10 +1,10 @@
 import { readAuthConfig } from "../../auth/cognitoAuth";
 import { createRequestJSON } from "../api/requestJSON";
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { markWorkspaceSnapshotScopeStale } from "../workspace/workspaceSnapshotCache";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
 import type { NodeMapCommandRequest } from "./nodeMapCommands";
-import { getNodeRelationshipGraphSnapshot, refreshNodeRelationshipGraphSnapshot, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "./NodeRelationshipGraph";
+import { getNodeRelationshipGraphSnapshot, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "./NodeRelationshipGraph";
 import { primeNodeRecordStoreCaches } from "./NodeRecordStore";
 import { buildLinkedNodePayloadFromSourceSide } from "./relationshipProjection";
 import { MINI_GRID, NODE_H, NODE_W, resolveOpenNodeMapPosition, type NodeDirection, type NodeRecord, type NodeRelationship, type PersistedMapPosition } from "./shared";
@@ -12,7 +12,6 @@ import { MINI_GRID, NODE_H, NODE_W, resolveOpenNodeMapPosition, type NodeDirecti
 const WORLD_W = 12800;
 const WORLD_H = 8800;
 const MAX_TEXT_SELECTION_NODE_TITLE_LENGTH = 500;
-const ACTIVE_NODES_SYSTEM_KEY = "active_nodes";
 
 export type SelectionNodeRelationshipKind = "parent" | "peer" | "child";
 
@@ -34,20 +33,6 @@ function relationshipDirectionForSelectionKind(kind: SelectionNodeRelationshipKi
   if (kind === "parent") return "top";
   if (kind === "child") return "bottom";
   return "right";
-}
-
-function readActiveNodesFolderID(folders: CompanyExplorerFolder[] | undefined): string {
-  return (folders ?? []).find((folder) => folder.folder_kind === "node" && folder.system_key === ACTIVE_NODES_SYSTEM_KEY)?.folder_id ?? "";
-}
-
-async function resolveActiveNodesFolderID(apiBase: string, companyID: string): Promise<string> {
-  const cached = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-  const cachedFolderID = readActiveNodesFolderID(cached.folders);
-  if (cachedFolderID) return cachedFolderID;
-
-  await refreshNodeRelationshipGraphSnapshot(apiBase, companyID).catch(() => undefined);
-  const refreshed = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-  return readActiveNodesFolderID(refreshed.folders);
 }
 
 function readOpenSelectionNodePosition(
@@ -108,7 +93,7 @@ export async function createNodeFromSelectionTitle(args: {
   const relationshipPayload = sourceNodeID && args.relationshipKind
     ? buildLinkedNodePayloadFromSourceSide(relationshipDirectionForSelectionKind(args.relationshipKind))
     : null;
-  const folderID = args.folderID?.trim() || await resolveActiveNodesFolderID(apiBase, companyID);
+  const folderID = args.folderID?.trim() ?? "";
   const response = await createWorkspaceEntityBatchCommand<TextSelectionNodeCreateResponse>({
     companyID,
     entityKind: "node",

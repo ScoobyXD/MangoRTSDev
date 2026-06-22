@@ -24,24 +24,10 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		}
 	}
 
-	targetFolderID := input.FolderID
+	targetFolderID := strings.TrimSpace(input.FolderID)
 	targetFolderKind := input.EntityKind
-	if input.EntityKind == "node" {
-		activeFolder, ok := r.ensureCompanyExplorerSystemFolderLocked(input.CompanyID, CompanyExplorerSystemActiveNodesKey)
-		if !ok {
-			return WorkspaceEntityBatchResult{}, ErrNotFound
-		}
-		targetFolderID = activeFolder.FolderID
-		targetFolderKind = activeFolder.FolderKind
-	} else if input.FolderID == "" {
-		activeFolder, err := r.activeLogicGatesFolderLocked(input.CompanyID)
-		if err != nil {
-			return WorkspaceEntityBatchResult{}, err
-		}
-		targetFolderID = activeFolder.FolderID
-		targetFolderKind = activeFolder.FolderKind
-	} else if input.FolderID != "" {
-		folder, ok := r.folders[key(input.CompanyID, input.FolderID)]
+	if targetFolderID != "" {
+		folder, ok := r.folders[key(input.CompanyID, targetFolderID)]
 		if !ok {
 			return WorkspaceEntityBatchResult{}, ErrNotFound
 		}

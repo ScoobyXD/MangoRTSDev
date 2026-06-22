@@ -315,6 +315,20 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
         />
       ))}
       <div style={{ height: virtualizedTree.bottomSpacer }} />
+      {!explorerSearchActive && (
+        <div
+          data-company-explorer-root-context-zone="true"
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onOpenContextMenu(event, null);
+          }}
+          style={{
+            minHeight: 96,
+            cursor: "default",
+          }}
+        />
+      )}
     </div>
   );
 };

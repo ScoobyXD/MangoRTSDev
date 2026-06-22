@@ -522,11 +522,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	eventInputs := logicGateAssignmentSavedWorkspaceEventInputs(result, meta)
 	if createdNode.CompanyID != "" {
 		eventInputs = append([]DomainEventInput{nodeCreatedWorkspaceEventInputWithMetadata(createdNode, meta)}, eventInputs...)
-		if deferCreatedNodeFolderItem {
-			eventInputs = append([]DomainEventInput{
-				DeferredCompanyExplorerFolderItemAssignEventInput(input.CompanyID, "", CompanyExplorerSystemActiveNodesKey, "node", createdNode.NodeID, 0, input.ActorUserID),
-			}, eventInputs...)
-		}
 	}
 	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.domain_event_append")
 	events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)

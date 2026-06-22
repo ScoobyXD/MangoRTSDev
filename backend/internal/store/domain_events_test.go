@@ -244,7 +244,7 @@ func TestWorkspaceDerivedProjectionRequestedEventInputUsesTaskPayload(t *testing
 	input := WorkspaceDerivedProjectionRequestedEventInput(
 		"company-1",
 		[]WorkspaceDerivedProjectionTask{
-			DeferredCompanyExplorerFolderItemAssignTask("", CompanyExplorerSystemActiveNodesKey, "node", "node-1", 0),
+			DeferredCompanyExplorerFolderItemAssignTask("", "active_nodes", "node", "node-1", 0),
 			DeferredNodeMapPositionUpsertTask(domainNodeMapPositionForTest("company-1", "node-1")),
 		},
 		"user-1",
