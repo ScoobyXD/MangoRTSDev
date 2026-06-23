@@ -46,7 +46,7 @@ import { useCompanyExplorerKeyboard } from "./useCompanyExplorerKeyboard";
 import { useCompanyExplorerSelectionBridge } from "./useCompanyExplorerSelectionBridge";
 import { useCompanyExplorerTreeModel } from "./useCompanyExplorerTreeModel";
 import { COMPANY_EXPLORER_TREE_ROW_HEIGHT, useCompanyExplorerVirtualTree } from "./useCompanyExplorerVirtualTree";
-import { buildCompanyExplorerSearchTreeRows, buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "./companyExplorerTreeRows";
+import { buildCompanyExplorerSearchTreeRows, buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName, isCompanyExplorerV2FolderItemPlacementRow } from "./companyExplorerTreeRows";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
@@ -2634,7 +2634,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
                 const existing = companyExplorerV2Rows.find((row) => (
                   row.entity_type === assignment.item_type
                   && (row.resource_id || row.entity_id) === assignment.item_id
-                  && row.edge_id
+                  && isCompanyExplorerV2FolderItemPlacementRow(row, companyExplorerV2Rows)
                 ));
                 return {
                   edge_id: existing?.edge_id,
@@ -2652,7 +2652,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           const existing = companyExplorerV2Rows.find((row) => (
             row.entity_type === assignment.item_type
             && (row.resource_id || row.entity_id) === assignment.item_id
-            && row.edge_id
+            && isCompanyExplorerV2FolderItemPlacementRow(row, companyExplorerV2Rows)
           ));
           if (existing?.edge_id) {
             return requestJSON<CompanyExplorerV2Row>(`/v1/company-explorer/items/${existing.edge_id}`, {
@@ -3624,7 +3624,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
   const canPlaceExplorerFolderAtTarget = useCallback((source: ExplorerTreeNode | undefined, target: ExplorerTreeNode): boolean => {
     if (isProtectedGVICRoleRow(target)) return false;
-    if (!source || source.kind !== "folder" || !source.folderID || !source.folderKind || source.id === target.id) return false;
+    if (!source || source.kind !== "folder" || !source.folderID || !source.folderKind || source.protectedDefaultFolder || source.id === target.id) return false;
     const targetKind = getExplorerRowOrderKind(target);
     if (!targetKind) return false;
     if (isGVICScopedRow(target) && source.folderKind !== targetKind) return false;
@@ -3861,7 +3861,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const createFolderScope = resolveCreateFolderScope(targets.preferredFolderParentID, targets.folderScopeType, targets.folderScopeID);
     const deleteRows = row ? (selectedTreeIDs.has(row.id) ? treeRows.filter((candidate) => selectedTreeIDs.has(candidate.id)) : [row]) : [];
     const deleteTargets = getDeleteTargetsForRows(deleteRows);
-    const permissionsTarget = !protectedGVICRow && row?.kind === "folder" && row.folderID && !row.systemKey && (!row.entityType || row.entityType === "folder")
+    const permissionsTarget = !protectedGVICRow && row?.kind === "folder" && row.folderID && !row.systemKey && !row.protectedDefaultFolder && (!row.entityType || row.entityType === "folder")
       ? {
         folderID: row.folderID,
         label: row.label,

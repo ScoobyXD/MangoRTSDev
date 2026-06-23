@@ -36,6 +36,7 @@ func scanCompanyExplorerV2Row(row companyExplorerV2RowScanner) (CompanyExplorerV
 	if strings.TrimSpace(nativeContext) != "" {
 		_ = json.Unmarshal([]byte(nativeContext), &item.NativeContext)
 	}
+	applyCompanyExplorerDefaultFolderNativeContext(&item)
 	return item, nil
 }
 
@@ -680,6 +681,9 @@ func (r *PostgresRepo) UpdateCompanyExplorerV2Folder(input CompanyExplorerV2Fold
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
+	if err := protectCompanyExplorerDefaultFolderMutation(input.CompanyID, input.EntityID); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
 	ctx := context.Background()
 	result, err := r.db.ExecContext(ctx, `
 update company_explorer_folders
@@ -872,6 +876,9 @@ func (r *PostgresRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string)
 	entityID = cleanUUIDText(entityID)
 	if companyID == "" || entityID == "" {
 		return ErrInvalid
+	}
+	if err := protectCompanyExplorerDefaultFolderMutation(companyID, entityID); err != nil {
+		return err
 	}
 	result, err := r.db.ExecContext(context.Background(), `
 delete from company_explorer_folders

@@ -20,6 +20,7 @@ export type ExplorerCreationContextRow = {
   folderScopeType?: CompanyExplorerFolderScopeType;
   folderScopeID?: string;
   systemKey?: CompanyExplorerSystemFolderKey;
+  protectedDefaultFolder?: boolean;
   syntheticKind?: string;
   GVICRole?: string;
 };
@@ -391,7 +392,7 @@ export type ExplorerDeleteTarget =
 
 export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | null): ExplorerDeleteTarget | null {
   if (!row) return null;
-  if (row.systemKey) return null;
+  if (row.systemKey || row.protectedDefaultFolder || row.syntheticKind === "search_path") return null;
   const entityID = row.entityID?.trim() ?? "";
   const entityType = row.entityType;
   const edgeID = row.edgeID?.trim() ?? "";
@@ -428,7 +429,7 @@ export function resolveExplorerRenameTarget(row?: ExplorerCreationContextRow | n
   | { kind: "project"; id: string }
   | null {
   if (!row) return null;
-  if (row.systemKey) return null;
+  if (row.systemKey || row.protectedDefaultFolder || row.syntheticKind === "search_path") return null;
   if (row.kind === "folder" && row.folderID && (!row.entityType || row.entityType === "folder")) return { kind: "folder", id: row.folderID };
   if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };

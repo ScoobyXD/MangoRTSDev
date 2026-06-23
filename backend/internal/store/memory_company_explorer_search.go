@@ -188,16 +188,17 @@ func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (Co
 		_ = priority
 		_ = matchPriority
 		matches = append(matches, CompanyExplorerSearchResult{
-			CompanyID:        entity.CompanyID,
-			ResourceType:     entity.EntityType,
-			ResourceID:       resourceID,
-			EntityID:         entity.EntityID,
-			DisplayName:      entity.Name,
-			MatchReason:      reason,
-			LocationPath:     r.companyExplorerV2LocationPathLocked(query.CompanyID, entity.EntityID),
-			HasChildren:      len(r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, entity.EntityID)) > 0,
-			CreatedTimestamp: entity.CreatedTimestamp,
-			UpdatedTimestamp: entity.UpdatedTimestamp,
+			CompanyID:              entity.CompanyID,
+			ResourceType:           entity.EntityType,
+			ResourceID:             resourceID,
+			EntityID:               entity.EntityID,
+			DisplayName:            entity.Name,
+			MatchReason:            reason,
+			LocationPath:           r.companyExplorerV2LocationPathLocked(query.CompanyID, entity.EntityID),
+			ProtectedDefaultFolder: entity.EntityType == CompanyExplorerV2EntityFolder && isCompanyExplorerDefaultFolderID(query.CompanyID, entity.EntityID),
+			HasChildren:            len(r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, entity.EntityID)) > 0,
+			CreatedTimestamp:       entity.CreatedTimestamp,
+			UpdatedTimestamp:       entity.UpdatedTimestamp,
 		})
 	}
 	for _, entity := range r.companyExplorerV2Entities {

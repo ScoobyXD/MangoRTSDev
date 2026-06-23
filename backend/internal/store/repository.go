@@ -410,16 +410,17 @@ type CompanyExplorerSearchQuery struct {
 }
 
 type CompanyExplorerSearchResult struct {
-	CompanyID        string                           `json:"company_id"`
-	ResourceType     string                           `json:"resource_type"`
-	ResourceID       string                           `json:"resource_id"`
-	EntityID         string                           `json:"entity_id"`
-	DisplayName      string                           `json:"display_name"`
-	MatchReason      string                           `json:"match_reason"`
-	LocationPath     []CompanyExplorerLocationSegment `json:"location_path"`
-	HasChildren      bool                             `json:"has_children"`
-	CreatedTimestamp time.Time                        `json:"created_timestamp"`
-	UpdatedTimestamp time.Time                        `json:"updated_timestamp"`
+	CompanyID              string                           `json:"company_id"`
+	ResourceType           string                           `json:"resource_type"`
+	ResourceID             string                           `json:"resource_id"`
+	EntityID               string                           `json:"entity_id"`
+	DisplayName            string                           `json:"display_name"`
+	MatchReason            string                           `json:"match_reason"`
+	LocationPath           []CompanyExplorerLocationSegment `json:"location_path"`
+	ProtectedDefaultFolder bool                             `json:"protected_default_folder,omitempty"`
+	HasChildren            bool                             `json:"has_children"`
+	CreatedTimestamp       time.Time                        `json:"created_timestamp"`
+	UpdatedTimestamp       time.Time                        `json:"updated_timestamp"`
 }
 
 type CompanyExplorerSearchResults struct {

@@ -35,6 +35,7 @@ func scanCompanyExplorerSearchResult(row companyExplorerSearchResultScanner) (Co
 	if item.LocationPath == nil {
 		item.LocationPath = []CompanyExplorerLocationSegment{}
 	}
+	item.ProtectedDefaultFolder = item.ResourceType == CompanyExplorerV2EntityFolder && isCompanyExplorerDefaultFolderID(item.CompanyID, item.EntityID)
 	return item, nil
 }
 
