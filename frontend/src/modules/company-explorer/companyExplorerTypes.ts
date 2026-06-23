@@ -38,7 +38,7 @@ export type ExplorerTreeNode = {
   hasChildren?: boolean;
   parentLogicGateID?: string;
   GVICRole?: LogicGateGVICRole | "other";
-  syntheticKind?: "GVIC_folder" | "logic_gate_children" | "default_scope_folder";
+  syntheticKind?: "GVIC_folder" | "logic_gate_children" | "default_scope_folder" | "search_path";
 };
 
 export type ExplorerDragPayload = ExplorerDropPayload;

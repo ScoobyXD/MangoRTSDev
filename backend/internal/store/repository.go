@@ -296,6 +296,7 @@ type CompanyExplorerRepository interface {
 	ListVisibleCompanyExplorerFolders(companyID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error)
 	ListCompanyExplorerV2RootRows(query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error)
 	ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error)
+	SearchCompanyExplorer(query CompanyExplorerSearchQuery) (CompanyExplorerSearchResults, error)
 	GetCompanyExplorerV2Entity(companyID, entityID, permissionUserID string) (CompanyExplorerV2Row, error)
 	GetCompanyExplorerV2FolderDefaultAccess(companyID, entityID string) (string, error)
 	CreateCompanyExplorerV2Folder(input CompanyExplorerV2FolderInput) (CompanyExplorerV2Row, error)
@@ -394,6 +395,36 @@ type CompanyExplorerV2Rows struct {
 	Rows []CompanyExplorerV2Row `json:"rows"`
 }
 
+type CompanyExplorerLocationSegment struct {
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+	ResourceID string `json:"resource_id,omitempty"`
+	Name       string `json:"name"`
+}
+
+type CompanyExplorerSearchQuery struct {
+	CompanyID        string
+	Query            string
+	PermissionUserID string
+	Limit            int
+}
+
+type CompanyExplorerSearchResult struct {
+	CompanyID        string                           `json:"company_id"`
+	ResourceType     string                           `json:"resource_type"`
+	ResourceID       string                           `json:"resource_id"`
+	EntityID         string                           `json:"entity_id"`
+	DisplayName      string                           `json:"display_name"`
+	MatchReason      string                           `json:"match_reason"`
+	LocationPath     []CompanyExplorerLocationSegment `json:"location_path"`
+	HasChildren      bool                             `json:"has_children"`
+	CreatedTimestamp time.Time                        `json:"created_timestamp"`
+	UpdatedTimestamp time.Time                        `json:"updated_timestamp"`
+}
+
+type CompanyExplorerSearchResults struct {
+	Results []CompanyExplorerSearchResult `json:"results"`
+}
 type CompanyExplorerV2Row struct {
 	CompanyID        string            `json:"company_id"`
 	EntityID         string            `json:"entity_id"`
@@ -771,16 +802,17 @@ type ProjectManagementTimelineMutationResult struct {
 }
 
 type ProjectInput struct {
-	CompanyID     string
-	ProjectID     string
-	Name          string
-	Status        string
-	Health        string
-	AccountIDs    []string
-	AccountIDsSet bool
-	TeamIDs       []string
-	TeamIDsSet    bool
-	ActorUserID   string
+	CompanyID                       string
+	ProjectID                       string
+	Name                            string
+	Status                          string
+	Health                          string
+	AccountIDs                      []string
+	AccountIDsSet                   bool
+	TeamIDs                         []string
+	TeamIDsSet                      bool
+	ActorUserID                     string
+	CompanyExplorerDefaultPlacement bool
 }
 
 type ResourceGVICAssignmentInput struct {

@@ -21,7 +21,7 @@ import {
   shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
 import { getExplorerRowContainerID } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
-import { buildCompanyExplorerTreeRows, buildCompanyExplorerV2TreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
+import { buildCompanyExplorerSearchTreeRows, buildCompanyExplorerTreeRows, buildCompanyExplorerV2TreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
 import { buildCompanyExplorerContextMenuSections, createInitialCompanyExplorerExpandedRows, filterExplorerRowsForCustomTopLevel } from "../../../../frontend/src/modules/company-explorer/CompanyExplorerContentModel.js";
 
 const systemFolders = [
@@ -125,6 +125,32 @@ run("tree rows render root content without a synthetic Company folder", () => {
   assert.equal(rows[rows.length - 1]?.depth, 0);
 });
 
+
+run("search tree rows render backend location path as nested explorer rows", () => {
+  const rows = buildCompanyExplorerSearchTreeRows([
+    {
+      company_id: "c",
+      resource_type: "logic_gate",
+      resource_id: "gate-a",
+      entity_id: "gate-a",
+      display_name: "Search Gate",
+      match_reason: "name_exact",
+      location_path: [
+        { entity_type: "folder", entity_id: "unfiled", name: "Unfiled" },
+        { entity_type: "folder", entity_id: "logic-gates", name: "Logic Gates" },
+      ],
+      has_children: true,
+      created_timestamp: "3",
+      updated_timestamp: "3",
+    },
+  ]);
+
+  assert.deepEqual(rows.map((row) => row.label), ["Unfiled", "Logic Gates", "Search Gate"]);
+  assert.deepEqual(rows.map((row) => row.depth), [0, 1, 2]);
+  assert.deepEqual(rows.map((row) => row.kind), ["folder", "folder", "logic_gate"]);
+  assert.equal(rows[2]?.logicGateID, "gate-a");
+  assert.equal(rows[2]?.folderLabel, "Unfiled / Logic Gates");
+});
 run("v2 tree rows preserve the existing tree shell ids and metadata", () => {
   const rows = buildCompanyExplorerV2TreeRows({
     expanded: new Set(["folder-root", "workspace-folder-folder-a", "logic-gate-gate-a"]),

@@ -46,7 +46,7 @@ import { useCompanyExplorerKeyboard } from "./useCompanyExplorerKeyboard";
 import { useCompanyExplorerSelectionBridge } from "./useCompanyExplorerSelectionBridge";
 import { useCompanyExplorerTreeModel } from "./useCompanyExplorerTreeModel";
 import { COMPANY_EXPLORER_TREE_ROW_HEIGHT, useCompanyExplorerVirtualTree } from "./useCompanyExplorerVirtualTree";
-import { buildCompanyExplorerTreeRows, buildCompanyExplorerV2TreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "./companyExplorerTreeRows";
+import { buildCompanyExplorerSearchTreeRows, buildCompanyExplorerTreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "./companyExplorerTreeRows";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
@@ -77,7 +77,7 @@ import {
   shouldRefreshKanbanBoardsAfterUpdate,
   type CompanyExplorerWorkspaceStreamEnvelope,
 } from "./companyExplorerStore";
-import { fetchCompanyExplorerChildren, fetchCompanyExplorerRoots, type CompanyExplorerLazyScope, type CompanyExplorerV2Row } from "./companyExplorerLazyApi";
+import { fetchCompanyExplorerChildren, fetchCompanyExplorerRoots, fetchCompanyExplorerSearchResults, type CompanyExplorerLazyScope, type CompanyExplorerSearchResult, type CompanyExplorerV2Row } from "./companyExplorerLazyApi";
 import { shouldIncludeGVICCustomRootFolder, shouldShowGVICCompanyScopedFolderShell } from "./companyExplorerGVICVisibility";
 
 const scopedRootCreationKeys = new Set<string>();
@@ -1490,6 +1490,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const [explorerStore, dispatchExplorerStore] = useReducer(reduceCompanyExplorerStore, undefined, createCompanyExplorerStoreState);
   const { nodes, logicGates, projects, kanbanBoards, folders, folderItems, rows: companyExplorerV2Rows, folderSnapshotLoaded } = explorerStore;
   const companyExplorerV2RowsRef = useRef<CompanyExplorerV2Row[]>(companyExplorerV2Rows);
+  const companyExplorerSearchRequestRef = useRef(0);
+  const [companyExplorerSearchResults, setCompanyExplorerSearchResults] = useState<CompanyExplorerSearchResult[]>([]);
   const [selectedTreeID, setSelectedTreeID] = useState("folder-root");
   const [selectedTreeIDs, setSelectedTreeIDs] = useState<Set<string>>(new Set(["folder-root"]));
   const [selectionAnchorTreeID, setSelectionAnchorTreeID] = useState("folder-root");
@@ -2178,11 +2180,37 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const explorerSearchText = effectiveExplorerSearchQuery.trim();
   const explorerSearchActive = explorerSearchText.length > 0;
 
+  useEffect(() => {
+    if (!companyExplorerV2Active || !explorerSearchActive) {
+      setCompanyExplorerSearchResults([]);
+      return;
+    }
+    const requestID = companyExplorerSearchRequestRef.current + 1;
+    companyExplorerSearchRequestRef.current = requestID;
+    let cancelled = false;
+    void fetchCompanyExplorerSearchResults(apiBase, companyID, explorerSearchText)
+      .then((payload) => {
+        if (cancelled || companyExplorerSearchRequestRef.current !== requestID) return;
+        setCompanyExplorerSearchResults(payload.results ?? []);
+      })
+      .catch((err) => {
+        if (cancelled || companyExplorerSearchRequestRef.current !== requestID) return;
+        setCompanyExplorerSearchResults([]);
+        setError(err instanceof Error ? err.message : "failed_to_search_company_explorer");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, companyExplorerV2Active, companyID, explorerSearchActive, explorerSearchText]);
+
+  const companyExplorerSearchTreeRows = useMemo(() => (
+    buildCompanyExplorerSearchTreeRows(companyExplorerSearchResults)
+  ), [companyExplorerSearchResults]);
+
   const allExpandedSearchTreeRows = useMemo(() => {
     const expandedForSearch = new Set<string>(["folder-root"]);
     if (companyExplorerV2Active) {
-      expandedForSearch.add("*");
-      return buildCompanyExplorerV2TreeRows({ expanded: expandedForSearch, rows: companyExplorerV2Rows });
+      return companyExplorerSearchTreeRows;
     }
     for (const folder of folders) expandedForSearch.add(`workspace-folder-${folder.folder_id}`);
     for (const logicGate of logicGates) expandedForSearch.add(`logic-gate-${logicGate.logic_gate_id}`);
@@ -2221,13 +2249,17 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       }),
       ...logicGatesByFunctionSearchRows,
     ];
-  }, [companyExplorerV2Active, companyExplorerV2Rows, companyGroupSections, companyID, currentUserID, folderItems, folders, kanbanBoards, logicGates, logicGatesByFunctionRootFolder, nodes, projects, GVICProjectionByUserID, rootRowOrder, scopedExplorerActive, scopedRootFolder, scopeViewsEnabled]);
+  }, [companyExplorerSearchTreeRows, companyExplorerV2Active, companyGroupSections, companyID, currentUserID, folderItems, folders, kanbanBoards, logicGates, logicGatesByFunctionRootFolder, nodes, projects, GVICProjectionByUserID, rootRowOrder, scopedExplorerActive, scopedRootFolder, scopeViewsEnabled]);
   const explorerSearchViewRows = useMemo(() => (
-    buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery })
-  ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
+    companyExplorerV2Active
+      ? companyExplorerSearchTreeRows
+      : buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery })
+  ), [allExpandedSearchTreeRows, companyExplorerSearchTreeRows, companyExplorerV2Active, effectiveExplorerSearchQuery]);
   const explorerSearchDropdownRows = useMemo(() => (
-    buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery, includeBranchDescendants: true })
-  ), [allExpandedSearchTreeRows, effectiveExplorerSearchQuery]);
+    companyExplorerV2Active
+      ? companyExplorerSearchTreeRows
+      : buildExplorerSearchViewRows({ rows: allExpandedSearchTreeRows, query: effectiveExplorerSearchQuery, includeBranchDescendants: true })
+  ), [allExpandedSearchTreeRows, companyExplorerSearchTreeRows, companyExplorerV2Active, effectiveExplorerSearchQuery]);
   useEffect(() => {
     if (!onSearchResultsChange) return;
     if (!explorerSearchActive) {
@@ -2849,6 +2881,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         companyID,
         name: "New Project",
         status: "Active",
+        skipCompanyExplorerDefaultPlacement: true,
       });
       const project = response.project;
       if (!project) throw new Error("project_create_missing_project");
@@ -3234,7 +3267,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     focusTreeRow(row, { selectionIntent: "navigate" });
   }, [focusTreeRow]);
 
-  const emitExplorerEntityActivation = useCallback((row: ExplorerTreeNode) => {
+  const emitExplorerEntityActivation = useCallback((row: ExplorerTreeNode, options: { suppressNodeNavigation?: boolean } = {}) => {
     const kind = row.kind === "node" || row.kind === "logic_gate" || row.kind === "project" ? row.kind : "";
     const id = kind === "node" ? (row.nodeID ?? "") : kind === "logic_gate" ? (row.logicGateID ?? "") : kind === "project" ? (row.projectID ?? "") : "";
     const cleanID = id.trim();
@@ -3246,7 +3279,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       id: cleanID,
       label: row.label,
       selectedTreeID: row.id,
-      suppressNavigation: kind === "node",
+      suppressNavigation: kind === "node" ? options.suppressNodeNavigation ?? true : false,
       changedAt: Date.now(),
     });
   }, [companyID, scope]);
@@ -3400,7 +3433,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     setSelectedTreeIDs(new Set([row.id]));
     setSelectionAnchorTreeID(row.id);
     focusTreeRow(row, { selectionIntent: "activate" });
-    emitExplorerEntityActivation(row);
+    emitExplorerEntityActivation(row, { suppressNodeNavigation: false });
     onSearchResultSelect?.();
     pendingScrollAlignRef.current = "center";
     pendingScrollTreeIDRef.current = row.id;

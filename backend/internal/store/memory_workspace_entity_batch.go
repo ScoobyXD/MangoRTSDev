@@ -10,6 +10,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
 	now := time.Now().UTC()
 	result := WorkspaceEntityBatchResult{
 		CompanyID:      input.CompanyID,
@@ -26,6 +27,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 
 	targetFolderID := strings.TrimSpace(input.FolderID)
 	targetFolderKind := input.EntityKind
+	syncDefaultFolderItems := targetFolderID == "" && MutationOriginNeedsCompanyExplorerDefaultPlacement(input.MutationOrigin)
 	if targetFolderID != "" {
 		folder, ok := r.folders[key(input.CompanyID, targetFolderID)]
 		if !ok {
@@ -38,6 +40,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 	for _, item := range input.Items {
 		inputClientIDs[item.ClientID] = struct{}{}
 	}
+
 	for _, relationship := range input.Relationships {
 		if relationship.EntityIDA != "" {
 			if input.EntityKind == "node" {
@@ -180,6 +183,18 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		}
 	}
 
+	if syncDefaultFolderItems {
+		r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
+		r.ensureCompanyExplorerDefaultFoldersLocked(input.CompanyID)
+		for _, mapping := range result.EntityMappings {
+			if !r.placeCompanyExplorerItemInDefaultFolderLocked(input.CompanyID, input.EntityKind, mapping.EntityID) {
+				continue
+			}
+			if item, ok := r.folderItems[folderItemKey(input.CompanyID, input.EntityKind, mapping.EntityID)]; ok {
+				result.FolderItems = append(result.FolderItems, item)
+			}
+		}
+	}
 	for _, relationship := range input.Relationships {
 		entityIDA := relationship.EntityIDA
 		if entityIDA == "" {

@@ -58,6 +58,7 @@ func (r *MemoryRepo) ListCompanyExplorerV2RootRows(query CompanyExplorerV2RowsQu
 	defer r.mu.Unlock()
 
 	r.ensureCompanyExplorerV2CompanyGraphLocked(query.CompanyID)
+	r.ensureCompanyExplorerDefaultStateLocked(query.CompanyID)
 	return r.listCompanyExplorerV2RootRowsLocked(query), nil
 }
 
@@ -70,6 +71,7 @@ func (r *MemoryRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQ
 	defer r.mu.Unlock()
 
 	r.ensureCompanyExplorerV2CompanyGraphLocked(query.CompanyID)
+	r.ensureCompanyExplorerDefaultStateLocked(query.CompanyID)
 	parent, ok := r.companyExplorerV2Entities[key(query.CompanyID, query.ParentEntityID)]
 	if !ok || !r.companyExplorerV2EntityVisibleLocked(query, parent) {
 		return CompanyExplorerV2Rows{}, ErrNotFound

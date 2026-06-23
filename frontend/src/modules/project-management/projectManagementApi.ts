@@ -228,6 +228,7 @@ export async function createProject(input: {
   health?: ProjectHealth;
   accountIDs?: string[];
   teamIDs?: string[];
+  skipCompanyExplorerDefaultPlacement?: boolean;
 }): Promise<ProjectMutationResponse> {
   const body: Record<string, unknown> = {
     company_id: input.companyID,
@@ -237,6 +238,7 @@ export async function createProject(input: {
   };
   if (input.accountIDs !== undefined) body.account_ids = input.accountIDs;
   if (input.teamIDs !== undefined) body.team_ids = input.teamIDs;
+  if (input.skipCompanyExplorerDefaultPlacement) body.skip_company_explorer_default_placement = true;
   return apiFetchJSON<ProjectMutationResponse>("/v1/projects", {
     method: "POST",
     body: JSON.stringify(body),

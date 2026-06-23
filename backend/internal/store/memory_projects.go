@@ -37,7 +37,17 @@ func (r *MemoryRepo) CreateProject(input ProjectInput) (ProjectMutationResult, e
 	r.setProjectTeamAssignmentsLocked(input.CompanyID, input.ProjectID, input.TeamIDs)
 
 	project = r.withProjectReadModelLocked(project)
-	return ProjectMutationResult{Project: &project}, nil
+	var folderItem *domain.CompanyExplorerFolderItem
+	if input.CompanyExplorerDefaultPlacement {
+		r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
+		r.ensureCompanyExplorerDefaultFoldersLocked(input.CompanyID)
+		if r.placeCompanyExplorerItemInDefaultFolderLocked(input.CompanyID, EntityTypeProject, project.ProjectID) {
+			if item, ok := r.folderItems[folderItemKey(input.CompanyID, EntityTypeProject, project.ProjectID)]; ok {
+				folderItem = &item
+			}
+		}
+	}
+	return ProjectMutationResult{Project: &project, FolderItem: folderItem}, nil
 }
 
 func (r *MemoryRepo) UpdateProject(input ProjectInput) (ProjectMutationResult, error) {

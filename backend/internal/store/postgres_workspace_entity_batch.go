@@ -39,6 +39,7 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	if strings.TrimSpace(input.FolderID) != "" && (input.MutationOrigin == MutationOriginNodeMap || input.MutationOrigin == MutationOriginLogicGateMap) {
 		syncFolderItems = true
 	}
+	syncDefaultFolderItems := strings.TrimSpace(input.FolderID) == "" && MutationOriginNeedsCompanyExplorerDefaultPlacement(input.MutationOrigin)
 	syncMapPositions := (input.EntityKind == "node" && MutationOriginNeedsNodeMapPosition(input.MutationOrigin)) ||
 		(input.EntityKind == "logic_gate" && MutationOriginNeedsLogicGateMapPosition(input.MutationOrigin))
 
@@ -265,6 +266,19 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 		}
 	}
 
+	if syncDefaultFolderItems {
+		for _, mapping := range result.EntityMappings {
+			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.default_folder_item_writes")
+			item, inserted, err := placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, input.CompanyID, input.EntityKind, mapping.EntityID, input.CreatorUserID)
+			stop()
+			if err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			if inserted {
+				result.FolderItems = append(result.FolderItems, item)
+			}
+		}
+	}
 	for _, relationship := range input.Relationships {
 		entityIDA, entityIDB, err := resolveWorkspaceEntityBatchRelationshipIDs(tx, ctx, input, clientToEntityID, relationship)
 		if err != nil {
