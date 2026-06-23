@@ -539,6 +539,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
   const saveTimersRef = useRef(new Map<string, number>());
   const logicGateAssignStatusTimerRef = useRef<number | null>(null);
+  const logicGateAssignFlashTimerRef = useRef<number | null>(null);
   const contentByBlockRef = useRef(new Map<string, EditorTextBlockContent>());
   const focusBlockIDRef = useRef("");
   const handledFocusRequestRef = useRef("");
@@ -580,6 +581,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [lastAssignedLogicGateID, setLastAssignedLogicGateID] = useState("");
   const [lastAssignedLogicGateLabel, setLastAssignedLogicGateLabel] = useState("");
   const [logicGateAssignStatus, setLogicGateAssignStatus] = useState("");
+  const [logicGateAssignFlash, setLogicGateAssignFlash] = useState<"" | "success" | "error">("");
   const [relationshipMenuOpen, setRelationshipMenuOpen] = useState(false);
   const [relationshipHoveredNodeID, setRelationshipHoveredNodeID] = useState("");
   const [relationshipCreateMenuOpen, setRelationshipCreateMenuOpen] = useState(false);
@@ -925,6 +927,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setLastAssignedLogicGateID("");
     setLastAssignedLogicGateLabel("");
     setLogicGateAssignStatus("");
+    setLogicGateAssignFlash("");
   }, [nodeID]);
 
   useEffect(() => {
@@ -1186,6 +1189,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   useEffect(() => () => {
     if (logicGateAssignStatusTimerRef.current !== null) window.clearTimeout(logicGateAssignStatusTimerRef.current);
+    if (logicGateAssignFlashTimerRef.current !== null) window.clearTimeout(logicGateAssignFlashTimerRef.current);
     for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
     saveTimersRef.current.clear();
   }, []);
@@ -1792,6 +1796,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [attachedEmails, canEdit, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
+  const flashLogicGateAssignButton = useCallback((state: "success" | "error") => {
+    if (logicGateAssignFlashTimerRef.current !== null) {
+      window.clearTimeout(logicGateAssignFlashTimerRef.current);
+      logicGateAssignFlashTimerRef.current = null;
+    }
+    setLogicGateAssignFlash(state);
+    logicGateAssignFlashTimerRef.current = window.setTimeout(() => {
+      setLogicGateAssignFlash((current) => (current === state ? "" : current));
+      logicGateAssignFlashTimerRef.current = null;
+    }, 700);
+  }, []);
+
   const assignToLogicGate = useCallback(async (logicGate: LogicGateRecord) => {
     if (!canEdit) return;
     const cleanLogicGateID = logicGate.logic_gate_id.trim();
@@ -1805,6 +1821,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       setLastAssignedLogicGateID("");
       setLastAssignedLogicGateLabel("");
       setLogicGateAssignStatus(message);
+      flashLogicGateAssignButton("error");
       onRequireNodePriorityForLogicGateAssignment();
       logicGateAssignStatusTimerRef.current = window.setTimeout(() => {
         setLogicGateAssignStatus((current) => (current === message ? "" : current));
@@ -1825,6 +1842,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       await onAssignToLogicGate(cleanLogicGateID);
       const message = `Assigned to Logic Gate: ${label}`;
       setLogicGateAssignStatus(message);
+      flashLogicGateAssignButton("success");
       logicGateAssignStatusTimerRef.current = window.setTimeout(() => {
         setLogicGateAssignStatus((current) => (current === message ? "" : current));
         logicGateAssignStatusTimerRef.current = null;
@@ -1834,6 +1852,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       setLastAssignedLogicGateID(previousAssignedLogicGateID);
       setLastAssignedLogicGateLabel(previousAssignedLogicGateLabel);
       setLogicGateAssignStatus(message);
+      flashLogicGateAssignButton("error");
       onError(message);
       logicGateAssignStatusTimerRef.current = window.setTimeout(() => {
         setLogicGateAssignStatus((current) => (current === message ? "" : current));
@@ -1842,7 +1861,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } finally {
       setAssigningLogicGateID("");
     }
-  }, [assigningLogicGateID, canEdit, lastAssignedLogicGateID, lastAssignedLogicGateLabel, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment]);
+  }, [assigningLogicGateID, canEdit, flashLogicGateAssignButton, lastAssignedLogicGateID, lastAssignedLogicGateLabel, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment]);
 
   const onDropEmail = useCallback((event: React.DragEvent) => {
     if (!canEdit) return;
@@ -2107,6 +2126,31 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     </div>
   );
 
+  const logicGateAssignerMenuWidth = Math.max(
+    280,
+    Math.min(compact ? 420 : 520, width > 0 ? width - 28 : compact ? 420 : 520),
+  );
+  const logicGateAssignButtonBackground = logicGateAssignFlash === "success"
+    ? "linear-gradient(135deg, rgba(34,197,94,0.98), rgba(134,239,172,0.9))"
+    : logicGateAssignFlash === "error"
+      ? "linear-gradient(135deg, rgba(239,68,68,0.96), rgba(254,202,202,0.92))"
+      : logicGateAssignerOpen
+        ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`
+        : EDITOR_NEU_SURFACE;
+  const logicGateAssignButtonBorder = logicGateAssignFlash
+    ? "1px solid transparent"
+    : logicGateAssignerOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`;
+  const logicGateAssignButtonColor = logicGateAssignFlash === "success"
+    ? "#064e3b"
+    : logicGateAssignFlash === "error"
+      ? "#7f1d1d"
+      : surfaceText;
+  const logicGateAssignButtonBoxShadow = logicGateAssignFlash === "success"
+    ? "0 0 0 1px rgba(34,197,94,0.32), 0 0 22px rgba(34,197,94,0.36), inset 1px 1px 0 rgba(255,255,255,0.8)"
+    : logicGateAssignFlash === "error"
+      ? "0 0 0 1px rgba(239,68,68,0.32), 0 0 22px rgba(239,68,68,0.35), inset 1px 1px 0 rgba(255,255,255,0.76)"
+      : EDITOR_NEU_SHADOW;
+
   const logicGateAssignerDropdown = canEdit && logicGateAssignerOpen ? (
     <div
       role="menu"
@@ -2115,11 +2159,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       style={{
         position: "absolute",
         top: "calc(100% - 1px)",
-        right: 0,
+        left: 0,
         zIndex: 95,
-        width: compact ? "min(88vw, 520px)" : "min(760px, calc(100vw - 48px))",
-        minWidth: compact ? 320 : 520,
-        maxWidth: "calc(100vw - 32px)",
+        width: logicGateAssignerMenuWidth,
+        minWidth: 0,
+        maxWidth: "calc(100vw - 44px)",
         minHeight: 0,
         display: "grid",
         gap: 9,
@@ -2144,7 +2188,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           onChange={(event) => setLogicGateSearch(event.currentTarget.value)}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
-              event.preventDefault();
               setLogicGateSearch("");
               event.currentTarget.blur();
             }
@@ -2316,9 +2359,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   width: "100%",
                   minWidth: 0,
                   borderRadius: logicGateAssignerOpen ? "9px 9px 0 0" : 9,
-                  border: logicGateAssignerOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-                  background: logicGateAssignerOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
-                  color: surfaceText,
+                  border: logicGateAssignButtonBorder,
+                  background: logicGateAssignButtonBackground,
+                  color: logicGateAssignButtonColor,
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 7,
@@ -2328,7 +2371,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   fontWeight: 800,
                   letterSpacing: 0,
                   whiteSpace: "nowrap",
-                  boxShadow: EDITOR_NEU_SHADOW,
+                  boxShadow: logicGateAssignButtonBoxShadow,
+                  transition: "background 140ms ease, border-color 140ms ease, box-shadow 180ms ease, color 140ms ease",
                 }}
               >
                 <ExplorerRowIcon kind="logic_gate" />

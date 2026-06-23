@@ -4,6 +4,7 @@ import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { NotificationPopover } from "../../app/NotificationPopover";
 import { requestAppSidebarPin, type SidebarPinKind } from "../../app/sidebarPins";
 import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "../../app/nodeEditorPopupControls";
+import { HeaderRecycleBinIcon } from "../../app/HeaderIcons";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { BoundRequestJSON } from "../../modules/api/requestJSON";
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage } from "../../modules/communications/communicationsApi";
@@ -699,15 +700,18 @@ function defaultNodeEditorPopupRect(): NodeEditorPopupRect {
   });
 }
 
-export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab }: {
+export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab, onDeleteNode }: {
   nodeID: string;
   nodeTitle: string;
   focusInformationID?: string;
   focusRequestID?: number;
   onClose: () => void;
   onCollapseToTab?: () => void;
+  onDeleteNode?: (nodeID: string) => boolean | void | Promise<boolean | void>;
 }) {
   const [popupRect, setPopupRect] = useState(defaultNodeEditorPopupRect);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ position?: ConfirmActionMenuPosition | null } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const popupRectRef = useRef(popupRect);
 
   useEffect(() => {
@@ -775,6 +779,24 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
     ownerDocument.addEventListener("pointercancel", finish);
   }, []);
 
+  const requestDeleteNode = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setDeleteConfirmation({ position: confirmMenuPositionFromElement(event.currentTarget) });
+  }, []);
+
+  const confirmDeleteNode = useCallback(async () => {
+    if (!onDeleteNode || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      const deleted = await onDeleteNode(nodeID);
+      if (deleted === false) return;
+      setDeleteConfirmation(null);
+      onClose();
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteBusy, nodeID, onClose, onDeleteNode]);
+
   return (
     <div
       style={nodeEditorPopupBackdropStyle}
@@ -808,6 +830,20 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
             }}
           />
         ))}
+        {onDeleteNode && (
+          <button
+            className="mango-elevated-action"
+            type="button"
+            title="Move node to Recycle Bin"
+            aria-label="Move node to Recycle Bin"
+            data-frame-interactive="true"
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={requestDeleteNode}
+            style={{ ...nodeEditorPopupCollapseButtonStyle, right: onCollapseToTab ? 68 : 38, color: "#be123c" }}
+          >
+            <HeaderRecycleBinIcon />
+          </button>
+        )}
         {onCollapseToTab && (
           <button
             className="mango-elevated-action"
@@ -846,6 +882,18 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
             focusRequestID={focusRequestID}
           />
         </React.Suspense>
+        {deleteConfirmation && (
+          <ConfirmActionMenu
+            title="Are you sure you want to delete this node?"
+            detail="This moves the node to the Recycle Bin."
+            position={deleteConfirmation.position}
+            confirmLabel={deleteBusy ? "Deleting" : "Yes"}
+            cancelLabel="No"
+            confirmDisabled={deleteBusy}
+            onConfirm={() => { void confirmDeleteNode(); }}
+            onCancel={() => setDeleteConfirmation(null)}
+          />
+        )}
       </div>
     </div>
   );

@@ -1187,7 +1187,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       companyID,
       logicGateID: cleanLogicGateID,
       nodeID: linkedNodeID,
-      status: "pending",
+      status: "requested",
       priority: priority ?? undefined,
       nodeTitle: linkedNodeTitle || linkedNodeID,
     });
