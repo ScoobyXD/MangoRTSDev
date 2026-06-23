@@ -430,6 +430,23 @@ func TestPostgresGroupHierarchyGVICSyncUsesScopedHelpers(t *testing.T) {
 	if !strings.Contains(affectedBody, "syncPostgresGVICForResourceKeysTx") || strings.Contains(affectedBody, "syncResourceGVICEffectiveAssignmentsTx") {
 		t.Fatalf("syncPostgresGVICForAffectedGroupsTx should delegate to resource-key GVIC+matrix sync, body:\n%s", affectedBody)
 	}
+	effectiveDeltaBody := extractFunctionSourceForTest(t, gvicSource, "func syncDerivedResourceGVICEffectiveAssignmentsDeltaTx")
+	for _, needle := range []string{
+		"not exists",
+		"do nothing",
+	} {
+		if !strings.Contains(effectiveDeltaBody, needle) {
+			t.Fatalf("syncDerivedResourceGVICEffectiveAssignmentsDeltaTx missing delta sync marker %q", needle)
+		}
+	}
+	for _, forbidden := range []string{
+		"delete from resource_gvic_effective_assignments\nwhere company_id=$1::uuid",
+		"do update set updated_timestamp=now()",
+	} {
+		if strings.Contains(effectiveDeltaBody, forbidden) {
+			t.Fatalf("syncDerivedResourceGVICEffectiveAssignmentsDeltaTx contains rebuild/retimestamp pattern %q", forbidden)
+		}
+	}
 }
 
 func mustCreateGVICMembershipUser(t *testing.T, repo *MemoryRepo, subject, companyID string) domain.User {

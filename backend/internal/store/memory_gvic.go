@@ -322,14 +322,23 @@ func (r *MemoryRepo) syncResourceGVICEffectiveAssignmentsLocked(keys []resourceG
 	deltas := make([]ProjectionDelta, 0)
 	for _, keyValue := range keys {
 		beforeEffective := r.gvicEffectiveAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
+		next := r.deriveResourceGVICEffectiveAssignmentsLocked(keyValue, time.Now().UTC())
+		nextByKey := make(map[string]domain.ResourceGVICEffectiveAssignment, len(next))
+		for _, assignment := range next {
+			nextByKey[gvicEffectiveAssignmentKey(assignment)] = assignment
+		}
 		for effectiveKey, assignment := range r.gvicEffectiveAssignments {
-			if assignment.CompanyID == keyValue.companyID && assignment.ResourceType == keyValue.resourceType && assignment.ResourceID == keyValue.resourceID {
+			if assignment.CompanyID != keyValue.companyID || assignment.ResourceType != keyValue.resourceType || assignment.ResourceID != keyValue.resourceID {
+				continue
+			}
+			if _, ok := nextByKey[effectiveKey]; !ok {
 				delete(r.gvicEffectiveAssignments, effectiveKey)
 			}
 		}
-		next := r.deriveResourceGVICEffectiveAssignmentsLocked(keyValue, time.Now().UTC())
-		for _, assignment := range next {
-			r.gvicEffectiveAssignments[gvicEffectiveAssignmentKey(assignment)] = assignment
+		for effectiveKey, assignment := range nextByKey {
+			if _, ok := r.gvicEffectiveAssignments[effectiveKey]; !ok {
+				r.gvicEffectiveAssignments[effectiveKey] = assignment
+			}
 		}
 		afterEffective := r.gvicEffectiveAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
 		beforeRows := make([]GVICEffectiveAssignmentProjectionRow, 0, len(beforeEffective))

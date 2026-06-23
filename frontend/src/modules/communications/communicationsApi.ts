@@ -1080,6 +1080,34 @@ export function markCommunicationsWorkspacePanelStale(companyID: string, scope?:
   clearWorkspacePanelReadCache(cleanCompanyID);
 }
 
+export function patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache(
+  companyID: string,
+  logicGateID: string,
+  assignments: LogicGateGVICAssignment[],
+): void {
+  const cleanCompanyID = companyID.trim();
+  const cleanLogicGateID = logicGateID.trim();
+  if (!cleanCompanyID || !cleanLogicGateID) return;
+  const cacheKey = `logic-gates:${cleanCompanyID}`;
+  communicationsReadInflight.delete(cacheKey);
+  const cached = communicationsReadCache.get(cacheKey) as CacheEntry<LogicGateRecord[]> | undefined;
+  if (!cached) return;
+  let changed = false;
+  const nextLogicGates = cloneLogicGates(cached.value).map((logicGate) => {
+    if (logicGate.logic_gate_id !== cleanLogicGateID) return logicGate;
+    changed = true;
+    return {
+      ...logicGate,
+      gvic_assignments: cloneResourceGVICAssignmentsAsLogicGate(assignments, cleanLogicGateID),
+    };
+  });
+  if (!changed) return;
+  communicationsReadCache.set(cacheKey, {
+    value: nextLogicGates,
+    fetchedAt: Date.now(),
+  });
+}
+
 export function primeEmailMessageCache(message: EmailMessage): void {
   primeMessageCaches(message);
 }
@@ -1556,11 +1584,13 @@ async function cachedRead<T>(key: string, maxAgeMs: number, load: () => Promise<
   const request = load()
     .then((value) => {
       const cachedValue = clone(value);
-      communicationsReadCache.set(key, { value: cachedValue, fetchedAt: Date.now() });
+      if (communicationsReadInflight.get(key) === request) {
+        communicationsReadCache.set(key, { value: cachedValue, fetchedAt: Date.now() });
+      }
       return cachedValue;
     })
     .finally(() => {
-      communicationsReadInflight.delete(key);
+      if (communicationsReadInflight.get(key) === request) communicationsReadInflight.delete(key);
     });
   communicationsReadInflight.set(key, request);
   return clone(await request);

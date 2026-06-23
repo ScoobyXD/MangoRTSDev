@@ -20,8 +20,9 @@ import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, ge
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../node-map/NodeRelationshipGraph";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
 import { buildLinkedNodePayloadFromSourceSide } from "../node-map/relationshipProjection";
-import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, getLogicGateEditorSequenceSingleFlight, invalidateLogicGateRecordStoreCaches, type LogicGateProjectionItem } from "../logic-gate-map/LogicGateRecordStore";
+import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, getLogicGateEditorSequenceSingleFlight, invalidateLogicGateRecordStoreCaches, patchLogicGateRecordStoreGVICAssignments, type LogicGateProjectionItem } from "../logic-gate-map/LogicGateRecordStore";
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
+import { patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache } from "../communications/communicationsApi";
 import { createRequestJSON } from "../api/requestJSON";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
@@ -1358,7 +1359,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const currentTarget = linkedEditorTargetRef.current;
       if (logicGateGVICMutationSequenceRef.current !== mutationSequence || currentTarget.kind !== "logic_gate" || currentTarget.id !== logicGateID) return;
       applyLogicGateGVICAssignments(assignments, logicGateID);
-      invalidateLogicGateRecordStoreCaches(apiBase, companyID, logicGateID);
+      patchLogicGateRecordStoreGVICAssignments(apiBase, companyID, logicGateID, assignments);
+      patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache(companyID, logicGateID, assignments);
       invalidateWorkspaceSnapshot(apiBase, companyID);
     }).catch((err) => {
       const currentTarget = linkedEditorTargetRef.current;

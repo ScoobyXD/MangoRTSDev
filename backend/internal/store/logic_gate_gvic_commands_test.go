@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"miraeopus/backend/internal/domain"
 )
@@ -264,6 +265,67 @@ func TestMemoryLogicGateGVICCommandsReplacePrimaryUsers(t *testing.T) {
 	}
 }
 
+func TestMemoryLogicGateGVICDeltaDoesNotRetimestampUnchangedEffectiveRows(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepo()
+	companyID := "company-GVIC-delta-effective-stability"
+	repo.EnsureCompany(companyID, "GVIC Delta Effective Stability Company")
+	logicGate, err := repo.CreateLogicGate(companyID, "Delta Effective Stability Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	generated := mustCreateGVICMembershipUser(t, repo, "GVIC-delta-generated", companyID)
+	verified := mustCreateGVICMembershipUser(t, repo, "GVIC-delta-verified", companyID)
+	consulted := mustCreateGVICMembershipUser(t, repo, "GVIC-delta-consulted", companyID)
+
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+		Assignments: []ResourceGVICAssignmentInput{
+			{Role: domain.GVICRoleGenerated, PrincipalType: EntityPermissionSubjectUser, PrincipalID: generated.UserID},
+			{Role: domain.GVICRoleVerified, PrincipalType: EntityPermissionSubjectUser, PrincipalID: verified.UserID},
+			{Role: domain.GVICRoleConsulted, PrincipalType: EntityPermissionSubjectUser, PrincipalID: consulted.UserID},
+		},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments initial: %v", err)
+	}
+	before, err := repo.ListResourceGVICEffectiveAssignments(companyID, EntityTypeLogicGate, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("ListResourceGVICEffectiveAssignments before remove: %v", err)
+	}
+	beforeGenerated := mustFindEffectiveGVICForUserRole(t, before, generated.UserID, domain.GVICRoleGenerated).UpdatedTimestamp
+	beforeConsulted := mustFindEffectiveGVICForUserRole(t, before, consulted.UserID, domain.GVICRoleConsulted).UpdatedTimestamp
+
+	time.Sleep(time.Millisecond)
+	if _, err := repo.RemoveResourceGVICAssignments(ResourceGVICAssignmentCommandInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleVerified,
+			PrincipalType: EntityPermissionSubjectUser,
+			PrincipalID:   verified.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("RemoveResourceGVICAssignments verified: %v", err)
+	}
+	after, err := repo.ListResourceGVICEffectiveAssignments(companyID, EntityTypeLogicGate, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("ListResourceGVICEffectiveAssignments after remove: %v", err)
+	}
+	if got := findEffectiveGVICForUserRole(after, verified.UserID, domain.GVICRoleVerified); got != nil {
+		t.Fatalf("verified effective assignment still exists after remove: %+v", *got)
+	}
+	if got := mustFindEffectiveGVICForUserRole(t, after, generated.UserID, domain.GVICRoleGenerated); !got.UpdatedTimestamp.Equal(beforeGenerated) {
+		t.Fatalf("generated updated_timestamp = %s, want unchanged %s", got.UpdatedTimestamp, beforeGenerated)
+	}
+	if got := mustFindEffectiveGVICForUserRole(t, after, consulted.UserID, domain.GVICRoleConsulted); !got.UpdatedTimestamp.Equal(beforeConsulted) {
+		t.Fatalf("consulted updated_timestamp = %s, want unchanged %s", got.UpdatedTimestamp, beforeConsulted)
+	}
+}
+
 func TestMemoryLogicGateGVICCommandsExpandGroupAssignments(t *testing.T) {
 	t.Parallel()
 
@@ -333,6 +395,24 @@ func TestMemoryLogicGateGVICCommandsExpandGroupAssignments(t *testing.T) {
 	if !removed.Changed || len(removed.GVICAssignments) != 0 {
 		t.Fatalf("removed group result = %+v, want configured group removed", removed)
 	}
+}
+
+func findEffectiveGVICForUserRole(items []domain.ResourceGVICEffectiveAssignment, userID, role string) *domain.ResourceGVICEffectiveAssignment {
+	for i := range items {
+		if items[i].UserID == userID && items[i].Role == role {
+			return &items[i]
+		}
+	}
+	return nil
+}
+
+func mustFindEffectiveGVICForUserRole(t *testing.T, items []domain.ResourceGVICEffectiveAssignment, userID, role string) domain.ResourceGVICEffectiveAssignment {
+	t.Helper()
+	item := findEffectiveGVICForUserRole(items, userID, role)
+	if item == nil {
+		t.Fatalf("effective assignment for user %s role %s not found in %+v", userID, role, items)
+	}
+	return *item
 }
 
 func TestMemoryLogicGateGVICCommandsRejectInvalidRoleUserAndCompany(t *testing.T) {
