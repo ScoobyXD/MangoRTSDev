@@ -2131,9 +2131,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     Math.min(compact ? 420 : 520, width > 0 ? width - 28 : compact ? 420 : 520),
   );
   const logicGateAssignButtonBackground = logicGateAssignFlash === "success"
-    ? "linear-gradient(135deg, rgba(34,197,94,0.98), rgba(134,239,172,0.9))"
+    ? "linear-gradient(135deg, rgba(57,255,136,0.98), rgba(206,255,225,0.98))"
     : logicGateAssignFlash === "error"
-      ? "linear-gradient(135deg, rgba(239,68,68,0.96), rgba(254,202,202,0.92))"
+      ? "linear-gradient(135deg, rgba(255,65,96,0.98), rgba(255,220,228,0.98))"
       : logicGateAssignerOpen
         ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`
         : EDITOR_NEU_SURFACE;
@@ -2146,9 +2146,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       ? "#7f1d1d"
       : surfaceText;
   const logicGateAssignButtonBoxShadow = logicGateAssignFlash === "success"
-    ? "0 0 0 1px rgba(34,197,94,0.32), 0 0 22px rgba(34,197,94,0.36), inset 1px 1px 0 rgba(255,255,255,0.8)"
+    ? "0 0 0 1px rgba(57,255,136,0.42), 0 0 26px rgba(57,255,136,0.58), inset 1px 1px 0 rgba(255,255,255,0.88)"
     : logicGateAssignFlash === "error"
-      ? "0 0 0 1px rgba(239,68,68,0.32), 0 0 22px rgba(239,68,68,0.35), inset 1px 1px 0 rgba(255,255,255,0.76)"
+      ? "0 0 0 1px rgba(255,65,96,0.42), 0 0 26px rgba(255,65,96,0.56), inset 1px 1px 0 rgba(255,255,255,0.84)"
       : EDITOR_NEU_SHADOW;
 
   const logicGateAssignerDropdown = canEdit && logicGateAssignerOpen ? (
@@ -2174,14 +2174,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         boxShadow: `${EDITOR_NEU_PANEL_SHADOW}, 0 18px 36px rgba(15,23,42,0.16)`,
       }}
     >
-      <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-        <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, color: surfaceText }}>
-          <ExplorerRowIcon kind="logic_gate" />
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{hasAssignedLogicGate ? `Assigned to Logic Gate: ${assignedLogicGateLabel}` : "Assign to Logic Gate"}</span>
-        </div>
-        {logicGateOptionsLoading && <span style={{ flex: "0 0 auto", fontSize: 11, color: surfaceText, opacity: 0.64, fontWeight: 800 }}>Loading</span>}
-      </div>
-
       <div style={{ position: "relative", minWidth: 0 }}>
         <input
           value={logicGateSearch}

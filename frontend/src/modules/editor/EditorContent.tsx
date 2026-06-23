@@ -922,6 +922,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     return logicGate ? getLogicGateTitle(logicGate) : "";
   }, [apiBase, companyID]);
 
+  const preserveNodeTitle = useCallback((candidate: string, current: string, nodeID: string): string => {
+    const cleanCandidate = candidate.trim();
+    const cleanCurrent = current.trim();
+    const cleanNodeID = nodeID.trim();
+    if (!cleanCandidate || (cleanNodeID && cleanCandidate === cleanNodeID)) return cleanCurrent;
+    return cleanCandidate;
+  }, []);
+
   const applyLogicGateGVICAssignments = useCallback((assignments: LogicGateGVICAssignment[], logicGateID: string): LogicGateGVICAssignment[] => {
     const normalized = normalizeLogicGateGVICAssignments(assignments, logicGateID);
     logicGateGVICAssignmentsRef.current = normalized;
@@ -972,14 +980,16 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       flushPendingDocumentSave(editorDocumentRef.current ? serializeEditorDocumentHTML(editorDocumentRef.current) : documentDraftRef.current);
       clearVisibleDocumentForSelection();
     }
+    const previousTitle = isSameEntity ? linkedNodeTitle : "";
+    const nextTitle = nodeID ? preserveNodeTitle(label || readNodeLabelFromGraph(nodeID), previousTitle, nodeID) : "";
     setLinkedEntityKind(nodeID ? "node" : "");
     setLinkedNodeID(nodeID);
-    setLinkedNodeTitle(nodeID ? (label || readNodeLabelFromGraph(nodeID)) : "");
+    setLinkedNodeTitle(nextTitle);
     if (nodeID && !isSameEntity && shouldFocusEditor) {
       setActiveTab("editor");
       focusEditorDocumentWithoutScrollJump();
     }
-  }, [clearVisibleDocumentForSelection, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, readNodeLabelFromGraph, rememberCurrentDocumentScroll]);
+  }, [clearVisibleDocumentForSelection, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, linkedNodeTitle, preserveNodeTitle, readNodeLabelFromGraph, rememberCurrentDocumentScroll]);
 
   const applyLinkedLogicGate = useCallback((logicGateID: string, label = "", options: { focusEditor?: boolean } = {}) => {
     const shouldFocusEditor = options.focusEditor !== false;
@@ -1182,24 +1192,38 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const rawPriority = nodePriorityDraft.trim();
     const parsedPriority = Number(rawPriority);
     const priority = Number.isInteger(parsedPriority) && parsedPriority >= 1 && parsedPriority <= 5 ? parsedPriority : null;
-    const result = await assignNodeToLogicGateStatus({
-      apiBase,
-      companyID,
-      logicGateID: cleanLogicGateID,
-      nodeID: linkedNodeID,
-      status: "requested",
-      priority: priority ?? undefined,
-      nodeTitle: linkedNodeTitle || linkedNodeID,
-    });
+    const currentLogicGateID = nodeLogicGateIDs.map((id) => id.trim()).find(Boolean) ?? "";
+    const result = currentLogicGateID && currentLogicGateID !== cleanLogicGateID
+      ? await moveLogicGateAssignment({
+        apiBase,
+        companyID,
+        logicGateID: cleanLogicGateID,
+        fromLogicGateID: currentLogicGateID,
+        nodeID: linkedNodeID,
+        status: "requested",
+        priority: priority ?? undefined,
+      })
+      : await assignNodeToLogicGateStatus({
+        apiBase,
+        companyID,
+        logicGateID: cleanLogicGateID,
+        nodeID: linkedNodeID,
+        status: "requested",
+        priority: priority ?? undefined,
+        nodeTitle: linkedNodeTitle || undefined,
+      });
+    const stableTitle = preserveNodeTitle(getNodeTitle(result.node), linkedNodeTitle, linkedNodeID);
+    const resultNode = stableTitle && stableTitle !== getNodeTitle(result.node) ? { ...result.node, name: stableTitle } : result.node;
     invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
-    setNodeStatus(result.node.status ?? "");
-    setNodePriorityDraft(result.node.priority == null ? "" : String(result.node.priority));
-    setNodeDueDateDraft(formatNodeDueDateForEditor(result.node.due_date));
-    setNodeLogicGateIDs(result.node.logic_gate_ids ?? []);
-    setNodeAccounts(result.node.accounts ?? nodeAccounts);
-    upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
+    setNodeStatus(resultNode.status ?? "");
+    setNodePriorityDraft(resultNode.priority == null ? "" : String(resultNode.priority));
+    setNodeDueDateDraft(formatNodeDueDateForEditor(resultNode.due_date));
+    setNodeLogicGateIDs(resultNode.logic_gate_ids ?? [cleanLogicGateID]);
+    setNodeAccounts(resultNode.accounts ?? nodeAccounts);
+    setLinkedNodeTitle((current) => preserveNodeTitle(getNodeTitle(resultNode), current || linkedNodeTitle, linkedNodeID));
+    upsertNodeRelationshipGraphNode(apiBase, companyID, resultNode);
     invalidateWorkspaceSnapshot(apiBase, companyID);
-  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, linkedNodeTitle, nodeAccounts, nodePriorityDraft]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, linkedNodeTitle, nodeAccounts, nodeLogicGateIDs, nodePriorityDraft, preserveNodeTitle]);
 
   const updateNodePresetPatch = useCallback(async (patch: Record<string, unknown>) => {
     if (!linkedEntityCanEdit) return;
@@ -1999,8 +2023,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       if (!node) return;
       setLinkedEntityCanEdit(canEditResourceAccess(node));
       setLinkedEntityCanAdmin(canAdminResourceAccess(node));
-      const nextTitle = getNodeTitle(node);
+      const rawNextTitle = getNodeTitle(node);
       setLinkedNodeTitle((current) => {
+        const nextTitle = preserveNodeTitle(rawNextTitle, current, linkedNodeID);
         if (current === nextTitle) return current;
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
         return nextTitle;
@@ -2012,7 +2037,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     };
     syncTitleFromGraph();
     return subscribeNodeRelationshipGraph(apiBase, companyID, syncTitleFromGraph);
-  }, [apiBase, companyID, forcedEntityKind, linkedEntityKind, linkedNodeID]);
+  }, [apiBase, companyID, forcedEntityKind, linkedEntityKind, linkedNodeID, preserveNodeTitle]);
 
   useEffect(() => {
     if (forcedEntityKind) return;
@@ -2150,7 +2175,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         if (!isCurrentLinkedLoad() || !isFreshEditorSnapshot(realtimeScope, editorSequence)) return;
         setLinkedEntityCanEdit(canEditResourceAccess(details));
         setLinkedEntityCanAdmin(canAdminResourceAccess(details));
-        setLinkedNodeTitle(getNodeTitle(details.node));
+        setLinkedNodeTitle((current) => preserveNodeTitle(getNodeTitle(details.node), current, linkedNodeID));
         setNodeStatus(details.node.status ?? "");
         setNodePriorityDraft(details.node.priority == null ? "" : String(details.node.priority));
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
@@ -2196,7 +2221,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, companyID, focusInformationID, focusRequestID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence, requestJSON, scheduleIndentGuideUpdate]);
+  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, companyID, focusInformationID, focusRequestID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, preserveNodeTitle, rememberEditorProjectionSequence, requestJSON, scheduleIndentGuideUpdate]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : EDITOR_NEU_PANEL_BACKGROUND;

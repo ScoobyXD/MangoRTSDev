@@ -3,6 +3,7 @@ import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMe
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { MinimizeToLineIcon, OpenInNewTabIcon } from "../../app/nodeEditorPopupControls";
+import { HeaderRecycleBinIcon } from "../../app/HeaderIcons";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import type { Account } from "../accounts/accountsApi";
 import { type KanbanCard, type KanbanColumn } from "./shared";
@@ -174,6 +175,7 @@ export function KanbanNodeEditorOverlay({
   onClose,
   onCollapseToTab,
   onOpenInNewTab,
+  onRequestDelete,
 }: {
   overlay: NodeEditorOverlayState;
   ratio: NodeEditorOverlayRatio;
@@ -187,6 +189,7 @@ export function KanbanNodeEditorOverlay({
   onClose: () => void;
   onCollapseToTab: () => void;
   onOpenInNewTab?: () => void;
+  onRequestDelete?: (nodeID: string, position?: ConfirmActionMenuPosition) => void;
 }) {
   const boardWidth = boardRootRef.current?.getBoundingClientRect().width ?? 0;
   const minLeftPx = getNodeEditorOverlayMinLeftPx(boardRootRef.current, allowHorizontalOverflow);
@@ -196,6 +199,16 @@ export function KanbanNodeEditorOverlay({
   const renderedLeftPx = boardWidth * renderedLeft;
   const availableWidthPx = boardWidth > 0 ? Math.max(1, boardWidth - renderedLeftPx - 22) : 0;
   const renderedWidth = boardWidth > 0 ? Math.min(ratio.width, availableWidthPx / boardWidth) : ratio.width;
+
+  React.useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
 
   return (
     <div
@@ -221,6 +234,20 @@ export function KanbanNodeEditorOverlay({
         cursor: "default",
       }}
     >
+      {onRequestDelete && (
+        <button
+          className="mango-elevated-action"
+          type="button"
+          title="Move node to Recycle Bin"
+          aria-label="Move node to Recycle Bin"
+          data-frame-interactive="true"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => onRequestDelete(overlay.nodeID, confirmMenuPositionFromElement(event.currentTarget))}
+          style={{ ...overlayHeaderButtonStyle(onOpenInNewTab ? 98 : 68), color: "#be123c" }}
+        >
+          <HeaderRecycleBinIcon />
+        </button>
+      )}
       <button
         className="mango-elevated-action"
         type="button"
@@ -420,7 +447,7 @@ export function KanbanDeleteConfirmations({
     return (
       <ModalShell
         title={`Are you sure you want to delete ${deleteNodeConfirmation.nodeIDs.length} node${deleteNodeConfirmation.nodeIDs.length === 1 ? "" : "s"}?`}
-        detail="This deletes the underlying node data and removes its Kanban placements."
+        detail="This moves the underlying node data to the Recycle Bin and removes its Kanban placements."
         position={deleteNodeConfirmation.position}
         onConfirm={() => onRemoveNodes(deleteNodeConfirmation.nodeIDs)}
         onCancel={onCancelNodeDelete}

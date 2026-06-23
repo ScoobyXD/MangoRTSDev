@@ -4,7 +4,7 @@ import { readAuthConfig } from "../auth/cognitoAuth";
 import { WORKTREE_VERSION } from "./worktreeVersion";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import FrameRightClickMenu from "./framerightclickmenu";
-import { HeaderAccountManagerIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "./HeaderIcons";
+import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderRecycleBinIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
 import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
@@ -917,6 +917,7 @@ export function AppSidebar({
         <AppSidebarButton
           label="My Triage"
           active={homeActive && activeHomeView === "my-triage"}
+          icon={<HeaderTriageIcon color="#0ea5e9" />}
           elevated
           trailing={<SidebarNotificationBadges badges={[{
             key: "my-triage",
@@ -949,6 +950,7 @@ export function AppSidebar({
               style={appSidebarSharedTriageButtonStyle}
               onClick={() => onHomeViewSelect("shared-root")}
             >
+              <span style={appSidebarSharedIconStyle}><HeaderSharedTriageIcon color="#8b5cf6" /></span>
               <span style={appSidebarTextStyle}>Shared Triage</span>
               <span style={appSidebarTrailingStyle}>
                 {loadingSharedInboxes && <span style={appSidebarSharedMetaStyle}>Loading</span>}
@@ -984,6 +986,7 @@ export function AppSidebar({
         <AppSidebarButton
           label="Updates"
           active={homeActive && activeHomeView === "updates"}
+          icon={<HeaderUpdatesIcon color="#f59e0b" />}
           elevated
           onClick={() => onHomeViewSelect("updates")}
         />
@@ -994,6 +997,7 @@ export function AppSidebar({
         <AppSidebarButton
           label="My Work"
           active={homeActive && activeHomeView === "my-work"}
+          icon={<HeaderMyWorkIcon color="#10b981" />}
           elevated
           onClick={() => onHomeViewSelect("my-work")}
         />
@@ -1275,10 +1279,13 @@ export function AppSidebar({
   );
 }
 
-function AppSidebarSectionHeader({ label }: { label: string }): React.ReactElement {
+function AppSidebarSectionHeader({ label, icon }: { label: string; icon?: React.ReactNode }): React.ReactElement {
   return (
     <div style={appSidebarSectionHeaderShellStyle}>
-      <span style={appSidebarSectionTitleStyle}>{label}</span>
+      <span style={appSidebarSectionTitleRowStyle}>
+        {icon && <span style={appSidebarSectionIconStyle}>{icon}</span>}
+        <span style={appSidebarSectionTitleStyle}>{label}</span>
+      </span>
       <span aria-hidden="true" style={appSidebarSectionHeaderLineStyle} />
     </div>
   );
@@ -1297,7 +1304,7 @@ function AppSidebarCompanyExplorerSection({
 }): React.ReactElement {
   return (
     <section style={appSidebarCompanyExplorerSectionStyle} aria-label="Company Explorer">
-      <AppSidebarSectionHeader label="Explorer" />
+      <AppSidebarSectionHeader label="Explorer" icon={<HeaderExplorerIcon color="#f97316" />} />
       <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
         <SidebarCompanyExplorerContent
           accent={SIDEBAR_ACTIVE_TEXT}
@@ -1701,7 +1708,7 @@ function defaultNodeEditorPopupRect(): NodeEditorPopupRect {
   });
 }
 
-export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab, onOpenInNewTab }: {
+export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab, onOpenInNewTab, onDeleteNode }: {
   nodeID: string;
   nodeTitle: string;
   focusInformationID?: string;
@@ -1709,8 +1716,11 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
   onClose: () => void;
   onCollapseToTab?: () => void;
   onOpenInNewTab?: () => void;
+  onDeleteNode?: (nodeID: string) => boolean | void | Promise<boolean | void>;
 }): React.ReactElement {
   const [popupRect, setPopupRect] = useState(defaultNodeEditorPopupRect);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ position?: ConfirmActionMenuPosition | null } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const popupRectRef = useRef(popupRect);
 
   useEffect(() => {
@@ -1787,6 +1797,24 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
     ownerDocument.addEventListener("pointercancel", finish);
   }, []);
 
+  const requestDeleteNode = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setDeleteConfirmation({ position: confirmMenuPositionFromElement(event.currentTarget) });
+  }, []);
+
+  const confirmDeleteNode = useCallback(async () => {
+    if (!onDeleteNode || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      const deleted = await onDeleteNode(nodeID);
+      if (deleted === false) return;
+      setDeleteConfirmation(null);
+      onClose();
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteBusy, nodeID, onClose, onDeleteNode]);
+
   return (
     <div
       style={nodeEditorPopupBackdropStyle}
@@ -1820,6 +1848,19 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
             }}
           />
         ))}
+        {onDeleteNode && (
+          <button
+            type="button"
+            title="Move node to Recycle Bin"
+            aria-label="Move node to Recycle Bin"
+            data-frame-interactive="true"
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={requestDeleteNode}
+            style={{ ...nodeEditorPopupIconButtonStyle(onOpenInNewTab ? (onCollapseToTab ? 98 : 68) : onCollapseToTab ? 68 : 38), color: "#be123c" }}
+          >
+            <HeaderRecycleBinIcon />
+          </button>
+        )}
         {onOpenInNewTab && (
           <button
             type="button"
@@ -1869,6 +1910,18 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
             focusRequestID={focusRequestID}
           />
         </React.Suspense>
+        {deleteConfirmation && (
+          <ConfirmActionMenu
+            title="Are you sure you want to delete this node?"
+            detail="This moves the node to the Recycle Bin."
+            position={deleteConfirmation.position}
+            confirmLabel={deleteBusy ? "Deleting" : "Yes"}
+            cancelLabel="No"
+            confirmDisabled={deleteBusy}
+            onConfirm={() => { void confirmDeleteNode(); }}
+            onCancel={() => setDeleteConfirmation(null)}
+          />
+        )}
       </div>
     </div>
   );
@@ -1975,6 +2028,21 @@ const appSidebarSectionHeaderShellStyle: React.CSSProperties = {
   gridTemplateRows: "auto 1px",
   gap: 5,
   padding: "0 3px",
+};
+
+const appSidebarSectionTitleRowStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+};
+
+const appSidebarSectionIconStyle: React.CSSProperties = {
+  width: 16,
+  height: 16,
+  display: "grid",
+  placeItems: "center",
+  flex: "0 0 auto",
 };
 
 const appSidebarSectionHeaderLineStyle: React.CSSProperties = {
@@ -2183,7 +2251,7 @@ const appSidebarSharedTriageButtonStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 42,
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto",
+  gridTemplateColumns: "20px minmax(0, 1fr) auto",
   alignItems: "center",
   gap: 6,
   border: "none",
@@ -2197,6 +2265,14 @@ const appSidebarSharedTriageButtonStyle: React.CSSProperties = {
   letterSpacing: 0,
   padding: "0 0 0 14px",
   textAlign: "left",
+};
+
+const appSidebarSharedIconStyle: React.CSSProperties = {
+  width: 20,
+  height: 20,
+  display: "grid",
+  placeItems: "center",
+  color: "#8b5cf6",
 };
 
 const appSidebarSharedDisclosureStyle: React.CSSProperties = {
