@@ -114,6 +114,7 @@ func (r *MemoryRepo) upsertNodeLogicGateAssignmentLocked(input nodeLogicGateAssi
 		assignment.RequestedByUserID = ""
 	}
 	assignment.UpdatedTimestamp = input.UpdatedTimestamp
+	r.clearNodeResourceGVICAssignmentsLocked(input.CompanyID, input.NodeID)
 	r.nodeLogicGateAssignments[assignmentKeyValue] = assignment
 	return assignment
 }

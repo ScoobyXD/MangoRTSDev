@@ -45,6 +45,8 @@ type EditorLinkedDocumentPanelsProps = {
   } | null;
   gvicFields: {
     assignments: LogicGateGVICAssignment[];
+    inherited?: boolean;
+    readOnlyReason?: string;
   } | null;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
@@ -740,6 +742,11 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                 pointerEvents: "auto",
               }}
             >
+              {gvicFields.readOnlyReason && (
+                <div style={{ gridColumn: "1 / -1", border: `1px solid ${ruleColor}`, borderRadius: 6, background: "rgba(100, 116, 139, 0.08)", color: "#475569", fontSize: 11, fontWeight: 750, padding: "6px 8px" }}>
+                  {gvicFields.readOnlyReason}
+                </div>
+              )}
               {GVIC_ROLES.map((column) => (
                 <GVICRoleEditor
                   key={column.role}
@@ -754,6 +761,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   panelBackground={panelBackground}
                   ruleColor={ruleColor}
                   canEdit={canEditGVIC}
+                  disabledReason={gvicFields.readOnlyReason}
                   onAddPrincipal={onAddGVICPrincipal}
                   onRemovePrincipal={onRemoveGVICPrincipal}
                 />
@@ -802,6 +810,7 @@ function GVICRoleEditor({
   panelBackground,
   ruleColor,
   canEdit,
+  disabledReason,
   onAddPrincipal,
   onRemovePrincipal,
 }: {
@@ -816,6 +825,7 @@ function GVICRoleEditor({
   panelBackground: string;
   ruleColor: string;
   canEdit: boolean;
+  disabledReason?: string;
   onAddPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
   onRemovePrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
 }) {
@@ -828,7 +838,8 @@ function GVICRoleEditor({
   const assignedPrincipalKeys = useMemo(() => new Set(assignments.map(logicGateGVICAssignmentSubjectKey)), [assignments]);
   const roleAccent = GVIC_ROLE_ACCENTS[role];
   const singleUserOnly = (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && (role === "generated" || role === "verified");
-  const inputPlaceholder = singleUserOnly ? "Add user" : "Add user or team";
+  const inheritedReadOnly = Boolean(disabledReason) && !canEdit;
+  const inputPlaceholder = disabledReason ? "Inherited" : singleUserOnly ? "Add user" : "Add user or team";
   const pickerAriaLabel = singleUserOnly ? `${label} users` : `${label} users and teams`;
   const assignedSummary = singleUserOnly
     ? (assignments.length === 0 ? "" : assignments.length === 1 ? GVICAssignmentLabel(assignments[0]) : `${GVICAssignmentLabel(assignments[0])} +${assignments.length - 1}`)
@@ -1046,6 +1057,7 @@ function GVICRoleEditor({
         background: `linear-gradient(145deg, rgba(255,255,255,0.96), ${hexWithAlpha(roleAccent, "12")}) padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "aa")}, rgba(255,255,255,0.84)) border-box`,
         boxShadow: "4px 4px 12px rgba(174,174,192,0.16), -4px -4px 12px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.84)",
         padding: 6,
+        opacity: inheritedReadOnly ? 0.74 : 1,
       }}
     >
       <strong style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#111827" }}>
@@ -1159,6 +1171,7 @@ function GVICRoleEditor({
             }
           }}
           placeholder={inputPlaceholder}
+          title={disabledReason || undefined}
           aria-label={`Add ${label} ${singleUserOnly ? "user" : "user or team"}`}
           aria-haspopup="listbox"
           aria-expanded={canEdit && open}

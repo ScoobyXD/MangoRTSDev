@@ -387,18 +387,23 @@ const (
 )
 
 type ResourceGVICAssignment struct {
-	CompanyID        string    `json:"company_id"`
-	ResourceType     string    `json:"resource_type"`
-	ResourceID       string    `json:"resource_id"`
-	Role             string    `json:"role"`
-	PrincipalType    string    `json:"principal_type"`
-	PrincipalID      string    `json:"principal_id"`
-	PrincipalName    string    `json:"principal_name,omitempty"`
-	UserID           string    `json:"user_id,omitempty"`
-	UserDisplayName  string    `json:"user_display_name,omitempty"`
-	UserEmail        string    `json:"user_email,omitempty"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+	CompanyID          string    `json:"company_id"`
+	ResourceType       string    `json:"resource_type"`
+	ResourceID         string    `json:"resource_id"`
+	Role               string    `json:"role"`
+	PrincipalType      string    `json:"principal_type"`
+	PrincipalID        string    `json:"principal_id"`
+	PrincipalName      string    `json:"principal_name,omitempty"`
+	UserID             string    `json:"user_id,omitempty"`
+	UserDisplayName    string    `json:"user_display_name,omitempty"`
+	UserEmail          string    `json:"user_email,omitempty"`
+	SourceResourceType string    `json:"source_resource_type,omitempty"`
+	SourceResourceID   string    `json:"source_resource_id,omitempty"`
+	InheritanceType    string    `json:"inheritance_type,omitempty"`
+	Inherited          bool      `json:"inherited,omitempty"`
+	ReadOnly           bool      `json:"read_only,omitempty"`
+	CreatedTimestamp   time.Time `json:"created_timestamp"`
+	UpdatedTimestamp   time.Time `json:"updated_timestamp"`
 }
 
 type ResourceGVICEffectiveAssignment struct {

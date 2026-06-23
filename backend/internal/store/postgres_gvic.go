@@ -67,6 +67,13 @@ func (r *PostgresRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssi
 	} else if !exists {
 		return ResourceGVICAssignmentMutationResult{}, ErrNotFound
 	}
+	if keyValue.resourceType == EntityTypeNode {
+		if logicGateID, err := postgresNodeLinkedLogicGateID(ctx, tx, keyValue.companyID, keyValue.resourceID); err != nil {
+			return ResourceGVICAssignmentMutationResult{}, err
+		} else if logicGateID != "" {
+			return ResourceGVICAssignmentMutationResult{}, ErrGVICInherited
+		}
+	}
 	for _, assignment := range assignments {
 		if err := validatePostgresGVICPrincipalTx(ctx, tx, keyValue.companyID, assignment.principalType, assignment.principalID); err != nil {
 			return ResourceGVICAssignmentMutationResult{}, err
@@ -311,7 +318,50 @@ func validatePostgresGVICPrincipalTx(ctx context.Context, tx *sql.Tx, companyID,
 	return nil
 }
 
+func postgresNodeLinkedLogicGateID(ctx context.Context, queryer postgresGVICQueryer, companyID, nodeID string) (string, error) {
+	var logicGateID string
+	err := queryer.QueryRowContext(ctx, `
+select logic_gate_id::text
+from node_logic_gate_assignments
+where company_id=$1::uuid
+  and node_id=$2::uuid
+order by updated_timestamp desc, created_timestamp desc, assignment_id desc
+limit 1`, companyID, nodeID).Scan(&logicGateID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return logicGateID, err
+}
+
+func clearPostgresNodeResourceGVICAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	if _, err := tx.ExecContext(ctx, `
+delete from resource_gvic_assignments
+where company_id=$1::uuid
+  and resource_type='node'
+  and resource_id=$2::uuid`, companyID, nodeID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `
+delete from resource_gvic_effective_assignments
+where company_id=$1::uuid
+  and resource_type='node'
+  and resource_id=$2::uuid`, companyID, nodeID)
+	return err
+}
 func postgresResourceGVICAssignmentsForResource(ctx context.Context, queryer postgresGVICQueryer, keyValue resourceGVICKey) ([]domain.ResourceGVICAssignment, error) {
+	if keyValue.resourceType == EntityTypeNode {
+		logicGateID, err := postgresNodeLinkedLogicGateID(ctx, queryer, keyValue.companyID, keyValue.resourceID)
+		if err != nil {
+			return nil, err
+		}
+		if logicGateID != "" {
+			source, err := postgresResourceGVICAssignmentsForResource(ctx, queryer, resourceGVICKey{companyID: keyValue.companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID})
+			if err != nil {
+				return nil, err
+			}
+			return inheritedResourceGVICAssignments(source, EntityTypeNode, keyValue.resourceID, EntityTypeLogicGate, logicGateID), nil
+		}
+	}
 	rows, err := queryer.QueryContext(ctx, `
 select
   assignment.company_id::text,
@@ -664,6 +714,16 @@ source_resource as (
     'direct'::text as inheritance_type
   from requested req
   where not (req.resource_type='node' and exists(select 1 from linked_node))
+  union all
+  select
+    req.company_id,
+    req.resource_type,
+    req.resource_id,
+    'logic_gate'::text as source_resource_type,
+    linked_node.logic_gate_id as source_resource_id,
+    'logic_gate_inherited'::text as inheritance_type
+  from requested req
+  join linked_node on req.resource_type='node'
 ),
 configured as (
   select

@@ -1065,6 +1065,7 @@ func (r *MemoryRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	}
 	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(input.CompanyID, input.NodeID))
+	r.clearNodeResourceGVICAssignmentsLocked(input.CompanyID, input.NodeID)
 	cards := r.kanbanCards[location.mapKey]
 	r.kanbanCards[location.mapKey] = append(cards[:location.index], cards[location.index+1:]...)
 	r.applyNodeStatusAfterLogicGateAssignmentRemovalLocked(input.CompanyID, input.NodeID, input.FallbackStatus)
