@@ -25,9 +25,8 @@ type UpdatesViewProps = {
   onOpenProject: (projectID: string, label: string) => void;
 };
 
-type UpdateGroupingField = "type" | "date" | "gvic";
-type UpdateResourceGroupingField = "project" | "logic_gate" | "node";
-type UpdateDisplayGroupingField = UpdateGroupingField | UpdateResourceGroupingField;
+type UpdateGroupingField = "type" | "date" | "gvic" | "project" | "logic_gate";
+type UpdateDisplayGroupingField = UpdateGroupingField;
 type UpdateGroupingDirection = "asc" | "desc";
 
 type UpdateGroupingSetting = {
@@ -78,14 +77,14 @@ const UPDATE_GROUPING_FIELDS: ReadonlyArray<{ value: UpdateGroupingField; label:
   { value: "type", label: "Update Type" },
   { value: "date", label: "Date" },
   { value: "gvic", label: "GVIC" },
+  { value: "project", label: "Project" },
+  { value: "logic_gate", label: "Logic Gate" },
 ];
 
-const UPDATE_RESOURCE_GROUPINGS: UpdateDisplayGroupingSetting[] = [
+const DEFAULT_UPDATE_GROUPINGS: UpdateGroupingSetting[] = [
   { field: "project", direction: "asc" },
   { field: "logic_gate", direction: "asc" },
-  { field: "node", direction: "asc" },
 ];
-const DEFAULT_UPDATE_GROUPINGS: UpdateGroupingSetting[] = [];
 
 const UPDATE_GROUPING_FIELD_SET = new Set<UpdateGroupingField>(UPDATE_GROUPING_FIELDS.map((field) => field.value));
 const NOTIFICATION_TYPE_NODE_ASSIGNED = "node.assigned";
@@ -102,7 +101,6 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
   const [branchLoadingIDs, setBranchLoadingIDs] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<UpdateFeedFilter>("all");
-  const [showProjectGroups, setShowProjectGroups] = useState(true);
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const fallbackSetting = useMemo(() => createDefaultUpdateGroupingSetting(companyID, currentUserID), [companyID, currentUserID]);
   const [settings, setSettings] = useState<UpdateSavedGroupingSetting[]>(() => [fallbackSetting]);
@@ -342,14 +340,13 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
 
   const sourceGroups = useMemo(() => rootGroups.map((root) => branchByRootID[root.id] ?? root), [branchByRootID, rootGroups]);
   const updateRows = useMemo(() => flattenUpdateRows(sourceGroups, hiddenNotificationIDs), [hiddenNotificationIDs, sourceGroups]);
-  const displayGroups = useMemo(() => buildUpdateDisplayGroups(updateRows, selectedSetting.groupings, showProjectGroups), [selectedSetting.groupings, showProjectGroups, updateRows]);
+  const displayGroups = useMemo(() => buildUpdateDisplayGroups(updateRows, selectedSetting.groupings), [selectedSetting.groupings, updateRows]);
   const visibleNotifications = useMemo(() => flattenDisplayNotifications(displayGroups), [displayGroups]);
   const groupingSignature = useMemo(() => JSON.stringify({
     setting: selectedSetting.setting_id,
     groupings: selectedSetting.groupings,
-    showProjectGroups,
     rows: updateRows.map((row) => row.rowKey).sort(),
-  }), [selectedSetting.groupings, selectedSetting.setting_id, showProjectGroups, updateRows]);
+  }), [selectedSetting.groupings, selectedSetting.setting_id, updateRows]);
   const activeFieldSet = new Set(selectedSetting.groupings.map((grouping) => grouping.field));
   const addableFields = UPDATE_GROUPING_FIELDS.filter((field) => !activeFieldSet.has(field.value));
 
@@ -438,11 +435,9 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
             setting={selectedSetting}
             settings={settings}
             addableFields={addableFields}
-            showProjectGroups={showProjectGroups}
             addGroupingOpen={addGroupingOpen}
             groupingFieldMenuIndex={groupingFieldMenuIndex}
             onSelectSetting={setSelectedSettingID}
-            onShowProjectGroupsChange={setShowProjectGroups}
             onAddSavedView={addSavedView}
             onDeleteSavedView={deleteSavedView}
             onToggleCollapsed={toggleSelectedSettingCollapsed}
@@ -488,11 +483,9 @@ function UpdateGroupingPanel({
   setting,
   settings,
   addableFields,
-  showProjectGroups,
   addGroupingOpen,
   groupingFieldMenuIndex,
   onSelectSetting,
-  onShowProjectGroupsChange,
   onAddSavedView,
   onDeleteSavedView,
   onToggleCollapsed,
@@ -505,11 +498,9 @@ function UpdateGroupingPanel({
   setting: UpdateSavedGroupingSetting;
   settings: UpdateSavedGroupingSetting[];
   addableFields: ReadonlyArray<{ value: UpdateGroupingField; label: string }>;
-  showProjectGroups: boolean;
   addGroupingOpen: boolean;
   groupingFieldMenuIndex: number | null;
   onSelectSetting: (settingID: string) => void;
-  onShowProjectGroupsChange: (show: boolean) => void;
   onAddSavedView: () => void;
   onDeleteSavedView: (settingID: string) => void;
   onToggleCollapsed: () => void;
@@ -541,15 +532,6 @@ function UpdateGroupingPanel({
             <button type="button" style={updatesNewViewButtonStyle} onClick={onAddSavedView}>+ New View</button>
           </div>
           <div style={updatesGroupingStackStyle}>
-            <label style={updatesProjectGroupToggleStyle}>
-              <input
-                type="checkbox"
-                checked={showProjectGroups}
-                style={updatesProjectGroupCheckboxStyle}
-                onChange={(event) => onShowProjectGroupsChange(event.currentTarget.checked)}
-              />
-              <span style={updatesProjectGroupToggleTextStyle}>Projects</span>
-            </label>
             {setting.groupings.map((grouping, index) => (
               <div key={`${grouping.field}:${index}`} style={updatesGroupingRowStyle(index)}>
                 <button
@@ -916,14 +898,21 @@ function updatePathWithGroup(path: { project?: UpdateRowResource; logicGate?: Up
   return path;
 }
 
-function buildUpdateDisplayGroups(rows: UpdateFeedRow[], groupings: UpdateGroupingSetting[], showProjectGroups: boolean): UpdateGroup[] {
-  const resourceGroupings = showProjectGroups
-    ? UPDATE_RESOURCE_GROUPINGS
-    : UPDATE_RESOURCE_GROUPINGS.filter((grouping) => grouping.field !== "project");
-  const displayGroupings: UpdateDisplayGroupingSetting[] = [
-    ...normalizeUpdateGroupingStack(groupings),
-    ...resourceGroupings,
-  ];
+function buildUpdateDisplayGroups(rows: UpdateFeedRow[], groupings: UpdateGroupingSetting[]): UpdateGroup[] {
+  const displayGroupings: UpdateDisplayGroupingSetting[] = normalizeUpdateGroupingStack(groupings);
+  if (displayGroupings.length === 0) {
+    return [{
+      id: "updates/all",
+      key: "updates:all",
+      field: "type",
+      label: "Updates",
+      resource_type: "",
+      resource_id: "",
+      depth: 0,
+      groups: [],
+      notifications: sortUpdateRows(rows).map((row) => row.item),
+    }];
+  }
   const groups = buildUniversalNestedGroups(rows, displayGroupings, {
     rootID: "updates",
     rowKey: (row) => row.rowKey,
@@ -951,7 +940,6 @@ function convertUniversalUpdateGroup(group: UniversalNestedGroup<UpdateFeedRow, 
 function getUpdateGroupValues(row: UpdateFeedRow, field: UpdateDisplayGroupingField): UniversalGroupValue[] {
   if (field === "project") return [updateResourceGroupValue("project", row.project, "No project")];
   if (field === "logic_gate") return [updateResourceGroupValue("logic_gate", row.logicGate, "No logic gate")];
-  if (field === "node") return [updateResourceGroupValue("node", row.node, "No node")];
   if (field === "type") return [updateTypeGroupValue(row.item)];
   if (field === "date") return [updateDateGroupValue(row.item.created_timestamp)];
   const role = row.item.role?.trim() ?? "";
@@ -976,7 +964,7 @@ function updateDateGroupValue(createdTimestamp: string): UniversalGroupValue {
 }
 
 function updateGroupResourceFromValue(field: UpdateDisplayGroupingField, key: string): { type: "project" | "logic_gate" | "node"; id: string } | null {
-  if (field !== "project" && field !== "logic_gate" && field !== "node") return null;
+  if (field !== "project" && field !== "logic_gate") return null;
   const prefix = `${field}:`;
   if (!key.startsWith(prefix)) return null;
   const id = key.slice(prefix.length).trim();
@@ -1251,35 +1239,6 @@ const updatesNewViewButtonStyle: React.CSSProperties = {
   padding: "0 8px",
 };
 
-const updatesProjectGroupToggleStyle: React.CSSProperties = {
-  minWidth: 0,
-  minHeight: 30,
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 7,
-  border: "1px solid rgba(15, 23, 42, 0.16)",
-  borderRadius: 5,
-  background: "rgba(248, 250, 252, 0.96)",
-  color: "#334155",
-  fontSize: 11,
-  fontWeight: 800,
-  padding: "0 8px",
-};
-
-const updatesProjectGroupCheckboxStyle: React.CSSProperties = {
-  width: 13,
-  height: 13,
-  margin: 0,
-  accentColor: "#0f766e",
-};
-
-const updatesProjectGroupToggleTextStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
-
 const updatesGroupingStackStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
@@ -1296,7 +1255,7 @@ function updatesGroupingRowStyle(index: number): React.CSSProperties {
     gridTemplateColumns: "minmax(0, 1fr) 46px 22px",
     alignItems: "center",
     gap: 5,
-    marginLeft: index * 16,
+    marginLeft: index * 20,
     border: "1px solid rgba(15, 23, 42, 0.16)",
     borderRadius: 5,
     background: "#f8fafc",

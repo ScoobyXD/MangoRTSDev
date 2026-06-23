@@ -384,6 +384,7 @@ export function HomePage({
   const [pendingSharedInboxMessageRefreshID, setPendingSharedInboxMessageRefreshID] = useState("");
   const [myWorkLiveRefreshToken, setMyWorkLiveRefreshToken] = useState(0);
   const [updatesLiveRefreshToken, setUpdatesLiveRefreshToken] = useState(0);
+  const [optimisticMyWorkDeletedNodeIDs, setOptimisticMyWorkDeletedNodeIDs] = useState<Set<string>>(new Set());
   const [noticeResourceAction, setNoticeResourceAction] = useState<HomeNoticeResourceAction | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [workspaceTrackWidth, setWorkspaceTrackWidth] = useState(() => Math.max(1, window.innerWidth - 20));
@@ -450,6 +451,9 @@ export function HomePage({
       : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!hideNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
   const activeGVICMatrixUserID = isInboxMatrixView ? (GVICMatrixTargetUserID.trim() || currentUserID) : currentUserID;
+  useEffect(() => {
+    setOptimisticMyWorkDeletedNodeIDs(new Set());
+  }, [companyID]);
   const scheduleMyWorkLiveRefresh = useCallback((scopes?: WorkspaceReconciliationScope[]) => {
     const myWorkScopes = (scopes ?? []).filter((scope) => scope.kind === "my_work");
     const targetUserIDs = cleanIDList(myWorkScopes.map((scope) => (
@@ -3293,8 +3297,12 @@ export function HomePage({
         if (node) mergeUpdatedNode(node);
       }
       scheduleCurrentUserMyWorkRefresh();
-      const action = fromLogicGateID ? "moved" : "added";
-      setNotice(nodeIDs.length === 1 ? `Node ${action} to Logic Gate.` : `${nodeIDs.length} nodes ${action} to Logic Gate.`);
+      if (fromLogicGateID === logicGateID) {
+        setNotice(nodeIDs.length === 1 ? "Node updated in Logic Gate." : `${nodeIDs.length} nodes updated in Logic Gate.`);
+      } else {
+        const action = fromLogicGateID ? "moved" : "added";
+        setNotice(nodeIDs.length === 1 ? `Node ${action} to Logic Gate.` : `${nodeIDs.length} nodes ${action} to Logic Gate.`);
+      }
     } catch (dropError) {
       setError(formatError(dropError, "Failed to add nodes to Logic Gate"));
     } finally {
@@ -3507,11 +3515,39 @@ export function HomePage({
     activeDeleteSelectionKindRef.current = kind;
     requestDeleteHomeEntities(kind === "node" ? buildNodeDeleteTargets(ids) : buildLogicGateDeleteTargets(ids), position);
   }, [buildLogicGateDeleteTargets, buildNodeDeleteTargets, requestDeleteHomeEntities]);
+  const renameMyWorkNode = useCallback(async (nodeID: string) => {
+    const cleanNodeID = nodeID.trim();
+    const node = nodeByID.get(cleanNodeID);
+    if (!cleanNodeID || !node) return;
+    const currentTitle = nodeTitle(node);
+    const nextTitle = window.prompt("Rename node", currentTitle)?.trim();
+    if (!nextTitle || nextTitle === currentTitle) return;
+    setBusy("rename-node");
+    setError("");
+    try {
+      const updated = await requestJSON<NodeRecord>(apiBase, `/v1/nodes/${encodeURIComponent(cleanNodeID)}`, {
+        method: "PUT",
+        body: JSON.stringify({ company_id: companyID, name: nextTitle }),
+      });
+      mergeUpdatedNode(updated);
+      invalidateNodeRecordStoreCaches(apiBase, companyID, cleanNodeID);
+      scheduleMyWorkLiveRefresh();
+      setNotice("Node renamed.");
+    } catch (renameError) {
+      setError(formatError(renameError, "Failed to rename node"));
+    } finally {
+      setBusy("");
+    }
+  }, [apiBase, companyID, mergeUpdatedNode, nodeByID, scheduleMyWorkLiveRefresh]);
   const deleteHomeEntities = useCallback(async (targets: HomeEntityDeleteTarget[]): Promise<boolean> => {
     const normalizedTargets = targets.map((target) => ({ kind: target.kind, id: target.id.trim() })).filter((target) => target.id);
     const nodeIDSet = new Set(normalizedTargets.filter((target) => target.kind === "node").map((target) => target.id));
     const logicGateIDSet = new Set(normalizedTargets.filter((target) => target.kind === "logic_gate").map((target) => target.id));
     if (nodeIDSet.size === 0 && logicGateIDSet.size === 0) return false;
+    const optimisticNodeIDs = Array.from(nodeIDSet);
+    if (optimisticNodeIDs.length > 0) {
+      setOptimisticMyWorkDeletedNodeIDs((current) => new Set([...current, ...optimisticNodeIDs]));
+    }
     setBusy("entity-delete");
     setError("");
     try {
@@ -3548,16 +3584,24 @@ export function HomePage({
       }
       setBulkEditMenu(null);
       setEntityDeleteConfirmation(null);
+      scheduleMyWorkLiveRefresh();
       const deletedCount = nodeIDSet.size + logicGateIDSet.size;
       setNotice(deletedCount === 1 ? "Item deleted." : `${deletedCount} items deleted.`);
       return true;
     } catch (deleteError) {
+      if (optimisticNodeIDs.length > 0) {
+        setOptimisticMyWorkDeletedNodeIDs((current) => {
+          const next = new Set(current);
+          for (const nodeID of optimisticNodeIDs) next.delete(nodeID);
+          return next;
+        });
+      }
       setError(formatError(deleteError, "Failed to delete selected items"));
       return false;
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, logicGateIDFromTreeID, logicGateSelectionAnchorID, nodeIDFromTreeID, nodeSelectionAnchorID, nodes]);
+  }, [apiBase, companyID, logicGateIDFromTreeID, logicGateSelectionAnchorID, nodeIDFromTreeID, nodeSelectionAnchorID, nodes, scheduleMyWorkLiveRefresh]);
   const deleteNodeEditorOverlayNode = useCallback(async (nodeID: string): Promise<boolean> => {
     const targets = buildNodeDeleteTargets([nodeID]);
     if (targets.length === 0) return false;
@@ -3854,13 +3898,14 @@ export function HomePage({
               onOpenNode={openNodeEditorOverlay}
               onOpenLogicGate={(logicGateID, label, nodeID) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)), nodeID)}
               onOpenProject={openProjectManagement}
-              onOpenNodeBulkMenu={openNodeBulkEditMenu}
-              onOpenLogicGateBulkMenu={openLogicGateBulkEditMenu}
+              onRenameNode={renameMyWorkNode}
+              onRequestDeleteNode={(nodeID, position) => requestDeleteBulkEditTargets("node", [nodeID], position)}
               onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
               onDropNodes={(input) => { void dropNodesIntoInboxLogicGate(input); }}
               onDropNodesInCell={(input) => { void dropNodesIntoNewInboxLogicGate(input); }}
               onDropLogicGates={(input) => { void moveLogicGatesIntoInboxCell(input); }}
               onDropProjects={(input) => { void moveProjectsIntoInboxCell(input); }}
+              hiddenNodeIDs={optimisticMyWorkDeletedNodeIDs}
             />
           ) : isUpdatesView ? (
             <UpdatesView
