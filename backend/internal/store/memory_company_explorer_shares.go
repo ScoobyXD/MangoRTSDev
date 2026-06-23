@@ -100,20 +100,3 @@ func (r *MemoryRepo) DeleteCompanyExplorerFolderShare(companyID, folderID, email
 	delete(r.folderShares, shareKey)
 	return nil
 }
-
-func (r *MemoryRepo) activateCompanyExplorerFolderSharesLocked(companyID, email, userID string, now time.Time) {
-	email = normalizeEmail(email)
-	userID = strings.TrimSpace(userID)
-	if companyID == "" || email == "" || userID == "" {
-		return
-	}
-	for shareKey, share := range r.folderShares {
-		if share.CompanyID != companyID || share.Email != email || share.Status != "pending" {
-			continue
-		}
-		share.UserID = &userID
-		share.Status = "active"
-		share.UpdatedTimestamp = now
-		r.folderShares[shareKey] = share
-	}
-}

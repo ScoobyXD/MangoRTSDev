@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
 )
@@ -151,31 +150,6 @@ func (r *PostgresRepo) DeleteCompanyExplorerFolderShare(companyID, folderID, ema
 		return ErrNotFound
 	}
 	return nil
-}
-
-func activateCompanyExplorerFolderSharesSQL(ctx context.Context, tx *sql.Tx, companyID, email, userID string) error {
-	companyID = strings.TrimSpace(companyID)
-	email = normalizeEmail(email)
-	userID = strings.TrimSpace(userID)
-	if companyID == "" || email == "" || userID == "" {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx,
-		`update company_explorer_folder_shares
-		 set user_id=$3,
-		     status='active',
-		     updated_timestamp=now()
-		 where company_id=$1
-		   and email=$2
-		   and status='pending'`,
-		companyID,
-		email,
-		userID,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	return err
 }
 
 type companyExplorerFolderShareScanner interface {

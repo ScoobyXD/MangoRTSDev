@@ -920,7 +920,6 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
-	r.activateCompanyExplorerFolderSharesLocked(invitation.CompanyID, invitation.Email, user.UserID, now)
 	invitation.Status = domain.InvitationStatusAccepted
 	invitation.AcceptedByUserID = &user.UserID
 	invitation.AcceptedTimestamp = &now

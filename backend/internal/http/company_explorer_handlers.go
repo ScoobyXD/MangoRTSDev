@@ -958,47 +958,22 @@ func (s *Server) inviteCompanyExplorerFolderShare(w http.ResponseWriter, r *http
 		return
 	}
 
-	targetEmail, targetUserID, existingMangoUser, err := s.resolveCompanyExplorerFolderShareTarget(req.CompanyID, req.UserID, req.Email)
+	targetEmail, targetUserID, err := s.resolveCompanyExplorerFolderShareTarget(req.CompanyID, req.UserID, req.Email)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_company_explorer_folder_share_target")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "company_explorer_folder_share_user_not_found")
 		return
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_resolve_company_explorer_folder_share_target")
 		return
 	}
-
-	var invitation *domain.Invitation
-	cognitoStatus := "not_needed"
 	if targetUserID == "" {
-		created, err := s.repo.CreateInvitation(store.CreateInvitationInput{
-			CompanyID:       req.CompanyID,
-			Email:           targetEmail,
-			Role:            domain.RoleCompanyUser,
-			InvitedByUserID: actor.User.UserID,
-		})
-		if errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusBadRequest, "invalid_invitation")
-			return
-		}
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "company_not_found")
-			return
-		}
-		if errors.Is(err, store.ErrAlreadyExists) {
-			writeError(w, http.StatusConflict, "user_already_exists")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_create_invitation")
-			return
-		}
-		invitation = &created
-		cognitoStatus = s.sendCognitoInvitation(r, created.Email, existingMangoUser)
-		if cognitoStatus == "failed" {
-			writeError(w, http.StatusBadGateway, "failed_to_create_cognito_user")
-			return
-		}
+		writeError(w, http.StatusNotFound, "company_explorer_folder_share_user_not_found")
+		return
 	}
 
 	share, err := s.repo.UpsertCompanyExplorerFolderShare(store.CompanyExplorerFolderShareInput{
@@ -1023,61 +998,46 @@ func (s *Server) inviteCompanyExplorerFolderShare(w http.ResponseWriter, r *http
 	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_share_upserted", map[string]any{"folder_id": folderID, "share": share})
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"share":                 share,
-		"invitation":            invitation,
-		"cognito_invite_status": cognitoStatus,
+		"invitation":            nil,
+		"cognito_invite_status": "not_needed",
 	})
 }
 
-func (s *Server) resolveCompanyExplorerFolderShareTarget(companyID, userID, email string) (string, string, bool, error) {
+func (s *Server) resolveCompanyExplorerFolderShareTarget(companyID, userID, email string) (string, string, error) {
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
 	email = normalizeEmailForCompare(email)
 	if companyID == "" {
-		return "", "", false, store.ErrInvalid
+		return "", "", store.ErrInvalid
 	}
 	if userID != "" {
 		user, err := s.repo.GetCompanyUser(companyID, userID)
 		if errors.Is(err, store.ErrNotFound) {
-			return "", "", false, store.ErrInvalid
+			return "", "", store.ErrNotFound
 		}
 		if err != nil {
-			return "", "", false, err
+			return "", "", err
 		}
-		return user.Email, user.UserID, true, nil
+		return user.Email, user.UserID, nil
 	}
 	if email == "" {
-		return "", "", false, store.ErrInvalid
+		return "", "", store.ErrInvalid
 	}
 	user, err := s.repo.GetAuthUserByEmail(email)
 	if errors.Is(err, store.ErrNotFound) {
-		return email, "", false, nil
+		return "", "", store.ErrNotFound
 	}
 	if err != nil {
-		return "", "", false, err
+		return "", "", err
 	}
 	companyUser, err := s.repo.GetCompanyUser(companyID, user.UserID)
 	if errors.Is(err, store.ErrNotFound) {
-		return email, "", true, nil
+		return "", "", store.ErrNotFound
 	}
 	if err != nil {
-		return "", "", false, err
+		return "", "", err
 	}
-	return companyUser.Email, companyUser.UserID, true, nil
-}
-
-func (s *Server) sendCognitoInvitation(r *http.Request, email string, existingMangoUser bool) string {
-	if existingMangoUser {
-		return "existing_mango_user"
-	}
-	if s.cognitoAdmin == nil {
-		return "not_configured"
-	}
-	result, err := s.cognitoAdmin.AdminCreateUser(r.Context(), email)
-	if err != nil {
-		log.Printf("failed to create cognito invitation user email=%s: %v", email, err)
-		return "failed"
-	}
-	return firstNonBlank(result.Status, "created")
+	return companyUser.Email, companyUser.UserID, nil
 }
 
 func (s *Server) publishCompanyExplorerDeletedTargets(companyID string, targets []store.CompanyExplorerDeletedTarget) {

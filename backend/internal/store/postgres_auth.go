@@ -1146,10 +1146,6 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 		return domain.Invitation{}, err
 	}
 
-	if err = activateCompanyExplorerFolderSharesSQL(context.Background(), tx, invitation.CompanyID, invitation.Email, user.UserID); err != nil {
-		return domain.Invitation{}, err
-	}
-
 	err = tx.QueryRow(
 		`update invitations
 		 set status = 'accepted',

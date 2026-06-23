@@ -756,14 +756,13 @@ func TestCompanyExplorerFolderShareExistingMember(t *testing.T) {
 	}
 }
 
-func TestCompanyExplorerFolderSharePendingActivatesOnInviteAccept(t *testing.T) {
+func TestCompanyExplorerFolderShareRejectsNonCompanyUser(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const companyID = "11111111-1111-1111-1111-111111111111"
 	const adminSubject = "admin-subject"
-	const inviteeSubject = "folder-share-invitee"
 	const inviteeEmail = "folder-share@example.com"
 	repo.EnsureCompany(companyID, "Acme Systems")
 	if _, err := repo.UpsertAuthUser(adminSubject, "admin@example.com", "Admin User"); err != nil {
@@ -776,8 +775,10 @@ func TestCompanyExplorerFolderSharePendingActivatesOnInviteAccept(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	cognito := &recordingCognitoAdmin{}
 	handler := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
+		CognitoAdmin:  cognito,
 	}).Routes()
 	adminToken := "Bearer " + testJWT(t, key, "kid", adminSubject, "admin@example.com")
 
@@ -786,45 +787,30 @@ func TestCompanyExplorerFolderSharePendingActivatesOnInviteAccept(t *testing.T) 
 	shareReq.Header.Set("Content-Type", "application/json")
 	shareRes := httptest.NewRecorder()
 	handler.ServeHTTP(shareRes, shareReq)
-	if shareRes.Code != http.StatusCreated {
-		t.Fatalf("share status = %d, want %d, body=%s", shareRes.Code, http.StatusCreated, strings.TrimSpace(shareRes.Body.String()))
+	if shareRes.Code != http.StatusNotFound {
+		t.Fatalf("share status = %d, want %d, body=%s", shareRes.Code, http.StatusNotFound, strings.TrimSpace(shareRes.Body.String()))
 	}
 	var sharePayload struct {
-		Share               domain.CompanyExplorerFolderShare `json:"share"`
-		Invitation          *domain.Invitation                `json:"invitation"`
-		CognitoInviteStatus string                            `json:"cognito_invite_status"`
+		Error string `json:"error"`
 	}
 	if err := json.NewDecoder(shareRes.Body).Decode(&sharePayload); err != nil {
 		t.Fatal(err)
 	}
-	if sharePayload.Share.Status != "pending" || sharePayload.Share.UserID != nil {
-		t.Fatalf("share = %+v, want pending external invite", sharePayload.Share)
+	if sharePayload.Error != "company_explorer_folder_share_user_not_found" {
+		t.Fatalf("share error = %q, want company_explorer_folder_share_user_not_found", sharePayload.Error)
 	}
-	if sharePayload.Invitation == nil || sharePayload.Invitation.Token == "" {
-		t.Fatalf("invitation = %+v, want token", sharePayload.Invitation)
+	if len(cognito.emails) != 0 || len(cognito.acceptedEmails) != 0 {
+		t.Fatalf("cognito calls = create %v accept %v, want none", cognito.emails, cognito.acceptedEmails)
 	}
-	if sharePayload.CognitoInviteStatus != "not_configured" {
-		t.Fatalf("cognito status = %q, want not_configured", sharePayload.CognitoInviteStatus)
-	}
-
-	acceptReq := httptest.NewRequest(http.MethodPost, "/v1/invitations/accept", strings.NewReader(`{"token":"`+sharePayload.Invitation.Token+`","display_name":"Folder Share User"}`))
-	acceptReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", inviteeSubject, inviteeEmail))
-	acceptReq.Header.Set("Content-Type", "application/json")
-	acceptRes := httptest.NewRecorder()
-	handler.ServeHTTP(acceptRes, acceptReq)
-	if acceptRes.Code != http.StatusOK {
-		t.Fatalf("accept status = %d, want %d, body=%s", acceptRes.Code, http.StatusOK, strings.TrimSpace(acceptRes.Body.String()))
-	}
-	user, err := repo.GetAuthUser(inviteeSubject)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := repo.GetAuthUserByEmail(inviteeEmail); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("invitee Mango user error = %v, want ErrNotFound", err)
 	}
 	shares, err := repo.ListCompanyExplorerFolderShares(companyID, folder.FolderID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(shares) != 1 || shares[0].Status != "active" || shares[0].UserID == nil || *shares[0].UserID != user.UserID {
-		t.Fatalf("shares after accept = %+v, want active share for accepted user %s", shares, user.UserID)
+	if len(shares) != 0 {
+		t.Fatalf("shares after rejected invite = %+v, want none", shares)
 	}
 }
 

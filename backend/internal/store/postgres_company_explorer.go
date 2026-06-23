@@ -311,39 +311,39 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 		            when exists (
 		              select 1
 		              from company_memberships membership
-		              where membership.user_id=$3::uuid
+		              where membership.user_id=$2::uuid
 		                and (
 		                  membership.role='dev_admin'
 		                  or (membership.company_id=$1::uuid and membership.role='company_admin')
 		                )
 		            ) then 'admin'
-		            when mangorts_user_can_access_resource(folder.company_id, 'company_explorer_folder', folder.folder_id, $3::uuid, 'edit') then 'edit'
+		            when mangorts_user_can_access_resource(folder.company_id, 'company_explorer_folder', folder.folder_id, $2::uuid, 'edit') then 'edit'
 		            else 'view'
 		          end as access_level
 		   from company_explorer_folders folder
 		   where folder.company_id=$1::uuid
 		     and folder.parent_folder_id is null
-		     and mangorts_user_can_access_resource(folder.company_id, 'company_explorer_folder', folder.folder_id, $3::uuid, $4)
+		     and mangorts_user_can_access_resource(folder.company_id, 'company_explorer_folder', folder.folder_id, $2::uuid, $3)
 		   union all
 		   select child.folder_id as resource_id,
 		          case
 		            when exists (
 		              select 1
 		              from company_memberships membership
-		              where membership.user_id=$3::uuid
+		              where membership.user_id=$2::uuid
 		                and (
 		                  membership.role='dev_admin'
 		                  or (membership.company_id=$1::uuid and membership.role='company_admin')
 		                )
 		            ) then 'admin'
-		            when mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, 'edit') then 'edit'
+		            when mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $2::uuid, 'edit') then 'edit'
 		            else 'view'
 		          end as access_level
 		   from company_explorer_folders child
 		   join visible_workspace_folder parent
 		     on parent.resource_id=child.parent_folder_id
 		   where child.company_id=$1::uuid
-		     and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4)
+		     and mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $2::uuid, $3)
 		 )
 		 select folder.company_id, folder.folder_id, folder.parent_folder_id, 'folder'::text as folder_kind, null::text as system_key, folder.name, `+companyExplorerFolderAccountEmailColumn(includeAccountEmail, "folder")+`, `+companyExplorerFolderScopeColumns("folder")+`, folder.position, folder.created_timestamp, folder.updated_timestamp,
 		        visible_workspace_folder.access_level
@@ -351,7 +351,7 @@ func (r *PostgresRepo) queryVisibleCompanyExplorerFolders(ctx context.Context, c
 		 join visible_workspace_folder on visible_workspace_folder.resource_id=folder.folder_id
 		 where folder.company_id=$1::uuid
 		 order by folder.position asc, folder.created_timestamp asc`,
-		companyID, nil, userID, EntityPermissionView,
+		companyID, userID, EntityPermissionView,
 	)
 	if err != nil {
 		if includeAccountEmail && isPostgresUndefinedColumn(err, "account_email") {

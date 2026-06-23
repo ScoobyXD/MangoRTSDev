@@ -101,7 +101,7 @@ export function useCompanyExplorerFolderShares(
           shares,
           busy: false,
           error: "",
-          message: share?.status === "active" ? "Folder shared." : "Invitation created.",
+          message: share ? "Folder shared." : "Share updated.",
           invitationToken: payload.invitation?.token ?? "",
         };
       });

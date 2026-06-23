@@ -367,6 +367,7 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 		"func (r *postgresrepo) listvisiblecompanyexplorernodesummaries",
 		"func (r *postgresrepo) listvisiblecompanyexplorerlogicgatesummaries",
 		"mangorts_user_can_access_resource",
+		"mangorts_user_can_access_resource(folder.company_id, 'company_explorer_folder', folder.folder_id, $2::uuid, $3)",
 		"item.target_type not in ('node', 'logic_gate', 'project')",
 	} {
 		if !strings.Contains(companyExplorerSource, needle) {
@@ -377,6 +378,10 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 		if strings.Contains(companyExplorerSource, forbidden) {
 			t.Fatalf("Postgres visible company explorer query should not use %q", forbidden)
 		}
+	}
+
+	if strings.Contains(companyExplorerSource, "companyid, nil, userid, entitypermissionview") {
+		t.Fatalf("Postgres visible company explorer root folder query must not pass an unused $2 parameter")
 	}
 
 	sharedInboxRaw, err := os.ReadFile("postgres_shared_inbox_folders.go")
