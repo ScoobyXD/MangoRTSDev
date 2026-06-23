@@ -1859,6 +1859,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setDeleteNodeConfirmation({ nodeIDs: uniqueNodeIDs, position: position ?? null });
   }, [cards]);
 
+  const requestNodeDeleteFromOverlay = useCallback((nodeID: string, position?: ConfirmActionMenuPosition) => {
+    const cleanNodeID = nodeID.trim();
+    if (!cleanNodeID) return;
+    setDeleteNodeConfirmation({ nodeIDs: [cleanNodeID], position: position ?? null });
+  }, []);
+
   const requestNodeRename = useCallback((card: KanbanCard) => {
     setCardContextMenu(null);
     setColumnContextMenu(null);
@@ -2711,6 +2717,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           onClose={() => closeNodeEditorOverlay()}
           onCollapseToTab={collapseNodeEditorOverlayToTab}
           onOpenInNewTab={() => openKanbanNodeInNewTab(nodeEditorOverlay.nodeID)}
+          onRequestDelete={requestNodeDeleteFromOverlay}
         />
       )}
       {accountAssignmentModal && (

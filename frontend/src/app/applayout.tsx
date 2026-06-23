@@ -51,6 +51,9 @@ import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, appTaskbarStorageScope, rea
 import { readAppTimelineState, rollTimelineStateToDate, saveAppTimelineState, type AppTimelineState } from "./timelineState";
 import { buildGvicRoute, buildLogicGateRoute, buildNodeRoute, buildProjectRoute, gvicRoleForViewID, type DeepLinkRoute, type GvicDeepLinkRoute } from "./deepLinkRoutes";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "./resourceLinks";
+import { createRequestJSON } from "../modules/api/requestJSON";
+import { invalidateNodeRecordStoreCaches } from "../modules/node-map/NodeRecordStore";
+import { removeNodeRelationshipGraphNode } from "../modules/node-map/NodeRelationshipGraph";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -403,7 +406,9 @@ const appResizeHandleStyle: React.CSSProperties = {
 };
 
 const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onNavigate, overrideContent }) => {
+  const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const activeCompanyID = getActiveCompanyID();
+  const appRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const taskbarScope = useMemo(() => (
     appTaskbarStorageScope(me?.user.user_id || me?.user.email || "local", activeCompanyID)
   ), [activeCompanyID, me?.user.email, me?.user.user_id]);
@@ -1304,6 +1309,29 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     }
   }, [explorerNodePopup, onNavigate, upsertDockTab]);
 
+  const deleteExplorerNodePopupNode = useCallback(async (nodeID: string): Promise<boolean> => {
+    const cleanNodeID = nodeID.trim();
+    const companyID = getActiveCompanyID();
+    if (!cleanNodeID || !companyID) return false;
+    try {
+      await appRequestJSON<{ status?: string }>(`/v1/nodes/${encodeURIComponent(cleanNodeID)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+      invalidateNodeRecordStoreCaches(apiBase, companyID, cleanNodeID);
+      removeNodeRelationshipGraphNode(apiBase, companyID, cleanNodeID);
+      setExplorerNodePopup((current) => (current?.nodeID === cleanNodeID ? null : current));
+      setActiveDockTabID((current) => {
+        const activeTab = dockTabs.find((tab) => tab.id === current);
+        return activeTab?.kind === "node" && activeTab.entityID === cleanNodeID ? null : current;
+      });
+      if (routeManagedExplorerNodePopupRef.current && onNavigate) {
+        routeManagedExplorerNodePopupRef.current = false;
+        onNavigate("/", { replace: true });
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, [apiBase, appRequestJSON, dockTabs, onNavigate]);
+
   const collapseLogicGateArenaToTab = useCallback((selection: { logicGateID: string; label: string }) => {
     upsertDockTab({
       kind: "logic_gate_arena",
@@ -2088,6 +2116,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           }}
           onCollapseToTab={collapseExplorerNodePopupToTab}
           onOpenInNewTab={() => openAppPathInNewTab(buildContextualNodeRoute(explorerNodePopup.nodeID))}
+          onDeleteNode={deleteExplorerNodePopupNode}
         />
       )}
 

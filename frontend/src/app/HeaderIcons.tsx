@@ -48,6 +48,45 @@ export const HeaderTeamsIcon: React.FC<{ color?: string }> = ({ color = "current
   </svg>
 );
 
+export const HeaderTriageIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
+    <path d="M2.3 3.4h11.4v9.2H2.3Z" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
+    <path d="M3.2 4.4 8 8.1l4.8-3.7" fill="none" stroke={color} strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M5.1 10.7h5.8" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" />
+  </svg>
+);
+
+export const HeaderSharedTriageIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
+    <path d="M2.4 4.4h5.2l1.15 1.35h4.85v6.45a1.15 1.15 0 0 1-1.15 1.15H3.55A1.15 1.15 0 0 1 2.4 12.2Z" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
+    <circle cx="6.05" cy="9.25" r="1.25" fill="none" stroke={color} strokeWidth="1.15" />
+    <circle cx="10.05" cy="9.25" r="1.25" fill="none" stroke={color} strokeWidth="1.15" />
+  </svg>
+);
+
+export const HeaderUpdatesIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
+    <path d="M8 2.2a4.8 4.8 0 0 0-4.8 4.8v2.55l-1 1.55h11.6l-1-1.55V7A4.8 4.8 0 0 0 8 2.2Z" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
+    <path d="M6.55 12.25a1.55 1.55 0 0 0 2.9 0" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" />
+    <path d="M11.6 2.1 13.8 4" fill="none" stroke={color} strokeWidth="1.1" strokeLinecap="round" />
+  </svg>
+);
+
+export const HeaderMyWorkIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
+    <rect x="2.2" y="3" width="11.6" height="10.3" rx="1.4" fill="none" stroke={color} strokeWidth="1.2" />
+    <path d="M5.1 2.1v2.2M10.9 2.1v2.2M4.4 7.2h3.3M4.4 10h5.9" fill="none" stroke={color} strokeWidth="1.15" strokeLinecap="round" />
+    <path d="m10.1 7.4 1 .95 1.7-2" fill="none" stroke={color} strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+export const HeaderExplorerIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
+    <path d="M2.2 4.6h4.35l1.1 1.3h6.15v6.35a1.2 1.2 0 0 1-1.2 1.2H3.4a1.2 1.2 0 0 1-1.2-1.2Z" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />
+    <path d="M2.65 4.65V3.4h4.1l1 1.25" fill="none" stroke={color} strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 export const HeaderLogicGateArenaIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
   <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
     <rect x="2" y="2.2" width="4.2" height="4.2" rx="1" fill="none" stroke={color} strokeWidth="1.35" />
