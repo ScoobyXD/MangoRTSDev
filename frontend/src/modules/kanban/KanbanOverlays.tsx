@@ -170,6 +170,7 @@ export function KanbanNodeEditorOverlay({
   accent,
   theme,
   allowHorizontalOverflow = false,
+  onLinkedLeftResizeStart,
   onClose,
   onCollapseToTab,
   onOpenInNewTab,
@@ -182,6 +183,7 @@ export function KanbanNodeEditorOverlay({
   accent: string;
   theme: "mango" | "teal" | "light" | "dark";
   allowHorizontalOverflow?: boolean;
+  onLinkedLeftResizeStart?: () => boolean;
   onClose: () => void;
   onCollapseToTab: () => void;
   onOpenInNewTab?: () => void;
@@ -293,6 +295,7 @@ export function KanbanNodeEditorOverlay({
             const boardBounds = boardRootRef.current?.getBoundingClientRect();
             const boardWidth = boardBounds?.width ?? window.innerWidth;
             const boardHeight = boardBounds?.height ?? window.innerHeight;
+            const linkedLeftResize = Boolean(handle.edges.left && onLinkedLeftResizeStart?.());
             resizeRef.current = {
               edges: handle.edges,
               startX: event.clientX,
@@ -304,6 +307,7 @@ export function KanbanNodeEditorOverlay({
               boardWidth,
               boardHeight,
               minLeft: getNodeEditorOverlayMinLeftPx(boardRootRef.current, allowHorizontalOverflow),
+              linkedLeftResize,
             };
           }}
           style={{
