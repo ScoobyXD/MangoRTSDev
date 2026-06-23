@@ -1,0 +1,12 @@
+POST/PUT updates source truth and projection tables.
+POST/PUT returns the changed result needed by the caller.
+Browser cache should be patched from the command response or projection deltas.
+Browser should not need to refetch a broad source-built
+
+
+Write source truth.
+Write/update projection tables precisely.
+Return the exact updated GVIC result from the command.
+Patch browser cache immediately from that result.
+Use projection/realtime deltas to keep other browser caches current.
+Prevent any later broad payload from overwriting newer GVIC with stale data.
