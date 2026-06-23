@@ -1213,13 +1213,19 @@ function outdentEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean 
   return true;
 }
 
-function getChecklistItemForPointer(root: HTMLElement, event: React.MouseEvent<HTMLDivElement>): HTMLLIElement | null {
+function getChecklistItemForPointer(root: HTMLElement, event: Pick<React.MouseEvent<HTMLDivElement>, "target" | "clientX">): HTMLLIElement | null {
   const item = getClosestEditorListItem(root, event.target);
   if (!item || getEditorListKindForItem(item) !== "checklist") return null;
   const rect = item.getBoundingClientRect();
   const markerZoneLeft = rect.left - 2;
   const markerZoneRight = rect.left + 26;
   return event.clientX >= markerZoneLeft && event.clientX <= markerZoneRight ? item : null;
+}
+
+function updateEditorChecklistCursor(root: HTMLElement, event: React.PointerEvent<HTMLDivElement>): boolean {
+  if (!getChecklistItemForPointer(root, event)) return false;
+  root.style.cursor = "pointer";
+  return true;
 }
 
 type EditorPlainTextBoundary = {
@@ -3121,6 +3127,7 @@ export function useEditorDocumentSurfaceHandlers({
     },
     onPointerMove(event) {
       if (updateEditorImageCursor(event.currentTarget, event.target, event.clientX, event.clientY)) return;
+      if (updateEditorChecklistCursor(event.currentTarget, event)) return;
       updateEditorTableCursor(event.currentTarget, event.target, event.clientX, event.clientY);
     },
     onKeyUp(event) {
