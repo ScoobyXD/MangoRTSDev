@@ -742,11 +742,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                 pointerEvents: "auto",
               }}
             >
-              {gvicFields.readOnlyReason && (
-                <div style={{ gridColumn: "1 / -1", border: `1px solid ${ruleColor}`, borderRadius: 6, background: "rgba(100, 116, 139, 0.08)", color: "#475569", fontSize: 11, fontWeight: 750, padding: "6px 8px" }}>
-                  {gvicFields.readOnlyReason}
-                </div>
-              )}
               {GVIC_ROLES.map((column) => (
                 <GVICRoleEditor
                   key={column.role}
@@ -833,6 +828,7 @@ function GVICRoleEditor({
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState(false);
   const [assignedOpen, setAssignedOpen] = useState(false);
+  const [disabledTooltipPosition, setDisabledTooltipPosition] = useState<{ x: number; y: number } | null>(null);
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(() => new Set());
   const containerRef = useRef<HTMLDivElement | null>(null);
   const assignedPrincipalKeys = useMemo(() => new Set(assignments.map(logicGateGVICAssignmentSubjectKey)), [assignments]);
@@ -845,6 +841,7 @@ function GVICRoleEditor({
     ? (assignments.length === 0 ? "" : assignments.length === 1 ? GVICAssignmentLabel(assignments[0]) : `${GVICAssignmentLabel(assignments[0])} +${assignments.length - 1}`)
     : `People (${assignments.length})`;
   const showAssignedButton = !singleUserOnly || assignments.length > 0;
+  const showDisabledTooltip = inheritedReadOnly && Boolean(disabledReason && disabledTooltipPosition);
   const toggleGroupExpanded = (groupID: string) => {
     const cleanGroupID = groupID.trim();
     if (!cleanGroupID) return;
@@ -1136,7 +1133,18 @@ function GVICRoleEditor({
           </div>
         )}
       </div>
-      <div style={{ position: "relative", minWidth: 0, width: "min(174px, 100%)", justifySelf: "start" }}>
+      <div
+        onMouseEnter={(event) => {
+          if (!inheritedReadOnly || !disabledReason) return;
+          setDisabledTooltipPosition({ x: event.clientX, y: event.clientY });
+        }}
+        onMouseMove={(event) => {
+          if (!inheritedReadOnly || !disabledReason) return;
+          setDisabledTooltipPosition({ x: event.clientX, y: event.clientY });
+        }}
+        onMouseLeave={() => setDisabledTooltipPosition(null)}
+        style={{ position: "relative", minWidth: 0, width: "min(174px, 100%)", justifySelf: "start" }}
+      >
         <input
           id={inputID}
           name={`${inputID}-GVIC-person`}
@@ -1171,13 +1179,37 @@ function GVICRoleEditor({
             }
           }}
           placeholder={inputPlaceholder}
-          title={disabledReason || undefined}
           aria-label={`Add ${label} ${singleUserOnly ? "user" : "user or team"}`}
           aria-haspopup="listbox"
           aria-expanded={canEdit && open}
           aria-controls={`${inputID}-options`}
-          style={{ width: "100%", minWidth: 0, minHeight: 27, boxSizing: "border-box", border: open ? "1px solid transparent" : `1px solid ${hexWithAlpha(roleAccent, "3f")}`, borderRadius: 8, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "bb")}, rgba(255,255,255,0.86)) border-box` : EDITOR_NEU_SURFACE, color: "#111827", font: "inherit", fontSize: 11, fontWeight: 750, padding: "3px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default", boxShadow: open ? `0 8px 18px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 8px rgba(174,174,192,0.18), -2px -2px 8px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.86)" }}
+          style={{ width: "100%", minWidth: 0, minHeight: 27, boxSizing: "border-box", border: open ? "1px solid transparent" : `1px solid ${hexWithAlpha(roleAccent, "3f")}`, borderRadius: 8, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "bb")}, rgba(255,255,255,0.86)) border-box` : EDITOR_NEU_SURFACE, color: "#111827", font: "inherit", fontSize: 11, fontWeight: 750, padding: "3px 8px", outline: "none", caretColor: canEdit ? "#111827" : "transparent", cursor: canEdit ? "text" : "default", pointerEvents: canEdit ? "auto" : "none", boxShadow: open ? `0 8px 18px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 8px rgba(174,174,192,0.18), -2px -2px 8px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.86)" }}
         />
+        {showDisabledTooltip && disabledReason && disabledTooltipPosition && (
+          <div
+            role="tooltip"
+            style={{
+              position: "fixed",
+              left: disabledTooltipPosition.x + 14,
+              top: disabledTooltipPosition.y + 14,
+              zIndex: 90,
+              maxWidth: 300,
+              border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+              borderRadius: 8,
+              background: `linear-gradient(145deg, rgba(255,255,255,0.98), ${EDITOR_NEU_PANEL_BACKGROUND})`,
+              boxShadow: "8px 8px 18px rgba(174,174,192,0.22), -6px -6px 16px rgba(255,255,255,0.9), inset 1px 1px 0 rgba(255,255,255,0.88)",
+              color: "#475569",
+              fontSize: 11,
+              fontWeight: 750,
+              lineHeight: 1.35,
+              padding: "8px 10px",
+              pointerEvents: "none",
+              whiteSpace: "normal",
+            }}
+          >
+            {disabledReason}
+          </div>
+        )}
         {canEdit && open && (
           <div
             id={`${inputID}-options`}
