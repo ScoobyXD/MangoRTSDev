@@ -1,4 +1,4 @@
-Last updated: 2026-06-20
+Last updated: 2026-06-23
 
 # Explorer Tests
 
@@ -32,6 +32,14 @@ E21 - Explorer target deletion removes the underlying target only through the ex
 E22 - Explorer placement, update, and removal events publish the affected parent entity ID.
 E23 - The frontend refreshes loaded branch identities after Explorer events instead of reloading unrelated branches.
 E24 - When refresh context is incomplete, parent entity ID fallback is used to decide which loaded branch should refresh.
+E25 - Every company has one default root folder named Unfiled.
+E26 - Unfiled has exactly three default child folders, in this order: Projects, Logic Gates, Nodes.
+E27 - Bare projects, logic gates, and nodes created outside Company Explorer route to Unfiled/Projects, Unfiled/Logic Gates, and Unfiled/Nodes respectively.
+E28 - Resources explicitly created at the Company Explorer root remain at the root and are not routed into Unfiled.
+E29 - Company Explorer search queries the whole company graph, not only branches that the lazy UI has already opened.
+E30 - Company Explorer search orders result types as logic gates, nodes, projects, then folders.
+E31 - Company Explorer search results include resource_type, resource_id, display name, match reason, and Explorer location path.
+E32 - Search result display renders the Explorer location path as nested Explorer rows with normal icons, and selecting a resource result opens that resource without switching node results to the map background.
 
 ## Scenarios
 
@@ -108,3 +116,38 @@ Expected:
 - Events include the affected parent entity ID.
 - Only loaded branches related to the affected parent refresh.
 - Parent entity ID fallback is used when the event does not include richer branch context.
+### Scenario E-S4: Default Unfiled Placement
+
+Business logic covered:
+- E25
+- E26
+- E27
+- E28
+
+Given:
+- A company has no user-created Explorer folders.
+- A project, logic gate, or node is created outside Company Explorer without an explicit folder placement.
+- Another resource is created explicitly at the Company Explorer root.
+
+Expected:
+- The root contains the default Unfiled folder.
+- Unfiled contains Projects, Logic Gates, and Nodes in that order.
+- Bare outside-created resources appear in the matching Unfiled child folder.
+- Explicit root-created resources stay at the Company Explorer root and do not also appear in Unfiled.
+
+### Scenario E-S5: Whole-Company Search
+
+Business logic covered:
+- E29
+- E30
+- E31
+- E32
+
+Given:
+- Matching logic gates, nodes, projects, and folders exist across folders and lazy branches that have not necessarily been opened.
+
+Expected:
+- Search returns matches from the whole company, not only loaded UI branches.
+- Logic gates are listed before nodes, nodes before projects, and projects before folders.
+- Each result includes resource_type, resource_id, display name, match reason, and Explorer location path.
+- The UI renders the location path as nested Explorer rows and selecting a resource result opens the resource directly without switching node results to the map background.

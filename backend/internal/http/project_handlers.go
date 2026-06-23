@@ -9,12 +9,13 @@ import (
 )
 
 type projectRequest struct {
-	CompanyID  string    `json:"company_id"`
-	Name       string    `json:"name"`
-	Status     string    `json:"status"`
-	Health     string    `json:"health"`
-	AccountIDs *[]string `json:"account_ids"`
-	TeamIDs    *[]string `json:"team_ids"`
+	CompanyID                           string    `json:"company_id"`
+	Name                                string    `json:"name"`
+	Status                              string    `json:"status"`
+	Health                              string    `json:"health"`
+	AccountIDs                          *[]string `json:"account_ids"`
+	TeamIDs                             *[]string `json:"team_ids"`
+	SkipCompanyExplorerDefaultPlacement bool      `json:"skip_company_explorer_default_placement"`
 }
 
 type projectInformationRequest struct {
@@ -128,19 +129,23 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result, err := s.repo.CreateProject(store.ProjectInput{
-			CompanyID:     companyID,
-			Name:          req.Name,
-			Status:        req.Status,
-			Health:        req.Health,
-			AccountIDs:    stringSliceValue(req.AccountIDs),
-			AccountIDsSet: req.AccountIDs != nil,
-			TeamIDs:       stringSliceValue(req.TeamIDs),
-			TeamIDsSet:    req.TeamIDs != nil,
-			ActorUserID:   actor.User.UserID,
+			CompanyID:                       companyID,
+			Name:                            req.Name,
+			Status:                          req.Status,
+			Health:                          req.Health,
+			AccountIDs:                      stringSliceValue(req.AccountIDs),
+			AccountIDsSet:                   req.AccountIDs != nil,
+			TeamIDs:                         stringSliceValue(req.TeamIDs),
+			TeamIDsSet:                      req.TeamIDs != nil,
+			ActorUserID:                     actor.User.UserID,
+			CompanyExplorerDefaultPlacement: !req.SkipCompanyExplorerDefaultPlacement,
 		})
 		if err != nil {
 			s.writeProjectMutationError(w, err, "failed_to_create_project")
 			return
+		}
+		if result.FolderItem != nil {
+			s.publishWorkspaceEvent(companyID, "company_explorer_item_placed", map[string]any{"parent_entity_id": result.FolderItem.FolderID, "target_type": result.FolderItem.ItemType, "target_id": result.FolderItem.ItemID, "folder_item": result.FolderItem})
 		}
 		if result.Project != nil {
 			s.publishWorkspaceEvent(companyID, "project_created", map[string]any{"project_id": result.Project.ProjectID, "project": result.Project})

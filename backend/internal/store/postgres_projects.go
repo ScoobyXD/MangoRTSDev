@@ -231,10 +231,20 @@ from inserted project
 	if err != nil {
 		return ProjectMutationResult{}, err
 	}
+	var folderItem *domain.CompanyExplorerFolderItem
+	if input.CompanyExplorerDefaultPlacement {
+		item, inserted, err := placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, input.CompanyID, EntityTypeProject, project.ProjectID, input.ActorUserID)
+		if err != nil {
+			return ProjectMutationResult{}, err
+		}
+		if inserted {
+			folderItem = &item
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return ProjectMutationResult{}, err
 	}
-	return ProjectMutationResult{Project: &project}, nil
+	return ProjectMutationResult{Project: &project, FolderItem: folderItem}, nil
 }
 
 func (r *PostgresRepo) UpdateProject(input ProjectInput) (ProjectMutationResult, error) {

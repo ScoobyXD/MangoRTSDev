@@ -7,6 +7,7 @@ import (
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -84,6 +85,50 @@ func (s *Server) handleCompanyExplorerChildren(w http.ResponseWriter, r *http.Re
 	writeJSONMaybeNotModified(w, r, http.StatusOK, rows)
 }
 
+func (s *Server) handleCompanyExplorerSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	queryText := strings.TrimSpace(r.URL.Query().Get("q"))
+	if queryText == "" {
+		queryText = strings.TrimSpace(r.URL.Query().Get("query"))
+	}
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	if queryText == "" {
+		writeError(w, http.StatusBadRequest, "query_required")
+		return
+	}
+	limit := 0
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil || parsedLimit <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid_limit")
+			return
+		}
+		limit = parsedLimit
+	}
+	results, err := s.repo.SearchCompanyExplorer(store.CompanyExplorerSearchQuery{
+		CompanyID:        companyID,
+		Query:            queryText,
+		PermissionUserID: s.entityPermissionActorUserID(r, companyID),
+		Limit:            limit,
+	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_search_query")
+		return
+	}
+	if err != nil {
+		log.Printf("company explorer search: failed company_id=%s query=%q: %v", companyID, queryText, err)
+		writeError(w, http.StatusInternalServerError, "failed_to_search_company_explorer")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, results)
+}
 func (s *Server) companyExplorerLazyRowsQuery(w http.ResponseWriter, r *http.Request) (store.CompanyExplorerLazyRowsQuery, bool) {
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 	if companyID == "" {

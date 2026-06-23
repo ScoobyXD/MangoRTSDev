@@ -3,7 +3,7 @@ import { getNodeTitle as getLogicGateTitle, type NodeRecord as LogicGateRecord }
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind } from "../folders/companyExplorerFolders.js";
 import type { KanbanBoard } from "../kanban/shared.js";
 import type { ProjectRecord } from "../project-management/projectManagementApi.js";
-import type { CompanyExplorerV2Row } from "./companyExplorerLazyApi.js";
+import type { CompanyExplorerSearchResult, CompanyExplorerV2EntityType, CompanyExplorerV2Row } from "./companyExplorerLazyApi.js";
 import {
   formatExplorerFolderLabel,
   isExplorerSystemFolderKey,
@@ -383,7 +383,89 @@ export function buildCompanyExplorerTreeRows({
   return rows;
 }
 
-export function buildCompanyExplorerV2TreeRows({
+
+function explorerKindForSearchEntity(entityType: CompanyExplorerV2EntityType): ExplorerTreeNode["kind"] {
+  if (entityType === "node") return "node";
+  if (entityType === "logic_gate") return "logic_gate";
+  if (entityType === "project") return "project";
+  return "folder";
+}
+
+function explorerFolderKindForSearchEntity(entityType: CompanyExplorerV2EntityType): CompanyExplorerFolderKind | undefined {
+  if (entityType === "node") return "node";
+  if (entityType === "project") return "project";
+  return "logic_gate";
+}
+
+function searchTreeIDForEntity(entityType: CompanyExplorerV2EntityType, resourceID: string, entityID: string, prefix: string): string {
+  const id = resourceID || entityID;
+  if (entityType === "node") return `${prefix}node-${id}`;
+  if (entityType === "logic_gate") return `${prefix}logic-gate-${id}`;
+  if (entityType === "project") return `${prefix}project-${id}`;
+  return `${prefix}workspace-folder-${entityID}`;
+}
+
+export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearchResult[]): ExplorerTreeNode[] {
+  const rows: ExplorerTreeNode[] = [];
+  results.forEach((result, resultIndex) => {
+    const pathLabelParts: string[] = [];
+    const rowPrefix = `company-explorer-search-${result.resource_type}-${result.resource_id || result.entity_id}-${resultIndex}-`;
+    result.location_path.forEach((segment, segmentIndex) => {
+      const kind = explorerKindForSearchEntity(segment.entity_type);
+      const resourceID = segment.resource_id || segment.entity_id;
+      pathLabelParts.push(formatExplorerFolderLabel(segment.name || resourceID));
+      rows.push({
+        id: searchTreeIDForEntity(segment.entity_type, resourceID, segment.entity_id, `${rowPrefix}path-${segmentIndex}-`),
+        label: segment.name || resourceID,
+        depth: segmentIndex,
+        kind,
+        entityID: segment.entity_id,
+        entityType: segment.entity_type,
+        resourceID: resourceID || undefined,
+        parentEntityID: segmentIndex > 0 ? result.location_path[segmentIndex - 1]?.entity_id ?? "" : "",
+        nodeID: segment.entity_type === "node" ? resourceID : undefined,
+        logicGateID: segment.entity_type === "logic_gate" ? resourceID : undefined,
+        projectID: segment.entity_type === "project" ? resourceID : undefined,
+        folderID: kind === "folder" ? segment.entity_id : undefined,
+        parentFolderID: segmentIndex > 0 ? result.location_path[segmentIndex - 1]?.entity_id ?? "" : "",
+        folderKind: explorerFolderKindForSearchEntity(segment.entity_type),
+        folderLabel: pathLabelParts.join(" / "),
+        scopeLevel: segmentIndex,
+        position: ((resultIndex + 1) * TREE_ROW_POSITION_STEP) + segmentIndex,
+        createdTimestamp: result.created_timestamp,
+        hasChildren: true,
+        syntheticKind: "search_path",
+      });
+    });
+
+    const resourceID = result.resource_id || result.entity_id;
+    const kind = explorerKindForSearchEntity(result.resource_type);
+    const folderKind = explorerFolderKindForSearchEntity(result.resource_type);
+    const parentSegment = result.location_path[result.location_path.length - 1];
+    rows.push({
+      id: `company-explorer-search-result-${result.resource_type}-${resourceID || result.entity_id}`,
+      label: result.display_name || resourceID || result.entity_id,
+      depth: result.location_path.length,
+      kind,
+      entityID: result.entity_id,
+      entityType: result.resource_type,
+      resourceID: resourceID || undefined,
+      parentEntityID: parentSegment?.entity_id ?? "",
+      nodeID: result.resource_type === "node" ? resourceID : undefined,
+      logicGateID: result.resource_type === "logic_gate" ? resourceID : undefined,
+      projectID: result.resource_type === "project" ? resourceID : undefined,
+      folderID: kind === "folder" ? result.entity_id : parentSegment?.entity_id ?? "",
+      parentFolderID: parentSegment?.entity_id ?? "",
+      folderKind,
+      folderLabel: pathLabelParts.join(" / "),
+      scopeLevel: result.location_path.length,
+      position: ((resultIndex + 1) * TREE_ROW_POSITION_STEP) + result.location_path.length,
+      createdTimestamp: result.created_timestamp,
+      hasChildren: Boolean(result.has_children),
+    });
+  });
+  return rows;
+}export function buildCompanyExplorerV2TreeRows({
   expanded,
   rows,
 }: BuildCompanyExplorerV2TreeRowsInput): ExplorerTreeNode[] {

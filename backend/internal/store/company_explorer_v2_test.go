@@ -624,6 +624,233 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	}
 }
 
+func TestMemoryCompanyExplorerDefaultUnfiledFolders(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-220000000101"
+	repo.EnsureCompany(companyID, "Default Folder Co")
+
+	user, err := repo.UpsertAuthUser("default-folders-user", "default-folders@example.com", "Default Folders User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("default-folders-user", companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+
+	roots, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeAll,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2RootRows: %v", err)
+	}
+	defaults := companyExplorerDefaultFolderIDs(companyID)
+	unfiled := requireCompanyExplorerV2Row(t, roots.Rows, CompanyExplorerV2EntityFolder, defaults.UnfiledFolderID)
+	if unfiled.Name != CompanyExplorerDefaultRootFolderName || unfiled.ParentEntityID != "" {
+		t.Fatalf("unfiled row = %+v", unfiled)
+	}
+
+	children, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeAll,
+		ParentEntityID:   defaults.UnfiledFolderID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows unfiled: %v", err)
+	}
+	gotNames := companyExplorerV2RowNames(children.Rows)
+	wantNames := []string{CompanyExplorerDefaultProjectsFolderName, CompanyExplorerDefaultLogicGatesFolderName, CompanyExplorerDefaultNodesFolderName}
+	if len(gotNames) != len(wantNames) {
+		t.Fatalf("default child names = %v, want %v", gotNames, wantNames)
+	}
+	for index := range wantNames {
+		if gotNames[index] != wantNames[index] {
+			t.Fatalf("default child names = %v, want %v", gotNames, wantNames)
+		}
+	}
+}
+
+func TestMemoryCompanyExplorerDefaultPlacementAndExplicitRootException(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-220000000102"
+	repo.EnsureCompany(companyID, "Default Placement Co")
+
+	user, err := repo.UpsertAuthUser("default-placement-user", "default-placement@example.com", "Default Placement User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("default-placement-user", companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	defaults := companyExplorerDefaultFolderIDs(companyID)
+
+	projectResult, err := repo.CreateProject(ProjectInput{
+		CompanyID:                       companyID,
+		Name:                            "Bare Project",
+		Status:                          "Active",
+		ActorUserID:                     user.UserID,
+		CompanyExplorerDefaultPlacement: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject default placement: %v", err)
+	}
+	if projectResult.FolderItem == nil || projectResult.FolderItem.FolderID != defaults.ProjectsFolderID {
+		t.Fatalf("project default folder item = %+v, want Projects folder %s", projectResult.FolderItem, defaults.ProjectsFolderID)
+	}
+
+	nodeBatch, err := repo.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
+		CompanyID:      companyID,
+		EntityKind:     EntityTypeNode,
+		MutationOrigin: MutationOriginNodeMap,
+		CreatorUserID:  user.UserID,
+		Items:          []WorkspaceEntityBatchItemInput{{ClientID: "node-1", Title: "Bare Node"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceEntityBatch node: %v", err)
+	}
+	if len(nodeBatch.FolderItems) != 1 || nodeBatch.FolderItems[0].FolderID != defaults.NodesFolderID {
+		t.Fatalf("node folder items = %+v, want Nodes folder %s", nodeBatch.FolderItems, defaults.NodesFolderID)
+	}
+
+	rootBatch, err := repo.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
+		CompanyID:      companyID,
+		EntityKind:     EntityTypeLogicGate,
+		MutationOrigin: MutationOriginCompanyExplorer,
+		CreatorUserID:  user.UserID,
+		Items:          []WorkspaceEntityBatchItemInput{{ClientID: "gate-root", Title: "Root Gate"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceEntityBatch root gate: %v", err)
+	}
+	if len(rootBatch.FolderItems) != 0 {
+		t.Fatalf("company explorer root create returned folder items = %+v, want none", rootBatch.FolderItems)
+	}
+	rootGateID := rootBatch.EntityMappings[0].EntityID
+	rootGateRow, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:        companyID,
+		ParentEntityID:   companyID,
+		ChildEntityType:  CompanyExplorerV2EntityLogicGate,
+		ChildResourceID:  rootGateID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge root gate: %v", err)
+	}
+	if rootGateRow.ParentEntityID != "" {
+		t.Fatalf("root gate visible parent = %q, want root", rootGateRow.ParentEntityID)
+	}
+
+	logicGateChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeAll,
+		ParentEntityID:   defaults.LogicGatesFolderID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows Logic Gates: %v", err)
+	}
+	if findCompanyExplorerV2Row(logicGateChildren.Rows, CompanyExplorerV2EntityLogicGate, rootGateID) != nil {
+		t.Fatalf("root-created logic gate appeared under Unfiled/Logic Gates")
+	}
+	rootChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
+		CompanyID:        companyID,
+		View:             CompanyExplorerLazyScopeAll,
+		ParentEntityID:   companyID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows root: %v", err)
+	}
+	requireCompanyExplorerV2Row(t, rootChildren.Rows, CompanyExplorerV2EntityLogicGate, rootGateID)
+}
+
+func TestMemoryCompanyExplorerSearchOrdersTypesAndReturnsLocationPath(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-220000000103"
+	repo.EnsureCompany(companyID, "Search Co")
+
+	user, err := repo.UpsertAuthUser("explorer-search-user", "explorer-search@example.com", "Explorer Search User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("explorer-search-user", companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+
+	gateBatch, err := repo.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
+		CompanyID:      companyID,
+		EntityKind:     EntityTypeLogicGate,
+		MutationOrigin: MutationOriginLogicGateMap,
+		CreatorUserID:  user.UserID,
+		Items:          []WorkspaceEntityBatchItemInput{{ClientID: "gate", Title: "Search Alpha"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceEntityBatch gate: %v", err)
+	}
+	nodeBatch, err := repo.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
+		CompanyID:      companyID,
+		EntityKind:     EntityTypeNode,
+		MutationOrigin: MutationOriginNodeMap,
+		CreatorUserID:  user.UserID,
+		Items:          []WorkspaceEntityBatchItemInput{{ClientID: "node", Title: "Search Alpha"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceEntityBatch node: %v", err)
+	}
+	projectResult, err := repo.CreateProject(ProjectInput{
+		CompanyID:                       companyID,
+		Name:                            "Search Alpha",
+		Status:                          "Active",
+		ActorUserID:                     user.UserID,
+		CompanyExplorerDefaultPlacement: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	folder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
+		CompanyID:        companyID,
+		ParentEntityID:   companyID,
+		Name:             "Search Alpha Folder",
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder: %v", err)
+	}
+
+	results, err := repo.SearchCompanyExplorer(CompanyExplorerSearchQuery{
+		CompanyID:        companyID,
+		Query:            "Search Alpha",
+		PermissionUserID: user.UserID,
+		Limit:            10,
+	})
+	if err != nil {
+		t.Fatalf("SearchCompanyExplorer: %v", err)
+	}
+	if len(results.Results) < 4 {
+		t.Fatalf("search results = %+v, want at least 4", results.Results)
+	}
+	wantTypes := []string{EntityTypeLogicGate, EntityTypeNode, EntityTypeProject, CompanyExplorerV2EntityFolder}
+	for index, want := range wantTypes {
+		if results.Results[index].ResourceType != want {
+			t.Fatalf("result type order = %+v, want %v first", results.Results, wantTypes)
+		}
+	}
+
+	gateID := gateBatch.EntityMappings[0].EntityID
+	nodeID := nodeBatch.EntityMappings[0].EntityID
+	projectID := projectResult.Project.ProjectID
+	requireCompanyExplorerSearchPath(t, results.Results, EntityTypeLogicGate, gateID, []string{CompanyExplorerDefaultRootFolderName, CompanyExplorerDefaultLogicGatesFolderName})
+	requireCompanyExplorerSearchPath(t, results.Results, EntityTypeNode, nodeID, []string{CompanyExplorerDefaultRootFolderName, CompanyExplorerDefaultNodesFolderName})
+	requireCompanyExplorerSearchPath(t, results.Results, EntityTypeProject, projectID, []string{CompanyExplorerDefaultRootFolderName, CompanyExplorerDefaultProjectsFolderName})
+	requireCompanyExplorerSearchPath(t, results.Results, CompanyExplorerV2EntityFolder, folder.EntityID, []string{})
+	for _, result := range results.Results[:4] {
+		if result.MatchReason == "" || result.DisplayName == "" || result.ResourceID == "" {
+			t.Fatalf("search result missing metadata: %+v", result)
+		}
+	}
+}
 func createProjectGateNodeTree(t *testing.T, repo *MemoryRepo, companyID string) (domain.Project, domain.LogicGate, domain.Node) {
 	t.Helper()
 	projectResult, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Project Parent", Status: "Active"})
@@ -660,6 +887,34 @@ func createProjectGateNodeTree(t *testing.T, repo *MemoryRepo, companyID string)
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
 	return *projectResult.Project, logicGate, node
+}
+
+func companyExplorerV2RowNames(rows []CompanyExplorerV2Row) []string {
+	names := make([]string, 0, len(rows))
+	for _, row := range rows {
+		names = append(names, row.Name)
+	}
+	return names
+}
+
+func requireCompanyExplorerSearchPath(t *testing.T, results []CompanyExplorerSearchResult, resourceType, resourceID string, wantNames []string) CompanyExplorerSearchResult {
+	t.Helper()
+	for _, result := range results {
+		if result.ResourceType != resourceType || result.ResourceID != resourceID {
+			continue
+		}
+		if len(result.LocationPath) != len(wantNames) {
+			t.Fatalf("location path for %s/%s = %+v, want %v", resourceType, resourceID, result.LocationPath, wantNames)
+		}
+		for index, want := range wantNames {
+			if result.LocationPath[index].Name != want {
+				t.Fatalf("location path for %s/%s = %+v, want %v", resourceType, resourceID, result.LocationPath, wantNames)
+			}
+		}
+		return result
+	}
+	t.Fatalf("missing search result type=%s id=%s in %+v", resourceType, resourceID, results)
+	return CompanyExplorerSearchResult{}
 }
 
 func requireDeletedTarget(t *testing.T, targets []CompanyExplorerDeletedTarget, kind, id string) {

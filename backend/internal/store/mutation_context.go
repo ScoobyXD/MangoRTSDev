@@ -58,6 +58,16 @@ func MutationOriginNeedsCompanyExplorerFolderItem(origin string) bool {
 	return origin == "" || origin == MutationOriginCompanyExplorer
 }
 
+func MutationOriginNeedsCompanyExplorerDefaultPlacement(origin string) bool {
+	origin = NormalizeMutationOrigin(origin)
+	switch origin {
+	case MutationOriginNodeMap, MutationOriginLogicGateMap, MutationOriginMatrix, MutationOriginKanban, MutationOriginEditor:
+		return true
+	default:
+		return false
+	}
+}
+
 type WorkspaceDerivedProjectionTask map[string]any
 
 func DeferredCompanyExplorerFolderItemAssignTask(folderID, systemFolderKey, itemType, itemID string, position int) WorkspaceDerivedProjectionTask {

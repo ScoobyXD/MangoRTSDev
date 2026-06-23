@@ -20,7 +20,29 @@ export type CompanyExplorerV2Row = {
   created_timestamp: string;
   updated_timestamp: string;
 };
+export type CompanyExplorerLocationSegment = {
+  entity_type: CompanyExplorerV2EntityType;
+  entity_id: string;
+  resource_id?: string;
+  name: string;
+};
 
+export type CompanyExplorerSearchResult = {
+  company_id: string;
+  resource_type: CompanyExplorerV2EntityType;
+  resource_id: string;
+  entity_id: string;
+  display_name: string;
+  match_reason: string;
+  location_path: CompanyExplorerLocationSegment[];
+  has_children?: boolean;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+export type CompanyExplorerSearchResponse = {
+  results: CompanyExplorerSearchResult[];
+};
 function lazyScopeQuery(companyID: string): string {
   return `company_id=${encodeURIComponent(companyID)}`;
 }
@@ -47,5 +69,20 @@ export function fetchCompanyExplorerChildren(
   return requestJSON<CompanyExplorerSnapshotPayload>(
     apiBase,
     `/v1/company-explorer/children?${lazyScopeQuery(companyID)}&parent_id=${encodeURIComponent(parentEntityID)}`,
+  );
+}
+export function fetchCompanyExplorerSearchResults(
+  apiBase: string,
+  companyID: string,
+  query: string,
+  limit?: number,
+): Promise<CompanyExplorerSearchResponse> {
+  const params = new URLSearchParams();
+  params.set("company_id", companyID);
+  params.set("q", query);
+  if (limit && limit > 0) params.set("limit", String(limit));
+  return requestJSON<CompanyExplorerSearchResponse>(
+    apiBase,
+    `/v1/company-explorer/search?${params.toString()}`,
   );
 }

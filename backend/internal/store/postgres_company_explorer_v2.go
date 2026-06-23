@@ -220,6 +220,9 @@ func (r *PostgresRepo) ListCompanyExplorerV2RootRows(query CompanyExplorerV2Rows
 	if err != nil {
 		return CompanyExplorerV2Rows{}, err
 	}
+	if err := r.ensureCompanyExplorerDefaultState(query.CompanyID); err != nil {
+		return CompanyExplorerV2Rows{}, err
+	}
 	ctx := context.Background()
 	rows, err := r.queryCompanyExplorerFinalRootChildren(ctx, query)
 	if err != nil {
@@ -231,6 +234,9 @@ func (r *PostgresRepo) ListCompanyExplorerV2RootRows(query CompanyExplorerV2Rows
 func (r *PostgresRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error) {
 	query, err := normalizeCompanyExplorerV2RowsQuery(query, true)
 	if err != nil {
+		return CompanyExplorerV2Rows{}, err
+	}
+	if err := r.ensureCompanyExplorerDefaultState(query.CompanyID); err != nil {
 		return CompanyExplorerV2Rows{}, err
 	}
 	ctx := context.Background()
