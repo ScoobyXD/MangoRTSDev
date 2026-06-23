@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FrameDataModel } from "../../types";
 import { KanbanContent } from "../../modules/kanban/KanbanContent";
+import type { ArenaBoardLeftResizeRequest, ArenaBoardLeftResizeResult } from "../../modules/kanban/KanbanContentModel";
 import { logicGateIDFromKanbanBoardID } from "../../modules/kanban/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../../modules/selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
@@ -24,10 +25,13 @@ type LogicGateArenaPageProps = {
 };
 
 type ArenaResizeState = {
+  sessionID: number;
   startX: number;
   containerWidth: number;
   editorUnits: number;
   kanbanUnits: number;
+  editorFrameID: string;
+  kanbanFrameID: string;
 };
 
 type ArenaLogicGateSelection = {
@@ -127,7 +131,10 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
   const companyID = getActiveCompanyID();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ArenaResizeState | null>(null);
+  const linkedNodeEditorResizeRef = useRef<ArenaResizeState | null>(null);
+  const resizeSessionIDRef = useRef(0);
   const lastArenaSelectionChangedAtRef = useRef(0);
+  const [kanbanBoardLeftResizeRequest, setKanbanBoardLeftResizeRequest] = useState<ArenaBoardLeftResizeRequest | null>(null);
   const [selectedLogicGate, setSelectedLogicGate] = useState<ArenaLogicGateSelection>(() => {
     const initialSelection = readInitialArenaLogicGateSelection(companyID, targetLogicGate);
     if (initialSelection.id) lastArenaSelectionChangedAtRef.current = arenaSelectionChangedAt(initialSelection);
@@ -139,6 +146,52 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
   const kanbanFrame = arenaFrames.kanban;
   const editorUnits = Math.max(1, editorFrame?.w ?? 34);
   const kanbanUnits = Math.max(1, kanbanFrame?.w ?? 44);
+
+  const createArenaResizeState = useCallback((startX: number): ArenaResizeState | null => {
+    if (!containerRef.current || !editorFrame || !kanbanFrame) return null;
+    const bounds = containerRef.current.getBoundingClientRect();
+    resizeSessionIDRef.current += 1;
+    return {
+      sessionID: resizeSessionIDRef.current,
+      startX,
+      containerWidth: bounds.width,
+      editorUnits,
+      kanbanUnits,
+      editorFrameID: editorFrame.id,
+      kanbanFrameID: kanbanFrame.id,
+    };
+  }, [editorFrame, editorUnits, kanbanFrame, kanbanUnits]);
+
+  const applyArenaResizeDelta = useCallback((state: ArenaResizeState, deltaX: number, notifyKanbanOverlay: boolean): ArenaBoardLeftResizeResult => {
+    const availableWidth = Math.max(1, state.containerWidth - SPLITTER_WIDTH_PX);
+    const totalUnits = state.editorUnits + state.kanbanUnits;
+    const deltaUnits = deltaX * (totalUnits / availableWidth);
+    const minEditor = totalUnits * (MIN_EDITOR_WIDTH_PX / availableWidth);
+    const minKanban = totalUnits * (MIN_KANBAN_WIDTH_PX / availableWidth);
+    const nextEditor = clamp(state.editorUnits + deltaUnits, minEditor, totalUnits - minKanban);
+    const nextKanban = state.editorUnits + state.kanbanUnits - nextEditor;
+    const appliedDeltaX = (nextEditor - state.editorUnits) * (availableWidth / totalUnits);
+    const result: ArenaBoardLeftResizeResult = {
+      appliedDeltaX,
+      startKanbanWidthPx: state.kanbanUnits * (availableWidth / totalUnits),
+      kanbanWidthPx: nextKanban * (availableWidth / totalUnits),
+    };
+
+    updateFrames((previous) => previous.map((frame) => {
+      if (frame.id === state.editorFrameID) return { ...frame, x: 0, y: 0, w: nextEditor, h: 1 };
+      if (frame.id === state.kanbanFrameID) return { ...frame, x: nextEditor, y: 0, w: nextKanban, h: 1 };
+      return frame;
+    }));
+    if (notifyKanbanOverlay) {
+      setKanbanBoardLeftResizeRequest({
+        sessionID: state.sessionID,
+        appliedDeltaX,
+        startKanbanWidthPx: result.startKanbanWidthPx,
+        kanbanWidthPx: result.kanbanWidthPx,
+      });
+    }
+    return result;
+  }, [updateFrames]);
 
   useEffect(() => {
     const pendingSelection = selectionFromPendingLogicGateArenaSelection(consumePendingLogicGateArenaSelection(companyID));
@@ -195,21 +248,9 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
   useEffect(() => {
     const onPointerMove = (event: PointerEvent) => {
       const state = resizeRef.current;
-      if (!state || !editorFrame || !kanbanFrame) return;
+      if (!state) return;
       event.preventDefault();
-      const availableWidth = Math.max(1, state.containerWidth - SPLITTER_WIDTH_PX);
-      const totalUnits = state.editorUnits + state.kanbanUnits;
-      const deltaUnits = (event.clientX - state.startX) * (totalUnits / availableWidth);
-      const minEditor = totalUnits * (MIN_EDITOR_WIDTH_PX / availableWidth);
-      const minKanban = totalUnits * (MIN_KANBAN_WIDTH_PX / availableWidth);
-      const nextEditor = clamp(state.editorUnits + deltaUnits, minEditor, totalUnits - minKanban);
-      const nextKanban = state.editorUnits + state.kanbanUnits - nextEditor;
-
-      updateFrames((previous) => previous.map((frame) => {
-        if (frame.id === editorFrame.id) return { ...frame, x: 0, y: 0, w: nextEditor, h: 1 };
-        if (frame.id === kanbanFrame.id) return { ...frame, x: nextEditor, y: 0, w: nextKanban, h: 1 };
-        return frame;
-      }));
+      applyArenaResizeDelta(state, event.clientX - state.startX, true);
     };
     const onPointerUp = () => {
       resizeRef.current = null;
@@ -224,22 +265,34 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerUp);
     };
-  }, [editorFrame, kanbanFrame, updateFrames]);
+  }, [applyArenaResizeDelta]);
 
   const startResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!containerRef.current || !editorFrame || !kanbanFrame) return;
+    const state = createArenaResizeState(event.clientX);
+    if (!state) return;
     event.preventDefault();
     event.stopPropagation();
-    const bounds = containerRef.current.getBoundingClientRect();
-    resizeRef.current = {
-      startX: event.clientX,
-      containerWidth: bounds.width,
-      editorUnits,
-      kanbanUnits,
-    };
+    resizeRef.current = state;
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
-  }, [editorFrame, editorUnits, kanbanFrame, kanbanUnits]);
+  }, [createArenaResizeState]);
+
+  const startNodeEditorLinkedLeftResize = useCallback((): boolean => {
+    const state = createArenaResizeState(0);
+    if (!state) return false;
+    linkedNodeEditorResizeRef.current = state;
+    return true;
+  }, [createArenaResizeState]);
+
+  const resizeArenaFromNodeEditorLeft = useCallback((deltaX: number): ArenaBoardLeftResizeResult | null => {
+    const state = linkedNodeEditorResizeRef.current;
+    if (!state) return null;
+    return applyArenaResizeDelta(state, deltaX, false);
+  }, [applyArenaResizeDelta]);
+
+  const endNodeEditorLinkedLeftResize = useCallback(() => {
+    linkedNodeEditorResizeRef.current = null;
+  }, []);
 
   const collapseArenaToTab = useCallback(() => {
     onCollapseToTab?.({
@@ -318,6 +371,10 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
           onCollapseArenaToTab={onCollapseToTab ? collapseArenaToTab : undefined}
           onNodeEditorOverlayOpen={openKanbanNode}
           onNodeEditorOverlayClose={closeKanbanNode}
+          arenaBoardLeftResizeRequest={kanbanBoardLeftResizeRequest}
+          onNodeEditorOverlayLeftResizeStart={startNodeEditorLinkedLeftResize}
+          onNodeEditorOverlayLeftResize={resizeArenaFromNodeEditorLeft}
+          onNodeEditorOverlayLeftResizeEnd={endNodeEditorLinkedLeftResize}
         />
       </section>
     </div>

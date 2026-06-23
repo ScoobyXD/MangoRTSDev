@@ -203,6 +203,7 @@ import {
   readLinkedExplorerSelection,
   readNodeEditorOverlayRatio,
   storeNodeEditorOverlayRatio,
+  type ArenaBoardLeftResizeRequest,
   type ColumnResizeState,
   type CompanyUser,
   type HighlightedEntity,
@@ -250,6 +251,24 @@ type KanbanAccountAssignmentState = {
   accountIDs: string[];
 };
 
+function nodeEditorOverlayRatioForBoardLeftResize(
+  startRatio: NodeEditorOverlayRatio,
+  startBoardWidthPx: number,
+  appliedDeltaX: number,
+  nextBoardWidthPx: number,
+  minLeftPx: number,
+): NodeEditorOverlayRatio {
+  const safeStartBoardWidth = Math.max(1, startBoardWidthPx);
+  const safeNextBoardWidth = Math.max(1, nextBoardWidthPx);
+  const startLeftPx = startRatio.left * safeStartBoardWidth;
+  const startWidthPx = startRatio.width * safeStartBoardWidth;
+  return clampNodeEditorOverlayRatio({
+    ...startRatio,
+    left: startLeftPx / safeNextBoardWidth,
+    width: (startWidthPx - appliedDeltaX) / safeNextBoardWidth,
+  }, { minLeft: minLeftPx / safeNextBoardWidth });
+}
+
 function logicGateIDForKanbanCard(card: Pick<KanbanCard, "logic_gate_id" | "board_id">, fallbackBoardID: string): string {
   return (card.logic_gate_id ?? "").trim() || logicGateIDFromKanbanBoardID(card.board_id || fallbackBoardID);
 }
@@ -294,6 +313,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   onCollapseArenaToTab,
   onNodeEditorOverlayOpen,
   onNodeEditorOverlayClose,
+  arenaBoardLeftResizeRequest = null,
+  onNodeEditorOverlayLeftResizeStart,
+  onNodeEditorOverlayLeftResize,
+  onNodeEditorOverlayLeftResizeEnd,
 }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
@@ -358,6 +381,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const resizeRef = useRef<ColumnResizeState | null>(null);
   const nodeEditorOverlayResizeRef = useRef<OverlayResizeState | null>(null);
   const nodeEditorOverlayRatioRef = useRef(nodeEditorOverlayRatio);
+  const arenaBoardLeftResizeBaselineRef = useRef<{ sessionID: number; ratio: NodeEditorOverlayRatio; startKanbanWidthPx: number } | null>(null);
   const activeBoardIDRef = useRef(activeBoardID);
   const frameBoardIDRef = useRef(frameBoardID);
   const boardsRef = useRef<KanbanBoard[]>([]);
@@ -484,6 +508,30 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   }, [nodeEditorOverlayRatio]);
 
   useEffect(() => {
+    if (!nodeEditorOverlay || !arenaBoardLeftResizeRequest) return;
+    const request: ArenaBoardLeftResizeRequest = arenaBoardLeftResizeRequest;
+    const baseline = arenaBoardLeftResizeBaselineRef.current?.sessionID === request.sessionID
+      ? arenaBoardLeftResizeBaselineRef.current
+      : {
+        sessionID: request.sessionID,
+        ratio: nodeEditorOverlayRatioRef.current,
+        startKanbanWidthPx: request.startKanbanWidthPx,
+      };
+    arenaBoardLeftResizeBaselineRef.current = baseline;
+    const minLeftPx = getNodeEditorOverlayMinLeftPx(boardRootRef.current, false);
+    const nextRatio = nodeEditorOverlayRatioForBoardLeftResize(
+      baseline.ratio,
+      baseline.startKanbanWidthPx,
+      request.appliedDeltaX,
+      request.kanbanWidthPx,
+      minLeftPx,
+    );
+    nodeEditorOverlayRatioRef.current = nextRatio;
+    setNodeEditorOverlayRatio((current) => (sameNodeEditorOverlayRatio(current, nextRatio) ? current : nextRatio));
+    storeNodeEditorOverlayRatio(companyID, frameID, nextRatio);
+  }, [arenaBoardLeftResizeRequest, companyID, frameID, nodeEditorOverlay]);
+
+  useEffect(() => {
     if (!nodeEditorOverlay) return;
     const reclampOverlay = () => {
       const boardBounds = boardRootRef.current?.getBoundingClientRect();
@@ -592,6 +640,32 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       const dy = event.clientY - state.startY;
       const boardWidth = Math.max(1, state.boardWidth);
       const boardHeight = Math.max(1, state.boardHeight);
+      if (state.linkedLeftResize && state.edges.left && onNodeEditorOverlayLeftResize) {
+        const linkedResize = onNodeEditorOverlayLeftResize(dx);
+        const appliedDeltaX = linkedResize?.appliedDeltaX ?? dx;
+        const nextBoardWidth = Math.max(1, linkedResize?.kanbanWidthPx ?? boardWidth);
+        let height = state.startHeight;
+        if (state.edges.bottom) height += dy;
+        if (state.edges.top) height -= dy;
+        const nextSize = clampNodeEditorOverlayRatio({
+          ...nodeEditorOverlayRatioRef.current,
+          left: state.startLeft / nextBoardWidth,
+          width: (state.startWidth - appliedDeltaX) / nextBoardWidth,
+          height: height / boardHeight,
+        }, { minLeft: state.minLeft / nextBoardWidth });
+        const top = state.edges.top
+          ? state.startTop + state.startHeight - nextSize.height * boardHeight
+          : state.startTop;
+        const nextRatio = clampNodeEditorOverlayRatio({
+          left: state.startLeft / nextBoardWidth,
+          top: top / boardHeight,
+          width: nextSize.width,
+          height: nextSize.height,
+        }, { minLeft: state.minLeft / nextBoardWidth });
+        nodeEditorOverlayRatioRef.current = nextRatio;
+        setNodeEditorOverlayRatio(nextRatio);
+        return;
+      }
       let width = state.startWidth;
       let height = state.startHeight;
       if (state.edges.right) width += dx;
@@ -625,8 +699,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       setNodeEditorOverlayRatio(nextRatio);
     };
     const onEnd = () => {
-      if (nodeEditorOverlayResizeRef.current) {
+      const state = nodeEditorOverlayResizeRef.current;
+      if (state) {
         storeNodeEditorOverlayRatio(companyID, frameID, nodeEditorOverlayRatioRef.current);
+        if (state.linkedLeftResize) onNodeEditorOverlayLeftResizeEnd?.();
       }
       nodeEditorOverlayResizeRef.current = null;
     };
@@ -636,7 +712,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onEnd);
     };
-  }, [companyID, frameID]);
+  }, [companyID, frameID, onNodeEditorOverlayLeftResize, onNodeEditorOverlayLeftResizeEnd]);
 
   const orderedColumns = useMemo(() => sortColumns(columns), [columns]);
   const columnColorByID = useMemo(() => new Map(orderedColumns.map((column) => [column.column_id, getKanbanColumnDisplayColor(column)])), [orderedColumns]);
@@ -2631,6 +2707,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           frameID={frameID}
           accent={accent}
           theme={theme}
+          onLinkedLeftResizeStart={onNodeEditorOverlayLeftResizeStart}
           onClose={() => closeNodeEditorOverlay()}
           onCollapseToTab={collapseNodeEditorOverlayToTab}
           onOpenInNewTab={() => openKanbanNodeInNewTab(nodeEditorOverlay.nodeID)}

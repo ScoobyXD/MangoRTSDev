@@ -49,6 +49,10 @@ export type KanbanContentProps = {
   onCollapseArenaToTab?: () => void;
   onNodeEditorOverlayOpen?: (nodeID: string) => void;
   onNodeEditorOverlayClose?: () => void;
+  arenaBoardLeftResizeRequest?: ArenaBoardLeftResizeRequest | null;
+  onNodeEditorOverlayLeftResizeStart?: () => boolean;
+  onNodeEditorOverlayLeftResize?: (deltaX: number) => ArenaBoardLeftResizeResult | null;
+  onNodeEditorOverlayLeftResizeEnd?: () => void;
 };
 
 export type OverlayResizeState = {
@@ -62,6 +66,7 @@ export type OverlayResizeState = {
   boardWidth: number;
   boardHeight: number;
   minLeft: number;
+  linkedLeftResize?: boolean;
 };
 
 export type NodeEditorOverlayRatio = {
@@ -69,6 +74,19 @@ export type NodeEditorOverlayRatio = {
   top: number;
   width: number;
   height: number;
+};
+
+export type ArenaBoardLeftResizeRequest = {
+  sessionID: number;
+  appliedDeltaX: number;
+  startKanbanWidthPx: number;
+  kanbanWidthPx: number;
+};
+
+export type ArenaBoardLeftResizeResult = {
+  appliedDeltaX: number;
+  startKanbanWidthPx: number;
+  kanbanWidthPx: number;
 };
 
 export const nodeEditorOverlayResizeHandles: Array<{
