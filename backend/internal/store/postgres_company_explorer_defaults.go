@@ -195,15 +195,26 @@ func backfillBareCompanyExplorerItemsForTypeTx(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	targetIDs := make([]string, 0)
 	for rows.Next() {
 		var targetID string
 		if err := rows.Scan(&targetID); err != nil {
+			_ = rows.Close()
 			return err
 		}
+		targetIDs = append(targetIDs, targetID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, targetID := range targetIDs {
 		if _, _, err := placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, companyID, targetType, targetID, ""); err != nil && !errors.Is(err, ErrInvalid) {
 			return err
 		}
 	}
-	return rows.Err()
+	return nil
 }
