@@ -1308,6 +1308,9 @@ type ChatPaneProps = {
   onSubmit: () => void;
 };
 
+const CHAT_COMPOSER_MIN_HEIGHT = 34;
+const CHAT_COMPOSER_PANE_HEIGHT_RESERVE = 116;
+
 export const ChatPane: React.FC<ChatPaneProps> = ({
   blockID,
   editable,
@@ -1346,10 +1349,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const mentionCloseTimerRef = useRef<number | null>(null);
   const threads = useMemo(() => buildChatThreads(messages), [messages]);
   const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
-  const lineCount = Math.min(5, Math.max(1, draft.split(/\r\n|\r|\n/).length));
-  const composerHeight = 34 + ((lineCount - 1) * 17);
   const canSubmit = editable && (draft.trim().length > 0 || draftAttachments.length > 0);
   const [height, setHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
+  const composerMaxHeight = Math.max(CHAT_COMPOSER_MIN_HEIGHT, height - CHAT_COMPOSER_PANE_HEIGHT_RESERVE);
+  const [composerSizing, setComposerSizing] = useState({ height: CHAT_COMPOSER_MIN_HEIGHT, scrolls: false });
   const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
   const [collapsedThreadIDs, setCollapsedThreadIDs] = useState<Set<string>>(() => new Set());
   const [activeMentionDraft, setActiveMentionDraft] = useState<ActiveMentionDraft | null>(null);
@@ -1361,6 +1364,21 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const mentionMenuOpen = editable && activeMentionDraft !== null && mentionOptions.length > 0;
   const hasEmailPane = Boolean(emailPane);
   const showingEmail = hasEmailPane && activeTab === "email";
+
+  const resizeComposer = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = `${CHAT_COMPOSER_MIN_HEIGHT}px`;
+    const measuredHeight = Math.ceil(textarea.scrollHeight);
+    const nextHeight = Math.max(CHAT_COMPOSER_MIN_HEIGHT, Math.min(measuredHeight, composerMaxHeight));
+    const nextScrolls = measuredHeight > composerMaxHeight + 1;
+    textarea.style.height = `${nextHeight}px`;
+    setComposerSizing((current) => (
+      current.height === nextHeight && current.scrolls === nextScrolls
+        ? current
+        : { height: nextHeight, scrolls: nextScrolls }
+    ));
+  }, [composerMaxHeight]);
 
   useEffect(() => {
     setHeight(readStoredChatPaneHeight(heightStorageKey));
@@ -1377,6 +1395,31 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   useEffect(() => {
     setActiveMentionIndex((current) => Math.min(current, Math.max(0, mentionOptions.length - 1)));
   }, [mentionOptions.length]);
+
+  useLayoutEffect(() => {
+    if (showingEmail) return;
+    resizeComposer();
+  }, [draft, resizeComposer, showingEmail]);
+
+  useLayoutEffect(() => {
+    if (showingEmail) return undefined;
+    const textarea = textareaRef.current;
+    const composer = textarea?.parentElement;
+    if (!textarea || !composer || typeof ResizeObserver === "undefined") return undefined;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      if (frame !== 0) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        resizeComposer();
+      });
+    });
+    observer.observe(composer);
+    return () => {
+      if (frame !== 0) window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [resizeComposer, showingEmail]);
 
   useEffect(() => {
     const visibleMessageIDs = new Set(messages.map((message) => message.id));
@@ -1686,7 +1729,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             <textarea
               ref={textareaRef}
               value={draft}
-              rows={lineCount}
+              rows={1}
               disabled={!editable}
               readOnly={!editable}
               placeholder={replyTarget ? `↖ Replying to ${replyTarget.authorName}` : ""}
@@ -1765,7 +1808,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   onSubmit();
                 }
               }}
-              style={{ width: "100%", height: composerHeight, minHeight: 34, maxHeight: 102, resize: "none", overflowY: lineCount >= 5 ? "auto" : "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+              style={{ width: "100%", height: composerSizing.height, minHeight: CHAT_COMPOSER_MIN_HEIGHT, maxHeight: composerMaxHeight, resize: "none", overflowY: composerSizing.scrolls ? "auto" : "hidden", boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
             />
             <button
               type="button"
