@@ -25,6 +25,7 @@ export type CompanyExplorerLocationSegment = {
   entity_id: string;
   resource_id?: string;
   name: string;
+  protected_default_folder?: boolean;
 };
 
 export type CompanyExplorerSearchResult = {
@@ -35,6 +36,7 @@ export type CompanyExplorerSearchResult = {
   display_name: string;
   match_reason: string;
   location_path: CompanyExplorerLocationSegment[];
+  protected_default_folder?: boolean;
   has_children?: boolean;
   created_timestamp: string;
   updated_timestamp: string;

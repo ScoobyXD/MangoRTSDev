@@ -40,6 +40,9 @@ E29 - Company Explorer search queries the whole company graph, not only branches
 E30 - Company Explorer search orders result types as logic gates, nodes, projects, then folders.
 E31 - Company Explorer search results include resource_type, resource_id, display name, match reason, and Explorer location path.
 E32 - Search result display renders the Explorer location path as nested Explorer rows with normal icons, and selecting a resource result opens that resource without switching node results to the map background.
+E33 - The default Unfiled folder and its Projects, Logic Gates, and Nodes child folders cannot be renamed or deleted, but resources inside those folders can still be moved or deleted through normal resource actions.
+E34 - While the Explorer search box contains text, the left sidebar hides non-Explorer sections and uses the remaining column for Explorer search results; clearing the search restores the normal sidebar.
+E35 - Dropping a node into an Explorer folder must create or move a Company Explorer folder placement and must not treat a logic-gate assignment or project relationship edge as an Explorer folder-item edge.
 
 ## Scenarios
 
@@ -123,6 +126,7 @@ Business logic covered:
 - E26
 - E27
 - E28
+- E33
 
 Given:
 - A company has no user-created Explorer folders.
@@ -134,6 +138,7 @@ Expected:
 - Unfiled contains Projects, Logic Gates, and Nodes in that order.
 - Bare outside-created resources appear in the matching Unfiled child folder.
 - Explicit root-created resources stay at the Company Explorer root and do not also appear in Unfiled.
+- Unfiled, Projects, Logic Gates, and Nodes do not expose rename/delete actions and direct delete/rename attempts are rejected.
 
 ### Scenario E-S5: Whole-Company Search
 
@@ -142,6 +147,7 @@ Business logic covered:
 - E30
 - E31
 - E32
+- E34
 
 Given:
 - Matching logic gates, nodes, projects, and folders exist across folders and lazy branches that have not necessarily been opened.
@@ -151,3 +157,18 @@ Expected:
 - Logic gates are listed before nodes, nodes before projects, and projects before folders.
 - Each result includes resource_type, resource_id, display name, match reason, and Explorer location path.
 - The UI renders the location path as nested Explorer rows and selecting a resource result opens the resource directly without switching node results to the map background.
+### Scenario E-S6: Folder Drops Preserve Edge Semantics
+
+Business logic covered:
+- E17
+- E18
+- E35
+
+Given:
+- A node can appear under a logic gate through a logic-gate assignment edge.
+- A user drags that node into a normal Company Explorer folder.
+
+Expected:
+- The folder drop writes a Company Explorer folder placement for the node.
+- The logic-gate assignment edge is not reused as a Company Explorer placement edge.
+- The drop does not fail with access_denied because of an edge-type mismatch.

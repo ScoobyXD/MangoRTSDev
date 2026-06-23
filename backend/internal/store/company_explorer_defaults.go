@@ -11,6 +11,8 @@ const (
 	CompanyExplorerDefaultLogicGatesFolderName = "Logic Gates"
 	CompanyExplorerDefaultNodesFolderName      = "Nodes"
 
+	CompanyExplorerProtectedDefaultFolderNativeContextKey = "protected_default_folder"
+
 	companyExplorerDefaultRootKey       = "unfiled"
 	companyExplorerDefaultProjectsKey   = "unfiled_projects"
 	companyExplorerDefaultLogicGatesKey = "unfiled_logic_gates"
@@ -73,6 +75,22 @@ func isCompanyExplorerDefaultFolderID(companyID, folderID string) bool {
 		folderID == folders.NodesFolderID
 }
 
+func applyCompanyExplorerDefaultFolderNativeContext(row *CompanyExplorerV2Row) {
+	if row == nil || row.EntityType != CompanyExplorerV2EntityFolder || !isCompanyExplorerDefaultFolderID(row.CompanyID, row.EntityID) {
+		return
+	}
+	if row.NativeContext == nil {
+		row.NativeContext = map[string]string{}
+	}
+	row.NativeContext[CompanyExplorerProtectedDefaultFolderNativeContextKey] = "true"
+}
+
+func protectCompanyExplorerDefaultFolderMutation(companyID, folderID string) error {
+	if isCompanyExplorerDefaultFolderID(companyID, folderID) {
+		return ErrInvalid
+	}
+	return nil
+}
 func normalizeCompanyExplorerSearchQuery(query CompanyExplorerSearchQuery) (CompanyExplorerSearchQuery, error) {
 	query.CompanyID = cleanUUIDText(query.CompanyID)
 	query.Query = strings.TrimSpace(query.Query)

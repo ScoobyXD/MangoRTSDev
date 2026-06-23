@@ -21,7 +21,7 @@ import {
   shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
 import { getExplorerRowContainerID } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
-import { buildCompanyExplorerSearchTreeRows, buildCompanyExplorerTreeRows, buildCompanyExplorerV2TreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
+import { buildCompanyExplorerSearchTreeRows, buildCompanyExplorerTreeRows, buildCompanyExplorerV2TreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName, isCompanyExplorerV2FolderItemPlacementRow } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
 import { buildCompanyExplorerContextMenuSections, createInitialCompanyExplorerExpandedRows, filterExplorerRowsForCustomTopLevel } from "../../../../frontend/src/modules/company-explorer/CompanyExplorerContentModel.js";
 
 const systemFolders = [
@@ -368,6 +368,30 @@ run("v2 native rows without source resource ids are not deletable as source reco
     entityID: "node-entity",
     entityType: "node",
   }), null);
+});run("protected default folder rows do not resolve destructive actions", () => {
+  const row = {
+    id: "workspace-folder-unfiled",
+    kind: "folder" as const,
+    folderKind: "logic_gate" as const,
+    folderID: "unfiled",
+    protectedDefaultFolder: true,
+  };
+  assert.equal(resolveExplorerDeleteTarget(row), null);
+  assert.equal(resolveExplorerRenameTarget(row), null);
+});
+
+run("v2 folder item placement detection ignores native relationship edges", () => {
+  const rows = [
+    { company_id: "c", entity_id: "folder-a", entity_type: "folder" as const, name: "Folder A", position: 1000, has_children: true, created_timestamp: "1", updated_timestamp: "1" },
+    { company_id: "c", entity_id: "gate-a", entity_type: "logic_gate" as const, resource_id: "gate-a", name: "Gate A", position: 1000, has_children: true, created_timestamp: "2", updated_timestamp: "2" },
+    { company_id: "c", entity_id: "node-folder", entity_type: "node" as const, resource_id: "node-folder", name: "Folder Node", parent_entity_id: "folder-a", edge_id: "explorer-item-edge", position: 1000, has_children: false, created_timestamp: "3", updated_timestamp: "3" },
+    { company_id: "c", entity_id: "node-root", entity_type: "node" as const, resource_id: "node-root", name: "Root Node", edge_id: "root-explorer-item-edge", position: 1000, has_children: false, created_timestamp: "4", updated_timestamp: "4" },
+    { company_id: "c", entity_id: "node-assigned", entity_type: "node" as const, resource_id: "node-assigned", name: "Assigned Node", parent_entity_id: "gate-a", edge_id: "logic-gate-assignment-edge", position: 1000, has_children: false, created_timestamp: "5", updated_timestamp: "5" },
+  ];
+
+  assert.equal(isCompanyExplorerV2FolderItemPlacementRow(rows[2], rows), true);
+  assert.equal(isCompanyExplorerV2FolderItemPlacementRow(rows[3], rows), true);
+  assert.equal(isCompanyExplorerV2FolderItemPlacementRow(rows[4], rows), false);
 });
 run("automatic folders hold active node placements and due-date history", () => {
   const rows = buildCompanyExplorerTreeRows({

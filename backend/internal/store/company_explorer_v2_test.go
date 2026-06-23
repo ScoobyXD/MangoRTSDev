@@ -672,6 +672,53 @@ func TestMemoryCompanyExplorerDefaultUnfiledFolders(t *testing.T) {
 	}
 }
 
+func TestMemoryCompanyExplorerDefaultFoldersAreProtected(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-220000000104"
+	repo.EnsureCompany(companyID, "Protected Defaults Co")
+
+	user, err := repo.UpsertAuthUser("protected-default-user", "protected-default@example.com", "Protected Default User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("protected-default-user", companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+
+	defaults := companyExplorerDefaultFolderIDs(companyID)
+	roots, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{CompanyID: companyID, PermissionUserID: user.UserID})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2RootRows: %v", err)
+	}
+	unfiled := requireCompanyExplorerV2Row(t, roots.Rows, CompanyExplorerV2EntityFolder, defaults.UnfiledFolderID)
+	if unfiled.NativeContext[CompanyExplorerProtectedDefaultFolderNativeContextKey] != "true" {
+		t.Fatalf("unfiled native context = %+v, want protected default marker", unfiled.NativeContext)
+	}
+
+	if _, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: defaults.UnfiledFolderID}}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("DeleteCompanyExplorerTargets Unfiled err = %v, want ErrInvalid", err)
+	}
+	if err := repo.DeleteCompanyExplorerV2Folder(companyID, defaults.LogicGatesFolderID); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("DeleteCompanyExplorerV2Folder Logic Gates err = %v, want ErrInvalid", err)
+	}
+	if _, err := repo.UpdateCompanyExplorerV2Folder(CompanyExplorerV2FolderUpdateInput{CompanyID: companyID, EntityID: defaults.NodesFolderID, Name: "Renamed", PermissionUserID: user.UserID}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("UpdateCompanyExplorerV2Folder Nodes err = %v, want ErrInvalid", err)
+	}
+	if _, err := repo.RenameCompanyExplorerFolder(companyID, defaults.UnfiledFolderID, "Renamed"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("RenameCompanyExplorerFolder Unfiled err = %v, want ErrInvalid", err)
+	}
+	if _, err := repo.MoveCompanyExplorerFolder(companyID, defaults.ProjectsFolderID, nil, 2000); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("MoveCompanyExplorerFolder Projects err = %v, want ErrInvalid", err)
+	}
+
+	children, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{CompanyID: companyID, ParentEntityID: defaults.UnfiledFolderID, PermissionUserID: user.UserID})
+	if err != nil {
+		t.Fatalf("ListCompanyExplorerV2ChildRows after blocked mutations: %v", err)
+	}
+	if gotNames := companyExplorerV2RowNames(children.Rows); len(gotNames) != 3 {
+		t.Fatalf("default child rows after blocked mutations = %v, want three child folders", gotNames)
+	}
+}
 func TestMemoryCompanyExplorerDefaultPlacementAndExplicitRootException(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000102"

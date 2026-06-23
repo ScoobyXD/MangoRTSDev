@@ -316,6 +316,9 @@ func (r *MemoryRepo) UpdateCompanyExplorerV2Folder(input CompanyExplorerV2Folder
 	if !ok || entity.EntityType != CompanyExplorerV2EntityFolder {
 		return CompanyExplorerV2Row{}, ErrNotFound
 	}
+	if err := protectCompanyExplorerDefaultFolderMutation(input.CompanyID, input.EntityID); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
 	if input.PermissionUserID != "" && !r.companyExplorerV2EntityCanEditLocked(input.CompanyID, input.PermissionUserID, entity) {
 		return CompanyExplorerV2Row{}, ErrNotFound
 	}
@@ -587,6 +590,9 @@ func (r *MemoryRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string) e
 	if !ok || entity.EntityType != CompanyExplorerV2EntityFolder {
 		return ErrNotFound
 	}
+	if err := protectCompanyExplorerDefaultFolderMutation(companyID, entityID); err != nil {
+		return err
+	}
 	folderIDs := map[string]bool{entityID: true}
 	changed := true
 	for changed {
@@ -828,6 +834,7 @@ func (r *MemoryRepo) companyExplorerV2RowLocked(query CompanyExplorerV2RowsQuery
 		CreatedTimestamp: entity.CreatedTimestamp,
 		UpdatedTimestamp: entity.UpdatedTimestamp,
 	}
+	applyCompanyExplorerDefaultFolderNativeContext(&row)
 	if edge != nil {
 		row.ParentEntityID = edge.ParentEntityID
 		row.EdgeID = edge.EdgeID

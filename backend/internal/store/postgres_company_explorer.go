@@ -282,6 +282,9 @@ func (r *PostgresRepo) GetCompanyExplorerFolder(companyID, folderID string) (dom
 	if companyID == "" || folderID == "" {
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
+	if err := protectCompanyExplorerDefaultFolderMutation(companyID, folderID); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	ctx := context.Background()
 	item, err := r.getCompanyExplorerFolder(ctx, companyID, folderID, true)
 	if err != nil {
@@ -616,6 +619,9 @@ func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name str
 	if companyID == "" || folderID == "" || name == "" {
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
+	if err := protectCompanyExplorerDefaultFolderMutation(companyID, folderID); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	ctx := context.Background()
 	var item domain.CompanyExplorerFolder
 	var parentOut sql.NullString
@@ -650,6 +656,9 @@ func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) e
 	folderID = cleanUUIDText(folderID)
 	if companyID == "" || folderID == "" {
 		return ErrInvalid
+	}
+	if err := protectCompanyExplorerDefaultFolderMutation(companyID, folderID); err != nil {
+		return err
 	}
 	deleted, err := r.db.ExecContext(context.Background(), `
 delete from company_explorer_folders
@@ -741,6 +750,10 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			for rows.Next() {
 				var folderID string
 				if err := rows.Scan(&folderID); err != nil {
+					rows.Close()
+					return CompanyExplorerDeleteResult{}, err
+				}
+				if err := protectCompanyExplorerDefaultFolderMutation(companyID, folderID); err != nil {
 					rows.Close()
 					return CompanyExplorerDeleteResult{}, err
 				}

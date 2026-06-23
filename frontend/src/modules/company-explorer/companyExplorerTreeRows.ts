@@ -405,6 +405,17 @@ function searchTreeIDForEntity(entityType: CompanyExplorerV2EntityType, resource
   return `${prefix}workspace-folder-${entityID}`;
 }
 
+function isProtectedDefaultFolderContext(nativeContext?: Record<string, string>): boolean {
+  return nativeContext?.protected_default_folder === "true";
+}
+
+export function isCompanyExplorerV2FolderItemPlacementRow(row: CompanyExplorerV2Row, rows: CompanyExplorerV2Row[]): boolean {
+  if (!row.edge_id || row.entity_type === "company" || row.entity_type === "folder") return false;
+  const parentEntityID = row.parent_entity_id?.trim() ?? "";
+  if (!parentEntityID) return true;
+  return rows.some((candidate) => candidate.entity_id === parentEntityID && candidate.entity_type === "folder");
+}
+
 export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearchResult[]): ExplorerTreeNode[] {
   const rows: ExplorerTreeNode[] = [];
   results.forEach((result, resultIndex) => {
@@ -429,6 +440,7 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
         folderID: kind === "folder" ? segment.entity_id : undefined,
         parentFolderID: segmentIndex > 0 ? result.location_path[segmentIndex - 1]?.entity_id ?? "" : "",
         folderKind: explorerFolderKindForSearchEntity(segment.entity_type),
+        protectedDefaultFolder: Boolean(segment.protected_default_folder),
         folderLabel: pathLabelParts.join(" / "),
         scopeLevel: segmentIndex,
         position: ((resultIndex + 1) * TREE_ROW_POSITION_STEP) + segmentIndex,
@@ -457,6 +469,7 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
       folderID: kind === "folder" ? result.entity_id : parentSegment?.entity_id ?? "",
       parentFolderID: parentSegment?.entity_id ?? "",
       folderKind,
+      protectedDefaultFolder: Boolean(result.protected_default_folder),
       folderLabel: pathLabelParts.join(" / "),
       scopeLevel: result.location_path.length,
       position: ((resultIndex + 1) * TREE_ROW_POSITION_STEP) + result.location_path.length,
@@ -551,6 +564,7 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
       folderID: kind === "folder" ? row.entity_id : row.parent_entity_id,
       parentFolderID: row.parent_entity_id ?? "",
       folderKind,
+      protectedDefaultFolder: row.entity_type === "folder" && isProtectedDefaultFolderContext(row.native_context),
       folderLabel: row.parent_entity_id ? rowByEntityID.get(row.parent_entity_id)?.name : undefined,
       scopeLevel: depth,
       position: row.position || TREE_ROW_POSITION_STEP,

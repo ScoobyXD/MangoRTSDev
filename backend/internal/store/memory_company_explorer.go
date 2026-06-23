@@ -432,6 +432,9 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	if !ok || item.FolderKind == "communications" {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
+	if err := protectCompanyExplorerDefaultFolderMutation(companyID, folderID); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	parent := item.ParentFolderID
 	targetParentID := companyExplorerParentID(item)
 	parentChanged := false
@@ -494,6 +497,9 @@ func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name strin
 	item, ok := r.folders[key(companyID, folderID)]
 	if !ok || item.FolderKind == "communications" {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
+	}
+	if err := protectCompanyExplorerDefaultFolderMutation(companyID, folderID); err != nil {
+		return domain.CompanyExplorerFolder{}, err
 	}
 	if item.SystemKey != nil {
 		return domain.CompanyExplorerFolder{}, ErrInvalid
@@ -608,6 +614,9 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 			}
 			folderKinds[target.ID] = folder.FolderKind
 			for id := range toDelete {
+				if err := protectCompanyExplorerDefaultFolderMutation(companyID, id); err != nil {
+					return CompanyExplorerDeleteResult{}, err
+				}
 				item := r.folders[key(companyID, id)]
 				if item.SystemKey != nil {
 					return CompanyExplorerDeleteResult{}, ErrInvalid

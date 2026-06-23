@@ -882,6 +882,8 @@ export function AppSidebar({
     );
   };
 
+  const explorerSearchActive = explorerSearchQuery.trim().length > 0;
+
   return (
     <aside className="company-explorer-scroll" data-app-sidebar="primary" style={appSidebarStyle}>
       <div style={appSidebarBrandStyle} aria-label="MangoRTS">
@@ -912,6 +914,8 @@ export function AppSidebar({
         </div>
       </div>
 
+      {!explorerSearchActive && (
+        <>
       <section style={appSidebarNavSectionStyle} aria-label="Live Feed">
         <AppSidebarSectionHeader label="Live Feed" />
         <AppSidebarButton
@@ -1116,13 +1120,17 @@ export function AppSidebar({
         />
       </section>
 
+        </>
+      )}
+
       <AppSidebarCompanyExplorerSection
         selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
         explorerSearchQuery={explorerSearchQuery}
+        explorerSearchActive={explorerSearchActive}
         onExplorerSearchQueryChange={setExplorerSearchQuery}
         onTriageMessagesDrop={requestExplorerTriageMessageDrop}
       />
-      {WORKTREE_VERSION && (
+      {!explorerSearchActive && WORKTREE_VERSION && (
         <div aria-label={`Worktree version ${WORKTREE_VERSION}`} style={appSidebarVersionStyle}>
           v{WORKTREE_VERSION}
         </div>
@@ -1287,17 +1295,19 @@ function AppSidebarSectionHeader({ label }: { label: string }): React.ReactEleme
 function AppSidebarCompanyExplorerSection({
   selectionTargetFrameIDs,
   explorerSearchQuery,
+  explorerSearchActive,
   onExplorerSearchQueryChange,
   onTriageMessagesDrop,
 }: {
   selectionTargetFrameIDs: string[];
   explorerSearchQuery: string;
+  explorerSearchActive: boolean;
   onExplorerSearchQueryChange: React.Dispatch<React.SetStateAction<string>>;
   onTriageMessagesDrop: CompanyExplorerTriageMessageDropHandler;
 }): React.ReactElement {
   return (
-    <section style={appSidebarCompanyExplorerSectionStyle} aria-label="Company Explorer">
-      <AppSidebarSectionHeader label="Explorer" />
+    <section style={appSidebarCompanyExplorerSectionStyle(explorerSearchActive)} aria-label="Company Explorer">
+      {!explorerSearchActive && <AppSidebarSectionHeader label="Explorer" />}
       <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
         <SidebarCompanyExplorerContent
           accent={SIDEBAR_ACTIVE_TEXT}
@@ -1306,6 +1316,7 @@ function AppSidebarCompanyExplorerSection({
           useParentScroll
           selectionTargetFrameIDs={selectionTargetFrameIDs}
           externalSearchQuery={explorerSearchQuery}
+          hideTopControls={explorerSearchActive}
           onSearchResultSelect={() => {
             onExplorerSearchQueryChange("");
           }}
@@ -1997,13 +2008,17 @@ function appSidebarPinnedSectionStyle(active: boolean): React.CSSProperties {
   };
 }
 
-const appSidebarCompanyExplorerSectionStyle: React.CSSProperties = {
-  flex: "0 0 auto",
-  minWidth: 0,
-  display: "grid",
-  gap: 6,
-  padding: "0 0 10px",
-};
+function appSidebarCompanyExplorerSectionStyle(searchActive: boolean): React.CSSProperties {
+  return {
+    flex: searchActive ? "1 1 auto" : "0 0 auto",
+    minHeight: searchActive ? 0 : undefined,
+    minWidth: 0,
+    display: "grid",
+    alignContent: searchActive ? "stretch" : undefined,
+    gap: searchActive ? 0 : 6,
+    padding: searchActive ? "0" : "0 0 10px",
+  };
+}
 
 const appSidebarSectionTitleStyle: React.CSSProperties = {
   padding: "0 6px",
