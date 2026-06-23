@@ -1135,6 +1135,30 @@ function startEditorListFromBlankLine(root: HTMLElement, kind: EditorListKind, c
   return insertEditorListAtSelection(root, kind, insertedText) !== null;
 }
 
+function insertEditorListFromEnter(root: HTMLElement, kind: EditorListKind, currentText: string, selectionStart: number, selectionEnd: number): boolean {
+  const blankLineBounds = listStarterLineBounds(currentText, selectionStart, selectionEnd);
+  if (blankLineBounds) {
+    if (blankLineBounds.lineEnd > blankLineBounds.lineStart) {
+      deleteTextByOffsets(root, blankLineBounds.lineStart, blankLineBounds.lineEnd, { preserveTrailingNewline: currentText.endsWith("\n") });
+    }
+    setEditorSelectionByPlainTextOffsets(root, blankLineBounds.lineStart);
+    return insertEditorListAtSelection(root, kind) !== null;
+  }
+
+  const range = getEditorSelectionRange(root);
+  if (!range) return false;
+  removeEditorTerminalBreaks(root);
+  const list = createEditorList(root.ownerDocument, kind);
+  const item = list.firstElementChild instanceof HTMLLIElement ? list.firstElementChild : null;
+  const fragment = root.ownerDocument.createDocumentFragment();
+  fragment.appendChild(root.ownerDocument.createTextNode("\n"));
+  fragment.appendChild(list);
+  range.deleteContents();
+  range.insertNode(fragment);
+  if (item) selectEditorListItem(root, item, "start");
+  return true;
+}
+
 function insertEditorListItemAfter(root: HTMLElement, item: HTMLLIElement): boolean {
   const kind = getEditorListKindForItem(item);
   if (!kind) return false;
@@ -3331,6 +3355,15 @@ export function useEditorDocumentSurfaceHandlers({
         }
         const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
         const currentText = readEditorDocumentText(root);
+        const editorListKind = !event.shiftKey ? editorListKindForOutlineStyle(outlineStyle) : null;
+        if (editorListKind) {
+          if (insertEditorListFromEnter(root, editorListKind, currentText, offsets.start, offsets.end)) {
+            scrollEditorToLineStart(root);
+            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "lineBreak");
+            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          }
+          return;
+        }
         const edit = insertEditorEnterText(currentText, offsets.start, offsets.end, outlineStyle, { continueAutomaticOutline: !event.shiftKey });
         const insertedText = edit.value.slice(offsets.start, edit.selectionStart);
         const preserveTrailingNewline = edit.value.endsWith("\n") && offsets.end >= currentText.length;
