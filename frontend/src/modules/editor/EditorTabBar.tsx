@@ -48,7 +48,7 @@ const EditorOutlineStyleIcon: React.FC<{ id: EditorOutlineStyleID; color: string
         <circle cx="4.2" cy="5" r="1.6" fill="#000000" />
         <circle cx="4.2" cy="9" r="1.6" fill="#000000" />
         <circle cx="4.2" cy="13" r="1.6" fill="#000000" />
-        <path d="M8 5h7M8 9h7M8 13h7" fill="none" stroke={color} strokeWidth="1.45" strokeLinecap="round" />
+        <path d="M8 5h7M8 9h7M8 13h7" fill="none" stroke={accent} strokeWidth="1.45" strokeLinecap="round" />
       </svg>
     );
   }
@@ -62,6 +62,13 @@ const EditorOutlineStyleIcon: React.FC<{ id: EditorOutlineStyleID; color: string
     </svg>
   );
 };
+
+function outlineStyleIconPalette(id: EditorOutlineStyleID): { color: string; accent: string } {
+  if (id === "automatic-outline-numbering") return { color: "#2563eb", accent: "#06b6d4" };
+  if (id === "indent-guides") return { color: "#7c3aed", accent: "#14b8a6" };
+  if (id === "bullet-list") return { color: "#000000", accent: "#f97316" };
+  return { color: "#059669", accent: "#06b6d4" };
+}
 
 
 function colorWithAlpha(color: string, alpha: number): string {
@@ -133,11 +140,11 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   const outlineMenuRef = useRef<HTMLDivElement | null>(null);
   const createMenuRef = useRef<HTMLDivElement | null>(null);
   const relationshipTabRef = useRef<HTMLButtonElement | null>(null);
+  const tabFrameBackground = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
   const outlineMenuSurface = "linear-gradient(145deg, rgba(248, 251, 255, 0.98), rgba(230, 236, 246, 0.96))";
   const outlineRowSurface = "linear-gradient(145deg, rgba(250, 253, 255, 0.96), rgba(232, 238, 248, 0.9))";
-  const outlineRowHoverSurface = "linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(237, 244, 252, 0.94))";
+  const outlineRowHoverSurface = "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(230,252,255,0.7) 46%, rgba(247,239,255,0.74))";
   const outlineRowSelectedSurface = `linear-gradient(145deg, ${colorWithAlpha(outlineMenuAccent, 0.17)}, rgba(255, 255, 255, 0.84))`;
-  const tabFrameBackground = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
   const tabHoverBackground = "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.66))";
   const tabHoverShadow = "0 8px 20px rgba(15, 23, 42, 0.12), 0 0 14px rgba(183, 124, 255, 0.18), inset 1px 1px 0 rgba(255,255,255,0.86)";
 
@@ -333,7 +340,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                   {EDITOR_OUTLINE_STYLE_ITEMS.map((item) => {
                     const itemSelected = item.id === outlineStyle;
                     const itemHovered = item.id === hoveredOutlineStyle;
-                    const itemIconColor = item.id === "bullet-list" ? "#000000" : itemSelected ? outlineMenuAccent : surfaceText;
+                    const itemIconPalette = outlineStyleIconPalette(item.id);
                     return (
                       <button
                         key={item.id}
@@ -349,9 +356,13 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                         style={{
                           width: "100%",
                           minHeight: 32,
-                          border: `1px solid ${itemSelected ? colorWithAlpha(outlineMenuAccent, 0.26) : "rgba(255, 255, 255, 0.58)"}`,
+                          border: `1px solid ${itemSelected || itemHovered ? "transparent" : "rgba(255, 255, 255, 0.58)"}`,
                           borderRadius: 8,
-                          background: itemSelected ? outlineRowSelectedSurface : itemHovered ? outlineRowHoverSurface : outlineRowSurface,
+                          background: itemSelected
+                            ? `${outlineRowSelectedSurface} padding-box, ${tabFrameBackground} border-box`
+                            : itemHovered
+                              ? `${outlineRowHoverSurface} padding-box, ${tabFrameBackground} border-box`
+                              : outlineRowSurface,
                           boxShadow: itemSelected
                             ? `inset 3px 3px 7px ${colorWithAlpha("#64748b", 0.2)}, inset -3px -3px 7px rgba(255, 255, 255, 0.82)`
                             : itemHovered
@@ -378,13 +389,13 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                             borderRadius: 7,
                             display: "grid",
                             placeItems: "center",
-                            background: itemSelected ? "rgba(255, 255, 255, 0.58)" : "rgba(246, 249, 253, 0.78)",
+                            background: itemSelected || itemHovered ? "rgba(255, 255, 255, 0.74)" : "rgba(246, 249, 253, 0.78)",
                             boxShadow: itemSelected
                               ? `inset 2px 2px 4px ${colorWithAlpha("#64748b", 0.16)}, inset -2px -2px 4px rgba(255, 255, 255, 0.82)`
                               : `2px 2px 5px ${colorWithAlpha("#64748b", 0.18)}, -2px -2px 5px rgba(255, 255, 255, 0.9)`,
                           }}
                         >
-                          <EditorOutlineStyleIcon id={item.id} color={itemIconColor} accent={outlineMenuAccent} />
+                          <EditorOutlineStyleIcon id={item.id} color={itemIconPalette.color} accent={itemIconPalette.accent} />
                         </span>
                         <span>{item.label}</span>
                         <span style={{ display: "grid", placeItems: "center", color: outlineMenuAccent }}>
