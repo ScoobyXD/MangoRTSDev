@@ -3507,11 +3507,11 @@ export function HomePage({
     activeDeleteSelectionKindRef.current = kind;
     requestDeleteHomeEntities(kind === "node" ? buildNodeDeleteTargets(ids) : buildLogicGateDeleteTargets(ids), position);
   }, [buildLogicGateDeleteTargets, buildNodeDeleteTargets, requestDeleteHomeEntities]);
-  const deleteHomeEntities = useCallback(async (targets: HomeEntityDeleteTarget[]) => {
+  const deleteHomeEntities = useCallback(async (targets: HomeEntityDeleteTarget[]): Promise<boolean> => {
     const normalizedTargets = targets.map((target) => ({ kind: target.kind, id: target.id.trim() })).filter((target) => target.id);
     const nodeIDSet = new Set(normalizedTargets.filter((target) => target.kind === "node").map((target) => target.id));
     const logicGateIDSet = new Set(normalizedTargets.filter((target) => target.kind === "logic_gate").map((target) => target.id));
-    if (nodeIDSet.size === 0 && logicGateIDSet.size === 0) return;
+    if (nodeIDSet.size === 0 && logicGateIDSet.size === 0) return false;
     setBusy("entity-delete");
     setError("");
     try {
@@ -3550,12 +3550,19 @@ export function HomePage({
       setEntityDeleteConfirmation(null);
       const deletedCount = nodeIDSet.size + logicGateIDSet.size;
       setNotice(deletedCount === 1 ? "Item deleted." : `${deletedCount} items deleted.`);
+      return true;
     } catch (deleteError) {
       setError(formatError(deleteError, "Failed to delete selected items"));
+      return false;
     } finally {
       setBusy("");
     }
   }, [apiBase, companyID, logicGateIDFromTreeID, logicGateSelectionAnchorID, nodeIDFromTreeID, nodeSelectionAnchorID, nodes]);
+  const deleteNodeEditorOverlayNode = useCallback(async (nodeID: string): Promise<boolean> => {
+    const targets = buildNodeDeleteTargets([nodeID]);
+    if (targets.length === 0) return false;
+    return deleteHomeEntities(targets);
+  }, [buildNodeDeleteTargets, deleteHomeEntities]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.key !== "Delete" || deleteConfirmation || busy) return;
@@ -4151,6 +4158,7 @@ export function HomePage({
           focusInformationID={nodeEditorOverlay.focusInformationID}
           focusRequestID={nodeEditorOverlay.focusRequestID}
           onClose={closeNodeEditorOverlay}
+          onDeleteNode={deleteNodeEditorOverlayNode}
           onCollapseToTab={() => {
             requestAppDockTab({ kind: "node", entityID: nodeEditorOverlay.nodeID, label: nodeEditorOverlay.nodeTitle });
             closeNodeEditorOverlay();
