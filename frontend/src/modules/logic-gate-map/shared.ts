@@ -98,7 +98,13 @@ export type LogicGateGVICAssignment = {
   user_id: string;
   user_display_name?: string;
   user_email?: string;
+  source_resource_type?: string;
+  source_resource_id?: string;
+  inheritance_type?: string;
+  inherited?: boolean;
+  read_only?: boolean;
   created_timestamp: string;
+  updated_timestamp?: string;
 };
 
 export type NodeRelationship = {

@@ -108,6 +108,20 @@ func cloneResourceGVICAssignments(items []domain.ResourceGVICAssignment) []domai
 	return append([]domain.ResourceGVICAssignment{}, items...)
 }
 
+func inheritedResourceGVICAssignments(items []domain.ResourceGVICAssignment, resourceType, resourceID, sourceResourceType, sourceResourceID string) []domain.ResourceGVICAssignment {
+	out := cloneResourceGVICAssignments(items)
+	for index := range out {
+		out[index].ResourceType = resourceType
+		out[index].ResourceID = resourceID
+		out[index].SourceResourceType = sourceResourceType
+		out[index].SourceResourceID = sourceResourceID
+		out[index].InheritanceType = GVICInheritanceLogicGateInherited
+		out[index].Inherited = true
+		out[index].ReadOnly = true
+	}
+	return out
+}
+
 func logicGateGVICAssignmentFromResource(item domain.ResourceGVICAssignment) domain.LogicGateGVICAssignment {
 	return domain.LogicGateGVICAssignment{
 		CompanyID:        item.CompanyID,

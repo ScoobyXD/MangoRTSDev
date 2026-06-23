@@ -20,6 +20,7 @@ var (
 	ErrInvitationReplaced            = errors.New("invitation replaced")
 	ErrInvitationEmailMismatch       = errors.New("invitation email mismatch")
 	ErrPrincipalNotInCompany         = errors.New("principal not in company")
+	ErrGVICInherited                 = errors.New("GVIC inherited")
 	ErrGVICStorageUnavailable        = errors.New("GVIC storage unavailable")
 	ErrSharedInboxStorageUnavailable = errors.New("shared inbox storage unavailable")
 	ErrEmailAccountUnavailable       = errors.New("email account unavailable")

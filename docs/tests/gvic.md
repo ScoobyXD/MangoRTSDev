@@ -4,7 +4,7 @@ Last updated: 2026-06-23
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: partial backend coverage for role validation, pointer inheritance, effective-delta stability, and scoped projection sync. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: partial backend coverage for role validation, pointer inheritance, inherited node read-only behavior, detach-empty behavior, effective-delta stability, and scoped projection sync. Rule ID mapping is partial.
 
 ## Business Logic
 
@@ -36,6 +36,14 @@ GVIC25 - Projection and realtime deltas are the cache update path for My Work an
 GVIC26 - Stale in-flight reads or browser cache entries must not repopulate older Logic Gate GVIC data after a successful POST or PUT.
 GVIC27 - Logic Gate GVIC and Node GVIC must follow the same cache freshness contract; Logic Gate GVIC must not depend on stale broad Logic Gate payloads when Node GVIC uses fresh resource GVIC data.
 GVIC28 - Logic Gate pointer inheritance keeps source assignments on the logic gate; linked node effective access and My Work rows resolve through that gate without materializing copied child-node effective rows.
+GVIC29 - A standalone node owns editable node GVIC source assignments.
+GVIC30 - A node inside a logic gate inherits GVIC from that parent logic gate; node GVIC reads must display the parent logic gate assignments as inherited, read-only node assignments.
+GVIC31 - Creating a node inside a logic gate, placing a standalone node into a logic gate, or moving a node between logic gates clears the node's standalone GVIC assignments and makes the node inherit from the current parent logic gate.
+GVIC32 - Detaching a node from a logic gate makes it standalone with empty GVIC; old standalone GVIC assignments must not be restored.
+GVIC33 - Node GVIC writes are rejected while the node inherits from a logic gate; users must update the parent logic gate GVIC instead.
+GVIC34 - Projects have their own GVIC for project visibility and updates, but logic gates and nodes do not inherit GVIC from projects.
+GVIC35 - My Work membership is based on node effective GVIC only; project and logic gate data decorate and group visible node rows but do not hide or reveal node rows.
+GVIC36 - Updates visibility is target-based: node events use node effective GVIC/access, logic gate events use logic gate GVIC/access, and project events use project GVIC/access.
 
 ## Scenarios
 
@@ -147,3 +155,33 @@ Expected:
 - Stale broad Logic Gate payloads, stale workspace list cache entries, and stale in-flight reads cannot overwrite newer Logic Gate GVIC assignments.
 - Logic Gate and Node GVIC follow the same freshness contract.
 - Linked node effective access resolves through the Logic Gate assignment without copied child-node effective rows.
+
+### Scenario GVIC-S6: Node Logic Gate GVIC Inheritance, My Work, And Updates
+
+Business logic covered:
+- GVIC21
+- GVIC28
+- GVIC29
+- GVIC30
+- GVIC31
+- GVIC32
+- GVIC33
+- GVIC34
+- GVIC35
+- GVIC36
+
+Given:
+- A standalone node has its own GVIC assignments.
+- The node is placed into a logic gate that has different GVIC assignments.
+- The node is later detached from the logic gate.
+- Project, logic gate, and node updates are shown in Updates.
+
+Expected:
+- Before placement, the standalone node GVIC is editable and controls the node's My Work visibility.
+- When the node is placed into the logic gate, the node's standalone GVIC assignments are cleared.
+- While the node is inside the logic gate, the node GVIC editor shows the parent logic gate GVIC as inherited read-only rows and rejects direct node GVIC writes.
+- Changing the parent logic gate GVIC immediately changes the linked node's effective GVIC and My Work visibility through pointer inheritance, without copying GVIC rows into the node.
+- My Work shows the node only when the user's effective node GVIC includes that node; parent project or logic gate GVIC only provides grouping and context.
+- Detaching the node makes it a standalone node with empty GVIC.
+- Project GVIC does not flow down into logic gates or nodes.
+- Updates visibility uses the GVIC/access rules of the updated target: project updates use project GVIC, logic gate updates use logic gate GVIC, and node updates use node effective GVIC.

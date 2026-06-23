@@ -43,6 +43,12 @@ func (r *MemoryRepo) ListResourceGVICAssignments(companyID, resourceType, resour
 	if !r.gvicResourceExistsLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID) {
 		return nil, ErrNotFound
 	}
+	if keyValue.resourceType == EntityTypeNode {
+		if assignment, ok := r.nodeLogicGateAssignments[nodeLogicGateAssignmentKey(keyValue.companyID, keyValue.resourceID)]; ok && strings.TrimSpace(assignment.LogicGateID) != "" {
+			source := r.gvicAssignmentsForResourceLocked(keyValue.companyID, EntityTypeLogicGate, assignment.LogicGateID)
+			return inheritedResourceGVICAssignments(source, EntityTypeNode, keyValue.resourceID, EntityTypeLogicGate, assignment.LogicGateID), nil
+		}
+	}
 	items := r.gvicAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
 	return cloneResourceGVICAssignments(items), nil
 }
@@ -85,6 +91,11 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 
 	if !r.gvicResourceExistsLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID) {
 		return ResourceGVICAssignmentMutationResult{}, ErrNotFound
+	}
+	if keyValue.resourceType == EntityTypeNode {
+		if assignment, ok := r.nodeLogicGateAssignments[nodeLogicGateAssignmentKey(keyValue.companyID, keyValue.resourceID)]; ok && strings.TrimSpace(assignment.LogicGateID) != "" {
+			return ResourceGVICAssignmentMutationResult{}, ErrGVICInherited
+		}
 	}
 	for _, assignment := range assignments {
 		if err := r.validateGVICPrincipalLocked(keyValue.companyID, assignment.principalType, assignment.principalID); err != nil {
@@ -274,6 +285,22 @@ func (r *MemoryRepo) gvicAssignmentsForResourceLocked(companyID, resourceType, r
 	}
 	sortResourceGVICAssignments(items)
 	return items
+}
+func (r *MemoryRepo) clearNodeResourceGVICAssignmentsLocked(companyID, nodeID string) bool {
+	changed := false
+	for sourceKey, assignment := range r.gvicAssignments {
+		if assignment.CompanyID == companyID && assignment.ResourceType == EntityTypeNode && assignment.ResourceID == nodeID {
+			delete(r.gvicAssignments, sourceKey)
+			changed = true
+		}
+	}
+	for effectiveKey, assignment := range r.gvicEffectiveAssignments {
+		if assignment.CompanyID == companyID && assignment.ResourceType == EntityTypeNode && assignment.ResourceID == nodeID {
+			delete(r.gvicEffectiveAssignments, effectiveKey)
+			changed = true
+		}
+	}
+	return changed
 }
 
 func (r *MemoryRepo) gvicEffectiveAssignmentsForResourceLocked(companyID, resourceType, resourceID string) []domain.ResourceGVICEffectiveAssignment {
