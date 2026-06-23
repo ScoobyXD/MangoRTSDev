@@ -615,6 +615,112 @@ button, input, textarea, select {
   outline-offset: 2px;
 }
 
+.editor-document-scroll ul[data-mango-editor-list] {
+  list-style: none;
+  margin: 2px 0;
+  padding-left: 20px;
+  white-space: pre-wrap;
+  clear: both;
+}
+
+.editor-document-scroll ul[data-mango-editor-list] ul[data-mango-editor-list] {
+  margin: 2px 0 2px 2px;
+  padding-left: 22px;
+}
+
+.editor-document-scroll li[data-mango-editor-list-item] {
+  position: relative;
+  min-height: 1.55em;
+  margin: 1px 0;
+  padding-left: 24px;
+  list-style: none;
+  white-space: pre-wrap;
+}
+
+.editor-document-scroll li[data-mango-editor-list-item]::marker {
+  content: "";
+}
+
+.editor-document-scroll li[data-mango-editor-list-item="bullet"]::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0.78em;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.22) 32%, transparent 48%),
+    linear-gradient(135deg, rgba(92, 238, 255, 0.96), rgba(183, 124, 255, 0.92) 58%, rgba(255, 255, 255, 0.72));
+  box-shadow:
+    2px 2px 5px rgba(174, 174, 192, 0.36),
+    -2px -2px 5px rgba(255, 255, 255, 0.92),
+    0 0 9px rgba(92, 238, 255, 0.24),
+    inset 1px 1px 1px rgba(255, 255, 255, 0.78);
+}
+
+.editor-document-scroll li[data-mango-editor-list-item="checklist"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.78em;
+  width: 15px;
+  height: 15px;
+  border: 1px solid rgba(92, 238, 255, 0.54);
+  border-radius: 5px;
+  transform: translateY(-50%);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(232, 246, 250, 0.72)) padding-box,
+    linear-gradient(135deg, rgba(92, 238, 255, 0.72), rgba(183, 124, 255, 0.58)) border-box;
+  box-shadow:
+    2px 2px 6px rgba(174, 174, 192, 0.34),
+    -2px -2px 6px rgba(255, 255, 255, 0.92),
+    inset 1px 1px 2px rgba(255, 255, 255, 0.86),
+    inset -1px -1px 2px rgba(100, 116, 139, 0.12);
+}
+
+.editor-document-scroll li[data-mango-editor-list-item="checklist"]::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0.77em;
+  width: 7px;
+  height: 4px;
+  border-left: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+  transform: translateY(-62%) rotate(-45deg) scale(0.72);
+  opacity: 0;
+  transition: opacity 120ms ease, transform 150ms ease;
+}
+
+.editor-document-scroll li[data-mango-editor-list-item="checklist"][data-mango-editor-checklist-checked="true"]::before {
+  border-color: transparent;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.08)) padding-box,
+    linear-gradient(135deg, rgba(20, 184, 166, 0.96), rgba(92, 238, 255, 0.84) 42%, rgba(183, 124, 255, 0.88)) border-box;
+  box-shadow:
+    2px 2px 6px rgba(174, 174, 192, 0.34),
+    -2px -2px 6px rgba(255, 255, 255, 0.86),
+    0 0 11px rgba(92, 238, 255, 0.24),
+    inset 1px 1px 1px rgba(255, 255, 255, 0.58);
+}
+
+.editor-document-scroll li[data-mango-editor-list-item="checklist"][data-mango-editor-checklist-checked="true"]::after {
+  border-color: #ffffff;
+  opacity: 1;
+  transform: translateY(-62%) rotate(-45deg) scale(1);
+}
+
+.editor-document-scroll li[data-mango-editor-list-item="checklist"]:hover::before {
+  border-color: rgba(183, 124, 255, 0.72);
+  box-shadow:
+    3px 3px 8px rgba(174, 174, 192, 0.36),
+    -3px -3px 8px rgba(255, 255, 255, 0.94),
+    0 0 12px rgba(183, 124, 255, 0.18),
+    inset 1px 1px 2px rgba(255, 255, 255, 0.88);
+}
+
 .editor-document-scroll table[data-mango-editor-table="true"] {
   width: 100%;
   max-width: 100%;
