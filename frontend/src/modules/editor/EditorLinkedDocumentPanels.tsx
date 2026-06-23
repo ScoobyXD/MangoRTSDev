@@ -1054,7 +1054,6 @@ function GVICRoleEditor({
         background: `linear-gradient(145deg, rgba(255,255,255,0.96), ${hexWithAlpha(roleAccent, "12")}) padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "aa")}, rgba(255,255,255,0.84)) border-box`,
         boxShadow: "4px 4px 12px rgba(174,174,192,0.16), -4px -4px 12px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.84)",
         padding: 6,
-        opacity: inheritedReadOnly ? 0.74 : 1,
       }}
     >
       <strong style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#111827" }}>
@@ -1193,11 +1192,11 @@ function GVICRoleEditor({
               left: disabledTooltipPosition.x + 14,
               top: disabledTooltipPosition.y - 12,
               transform: "translateY(-100%)",
-              zIndex: 90,
+              zIndex: 10000,
               maxWidth: 320,
               border: "1px solid #cbd5e1",
               borderRadius: 8,
-              background: "#f8fafc",
+              background: "#ffffff",
               boxShadow: "5px 5px 12px rgba(148,163,184,0.32), -4px -4px 10px rgba(255,255,255,0.92), inset 1px 1px 0 rgba(255,255,255,0.95)",
               color: "#334155",
               fontSize: 11,
