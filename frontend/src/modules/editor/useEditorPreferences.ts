@@ -7,6 +7,8 @@ import {
 
 export const EDITOR_OUTLINE_STYLE_ITEMS: ReadonlyArray<{ id: EditorOutlineStyleID; label: string }> = [
   { id: "automatic-outline-numbering", label: "Automatic Numbering" },
+  { id: "bullet-list", label: "Bullet Points" },
+  { id: "checklist", label: "Checklist" },
   { id: "indent-guides", label: "Indent Guides" },
 ];
 

@@ -10,6 +10,9 @@ import {
   type EditorOutlineStyleID,
 } from "./plainTextEditing";
 import {
+  EDITOR_CHECKLIST_CHECKED_ATTRIBUTE,
+  EDITOR_LIST_ATTRIBUTE,
+  EDITOR_LIST_ITEM_ATTRIBUTE,
   EDITOR_TABLE_ATTRIBUTE,
   EDITOR_TABLE_CELL_ATTRIBUTE,
   EDITOR_TABLE_COLUMNS_ATTRIBUTE,
@@ -27,9 +30,11 @@ import {
   readEditorTableColumnWidths,
   readEditorTableOffsetPercent,
   readEditorTableWidthPercent,
+  readEditorListKind,
   readEditorDocumentText,
   sanitizeEditorDocumentHTML,
   serializeEditorDocumentHTML,
+  type EditorListKind,
 } from "./richTextEditing";
 import {
   recordEditorDocumentUndoChange,
@@ -962,6 +967,235 @@ function replaceDocumentWithPlainText(root: HTMLElement, text: string, selection
 
 function documentHasEditorImages(root: HTMLElement): boolean {
   return root.querySelector(`span[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"]`) !== null;
+}
+
+const EDITOR_LIST_ITEM_SELECTOR = `li[${EDITOR_LIST_ITEM_ATTRIBUTE}]`;
+
+function editorListKindForOutlineStyle(outlineStyle: EditorOutlineStyleID): EditorListKind | null {
+  if (outlineStyle === "bullet-list") return "bullet";
+  if (outlineStyle === "checklist") return "checklist";
+  return null;
+}
+
+function getEditorListKindForList(list: Element | null): EditorListKind | null {
+  return list instanceof HTMLUListElement ? readEditorListKind(list.getAttribute(EDITOR_LIST_ATTRIBUTE)) : null;
+}
+
+function getEditorListForItem(item: HTMLLIElement): HTMLUListElement | null {
+  const list = item.parentElement;
+  return getEditorListKindForList(list) ? list as HTMLUListElement : null;
+}
+
+function getEditorListKindForItem(item: HTMLLIElement): EditorListKind | null {
+  return getEditorListKindForList(getEditorListForItem(item));
+}
+
+function getClosestEditorListItem(root: HTMLElement, node: Node | EventTarget | null): HTMLLIElement | null {
+  const element = node instanceof Element
+    ? node
+    : node instanceof Node ? node.parentElement : null;
+  const item = element?.closest?.(EDITOR_LIST_ITEM_SELECTOR) ?? null;
+  return item instanceof HTMLLIElement && root.contains(item) ? item : null;
+}
+
+function getCurrentEditorListItem(root: HTMLElement): HTMLLIElement | null {
+  const range = getEditorSelectionRange(root);
+  if (!range) return null;
+  return getClosestEditorListItem(root, range.startContainer)
+    ?? getClosestEditorListItem(root, range.endContainer)
+    ?? getClosestEditorListItem(root, range.commonAncestorContainer);
+}
+
+function editorListItemOwnTextNodes(item: HTMLLIElement): Text[] {
+  const textNodes: Text[] = [];
+  const walker = item.ownerDocument.createTreeWalker(item, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      let current: Node | null = node.parentNode;
+      while (current && current !== item) {
+        if (current instanceof HTMLUListElement && readEditorListKind(current.getAttribute(EDITOR_LIST_ATTRIBUTE))) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        current = current.parentNode;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+    textNodes.push(node);
+  }
+  return textNodes;
+}
+
+function readEditorListItemOwnText(item: HTMLLIElement): string {
+  return editorListItemOwnTextNodes(item).map((node) => node.data).join("");
+}
+
+function editorListItemContentIsEmpty(item: HTMLLIElement): boolean {
+  return readEditorListItemOwnText(item).replace(/\u200b/g, "").trim().length === 0;
+}
+
+function directNestedEditorList(item: HTMLLIElement): HTMLUListElement | null {
+  return Array.from(item.children).find((child): child is HTMLUListElement => (
+    child instanceof HTMLUListElement && readEditorListKind(child.getAttribute(EDITOR_LIST_ATTRIBUTE)) !== null
+  )) ?? null;
+}
+
+function removeEditorListItemPlaceholders(item: HTMLLIElement) {
+  Array.from(item.childNodes).forEach((child) => {
+    if (child instanceof HTMLBRElement) child.remove();
+    if (child.nodeType === Node.TEXT_NODE && !(child.textContent ?? "").length) child.remove();
+  });
+}
+
+function createEditorListItem(ownerDocument: Document, kind: EditorListKind, text = ""): HTMLLIElement {
+  const item = ownerDocument.createElement("li");
+  item.setAttribute(EDITOR_LIST_ITEM_ATTRIBUTE, kind);
+  if (kind === "checklist") item.setAttribute(EDITOR_CHECKLIST_CHECKED_ATTRIBUTE, "false");
+  if (text) item.appendChild(ownerDocument.createTextNode(text));
+  else item.appendChild(ownerDocument.createElement("br"));
+  return item;
+}
+
+function createEditorList(ownerDocument: Document, kind: EditorListKind, text = ""): HTMLUListElement {
+  const list = ownerDocument.createElement("ul");
+  list.setAttribute(EDITOR_LIST_ATTRIBUTE, kind);
+  list.appendChild(createEditorListItem(ownerDocument, kind, text));
+  return list;
+}
+
+function selectEditorListItem(root: HTMLElement, item: HTMLLIElement, edge: "start" | "end" = "end") {
+  const selection = root.ownerDocument.getSelection();
+  if (!selection) return;
+  const range = root.ownerDocument.createRange();
+  const textNodes = editorListItemOwnTextNodes(item);
+  const textNode = edge === "start" ? textNodes[0] : textNodes[textNodes.length - 1];
+  if (textNode) {
+    range.setStart(textNode, edge === "start" ? 0 : textNode.data.length);
+  } else {
+    const placeholder = Array.from(item.childNodes).find((child): child is HTMLBRElement => child instanceof HTMLBRElement);
+    if (placeholder) range.setStartBefore(placeholder);
+    else range.selectNodeContents(item);
+  }
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function insertTextIntoEmptyEditorListItem(root: HTMLElement, item: HTMLLIElement, text: string): boolean {
+  if (!text || !editorListItemContentIsEmpty(item)) return false;
+  removeEditorListItemPlaceholders(item);
+  const textNode = root.ownerDocument.createTextNode(text);
+  item.insertBefore(textNode, directNestedEditorList(item));
+  const range = root.ownerDocument.createRange();
+  range.setStart(textNode, textNode.data.length);
+  range.collapse(true);
+  const selection = root.ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return true;
+}
+
+function insertEditorListAtSelection(root: HTMLElement, kind: EditorListKind, initialText = ""): HTMLLIElement | null {
+  const range = getEditorSelectionRange(root);
+  if (!range) return null;
+  removeEditorTerminalBreaks(root);
+  const list = createEditorList(root.ownerDocument, kind, initialText);
+  const item = list.firstElementChild instanceof HTMLLIElement ? list.firstElementChild : null;
+  range.deleteContents();
+  range.insertNode(list);
+  if (item) selectEditorListItem(root, item, initialText ? "end" : "start");
+  return item;
+}
+
+function readPlainTextLineBounds(value: string, selectionStart: number): { lineStart: number; lineEnd: number; line: string } {
+  const start = Math.max(0, Math.min(selectionStart, value.length));
+  const lineStart = value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+  const nextLineBreak = value.indexOf("\n", start);
+  const lineEnd = nextLineBreak === -1 ? value.length : nextLineBreak;
+  return { lineStart, lineEnd, line: value.slice(lineStart, lineEnd) };
+}
+
+function listStarterLineBounds(value: string, selectionStart: number, selectionEnd: number): { lineStart: number; lineEnd: number } | null {
+  if (selectionStart !== selectionEnd) return null;
+  const { lineStart, lineEnd, line } = readPlainTextLineBounds(value, selectionStart);
+  const relativeStart = selectionStart - lineStart;
+  const beforeCaret = line.slice(0, relativeStart);
+  const afterCaret = line.slice(relativeStart);
+  if (!/^[ \t\u00a0]*$/.test(beforeCaret) || !/^[ \t\u00a0]*$/.test(afterCaret)) return null;
+  return { lineStart, lineEnd };
+}
+
+function startEditorListFromBlankLine(root: HTMLElement, kind: EditorListKind, currentText: string, selectionStart: number, selectionEnd: number, insertedText: string): boolean {
+  const bounds = listStarterLineBounds(currentText, selectionStart, selectionEnd);
+  if (!bounds) return false;
+  if (bounds.lineEnd > bounds.lineStart) {
+    deleteTextByOffsets(root, bounds.lineStart, bounds.lineEnd, { preserveTrailingNewline: currentText.endsWith("\n") });
+  }
+  setEditorSelectionByPlainTextOffsets(root, bounds.lineStart);
+  return insertEditorListAtSelection(root, kind, insertedText) !== null;
+}
+
+function insertEditorListItemAfter(root: HTMLElement, item: HTMLLIElement): boolean {
+  const kind = getEditorListKindForItem(item);
+  if (!kind) return false;
+  const nextItem = createEditorListItem(root.ownerDocument, kind);
+  item.after(nextItem);
+  selectEditorListItem(root, nextItem, "start");
+  return true;
+}
+
+function exitEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean {
+  const list = getEditorListForItem(item);
+  if (!list) return false;
+  const lineBreak = root.ownerDocument.createTextNode("\n");
+  item.remove();
+  if (list.querySelector(EDITOR_LIST_ITEM_SELECTOR)) list.after(lineBreak);
+  else list.replaceWith(lineBreak);
+  const range = root.ownerDocument.createRange();
+  range.setStart(lineBreak, lineBreak.data.length);
+  range.collapse(true);
+  const selection = root.ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return true;
+}
+
+function indentEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean {
+  const kind = getEditorListKindForItem(item);
+  if (!kind) return false;
+  const previousItem = item.previousElementSibling;
+  if (!(previousItem instanceof HTMLLIElement)) return false;
+  let nestedList = Array.from(previousItem.children).find((child): child is HTMLUListElement => (
+    child instanceof HTMLUListElement && readEditorListKind(child.getAttribute(EDITOR_LIST_ATTRIBUTE)) === kind
+  )) ?? null;
+  if (!nestedList) {
+    nestedList = root.ownerDocument.createElement("ul");
+    nestedList.setAttribute(EDITOR_LIST_ATTRIBUTE, kind);
+    previousItem.appendChild(nestedList);
+  }
+  nestedList.appendChild(item);
+  selectEditorListItem(root, item, "end");
+  return true;
+}
+
+function outdentEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean {
+  const list = getEditorListForItem(item);
+  if (!list) return false;
+  const parentItem = list.parentElement instanceof HTMLLIElement ? list.parentElement : null;
+  if (!parentItem) return false;
+  parentItem.after(item);
+  if (!list.querySelector(EDITOR_LIST_ITEM_SELECTOR)) list.remove();
+  selectEditorListItem(root, item, "end");
+  return true;
+}
+
+function getChecklistItemForPointer(root: HTMLElement, event: React.MouseEvent<HTMLDivElement>): HTMLLIElement | null {
+  const item = getClosestEditorListItem(root, event.target);
+  if (!item || getEditorListKindForItem(item) !== "checklist") return null;
+  const rect = item.getBoundingClientRect();
+  const markerZoneLeft = rect.left - 2;
+  const markerZoneRight = rect.left + 26;
+  return event.clientX >= markerZoneLeft && event.clientX <= markerZoneRight ? item : null;
 }
 
 type EditorPlainTextBoundary = {
@@ -2569,6 +2803,18 @@ export function useEditorDocumentSurfaceHandlers({
           return;
         }
 
+        const activeEditorListItem = getCurrentEditorListItem(root);
+        if (activeEditorListItem && editorListItemContentIsEmpty(activeEditorListItem)) {
+          event.preventDefault();
+          pendingEditorFontSizeRef.current = null;
+          const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
+          if (insertTextIntoEmptyEditorListItem(root, activeEditorListItem, inputEvent.data)) {
+            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
+            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          }
+          return;
+        }
+
         if (outlineStyle === "automatic-outline-numbering") {
           const offsets = getEditorSelectionOffsets(root);
           if (offsets) {
@@ -2583,6 +2829,22 @@ export function useEditorDocumentSurfaceHandlers({
                 if (documentHasEditorImages(root)) return;
                 replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
               }
+              recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
+              commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+              return;
+            }
+          }
+        }
+
+        const editorListKind = editorListKindForOutlineStyle(outlineStyle);
+        if (editorListKind) {
+          const offsets = getEditorSelectionOffsets(root);
+          if (offsets) {
+            const currentText = readEditorDocumentText(root);
+            const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
+            if (startEditorListFromBlankLine(root, editorListKind, currentText, offsets.start, offsets.end, inputEvent.data)) {
+              event.preventDefault();
+              pendingEditorFontSizeRef.current = null;
               recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
               commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
               return;
@@ -2763,6 +3025,19 @@ export function useEditorDocumentSurfaceHandlers({
       }
       pendingEditorFontSizeRef.current = null;
       syncSelectionFontSize(root, onSelectionFontSizeChange);
+      const checklistItem = getChecklistItemForPointer(root, event);
+      if (checklistItem) {
+        event.preventDefault();
+        event.stopPropagation();
+        const undoBefore = snapshotEditorDocumentRoot(root);
+        checklistItem.setAttribute(
+          EDITOR_CHECKLIST_CHECKED_ATTRIBUTE,
+          checklistItem.getAttribute(EDITOR_CHECKLIST_CHECKED_ATTRIBUTE) === "true" ? "false" : "true",
+        );
+        recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "format");
+        commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
+        return;
+      }
       const anchor = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
       if (!anchor) {
         const cell = getClosestEditorTableCell(root, event.target);
@@ -2984,6 +3259,61 @@ export function useEditorDocumentSurfaceHandlers({
           event.preventDefault();
           recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "image");
           commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
+          return;
+        }
+      }
+
+      const activeEditorListItem = getCurrentEditorListItem(root);
+      if (activeEditorListItem) {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          pendingEditorFontSizeRef.current = null;
+          clearEditorImageSelection(root);
+          const mentionUndoBefore = breakEditorMentionsForInput(root, "insertParagraph");
+          if (mentionUndoBefore) {
+            activeMentionRootRef.current = null;
+            setActiveMentionDraft(null);
+          }
+          const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
+          const changed = editorListItemContentIsEmpty(activeEditorListItem)
+            ? exitEditorListItem(root, activeEditorListItem)
+            : insertEditorListItemAfter(root, activeEditorListItem);
+          if (changed) {
+            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "lineBreak");
+            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          }
+          return;
+        }
+
+        if (event.key === "Tab") {
+          event.preventDefault();
+          pendingEditorFontSizeRef.current = null;
+          clearEditorImageSelection(root);
+          const mentionUndoBefore = breakEditorMentionsForInput(root, "insertText");
+          if (mentionUndoBefore) {
+            activeMentionRootRef.current = null;
+            setActiveMentionDraft(null);
+          }
+          const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
+          const changed = event.shiftKey
+            ? outdentEditorListItem(root, activeEditorListItem)
+            : indentEditorListItem(root, activeEditorListItem);
+          if (changed) {
+            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "tab");
+            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          }
+          return;
+        }
+
+        if (event.key === "Backspace" && editorListItemContentIsEmpty(activeEditorListItem)) {
+          event.preventDefault();
+          pendingEditorFontSizeRef.current = null;
+          clearEditorImageSelection(root);
+          const undoBefore = snapshotEditorDocumentRoot(root);
+          if (exitEditorListItem(root, activeEditorListItem)) {
+            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "delete");
+            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          }
           return;
         }
       }

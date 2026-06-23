@@ -21,6 +21,11 @@ export const EDITOR_TABLE_HEADER_ATTRIBUTE = "data-mango-editor-table-header";
 export const EDITOR_TABLE_COLUMN_WIDTHS_ATTRIBUTE = "data-mango-editor-table-column-widths";
 export const EDITOR_TABLE_WIDTH_ATTRIBUTE = "data-mango-editor-table-width";
 export const EDITOR_TABLE_OFFSET_ATTRIBUTE = "data-mango-editor-table-offset";
+export const EDITOR_LIST_ATTRIBUTE = "data-mango-editor-list";
+export const EDITOR_LIST_ITEM_ATTRIBUTE = "data-mango-editor-list-item";
+export const EDITOR_CHECKLIST_CHECKED_ATTRIBUTE = "data-mango-editor-checklist-checked";
+
+export type EditorListKind = "bullet" | "checklist";
 
 export const EDITOR_TABLE_DEFAULT_ROWS = 3;
 export const EDITOR_TABLE_DEFAULT_COLUMNS = 3;
@@ -68,6 +73,11 @@ function normalizeEditorURL(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+export function readEditorListKind(value: string | null | undefined): EditorListKind | null {
+  if (value === "bullet" || value === "checklist") return value;
+  return null;
 }
 
 export function getEditorLinkHrefForText(value: string): string | null {
@@ -332,6 +342,34 @@ function appendSanitizedEditorGridTable(source: HTMLElement, target: Node, owner
   target.appendChild(createSanitizedEditorTableFromCells(rowCells.map((row) => row.filter((cell): cell is HTMLElement => cell !== null)), ownerDocument, source));
 }
 
+function appendSanitizedEditorListItem(source: HTMLElement, list: HTMLUListElement, ownerDocument: Document, kind: EditorListKind) {
+  const item = ownerDocument.createElement("li");
+  item.setAttribute(EDITOR_LIST_ITEM_ATTRIBUTE, kind);
+  if (kind === "checklist") {
+    item.setAttribute(EDITOR_CHECKLIST_CHECKED_ATTRIBUTE, source.getAttribute(EDITOR_CHECKLIST_CHECKED_ATTRIBUTE) === "true" ? "true" : "false");
+  }
+  appendSanitizedChildren(source, item, ownerDocument);
+  if (item.childNodes.length === 0) item.appendChild(ownerDocument.createElement("br"));
+  list.appendChild(item);
+}
+
+function appendSanitizedEditorList(source: HTMLElement, target: Node, ownerDocument: Document, fallbackKind: EditorListKind) {
+  const kind = readEditorListKind(source.getAttribute(EDITOR_LIST_ATTRIBUTE)) ?? fallbackKind;
+  const list = ownerDocument.createElement("ul");
+  list.setAttribute(EDITOR_LIST_ATTRIBUTE, kind);
+  Array.from(source.children)
+    .filter((child): child is HTMLElement => child instanceof HTMLElement && child.tagName.toLowerCase() === "li")
+    .forEach((item) => appendSanitizedEditorListItem(item, list, ownerDocument, kind));
+  if (list.children.length === 0) {
+    const item = ownerDocument.createElement("li");
+    item.setAttribute(EDITOR_LIST_ITEM_ATTRIBUTE, kind);
+    if (kind === "checklist") item.setAttribute(EDITOR_CHECKLIST_CHECKED_ATTRIBUTE, "false");
+    item.appendChild(ownerDocument.createElement("br"));
+    list.appendChild(item);
+  }
+  target.appendChild(list);
+}
+
 function appendSanitizedChildren(source: Node, target: Node, ownerDocument: Document) {
   source.childNodes.forEach((child) => appendSanitizedNode(child, target, ownerDocument));
 }
@@ -423,6 +461,11 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
 
   if (tagName === "thead" || tagName === "tbody") {
     appendSanitizedChildren(element, target, ownerDocument);
+    return;
+  }
+
+  if (tagName === "ul") {
+    appendSanitizedEditorList(element, target, ownerDocument, "bullet");
     return;
   }
 

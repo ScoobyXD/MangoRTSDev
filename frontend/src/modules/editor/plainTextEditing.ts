@@ -1,6 +1,6 @@
 export const EDITOR_TAB_TEXT = "     ";
 
-export type EditorOutlineStyleID = "automatic-outline-numbering" | "indent-guides";
+export type EditorOutlineStyleID = "automatic-outline-numbering" | "bullet-list" | "checklist" | "indent-guides";
 export type EditorTabDirection = "indent" | "outdent";
 export type EditorInlineFormatCommand = "bold" | "underline" | "hyperlink";
 
@@ -54,7 +54,7 @@ function countIndentDepth(indentation: string): number {
 }
 
 export function isEditorOutlineStyleID(value: string): value is EditorOutlineStyleID {
-  return value === "automatic-outline-numbering" || value === "indent-guides";
+  return value === "automatic-outline-numbering" || value === "bullet-list" || value === "checklist" || value === "indent-guides";
 }
 
 type OutlineMarkerKind = "decimal" | "alpha" | "roman";
