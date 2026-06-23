@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
+import { requestAppSidebarPin } from "../../app/sidebarPins";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../../modules/communications/communicationsApi";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import { GVICMatrixRealtimeScope } from "../../modules/gvic/gvicMatrixProjectionDeltas";
@@ -51,7 +53,6 @@ import {
   GVICRoleLabel,
   myWorkGroupingFieldLabel,
   myWorkCellGroupStateID,
-  myWorkDisplayGroupingStack,
   normalizeMyWorkGroupingStack,
   normalizeMyWorkSavedGroupingSetting,
   priorityLabel,
@@ -80,13 +81,15 @@ type MyWorkViewProps = {
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
-  onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
+  onRenameNode?: (nodeID: string) => void;
+  onRequestDeleteNode?: (nodeID: string, position?: ConfirmActionMenuPosition) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
   onCreateNodeInCell?: (input: MyWorkCellCreateInput) => void;
   onDropNodes?: (input: MyWorkNodeDropInput) => void;
   onDropNodesInCell?: (input: MyWorkCellNodeDropInput) => void;
   onDropLogicGates?: (input: MyWorkCellLogicGateDropInput) => void;
   onDropProjects?: (input: MyWorkCellProjectDropInput) => void;
+  hiddenNodeIDs?: Iterable<string>;
 };
 
 type ScopePickerRow = {
@@ -174,11 +177,14 @@ export function MyWorkView({
   onOpenNode,
   onOpenLogicGate,
   onOpenProject,
-  onOpenNodeBulkMenu,
+  onRenameNode,
+  onRequestDeleteNode,
   onCreateNodeInCell,
+  onDropNodes,
   onDropNodesInCell,
   onDropLogicGates,
   onDropProjects,
+  hiddenNodeIDs,
 }: MyWorkViewProps) {
   const userByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id.trim(), user])), [companyUsers]);
   const groupByID = useMemo(() => new Map(companyUserGroups.map((group) => [group.group_id.trim(), group])), [companyUserGroups]);
@@ -232,7 +238,6 @@ export function MyWorkView({
   const [scopeMenuLevel, setScopeMenuLevel] = useState<MyWorkScopeLevel | null>(null);
   const [addGroupingOpen, setAddGroupingOpen] = useState(false);
   const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
-  const [showProjectGroups, setShowProjectGroups] = useState(true);
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const [matrixCells, setMatrixCells] = useState<MyWorkMatrixCellWithUser[]>([]);
   const [matrixStateCacheKey, setMatrixStateCacheKey] = useState("");
@@ -290,11 +295,15 @@ export function MyWorkView({
   }), [companyID, matrixTargetUserIDs, selectedScope]);
   const cachedMatrixState = readMyWorkMatrixCache(matrixCacheKey);
   const matrixStateMatchesCacheKey = matrixStateCacheKey === matrixCacheKey;
-  const displayedMatrixCells = matrixStateMatchesCacheKey
+  const baseDisplayedMatrixCells = matrixStateMatchesCacheKey
     ? matrixCells
     : cachedMatrixState?.hasValue
       ? cachedMatrixState.cells
       : [];
+  const hiddenNodeIDSet = useMemo(() => new Set(cleanIDList(Array.from(hiddenNodeIDs ?? []))), [hiddenNodeIDs]);
+  const displayedMatrixCells = hiddenNodeIDSet.size === 0
+    ? baseDisplayedMatrixCells
+    : baseDisplayedMatrixCells.filter((cell) => !hiddenNodeIDSet.has(cell.node_id?.trim() ?? ""));
   const displayedMatrixError = matrixStateMatchesCacheKey
     ? matrixError
     : cachedMatrixState?.hasValue
@@ -620,10 +629,9 @@ export function MyWorkView({
   }, [displayedMatrixCells, groupByID, groupIDsByUserID, userByID]);
 
   const visibleRows = rows;
-  const displayGroupings = useMemo(
-    () => myWorkDisplayGroupingStack(selectedSetting.groupings, showProjectGroups),
-    [selectedSetting.groupings, showProjectGroups],
-  );
+  const displayGroupings = useMemo(() => normalizeMyWorkGroupingStack(selectedSetting.groupings), [selectedSetting.groupings]);
+  const showProjectHeaders = displayGroupings.some((grouping) => grouping.field === "project");
+  const showLogicGateHeaders = displayGroupings.some((grouping) => grouping.field === "logic_gate");
   const matrixRowsByCell = useMemo(() => buildMyWorkRowsByMatrixCell(visibleRows), [visibleRows]);
   const defaultExpandedGroupIDs = useMemo(() => {
     const debugEnabled = myWorkDebugEnabled();
@@ -662,7 +670,6 @@ export function MyWorkView({
       setting: selectedSetting.setting_id,
       scope: selectedScope,
       groupings: displayGroupings,
-      showProjectGroups,
       rows: visibleRows.map((row) => row.rowKey ?? `${row.kind}:${row.id}`).sort(),
     });
     if (debugEnabled) {
@@ -676,7 +683,7 @@ export function MyWorkView({
       });
     }
     return result;
-  }, [displayGroupings, selectedScope, selectedSetting.setting_id, showProjectGroups, visibleRows]);
+  }, [displayGroupings, selectedScope, selectedSetting.setting_id, visibleRows]);
 
   useEffect(() => {
     setExpandedGroupIDs(defaultExpandedGroupIDs);
@@ -744,11 +751,9 @@ export function MyWorkView({
           scopeMenuLevel={scopeMenuLevel}
           scopeRows={scopeRows}
           addableFields={addableFields}
-          showProjectGroups={showProjectGroups}
           addGroupingOpen={addGroupingOpen}
           groupingFieldMenuIndex={groupingFieldMenuIndex}
           onSelectSetting={setSelectedSettingID}
-          onShowProjectGroupsChange={setShowProjectGroups}
           onAddSavedView={addSavedView}
           onDeleteSavedView={deleteSavedView}
           onSelectScopeLevel={selectScopeLevel}
@@ -776,7 +781,8 @@ export function MyWorkView({
             rows={visibleRows}
             rowsByCell={matrixRowsByCell}
             groupings={displayGroupings}
-            showProjectGroups={showProjectGroups}
+            showProjectHeaders={showProjectHeaders}
+            showLogicGateHeaders={showLogicGateHeaders}
             expandedGroupIDs={expandedGroupIDs}
             onToggleGroup={(groupID) => {
               setExpandedGroupIDs((current) => {
@@ -796,8 +802,10 @@ export function MyWorkView({
             onOpenNode={onOpenNode}
             onOpenLogicGate={onOpenLogicGate}
             onOpenProject={onOpenProject}
-            onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+            onRenameNode={onRenameNode}
+            onRequestDeleteNode={onRequestDeleteNode}
             onCreateNodeInCell={onCreateNodeInCell}
+            onDropNodes={onDropNodes}
             onDropNodesInCell={onDropNodesInCell}
             onDropLogicGates={onDropLogicGates}
             onDropProjects={onDropProjects}
@@ -819,11 +827,9 @@ function GroupingPanel({
   scopeMenuLevel,
   scopeRows,
   addableFields,
-  showProjectGroups,
   addGroupingOpen,
   groupingFieldMenuIndex,
   onSelectSetting,
-  onShowProjectGroupsChange,
   onAddSavedView,
   onDeleteSavedView,
   onSelectScopeLevel,
@@ -842,11 +848,9 @@ function GroupingPanel({
   scopeMenuLevel: MyWorkScopeLevel | null;
   scopeRows: ScopePickerRow[];
   addableFields: ReadonlyArray<{ value: MyWorkGroupingField; label: string }>;
-  showProjectGroups: boolean;
   addGroupingOpen: boolean;
   groupingFieldMenuIndex: number | null;
   onSelectSetting: (settingID: string) => void;
-  onShowProjectGroupsChange: (show: boolean) => void;
   onAddSavedView: () => void;
   onDeleteSavedView: (settingID: string) => void;
   onSelectScopeLevel: (level: MyWorkScopeLevel) => void;
@@ -1005,15 +1009,6 @@ function GroupingPanel({
                 <button type="button" className="mango-my-work-action-button" style={newViewButtonStyle} onClick={onAddSavedView}>+ New View</button>
               </div>
               <div style={groupingStackStyle}>
-                <label className="mango-my-work-project-toggle" style={projectGroupToggleStyle}>
-                  <input
-                    type="checkbox"
-                    checked={showProjectGroups}
-                    style={projectGroupCheckboxStyle}
-                    onChange={(event) => onShowProjectGroupsChange(event.currentTarget.checked)}
-                  />
-                  <span style={projectGroupToggleTextStyle}>Projects</span>
-                </label>
                 {setting.groupings.map((grouping, index) => (
                   <div key={`${grouping.field}:${index}`} style={groupingRowStyle(index)}>
                     <button
@@ -1099,11 +1094,14 @@ function MyWorkGroupList({
   onOpenNode,
   onOpenLogicGate,
   onOpenProject,
-  onOpenNodeBulkMenu,
+  onRenameNode,
+  onRequestDeleteNode,
   nodeByID,
   logicGateByID,
-  showProjectGroups,
+  showProjectHeaders,
+  showLogicGateHeaders,
   projectGroupAncestor = false,
+  logicGateGroupAncestor = false,
 }: {
   groups: MyWorkNestedGroup[];
   cellKey: string;
@@ -1113,11 +1111,14 @@ function MyWorkGroupList({
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
-  onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
+  onRenameNode?: (nodeID: string) => void;
+  onRequestDeleteNode?: (nodeID: string, position?: ConfirmActionMenuPosition) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
-  showProjectGroups: boolean;
+  showProjectHeaders: boolean;
+  showLogicGateHeaders: boolean;
   projectGroupAncestor?: boolean;
+  logicGateGroupAncestor?: boolean;
 }) {
   return (
     <div style={groupListStyle}>
@@ -1127,6 +1128,7 @@ function MyWorkGroupList({
         const leafRows = group.groups.length === 0 ? group.rows : [];
         const resourceTarget = myWorkGroupResourceTarget(group);
         const nextProjectGroupAncestor = projectGroupAncestor || group.field === "project";
+        const nextLogicGateGroupAncestor = logicGateGroupAncestor || group.field === "logic_gate";
         return (
           <div key={group.id} style={groupBlockStyle}>
             <div style={groupHeaderStyle(group.depth, role)}>
@@ -1139,7 +1141,14 @@ function MyWorkGroupList({
                 <ExplorerDisclosureIcon open={open} color="rgba(15, 23, 42, 0.66)" />
               </button>
               {resourceTarget ? (
-                <button type="button" style={groupHeaderResourceButtonStyle} onClick={() => onOpenProject(resourceTarget.id, resourceTarget.label)}>
+                <button
+                  type="button"
+                  style={groupHeaderResourceButtonStyle}
+                  onClick={() => {
+                    if (resourceTarget.kind === "project") onOpenProject(resourceTarget.id, resourceTarget.label);
+                    else onOpenLogicGate(resourceTarget.id, resourceTarget.label);
+                  }}
+                >
                   <GroupHeaderIcon field={group.field} role={role} />
                   <span style={groupHeaderLabelStyle}>{group.label}</span>
                 </button>
@@ -1160,15 +1169,18 @@ function MyWorkGroupList({
                 onOpenNode={onOpenNode}
                 onOpenLogicGate={onOpenLogicGate}
                 onOpenProject={onOpenProject}
-                onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+                onRenameNode={onRenameNode}
+                onRequestDeleteNode={onRequestDeleteNode}
                 nodeByID={nodeByID}
                 logicGateByID={logicGateByID}
-                showProjectGroups={showProjectGroups}
+                showProjectHeaders={showProjectHeaders}
+                showLogicGateHeaders={showLogicGateHeaders}
                 projectGroupAncestor={nextProjectGroupAncestor}
+                logicGateGroupAncestor={nextLogicGateGroupAncestor}
               />
             )}
             {open && leafRows.length > 0 && (
-              <MyWorkRows rows={leafRows} role={role} depth={group.depth + 1} showProjectHeaders={showProjectGroups && !nextProjectGroupAncestor} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} nodeByID={nodeByID} logicGateByID={logicGateByID} />
+              <MyWorkRows rows={leafRows} role={role} depth={group.depth + 1} showProjectHeaders={showProjectHeaders && !nextProjectGroupAncestor} showLogicGateHeaders={showLogicGateHeaders && !nextLogicGateGroupAncestor} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onRenameNode={onRenameNode} onRequestDeleteNode={onRequestDeleteNode} nodeByID={nodeByID} logicGateByID={logicGateByID} />
             )}
           </div>
         );
@@ -1184,7 +1196,8 @@ function MyWorkRows({
   onOpenNode,
   onOpenLogicGate,
   onOpenProject,
-  onOpenNodeBulkMenu,
+  onRenameNode,
+  onRequestDeleteNode,
   nodeByID,
   logicGateByID,
   showProjectHeaders = true,
@@ -1196,7 +1209,8 @@ function MyWorkRows({
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
-  onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
+  onRenameNode?: (nodeID: string) => void;
+  onRequestDeleteNode?: (nodeID: string, position?: ConfirmActionMenuPosition) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
   showProjectHeaders?: boolean;
@@ -1219,7 +1233,8 @@ function MyWorkRows({
           onOpenNode={onOpenNode}
           onOpenLogicGate={onOpenLogicGate}
           onOpenProject={onOpenProject}
-          onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+          onRenameNode={onRenameNode}
+          onRequestDeleteNode={onRequestDeleteNode}
           nodeByID={nodeByID}
           logicGateByID={logicGateByID}
         />
@@ -1234,7 +1249,8 @@ function MyWorkDisplayRowItem({
   onOpenNode,
   onOpenLogicGate,
   onOpenProject,
-  onOpenNodeBulkMenu,
+  onRenameNode,
+  onRequestDeleteNode,
   nodeByID,
   logicGateByID,
 }: {
@@ -1243,10 +1259,12 @@ function MyWorkDisplayRowItem({
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
-  onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
+  onRenameNode?: (nodeID: string) => void;
+  onRequestDeleteNode?: (nodeID: string, position?: ConfirmActionMenuPosition) => void;
   nodeByID: Map<string, NodeRecord>;
   logicGateByID: Map<string, LogicGateRecord>;
 }) {
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   if (displayRow.kind !== "node") {
     const kind = displayRow.kind === "project_header" ? "project" : "logic_gate";
     const canOpen = displayRow.kind === "project_header"
@@ -1289,7 +1307,9 @@ function MyWorkDisplayRowItem({
         style={workRowStyle(displayRow.depth, role, row.kind, false)}
         draggable
         onContextMenu={(event) => {
-          if (onOpenNodeBulkMenu) onOpenNodeBulkMenu(row.id, event);
+          event.preventDefault();
+          event.stopPropagation();
+          setContextMenu({ x: event.clientX, y: event.clientY });
         }}
         onDragStart={(event) => {
           writeMyWorkDragPayload(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME, { nodeIDs: [row.id], fromLogicGateID: rowLogicGateID });
@@ -1305,19 +1325,66 @@ function MyWorkDisplayRowItem({
         </button>
         <span style={workRowStatusStyle(role)}>{status}</span>
       </div>
+      {contextMenu && (
+        <FrameRightClickMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)} minWidth={190}>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            onClick={() => {
+              onRenameNode?.(row.id);
+              setContextMenu(null);
+            }}
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            onClick={() => {
+              requestAppSidebarPin({ kind: "node", id: row.id, label: row.title });
+              setContextMenu(null);
+            }}
+          >
+            Pin
+          </button>
+          <div style={myWorkContextMenuDividerStyle} />
+          <button
+            type="button"
+            style={{ ...sharedInboxContextMenuButtonStyle, color: "#dc2626" }}
+            onClick={(event) => {
+              onRequestDeleteNode?.(row.id, confirmMenuPositionFromElement(event.currentTarget));
+              setContextMenu(null);
+            }}
+          >
+            Delete
+          </button>
+        </FrameRightClickMenu>
+      )}
     </div>
   );
 }
 
 type MyWorkGroupResourceTarget = {
-  kind: "project";
+  kind: "project" | "logic_gate";
   id: string;
   label: string;
 };
 
 function myWorkGroupResourceTarget(group: MyWorkNestedGroup): MyWorkGroupResourceTarget | null {
-  if (group.field !== "project") return null;
+  if (group.field !== "project" && group.field !== "logic_gate") return null;
   const rows = collectMyWorkGroupRows(group);
+  if (group.field === "logic_gate") {
+    const logicGateLabelsByID = new Map<string, string>();
+    for (const row of rows) {
+      const logicGateID = row.logicGateIDs[0]?.trim() ?? "";
+      if (!logicGateID) continue;
+      const label = row.logicGateLabels.find((logicGateLabel) => logicGateLabel.trim())?.trim() || group.label;
+      logicGateLabelsByID.set(logicGateID, label);
+    }
+    if (logicGateLabelsByID.size !== 1) return null;
+    const [id, label] = logicGateLabelsByID.entries().next().value as [string, string];
+    return { kind: "logic_gate", id, label: label || group.label };
+  }
   const projectLabelsByID = new Map<string, string>();
   for (const row of rows) {
     const projectID = row.projectID?.trim() ?? "";
@@ -1428,14 +1495,17 @@ function MyWorkMatrix({
   rows,
   rowsByCell,
   groupings,
-  showProjectGroups,
+  showProjectHeaders,
+  showLogicGateHeaders,
   expandedGroupIDs,
   onToggleGroup,
   onOpenNode,
   onOpenLogicGate,
   onOpenProject,
-  onOpenNodeBulkMenu,
+  onRenameNode,
+  onRequestDeleteNode,
   onCreateNodeInCell,
+  onDropNodes,
   onDropNodesInCell,
   onDropLogicGates,
   onDropProjects,
@@ -1447,14 +1517,17 @@ function MyWorkMatrix({
   rows: MyWorkResourceRow[];
   rowsByCell: Map<string, MyWorkResourceRow[]>;
   groupings: MyWorkGroupingSetting[];
-  showProjectGroups: boolean;
+  showProjectHeaders: boolean;
+  showLogicGateHeaders: boolean;
   expandedGroupIDs: Set<string>;
   onToggleGroup: (groupID: string) => void;
   onOpenNode: (node: NodeRecord) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
-  onOpenNodeBulkMenu?: (nodeID: string, event: React.MouseEvent) => void;
+  onRenameNode?: (nodeID: string) => void;
+  onRequestDeleteNode?: (nodeID: string, position?: ConfirmActionMenuPosition) => void;
   onCreateNodeInCell?: (input: MyWorkCellCreateInput) => void;
+  onDropNodes?: (input: MyWorkNodeDropInput) => void;
   onDropNodesInCell?: (input: MyWorkCellNodeDropInput) => void;
   onDropLogicGates?: (input: MyWorkCellLogicGateDropInput) => void;
   onDropProjects?: (input: MyWorkCellProjectDropInput) => void;
@@ -1595,7 +1668,7 @@ function MyWorkMatrix({
                   setCreateMenu({ x: event.clientX, y: event.clientY, input: createInput });
                 }}
                 onDragOver={(event) => {
-                  if (!onDropNodesInCell && !onDropLogicGates && !onDropProjects) return;
+                  if (!onDropNodes && !onDropNodesInCell && !onDropLogicGates && !onDropProjects) return;
                   const hasNodeDrag = hasMyWorkDragType(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME);
                   const hasLogicGateDrag = hasMyWorkDragType(event.dataTransfer, HOME_INBOX_LOGIC_GATE_DRAG_MIME);
                   const hasProjectDrag = hasMyWorkDragType(event.dataTransfer, HOME_INBOX_PROJECT_DRAG_MIME);
@@ -1621,7 +1694,14 @@ function MyWorkMatrix({
                     nodeIDsByLogicGateID: projectPayload?.nodeIDsByLogicGateID,
                   });
                   if (logicGateIDs.length > 0 && onDropLogicGates) onDropLogicGates({ ...createInput, logicGateIDs, nodeIDsByLogicGateID: gatePayload?.nodeIDsByLogicGateID });
-                  if (nodeIDs.length > 0 && onDropNodesInCell) onDropNodesInCell({ ...createInput, nodeIDs, fromLogicGateID: nodePayload?.fromLogicGateID });
+                  if (nodeIDs.length > 0) {
+                    const sourceLogicGateID = nodePayload?.fromLogicGateID?.trim() ?? "";
+                    if (sourceLogicGateID && onDropNodes) {
+                      onDropNodes({ ...createInput, logicGateID: sourceLogicGateID, nodeIDs, fromLogicGateID: sourceLogicGateID });
+                    } else if (onDropNodesInCell) {
+                      onDropNodesInCell({ ...createInput, nodeIDs });
+                    }
+                  }
                 }}
               >
                 {cellRows.length === 0 ? (
@@ -1636,13 +1716,15 @@ function MyWorkMatrix({
                     onOpenNode={onOpenNode}
                     onOpenLogicGate={onOpenLogicGate}
                     onOpenProject={onOpenProject}
-                    onOpenNodeBulkMenu={onOpenNodeBulkMenu}
+                    onRenameNode={onRenameNode}
+                    onRequestDeleteNode={onRequestDeleteNode}
                     nodeByID={nodeByID}
                     logicGateByID={logicGateByID}
-                    showProjectGroups={showProjectGroups}
+                    showProjectHeaders={showProjectHeaders}
+                    showLogicGateHeaders={showLogicGateHeaders}
                   />
                 ) : (
-                  <MyWorkRows rows={cellRows} role={role} depth={0} showProjectHeaders={showProjectGroups} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onOpenNodeBulkMenu={onOpenNodeBulkMenu} nodeByID={nodeByID} logicGateByID={logicGateByID} />
+                  <MyWorkRows rows={cellRows} role={role} depth={0} showProjectHeaders={showProjectHeaders} showLogicGateHeaders={showLogicGateHeaders} onOpenNode={onOpenNode} onOpenLogicGate={onOpenLogicGate} onOpenProject={onOpenProject} onRenameNode={onRenameNode} onRequestDeleteNode={onRequestDeleteNode} nodeByID={nodeByID} logicGateByID={logicGateByID} />
                 )}
               </div>
             );
@@ -2070,12 +2152,14 @@ function PeopleIcon({ multiple }: { multiple: boolean }) {
 
 function GroupHeaderIcon({ field, role }: { field: MyWorkGroupingField; role: LogicGateGVICRole }) {
   if (field === "project") return <ExplorerRowIcon kind="project" />;
+  if (field === "logic_gate") return <ExplorerRowIcon kind="logic_gate" />;
   return <span aria-hidden="true" style={groupHeaderBadgeStyle(role)}>{groupHeaderBadgeLabel(field)}</span>;
 }
 
 function groupHeaderBadgeLabel(field: MyWorkGroupingField): string {
   if (field === "account") return "A";
   if (field === "due_date") return "D";
+  if (field === "logic_gate") return "L";
   if (field === "person") return "P";
   if (field === "project") return "P";
   if (field === "status") return "S";
@@ -2562,37 +2646,6 @@ const groupingStackStyle: React.CSSProperties = {
   gap: 6,
 };
 
-const projectGroupToggleStyle: React.CSSProperties = {
-  width: "100%",
-  minWidth: 0,
-  minHeight: 30,
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 7,
-  border: "1px solid rgba(124, 58, 237, 0.18)",
-  borderRadius: 6,
-  background: "linear-gradient(135deg, rgba(255,255,255,0.90), rgba(237,233,254,0.58))",
-  color: "#5b21b6",
-  fontSize: 11,
-  fontWeight: 820,
-  padding: "0 8px",
-  cursor: "pointer",
-};
-
-const projectGroupCheckboxStyle: React.CSSProperties = {
-  width: 13,
-  height: 13,
-  margin: 0,
-  accentColor: "#0f766e",
-};
-
-const projectGroupToggleTextStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
-
 function groupingRowStyle(index: number): React.CSSProperties {
   const accent = myWorkGroupingAccent(index);
   return {
@@ -2604,7 +2657,7 @@ function groupingRowStyle(index: number): React.CSSProperties {
     gridTemplateColumns: "minmax(0, 1fr) 46px 22px",
     alignItems: "center",
     gap: 5,
-    marginLeft: Math.min(index * 8, 16),
+    marginLeft: Math.min(index * 12, 30),
     border: `1px solid ${homeColorWithAlpha(accent, 0.18)}`,
     borderRadius: 7,
     background: `linear-gradient(145deg, rgba(255,255,255,0.92), ${homeColorWithAlpha(accent, 0.12)})`,
@@ -2800,6 +2853,12 @@ const groupHeaderStaticContentStyle: React.CSSProperties = {
   gridTemplateColumns: "18px minmax(0, auto)",
   alignItems: "center",
   gap: 5,
+};
+
+const myWorkContextMenuDividerStyle: React.CSSProperties = {
+  height: 1,
+  margin: "5px 8px",
+  background: "rgba(15, 23, 42, 0.12)",
 };
 
 const groupHeaderLabelStyle: React.CSSProperties = {

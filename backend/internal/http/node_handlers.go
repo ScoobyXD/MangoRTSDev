@@ -140,6 +140,10 @@ func parseOptionalPriorityField(fields map[string]json.RawMessage) (*int, bool, 
 	return &parsed, true, parsed >= 1 && parsed <= 5
 }
 
+type timedCompanyExplorerDeleteRepository interface {
+	DeleteCompanyExplorerTargetsWithTiming(companyID string, targets []store.CompanyExplorerDeleteTargetInput, recorder store.TimingRecorder) (store.CompanyExplorerDeleteResult, error)
+}
+
 func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.TrimPrefix(r.URL.Path, "/v1/nodes/")
 	parts := strings.Split(trimmed, "/")
@@ -246,15 +250,35 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == http.MethodDelete {
+			timedWriter, timings := startTimedRequest(w)
+			w = timedWriter
+			defer func() {
+				timings.log(r, timedWriter.status)
+			}()
+			stop := timings.observeAccounted("request.validate")
 			companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 			if companyID == "" {
+				stop()
 				writeError(w, http.StatusBadRequest, "company_id_required")
 				return
 			}
+			stop()
+			stop = timings.observeAccounted("request.access_check")
 			if !s.requireEntityAdmin(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
+				stop()
 				return
 			}
-			result, err := s.repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{Kind: "node", ID: nodeID}})
+			stop()
+			targets := []store.CompanyExplorerDeleteTargetInput{{Kind: "node", ID: nodeID}}
+			stop = timings.observeAccounted("source.transaction")
+			var result store.CompanyExplorerDeleteResult
+			var err error
+			if repo, ok := s.repo.(timedCompanyExplorerDeleteRepository); ok {
+				result, err = repo.DeleteCompanyExplorerTargetsWithTiming(companyID, targets, timings)
+			} else {
+				result, err = s.repo.DeleteCompanyExplorerTargets(companyID, targets)
+			}
+			stop()
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "node_not_found")
 				return
@@ -262,7 +286,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed_to_delete_node")
 				return
 			}
+			stop = timings.observeAccounted("events.publish.enqueue")
 			s.publishCompanyExplorerDeletedTargets(companyID, result.Targets)
+			stop()
 			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 			return
 		}

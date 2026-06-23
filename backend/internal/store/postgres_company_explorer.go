@@ -683,6 +683,14 @@ select exists(
 }
 
 func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput) (CompanyExplorerDeleteResult, error) {
+	return r.deleteCompanyExplorerTargets(companyID, targets, nil)
+}
+
+func (r *PostgresRepo) DeleteCompanyExplorerTargetsWithTiming(companyID string, targets []CompanyExplorerDeleteTargetInput, recorder TimingRecorder) (CompanyExplorerDeleteResult, error) {
+	return r.deleteCompanyExplorerTargets(companyID, targets, recorder)
+}
+
+func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput, recorder TimingRecorder) (CompanyExplorerDeleteResult, error) {
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" || len(targets) == 0 {
 		return CompanyExplorerDeleteResult{}, ErrInvalid
@@ -697,8 +705,11 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 		}
 	}
 
-	ctx := context.Background()
+	ctx := ContextWithTimingRecorder(context.Background(), recorder)
+	defer observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.total")()
+	stop := observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.begin")
 	tx, err := r.db.BeginTx(ctx, nil)
+	stop()
 	if err != nil {
 		return CompanyExplorerDeleteResult{}, err
 	}
@@ -716,6 +727,7 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 	kanbanBoardIDs := map[string]bool{}
 	recycleRoots := make([]companyExplorerRecycleRootScope, 0, len(targets))
 
+	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.resolve_targets")
 	for _, target := range targets {
 		targetScope := newCompanyExplorerRecycleScope()
 		switch target.Kind {
@@ -816,7 +828,9 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 		}
 		recycleRoots = append(recycleRoots, companyExplorerRecycleRootScope{Target: target, Scope: targetScope})
 	}
+	stop()
 
+	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.validate_targets")
 	for nodeID := range nodeIDs {
 		exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`, companyID, nodeID)
 		if err != nil {
@@ -855,6 +869,7 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			continue
 		}
 	}
+	stop()
 
 	result := CompanyExplorerDeleteResult{Targets: make([]CompanyExplorerDeletedTarget, 0)}
 	projectionDeltas := make([]ProjectionDelta, 0)
@@ -885,41 +900,60 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 		recycleCandidates = append(recycleCandidates, recycleRoots[index])
 	}
 	if len(recycleCandidates) > 0 {
+		stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.recycle_bin_write")
 		if err := postgresCreateRecycleBinItemsTx(ctx, tx, companyID, recycleCandidates); err != nil {
+			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
+		stop()
 	}
 
+	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.folder_effective_delete")
 	for folderID := range folderIDs {
 		if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
+			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.logic_gate_delete")
 	for logicGateID := range logicGateIDs {
 		deltas, err := postgresDeleteLogicGateWithProjectionDeltasTx(ctx, tx, companyID, logicGateID)
 		if err != nil {
+			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
 		projectionDeltas = append(projectionDeltas, deltas...)
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.kanban_delete")
 	for boardID := range kanbanBoardIDs {
 		if err := postgresDeleteKanbanBoardTx(ctx, tx, companyID, boardID); err != nil {
+			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.project_delete")
 	for projectID := range projectIDs {
 		if err := postgresDeleteProjectTx(ctx, tx, companyID, projectID); err != nil {
+			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.node_delete")
 	for nodeID := range nodeIDs {
 		deltas, err := postgresDeleteNodeWithProjectionDeltasTx(ctx, tx, companyID, nodeID)
 		if err != nil {
+			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
 		projectionDeltas = append(projectionDeltas, deltas...)
 	}
+	stop()
 	if len(folderIDs) > 0 {
+		stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.folder_access_cleanup")
 		grantFolderIDs := make([]string, 0, len(folderIDs))
 		for folderID := range folderIDs {
 			grantFolderIDs = append(grantFolderIDs, folderID)
@@ -929,6 +963,7 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			 where company_id=$1 and resource_type in ($2, $3, $4) and resource_id = any(string_to_array($5, ',')::uuid[])`,
 			companyID, EntityTypeSharedInboxFolder, EntityTypeSharedInbox, EntityTypeSharedTriageFolder, strings.Join(grantFolderIDs, ","),
 		); err != nil {
+			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
 		if err := execOptionalPostgresShapeCleanupTx(tx, "resource_permissions",
@@ -936,25 +971,36 @@ func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []
 			 where company_id=$1 and resource_type in ($2, $3, $4) and resource_id = any(string_to_array($5, ',')::uuid[])`,
 			companyID, EntityTypeCompanyExplorerFolder, EntityTypeSharedInboxFolder, EntityTypeSharedInbox, strings.Join(grantFolderIDs, ","),
 		); err != nil {
+			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
+		stop()
 	}
+	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.folder_root_delete")
 	for folderID := range folderRootIDs {
 		if _, err := tx.ExecContext(ctx,
 			`delete from company_explorer_folders
 			 where company_id=$1 and folder_id=$2`,
 			companyID, folderID,
 		); err != nil {
+			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.projection_event_append")
 	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
+		stop()
 		return CompanyExplorerDeleteResult{}, err
 	}
+	stop()
 
+	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.commit")
 	if err := tx.Commit(); err != nil {
+		stop()
 		return CompanyExplorerDeleteResult{}, err
 	}
+	stop()
 	return result, nil
 }
 
@@ -990,24 +1036,33 @@ func execOptionalPostgresShapeCleanupTx(tx *sql.Tx, tableName, query string, arg
 }
 
 func postgresDeleteNodeWithProjectionDeltasTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectionDelta, error) {
+	defer observeTiming(ctx, "repo.postgresDeleteNodeWithProjectionDeltasTx.total")()
+	stop := observeTiming(ctx, "repo.postgresDeleteNodeWithProjectionDeltasTx.projection_dependencies")
 	deltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
 		CompanyID: companyID,
 		NodeID:    nodeID,
 		Delete:    true,
 	})
+	stop()
 	if err != nil {
 		return nil, err
 	}
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeWithProjectionDeltasTx.project_relationship_delete")
 	if _, err := tx.ExecContext(ctx, `
 delete from project_relationships
 where company_id=$1::uuid
   and resource_type='node'
   and resource_id=$2::uuid`, companyID, nodeID); err != nil {
+		stop()
 		return nil, err
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeWithProjectionDeltasTx.node_rows_delete")
 	if err := postgresDeleteNodeRowsTx(ctx, tx, companyID, nodeID, false); err != nil {
+		stop()
 		return nil, err
 	}
+	stop()
 	return deltas, nil
 }
 
@@ -1016,97 +1071,139 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 }
 
 func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string, deleteProjectionRows bool) error {
+	defer observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.total")()
+	stop := observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.effective_facts_delete")
 	if err := deleteEffectiveFactsForResourceTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
+		stop()
 		return err
 	}
+	stop()
 	if deleteProjectionRows {
+		stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.gvic_matrix_projection_delete")
 		if err := deletePostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			stop()
 			return err
 		}
+		stop()
+		stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.project_timeline_projection_delete")
 		if err := deleteProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			stop()
 			return err
 		}
+		stop()
 	}
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.project_timeline_items_delete")
 	if _, err := tx.ExecContext(ctx,
 		`delete from project_management_timeline_items
 		 where company_id=$1 and node_id=$2`,
 		companyID, nodeID,
 	); err != nil {
+		stop()
 		return err
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.node_relationships_delete")
 	if _, err := tx.ExecContext(ctx,
 		`delete from node_relationships
 		 where company_id=$1 and (node_id_a=$2 or node_id_b=$2)`,
 		companyID, nodeID,
 	); err != nil {
+		stop()
 		return err
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.company_explorer_items_delete")
 	if _, err := tx.ExecContext(ctx,
 		`delete from company_explorer_items
 		 where company_id=$1::uuid and target_type='node' and target_id=$2::uuid`,
 		companyID, nodeID,
 	); err != nil {
+		stop()
 		return err
 	}
+	stop()
 	if deleteProjectionRows {
+		stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.kanban_projection_delete")
 		if _, err := tx.ExecContext(ctx,
 			`delete from kanban_board_projection
 			 where company_id=$1 and node_id=$2`,
 			companyID, nodeID,
 		); err != nil {
+			stop()
 			return err
 		}
+		stop()
 	}
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.node_information_delete")
 	if _, err := tx.ExecContext(ctx,
 		`delete from node_information
 		 where company_id=$1 and node_id=$2`,
 		companyID, nodeID,
 	); err != nil {
+		stop()
 		return err
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.node_projection_delete")
 	if _, err := tx.ExecContext(ctx,
 		`delete from node_projection_table
 		 where company_id=$1 and node_id=$2`,
 		companyID, nodeID,
 	); err != nil {
+		stop()
 		return err
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.node_map_positions_delete")
 	if _, err := tx.ExecContext(ctx,
 		`delete from node_map_positions
 		 where company_id=$1 and node_id=$2`,
 		companyID, nodeID,
 	); err != nil {
+		stop()
 		return err
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.resource_access_grants_delete")
 	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_access_grants",
 		`delete from resource_access_grants
 		 where company_id=$1 and resource_type='node' and resource_id=$2::uuid`,
 		companyID, nodeID,
 	); err != nil {
+		stop()
 		return err
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.resource_permissions_delete")
 	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_permissions",
 		`delete from resource_permissions
 		 where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid`,
 		companyID, nodeID,
 	); err != nil {
+		stop()
 		return err
 	}
+	stop()
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.node_delete")
 	deleted, err := tx.ExecContext(ctx,
 		`delete from nodes
 		 where company_id=$1 and node_id=$2`,
 		companyID, nodeID,
 	)
 	if err != nil {
+		stop()
 		return err
 	}
 	affected, err := deleted.RowsAffected()
 	if err != nil {
+		stop()
 		return err
 	}
 	if affected == 0 {
+		stop()
 		return ErrNotFound
 	}
+	stop()
 	return nil
 }
 

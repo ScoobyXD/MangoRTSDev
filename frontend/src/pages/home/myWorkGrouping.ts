@@ -14,6 +14,7 @@ export type MyWorkSelectedScope = {
 export type MyWorkGroupingField =
   | "account"
   | "due_date"
+  | "logic_gate"
   | "person"
   | "project"
   | "status"
@@ -87,6 +88,7 @@ export type MyWorkNestedGroup = UniversalNestedGroup<MyWorkResourceRow, MyWorkGr
 export const MY_WORK_GROUPING_FIELDS: ReadonlyArray<{ value: MyWorkGroupingField; label: string }> = [
   { value: "account", label: "Account" },
   { value: "due_date", label: "Date / Due Date" },
+  { value: "logic_gate", label: "Logic Gate" },
   { value: "person", label: "Person" },
   { value: "project", label: "Project" },
   { value: "status", label: "Status" },
@@ -229,6 +231,12 @@ export function getMyWorkGroupValues(row: MyWorkResourceRow, field: MyWorkGroupi
     return projects.map((label) => ({ key: `project:${label.toLowerCase()}`, label, sortValue: label.toLowerCase() }));
   }
 
+  if (field === "logic_gate") {
+    const logicGates = (row.logicGateLabels ?? []).map((label) => label.trim()).filter(Boolean);
+    if (logicGates.length === 0) return [{ key: "logic_gate:none", label: "No logic gate", sortValue: "", sortLast: true }];
+    return logicGates.map((label) => ({ key: `logic_gate:${label.toLowerCase()}`, label, sortValue: label.toLowerCase() }));
+  }
+
   if (field === "status") {
     const status = row.status?.trim() ?? "";
     if (!status) return [{ key: "status:none", label: "No status", sortValue: "", sortLast: true }];
@@ -251,11 +259,6 @@ export function buildNestedGroups(
     getValues,
     sortRows: sortMyWorkRows,
   });
-}
-
-export function myWorkDisplayGroupingStack(groupings: MyWorkGroupingSetting[], showProjectGroups: boolean): MyWorkGroupingSetting[] {
-  const normalized = normalizeMyWorkGroupingStack(groupings);
-  return showProjectGroups ? normalized : normalized.filter((grouping) => grouping.field !== "project");
 }
 
 export function sortGroups<T extends MyWorkGroupValue>(groups: T[], direction: MyWorkGroupingDirection): T[] {

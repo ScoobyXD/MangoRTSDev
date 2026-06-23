@@ -1,4 +1,4 @@
-Last updated: 2026-06-21
+Last updated: 2026-06-23
 
 # My Work Rules
 
@@ -44,7 +44,7 @@ MW21 - The backend must not recursively build a tree for My Work reads.
 MW22 - The frontend must not lazy-fetch My Work branches to derive the matrix.
 MW23 - The projection row carries denormalized `node_name`, path context, row status, due date, accounts, timestamps, and `sort_order`.
 MW24 - Hidden work is filtered out: the viewer needs node work access and view access to any projected project or logic-gate context.
-MW25 - My Work grouping supports account, due date, person, project, status, and team fields.
+MW25 - My Work grouping supports account, due date, logic gate, person, project, status, and team fields.
 MW26 - The default My Work grouping is project ascending.
 MW27 - Saved grouping settings are scoped by company and current user.
 MW28 - Malformed or duplicate saved grouping settings are normalized before use.
@@ -61,7 +61,12 @@ MW36 - My Work pulls only active work. Standalone nodes are active when they are
     c. Done nodes through a logic gate under an active project are included
     d. Done projects do not make their related nodes visible
 MW37 - Expanding or collapsing a grouping row is scoped to the exact matrix cell where the user clicked; the same grouping label/path in another role or priority cell must not change.
-MW38 - The My Work grouping UI includes a Projects toggle. Turning Projects off hides project grouping/path display while preserving node leaves and logic-gate display context.
+MW38 - Project and Logic Gate are normal My Work grouping fields. Removing either field from the grouping stack hides that grouping/path section while preserving node leaves and any remaining path context.
+MW39 - Dragging a node from one My Work cell to another preserves an existing logic-gate relationship when the dragged row already came from a logic gate; the drop updates that same logic gate assignment/status/priority context instead of moving the node out of the gate or creating a different gate.
+MW40 - Dragging a node without existing logic-gate context into an empty My Work cell can create/add the node to the target cell's new logic-gate context.
+MW41 - The My Work node context menu is a compact command list with Rename, Pin, and Delete. Delete is visually separated from the non-destructive commands.
+MW42 - A node deleted from My Work may be hidden optimistically while the delete request is pending. On delete failure the hidden row is restored; on success My Work is refreshed.
+MW43 - Updates grouping supports project and logic gate as normal grouping fields, with no Projects toggle. Updates remains an event/mention feed and must not share My Work's active-work semantics.
 
 ## Projection Sync Events
 
@@ -133,23 +138,31 @@ Expected:
 ### Scenario MW-S3: Grouping, Open Behavior, And Creation
 
 Business logic covered:
-- MW25 through MW31, MW37 through MW38
+- MW25 through MW31, MW37 through MW43
 
 Given:
 - A user changes My Work grouping settings.
 - Saved local grouping settings include duplicates or malformed fields.
 - The user opens work rows and creates work from a priority/role cell.
+- The user right-clicks a My Work node.
+- The user drags both logic-gate-backed and standalone nodes between matrix cells.
+- A user changes Updates grouping settings.
 
 Expected:
-- Supported grouping fields are account, due date, person, project, status, and team.
+- Supported My Work grouping fields are account, due date, logic gate, person, project, status, and team.
 - The default grouping is project ascending.
 - Saved grouping settings are isolated by company and user.
 - Malformed or duplicate settings are normalized.
 - Opening a row navigates to the node with available path context.
 - Expanding a group does not accidentally open the work item.
 - Collapsing or expanding a group in one matrix cell does not collapse or expand matching groups in any other cell.
-- The Projects toggle hides project group/path display without removing node leaves or logic-gate context.
+- Project and Logic Gate grouping can be removed independently without removing node leaves.
+- The My Work node context menu shows only Rename, Pin, and Delete, with Delete separated.
 - Created work receives the selected priority and creator GVIC role.
+- A dropped node that already belongs to a logic gate keeps that logic-gate relationship and visibly remains under that logic gate after the move.
+- A dropped standalone node can use the target cell creation path.
+- Deleting a My Work node hides it optimistically, restores it on failure, and refreshes My Work on success.
+- Updates grouping supports Project and Logic Gate as ordinary grouping choices while staying separate from My Work active-work grouping.
 
 ### Scenario MW-S4: Transactional Projection And Realtime
 
