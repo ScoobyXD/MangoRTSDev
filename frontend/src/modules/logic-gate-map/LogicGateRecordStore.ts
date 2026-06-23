@@ -1,5 +1,5 @@
 import { requestJSON } from "../api/requestJSON.js";
-import type { LogicGateDetails, LogicGateRecord, LogicGateRelationship } from "./shared.js";
+import type { LogicGateDetails, LogicGateGVICAssignment, LogicGateRecord, LogicGateRelationship } from "./shared.js";
 
 export type LogicGateProjectionItem = {
   company_id: string;
@@ -56,6 +56,14 @@ function cacheLogicGateViewPayload(cacheKey: string, payload: LogicGateViewRespo
   return details;
 }
 
+function normalizeCachedGVICAssignments(assignments: LogicGateGVICAssignment[], logicGateID: string): LogicGateGVICAssignment[] {
+  return assignments.map((assignment) => ({
+    ...assignment,
+    logic_gate_id: assignment.logic_gate_id?.trim() || logicGateID,
+    resource_id: assignment.resource_id?.trim() || logicGateID,
+  }));
+}
+
 async function getLogicGateViewPayloadSingleFlight(apiBase: string, companyID: string, logicGateID: string): Promise<LogicGateViewResponse> {
   const cacheKey = key(apiBase, companyID, logicGateID);
   const cached = viewCache.get(cacheKey);
@@ -84,6 +92,42 @@ export function invalidateLogicGateRecordStoreCaches(apiBase: string, companyID:
   viewCache.delete(cacheKey);
   detailsCache.delete(cacheKey);
   projectionCache.delete(cacheKey);
+}
+
+export function patchLogicGateRecordStoreGVICAssignments(
+  apiBase: string,
+  companyID: string,
+  logicGateID: string,
+  assignments: LogicGateGVICAssignment[],
+): void {
+  const cleanLogicGateID = logicGateID.trim();
+  if (!cleanLogicGateID) return;
+  const cacheKey = key(apiBase, companyID, cleanLogicGateID);
+  const nextAssignments = normalizeCachedGVICAssignments(assignments, cleanLogicGateID);
+  bumpViewGeneration(cacheKey);
+  viewInflight.delete(cacheKey);
+
+  const cachedView = viewCache.get(cacheKey);
+  if (cachedView?.logic_gate) {
+    viewCache.set(cacheKey, {
+      ...cachedView,
+      logic_gate: {
+        ...cachedView.logic_gate,
+        gvic_assignments: nextAssignments,
+      },
+    });
+  }
+
+  const cachedDetails = detailsCache.get(cacheKey);
+  if (cachedDetails?.logic_gate) {
+    detailsCache.set(cacheKey, {
+      ...cachedDetails,
+      logic_gate: {
+        ...cachedDetails.logic_gate,
+        gvic_assignments: nextAssignments,
+      },
+    });
+  }
 }
 
 export function primeLogicGateRecordStoreCaches(apiBase: string, companyID: string, entries: Array<{
@@ -115,7 +159,13 @@ export async function getLogicGateRecordSingleFlight(apiBase: string, companyID:
   const cacheKey = key(apiBase, companyID, logicGateID);
   const cached = detailsCache.get(cacheKey);
   if (cached) return cached;
+  const generation = readViewGeneration(cacheKey);
   const payload = await getLogicGateViewPayloadSingleFlight(apiBase, companyID, logicGateID);
+  if (readViewGeneration(cacheKey) !== generation) {
+    const current = detailsCache.get(cacheKey);
+    if (current) return current;
+    return getLogicGateRecordSingleFlight(apiBase, companyID, logicGateID);
+  }
   return cacheLogicGateViewPayload(cacheKey, payload);
 }
 

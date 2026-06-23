@@ -560,14 +560,7 @@ func syncResourceGVICEffectiveAssignmentsTx(ctx context.Context, tx *sql.Tx, com
 		for _, item := range beforeDomain {
 			beforeRows = append(beforeRows, gvicEffectiveProjectionRowFromDomain(item))
 		}
-		if _, err := tx.ExecContext(ctx, `
-delete from resource_gvic_effective_assignments
-where company_id=$1::uuid
-  and resource_type=$2
-  and resource_id=$3::uuid`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID); err != nil {
-			return nil, err
-		}
-		if err := insertDerivedResourceGVICEffectiveAssignmentsTx(ctx, tx, keyValue); err != nil {
+		if err := syncDerivedResourceGVICEffectiveAssignmentsDeltaTx(ctx, tx, keyValue); err != nil {
 			return nil, err
 		}
 		afterDomain, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, keyValue)
@@ -647,8 +640,7 @@ func normalizeResourceGVICKeysForCompany(companyID string, keys []resourceGVICKe
 	return ordered, nil
 }
 
-func insertDerivedResourceGVICEffectiveAssignmentsTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey) error {
-	_, err := tx.ExecContext(ctx, `
+const postgresDerivedResourceGVICEffectiveAssignmentsCTE = `
 with requested as (
   select $1::uuid as company_id, $2::text as resource_type, $3::uuid as resource_id
 ),
@@ -730,7 +722,31 @@ derived as (
   join company_memberships membership
     on membership.company_id=member.company_id
    and membership.user_id=member.user_id
-)
+)`
+
+func syncDerivedResourceGVICEffectiveAssignmentsDeltaTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey) error {
+	if _, err := tx.ExecContext(ctx, postgresDerivedResourceGVICEffectiveAssignmentsCTE+`
+delete from resource_gvic_effective_assignments existing
+where existing.company_id=$1::uuid
+  and existing.resource_type=$2
+  and existing.resource_id=$3::uuid
+  and not exists (
+    select 1
+    from derived
+    where derived.company_id=existing.company_id
+      and derived.resource_type=existing.resource_type
+      and derived.resource_id=existing.resource_id
+      and derived.role=existing.role
+      and derived.user_id=existing.user_id
+      and derived.source_resource_type=existing.source_resource_type
+      and derived.source_resource_id=existing.source_resource_id
+      and derived.source_principal_type=existing.source_principal_type
+      and derived.source_principal_id=existing.source_principal_id
+      and derived.inheritance_type=existing.inheritance_type
+  )`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, postgresDerivedResourceGVICEffectiveAssignmentsCTE+`
 insert into resource_gvic_effective_assignments (
   company_id,
   resource_type,
@@ -768,7 +784,7 @@ on conflict (
   source_principal_type,
   source_principal_id,
   inheritance_type
-) do update set updated_timestamp=now()`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
+) do nothing`, keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
 	return err
 }
 
