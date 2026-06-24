@@ -4,7 +4,7 @@ Last updated: 2026-06-24
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (backend lifecycle and permission-edge coverage exists; frontend menu and drag behavior still needs mapped automation)
+- Business Logic Covered By Automated Tests: Partial (backend lifecycle, permission-edge coverage, and frontend DB-backed API/no-cache coverage exists; frontend menu and drag behavior still needs mapped automation)
 
 ## Business Logic
 
@@ -21,6 +21,8 @@ PIN10 - Unpin deletes only the current user's pin in the current company.
 PIN11 - Pin order is persisted in the database and can be changed by dragging pins within the pin section.
 PIN12 - Resource right-click menus put Open in new browser tab first and Pin second for pinnable resources.
 PIN13 - Pinned-resource right-click menus put Open in new browser tab first and Unpin second.
+PIN14 - The sidebar pin section must not read, write, hydrate, or recover pins from browser storage.
+PIN15 - The only frontend pin API surface is /v1/user-pins, /v1/user-pins/{pin_id}, and /v1/user-pins/order; legacy /v1/pins, pinsApi, SIDEBAR_PINS_KEY, label, and addedAt pin compatibility are not allowed.
 
 ## Scenarios
 
@@ -107,3 +109,23 @@ Expected:
 - Each user sees only their own pins.
 - The same resource can be pinned independently by different users.
 - A user's pins in one company do not appear in another company.
+
+### Scenario PIN-S6: No Browser Cache Fallback
+
+Business logic covered:
+- PIN1
+- PIN7
+- PIN14
+- PIN15
+
+Given:
+- A user pins a resource in the sidebar.
+- The browser has any old localStorage or sessionStorage sidebar-pin data.
+- The user opens the same account and company in a fresh incognito session.
+
+Expected:
+- Creating a pin sends the write to the DB-backed user-pins API.
+- The pin is visible only when the user-pins API returns it from the database.
+- Old browser storage cannot make a pin appear in the sidebar.
+- If the API write fails, the frontend does not persist a UI-only pin in browser storage.
+- A fresh incognito session shows the same pins as a normal session after the database row exists.
