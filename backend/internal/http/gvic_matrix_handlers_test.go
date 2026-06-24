@@ -159,9 +159,10 @@ func TestGVICMatrixNodeCreateInExistingLogicGateAssignsCreator(t *testing.T) {
 	if len(effective) != 1 ||
 		effective[0].Role != domain.GVICRoleGenerated ||
 		effective[0].UserID != responsible.UserID ||
-		effective[0].SourceResourceType != store.EntityTypeLogicGate ||
-		effective[0].InheritanceType != store.GVICInheritanceLogicGateInherited {
-		t.Fatalf("effective node GVIC = %+v, want inherited generated assignment from logic gate", effective)
+		effective[0].SourceResourceType != store.EntityTypeNode ||
+		effective[0].SourceResourceID != payload.Node.NodeID ||
+		effective[0].InheritanceType != store.GVICInheritanceDirect {
+		t.Fatalf("effective node GVIC = %+v, want direct generated snapshot from node", effective)
 	}
 }
 

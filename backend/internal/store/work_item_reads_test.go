@@ -223,6 +223,7 @@ func TestMemoryRepoMyWorkMatrixRowsMoveResourceBetweenActiveProjectRelationships
 	user := mustCreateInboxReadCompanyUser(t, repo, "my-work-project-user", companyID, "my-work-project@example.com", "My Work Project User")
 
 	logicGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Single Project Gate")
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, logicGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}})
 	node, err := repo.CreateNode(companyID, "Done node under active project gate")
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
@@ -238,7 +239,6 @@ func TestMemoryRepoMyWorkMatrixRowsMoveResourceBetweenActiveProjectRelationships
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	mustSetInboxReadLogicGateGVIC(t, repo, companyID, logicGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}})
 
 	alpha := mustCreateInboxReadProject(t, repo, companyID, "Alpha Project", "Active", user.UserID)
 	bravo := mustCreateInboxReadProject(t, repo, companyID, "Bravo Project", "In Progress", user.UserID)
@@ -301,6 +301,7 @@ func TestMemoryRepoMyWorkMatrixRowsApplyProjectActiveRules(t *testing.T) {
 		t.Fatalf("CreateNode project logic gate done: %v", err)
 	}
 	logicGate := mustCreateInboxReadLogicGate(t, repo, companyID, "Active Project Gate")
+	mustSetInboxReadLogicGateGVIC(t, repo, companyID, logicGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}})
 	gatePriority := 2
 	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
 		CompanyID:   companyID,
@@ -312,7 +313,6 @@ func TestMemoryRepoMyWorkMatrixRowsApplyProjectActiveRules(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	mustSetInboxReadLogicGateGVIC(t, repo, companyID, logicGate.LogicGateID, []LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}})
 	mustLinkInboxReadProjectResource(t, repo, companyID, activeProject.ProjectID, EntityTypeLogicGate, logicGate.LogicGateID, 2, user.UserID)
 
 	doneProjectNode, err := repo.CreateNode(companyID, "Done project active node")

@@ -816,26 +816,13 @@ returns boolean as $$
         and access.user_id=p_user_id
     )
   ),
-  linked_node_logic_gate(logic_gate_id) as (
-    select assignment.logic_gate_id
-    from node_logic_gate_assignments assignment, normalized_resource normalized
-    where normalized.resource_type='node'
-      and assignment.company_id=p_company_id
-      and assignment.node_id=p_resource_id
-    order by assignment.updated_timestamp desc, assignment.created_timestamp desc, assignment.assignment_id desc
-    limit 1
-  ),
   gvic_resource_lookup(resource_type, resource_id) as (
     select
       case
-        when normalized.resource_type='node' and exists (select 1 from linked_node_logic_gate) then 'logic_gate'
         when normalized.resource_type='shared_inbox_folder' then 'shared_triage_folder'
         else normalized.resource_type
       end,
-      case
-        when normalized.resource_type='node' and exists (select 1 from linked_node_logic_gate) then (select logic_gate_id from linked_node_logic_gate limit 1)
-        else p_resource_id
-      end
+      p_resource_id
     from normalized_resource normalized
   ),
   gvic_access(max_rank) as (

@@ -465,10 +465,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	} else if hadPreviousAssignment && previousAssignment.LogicGateID == input.LogicGateID {
 		issueValue = previousAssignment.IsIssue
 	}
-
-	if err := clearPostgresNodeResourceGVICAssignmentsTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
-		return LogicGateNodeAssignmentResult{}, err
-	}
+	snapshotGVICFromLogicGate := !hadPreviousAssignment || previousAssignment.LogicGateID != input.LogicGateID
 
 	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.assignment_writes")
 	assignment, err := upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
@@ -496,6 +493,14 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	if hadPreviousAssignment && previousAssignment.LogicGateID != input.LogicGateID {
 		stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.access_policy_copy")
 		if err := copyPostgresLogicGateAccessPolicyToNodeTx(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
+			stop()
+			return LogicGateNodeAssignmentResult{}, err
+		}
+		stop()
+	}
+	if snapshotGVICFromLogicGate {
+		stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.gvic_snapshot")
+		if err := snapshotPostgresLogicGateGVICToNodeTx(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
 			stop()
 			return LogicGateNodeAssignmentResult{}, err
 		}
@@ -619,10 +624,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		cardID = newUUIDv7String()
 	}
 
-	if err := clearPostgresNodeResourceGVICAssignmentsTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
-		return LogicGateNodeAssignmentResult{}, err
-	}
-
 	assignment, err = upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
 		AssignmentID:         assignment.AssignmentID,
 		CompanyID:            input.CompanyID,
@@ -650,6 +651,9 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 			return LogicGateNodeAssignmentResult{}, err
 		}
 		if err := updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx(ctx, tx, input.CompanyID, input.NodeID, targetBoardID, cardID, input.LogicGateID); err != nil {
+			return LogicGateNodeAssignmentResult{}, err
+		}
+		if err := snapshotPostgresLogicGateGVICToNodeTx(ctx, tx, input.CompanyID, input.LogicGateID, input.NodeID); err != nil {
 			return LogicGateNodeAssignmentResult{}, err
 		}
 	}
@@ -710,9 +714,6 @@ delete from node_logic_gate_assignments
 where company_id=$1 and node_id=$2 and assignment_id=$3`, assignment.CompanyID, assignment.NodeID, assignment.AssignmentID); err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
-	if err := clearPostgresNodeResourceGVICAssignmentsTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
-		return LogicGateNodeAssignmentRemoveResult{}, err
-	}
 	var fallbackStatus any
 	if input.FallbackStatus != nil {
 		fallbackStatus = *input.FallbackStatus
@@ -765,9 +766,6 @@ func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssign
 
 	assignment, err := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
 	if err != nil {
-		return LogicGateNodeAssignmentResult{}, err
-	}
-	if err := clearPostgresNodeResourceGVICAssignmentsTx(ctx, tx, input.CompanyID, input.NodeID); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
 

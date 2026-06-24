@@ -644,6 +644,9 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		r.kanbanCards[k][index] = card
 		if card.LogicGateID != nil {
 			r.upsertNodeLogicGateAssignmentFromCardLocked(card)
+			if !hadPreviousAssignment || previousAssignment.LogicGateID != *card.LogicGateID {
+				r.snapshotLogicGateGVICToNodeLocked(input.CompanyID, *card.LogicGateID, input.NodeID)
+			}
 			if hadPreviousAssignment && previousAssignment.LogicGateID != *card.LogicGateID {
 				if err := r.copyLogicGateAccessPolicyToNodeLocked(input.CompanyID, *card.LogicGateID, input.NodeID); err != nil {
 					return domain.KanbanCard{}, err
@@ -680,6 +683,9 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 	r.kanbanCards[k] = append(r.kanbanCards[k], card)
 	if card.LogicGateID != nil {
 		r.upsertNodeLogicGateAssignmentFromCardLocked(card)
+		if !hadPreviousAssignment || previousAssignment.LogicGateID != *card.LogicGateID {
+			r.snapshotLogicGateGVICToNodeLocked(input.CompanyID, *card.LogicGateID, input.NodeID)
+		}
 		if hadPreviousAssignment && previousAssignment.LogicGateID != *card.LogicGateID {
 			if err := r.copyLogicGateAccessPolicyToNodeLocked(input.CompanyID, *card.LogicGateID, input.NodeID); err != nil {
 				return domain.KanbanCard{}, err
@@ -765,7 +771,7 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 	}
 	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
-	projectionDeltas = append(projectionDeltas, r.syncGVICMatrixProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)...)
+	projectionDeltas = append(projectionDeltas, r.syncGVICResourceKeysLocked(input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})...)
 
 	assignment, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {
@@ -1004,13 +1010,14 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 			r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 			return LogicGateNodeAssignmentResult{}, err
 		}
+		r.snapshotLogicGateGVICToNodeLocked(input.CompanyID, input.LogicGateID, input.NodeID)
 	} else {
 		r.kanbanCards[location.mapKey][location.index] = resultCard
 	}
 	r.syncNodeStatusFromKanbanCardLocked(resultCard)
 	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
-	projectionDeltas = append(projectionDeltas, r.syncGVICMatrixProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)...)
+	projectionDeltas = append(projectionDeltas, r.syncGVICResourceKeysLocked(input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})...)
 
 	assignment, ok = r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {
@@ -1065,13 +1072,12 @@ func (r *MemoryRepo) RemoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	}
 	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(input.CompanyID, input.NodeID))
-	r.clearNodeResourceGVICAssignmentsLocked(input.CompanyID, input.NodeID)
 	cards := r.kanbanCards[location.mapKey]
 	r.kanbanCards[location.mapKey] = append(cards[:location.index], cards[location.index+1:]...)
 	r.applyNodeStatusAfterLogicGateAssignmentRemovalLocked(input.CompanyID, input.NodeID, input.FallbackStatus)
 	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
-	projectionDeltas = append(projectionDeltas, r.syncGVICMatrixProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)...)
+	projectionDeltas = append(projectionDeltas, r.syncGVICResourceKeysLocked(input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})...)
 
 	result := LogicGateNodeAssignmentRemoveResult{
 		Card:             r.withKanbanCardProjectionFieldsLocked(location.card),
@@ -1140,7 +1146,7 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 	r.syncNodeStatusFromKanbanCardLocked(card)
 	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
 	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
-	projectionDeltas = append(projectionDeltas, r.syncGVICMatrixProjectionForNodeDeltasLocked(input.CompanyID, input.NodeID)...)
+	projectionDeltas = append(projectionDeltas, r.syncGVICResourceKeysLocked(input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: input.NodeID}})...)
 
 	assignment, ok = r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, input.LogicGateID)
 	if !ok {

@@ -487,7 +487,46 @@ func (s *Server) authorizedGVICMatrixProjectionDeltaForUser(delta store.Projecti
 		projectionRowID = strings.TrimSpace(delta.Row.ProjectionRowID)
 	}
 	nodeID := projectionDeltaNodeID(delta)
-	if projectionRowID == "" || nodeID == "" {
+	logicGateID := projectionDeltaLogicGateID(delta)
+	if nodeID == "" {
+		if logicGateID == "" || !projectionDeltaIsLogicGateResource(delta) {
+			return store.ProjectionDelta{}, false
+		}
+		delta.RowKey.ResourceType = store.EntityTypeLogicGate
+		delta.RowKey.ResourceID = logicGateID
+		delta.RowKey.LogicGateID = logicGateID
+		switch delta.Operation {
+		case store.ProjectionDeltaOperationDelete:
+			delta.Row = nil
+			delta.Patch = nil
+			return delta, true
+		case store.ProjectionDeltaOperationUpsert, store.ProjectionDeltaOperationPatch:
+		default:
+			return store.ProjectionDelta{}, false
+		}
+		allowed, err := s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionEdit)
+		if err != nil {
+			log.Printf("failed to check GVIC matrix projection delta logic gate access company_id=%s user_id=%s logic_gate_id=%s: %v", delta.CompanyID, userID, logicGateID, err)
+			return store.ProjectionDelta{}, false
+		}
+		if !allowed {
+			return store.ProjectionDelta{
+				CompanyID:          delta.CompanyID,
+				Projection:         delta.Projection,
+				Operation:          store.ProjectionDeltaOperationDelete,
+				RowKey:             delta.RowKey,
+				ProjectedTimestamp: time.Now().UTC(),
+			}, true
+		}
+		if delta.Row != nil {
+			delta.Row.UserID = userID
+			delta.Row.ResourceType = store.EntityTypeLogicGate
+			delta.Row.ResourceID = logicGateID
+			delta.Row.LogicGateID = &logicGateID
+		}
+		return delta, true
+	}
+	if projectionRowID == "" {
 		return store.ProjectionDelta{}, false
 	}
 	delta.RowKey.ProjectionRowID = projectionRowID
@@ -506,7 +545,6 @@ func (s *Server) authorizedGVICMatrixProjectionDeltaForUser(delta store.Projecti
 		log.Printf("failed to check GVIC matrix projection delta access company_id=%s user_id=%s projection_row_id=%s node_id=%s: %v", delta.CompanyID, userID, projectionRowID, nodeID, err)
 		return store.ProjectionDelta{}, false
 	}
-	logicGateID := projectionDeltaLogicGateID(delta)
 	if allowed && logicGateID != "" {
 		allowed, err = s.repo.UserHasEffectiveAccess(delta.CompanyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
 		if err != nil {
@@ -832,10 +870,28 @@ func projectionDeltaLogicGateID(delta store.ProjectionDelta) string {
 	if logicGateID := strings.TrimSpace(delta.RowKey.LogicGateID); logicGateID != "" {
 		return logicGateID
 	}
+	if resourceType := strings.TrimSpace(delta.RowKey.ResourceType); resourceType == store.EntityTypeLogicGate {
+		if resourceID := strings.TrimSpace(delta.RowKey.ResourceID); resourceID != "" {
+			return resourceID
+		}
+	}
 	if delta.Row != nil && delta.Row.LogicGateID != nil {
 		return strings.TrimSpace(*delta.Row.LogicGateID)
 	}
+	if delta.Row != nil && delta.Row.ResourceType == store.EntityTypeLogicGate {
+		return strings.TrimSpace(delta.Row.ResourceID)
+	}
 	return ""
+}
+
+func projectionDeltaIsLogicGateResource(delta store.ProjectionDelta) bool {
+	if strings.TrimSpace(delta.RowKey.ResourceType) == store.EntityTypeLogicGate && strings.TrimSpace(delta.RowKey.ResourceID) != "" {
+		return true
+	}
+	if delta.Row != nil && strings.TrimSpace(delta.Row.ResourceType) == store.EntityTypeLogicGate && strings.TrimSpace(delta.Row.ResourceID) != "" {
+		return true
+	}
+	return false
 }
 
 func projectionDeltaNodeID(delta store.ProjectionDelta) string {
