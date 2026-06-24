@@ -120,7 +120,7 @@ function HomePinContextMenu({ menu, onClose, onDelete }: {
         type="button"
         style={sharedInboxContextMenuButtonStyle}
         onClick={() => {
-          requestAppSidebarPin(menu);
+          requestAppSidebarPin({ kind: menu.kind, id: menu.id, name: menu.label });
           onClose();
         }}
       >
@@ -218,7 +218,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
       requestAppSidebarPin({
         kind: menu.kind,
         id,
-        label: menu.kind === "node" ? nodeTitle(nodeByID.get(id)) : logicGateTitle(logicGateByID.get(id)),
+        name: menu.kind === "node" ? nodeTitle(nodeByID.get(id)) : logicGateTitle(logicGateByID.get(id)),
       });
     }
     onClose();

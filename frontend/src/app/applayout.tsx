@@ -1188,7 +1188,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       .map((pin) => ({
         ...pin,
         id: pin.id.trim(),
-        name: (pin.name ?? pin.label ?? "").trim() || sidebarPinFallbackName(pin.kind, pin.id),
+        name: (pin.name ?? "").trim() || sidebarPinFallbackName(pin.kind, pin.id),
       }))
       .filter((pin) => pin.id && isSidebarPinKind(pin.kind));
     if (cleanPins.length === 0) return;
@@ -1544,9 +1544,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         kind: detail.kind,
         name: typeof detail.name === "string" && detail.name.trim()
           ? detail.name.trim()
-          : typeof detail.label === "string" && detail.label.trim()
-            ? detail.label.trim()
-            : sidebarPinFallbackName(detail.kind, id),
+          : sidebarPinFallbackName(detail.kind, id),
       }]);
     };
     window.addEventListener(EVENT_APP_SIDEBAR_PIN_REQUESTED, onSidebarPinRequested);
