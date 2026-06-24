@@ -75,10 +75,8 @@ with latest_assignment as (
   from node_row
   join resource_gvic_effective_assignments effective
     on effective.company_id=node_row.company_id
-   and (
-     (node_row.logic_gate_id is not null and effective.resource_type='logic_gate' and effective.resource_id=node_row.logic_gate_id)
-     or (node_row.logic_gate_id is null and effective.resource_type='node' and effective.resource_id=node_row.node_id)
-   )
+   and effective.resource_type='node'
+   and effective.resource_id=node_row.node_id
   where effective.role in ('generated', 'verified', 'consulted', 'informed')
 ), project_matches as (
   select distinct on (
@@ -281,8 +279,8 @@ with input_users as (
   from node_row
   join resource_gvic_effective_assignments effective
     on effective.company_id=node_row.company_id
-   and effective.resource_type='logic_gate'
-   and effective.resource_id=node_row.logic_gate_id
+   and effective.resource_type='node'
+   and effective.resource_id=node_row.node_id
   join input_users
     on input_users.user_id=effective.user_id
   where effective.role in ('generated', 'verified', 'consulted', 'informed')), project_matches as (
@@ -1137,9 +1135,12 @@ where company_id=$1::uuid
 
 func postgresGVICMatrixAssignmentUserIDsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) (map[string]bool, error) {
 	rows, err := tx.QueryContext(ctx, `
-with recursive `+postgresLogicGateGVICUsersCTE+`
-select distinct assignment.user_id::text
-from logic_gate_GVIC_users assignment
+select distinct effective.user_id::text
+from node_logic_gate_assignments assignment
+join resource_gvic_effective_assignments effective
+  on effective.company_id=assignment.company_id
+ and effective.resource_type='node'
+ and effective.resource_id=assignment.node_id
 where assignment.company_id=$1::uuid
   and assignment.logic_gate_id=$2::uuid`, companyID, logicGateID)
 	if err != nil {

@@ -287,8 +287,8 @@ func TestEventWorkerGVICMatrixPermissionLossSendsDeleteWithoutRowPayload(t *test
 		t.Fatalf("GVICMatrix permission delta = %+v, want one scoped delta", delta)
 	}
 	got := delta.Deltas[0]
-	if got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.ProjectionRowID == "" || got.RowKey.NodeID != node.NodeID {
-		t.Fatalf("GVICMatrix permission delta payload = %+v, want delete without row payload", got)
+	if got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.ResourceType != store.EntityTypeLogicGate || got.RowKey.ResourceID != logicGate.LogicGateID {
+		t.Fatalf("GVICMatrix permission delta payload = %+v, want logic gate delete without row payload", got)
 	}
 }
 

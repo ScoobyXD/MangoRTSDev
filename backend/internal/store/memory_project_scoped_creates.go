@@ -334,7 +334,7 @@ func (r *MemoryRepo) assignInitialProjectScopedNodeToLogicGateLocked(input Proje
 	}
 	kanbanAfter := r.kanbanProjectionRowsForNodeLocked(assignmentInput.CompanyID, assignmentInput.NodeID)
 	projectionDeltas := diffKanbanProjectionRows(kanbanBefore, kanbanAfter)
-	projectionDeltas = append(projectionDeltas, r.syncGVICMatrixProjectionForNodeDeltasLocked(assignmentInput.CompanyID, assignmentInput.NodeID)...)
+	projectionDeltas = append(projectionDeltas, r.syncGVICResourceKeysLocked(assignmentInput.CompanyID, []resourceGVICKey{{companyID: assignmentInput.CompanyID, resourceType: EntityTypeNode, resourceID: assignmentInput.NodeID}})...)
 	assignment, ok := r.nodeLogicGateAssignmentLocked(assignmentInput.CompanyID, assignmentInput.NodeID, assignmentInput.LogicGateID)
 	if !ok {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound

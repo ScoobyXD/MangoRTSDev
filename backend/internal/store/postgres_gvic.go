@@ -67,13 +67,6 @@ func (r *PostgresRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssi
 	} else if !exists {
 		return ResourceGVICAssignmentMutationResult{}, ErrNotFound
 	}
-	if keyValue.resourceType == EntityTypeNode {
-		if logicGateID, err := postgresNodeLinkedLogicGateID(ctx, tx, keyValue.companyID, keyValue.resourceID); err != nil {
-			return ResourceGVICAssignmentMutationResult{}, err
-		} else if logicGateID != "" {
-			return ResourceGVICAssignmentMutationResult{}, ErrGVICInherited
-		}
-	}
 	for _, assignment := range assignments {
 		if err := validatePostgresGVICPrincipalTx(ctx, tx, keyValue.companyID, assignment.principalType, assignment.principalID); err != nil {
 			return ResourceGVICAssignmentMutationResult{}, err
@@ -318,22 +311,13 @@ func validatePostgresGVICPrincipalTx(ctx context.Context, tx *sql.Tx, companyID,
 	return nil
 }
 
-func postgresNodeLinkedLogicGateID(ctx context.Context, queryer postgresGVICQueryer, companyID, nodeID string) (string, error) {
-	var logicGateID string
-	err := queryer.QueryRowContext(ctx, `
-select logic_gate_id::text
-from node_logic_gate_assignments
-where company_id=$1::uuid
-  and node_id=$2::uuid
-order by updated_timestamp desc, created_timestamp desc, assignment_id desc
-limit 1`, companyID, nodeID).Scan(&logicGateID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+func snapshotPostgresLogicGateGVICToNodeTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID, nodeID string) error {
+	companyID = cleanUUIDText(companyID)
+	logicGateID = cleanUUIDText(logicGateID)
+	nodeID = cleanUUIDText(nodeID)
+	if ctx == nil || tx == nil || companyID == "" || logicGateID == "" || nodeID == "" {
+		return ErrInvalid
 	}
-	return logicGateID, err
-}
-
-func clearPostgresNodeResourceGVICAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_gvic_assignments
 where company_id=$1::uuid
@@ -342,26 +326,33 @@ where company_id=$1::uuid
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `
-delete from resource_gvic_effective_assignments
-where company_id=$1::uuid
-  and resource_type='node'
-  and resource_id=$2::uuid`, companyID, nodeID)
+insert into resource_gvic_assignments (
+  company_id,
+  resource_type,
+  resource_id,
+  role,
+  principal_type,
+  principal_id,
+  created_timestamp,
+  updated_timestamp
+)
+select
+  assignment.company_id,
+  'node',
+  $3::uuid,
+  assignment.role,
+  assignment.principal_type,
+  assignment.principal_id,
+  now(),
+  now()
+from resource_gvic_assignments assignment
+where assignment.company_id=$1::uuid
+  and assignment.resource_type='logic_gate'
+  and assignment.resource_id=$2::uuid
+on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id) do nothing`, companyID, logicGateID, nodeID)
 	return err
 }
 func postgresResourceGVICAssignmentsForResource(ctx context.Context, queryer postgresGVICQueryer, keyValue resourceGVICKey) ([]domain.ResourceGVICAssignment, error) {
-	if keyValue.resourceType == EntityTypeNode {
-		logicGateID, err := postgresNodeLinkedLogicGateID(ctx, queryer, keyValue.companyID, keyValue.resourceID)
-		if err != nil {
-			return nil, err
-		}
-		if logicGateID != "" {
-			source, err := postgresResourceGVICAssignmentsForResource(ctx, queryer, resourceGVICKey{companyID: keyValue.companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID})
-			if err != nil {
-				return nil, err
-			}
-			return inheritedResourceGVICAssignments(source, EntityTypeNode, keyValue.resourceID, EntityTypeLogicGate, logicGateID), nil
-		}
-	}
 	rows, err := queryer.QueryContext(ctx, `
 select
   assignment.company_id::text,
@@ -448,49 +439,25 @@ order by
 
 func postgresResourceGVICEffectiveAssignmentsForResource(ctx context.Context, queryer postgresGVICQueryer, keyValue resourceGVICKey) ([]domain.ResourceGVICEffectiveAssignment, error) {
 	rows, err := queryer.QueryContext(ctx, `
-with requested as (
-  select $1::uuid as company_id, $2::text as resource_type, $3::uuid as resource_id
-),
-linked_node as (
-  select assignment.logic_gate_id
-  from node_logic_gate_assignments assignment
-  join requested req
-    on req.resource_type='node'
-   and assignment.company_id=req.company_id
-   and assignment.node_id=req.resource_id
-  order by assignment.updated_timestamp desc, assignment.created_timestamp desc, assignment.assignment_id desc
-  limit 1
-),
-effective_source as (
-  select
-    req.company_id,
-    req.resource_type,
-    req.resource_id,
-    case when req.resource_type='node' and exists(select 1 from linked_node) then 'logic_gate' else req.resource_type end as lookup_resource_type,
-    case when req.resource_type='node' and exists(select 1 from linked_node) then (select logic_gate_id from linked_node) else req.resource_id end as lookup_resource_id,
-    case when req.resource_type='node' and exists(select 1 from linked_node) then 'logic_gate_inherited'::text else null::text end as pointer_inheritance_type
-  from requested req
-)
 select
   assignment.company_id::text,
-  effective_source.resource_type,
-  effective_source.resource_id::text,
+  assignment.resource_type,
+  assignment.resource_id::text,
   assignment.role,
   assignment.user_id::text,
   assignment.source_resource_type,
   assignment.source_resource_id::text,
   assignment.source_principal_type,
   assignment.source_principal_id::text,
-  coalesce(effective_source.pointer_inheritance_type, assignment.inheritance_type),
+  assignment.inheritance_type,
   nullif(app_user.display_name, ''),
   nullif(app_user.email, ''),
   assignment.updated_timestamp
-from effective_source
-join resource_gvic_effective_assignments assignment
-  on assignment.company_id=effective_source.company_id
- and assignment.resource_type=effective_source.lookup_resource_type
- and assignment.resource_id=effective_source.lookup_resource_id
+from resource_gvic_effective_assignments assignment
 left join users app_user on app_user.user_id=assignment.user_id
+where assignment.company_id=$1::uuid
+  and assignment.resource_type=$2
+  and assignment.resource_id=$3::uuid
 order by assignment.user_id::text, assignment.role, assignment.source_resource_type, assignment.source_resource_id::text, assignment.source_principal_type, assignment.source_principal_id::text`,
 		keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
 	if err != nil {
@@ -534,32 +501,9 @@ order by assignment.user_id::text, assignment.role, assignment.source_resource_t
 	return items, nil
 }
 func postgresAffectedGVICResourceKeysTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey) ([]resourceGVICKey, error) {
+	_ = ctx
+	_ = tx
 	seen := map[resourceGVICKey]bool{keyValue: true}
-	if keyValue.resourceType == EntityTypeLogicGate {
-		rows, err := tx.QueryContext(ctx, `
-select node_id::text
-from node_logic_gate_assignments
-where company_id=$1::uuid
-  and logic_gate_id=$2::uuid`, keyValue.companyID, keyValue.resourceID)
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			var nodeID string
-			if err := rows.Scan(&nodeID); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			seen[resourceGVICKey{companyID: keyValue.companyID, resourceType: EntityTypeNode, resourceID: nodeID}] = true
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		if err := rows.Close(); err != nil {
-			return nil, err
-		}
-	}
 	keys := make([]resourceGVICKey, 0, len(seen))
 	for item := range seen {
 		keys = append(keys, item)
@@ -694,16 +638,6 @@ const postgresDerivedResourceGVICEffectiveAssignmentsCTE = `
 with requested as (
   select $1::uuid as company_id, $2::text as resource_type, $3::uuid as resource_id
 ),
-linked_node as (
-  select assignment.logic_gate_id
-  from node_logic_gate_assignments assignment
-  join requested req
-    on req.resource_type='node'
-   and assignment.company_id=req.company_id
-   and assignment.node_id=req.resource_id
-  order by assignment.updated_timestamp desc, assignment.created_timestamp desc, assignment.assignment_id desc
-  limit 1
-),
 source_resource as (
   select
     req.company_id,
@@ -713,17 +647,6 @@ source_resource as (
     req.resource_id as source_resource_id,
     'direct'::text as inheritance_type
   from requested req
-  where not (req.resource_type='node' and exists(select 1 from linked_node))
-  union all
-  select
-    req.company_id,
-    req.resource_type,
-    req.resource_id,
-    'logic_gate'::text as source_resource_type,
-    linked_node.logic_gate_id as source_resource_id,
-    'logic_gate_inherited'::text as inheritance_type
-  from requested req
-  join linked_node on req.resource_type='node'
 ),
 configured as (
   select

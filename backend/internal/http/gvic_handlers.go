@@ -14,15 +14,6 @@ type resourceGVICAssignmentsRequest struct {
 	IdempotencyKey  string                              `json:"idempotency_key"`
 }
 
-type resourceGVICInheritancePayload struct {
-	Inherited          bool   `json:"inherited"`
-	SourceResourceType string `json:"source_resource_type"`
-	SourceResourceID   string `json:"source_resource_id"`
-	InheritanceType    string `json:"inheritance_type"`
-	ReadOnly           bool   `json:"read_only"`
-	Reason             string `json:"reason"`
-}
-
 func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.TrimPrefix(r.URL.Path, "/v1/resources/")
 	parts := strings.Split(trimmed, "/")
@@ -66,16 +57,6 @@ func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			payload := map[string]any{"company_id": companyID, "resource_type": resourceType, "resource_id": resourceID, "gvic_assignments": assignments}
-			if resourceType == store.EntityTypeNode {
-				inheritance, err := s.nodeGVICInheritancePayload(companyID, resourceID)
-				if err != nil {
-					writeError(w, http.StatusInternalServerError, "failed_to_load_gvic")
-					return
-				}
-				if inheritance != nil {
-					payload["gvic_inheritance"] = inheritance
-				}
-			}
 			writeJSON(w, http.StatusOK, payload)
 			return
 		case http.MethodPut:
@@ -164,31 +145,6 @@ func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeError(w, http.StatusNotFound, "not_found")
-}
-
-func (s *Server) nodeGVICInheritancePayload(companyID, nodeID string) (*resourceGVICInheritancePayload, error) {
-	assignments, err := s.repo.ListNodeLogicGateAssignments(companyID, nodeID)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	for _, assignment := range assignments {
-		logicGateID := strings.TrimSpace(assignment.LogicGateID)
-		if logicGateID == "" {
-			continue
-		}
-		return &resourceGVICInheritancePayload{
-			Inherited:          true,
-			SourceResourceType: store.EntityTypeLogicGate,
-			SourceResourceID:   logicGateID,
-			InheritanceType:    store.GVICInheritanceLogicGateInherited,
-			ReadOnly:           true,
-			Reason:             "node_inherits_logic_gate_gvic",
-		}, nil
-	}
-	return nil, nil
 }
 
 func decodeGVICAssignmentsRequest(w http.ResponseWriter, r *http.Request) (resourceGVICAssignmentsRequest, bool) {

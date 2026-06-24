@@ -43,12 +43,6 @@ func (r *MemoryRepo) ListResourceGVICAssignments(companyID, resourceType, resour
 	if !r.gvicResourceExistsLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID) {
 		return nil, ErrNotFound
 	}
-	if keyValue.resourceType == EntityTypeNode {
-		if assignment, ok := r.nodeLogicGateAssignments[nodeLogicGateAssignmentKey(keyValue.companyID, keyValue.resourceID)]; ok && strings.TrimSpace(assignment.LogicGateID) != "" {
-			source := r.gvicAssignmentsForResourceLocked(keyValue.companyID, EntityTypeLogicGate, assignment.LogicGateID)
-			return inheritedResourceGVICAssignments(source, EntityTypeNode, keyValue.resourceID, EntityTypeLogicGate, assignment.LogicGateID), nil
-		}
-	}
 	items := r.gvicAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
 	return cloneResourceGVICAssignments(items), nil
 }
@@ -91,11 +85,6 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 
 	if !r.gvicResourceExistsLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID) {
 		return ResourceGVICAssignmentMutationResult{}, ErrNotFound
-	}
-	if keyValue.resourceType == EntityTypeNode {
-		if assignment, ok := r.nodeLogicGateAssignments[nodeLogicGateAssignmentKey(keyValue.companyID, keyValue.resourceID)]; ok && strings.TrimSpace(assignment.LogicGateID) != "" {
-			return ResourceGVICAssignmentMutationResult{}, ErrGVICInherited
-		}
 	}
 	for _, assignment := range assignments {
 		if err := r.validateGVICPrincipalLocked(keyValue.companyID, assignment.principalType, assignment.principalID); err != nil {
@@ -303,24 +292,37 @@ func (r *MemoryRepo) clearNodeResourceGVICAssignmentsLocked(companyID, nodeID st
 	return changed
 }
 
+func (r *MemoryRepo) snapshotLogicGateGVICToNodeLocked(companyID, logicGateID, nodeID string) bool {
+	companyID = strings.TrimSpace(companyID)
+	logicGateID = strings.TrimSpace(logicGateID)
+	nodeID = strings.TrimSpace(nodeID)
+	if companyID == "" || logicGateID == "" || nodeID == "" {
+		return false
+	}
+	changed := r.clearNodeResourceGVICAssignmentsLocked(companyID, nodeID)
+	now := time.Now().UTC()
+	for _, source := range r.gvicAssignmentsForResourceLocked(companyID, EntityTypeLogicGate, logicGateID) {
+		item := source
+		item.ResourceType = EntityTypeNode
+		item.ResourceID = nodeID
+		item.SourceResourceType = ""
+		item.SourceResourceID = ""
+		item.InheritanceType = ""
+		item.Inherited = false
+		item.ReadOnly = false
+		item.CreatedTimestamp = now
+		item.UpdatedTimestamp = now
+		sourceKey := gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)
+		if _, ok := r.gvicAssignments[sourceKey]; !ok {
+			changed = true
+		}
+		r.gvicAssignments[sourceKey] = item
+	}
+	return changed
+}
+
 func (r *MemoryRepo) gvicEffectiveAssignmentsForResourceLocked(companyID, resourceType, resourceID string) []domain.ResourceGVICEffectiveAssignment {
 	items := make([]domain.ResourceGVICEffectiveAssignment, 0)
-	if resourceType == EntityTypeNode {
-		if assignment, ok := r.nodeLogicGateAssignments[nodeLogicGateAssignmentKey(companyID, resourceID)]; ok && strings.TrimSpace(assignment.LogicGateID) != "" {
-			for _, effective := range r.gvicEffectiveAssignments {
-				if effective.CompanyID != companyID || effective.ResourceType != EntityTypeLogicGate || effective.ResourceID != assignment.LogicGateID {
-					continue
-				}
-				item := effective
-				item.ResourceType = EntityTypeNode
-				item.ResourceID = resourceID
-				item.InheritanceType = GVICInheritanceLogicGateInherited
-				items = append(items, item)
-			}
-			sortResourceGVICEffectiveAssignments(items)
-			return items
-		}
-	}
 	for _, assignment := range r.gvicEffectiveAssignments {
 		if assignment.CompanyID == companyID && assignment.ResourceType == resourceType && assignment.ResourceID == resourceID {
 			items = append(items, assignment)
@@ -331,13 +333,6 @@ func (r *MemoryRepo) gvicEffectiveAssignmentsForResourceLocked(companyID, resour
 }
 func (r *MemoryRepo) affectedGVICResourceKeysLocked(keyValue resourceGVICKey) []resourceGVICKey {
 	seen := map[resourceGVICKey]bool{keyValue: true}
-	if keyValue.resourceType == EntityTypeLogicGate {
-		for _, assignment := range r.nodeLogicGateAssignments {
-			if assignment.CompanyID == keyValue.companyID && assignment.LogicGateID == keyValue.resourceID {
-				seen[resourceGVICKey{companyID: keyValue.companyID, resourceType: EntityTypeNode, resourceID: assignment.NodeID}] = true
-			}
-		}
-	}
 	out := make([]resourceGVICKey, 0, len(seen))
 	for item := range seen {
 		out = append(out, item)
@@ -382,11 +377,6 @@ func (r *MemoryRepo) syncResourceGVICEffectiveAssignmentsLocked(keys []resourceG
 }
 
 func (r *MemoryRepo) deriveResourceGVICEffectiveAssignmentsLocked(keyValue resourceGVICKey, now time.Time) []domain.ResourceGVICEffectiveAssignment {
-	if keyValue.resourceType == EntityTypeNode {
-		if assignment, ok := r.nodeLogicGateAssignments[nodeLogicGateAssignmentKey(keyValue.companyID, keyValue.resourceID)]; ok && strings.TrimSpace(assignment.LogicGateID) != "" {
-			return nil
-		}
-	}
 	sourceType := keyValue.resourceType
 	sourceID := keyValue.resourceID
 	inheritance := GVICInheritanceDirect

@@ -345,7 +345,7 @@ func TestGVICMatrixNodeCreateForExistingLogicGateWritesProjectionEventRows(t *te
 		t.Fatalf("new event rows = %+v, want exactly one Kanban and one GVICMatrix row", newRows)
 	}
 	assertKanbanProjectionEventRowForLogicGate(t, kanbanRows[0], logicGate.LogicGateID, 1)
-	assertGVICMatrixProjectionEventRowForUser(t, GVICMatrixRows[0], user.UserID, 1, []string{EntityTypeNode})
+	assertGVICMatrixProjectionEventRowForUser(t, GVICMatrixRows[0], user.UserID, 2, []string{EntityTypeNode})
 }
 
 func TestGVICMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *testing.T) {
@@ -391,7 +391,7 @@ func TestGVICMatrixNodeCreateWithNewLogicGateWritesProjectionEventRowsOnce(t *te
 		t.Fatalf("event rows = %+v, want one Kanban row and one GVICMatrix row for created logic-gate projection", rows)
 	}
 	assertKanbanProjectionEventRowForLogicGate(t, kanbanRows[0], result.LogicGate.LogicGateID, 1)
-	assertGVICMatrixProjectionEventRowForUser(t, GVICMatrixRows[0], user.UserID, 1, []string{EntityTypeNode})
+	assertGVICMatrixProjectionEventRowForUser(t, GVICMatrixRows[0], user.UserID, 1, []string{EntityTypeLogicGate})
 	if current, err := repo.CurrentEventRowSequence(companyID, GVICMatrixProjectionUserScope(user.UserID)); err != nil || current != 1 {
 		t.Fatalf("CurrentEventRowSequence GVICMatrix = %d err=%v, want 1", current, err)
 	}
@@ -1083,10 +1083,17 @@ func assertGVICMatrixProjectionEventRowForUser(t *testing.T, row EventRow, userI
 	}
 	gotResourceTypes := make([]string, 0, len(payload.Deltas))
 	for _, delta := range payload.Deltas {
-		if delta.RowKey.ProjectionRowID == "" || delta.RowKey.NodeID == "" {
-			t.Fatalf("GVICMatrix payload row key = %+v, want projection_row_id and node_id", delta.RowKey)
+		switch {
+		case delta.RowKey.NodeID != "":
+			if delta.RowKey.ProjectionRowID == "" {
+				t.Fatalf("GVICMatrix node payload row key = %+v, want projection_row_id", delta.RowKey)
+			}
+			gotResourceTypes = append(gotResourceTypes, EntityTypeNode)
+		case delta.RowKey.ResourceType == EntityTypeLogicGate && delta.RowKey.ResourceID != "":
+			gotResourceTypes = append(gotResourceTypes, EntityTypeLogicGate)
+		default:
+			t.Fatalf("GVICMatrix payload row key = %+v, want node or logic gate resource", delta.RowKey)
 		}
-		gotResourceTypes = append(gotResourceTypes, EntityTypeNode)
 	}
 	if !sameStringSet(gotResourceTypes, wantResourceTypes) {
 		t.Fatalf("GVICMatrix payload resource types = %+v, want %+v", gotResourceTypes, wantResourceTypes)

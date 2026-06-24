@@ -170,11 +170,6 @@ func (r *MemoryRepo) syncGVICMatrixProjectionForNodeLocked(companyID, nodeID str
 			logicGateID = strings.TrimSpace(assignment.LogicGateID)
 		}
 		users := r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeNode, node.NodeID, nil)
-		if logicGateID != "" {
-			for userID := range r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeLogicGate, logicGateID, nil) {
-				users[userID] = true
-			}
-		}
 		for userID := range users {
 			if userID != "" {
 				rowKey := GVICMatrixProjectionKey(companyID, userID, GVICMatrixProjectionResourceNode, node.NodeID)
@@ -198,6 +193,11 @@ func (r *MemoryRepo) syncGVICMatrixProjectionForLogicGateLocked(companyID, logic
 	users := r.GVICMatrixProjectionUsersForLogicGateLocked(companyID, logicGateID)
 	for userID := range r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeLogicGate, logicGateID, nil) {
 		users[userID] = true
+	}
+	for _, nodeID := range r.nodeIDsAssignedToLogicGateLocked(companyID, logicGateID) {
+		for userID := range r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeNode, nodeID, nil) {
+			users[userID] = true
+		}
 	}
 	r.syncGVICMatrixProjectionForLogicGateUsersLocked(companyID, logicGateID, mapKeys(users))
 }
@@ -226,13 +226,14 @@ func (r *MemoryRepo) syncGVICMatrixProjectionForLogicGateUsersLocked(companyID, 
 			continue
 		}
 		desired := map[string]bool{}
-		if !r.logicGateUserHasAnyGVICLocked(companyID, logicGateID, userID) {
-			r.deleteStaleGVICMatrixProjectionForLogicGateUserLocked(companyID, logicGateID, userID, desired)
-			continue
+		if r.logicGateUserHasAnyGVICLocked(companyID, logicGateID, userID) {
+			desired[GVICMatrixProjectionKey(companyID, userID, GVICMatrixProjectionResourceLogicGate, logicGateID)] = true
+			r.upsertGVICMatrixProjectionLogicGateRowLocked(companyID, logicGateID, userID)
 		}
-		desired[GVICMatrixProjectionKey(companyID, userID, GVICMatrixProjectionResourceLogicGate, logicGateID)] = true
-		r.upsertGVICMatrixProjectionLogicGateRowLocked(companyID, logicGateID, userID)
 		for _, nodeID := range r.nodeIDsAssignedToLogicGateLocked(companyID, logicGateID) {
+			if !r.gvicEffectiveUsersForResourceLocked(companyID, EntityTypeNode, nodeID, nil)[userID] {
+				continue
+			}
 			node, ok := r.nodes[key(companyID, nodeID)]
 			if !ok {
 				continue
@@ -353,6 +354,24 @@ func (r *MemoryRepo) GVICMatrixProjectionRowsForResourcesLocked(companyID string
 			items = append(items, item)
 		}
 	}
+	for _, row := range r.GVICMatrixProjectionRows {
+		if row.CompanyID != companyID || row.ResourceType != GVICMatrixProjectionResourceLogicGate {
+			continue
+		}
+		if len(logicGateSet) > 0 && !logicGateSet[row.ResourceID] {
+			continue
+		}
+		if len(logicGateSet) == 0 {
+			continue
+		}
+		item := memoryGVICMatrixProjectionRowToDTO(row)
+		key := GVICMatrixProjectionRowKeyString(GVICMatrixProjectionRowKey(item))
+		if key == ":" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		items = append(items, item)
+	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].UserID != items[j].UserID {
 			return items[i].UserID < items[j].UserID
@@ -380,6 +399,18 @@ func (r *MemoryRepo) GVICMatrixProjectionRowsForLogicGateLocked(companyID, logic
 			seen[key] = true
 			items = append(items, item)
 		}
+	}
+	for _, row := range r.GVICMatrixProjectionRows {
+		if row.CompanyID != companyID || row.ResourceType != GVICMatrixProjectionResourceLogicGate || row.ResourceID != logicGateID {
+			continue
+		}
+		item := memoryGVICMatrixProjectionRowToDTO(row)
+		key := GVICMatrixProjectionRowKeyString(GVICMatrixProjectionRowKey(item))
+		if key == ":" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].UserID != items[j].UserID {
@@ -704,13 +735,7 @@ func memoryGVICMatrixProjectionRowToDTO(row memoryGVICMatrixProjectionRow) GVICM
 }
 
 func (r *MemoryRepo) myWorkRolesForProjectionRowLocked(row memoryGVICMatrixProjectionRow) []string {
-	resourceType := row.ResourceType
-	resourceID := row.ResourceID
-	if row.ResourceType == GVICMatrixProjectionResourceNode && strings.TrimSpace(row.LogicGateID) != "" {
-		resourceType = EntityTypeLogicGate
-		resourceID = strings.TrimSpace(row.LogicGateID)
-	}
-	return r.gvicEffectiveRolesForUserLocked(row.CompanyID, resourceType, resourceID, row.UserID, map[string]bool{
+	return r.gvicEffectiveRolesForUserLocked(row.CompanyID, row.ResourceType, row.ResourceID, row.UserID, map[string]bool{
 		domain.GVICRoleGenerated: true,
 		domain.GVICRoleVerified:  true,
 		domain.GVICRoleConsulted: true,
