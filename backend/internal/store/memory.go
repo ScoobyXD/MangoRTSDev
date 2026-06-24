@@ -60,6 +60,7 @@ type MemoryRepo struct {
 	effectiveAccess                map[string]domain.EffectiveResourceAccess
 	invitations                    map[string]domain.Invitation
 	emailConnections               map[string]domain.UserEmailConnection
+	companyEmailConnections        map[string]domain.CompanyEmailConnection
 	messageReadStatuses            map[string]domain.CommunicationsMessageReadStatus
 	triageItems                    map[string]domain.CommunicationsTriageItem
 	emailNodeLinks                 map[string]communicationsEmailNodeLink
@@ -130,6 +131,7 @@ func NewMemoryRepo() *MemoryRepo {
 		effectiveAccess:                map[string]domain.EffectiveResourceAccess{},
 		invitations:                    map[string]domain.Invitation{},
 		emailConnections:               map[string]domain.UserEmailConnection{},
+		companyEmailConnections:        map[string]domain.CompanyEmailConnection{},
 		messageReadStatuses:            map[string]domain.CommunicationsMessageReadStatus{},
 		triageItems:                    map[string]domain.CommunicationsTriageItem{},
 		emailNodeLinks:                 map[string]communicationsEmailNodeLink{},

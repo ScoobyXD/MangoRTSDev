@@ -224,6 +224,7 @@ type QueuedArchiveBatch = {
 
 type SharedInboxEmailConnectionDialogState = {
   accountEmail: string;
+  canConnect: boolean;
   createIntent?: CommunicationsSharedInboxCreateIntent;
 };
 
@@ -571,6 +572,12 @@ export function HomePage({
     : activeSharedInboxFolderID
       ? sharedInboxTreeUserCanManageMail(sharedInboxes, activeSharedInboxFolderID, currentUserID, currentUserHasFullSharedInboxAccess)
       : true;
+  const canRepairSharedInboxConnection = useCallback((folderID: string): boolean => {
+    if (currentUserHasFullSharedInboxAccess) return true;
+    const cleanFolderID = folderID.trim();
+    if (!cleanFolderID) return false;
+    return sharedInboxTreeUserCanManageMail(sharedInboxes, cleanFolderID, currentUserID, false);
+  }, [currentUserHasFullSharedInboxAccess, currentUserID, sharedInboxes]);
   useEffect(() => {
     if (!notice || notice !== noticeResourceTextRef.current) {
       noticeResourceTextRef.current = "";
@@ -923,7 +930,7 @@ export function HomePage({
         const folder = sharedInboxes.find((item) => item.folder_id === sharedInboxID);
         const accountEmail = folder?.account_email?.trim().toLowerCase() ?? "";
         if (accountEmail) {
-          setSharedInboxEmailConnectionDialog({ accountEmail });
+          setSharedInboxEmailConnectionDialog({ accountEmail, canConnect: canRepairSharedInboxConnection(sharedInboxID) });
           return false;
         }
       }
@@ -934,7 +941,7 @@ export function HomePage({
       setError(formatError(folderError, "Failed to load folders"));
       return false;
     }
-  }, [companyID, handleEmailAccessExpired, sharedInboxes]);
+  }, [canRepairSharedInboxConnection, companyID, handleEmailAccessExpired, sharedInboxes]);
   const loadSharedInboxes = useCallback(async (): Promise<boolean> => {
     if (sharedInboxesRequestInFlightRef.current) return false;
     sharedInboxesRequestInFlightRef.current = true;
@@ -1155,7 +1162,7 @@ export function HomePage({
     } catch (messageError) {
       if (messageRequestSeqRef.current === requestSeq) {
         if (activeSharedInboxFolderID && activeSharedInbox?.account_email && (isSharedInboxEmailConnectionError(messageError) || isEmailAccessExpiredError(messageError))) {
-          setSharedInboxEmailConnectionDialog({ accountEmail: activeSharedInbox.account_email.trim().toLowerCase() });
+          setSharedInboxEmailConnectionDialog({ accountEmail: activeSharedInbox.account_email.trim().toLowerCase(), canConnect: canRepairSharedInboxConnection(activeSharedInboxFolderID) });
           setMessages([]);
           setNextPageToken("");
           return;
@@ -1178,7 +1185,7 @@ export function HomePage({
         }
       }
     }
-  }, [activeMailViewHasEmailConnection, activeSharedInbox, activeSharedInboxBlocksEmail, activeSharedInboxFolderID, activeSharedInboxNeedsEmail, activeViewID, clearPrefetchedMessagePage, companyID, draftMessages, handleEmailAccessExpired, mailbox, searchQuery, unreadOnly]);
+  }, [activeMailViewHasEmailConnection, activeSharedInbox, activeSharedInboxBlocksEmail, activeSharedInboxFolderID, activeSharedInboxNeedsEmail, activeViewID, canRepairSharedInboxConnection, clearPrefetchedMessagePage, companyID, draftMessages, handleEmailAccessExpired, mailbox, searchQuery, unreadOnly]);
   useEffect(() => {
     const sharedInboxID = pendingSharedInboxMessageRefreshID.trim();
     if (!sharedInboxID) return;
@@ -1301,7 +1308,7 @@ export function HomePage({
       }, 0);
     } catch (messageError) {
       if (activeSharedInboxFolderID && activeSharedInbox?.account_email && (isSharedInboxEmailConnectionError(messageError) || isEmailAccessExpiredError(messageError))) {
-        setSharedInboxEmailConnectionDialog({ accountEmail: activeSharedInbox.account_email.trim().toLowerCase() });
+        setSharedInboxEmailConnectionDialog({ accountEmail: activeSharedInbox.account_email.trim().toLowerCase(), canConnect: canRepairSharedInboxConnection(activeSharedInboxFolderID) });
         return;
       }
       if (isEmailAccessExpiredError(messageError)) {
@@ -1312,7 +1319,7 @@ export function HomePage({
     } finally {
       setLoadingMoreMessages(false);
     }
-  }, [activeMailViewHasEmailConnection, activeSharedInbox, activeSharedInboxFolderID, appendPrefetchedMessagePage, companyID, currentMessageFilterKey, handleEmailAccessExpired, messageListWithinPrefetchDistance, prefetchNextMessagePage]);
+  }, [activeMailViewHasEmailConnection, activeSharedInbox, activeSharedInboxFolderID, appendPrefetchedMessagePage, canRepairSharedInboxConnection, companyID, currentMessageFilterKey, handleEmailAccessExpired, messageListWithinPrefetchDistance, prefetchNextMessagePage]);
   useEffect(() => {
     loadMessagesRef.current = loadMessages;
   }, [loadMessages]);
@@ -2202,12 +2209,12 @@ export function HomePage({
   const requestSharedInboxEmailConnection = useCallback((connectionError: unknown, accountEmail: string, createIntent?: CommunicationsSharedInboxCreateIntent): boolean => {
     const cleanAccountEmail = accountEmail.trim().toLowerCase();
     if (!cleanAccountEmail || !isSharedInboxEmailConnectionError(connectionError)) return false;
-    setSharedInboxEmailConnectionDialog({ accountEmail: cleanAccountEmail, createIntent });
+    setSharedInboxEmailConnectionDialog({ accountEmail: cleanAccountEmail, canConnect: true, createIntent });
     return true;
   }, []);
   const startSharedInboxEmailConnection = useCallback(async (provider: EmailProvider) => {
     const accountEmail = sharedInboxEmailConnectionDialog?.accountEmail.trim().toLowerCase() ?? "";
-    if (!accountEmail) return;
+    if (!accountEmail || sharedInboxEmailConnectionDialog?.canConnect === false) return;
     setBusy("shared-inbox-connect");
     setError("");
     try {
@@ -4192,6 +4199,7 @@ export function HomePage({
         <SharedInboxEmailConnectionDialog
           accountEmail={sharedInboxEmailConnectionDialog.accountEmail}
           busy={busy === "shared-inbox-connect"}
+          canConnect={sharedInboxEmailConnectionDialog.canConnect}
           onCancel={() => setSharedInboxEmailConnectionDialog(null)}
           onConnect={(provider) => { void startSharedInboxEmailConnection(provider); }}
         />
@@ -4257,9 +4265,10 @@ function SharedInboxEmailAssignmentDialog({ folderName, draft, error, busy, onDr
   );
 }
 
-function SharedInboxEmailConnectionDialog({ accountEmail, busy, onConnect, onCancel }: {
+function SharedInboxEmailConnectionDialog({ accountEmail, busy, canConnect, onConnect, onCancel }: {
   accountEmail: string;
   busy: boolean;
+  canConnect: boolean;
   onConnect: (provider: EmailProvider) => void;
   onCancel: () => void;
 }) {
@@ -4272,12 +4281,14 @@ function SharedInboxEmailConnectionDialog({ accountEmail, busy, onConnect, onCan
         style={homeDialogStyle}
         onPointerDown={(event) => event.stopPropagation()}
       >
-        <div style={homeDialogTitleStyle}>Connect shared inbox email</div>
-        <div style={homeDialogDetailStyle}>{accountEmail} is not connected yet.</div>
-        <div style={homeDialogButtonRowStyle}>
-          <button type="button" disabled={busy} onClick={() => onConnect("google")} style={homeDialogPrimaryButtonStyle}>Google</button>
-          <button type="button" disabled={busy} onClick={() => onConnect("microsoft")} style={homeDialogPrimaryButtonStyle}>Microsoft</button>
-        </div>
+        <div style={homeDialogTitleStyle}>{canConnect ? "Reconnect shared inbox email" : "Shared inbox needs admin reauthorization"}</div>
+        <div style={homeDialogDetailStyle}>{canConnect ? `${accountEmail} needs a company shared connection.` : `${accountEmail} needs an admin to reconnect the shared inbox email.`}</div>
+        {canConnect && (
+          <div style={homeDialogButtonRowStyle}>
+            <button type="button" disabled={busy} onClick={() => onConnect("google")} style={homeDialogPrimaryButtonStyle}>Google</button>
+            <button type="button" disabled={busy} onClick={() => onConnect("microsoft")} style={homeDialogPrimaryButtonStyle}>Microsoft</button>
+          </div>
+        )}
         <button type="button" disabled={busy} onClick={onCancel} style={homeDialogSecondaryButtonStyle}>Cancel</button>
       </div>
     </div>

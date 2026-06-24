@@ -23,6 +23,7 @@ with communications_shared_items as (
          folder.name,
          folder.default_access,
          null::text as account_email,
+         null::text as company_email_connection_id,
          folder.position,
          folder.created_timestamp,
          folder.updated_timestamp,
@@ -37,6 +38,7 @@ with communications_shared_items as (
          inbox.name,
          inbox.default_access,
          inbox.account_email,
+         inbox.company_email_connection_id::text,
          inbox.position,
          inbox.created_timestamp,
          inbox.updated_timestamp,
@@ -54,6 +56,7 @@ func scanCommunicationsSharedInboxFolder(row communicationsSharedInboxFolderScan
 	var sharedInboxID sql.NullString
 	var parent sql.NullString
 	var accountEmail sql.NullString
+	var companyEmailConnectionID sql.NullString
 	var entryType string
 	err := row.Scan(
 		&item.CompanyID,
@@ -64,6 +67,7 @@ func scanCommunicationsSharedInboxFolder(row communicationsSharedInboxFolderScan
 		&item.Name,
 		&item.DefaultAccess,
 		&accountEmail,
+		&companyEmailConnectionID,
 		&item.Position,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
@@ -82,6 +86,9 @@ func scanCommunicationsSharedInboxFolder(row communicationsSharedInboxFolderScan
 	}
 	if accountEmail.Valid {
 		item.AccountEmail = &accountEmail.String
+	}
+	if companyEmailConnectionID.Valid {
+		item.CompanyEmailConnectionID = companyEmailConnectionID.String
 	}
 	item.DefaultAccess = defaultResourceAccessOrEdit(item.DefaultAccess)
 	return item, nil
@@ -176,6 +183,7 @@ select company_id,
        name,
        coalesce(default_access, $3),
        account_email,
+       company_email_connection_id,
        position,
        created_timestamp,
        updated_timestamp
@@ -257,6 +265,21 @@ func (r *PostgresRepo) CreateCommunicationsSharedInboxFolder(companyID, parentFo
 			return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
 		}
 	}
+	var companyEmailConnectionID sql.NullString
+	if accountEmail != "" {
+		if err := tx.QueryRowContext(ctx, `
+select company_email_connection_id::text
+from company_email_connections
+where company_id=$1::uuid
+  and account_email=$2
+  and status='connected'
+limit 1`, companyID, accountEmail).Scan(&companyEmailConnectionID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
+			}
+			return domain.CompanyExplorerFolder{}, err
+		}
+	}
 	position, err := nextCommunicationsSharedInboxPositionSQL(ctx, tx, companyID, parent)
 	if err != nil {
 		if postgresSharedInboxStorageUnavailable(err) {
@@ -293,12 +316,13 @@ insert into shared_inboxes (
   parent_folder_id,
   name,
   account_email,
+  company_email_connection_id,
   default_access,
   position,
   created_timestamp,
   updated_timestamp
-) values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, now(), now())`,
-			companyID, itemID, parent, name, accountEmail, ResourceDefaultAccessEdit, position,
+) values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7, $8, now(), now())`,
+			companyID, itemID, parent, name, accountEmail, companyEmailConnectionID, ResourceDefaultAccessEdit, position,
 		); err != nil {
 			if postgresSharedInboxStorageUnavailable(err) {
 				return domain.CompanyExplorerFolder{}, ErrSharedInboxStorageUnavailable
@@ -327,6 +351,7 @@ select company_id,
        name,
        coalesce(default_access, $2),
        account_email,
+       company_email_connection_id,
        position,
        created_timestamp,
        updated_timestamp
@@ -404,6 +429,7 @@ select item.company_id,
        item.name,
        coalesce(item.default_access, $3),
        item.account_email,
+       item.company_email_connection_id,
        item.position,
        item.created_timestamp,
        item.updated_timestamp,
@@ -440,6 +466,7 @@ order by item.position asc, item.created_timestamp asc`, companyID, userID, Reso
 		var parent sql.NullString
 		var entryType string
 		var accountEmail sql.NullString
+		var companyEmailConnectionID sql.NullString
 		if err := rows.Scan(
 			&item.CompanyID,
 			&item.FolderID,
@@ -449,6 +476,7 @@ order by item.position asc, item.created_timestamp asc`, companyID, userID, Reso
 			&item.Name,
 			&item.DefaultAccess,
 			&accountEmail,
+			&companyEmailConnectionID,
 			&item.Position,
 			&item.CreatedTimestamp,
 			&item.UpdatedTimestamp,
@@ -468,6 +496,9 @@ order by item.position asc, item.created_timestamp asc`, companyID, userID, Reso
 		}
 		if accountEmail.Valid {
 			item.AccountEmail = &accountEmail.String
+		}
+		if companyEmailConnectionID.Valid {
+			item.CompanyEmailConnectionID = companyEmailConnectionID.String
 		}
 		items = append(items, item)
 	}
@@ -722,15 +753,15 @@ where company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`
 		return tx.Commit()
 	}
 
-	var accountEmail sql.NullString
-	if err := tx.QueryRowContext(ctx, `
-select account_email
-from shared_inboxes
-where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID).Scan(&accountEmail); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
+	if exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from shared_inboxes where company_id=$1::uuid and shared_inbox_id=$2::uuid)`, companyID, folderID); err != nil {
 		return err
+	} else if !exists {
+		if folderExists, err := postgresTxExists(ctx, tx, `select exists(select 1 from shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, folderID); err != nil {
+			return err
+		} else if folderExists {
+			return ErrInvalid
+		}
+		return ErrNotFound
 	}
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_permissions
@@ -746,17 +777,6 @@ where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, compan
 delete from resource_gvic_assignments
 where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, EntityTypeSharedInbox, folderID); err != nil && !isPostgresUndefinedTable(err, "resource_gvic_assignments") {
 		return err
-	}
-	if cleanAccountEmail := normalizeEmail(accountEmail.String); cleanAccountEmail != "" {
-		if _, err := tx.ExecContext(ctx, `
-delete from user_email_connections connection
-using company_memberships membership
-where membership.user_id = connection.user_id
-  and membership.company_id = $1::uuid
-  and connection.account_email = $2
-  and connection.connection_scope = 'shared'`, companyID, cleanAccountEmail); err != nil && !isPostgresUndefinedTable(err, "user_email_connections") {
-			return err
-		}
 	}
 	if _, err := tx.ExecContext(ctx, `delete from shared_inboxes where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID); err != nil {
 		return err
@@ -802,11 +822,25 @@ for update`, companyID, folderID).Scan(new(int)); errors.Is(err, sql.ErrNoRows) 
 	if !available {
 		return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
 	}
+	var companyEmailConnectionID string
+	if err := tx.QueryRowContext(ctx, `
+select company_email_connection_id::text
+from company_email_connections
+where company_id=$1::uuid
+  and account_email=$2
+  and status='connected'
+limit 1`, companyID, accountEmail).Scan(&companyEmailConnectionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
+		}
+		return domain.CompanyExplorerFolder{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `
 update shared_inboxes
 set account_email=$3,
+    company_email_connection_id=$4::uuid,
     updated_timestamp=now()
-where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID, accountEmail); err != nil {
+where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID, accountEmail, companyEmailConnectionID); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
 	if err := tx.Commit(); err != nil {

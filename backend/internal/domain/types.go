@@ -215,6 +215,18 @@ type UserEmailConnection struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type CompanyEmailConnection struct {
+	CompanyEmailConnectionID string    `json:"company_email_connection_id"`
+	CompanyID                string    `json:"company_id"`
+	Provider                 string    `json:"provider"`
+	AccountEmail             string    `json:"account_email"`
+	GrantID                  string    `json:"-"`
+	Status                   string    `json:"status"`
+	ConnectedByUserID        string    `json:"connected_by_user_id,omitempty"`
+	CreatedTimestamp         time.Time `json:"created_timestamp"`
+	UpdatedTimestamp         time.Time `json:"updated_timestamp"`
+}
+
 type EmailAddressSnapshot struct {
 	Name  string `json:"name,omitempty"`
 	Email string `json:"email"`
@@ -627,24 +639,25 @@ type LogicGateWorkAssignment struct {
 }
 
 type CompanyExplorerFolder struct {
-	CompanyID        string                      `json:"company_id"`
-	FolderID         string                      `json:"folder_id"`
-	SharedInboxID    string                      `json:"shared_inbox_id,omitempty"`
-	ParentFolderID   *string                     `json:"parent_folder_id,omitempty"`
-	FolderKind       string                      `json:"folder_kind"`
-	EntryType        string                      `json:"entry_type,omitempty"`
-	SystemKey        *string                     `json:"system_key,omitempty"`
-	Name             string                      `json:"name"`
-	DefaultAccess    string                      `json:"default_access,omitempty"`
-	AccountEmail     *string                     `json:"account_email,omitempty"`
-	ScopeType        string                      `json:"scope_type,omitempty"`
-	ScopeID          *string                     `json:"scope_id,omitempty"`
-	Position         int                         `json:"position"`
-	GVICAssignments  []SharedInboxGVICAssignment `json:"gvic_assignments,omitempty"`
-	AccessGrants     []EntityPermission          `json:"access_grants,omitempty"`
-	EffectiveAccess  string                      `json:"effective_access_level,omitempty"`
-	CreatedTimestamp time.Time                   `json:"created_timestamp"`
-	UpdatedTimestamp time.Time                   `json:"updated_timestamp"`
+	CompanyID                string                      `json:"company_id"`
+	FolderID                 string                      `json:"folder_id"`
+	SharedInboxID            string                      `json:"shared_inbox_id,omitempty"`
+	ParentFolderID           *string                     `json:"parent_folder_id,omitempty"`
+	FolderKind               string                      `json:"folder_kind"`
+	EntryType                string                      `json:"entry_type,omitempty"`
+	SystemKey                *string                     `json:"system_key,omitempty"`
+	Name                     string                      `json:"name"`
+	DefaultAccess            string                      `json:"default_access,omitempty"`
+	AccountEmail             *string                     `json:"account_email,omitempty"`
+	CompanyEmailConnectionID string                      `json:"company_email_connection_id,omitempty"`
+	ScopeType                string                      `json:"scope_type,omitempty"`
+	ScopeID                  *string                     `json:"scope_id,omitempty"`
+	Position                 int                         `json:"position"`
+	GVICAssignments          []SharedInboxGVICAssignment `json:"gvic_assignments,omitempty"`
+	AccessGrants             []EntityPermission          `json:"access_grants,omitempty"`
+	EffectiveAccess          string                      `json:"effective_access_level,omitempty"`
+	CreatedTimestamp         time.Time                   `json:"created_timestamp"`
+	UpdatedTimestamp         time.Time                   `json:"updated_timestamp"`
 }
 
 type SharedInboxGVICAssignment struct {

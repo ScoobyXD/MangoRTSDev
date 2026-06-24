@@ -91,9 +91,12 @@ type IdentityRepository interface {
 	AcceptInvitation(token, cognitoSubject, email, displayName string) (domain.Invitation, error)
 	GetUserEmailConnection(userID string) (domain.UserEmailConnection, error)
 	ListUserEmailConnections(userID string) ([]domain.UserEmailConnection, error)
-	GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail string) (domain.UserEmailConnection, error)
+	GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail string) (domain.CompanyEmailConnection, error)
+	GetCompanyEmailConnectionByID(companyID, connectionID string) (domain.CompanyEmailConnection, error)
 	GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error)
 	UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error)
+	UpsertCompanyEmailConnection(input CompanyEmailConnectionInput) (domain.CompanyEmailConnection, error)
+	UpdateCompanyEmailConnectionStatus(companyID, connectionID, status string) (domain.CompanyEmailConnection, error)
 	UpdateUserEmailConnectionStatus(userID, accountEmail, status string) (domain.UserEmailConnection, error)
 	DeleteUserEmailConnection(userID string) error
 }
@@ -1860,6 +1863,16 @@ type UserEmailConnectionInput struct {
 	Scope        string
 	GrantID      string
 	Status       string
+}
+
+type CompanyEmailConnectionInput struct {
+	CompanyEmailConnectionID string
+	CompanyID                string
+	Provider                 string
+	AccountEmail             string
+	GrantID                  string
+	Status                   string
+	ConnectedByUserID        string
 }
 
 func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {
