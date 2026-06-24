@@ -788,6 +788,10 @@ export function sharedInboxTreeUserCanManageMail(folders: CommunicationsSharedIn
   return folders.some((folder) => scopedFolderIDs.has(folder.folder_id) && sharedInboxUserCanManageMail(folder, userID, false));
 }
 
+export function sharedInboxCanLoadMail(folder: Pick<CommunicationsSharedInbox, "entry_type" | "account_email"> | null | undefined): boolean {
+  return !!folder && folder.entry_type === "shared_inbox" && Boolean((folder.account_email ?? "").trim());
+}
+
 export function gvicInboxSectionForView(viewID: HomeViewID): (typeof GVIC_INBOX_SECTIONS)[number] | null {
   return GVIC_INBOX_SECTIONS.find((section) => section.viewID === viewID) ?? null;
 }

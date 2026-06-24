@@ -4,7 +4,7 @@ Last updated: 2026-06-24
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: 0% (rule IDs are not mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (frontend helper coverage exists for mailbox-capable Shared Triage rows; rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -46,6 +46,9 @@ ST35 - Shared inbox mail actions use the company-owned grant but are authorized 
 ST36 - Shared inbox permissions remain stored on resource_permissions with resource_type = shared_inbox and resource_id = shared_inboxes.shared_inbox_id.
 ST37 - Shared inbox GVIC assignments remain stored on resource_gvic_assignments with resource_type = shared_inbox and resource_id = shared_inboxes.shared_inbox_id.
 ST38 - Email connection records do not receive Shared Triage permissions or GVIC assignments; permissions and GVIC are assigned to the shared inbox work surface.
+ST39 - Plain Shared Triage folders are organizational containers only; selecting one clears mail state and must not call email folder, message list, message detail, prefetch, or load-more endpoints.
+ST40 - Shared Triage mail refresh is driven by Nylas webhooks through backend communications realtime, with browser focus/visibility refresh as a safety refresh; the browser must not poll the message list every 30 seconds.
+ST41 - Communications realtime events refresh the active mail-capable mailbox view only; active Shared Triage root, plain Shared Triage folders, My Work, Updates, and GVIC matrix views must not issue mail refresh GETs from those events.
 
 ## Scenarios
 
@@ -210,3 +213,28 @@ Expected:
 - User B can start the shared inbox reconnect flow for the company-owned credential.
 - After reconnect, permitted users open the same shared inbox without personal OAuth.
 - Mail operations still use the company-owned grant and the current user's identity for authorization and audit.
+
+### Scenario ST-S8: Shared Folder Selection And Mail Refresh
+
+Business logic covered:
+- ST6
+- ST11
+- ST12
+- ST22
+- ST39
+- ST40
+- ST41
+
+Given:
+- Shared Triage contains a plain parent folder and a mailbox-capable shared inbox entry under that folder.
+- The mailbox-capable shared inbox has entry_type = shared_inbox, an account email, and a linked company email connection.
+- The browser has an active communications realtime subscription.
+
+Expected:
+- Selecting the plain parent folder clears any previous mail list and selected message state.
+- Selecting the plain parent folder does not call email folders, message list, message detail, prefetch, or load-more endpoints.
+- Selecting the plain parent folder does not retry mail GETs when the row has no mailbox connection because folders are not mailbox resources.
+- Selecting the mailbox-capable shared inbox may load mail using the company-owned shared grant.
+- Nylas message.created, message.updated, message.deleted, and message.opened events may refresh the active mailbox-capable shared inbox.
+- Those realtime events do not trigger mail GETs while Shared Triage root, a plain Shared Triage folder, My Work, Updates, or a GVIC matrix view is active.
+- Focus or visibility return may refresh the active mailbox-capable mail view, but there is no browser-side 30-second message polling loop.

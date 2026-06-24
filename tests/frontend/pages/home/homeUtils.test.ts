@@ -27,6 +27,7 @@ import {
   resizeHomeColumns,
   resizeHomeInboxMatrixColumnsWithoutSidebar,
   setNodeDragData,
+  sharedInboxCanLoadMail,
   workspaceEventTouchesHomePanel,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
 import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
@@ -146,6 +147,13 @@ test("shared inbox rows are stable, sorted, and nested by parent", () => {
     ["child-a", 1],
     ["child-b", 1],
   ]);
+});
+
+test("shared inbox mail loading only targets mailbox-capable entries with an account email", () => {
+  assert.equal(sharedInboxCanLoadMail(undefined), false);
+  assert.equal(sharedInboxCanLoadMail({ entry_type: "folder", account_email: "support@example.com" }), false);
+  assert.equal(sharedInboxCanLoadMail({ entry_type: "shared_inbox", account_email: "" }), false);
+  assert.equal(sharedInboxCanLoadMail({ entry_type: "shared_inbox", account_email: " support@example.com " }), true);
 });
 
 test("GVIC inbox group builder classifies work by role, status, and priority", () => {
