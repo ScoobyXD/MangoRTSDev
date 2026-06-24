@@ -653,12 +653,12 @@ func TestNylasCallbackCreatesSharedInboxFromOAuthIntent(t *testing.T) {
 	if personal.AccountEmail != user.Email || personal.GrantID != "personal-grant" || personal.Scope != "personal" {
 		t.Fatalf("personal connection = %+v, want unchanged personal grant", personal)
 	}
-	shared, err := repo.GetUserEmailConnectionByGrantID("shared-oauth-grant")
+	shared, err := repo.GetCompanyEmailConnectionByAccountEmail(companyID, "support@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if shared.AccountEmail != "support@example.com" || shared.Scope != "shared" {
-		t.Fatalf("shared connection = %+v, want shared support grant", shared)
+	if shared.AccountEmail != "support@example.com" || shared.GrantID != "shared-oauth-grant" || shared.ConnectedByUserID != user.UserID {
+		t.Fatalf("shared company connection = %+v, want company-owned support grant", shared)
 	}
 }
 
@@ -965,24 +965,17 @@ func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 	if _, err := repo.AddCompanyMembership("actor-subject", companyID, "company_user"); err != nil {
 		t.Fatal(err)
 	}
-	sharedUser, err := repo.UpsertAuthUser("shared-subject", "shared@example.com", "Shared")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AddCompanyMembership("shared-subject", companyID, "company_user"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
-		UserID:       sharedUser.UserID,
-		Provider:     "microsoft",
-		AccountEmail: sharedUser.Email,
-		Scope:        "shared",
-		GrantID:      "grant-shared",
-		Status:       "connected",
+	if _, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID:         companyID,
+		Provider:          "microsoft",
+		AccountEmail:      "support@example.com",
+		GrantID:           "grant-shared",
+		Status:            "connected",
+		ConnectedByUserID: actor.UserID,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", sharedUser.Email)
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}

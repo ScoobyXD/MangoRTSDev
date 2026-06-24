@@ -1,4 +1,4 @@
-Last updated: 2026-06-20
+Last updated: 2026-06-24
 
 # Shared Triage Tests
 
@@ -13,12 +13,12 @@ ST2 - Normal users only see shared inbox folders where effective access grants a
 ST3 - Company managers and dev admins can see shared inbox folders with admin-level effective access.
 ST4 - Creating a shared inbox folder requires company access, a nonblank name, and edit access to the selected parent when the folder is nested.
 ST5 - Creating a shared inbox initializes default access as no access and gives the creator edit access.
-ST6 - Shared inbox folders and mailbox entries use the same tree model, with mailbox-capable entries identified by an account email or shared connection.
+ST6 - Shared inbox folders and mailbox entries use the same tree model, with mailbox-capable entries identified by a shared inbox entry type, account email, and company email connection link.
 ST7 - Renaming, moving, or changing mailbox linkage for a shared inbox folder requires edit access.
 ST8 - Deleting a shared inbox folder requires edit access.
 ST9 - Protected shared inbox folders cannot be renamed or deleted.
-ST10 - Deleting a mailbox-capable shared inbox attempts to remove the backing Nylas shared grant, but the folder deletion result must still be reported clearly.
-ST11 - Reading shared inbox folders and messages uses the shared mailbox grant instead of the viewer's personal mailbox grant.
+ST10 - Deleting a mailbox-capable shared inbox removes the Shared Triage work surface and its shared inbox permissions/GVIC rows, but does not automatically revoke the reusable company-owned mailbox credential.
+ST11 - Reading shared inbox folders and messages uses the company-owned shared mailbox grant instead of the viewer's personal mailbox grant.
 ST12 - Shared mailbox caches are scoped by shared account/grant so one shared mailbox does not leak into another.
 ST13 - Sending mail from a shared inbox requires edit access to that shared inbox.
 ST14 - View-only shared inbox access can read mailbox content but cannot send from that mailbox.
@@ -31,6 +31,21 @@ ST20 - If shared inbox access storage is unavailable, access endpoints return a 
 ST21 - Shared inbox GVIC assignment APIs apply only to mailbox/shared inbox resources, not plain organizational folders.
 ST22 - Shared Triage must not show private personal mailbox messages unless they were explicitly added through a shared inbox path.
 ST23 - Shared inbox access and tree changes publish workspace events so other clients refresh.
+ST24 - Company-owned shared mailbox credentials are stored in company_email_connections, not as permission-bearing users.
+ST25 - A mailbox address used by a shared inbox does not need to be a Mango user and does not need company membership.
+ST26 - Each mailbox-capable shared inbox stores a company_email_connection_id foreign key that points to the company-owned mailbox credential used for mail operations.
+ST27 - shared_inboxes.account_email remains display/search metadata, but the credential source of truth is the company_email_connection_id link.
+ST28 - Personal My Triage mailbox credentials stay in user_email_connections and must not be used as the source of truth for Shared Triage mailbox access.
+ST29 - Shared inbox OAuth setup or reconnect writes or updates company_email_connections for the target company and mailbox.
+ST30 - Creating or reassigning a mailbox-capable shared inbox requires an existing connected company email connection for that company and account email, or starts the shared inbox OAuth repair flow for a user allowed to manage that shared inbox.
+ST31 - Existing legacy user_email_connections rows with connection_scope = shared are backfilled into company_email_connections and linked to matching shared_inboxes.
+ST32 - Users with view or edit permission to a shared inbox can open the shared inbox without connecting that mailbox to their personal account.
+ST33 - If a company-owned shared connection is missing or expired, normal permitted users see a repair-required state and do not receive a personal OAuth prompt.
+ST34 - If a company-owned shared connection is missing or expired, users who can manage that shared inbox can start shared inbox OAuth reconnect for the company-owned credential.
+ST35 - Shared inbox mail actions use the company-owned grant but are authorized and audited as the currently logged-in user.
+ST36 - Shared inbox permissions remain stored on resource_permissions with resource_type = shared_inbox and resource_id = shared_inboxes.shared_inbox_id.
+ST37 - Shared inbox GVIC assignments remain stored on resource_gvic_assignments with resource_type = shared_inbox and resource_id = shared_inboxes.shared_inbox_id.
+ST38 - Email connection records do not receive Shared Triage permissions or GVIC assignments; permissions and GVIC are assigned to the shared inbox work surface.
 
 ## Scenarios
 
@@ -42,6 +57,7 @@ Business logic covered:
 - ST3
 - ST6
 - ST22
+- ST32
 
 Given:
 - A company has several shared inbox folders and mailbox-capable shared inboxes.
@@ -53,6 +69,7 @@ Expected:
 - User A does not see private personal mailbox messages in Shared Triage.
 - The company manager sees shared inboxes with admin-level effective access.
 - Mailbox-capable entries and plain folder entries are represented in the same tree without mixing their mailbox behavior.
+- User A opens a visible shared inbox without connecting that mailbox to User A's personal account.
 
 ### Scenario ST-S2: Create, Rename, Move, And Delete Shared Inbox Folders
 
@@ -64,18 +81,21 @@ Business logic covered:
 - ST9
 - ST10
 - ST23
+- ST26
+- ST27
+- ST30
 
 Given:
 - A user can edit one shared inbox parent folder and only view another parent folder.
 - A protected shared inbox folder exists.
-- A mailbox-capable shared inbox has a backing shared mailbox grant.
+- A mailbox-capable shared inbox has a linked company email connection.
 
 Expected:
 - Creating under the editable parent succeeds and gives the creator edit access while leaving default access as no access.
 - Creating under the view-only parent fails.
 - Rename, move, and mailbox linkage changes require edit access.
 - Protected shared inbox folders cannot be renamed or deleted.
-- Deleting a mailbox-capable shared inbox attempts grant cleanup and reports the folder deletion result.
+- Deleting a mailbox-capable shared inbox removes the Shared Triage work surface without treating the company email connection as a user permission record.
 - Successful changes publish workspace refresh events.
 
 ### Scenario ST-S3: Shared Mailbox Read And Send
@@ -85,17 +105,24 @@ Business logic covered:
 - ST12
 - ST13
 - ST14
+- ST24
+- ST25
+- ST28
+- ST35
 
 Given:
 - User A has view access to Shared Inbox 1.
 - User B has edit access to Shared Inbox 1.
 - Shared Inbox 2 uses a different shared mailbox grant.
+- The mailbox address for Shared Inbox 1 is not a Mango user.
 
 Expected:
-- Reading Shared Inbox 1 uses its shared grant, not either user's personal mailbox grant.
+- Reading Shared Inbox 1 uses its company-owned shared grant, not either user's personal mailbox grant.
+- The mailbox address does not need a Mango user record or company membership.
 - Cached folders/messages for Shared Inbox 1 do not appear under Shared Inbox 2.
 - User A can read Shared Inbox 1 but cannot send from it.
 - User B can send from Shared Inbox 1.
+- User B's send action is authorized and audited as User B while using the shared grant.
 
 ### Scenario ST-S4: Shared Inbox Access Settings
 
@@ -106,6 +133,9 @@ Business logic covered:
 - ST18
 - ST19
 - ST20
+- ST36
+- ST37
+- ST38
 
 Given:
 - A shared inbox has default access, user grants, group grants, and GVIC assignments.
@@ -118,12 +148,15 @@ Expected:
 - The response includes default access, explicit grants, GVIC assignments, effective access, and can-edit-permissions.
 - GVIC assignments are not converted into resource permission grants.
 - User and group grants are both accepted.
+- Permissions and GVIC rows target the shared inbox resource, not the company email connection.
 - If storage is unavailable, the endpoint returns service unavailable.
 
 ### Scenario ST-S5: Shared Inbox GVIC Scope
 
 Business logic covered:
 - ST21
+- ST37
+- ST38
 
 Given:
 - The company has a mailbox-capable shared inbox and a plain shared inbox folder.
@@ -131,3 +164,49 @@ Given:
 Expected:
 - GVIC assignments can be managed for the mailbox/shared inbox resource.
 - GVIC assignments are rejected for a plain organizational folder when that resource is not a mailbox/shared inbox.
+- GVIC assignments do not move when the shared inbox is reconnected to the same or a different company email connection.
+
+### Scenario ST-S6: Company-Owned Shared Mailbox Connection Setup
+
+Business logic covered:
+- ST24
+- ST25
+- ST26
+- ST27
+- ST28
+- ST29
+- ST30
+- ST31
+
+Given:
+- An admin starts shared inbox OAuth for support@example.com in Company A.
+- support@example.com is not a Mango user.
+- Company A has a Shared Triage mailbox entry for support@example.com.
+- Legacy shared-scope user email connection rows may already exist from older shared inbox setup flows.
+
+Expected:
+- The OAuth callback writes or updates company_email_connections for Company A and support@example.com.
+- The shared inbox stores company_email_connection_id and keeps account_email only as display/search metadata.
+- The shared inbox does not require support@example.com to exist as a Mango user.
+- Personal My Triage credentials in user_email_connections remain separate from the company-owned shared connection.
+- Legacy shared-scope rows are backfilled into company_email_connections and linked to matching shared inboxes.
+- Creating or reassigning a mailbox-capable shared inbox fails or starts shared OAuth repair when no connected company email connection exists.
+
+### Scenario ST-S7: Shared Connection Missing Or Expired
+
+Business logic covered:
+- ST33
+- ST34
+- ST35
+
+Given:
+- A shared inbox is visible to User A and User B.
+- User A has view access only.
+- User B can manage mail for that shared inbox.
+- The company-owned shared connection is missing, disconnected, or reauth-required.
+
+Expected:
+- User A sees a shared inbox repair-required state and is not asked to connect the mailbox to User A's personal account.
+- User B can start the shared inbox reconnect flow for the company-owned credential.
+- After reconnect, permitted users open the same shared inbox without personal OAuth.
+- Mail operations still use the company-owned grant and the current user's identity for authorization and audit.

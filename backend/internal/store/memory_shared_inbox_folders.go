@@ -37,28 +37,32 @@ func (r *MemoryRepo) CreateCommunicationsSharedInboxFolder(companyID, parentFold
 
 	entryType := CommunicationsSharedInboxEntryTypeFolder
 	var accountEmailPtr *string
+	companyEmailConnectionID := ""
 	if accountEmail != "" {
-		if !r.companyHasConnectedEmailAccountLocked(companyID, accountEmail) {
+		connection, ok := r.connectedCompanyEmailConnectionForAccountLocked(companyID, accountEmail)
+		if !ok {
 			return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
 		}
 		entryType = CommunicationsSharedInboxEntryTypeSharedInbox
 		accountEmailPtr = &accountEmail
+		companyEmailConnectionID = connection.CompanyEmailConnectionID
 	}
 
 	now := time.Now().UTC()
 	item := domain.CompanyExplorerFolder{
-		CompanyID:        companyID,
-		FolderID:         newUUIDv7String(),
-		ParentFolderID:   parent,
-		FolderKind:       "communications",
-		EntryType:        entryType,
-		Name:             name,
-		DefaultAccess:    ResourceDefaultAccessEdit,
-		AccountEmail:     accountEmailPtr,
-		ScopeType:        CompanyExplorerFolderScopeCompany,
-		Position:         nextCompanyExplorerFolderPosition(r.folders, companyID, "communications", parentFolderID),
-		CreatedTimestamp: now,
-		UpdatedTimestamp: now,
+		CompanyID:                companyID,
+		FolderID:                 newUUIDv7String(),
+		ParentFolderID:           parent,
+		FolderKind:               "communications",
+		EntryType:                entryType,
+		Name:                     name,
+		DefaultAccess:            ResourceDefaultAccessEdit,
+		AccountEmail:             accountEmailPtr,
+		CompanyEmailConnectionID: companyEmailConnectionID,
+		ScopeType:                CompanyExplorerFolderScopeCompany,
+		Position:                 nextCompanyExplorerFolderPosition(r.folders, companyID, "communications", parentFolderID),
+		CreatedTimestamp:         now,
+		UpdatedTimestamp:         now,
 	}
 	if entryType == CommunicationsSharedInboxEntryTypeSharedInbox {
 		item.SharedInboxID = item.FolderID
@@ -233,19 +237,6 @@ func (r *MemoryRepo) DeleteCommunicationsSharedInboxFolder(companyID, folderID s
 	}
 	root = normalizeMemorySharedInboxFolder(root)
 	if root.EntryType == CommunicationsSharedInboxEntryTypeSharedInbox {
-		if root.AccountEmail != nil {
-			accountEmail := normalizeEmail(*root.AccountEmail)
-			if accountEmail != "" {
-				for connectionKey, connection := range r.emailConnections {
-					if normalizeEmailConnectionScope(connection.Scope) != "shared" || normalizeEmail(connection.AccountEmail) != accountEmail {
-						continue
-					}
-					if _, ok := r.memberships[membershipKey(companyID, connection.UserID)]; ok {
-						delete(r.emailConnections, connectionKey)
-					}
-				}
-			}
-		}
 		delete(r.folders, key(companyID, folderID))
 		delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, folderID))
 		if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeSharedInbox, folderID); err != nil {

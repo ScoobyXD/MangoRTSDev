@@ -1009,22 +1009,37 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 		provider = state.Provider
 	}
 	connectionScope := communicationsConnectionScopeForOAuthGrant(state, grant.Email)
-	connectionInput := store.UserEmailConnectionInput{
-		UserID:       state.UserID,
-		Provider:     provider,
-		AccountEmail: grant.Email,
-		Scope:        connectionScope,
-		GrantID:      grant.GrantID,
-		Status:       "connected",
-	}
-	connection, err := s.repo.UpsertUserEmailConnection(connectionInput)
-	if errors.Is(err, store.ErrNotFound) && communicationsOAuthStateTargetsPersonalMailbox(state) && normalizeEmailForCompare(grant.Email) == normalizeEmailForCompare(state.Email) {
-		if recoveredUser, lookupErr := s.repo.GetAuthUserByEmail(state.Email); lookupErr == nil && strings.TrimSpace(recoveredUser.UserID) != "" {
-			log.Printf("nylas_oauth_callback outcome=recovering reason=state_user_not_found_by_email request_id=%s original_user_id=%s recovered_user_id=%s provider=%s account_email=%s scope=%s grant=%s", requestCorrelationID(r), state.UserID, recoveredUser.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID))
-			connectionInput.UserID = recoveredUser.UserID
-			connection, err = s.repo.UpsertUserEmailConnection(connectionInput)
-		} else if lookupErr != nil && !errors.Is(lookupErr, store.ErrNotFound) {
-			log.Printf("nylas_oauth_callback outcome=warning reason=recover_user_by_email_failed request_id=%s original_user_id=%s provider=%s account_email=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), grantIDLogValue(grant.GrantID), lookupErr)
+	var connection domain.UserEmailConnection
+	var companyConnection domain.CompanyEmailConnection
+	sharedInboxCompanyID := strings.TrimSpace(state.SharedInboxCompanyID)
+	if connectionScope == "shared" && sharedInboxCompanyID != "" {
+		companyConnection, err = s.repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+			CompanyID:         sharedInboxCompanyID,
+			Provider:          provider,
+			AccountEmail:      grant.Email,
+			GrantID:           grant.GrantID,
+			Status:            "connected",
+			ConnectedByUserID: state.UserID,
+		})
+		connection = userConnectionForCompanyEmailConnection(companyConnection, state.UserID)
+	} else {
+		connectionInput := store.UserEmailConnectionInput{
+			UserID:       state.UserID,
+			Provider:     provider,
+			AccountEmail: grant.Email,
+			Scope:        connectionScope,
+			GrantID:      grant.GrantID,
+			Status:       "connected",
+		}
+		connection, err = s.repo.UpsertUserEmailConnection(connectionInput)
+		if errors.Is(err, store.ErrNotFound) && communicationsOAuthStateTargetsPersonalMailbox(state) && normalizeEmailForCompare(grant.Email) == normalizeEmailForCompare(state.Email) {
+			if recoveredUser, lookupErr := s.repo.GetAuthUserByEmail(state.Email); lookupErr == nil && strings.TrimSpace(recoveredUser.UserID) != "" {
+				log.Printf("nylas_oauth_callback outcome=recovering reason=state_user_not_found_by_email request_id=%s original_user_id=%s recovered_user_id=%s provider=%s account_email=%s scope=%s grant=%s", requestCorrelationID(r), state.UserID, recoveredUser.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID))
+				connectionInput.UserID = recoveredUser.UserID
+				connection, err = s.repo.UpsertUserEmailConnection(connectionInput)
+			} else if lookupErr != nil && !errors.Is(lookupErr, store.ErrNotFound) {
+				log.Printf("nylas_oauth_callback outcome=warning reason=recover_user_by_email_failed request_id=%s original_user_id=%s provider=%s account_email=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), grantIDLogValue(grant.GrantID), lookupErr)
+			}
 		}
 	}
 	if errors.Is(err, store.ErrNotFound) {
@@ -1041,17 +1056,19 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 	}
 	s.commCache.invalidateUser(state.UserID)
 	createdSharedInboxID := ""
-	if connectionScope == "shared" && strings.TrimSpace(state.SharedInboxCompanyID) != "" {
-		item, createErr := s.repo.CreateCommunicationsSharedInboxFolder(state.SharedInboxCompanyID, state.SharedInboxParentFolderID, state.SharedInboxName, grant.Email)
+	if connectionScope == "shared" && sharedInboxCompanyID != "" {
+		item, createErr := s.repo.CreateCommunicationsSharedInboxFolder(sharedInboxCompanyID, state.SharedInboxParentFolderID, state.SharedInboxName, grant.Email)
 		if createErr != nil {
-			_, _ = s.repo.UpdateUserEmailConnectionStatus(connection.UserID, connection.AccountEmail, "disconnected")
+			if strings.TrimSpace(companyConnection.CompanyEmailConnectionID) != "" {
+				_, _ = s.repo.UpdateCompanyEmailConnectionStatus(sharedInboxCompanyID, companyConnection.CompanyEmailConnectionID, "disconnected")
+			}
 			s.deleteNylasOAuthGrantBestEffort(r.Context(), requestCorrelationID(r), "shared_inbox_create_failed", grant)
-			log.Printf("nylas_oauth_callback outcome=redirect reason=shared_inbox_create_failed request_id=%s user_id=%s company_id=%s parent_folder_id=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, state.SharedInboxCompanyID, state.SharedInboxParentFolderID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID), createErr)
+			log.Printf("nylas_oauth_callback outcome=redirect reason=shared_inbox_create_failed request_id=%s user_id=%s company_id=%s parent_folder_id=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, sharedInboxCompanyID, state.SharedInboxParentFolderID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID), createErr)
 			s.redirectCommunications(w, r, "shared_inbox_create_failed")
 			return
 		}
 		createdSharedInboxID = item.FolderID
-		s.publishWorkspaceEvent(state.SharedInboxCompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "shared_inbox_id": item.SharedInboxID, "folder_kind": item.FolderKind, "resource_type": store.EntityTypeSharedInbox, "folder": item})
+		s.publishWorkspaceEvent(sharedInboxCompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "shared_inbox_id": item.SharedInboxID, "folder_kind": item.FolderKind, "resource_type": store.EntityTypeSharedInbox, "folder": item})
 	}
 	log.Printf("nylas_oauth_callback outcome=success request_id=%s user_id=%s provider=%s account_email=%s scope=%s strict_email=%t grant=%s", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, state.StrictEmail, grantIDLogValue(grant.GrantID))
 	s.redirectCommunicationsSuccess(w, r, connection, createdSharedInboxID)
@@ -1137,7 +1154,13 @@ func (s *Server) requireCommunicationsConnection(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusConflict, "shared_inbox_email_not_assigned")
 		return domain.UserEmailConnection{}, false
 	}
-	connection, err := s.repo.GetCompanyEmailConnectionByAccountEmail(companyID, *folder.AccountEmail)
+	var connection domain.CompanyEmailConnection
+	var err error
+	if strings.TrimSpace(folder.CompanyEmailConnectionID) != "" {
+		connection, err = s.repo.GetCompanyEmailConnectionByID(companyID, folder.CompanyEmailConnectionID)
+	} else {
+		connection, err = s.repo.GetCompanyEmailConnectionByAccountEmail(companyID, *folder.AccountEmail)
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusConflict, "shared_inbox_email_account_not_connected")
 		return domain.UserEmailConnection{}, false
@@ -1150,7 +1173,7 @@ func (s *Server) requireCommunicationsConnection(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_email_connection")
 		return domain.UserEmailConnection{}, false
 	}
-	return requireConnectedEmailStatus(w, connection)
+	return requireConnectedCompanyEmailStatus(w, connection, actor.User.UserID)
 }
 
 func requireConnectedEmailStatus(w http.ResponseWriter, connection domain.UserEmailConnection) (domain.UserEmailConnection, bool) {
@@ -1163,6 +1186,23 @@ func requireConnectedEmailStatus(w http.ResponseWriter, connection domain.UserEm
 		return domain.UserEmailConnection{}, false
 	}
 	return connection, true
+}
+
+func userConnectionForCompanyEmailConnection(connection domain.CompanyEmailConnection, actorUserID string) domain.UserEmailConnection {
+	return domain.UserEmailConnection{
+		UserID:           strings.TrimSpace(actorUserID),
+		Provider:         connection.Provider,
+		AccountEmail:     connection.AccountEmail,
+		Scope:            "shared",
+		GrantID:          connection.GrantID,
+		Status:           connection.Status,
+		CreatedTimestamp: connection.CreatedTimestamp,
+		UpdatedTimestamp: connection.UpdatedTimestamp,
+	}
+}
+
+func requireConnectedCompanyEmailStatus(w http.ResponseWriter, connection domain.CompanyEmailConnection, actorUserID string) (domain.UserEmailConnection, bool) {
+	return requireConnectedEmailStatus(w, userConnectionForCompanyEmailConnection(connection, actorUserID))
 }
 
 func (s *Server) findVisibleSharedInboxFolder(w http.ResponseWriter, actor ActorContext, companyID, folderID, accessLevel string) (domain.CompanyExplorerFolder, bool) {

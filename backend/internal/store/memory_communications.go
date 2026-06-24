@@ -47,34 +47,39 @@ func (r *MemoryRepo) ListUserEmailConnections(userID string) ([]domain.UserEmail
 	return connections, nil
 }
 
-func (r *MemoryRepo) GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail string) (domain.UserEmailConnection, error) {
+func (r *MemoryRepo) GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail string) (domain.CompanyEmailConnection, error) {
 	companyID = strings.TrimSpace(companyID)
 	accountEmail = normalizeEmail(accountEmail)
 	if companyID == "" || accountEmail == "" {
-		return domain.UserEmailConnection{}, ErrInvalid
+		return domain.CompanyEmailConnection{}, ErrInvalid
 	}
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var found domain.UserEmailConnection
-	hasFound := false
-	for _, connection := range r.emailConnections {
-		if connection.Status != "connected" || normalizeEmail(connection.AccountEmail) != accountEmail || normalizeEmailConnectionScope(connection.Scope) != "shared" {
-			continue
-		}
-		if _, ok := r.memberships[membershipKey(companyID, connection.UserID)]; !ok {
-			continue
-		}
-		if !hasFound || connection.UpdatedTimestamp.After(found.UpdatedTimestamp) {
-			found = connection
-			hasFound = true
+	for _, connection := range r.companyEmailConnections {
+		if connection.CompanyID == companyID && normalizeEmail(connection.AccountEmail) == accountEmail {
+			return connection, nil
 		}
 	}
-	if !hasFound {
-		return domain.UserEmailConnection{}, ErrNotFound
+	return domain.CompanyEmailConnection{}, ErrNotFound
+}
+
+func (r *MemoryRepo) GetCompanyEmailConnectionByID(companyID, connectionID string) (domain.CompanyEmailConnection, error) {
+	companyID = strings.TrimSpace(companyID)
+	connectionID = strings.TrimSpace(connectionID)
+	if companyID == "" || connectionID == "" {
+		return domain.CompanyEmailConnection{}, ErrInvalid
 	}
-	return found, nil
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	connection, ok := r.companyEmailConnections[companyEmailConnectionKey(companyID, connectionID)]
+	if !ok {
+		return domain.CompanyEmailConnection{}, ErrNotFound
+	}
+	return connection, nil
 }
 
 func (r *MemoryRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error) {
@@ -131,6 +136,114 @@ func (r *MemoryRepo) UpsertUserEmailConnection(input UserEmailConnectionInput) (
 	connection.Status = status
 	connection.UpdatedTimestamp = now
 	r.emailConnections[connectionKey] = connection
+	if scope == "shared" {
+		for _, membership := range r.memberships {
+			if membership.UserID != userID {
+				continue
+			}
+			existingConnectionID := ""
+			for _, existing := range r.companyEmailConnections {
+				if existing.CompanyID == membership.CompanyID && normalizeEmail(existing.AccountEmail) == accountEmail {
+					existingConnectionID = existing.CompanyEmailConnectionID
+					break
+				}
+			}
+			if existingConnectionID == "" {
+				existingConnectionID = newUUIDv7String()
+			}
+			companyKey := companyEmailConnectionKey(membership.CompanyID, existingConnectionID)
+			companyConnection := r.companyEmailConnections[companyKey]
+			if companyConnection.CreatedTimestamp.IsZero() {
+				companyConnection.CreatedTimestamp = now
+			}
+			companyConnection.CompanyEmailConnectionID = existingConnectionID
+			companyConnection.CompanyID = membership.CompanyID
+			companyConnection.Provider = provider
+			companyConnection.AccountEmail = accountEmail
+			companyConnection.GrantID = grantID
+			companyConnection.Status = status
+			companyConnection.ConnectedByUserID = userID
+			companyConnection.UpdatedTimestamp = now
+			r.companyEmailConnections[companyKey] = companyConnection
+		}
+	}
+	return connection, nil
+}
+
+func (r *MemoryRepo) UpsertCompanyEmailConnection(input CompanyEmailConnectionInput) (domain.CompanyEmailConnection, error) {
+	companyID := strings.TrimSpace(input.CompanyID)
+	connectionID := strings.TrimSpace(input.CompanyEmailConnectionID)
+	provider := normalizeEmailProvider(input.Provider)
+	accountEmail := normalizeEmail(input.AccountEmail)
+	grantID := strings.TrimSpace(input.GrantID)
+	status := normalizeEmailConnectionStatus(input.Status)
+	connectedByUserID := strings.TrimSpace(input.ConnectedByUserID)
+	if companyID == "" || provider == "" || accountEmail == "" || grantID == "" || status == "" {
+		return domain.CompanyEmailConnection{}, ErrInvalid
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.companies[companyID]; !ok {
+		return domain.CompanyEmailConnection{}, ErrNotFound
+	}
+	if connectedByUserID != "" && !r.userIDExistsLocked(connectedByUserID) {
+		return domain.CompanyEmailConnection{}, ErrNotFound
+	}
+
+	for _, existing := range r.companyEmailConnections {
+		if existing.CompanyID == companyID && normalizeEmail(existing.AccountEmail) == accountEmail {
+			connectionID = existing.CompanyEmailConnectionID
+			break
+		}
+	}
+	if connectionID == "" {
+		connectionID = newUUIDv7String()
+	}
+	connectionKey := companyEmailConnectionKey(companyID, connectionID)
+	for existingKey, existing := range r.companyEmailConnections {
+		if existing.CompanyID == companyID && existing.GrantID == grantID && existingKey != connectionKey {
+			delete(r.companyEmailConnections, existingKey)
+		}
+	}
+
+	now := time.Now().UTC()
+	connection := r.companyEmailConnections[connectionKey]
+	if connection.CreatedTimestamp.IsZero() {
+		connection.CreatedTimestamp = now
+	}
+	connection.CompanyEmailConnectionID = connectionID
+	connection.CompanyID = companyID
+	connection.Provider = provider
+	connection.AccountEmail = accountEmail
+	connection.GrantID = grantID
+	connection.Status = status
+	connection.ConnectedByUserID = connectedByUserID
+	connection.UpdatedTimestamp = now
+	r.companyEmailConnections[connectionKey] = connection
+	return connection, nil
+}
+
+func (r *MemoryRepo) UpdateCompanyEmailConnectionStatus(companyID, connectionID, status string) (domain.CompanyEmailConnection, error) {
+	companyID = strings.TrimSpace(companyID)
+	connectionID = strings.TrimSpace(connectionID)
+	status = normalizeEmailConnectionStatus(status)
+	if companyID == "" || connectionID == "" || status == "" {
+		return domain.CompanyEmailConnection{}, ErrInvalid
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	connectionKey := companyEmailConnectionKey(companyID, connectionID)
+	connection, ok := r.companyEmailConnections[connectionKey]
+	if !ok {
+		return domain.CompanyEmailConnection{}, ErrNotFound
+	}
+	connection.Status = status
+	connection.UpdatedTimestamp = time.Now().UTC()
+	r.companyEmailConnections[connectionKey] = connection
 	return connection, nil
 }
 
@@ -287,6 +400,10 @@ func (r *MemoryRepo) userByIDLocked(userID string) (domain.User, bool) {
 
 func emailConnectionKey(userID, accountEmail string) string {
 	return strings.TrimSpace(userID) + "\x1f" + normalizeEmail(accountEmail)
+}
+
+func companyEmailConnectionKey(companyID, connectionID string) string {
+	return strings.TrimSpace(companyID) + "\x1f" + strings.TrimSpace(connectionID)
 }
 
 func normalizeEmailProvider(provider string) string {

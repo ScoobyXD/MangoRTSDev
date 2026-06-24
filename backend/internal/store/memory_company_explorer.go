@@ -511,15 +511,21 @@ func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name strin
 }
 
 func (r *MemoryRepo) companyHasConnectedEmailAccountLocked(companyID, accountEmail string) bool {
-	for _, connection := range r.emailConnections {
-		if connection.Status != "connected" || normalizeEmail(connection.AccountEmail) != accountEmail || normalizeEmailConnectionScope(connection.Scope) != "shared" {
-			continue
-		}
-		if _, ok := r.memberships[membershipKey(companyID, connection.UserID)]; ok {
+	for _, connection := range r.companyEmailConnections {
+		if connection.CompanyID == companyID && connection.Status == "connected" && normalizeEmail(connection.AccountEmail) == accountEmail {
 			return true
 		}
 	}
 	return false
+}
+
+func (r *MemoryRepo) connectedCompanyEmailConnectionForAccountLocked(companyID, accountEmail string) (domain.CompanyEmailConnection, bool) {
+	for _, connection := range r.companyEmailConnections {
+		if connection.CompanyID == companyID && connection.Status == "connected" && normalizeEmail(connection.AccountEmail) == accountEmail {
+			return connection, true
+		}
+	}
+	return domain.CompanyEmailConnection{}, false
 }
 
 func (r *MemoryRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderID, accountEmail string) (domain.CompanyExplorerFolder, error) {
@@ -547,10 +553,12 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderI
 	if item.EntryType != CommunicationsSharedInboxEntryTypeSharedInbox {
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
-	if !r.companyHasConnectedEmailAccountLocked(companyID, accountEmail) {
+	connection, ok := r.connectedCompanyEmailConnectionForAccountLocked(companyID, accountEmail)
+	if !ok {
 		return domain.CompanyExplorerFolder{}, ErrEmailAccountUnavailable
 	}
 	item.AccountEmail = &accountEmail
+	item.CompanyEmailConnectionID = connection.CompanyEmailConnectionID
 	item.SharedInboxID = item.FolderID
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item

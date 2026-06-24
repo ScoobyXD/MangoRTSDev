@@ -202,6 +202,31 @@ create unique index if not exists idx_user_email_connections_grant_id
 create index if not exists idx_user_email_connections_user_updated
   on user_email_connections(user_id, updated_timestamp desc);
 
+create table if not exists company_email_connections (
+  company_email_connection_id uuid not null,
+  company_id uuid not null,
+  provider text not null,
+  account_email text not null,
+  grant_id text not null,
+  status text not null default 'connected',
+  connected_by_user_id uuid,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint company_email_connections_provider_chk check (provider in ('google', 'microsoft')),
+  constraint company_email_connections_account_email_chk check (btrim(account_email) <> '' and account_email = lower(btrim(account_email))),
+  constraint company_email_connections_grant_id_nonblank_chk check (btrim(grant_id) <> ''),
+  constraint company_email_connections_status_chk check (status in ('connected', 'disconnected', 'reauth_required')),
+  primary key (company_email_connection_id),
+  unique (company_id, company_email_connection_id),
+  unique (company_id, account_email),
+  unique (company_id, grant_id),
+  foreign key (company_id) references companies(company_id) on delete cascade,
+  foreign key (connected_by_user_id) references users(user_id) on delete set null
+);
+
+create index if not exists idx_company_email_connections_company_status
+  on company_email_connections(company_id, status, updated_timestamp desc);
+
 create table if not exists communications_message_read_statuses (
   user_id uuid not null,
   message_id text not null,
@@ -1374,6 +1399,7 @@ create table if not exists shared_inboxes (
   parent_folder_id uuid,
   name text not null,
   account_email text not null,
+  company_email_connection_id uuid,
   default_access text not null default 'edit',
   position integer not null default 0,
   created_timestamp timestamptz not null default now(),
@@ -1383,7 +1409,8 @@ create table if not exists shared_inboxes (
   constraint shared_inboxes_account_email_chk check (btrim(account_email) <> '' and account_email = lower(btrim(account_email))),
   primary key (company_id, shared_inbox_id),
   foreign key (company_id) references companies (company_id) on delete cascade,
-  foreign key (company_id, parent_folder_id) references shared_inbox_folders (company_id, folder_id)
+  foreign key (company_id, parent_folder_id) references shared_inbox_folders (company_id, folder_id),
+  foreign key (company_id, company_email_connection_id) references company_email_connections(company_id, company_email_connection_id)
 );
 
 create index if not exists idx_shared_inboxes_parent
@@ -1391,6 +1418,9 @@ create index if not exists idx_shared_inboxes_parent
 
 create index if not exists idx_shared_inboxes_account_email
   on shared_inboxes(company_id, account_email);
+
+create index if not exists idx_shared_inboxes_company_email_connection
+  on shared_inboxes(company_id, company_email_connection_id);
 
 create table if not exists company_explorer_items (
   company_id uuid not null,

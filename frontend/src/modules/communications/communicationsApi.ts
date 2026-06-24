@@ -162,6 +162,7 @@ export type CommunicationsSharedInbox = {
   name: string;
   default_access?: "edit" | "no_access";
   account_email?: string;
+  company_email_connection_id?: string;
   position: number;
   gvic_assignments?: CommunicationsSharedInboxGVICAssignment[];
   access_grants?: ResourceAccessGrant[];
