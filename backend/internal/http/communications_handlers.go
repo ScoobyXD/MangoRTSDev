@@ -694,7 +694,7 @@ func (s *Server) archiveCommunicationsMessagesBatch(ctx context.Context, connect
 					}
 					var apiErr NylasAPIError
 					if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
-						_, _ = s.repo.UpdateUserEmailConnectionStatus(connection.UserID, connection.AccountEmail, "reauth_required")
+						s.markCommunicationsConnectionReauthRequired(connection)
 					}
 				} else {
 					result.ArchivedIDs = append(result.ArchivedIDs, firstNonBlank(archived.ID, messageID))
@@ -1190,14 +1190,16 @@ func requireConnectedEmailStatus(w http.ResponseWriter, connection domain.UserEm
 
 func userConnectionForCompanyEmailConnection(connection domain.CompanyEmailConnection, actorUserID string) domain.UserEmailConnection {
 	return domain.UserEmailConnection{
-		UserID:           strings.TrimSpace(actorUserID),
-		Provider:         connection.Provider,
-		AccountEmail:     connection.AccountEmail,
-		Scope:            "shared",
-		GrantID:          connection.GrantID,
-		Status:           connection.Status,
-		CreatedTimestamp: connection.CreatedTimestamp,
-		UpdatedTimestamp: connection.UpdatedTimestamp,
+		UserID:                   strings.TrimSpace(actorUserID),
+		Provider:                 connection.Provider,
+		AccountEmail:             connection.AccountEmail,
+		Scope:                    "shared",
+		CompanyID:                connection.CompanyID,
+		CompanyEmailConnectionID: connection.CompanyEmailConnectionID,
+		GrantID:                  connection.GrantID,
+		Status:                   connection.Status,
+		CreatedTimestamp:         connection.CreatedTimestamp,
+		UpdatedTimestamp:         connection.UpdatedTimestamp,
 	}
 }
 
@@ -1230,7 +1232,7 @@ func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connect
 	if errors.As(err, &apiErr) {
 		log.Printf("nylas API error user_id=%s provider=%s path=%s status=%d code=%s message=%s", connection.UserID, connection.Provider, r.URL.Path, apiErr.StatusCode, apiErr.Code, apiErr.Message)
 		if apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden {
-			_, _ = s.repo.UpdateUserEmailConnectionStatus(connection.UserID, connection.AccountEmail, "reauth_required")
+			s.markCommunicationsConnectionReauthRequired(connection)
 			writeError(w, http.StatusUnauthorized, "nylas_reauth_required")
 			return
 		}
@@ -1252,6 +1254,18 @@ func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connect
 	}
 	log.Printf("nylas proxy error user_id=%s provider=%s path=%s: %v", connection.UserID, connection.Provider, r.URL.Path, err)
 	writeError(w, http.StatusBadGateway, "nylas_request_failed")
+}
+
+func (s *Server) markCommunicationsConnectionReauthRequired(connection domain.UserEmailConnection) {
+	if strings.TrimSpace(connection.Scope) == "shared" {
+		companyID := strings.TrimSpace(connection.CompanyID)
+		connectionID := strings.TrimSpace(connection.CompanyEmailConnectionID)
+		if companyID != "" && connectionID != "" {
+			_, _ = s.repo.UpdateCompanyEmailConnectionStatus(companyID, connectionID, "reauth_required")
+		}
+		return
+	}
+	_, _ = s.repo.UpdateUserEmailConnectionStatus(connection.UserID, connection.AccountEmail, "reauth_required")
 }
 
 const (
