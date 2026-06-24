@@ -379,7 +379,7 @@ func TestPostgresGroupHierarchyGVICSyncUsesScopedHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile postgres_entity_permissions.go: %v", err)
 	}
-	entitySource := string(entityRaw)
+	entitySource := strings.ReplaceAll(string(entityRaw), "\r\n", "\n")
 	updateBody := extractFunctionSourceForTest(t, entitySource, "func (r *PostgresRepo) UpdateCompanyUserGroup")
 	deleteBody := extractFunctionSourceForTest(t, entitySource, "func (r *PostgresRepo) DeleteCompanyUserGroup")
 	for name, body := range map[string]string{
@@ -409,7 +409,7 @@ func TestPostgresGroupHierarchyGVICSyncUsesScopedHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile postgres_gvic.go: %v", err)
 	}
-	gvicSource := string(gvicRaw)
+	gvicSource := strings.ReplaceAll(string(gvicRaw), "\r\n", "\n")
 	syncBody := extractFunctionSourceForTest(t, gvicSource, "func syncPostgresGVICForResourceKeysTx")
 	for _, needle := range []string{
 		"syncResourceGVICEffectiveAssignmentsTx",
@@ -424,7 +424,7 @@ func TestPostgresGroupHierarchyGVICSyncUsesScopedHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile postgres_gvic_matrix_projection.go: %v", err)
 	}
-	projectionSource := string(projectionRaw)
+	projectionSource := strings.ReplaceAll(string(projectionRaw), "\r\n", "\n")
 	if !strings.Contains(projectionSource, "and effective.resource_type='node'\n   and effective.resource_id=node_row.node_id") {
 		t.Fatalf("Logic Gate matrix projection should read assigned-node users from node GVIC snapshots")
 	}
