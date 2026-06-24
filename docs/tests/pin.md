@@ -4,12 +4,12 @@ Last updated: 2026-06-24
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (backend lifecycle, permission-edge coverage, and frontend DB-backed API/no-cache coverage exists; frontend menu and drag behavior still needs mapped automation)
+- Business Logic Covered By Automated Tests: Partial (backend lifecycle, permission-edge coverage, canonical pins table audit, and frontend DB-backed API/no-cache coverage exists; frontend menu and drag behavior still needs mapped automation)
 
 ## Business Logic
 
 PIN1 - Pins are stored in the database, scoped by company and user, not browser cache.
-PIN2 - A pin row has a single primary key pin ID plus company ID, user ID, resource type, resource ID, name, position, and created timestamp.
+PIN2 - The canonical database table is pins; a pin row has a single primary key pin ID plus company ID, user ID, resource type, resource ID, name, position, and created timestamp.
 PIN3 - Supported pinned resource types are node, logic gate, and project.
 PIN4 - Creating a pin requires company access and current view access to the target resource.
 PIN5 - The pin name is a snapshot resolved from the server resource name or title at pin time.
@@ -23,6 +23,7 @@ PIN12 - Resource right-click menus put Open in new browser tab first and Pin sec
 PIN13 - Pinned-resource right-click menus put Open in new browser tab first and Unpin second.
 PIN14 - The sidebar pin section must not read, write, hydrate, or recover pins from browser storage.
 PIN15 - The only frontend pin API surface is /v1/user-pins, /v1/user-pins/{pin_id}, and /v1/user-pins/order; legacy /v1/pins, pinsApi, SIDEBAR_PINS_KEY, label, and addedAt pin compatibility are not allowed.
+PIN16 - The user_pins table is not canonical and must be dropped; backend storage reads and writes the pins table.
 
 ## Scenarios
 
@@ -117,6 +118,7 @@ Business logic covered:
 - PIN7
 - PIN14
 - PIN15
+- PIN16
 
 Given:
 - A user pins a resource in the sidebar.
@@ -129,3 +131,4 @@ Expected:
 - Old browser storage cannot make a pin appear in the sidebar.
 - If the API write fails, the frontend does not persist a UI-only pin in browser storage.
 - A fresh incognito session shows the same pins as a normal session after the database row exists.
+- DBeaver queries against public.pins show the saved rows, and public.user_pins does not remain as the app's storage table.

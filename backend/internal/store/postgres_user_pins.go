@@ -14,7 +14,7 @@ func (r *PostgresRepo) ListUserPins(input UserPinListInput) ([]domain.UserPin, e
 	}
 	rows, err := r.db.QueryContext(context.Background(), `
 select company_id::text, pin_id::text, user_id::text, resource_type, resource_id::text, name, position, created_timestamp
-from user_pins
+from pins
 where company_id=$1::uuid and user_id=$2::uuid
 order by position asc, created_timestamp asc, pin_id asc`, input.CompanyID, input.UserID)
 	if err != nil {
@@ -44,7 +44,7 @@ func (r *PostgresRepo) UpsertUserPin(input UserPinInput) (domain.UserPin, error)
 		}
 	}
 	item, err := scanUserPin(r.db.QueryRowContext(context.Background(), `
-insert into user_pins (
+insert into pins (
   company_id,
   pin_id,
   user_id,
@@ -77,7 +77,7 @@ func (r *PostgresRepo) DeleteUserPin(input UserPinDeleteInput) error {
 		return ErrInvalid
 	}
 	result, err := r.db.ExecContext(context.Background(), `
-delete from user_pins
+delete from pins
 where company_id=$1::uuid and user_id=$2::uuid and pin_id=$3::uuid`, input.CompanyID, input.UserID, input.PinID)
 	if err != nil {
 		return err
@@ -105,7 +105,7 @@ func (r *PostgresRepo) ReorderUserPins(input UserPinReorderInput) error {
 
 	for index, pinID := range input.PinIDs {
 		result, err := tx.ExecContext(context.Background(), `
-update user_pins
+update pins
 set position=$4
 where company_id=$1::uuid and user_id=$2::uuid and pin_id=$3::uuid`,
 			input.CompanyID,
@@ -177,7 +177,7 @@ func (r *PostgresRepo) nextUserPinPosition(companyID, userID, resourceType, reso
 	var existingPosition sql.NullInt64
 	err := r.db.QueryRowContext(context.Background(), `
 select position
-from user_pins
+from pins
 where company_id=$1::uuid and user_id=$2::uuid and resource_type=$3 and resource_id=$4::uuid`, companyID, userID, resourceType, resourceID).Scan(&existingPosition)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
@@ -188,7 +188,7 @@ where company_id=$1::uuid and user_id=$2::uuid and resource_type=$3 and resource
 	var position int
 	err = r.db.QueryRowContext(context.Background(), `
 select coalesce(max(position), 0) + $3
-from user_pins
+from pins
 where company_id=$1::uuid and user_id=$2::uuid`, companyID, userID, userPinPositionStep).Scan(&position)
 	return position, err
 }
