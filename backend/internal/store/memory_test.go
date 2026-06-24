@@ -1107,12 +1107,17 @@ func TestMemoryRepoUserEmailConnectionLifecycle(t *testing.T) {
 	}
 }
 
-func TestMemoryRepoUserEmailConnectionsArePerAccount(t *testing.T) {
+func TestMemoryRepoUserEmailConnectionsArePersonalOnly(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	repo.EnsureCompany(companyID, "Email Company")
 	user, err := repo.UpsertAuthUser("subject-email", "user@example.com", "Email User")
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
@@ -1141,15 +1146,15 @@ func TestMemoryRepoUserEmailConnectionsArePerAccount(t *testing.T) {
 	if personal.AccountEmail != "user@example.com" || personal.GrantID != "personal-grant" {
 		t.Fatalf("personal connection = %+v, want user@example.com personal-grant", personal)
 	}
-	shared, err := repo.GetUserEmailConnectionByGrantID("shared-grant")
+	companyConnection, err := repo.GetCompanyEmailConnectionByAccountEmail(companyID, "shared@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if shared.AccountEmail != "shared@example.com" {
-		t.Fatalf("shared connection = %+v, want shared account", shared)
+	if companyConnection.AccountEmail != "shared@example.com" || companyConnection.GrantID != "shared-grant" {
+		t.Fatalf("company shared connection = %+v, want shared account company grant", companyConnection)
 	}
-	if _, err := repo.UpdateUserEmailConnectionStatus(user.UserID, "shared@example.com", "reauth_required"); err != nil {
-		t.Fatal(err)
+	if _, err := repo.UpdateUserEmailConnectionStatus(user.UserID, "shared@example.com", "reauth_required"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("shared user connection status error = %v, want ErrNotFound", err)
 	}
 	personal, err = repo.GetUserEmailConnection(user.UserID)
 	if err != nil {
@@ -1164,12 +1169,15 @@ func TestMemoryRepoUserEmailConnectionsArePerAccount(t *testing.T) {
 	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("personal after delete error = %v, want ErrNotFound", err)
 	}
-	shared, err = repo.GetUserEmailConnectionByGrantID("shared-grant")
+	if _, err := repo.GetUserEmailConnectionByGrantID("shared-grant"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("shared grant user lookup error = %v, want ErrNotFound", err)
+	}
+	companyConnection, err = repo.GetCompanyEmailConnectionByAccountEmail(companyID, "shared@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if shared.Status != "reauth_required" {
-		t.Fatalf("shared status = %q, want reauth_required after personal delete", shared.Status)
+	if companyConnection.Status != "connected" {
+		t.Fatalf("company shared status = %q, want connected after personal delete", companyConnection.Status)
 	}
 }
 

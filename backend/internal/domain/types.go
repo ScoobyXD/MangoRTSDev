@@ -205,14 +205,16 @@ type Invitation struct {
 }
 
 type UserEmailConnection struct {
-	UserID           string    `json:"user_id"`
-	Provider         string    `json:"provider"`
-	AccountEmail     string    `json:"account_email"`
-	Scope            string    `json:"scope,omitempty"`
-	GrantID          string    `json:"-"`
-	Status           string    `json:"status"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+	UserID                   string    `json:"user_id"`
+	Provider                 string    `json:"provider"`
+	AccountEmail             string    `json:"account_email"`
+	Scope                    string    `json:"scope,omitempty"`
+	CompanyID                string    `json:"company_id,omitempty"`
+	CompanyEmailConnectionID string    `json:"company_email_connection_id,omitempty"`
+	GrantID                  string    `json:"-"`
+	Status                   string    `json:"status"`
+	CreatedTimestamp         time.Time `json:"created_timestamp"`
+	UpdatedTimestamp         time.Time `json:"updated_timestamp"`
 }
 
 type CompanyEmailConnection struct {

@@ -35,10 +35,10 @@ ST24 - Company-owned shared mailbox credentials are stored in company_email_conn
 ST25 - A mailbox address used by a shared inbox does not need to be a Mango user and does not need company membership.
 ST26 - Each mailbox-capable shared inbox stores a company_email_connection_id foreign key that points to the company-owned mailbox credential used for mail operations.
 ST27 - shared_inboxes.account_email remains display/search metadata, but the credential source of truth is the company_email_connection_id link.
-ST28 - Personal My Triage mailbox credentials stay in user_email_connections and must not be used as the source of truth for Shared Triage mailbox access.
+ST28 - Personal My Triage mailbox credentials stay in user_email_connections as personal-only rows and must not be used as the source of truth for Shared Triage mailbox access.
 ST29 - Shared inbox OAuth setup or reconnect writes or updates company_email_connections for the target company and mailbox.
 ST30 - Creating or reassigning a mailbox-capable shared inbox requires an existing connected company email connection for that company and account email, or starts the shared inbox OAuth repair flow for a user allowed to manage that shared inbox.
-ST31 - Existing legacy user_email_connections rows with connection_scope = shared are backfilled into company_email_connections and linked to matching shared_inboxes.
+ST31 - Existing legacy user_email_connections rows with connection_scope = shared are backfilled into company_email_connections, linked to matching shared_inboxes, then removed before the legacy connection_scope column is dropped.
 ST32 - Users with view or edit permission to a shared inbox can open the shared inbox without connecting that mailbox to their personal account.
 ST33 - If a company-owned shared connection is missing or expired, normal permitted users see a repair-required state and do not receive a personal OAuth prompt.
 ST34 - If a company-owned shared connection is missing or expired, users who can manage that shared inbox can start shared inbox OAuth reconnect for the company-owned credential.
@@ -189,7 +189,7 @@ Expected:
 - The shared inbox stores company_email_connection_id and keeps account_email only as display/search metadata.
 - The shared inbox does not require support@example.com to exist as a Mango user.
 - Personal My Triage credentials in user_email_connections remain separate from the company-owned shared connection.
-- Legacy shared-scope rows are backfilled into company_email_connections and linked to matching shared inboxes.
+- Legacy shared-scope rows are backfilled into company_email_connections, linked to matching shared inboxes, removed from user_email_connections, and followed by dropping the legacy connection_scope column.
 - Creating or reassigning a mailbox-capable shared inbox fails or starts shared OAuth repair when no connected company email connection exists.
 
 ### Scenario ST-S7: Shared Connection Missing Or Expired

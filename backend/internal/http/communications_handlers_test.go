@@ -568,12 +568,8 @@ func TestNylasCallbackStoresSharedAccountWithoutOverwritingPersonalConnection(t 
 	if personal.AccountEmail != user.Email || personal.GrantID != "personal-grant" {
 		t.Fatalf("personal connection = %+v, want unchanged personal grant", personal)
 	}
-	shared, err := repo.GetUserEmailConnectionByGrantID("shared-grant")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if shared.UserID != user.UserID || shared.AccountEmail != "shared@example.com" {
-		t.Fatalf("shared connection = %+v, want separate shared account grant", shared)
+	if _, err := repo.GetUserEmailConnectionByGrantID("shared-grant"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("shared user connection lookup error = %v, want ErrNotFound", err)
 	}
 }
 
@@ -1917,6 +1913,87 @@ func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {
 	}
 	if connection.Status != "reauth_required" {
 		t.Fatalf("connection status = %q, want reauth_required", connection.Status)
+	}
+}
+
+func TestCommunicationsSharedNylasAuthErrorMarksCompanyConnectionReauthRequired(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "company-shared-reauth"
+	repo.EnsureCompany(companyID, "Shared Reauth Company")
+	const subject = "shared-reauth-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "personal-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	companyConnection, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID:         companyID,
+		Provider:          "google",
+		AccountEmail:      "support@example.com",
+		GrantID:           "shared-grant",
+		Status:            "connected",
+		ConnectedByUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeSharedInbox,
+		EntityID:   folder.FolderID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   &fakeNylasClient{listErr: NylasAPIError{StatusCode: http.StatusUnauthorized, Code: "unauthorized"}},
+	}).Routes()
+
+	path := "/v1/communications/messages?company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	}
+	updatedCompanyConnection, err := repo.GetCompanyEmailConnectionByID(companyID, companyConnection.CompanyEmailConnectionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedCompanyConnection.Status != "reauth_required" {
+		t.Fatalf("company connection status = %q, want reauth_required", updatedCompanyConnection.Status)
+	}
+	personal, err := repo.GetUserEmailConnection(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if personal.Status != "connected" {
+		t.Fatalf("personal status = %q, want connected", personal.Status)
 	}
 }
 
