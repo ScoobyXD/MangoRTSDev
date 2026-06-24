@@ -1,34 +1,48 @@
 import { humanLabelOrFallback } from "../modules/entityLabels.js";
-export type SidebarPinKind = "node" | "logic_gate";
+export type SidebarPinKind = "node" | "logic_gate" | "project";
 
 export type SidebarPin = {
+  pinID: string;
   id: string;
   kind: SidebarPinKind;
-  label: string;
-  addedAt: number;
+  name: string;
+  position: number;
+  createdTimestamp: string;
+};
+
+export type SidebarPinDraft = {
+  id: string;
+  kind: SidebarPinKind;
+  name?: string;
+  label?: string;
 };
 
 export type SidebarPinRequestDetail = {
   id: string;
   kind: SidebarPinKind;
+  name?: string;
   label?: string;
 };
 
 export const EVENT_APP_SIDEBAR_PIN_REQUESTED = "mangorts:app-sidebar-pin-requested";
 
-export function sidebarPinFallbackLabel(kind: SidebarPinKind, id: string): string {
+export function sidebarPinFallbackName(kind: SidebarPinKind, id: string): string {
   if (kind === "logic_gate") return "Logic Gate";
+  if (kind === "project") return "Project";
   return `Node ${id.trim().slice(0, 8) || "pin"}`;
 }
+
+export const sidebarPinFallbackLabel = sidebarPinFallbackName;
 
 export function requestAppSidebarPin(detail: SidebarPinRequestDetail): void {
   const id = detail.id.trim();
   if (!id) return;
+  const rawName = detail.name ?? detail.label;
   window.dispatchEvent(new CustomEvent<SidebarPinRequestDetail>(EVENT_APP_SIDEBAR_PIN_REQUESTED, {
     detail: {
       id,
       kind: detail.kind,
-      label: detail.kind === "logic_gate" ? humanLabelOrFallback(detail.label, sidebarPinFallbackLabel(detail.kind, id)) : (detail.label?.trim() || sidebarPinFallbackLabel(detail.kind, id)),
+      name: detail.kind === "logic_gate" ? humanLabelOrFallback(rawName, sidebarPinFallbackName(detail.kind, id)) : (rawName?.trim() || sidebarPinFallbackName(detail.kind, id)),
     },
   }));
 }

@@ -2643,7 +2643,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
                 type="button"
                 style={contextMenuButtonStyle}
                 onClick={() => {
-                  requestAppSidebarPin({ kind: "node", id: arenaCellContextCard.node_id, label: arenaCellContextCard.node_title });
+                  requestAppSidebarPin({ kind: "node", id: arenaCellContextCard.node_id, name: arenaCellContextCard.node_title });
                   setArenaCellContextMenu(null);
                 }}
                 {...contextMenuHoverHandlers}

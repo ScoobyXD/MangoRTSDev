@@ -103,6 +103,7 @@ type AppSidebarProps = {
   onHomeViewSelect: (view: HomeSidebarView) => void;
   onPageSelect: (page: AppSidebarPrimaryPage) => void;
   onPinOpen: (pin: SidebarPin) => void;
+  onPinOpenInNewTab: (pin: SidebarPin) => void;
   onPinRemove: (pin: SidebarPin) => void;
   onPinReorder: (moving: SidebarPin, target: SidebarPin | null, placement: "before" | "after") => void;
   onPinDragEnter: () => void;
@@ -232,6 +233,7 @@ export function AppSidebar({
   onHomeViewSelect,
   onPageSelect,
   onPinOpen,
+  onPinOpenInNewTab,
   onPinRemove,
   onPinReorder,
   onPinDragEnter,
@@ -348,7 +350,9 @@ export function AppSidebar({
   const readDraggedSidebarPin = useCallback((dataTransfer: DataTransfer): SidebarPin | null => {
     try {
       const parsed = JSON.parse(dataTransfer.getData(APP_SIDEBAR_PIN_DRAG_MIME)) as Partial<SidebarPin>;
-      const kind = parsed.kind === "node" || parsed.kind === "logic_gate" ? parsed.kind : null;
+      const pinID = typeof parsed.pinID === "string" ? parsed.pinID.trim() : "";
+      if (pinID) return pins.find((pin) => pin.pinID === pinID) ?? null;
+      const kind = parsed.kind === "node" || parsed.kind === "logic_gate" || parsed.kind === "project" ? parsed.kind : null;
       const id = typeof parsed.id === "string" ? parsed.id.trim() : "";
       if (!kind || !id) return null;
       return pins.find((pin) => pin.kind === kind && pin.id === id) ?? null;
@@ -1042,7 +1046,7 @@ export function AppSidebar({
           {pins.length === 0 ? (
             <div style={appSidebarEmptyStyle}>No pins</div>
           ) : pins.map((pin) => {
-            const pinKey = `${pin.kind}:${pin.id}`;
+            const pinKey = pin.pinID || `${pin.kind}:${pin.id}`;
             const dropPlacement = pinDropTarget?.key === pinKey ? pinDropTarget.placement : null;
             return (
               <div
@@ -1051,8 +1055,8 @@ export function AppSidebar({
                 style={appSidebarPinRowStyle(dropPlacement)}
                 onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData(APP_SIDEBAR_PIN_DRAG_MIME, JSON.stringify({ kind: pin.kind, id: pin.id }));
-                  event.dataTransfer.setData("text/plain", pin.label);
+                  event.dataTransfer.setData(APP_SIDEBAR_PIN_DRAG_MIME, JSON.stringify({ pinID: pin.pinID, kind: pin.kind, id: pin.id }));
+                  event.dataTransfer.setData("text/plain", pin.name);
                   setPinDropTarget(null);
                 }}
                 onDragEnd={() => setPinDropTarget(null)}
@@ -1079,9 +1083,9 @@ export function AppSidebar({
               >
                 <button type="button" style={appSidebarPinButtonStyle} onClick={() => onPinOpen(pin)}>
                   <span style={appSidebarPinIconStyle}><ExplorerRowIcon kind={pin.kind} /></span>
-                  <span style={appSidebarTextStyle}>{pin.label}</span>
+                  <span style={appSidebarTextStyle}>{pin.name}</span>
                 </button>
-                <button type="button" aria-label={`Remove ${pin.label}`} style={appSidebarPinRemoveStyle} onClick={() => onPinRemove(pin)}>
+                <button type="button" aria-label={`Unpin ${pin.name}`} style={appSidebarPinRemoveStyle} onClick={() => onPinRemove(pin)}>
                   X
                 </button>
               </div>
@@ -1275,11 +1279,21 @@ export function AppSidebar({
             type="button"
             style={appSidebarContextMenuButtonStyle}
             onClick={() => {
+              onPinOpenInNewTab(pinContextMenu.pin);
+              setPinContextMenu(null);
+            }}
+          >
+            Open in new browser tab
+          </button>
+          <button
+            type="button"
+            style={appSidebarContextMenuButtonStyle}
+            onClick={() => {
               onPinRemove(pinContextMenu.pin);
               setPinContextMenu(null);
             }}
           >
-            De-pin {pinContextMenu.pin.kind === "logic_gate" ? "Logic Gate" : "Node"}
+            Unpin
           </button>
         </FrameRightClickMenu>
       )}

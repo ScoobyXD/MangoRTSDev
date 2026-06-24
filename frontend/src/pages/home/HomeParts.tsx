@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { NotificationPopover } from "../../app/NotificationPopover";
+import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
+import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin, type SidebarPinKind } from "../../app/sidebarPins";
 import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "../../app/nodeEditorPopupControls";
 import { HeaderRecycleBinIcon } from "../../app/HeaderIcons";
@@ -97,8 +99,23 @@ function HomePinContextMenu({ menu, onClose, onDelete }: {
   onDelete?: (target: HomePinContextMenuState, position?: ConfirmActionMenuPosition) => void;
 }) {
   if (!menu) return null;
+  const openRoute = menu.kind === "logic_gate"
+    ? buildLogicGateRoute(menu.id)
+    : menu.kind === "project"
+      ? buildProjectRoute(menu.id)
+      : buildNodeRoute(menu.id);
   return (
     <FrameRightClickMenu x={menu.x} y={menu.y} onClose={onClose}>
+      <button
+        type="button"
+        style={sharedInboxContextMenuButtonStyle}
+        onClick={() => {
+          openAppPathInNewTab(openRoute);
+          onClose();
+        }}
+      >
+        Open in new browser tab
+      </button>
       <button
         type="button"
         style={sharedInboxContextMenuButtonStyle}
@@ -107,7 +124,7 @@ function HomePinContextMenu({ menu, onClose, onDelete }: {
           onClose();
         }}
       >
-        Pin {menu.kind === "logic_gate" ? "Logic Gate" : "Node"}
+        Pin {menu.kind === "logic_gate" ? "Logic Gate" : menu.kind === "project" ? "Project" : "Node"}
       </button>
       {onDelete && (
         <button
@@ -4629,7 +4646,17 @@ export function LogicGateInboxNodeGroupCard({
             type="button"
             style={sharedInboxContextMenuButtonStyle}
             onClick={() => {
-              requestAppSidebarPin({ kind: "logic_gate", id: group.logicGateID, label: group.label });
+              openAppPathInNewTab(buildLogicGateRoute(group.logicGateID));
+              setGroupContextMenu(null);
+            }}
+          >
+            Open in new browser tab
+          </button>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            onClick={() => {
+              requestAppSidebarPin({ kind: "logic_gate", id: group.logicGateID, name: group.label });
               setGroupContextMenu(null);
             }}
           >

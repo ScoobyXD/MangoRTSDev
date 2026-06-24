@@ -23,6 +23,8 @@ import { filterNodeGraphToFolderScope, resolveScopedMapSelectionFallback, type C
 import { classifyFrameKind, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { buildNodeRoute } from "../../app/deepLinkRoutes";
+import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
@@ -1618,12 +1620,16 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
             requestFindNodesOnCompanyExplorer(ids);
             setNodeContextMenu(null);
           }}
+          onOpenNodeInNewTab={(nodeID) => {
+            openAppPathInNewTab(buildNodeRoute(nodeID));
+            setNodeContextMenu(null);
+          }}
           onPinNode={(nodeID) => {
             const current = nodes.find((node) => node.node_id === nodeID);
             requestAppSidebarPin({
               kind: "node",
               id: nodeID,
-              label: current ? getNodeTitle(current) : nodeID,
+              name: current ? getNodeTitle(current) : nodeID,
             });
             setNodeContextMenu(null);
           }}

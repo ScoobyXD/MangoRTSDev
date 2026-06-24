@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { buildProjectRoute } from "../../app/deepLinkRoutes.js";
 import { openAppPathInNewTab } from "../../app/resourceLinks.js";
+import { requestAppSidebarPin } from "../../app/sidebarPins.js";
 import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl.js";
@@ -1456,7 +1457,22 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
               setProjectContextMenu(null);
             }}
           >
-            Open project in new browser tab
+            Open in new browser tab
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            style={projectContextMenuButtonStyle}
+            onClick={() => {
+              requestAppSidebarPin({
+                kind: "project",
+                id: projectContextMenu.project.project_id,
+                name: projectContextMenu.project.name,
+              });
+              setProjectContextMenu(null);
+            }}
+          >
+            Pin
           </button>
           <button
             type="button"

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } 
 import { buildLogicGateRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks";
+import { requestAppSidebarPin } from "../../app/sidebarPins";
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { getNodeTitle as getNodeRecordTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeTitle as getLogicGateRecordTitle, toLogicGateCanvasRecord, type LogicGateGVICRole, type LogicGateRecord as LogicGateApiRecord, type NodeRecord as LogicGateCanvasRecord } from "../logic-gate-map/shared";
@@ -34,6 +35,7 @@ import {
   type CompanyExplorerContextMenuState,
   type CompanyExplorerFolderPermissionsTarget,
   type CompanyExplorerOpenInNewTabTarget,
+  type CompanyExplorerPinTarget,
   type ExplorerDeleteTargetWithLabel,
   type ExplorerDragPayload,
   type ExplorerRenameDraft,
@@ -113,6 +115,12 @@ function getOpenInNewTabTargetForExplorerRow(row?: ExplorerTreeNode | null): Com
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
   if (row.kind === "project" && row.projectID) return { kind: "project", id: row.projectID };
   return null;
+}
+
+function getPinTargetForExplorerRow(row?: ExplorerTreeNode | null): CompanyExplorerPinTarget | null {
+  const target = getOpenInNewTabTargetForExplorerRow(row);
+  if (!target) return null;
+  return { ...target, name: row?.label?.trim() || target.id };
 }
 
 function openCompanyExplorerTargetInNewTab(target: CompanyExplorerOpenInNewTabTarget): void {
@@ -3877,6 +3885,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       renameTarget: protectedGVICRow ? null : resolveExplorerRenameTarget(row ?? null),
       permissionsTarget,
       openInNewTabTarget: protectedGVICRow ? null : getOpenInNewTabTargetForExplorerRow(row),
+      pinTarget: protectedGVICRow ? null : getPinTargetForExplorerRow(row),
       renameTreeID: row?.id ?? "",
       renameLabel: row?.label ?? "",
       contextKind,
@@ -4128,6 +4137,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         onOpenInNewTab={(target) => {
           setExplorerContextMenu(null);
           openCompanyExplorerTargetInNewTab(target);
+        }}
+        onPinTarget={(target) => {
+          setExplorerContextMenu(null);
+          requestAppSidebarPin({ kind: target.kind, id: target.id, name: target.name });
         }}
         onRenameTarget={(treeID, target, value) => {
           setExplorerContextMenu(null);
