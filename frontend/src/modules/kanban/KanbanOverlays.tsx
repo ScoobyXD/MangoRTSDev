@@ -88,7 +88,7 @@ export function KanbanContextMenus({
             type="button"
             style={contextMenuButtonStyle}
             onClick={() => {
-              requestAppSidebarPin({ kind: "node", id: contextCard.node_id, label: contextCard.node_title });
+              requestAppSidebarPin({ kind: "node", id: contextCard.node_id, name: contextCard.node_title });
               onCloseCardMenu();
             }}
             {...contextMenuHoverHandlers}

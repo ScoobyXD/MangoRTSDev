@@ -38,6 +38,7 @@ type Repository interface {
 	EffectiveAccessRepository
 	ConsolidatedViewRepository
 	SavedViewRepository
+	UserPinRepository
 	LogicGateWorkRepository
 	WorkItemReadRepository
 	CompanyExplorerRepository
@@ -253,6 +254,40 @@ type SavedViewInput struct {
 type SavedViewDeleteInput struct {
 	CompanyID   string
 	SavedViewID string
+}
+
+type UserPinRepository interface {
+	ListUserPins(input UserPinListInput) ([]domain.UserPin, error)
+	UpsertUserPin(input UserPinInput) (domain.UserPin, error)
+	DeleteUserPin(input UserPinDeleteInput) error
+	ReorderUserPins(input UserPinReorderInput) error
+}
+
+type UserPinListInput struct {
+	CompanyID string
+	UserID    string
+}
+
+type UserPinInput struct {
+	CompanyID    string
+	PinID        string
+	UserID       string
+	ResourceType string
+	ResourceID   string
+	Name         string
+	Position     int
+}
+
+type UserPinDeleteInput struct {
+	CompanyID string
+	UserID    string
+	PinID     string
+}
+
+type UserPinReorderInput struct {
+	CompanyID string
+	UserID    string
+	PinIDs    []string
 }
 
 type LogicGateWorkRepository interface {

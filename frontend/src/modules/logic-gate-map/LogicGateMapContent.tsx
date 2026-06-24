@@ -19,6 +19,8 @@ import { buildLogicGateMapRelationshipRoutingGrid, getLogicGateMapAnchorPoint, r
 import { useLogicGateMapGraphPersistence } from "./useLogicGateMapGraphPersistence";
 import { useLogicGateMapViewportHandlers } from "./useLogicGateMapViewportHandlers";
 import { getActiveCompanyID } from "../../auth/currentCompany";
+import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
+import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { createRequestJSON } from "../api/requestJSON";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
@@ -1542,12 +1544,16 @@ export const LogicGateMapContent: React.FC<{ accent: string; widgetId?: string; 
             requestFindLogicGatesOnCompanyExplorer(ids);
             setNodeContextMenu(null);
           }}
+          onOpenNodeInNewTab={(nodeID) => {
+            openAppPathInNewTab(buildLogicGateRoute(nodeID));
+            setNodeContextMenu(null);
+          }}
           onPinNode={(nodeID) => {
             const current = nodes.find((node) => node.node_id === nodeID);
             requestAppSidebarPin({
               kind: "logic_gate",
               id: nodeID,
-              label: current ? getNodeTitle(current) : nodeID,
+              name: current ? getNodeTitle(current) : nodeID,
             });
             setNodeContextMenu(null);
           }}

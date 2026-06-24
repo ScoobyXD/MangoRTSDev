@@ -43,7 +43,8 @@ import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/l
 import { AppLiveFreshnessBridge } from "./AppLiveFreshnessBridge";
 import { useFrameDragResize } from "./useFrameDragResize";
 import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeSidebarView, type SidebarPin } from "./AppSidebarChrome";
-import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackLabel, type SidebarPinRequestDetail } from "./sidebarPins";
+import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackName, type SidebarPinDraft, type SidebarPinKind, type SidebarPinRequestDetail } from "./sidebarPins";
+import { createSidebarPin, deleteSidebarPin, fetchSidebarPins, reorderSidebarPins } from "./sidebarPinsApi";
 import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeCreator";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import { AppTaskbar } from "./AppTaskbar";
@@ -69,7 +70,6 @@ const COLORWAY_LABELS: Record<ColorwayKey, string> = {
 };
 const APP_SIDEBAR_MAX_W = 420;
 const APP_RESIZE_HANDLE_W = 10;
-const SIDEBAR_PINS_KEY = "mangorts.app-sidebar-pins.v1";
 const SIDEBAR_WIDTH_KEY = "mangorts.app-sidebar-width.v1";
 const HOME_VIEW_STORAGE_PREFIX = "mangorts.app.home-view.v1";
 const SHOW_LEGACY_HEADER = false;
@@ -180,43 +180,6 @@ function getSidebarExplorerSelectionTargetFrameIDs(tab: ViewTab | undefined): st
     .map((frame) => frame.id);
 }
 
-function isSidebarPin(value: unknown): value is SidebarPin {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<SidebarPin>;
-  return (
-    (candidate.kind === "node" || candidate.kind === "logic_gate") &&
-    typeof candidate.id === "string" &&
-    candidate.id.trim().length > 0 &&
-    typeof candidate.label === "string" &&
-    typeof candidate.addedAt === "number"
-  );
-}
-
-function readSidebarPins(): SidebarPin[] {
-  try {
-    const raw = localStorage.getItem(SIDEBAR_PINS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isSidebarPin).map((pin) => ({
-      id: pin.id.trim(),
-      kind: pin.kind,
-      label: pin.label.trim() || sidebarPinFallbackLabel(pin.kind, pin.id),
-      addedAt: pin.addedAt,
-    }));
-  } catch {
-    return [];
-  }
-}
-
-function saveSidebarPins(pins: SidebarPin[]): void {
-  try {
-    localStorage.setItem(SIDEBAR_PINS_KEY, JSON.stringify(pins));
-  } catch {
-    // Sidebar pins are convenience state; losing storage should not block navigation.
-  }
-}
-
 function clampSidebarWidth(width: number): number {
   return clamp(Math.round(width), APP_SIDEBAR_MIN_W, APP_SIDEBAR_MAX_W);
 }
@@ -236,29 +199,66 @@ function saveSidebarWidth(width: number): void {
   } catch {}
 }
 
-function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPin[] {
+function isSidebarPinKind(value: unknown): value is SidebarPinKind {
+  return value === "node" || value === "logic_gate" || value === "project";
+}
+
+function sidebarPinIdentity(pin: Pick<SidebarPin, "pinID" | "kind" | "id">): string {
+  const pinID = pin.pinID.trim();
+  return pinID ? `pin:${pinID}` : `${pin.kind}:${pin.id}`;
+}
+
+function upsertSidebarPin(items: SidebarPin[], pin: SidebarPin): SidebarPin[] {
+  const identity = sidebarPinIdentity(pin);
+  const existingIndex = items.findIndex((item) => sidebarPinIdentity(item) === identity || (item.kind === pin.kind && item.id === pin.id));
+  const next = [...items];
+  if (existingIndex >= 0) next[existingIndex] = pin;
+  else next.push(pin);
+  return next.sort((left, right) => (
+    left.position - right.position
+    || Date.parse(left.createdTimestamp) - Date.parse(right.createdTimestamp)
+    || left.pinID.localeCompare(right.pinID)
+  ));
+}
+
+function moveSidebarPin(items: SidebarPin[], moving: SidebarPin, target: SidebarPin | null, placement: "before" | "after"): SidebarPin[] {
+  const movingIdentity = sidebarPinIdentity(moving);
+  const movingIndex = items.findIndex((item) => sidebarPinIdentity(item) === movingIdentity);
+  if (movingIndex < 0) return items;
+  const movingPin = items[movingIndex];
+  const withoutMoving = items.filter((_, index) => index !== movingIndex);
+  const targetIdentity = target ? sidebarPinIdentity(target) : "";
+  const targetIndex = target ? withoutMoving.findIndex((item) => sidebarPinIdentity(item) === targetIdentity) : withoutMoving.length;
+  const insertIndex = targetIndex < 0
+    ? withoutMoving.length
+    : placement === "after"
+      ? targetIndex + 1
+      : targetIndex;
+  const next = [...withoutMoving];
+  next.splice(Math.max(0, Math.min(insertIndex, next.length)), 0, movingPin);
+  return next;
+}
+
+function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPinDraft[] {
   const payload = readExplorerDragPayload(dataTransfer);
   if (!payload) return [];
   const droppedText = dataTransfer.getData("text/plain").trim();
-  const now = Date.now();
 
-  if ((payload.kind === "node" || payload.kind === "logic_gate") && payload.itemID) {
+  if (isSidebarPinKind(payload.kind) && payload.itemID) {
     const kind = payload.kind;
     return [{
       id: payload.itemID.trim(),
       kind,
-      label: droppedText || sidebarPinFallbackLabel(kind, payload.itemID),
-      addedAt: now,
+      name: droppedText || sidebarPinFallbackName(kind, payload.itemID),
     }];
   }
 
-  if (payload.kind === "batch" && (payload.itemType === "node" || payload.itemType === "logic_gate")) {
+  if (payload.kind === "batch" && isSidebarPinKind(payload.itemType)) {
     const kind = payload.itemType;
-    return (payload.items ?? []).map((item, index) => ({
+    return (payload.items ?? []).map((item) => ({
       id: item.itemID.trim(),
       kind,
-      label: sidebarPinFallbackLabel(kind, item.itemID),
-      addedAt: now + index,
+      name: sidebarPinFallbackName(kind, item.itemID),
     }));
   }
 
@@ -439,7 +439,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     return loadFrameLinks().filter((edge) => loadedFrameIDs.has(edge.a) && loadedFrameIDs.has(edge.b));
   });
   const [appSidebarWidth, setAppSidebarWidth] = useState(readSidebarWidth);
-  const [sidebarPins, setSidebarPins] = useState<SidebarPin[]>(readSidebarPins);
+  const [sidebarPins, setSidebarPins] = useState<SidebarPin[]>([]);
+  const sidebarPinsRef = useRef<SidebarPin[]>([]);
   const [pinDropActive, setPinDropActive] = useState(false);
   const [explorerNodePopup, setExplorerNodePopup] = useState<NodeEditorPopupState | null>(() => nodePopupFromRoute(deepLink));
   const [taskbarData, setTaskbarData] = useState(() => ({
@@ -647,7 +648,28 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   useEffect(() => { saveViews(tabs, activeTabId); }, [tabs, activeTabId]);
   useEffect(() => { saveSettings({ bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor }); }, [bgColor, crossColor, headerBgColor, headerTextColor, tabBgColor, tabTextColor]);
   useEffect(() => { saveSidebarWidth(appSidebarWidth); }, [appSidebarWidth]);
-  useEffect(() => { saveSidebarPins(sidebarPins); }, [sidebarPins]);
+  useEffect(() => { sidebarPinsRef.current = sidebarPins; }, [sidebarPins]);
+  useEffect(() => {
+    const cleanCompanyID = activeCompanyID.trim();
+    if (!cleanCompanyID) {
+      setSidebarPins([]);
+      return;
+    }
+    let cancelled = false;
+    fetchSidebarPins(apiBase, cleanCompanyID)
+      .then((pins) => {
+        if (!cancelled) setSidebarPins(pins);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error("Failed to load sidebar pins", error);
+          setSidebarPins([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCompanyID, apiBase]);
   useEffect(() => {
     setTaskbarData((previous) => {
       if (previous.scope === taskbarScope) return previous;
@@ -1159,49 +1181,55 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     activatePrimaryPage(initialPage);
   }, [activatePrimaryPage, deepLink, initialPage, overrideContent]);
 
-  const addSidebarPins = useCallback((pins: SidebarPin[]) => {
-    const cleanPins = pins.filter((pin) => pin.id.trim() && (pin.kind === "node" || pin.kind === "logic_gate"));
+  const addSidebarPins = useCallback((pins: SidebarPinDraft[]) => {
+    const cleanCompanyID = activeCompanyID.trim();
+    if (!cleanCompanyID) return;
+    const cleanPins = pins
+      .map((pin) => ({
+        ...pin,
+        id: pin.id.trim(),
+        name: (pin.name ?? pin.label ?? "").trim() || sidebarPinFallbackName(pin.kind, pin.id),
+      }))
+      .filter((pin) => pin.id && isSidebarPinKind(pin.kind));
     if (cleanPins.length === 0) return;
-    setSidebarPins((previous) => {
-      const next = [...previous];
+    void (async () => {
       for (const pin of cleanPins) {
-        const id = pin.id.trim();
-        const index = next.findIndex((item) => item.kind === pin.kind && item.id === id);
-        const normalized = {
-          ...pin,
-          id,
-          label: pin.label.trim() || sidebarPinFallbackLabel(pin.kind, id),
-        };
-        if (index >= 0) next[index] = { ...next[index], ...normalized };
-        else next.push(normalized);
+        try {
+          const saved = await createSidebarPin(apiBase, cleanCompanyID, pin);
+          setSidebarPins((previous) => upsertSidebarPin(previous, saved));
+        } catch (error) {
+          console.error("Failed to save sidebar pin", error);
+        }
       }
-      return next;
-    });
-  }, []);
+    })();
+  }, [activeCompanyID, apiBase]);
 
   const removeSidebarPin = useCallback((pin: SidebarPin) => {
-    setSidebarPins((previous) => previous.filter((item) => item.kind !== pin.kind || item.id !== pin.id));
-  }, []);
+    const cleanCompanyID = activeCompanyID.trim();
+    const pinID = pin.pinID.trim();
+    const previousPins = sidebarPinsRef.current;
+    setSidebarPins((previous) => previous.filter((item) => sidebarPinIdentity(item) !== sidebarPinIdentity(pin)));
+    if (!cleanCompanyID || !pinID) return;
+    void deleteSidebarPin(apiBase, cleanCompanyID, pinID).catch((error) => {
+      console.error("Failed to remove sidebar pin", error);
+      setSidebarPins(previousPins);
+    });
+  }, [activeCompanyID, apiBase]);
 
   const reorderSidebarPin = useCallback((moving: SidebarPin, target: SidebarPin | null, placement: "before" | "after") => {
-    setSidebarPins((previous) => {
-      const movingIndex = previous.findIndex((item) => item.kind === moving.kind && item.id === moving.id);
-      if (movingIndex < 0) return previous;
-      const movingPin = previous[movingIndex];
-      const withoutMoving = previous.filter((_, index) => index !== movingIndex);
-      const targetIndex = target
-        ? withoutMoving.findIndex((item) => item.kind === target.kind && item.id === target.id)
-        : withoutMoving.length;
-      const insertIndex = targetIndex < 0
-        ? withoutMoving.length
-        : placement === "after"
-          ? targetIndex + 1
-          : targetIndex;
-      const next = [...withoutMoving];
-      next.splice(Math.max(0, Math.min(insertIndex, next.length)), 0, movingPin);
-      return next;
-    });
-  }, []);
+    const cleanCompanyID = activeCompanyID.trim();
+    const nextPins = moveSidebarPin(sidebarPinsRef.current, moving, target, placement);
+    setSidebarPins(nextPins);
+    if (!cleanCompanyID) return;
+    const pinIDs = nextPins.map((pin) => pin.pinID.trim()).filter(Boolean);
+    if (pinIDs.length !== nextPins.length) return;
+    void reorderSidebarPins(apiBase, cleanCompanyID, pinIDs)
+      .then((pins) => setSidebarPins(pins))
+      .catch((error) => {
+        console.error("Failed to reorder sidebar pins", error);
+        void fetchSidebarPins(apiBase, cleanCompanyID).then(setSidebarPins).catch(() => {});
+      });
+  }, [activeCompanyID, apiBase]);
 
   const upsertDockTab = useCallback((input: AppDockTabInput): string => {
     const tabID = appDockTabID(input.kind, input.entityID);
@@ -1437,19 +1465,25 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     onNavigate(routeForPage("home"), { replace: true });
   }, [homeViewID, onNavigate, gvicDeepLink]);
 
+  const routeForSidebarPin = useCallback((pin: SidebarPin): string => {
+    if (pin.kind === "logic_gate") return buildLogicGateRoute(pin.id);
+    if (pin.kind === "project") return buildProjectRoute(pin.id);
+    return buildNodeRoute(pin.id);
+  }, []);
+
   const openSidebarPin = useCallback((pin: SidebarPin) => {
     const companyID = getActiveCompanyID();
     if (pin.kind === "logic_gate") {
       setExplorerNodePopup(null);
       setLogicGateArenaTarget({
         logicGateID: pin.id,
-        label: pin.label,
+        label: pin.name,
         requestID: Date.now(),
       });
       writePendingLogicGateArenaSelection({
         companyID,
         logicGateID: pin.id,
-        label: pin.label,
+        label: pin.name,
       });
       const ensured = activatePrimaryPage("logic-gate-arena");
       if (onNavigate) {
@@ -1458,19 +1492,37 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       }
       return;
     }
+    if (pin.kind === "project") {
+      setExplorerNodePopup(null);
+      setActiveDockTabID(null);
+      setProjectManagementTarget({ projectID: pin.id, requestID: Date.now() });
+      const ensured = activatePrimaryPage("project-management");
+      if (onNavigate) {
+        saveViews(ensured.tabs, ensured.tab.id);
+        onNavigate(buildProjectRoute(pin.id));
+      }
+      return;
+    }
 
     closeMenus();
     setActiveDockTabID(null);
     routeManagedExplorerNodePopupRef.current = false;
-    setExplorerNodePopup({ nodeID: pin.id, nodeTitle: pin.label });
+    setExplorerNodePopup({ nodeID: pin.id, nodeTitle: pin.name });
+    if (onNavigate) onNavigate(buildNodeRoute(pin.id));
   }, [activatePrimaryPage, closeMenus, onNavigate]);
+
+  const openSidebarPinInNewBrowserTab = useCallback((pin: SidebarPin) => {
+    openAppPathInNewTab(routeForSidebarPin(pin));
+  }, [routeForSidebarPin]);
 
   const openTimelineEntity = useCallback((target: { kind: "node" | "logic_gate"; id: string; label: string }) => {
     openSidebarPin({
+      pinID: "",
       kind: target.kind,
       id: target.id,
-      label: target.label,
-      addedAt: Date.now(),
+      name: target.label,
+      position: 0,
+      createdTimestamp: new Date().toISOString(),
     });
   }, [openSidebarPin]);
 
@@ -1486,14 +1538,15 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     const onSidebarPinRequested = (event: Event) => {
       const detail = (event as CustomEvent<SidebarPinRequestDetail>).detail;
       const id = typeof detail?.id === "string" ? detail.id.trim() : "";
-      if (!id || (detail.kind !== "node" && detail.kind !== "logic_gate")) return;
+      if (!id || !isSidebarPinKind(detail.kind)) return;
       addSidebarPins([{
         id,
         kind: detail.kind,
-        label: typeof detail.label === "string" && detail.label.trim()
-          ? detail.label.trim()
-          : sidebarPinFallbackLabel(detail.kind, id),
-        addedAt: Date.now(),
+        name: typeof detail.name === "string" && detail.name.trim()
+          ? detail.name.trim()
+          : typeof detail.label === "string" && detail.label.trim()
+            ? detail.label.trim()
+            : sidebarPinFallbackName(detail.kind, id),
       }]);
     };
     window.addEventListener(EVENT_APP_SIDEBAR_PIN_REQUESTED, onSidebarPinRequested);
@@ -1736,6 +1789,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           onHomeViewSelect={selectHomeSidebarView}
           onPageSelect={selectPrimaryPage}
           onPinOpen={openSidebarPin}
+          onPinOpenInNewTab={openSidebarPinInNewBrowserTab}
           onPinRemove={removeSidebarPin}
           onPinReorder={reorderSidebarPin}
           onPinDragEnter={() => setPinDropActive(true)}

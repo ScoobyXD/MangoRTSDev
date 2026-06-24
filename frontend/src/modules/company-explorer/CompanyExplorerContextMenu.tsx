@@ -8,6 +8,7 @@ import type {
   CompanyExplorerContextMenuState,
   CompanyExplorerFolderPermissionsTarget,
   CompanyExplorerOpenInNewTabTarget,
+  CompanyExplorerPinTarget,
   ExplorerDeleteTargetWithLabel,
   ExplorerRenameTarget,
 } from "./companyExplorerTypes";
@@ -22,6 +23,7 @@ type CompanyExplorerContextMenuProps = {
   onCreateProject: (parentFolderID: string, position?: number) => void;
   onOpenFolderPermissions: (target: CompanyExplorerFolderPermissionsTarget) => void;
   onOpenInNewTab: (target: CompanyExplorerOpenInNewTabTarget) => void;
+  onPinTarget: (target: CompanyExplorerPinTarget) => void;
   onRenameTarget: (treeID: string, target: ExplorerRenameTarget, value: string) => void;
   onDeleteTargets: (targets: ExplorerDeleteTargetWithLabel[], position?: ConfirmActionMenuPosition) => void;
 };
@@ -35,6 +37,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   onCreateProject,
   onOpenFolderPermissions,
   onOpenInNewTab,
+  onPinTarget,
   onRenameTarget,
   onDeleteTargets,
 }) => {
@@ -48,6 +51,7 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
   const priorityOptions = KANBAN_NODE_PRIORITY_STYLE_OPTIONS.filter((option) => option.value !== "0");
   const menuSections = buildCompanyExplorerContextMenuSections({
     openInNewTabEnabled: Boolean(menu.openInNewTabTarget),
+    pinEnabled: Boolean(menu.pinTarget),
     permissionsEnabled: Boolean(menu.permissionsTarget),
     createFolderEnabled: menu.canCreateFolder,
     createNodeEnabled: menu.canCreateNode,
@@ -168,6 +172,23 @@ export const CompanyExplorerContextMenu: React.FC<CompanyExplorerContextMenuProp
           onClick={() => {
             if (!menu.openInNewTabTarget) return;
             onOpenInNewTab(menu.openInNewTabTarget);
+          }}
+        >
+          {action.label}
+        </button>
+      );
+    }
+    if (action.id === "pin") {
+      return (
+        <button
+          key={action.id}
+          type="button"
+          disabled={!action.enabled}
+          style={menuButtonStyle(action.enabled)}
+          {...menuItemEvents(action.enabled, closePrioritySubmenu)}
+          onClick={() => {
+            if (!menu.pinTarget) return;
+            onPinTarget(menu.pinTarget);
           }}
         >
           {action.label}

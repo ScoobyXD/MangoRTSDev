@@ -131,6 +131,7 @@ export type CompanyExplorerContentProps = {
 
 export type CompanyExplorerContextMenuActionID =
   | "open_in_new_tab"
+  | "pin"
   | "folder_permissions"
   | "create_folder"
   | "create_node"
@@ -147,6 +148,7 @@ export type CompanyExplorerContextMenuAction = {
 
 export function buildCompanyExplorerContextMenuSections(input: {
   openInNewTabEnabled?: boolean;
+  pinEnabled?: boolean;
   permissionsEnabled: boolean;
   createFolderEnabled: boolean;
   createNodeEnabled: boolean;
@@ -157,6 +159,7 @@ export function buildCompanyExplorerContextMenuSections(input: {
 }): CompanyExplorerContextMenuAction[][] {
   const resourceActions: CompanyExplorerContextMenuAction[] = [
     ...(input.openInNewTabEnabled ? [{ id: "open_in_new_tab", label: "Open in new browser tab", enabled: true } as CompanyExplorerContextMenuAction] : []),
+    ...(input.pinEnabled ? [{ id: "pin", label: "Pin", enabled: true } as CompanyExplorerContextMenuAction] : []),
   ];
   return [
     [

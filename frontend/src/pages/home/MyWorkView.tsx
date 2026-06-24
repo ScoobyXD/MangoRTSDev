@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
+import { buildNodeRoute } from "../../app/deepLinkRoutes";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
+import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../../modules/communications/communicationsApi";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
@@ -1331,21 +1333,31 @@ function MyWorkDisplayRowItem({
             type="button"
             style={sharedInboxContextMenuButtonStyle}
             onClick={() => {
-              onRenameNode?.(row.id);
+              openAppPathInNewTab(buildNodeRoute(row.id));
               setContextMenu(null);
             }}
           >
-            Rename
+            Open in new browser tab
           </button>
           <button
             type="button"
             style={sharedInboxContextMenuButtonStyle}
             onClick={() => {
-              requestAppSidebarPin({ kind: "node", id: row.id, label: row.title });
+              requestAppSidebarPin({ kind: "node", id: row.id, name: row.title });
               setContextMenu(null);
             }}
           >
             Pin
+          </button>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            onClick={() => {
+              onRenameNode?.(row.id);
+              setContextMenu(null);
+            }}
+          >
+            Rename
           </button>
           <div style={myWorkContextMenuDividerStyle} />
           <button

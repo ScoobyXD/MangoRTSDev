@@ -148,6 +148,17 @@ type SavedView struct {
 	UpdatedTimestamp time.Time           `json:"updated_timestamp"`
 }
 
+type UserPin struct {
+	CompanyID        string    `json:"company_id"`
+	PinID            string    `json:"pin_id"`
+	UserID           string    `json:"user_id"`
+	ResourceType     string    `json:"resource_type"`
+	ResourceID       string    `json:"resource_id"`
+	Name             string    `json:"name"`
+	Position         int       `json:"position"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+}
+
 type EntityPermission struct {
 	CompanyID        string    `json:"company_id"`
 	EntityType       string    `json:"entity_type"`

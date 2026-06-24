@@ -32,6 +32,7 @@ type LogicGateMapContextMenusProps = {
   onToggleRelationshipColors: () => void;
   onRelationshipRoleColorChange: (role: LogicGateMapRelationshipRole, color: string) => void;
   onFindNodeSelection: (nodeID: string) => void;
+  onOpenNodeInNewTab: (nodeID: string) => void;
   onPinNode: (nodeID: string) => void;
   onRenameNode: (nodeID: string) => void;
   onOpenPermissions: (nodeID: string) => void;
@@ -65,6 +66,7 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
   onToggleRelationshipColors,
   onRelationshipRoleColorChange,
   onFindNodeSelection,
+  onOpenNodeInNewTab,
   onPinNode,
   onRenameNode,
   onOpenPermissions,
@@ -216,6 +218,9 @@ export const LogicGateMapContextMenus: React.FC<LogicGateMapContextMenusProps> =
         }}
         onPointerDown={(event) => event.stopPropagation()}
       >
+        <button style={contextMenuButtonStyle} onClick={() => onOpenNodeInNewTab(nodeContextMenu.nodeID)}>
+          Open in new browser tab
+        </button>
         <button style={contextMenuButtonStyle} onClick={() => onFindNodeSelection(nodeContextMenu.nodeID)}>
           Find on Explorer
         </button>
