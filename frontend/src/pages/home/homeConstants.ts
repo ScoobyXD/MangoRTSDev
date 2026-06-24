@@ -12,7 +12,6 @@ export const MESSAGE_BATCH_SIZE = 20;
 export const ARCHIVE_BATCH_SIZE = 5;
 export const ARCHIVE_BATCH_FLUSH_DELAY_MS = 500;
 export const MESSAGE_EVENT_REFRESH_DELAY_MS = 1_200;
-export const MESSAGE_POLL_REFRESH_INTERVAL_MS = 30_000;
 export const AUTO_ARCHIVE_SCROLL_DELAY_MS = 2_000;
 export const SELF_SEND_DELIVERY_REFRESH_DELAY_MS = 4_000;
 export const TRIAGE_MESSAGE_DRAG_MIME = "application/x-mangorts-communications-triage-messages";
