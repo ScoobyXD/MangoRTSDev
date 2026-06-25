@@ -486,6 +486,7 @@ export const panelStyle: React.CSSProperties = {
 export function mailViewerPanelStyle(attached: boolean): React.CSSProperties {
   return {
     ...panelStyle,
+    position: "relative",
     gridTemplateRows: "minmax(0, 1fr)",
     marginLeft: attached ? -HOME_COLUMN_RESIZER_WIDTH : 0,
     borderRadius: attached ? `0 ${HOME_KEY_COLUMN_RADIUS}px ${HOME_KEY_COLUMN_RADIUS}px 0` : HOME_KEY_COLUMN_RADIUS,
@@ -1833,7 +1834,7 @@ export const mailMessageListFrameStyle: React.CSSProperties = {
 
 export const triageAdvanceButtonDockStyle: React.CSSProperties = {
   position: "absolute",
-  right: 14,
+  left: 14,
   bottom: 14,
   zIndex: 5,
   pointerEvents: "none",
@@ -1841,10 +1842,21 @@ export const triageAdvanceButtonDockStyle: React.CSSProperties = {
 
 export const triageAdvanceButtonStyle: React.CSSProperties = {
   ...mailPanelPrimaryButtonStyle,
-  minWidth: 178,
-  minHeight: 38,
+  width: 136,
+  height: 58,
+  minHeight: 58,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: 8,
+  padding: "8px 10px",
+  borderRadius: 8,
+  fontSize: 10,
+  fontWeight: 800,
+  lineHeight: 1.1,
   pointerEvents: "auto",
-  whiteSpace: "nowrap",
+  textAlign: "left",
+  whiteSpace: "normal",
 };
 
 export const loadingMoreStyle: React.CSSProperties = {
