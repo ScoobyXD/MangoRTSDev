@@ -210,7 +210,6 @@ type DeleteTextBlockConfirmationModalProps = {
 export const DeleteTextBlockConfirmationModal: React.FC<DeleteTextBlockConfirmationModalProps> = ({
   title,
   chatCount,
-  surfaceText,
   position,
   onConfirm,
   onCancel,
@@ -219,7 +218,7 @@ export const DeleteTextBlockConfirmationModal: React.FC<DeleteTextBlockConfirmat
     title="Are you sure you want to delete this?"
     detail={`This removes "${title}" from the middle column${chatCount > 0 ? ` and deletes ${chatCount} chat repl${chatCount === 1 ? "y" : "ies"} attached to it` : ""}.`}
     position={position}
-    isDarkTheme={surfaceText !== "#111111"}
+    isDarkTheme={false}
     onConfirm={onConfirm}
     onCancel={onCancel}
   />

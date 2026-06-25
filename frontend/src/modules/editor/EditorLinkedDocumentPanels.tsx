@@ -428,13 +428,14 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   return (
     <>
       {(activeTab === "editor" || activeTab === "outline-styles") && (
-        <div className="mango-editor-hover-highlight" style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
+        <div className="mango-editor-hover-highlight" style={{ display: "grid", gap: 8, width: "100%", pointerEvents: "auto" }}>
           <div
             style={{
               minWidth: 0,
+              width: "100%",
               maxWidth: "100%",
               display: "grid",
-              gridTemplateColumns: gvicStrip ? "minmax(0, min(780px, 1fr)) max-content" : "minmax(0, min(780px, 100%))",
+              gridTemplateColumns: gvicStrip ? "minmax(0, 1fr) max-content" : "minmax(0, 1fr)",
               alignItems: "center",
               gap: 8,
             }}
@@ -517,7 +518,11 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               {linkedNodeTitle || "\u00A0"}
             </span>
           </div>
-          {gvicStrip}
+          {gvicStrip && (
+            <div style={{ justifySelf: "end", alignSelf: "center", minWidth: 0, paddingRight: 4 }}>
+              {gvicStrip}
+            </div>
+          )}
           </div>
           {nodePresetFields && (
             <div
