@@ -189,7 +189,7 @@ export type GVICMatrixProjectionRow = {
 };
 
 export type LogicGateAssignmentCommandResult = { card: KanbanCard; node: NodeRecord; gvic_projection_rows: GVICMatrixProjectionRow[] };
-type LogicGateAssignmentMutationOrigin = "kanban" | "matrix";
+type LogicGateAssignmentMutationOrigin = "company_explorer" | "kanban" | "matrix";
 
 export type GVICMatrixNodeCreateResult = {
   node: NodeRecord;

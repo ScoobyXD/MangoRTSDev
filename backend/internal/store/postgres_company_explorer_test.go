@@ -99,6 +99,40 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLogicGateNativeChildren(
 	}
 }
 
+func TestPostgresCompanyExplorerSearchUsesVisibleExplorerLocations(t *testing.T) {
+	raw, err := os.ReadFile("postgres_company_explorer_search.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_company_explorer_search.go: %v", err)
+	}
+	source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+	for _, want := range []string{
+		"with recursive visible_folder_paths as",
+		"companyexploreraccesspredicate(\"'folder'\", \"folder.folder_id\", \"$3\", \"$4\")",
+		"companyexploreraccesspredicate(\"'folder'\", \"child.folder_id\", \"$3\", \"$4\")",
+		"visible_item_locations as",
+		"and (item.parent_folder_id is null or parent.folder_id is not null)",
+		"companyexploreraccesspredicate(\"item.target_type\", \"item.target_id\", \"$3\", \"$4\")",
+		"visible_logic_gate_locations as",
+		"from node_logic_gate_assignments assignment",
+		"join visible_logic_gate_locations logic_gate_location",
+		"companyexploreraccesspredicate(\"'node'\", \"assignment.node_id\", \"$3\", \"$4\")",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("company explorer search SQL missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"from project_relationships relationship",
+		"project_locations",
+		"relationship.resource_id as target_id",
+		"from candidates candidate left join ranked_locations",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("company explorer search SQL kept hidden/project relationship search marker %q", forbidden)
+		}
+	}
+}
+
 func TestPostgresCompanyExplorerV2RootRowsUseContiguousRootArgs(t *testing.T) {
 	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
 	if err != nil {

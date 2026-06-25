@@ -20,7 +20,7 @@ import {
   shouldAcceptClearedMapSelectionAfterExplorerSelection,
   shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
-import { getExplorerRowContainerID } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
+import { getExplorerRowContainerID, shouldRemoveExplorerPlacementAfterLogicGateDrop } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { buildCompanyExplorerSearchTreeRows, buildCompanyExplorerTreeRows, buildCompanyExplorerV2TreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName, isCompanyExplorerV2FolderItemPlacementRow } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
 import { buildCompanyExplorerContextMenuSections, createInitialCompanyExplorerExpandedRows, filterExplorerRowsForCustomTopLevel } from "../../../../frontend/src/modules/company-explorer/CompanyExplorerContentModel.js";
 
@@ -67,6 +67,32 @@ run("logic gate child node rows use the logic gate as their reorder container", 
     parentLogicGateID: "gate-1",
     syntheticKind: "logic_gate_children",
   }), "gate-1");
+});
+
+run("logic gate drops clean up folder placements but not assignment rows", () => {
+  const folderNode = {
+    id: "node-node-1",
+    label: "Node 1",
+    depth: 1,
+    kind: "node" as const,
+    nodeID: "node-1",
+    edgeID: "explorer-item-edge",
+    parentEntityID: "folder-1",
+    scopeLevel: 1,
+    position: 1000,
+    createdTimestamp: "0",
+  };
+  const logicGateNode = {
+    ...folderNode,
+    id: "logic-gate-gate-1-node-node-1",
+    edgeID: "assignment-edge",
+    parentEntityID: "gate-1",
+  };
+
+  assert.equal(shouldRemoveExplorerPlacementAfterLogicGateDrop(folderNode, "folder"), true);
+  assert.equal(shouldRemoveExplorerPlacementAfterLogicGateDrop({ ...folderNode, parentEntityID: "" }, undefined), true);
+  assert.equal(shouldRemoveExplorerPlacementAfterLogicGateDrop(logicGateNode, "logic_gate", "gate-1"), false);
+  assert.equal(shouldRemoveExplorerPlacementAfterLogicGateDrop({ ...folderNode, edgeID: "" }, "folder"), false);
 });
 
 run("company explorer context menu keeps fixed sections with disabled unavailable actions", () => {
