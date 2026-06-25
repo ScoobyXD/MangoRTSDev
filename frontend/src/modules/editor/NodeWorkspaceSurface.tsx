@@ -5,21 +5,9 @@ import { humanLabelOrFallback } from "../entityLabels.js";
 import { getLogicGateRecordSingleFlight } from "../logic-gate-map/LogicGateRecordStore.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../node-map/eventbus";
-import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
-import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
-import {
-  buildNodeRelationshipHierarchyRows,
-  collectNodeStructureIDs,
-  type NodeRelationshipHierarchyRow,
-} from "../node-map/nodeRelationshipStructure";
-import { createNodeFromSelectionTitle, type SelectionNodeRelationshipKind } from "../node-map/selectionNodeCreation";
-import { getNodeTitle, type NodeRecord, type NodeRelationship } from "../node-map/shared";
-import { listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
-import { publishLiveSelection } from "../selectionCoordinator";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
 import type { CompanyExplorerV2Row } from "../company-explorer/companyExplorerLazyApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
-import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockContentPayload,
@@ -249,173 +237,11 @@ function logicGateOptionLabel(logicGate: LogicGateRecord): string {
   return humanLabelOrFallback(logicGate.header, humanLabelOrFallback(logicGate.logic_gate_id, "Logic Gate"));
 }
 
-type RelationshipIconKind = "parent" | "peer" | "child" | "related";
-type RelationshipCreateKind = SelectionNodeRelationshipKind;
-type RelationshipRowContextMenu = { row: NodeRelationshipHierarchyRow; x: number; y: number };
-
-const RELATIONSHIP_CREATE_OPTIONS: Array<{ kind: RelationshipCreateKind; label: string; title: string }> = [
-  { kind: "parent", label: "Create Parent Node", title: "new parent node" },
-  { kind: "peer", label: "Create Peer Node", title: "new peer node" },
-  { kind: "child", label: "Create Child Node", title: "new child node" },
-];
-
-function relationshipRowIconKind(row: NodeRelationshipHierarchyRow): RelationshipIconKind {
-  if (row.role === "Peer") return "peer";
-  if (row.role === "Child") return "child";
-  if (row.role === "Parent" || row.hasChildren || row.depth === 0) return "parent";
-  return "related";
-}
-
-function relationshipRowRoleLabel(row: NodeRelationshipHierarchyRow, current: boolean): string {
-  if (current) return "Current";
-  const kind = relationshipRowIconKind(row);
-  if (kind === "parent") return "Parent";
-  if (kind === "peer") return "Peer";
-  if (kind === "child") return "Child";
-  return "";
-}
-
-function relationshipRowAccentColor(kind: RelationshipIconKind, accent: string): string {
-  if (kind === "parent") return "#0891b2";
-  if (kind === "peer") return "#7c3aed";
-  if (kind === "child") return "#059669";
-  return accent;
-}
-
 const RelationshipCheckIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block" }}>
     <path d="m3.4 8.15 2.8 2.75 6.35-6.65" fill="none" stroke={color} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
-
-const RelationshipRoleIcon: React.FC<{ kind: RelationshipIconKind; color: string }> = ({ kind, color }) => {
-  const boxFill = "rgba(255,255,255,0.9)";
-  if (kind === "peer") {
-    return (
-      <svg aria-hidden="true" width="28" height="28" viewBox="0 0 28 28" style={{ display: "block" }}>
-        <path d="M3.5 14h6.1M18.4 14h6.1" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" />
-        <rect x="9.6" y="8.8" width="8.8" height="10.4" rx="2.4" fill={boxFill} stroke={color} strokeWidth="1.8" />
-      </svg>
-    );
-  }
-  if (kind === "child") {
-    return (
-      <svg aria-hidden="true" width="28" height="28" viewBox="0 0 28 28" style={{ display: "block" }}>
-        <path d="M14 3.5v7.2" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" />
-        <rect x="9.6" y="10.7" width="8.8" height="10.4" rx="2.4" fill={boxFill} stroke={color} strokeWidth="1.8" />
-      </svg>
-    );
-  }
-  return (
-    <svg aria-hidden="true" width="28" height="28" viewBox="0 0 28 28" style={{ display: "block" }}>
-      <rect x="9.6" y="6.7" width="8.8" height="10.4" rx="2.4" fill={boxFill} stroke={color} strokeWidth="1.8" />
-      <path d="M14 17.1v7.4" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-};
-
-function RelationshipMenuRow({
-  row,
-  current,
-  hovered,
-  accent,
-  surfaceText,
-  strokeColor,
-  onOpen,
-  onHover,
-  onContextMenu,
-}: {
-  row: NodeRelationshipHierarchyRow;
-  current: boolean;
-  hovered: boolean;
-  accent: string;
-  surfaceText: string;
-  strokeColor: string;
-  onOpen: (row: NodeRelationshipHierarchyRow) => void;
-  onHover: (nodeID: string) => void;
-  onContextMenu: (row: NodeRelationshipHierarchyRow, event: React.MouseEvent<HTMLButtonElement>) => void;
-}) {
-  const kind = relationshipRowIconKind(row);
-  const color = current ? accent : relationshipRowAccentColor(kind, accent);
-  const label = relationshipRowRoleLabel(row, current);
-  const highlighted = current || hovered;
-  return (
-    <button
-      type="button"
-      role="treeitem"
-      title={row.title}
-      aria-current={current ? "true" : undefined}
-      onClick={() => onOpen(row)}
-      onMouseEnter={() => onHover(row.nodeID)}
-      onMouseLeave={() => onHover("")}
-      onContextMenu={(event) => onContextMenu(row, event)}
-      style={{
-        width: "100%",
-        minWidth: 0,
-        minHeight: 38,
-        boxSizing: "border-box",
-        display: "grid",
-        gridTemplateColumns: "30px minmax(0, 1fr) auto",
-        alignItems: "center",
-        gap: 8,
-        padding: `5px 8px 5px ${10 + row.depth * 18}px`,
-        border: highlighted ? "1px solid transparent" : `1px solid ${strokeColor}`,
-        borderRadius: 8,
-        background: highlighted
-          ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, rgba(6,182,212,0.8), rgba(124,58,237,0.72), rgba(16,185,129,0.62)) border-box`
-          : "rgba(255,255,255,0.7)",
-        color: surfaceText,
-        cursor: "pointer",
-        font: "inherit",
-        textAlign: "left",
-        boxShadow: highlighted ? `${EDITOR_NEU_SHADOW}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "inset 1px 1px 0 rgba(255,255,255,0.72)",
-        transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease",
-        transform: hovered && !current ? "translateY(-1px)" : "translateY(0)",
-      }}
-    >
-      <span
-        aria-hidden="true"
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: 8,
-          display: "grid",
-          placeItems: "center",
-          background: `linear-gradient(135deg, rgba(255,255,255,0.95), ${color}22)`,
-          boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86)",
-        }}
-      >
-        <RelationshipRoleIcon kind={kind} color={color} />
-      </span>
-      <span style={{ minWidth: 0, display: "grid", gap: 2 }}>
-        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: current ? 900 : 780 }}>
-          {row.title}
-        </span>
-        {label && (
-          <span style={{ color, fontSize: 9.5, fontWeight: 850, letterSpacing: 0 }}>
-            {label}
-          </span>
-        )}
-      </span>
-      <span
-        aria-hidden="true"
-        style={{
-          width: 24,
-          height: 24,
-          borderRadius: 8,
-          display: "grid",
-          placeItems: "center",
-          border: current ? `1px solid ${color}` : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-          background: current ? "#ffffff" : "rgba(255,255,255,0.56)",
-          opacity: current ? 1 : 0,
-          boxShadow: current ? "0 6px 14px rgba(15,23,42,0.12)" : undefined,
-        }}
-      >
-        {current && <RelationshipCheckIcon color={color} />}
-      </span>
-    </button>
-  );
-}
 
 function sortLogicGateOptions(items: LogicGateRecord[]): LogicGateRecord[] {
   return [...items].sort((a, b) => (
@@ -506,7 +332,6 @@ function scrollNodeWorkspaceInformationIntoView(root: HTMLElement | null, inform
 
 export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   companyID,
-  scope,
   nodeID,
   canEdit,
   nodePriorityDraft,
@@ -583,18 +408,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [lastAssignedLogicGateLabel, setLastAssignedLogicGateLabel] = useState("");
   const [logicGateAssignStatus, setLogicGateAssignStatus] = useState("");
   const [logicGateAssignFlash, setLogicGateAssignFlash] = useState<"" | "success" | "error">("");
-  const [relationshipMenuOpen, setRelationshipMenuOpen] = useState(false);
-  const [relationshipHoveredNodeID, setRelationshipHoveredNodeID] = useState("");
-  const [relationshipCreateMenuOpen, setRelationshipCreateMenuOpen] = useState(false);
-  const [relationshipCreatingKind, setRelationshipCreatingKind] = useState<RelationshipCreateKind | "">("");
-  const [relationshipRowContextMenu, setRelationshipRowContextMenu] = useState<RelationshipRowContextMenu | null>(null);
-  const [relationshipDeletingNodeID, setRelationshipDeletingNodeID] = useState("");
-  const [projectRelationshipRows, setProjectRelationshipRows] = useState<ProjectRelationshipProjection[]>([]);
-  const [projectRelationshipsLoading, setProjectRelationshipsLoading] = useState(false);
-  const [relationshipGraph, setRelationshipGraph] = useState<{ nodes: NodeRecord[]; relationships: NodeRelationship[] }>(() => {
-    const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-    return { nodes: snapshot.nodes ?? [], relationships: snapshot.relationships ?? [] };
-  });
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
   const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number; position: ConfirmActionMenuPosition } | null>(null);
@@ -687,33 +500,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const assignLogicGateButtonLabel = hasAssignedLogicGate
     ? `Assigned to Logic Gate: ${assignedLogicGateLabel}`
     : "Assign to Logic Gate";
-  const relationshipNodeTitle = useMemo(() => {
-    const node = relationshipGraph.nodes.find((item) => item.node_id === nodeID);
-    return node ? getNodeTitle(node) : humanLabelOrFallback(nodeID, "This node");
-  }, [nodeID, relationshipGraph.nodes]);
-  const relationshipRows = useMemo(() => {
-    const cleanNodeID = nodeID.trim();
-    if (!cleanNodeID) return [];
-    const structureIDs = Array.from(collectNodeStructureIDs(cleanNodeID, relationshipGraph.relationships));
-    const requestedIDs = structureIDs.includes(cleanNodeID) ? structureIDs : [cleanNodeID, ...structureIDs];
-    const fallbackNode: NodeRecord | null = relationshipGraph.nodes.some((item) => item.node_id === cleanNodeID)
-      ? null
-      : {
-        company_id: companyID,
-        node_id: cleanNodeID,
-        name: relationshipNodeTitle,
-        created_timestamp: "",
-      };
-    const nodes = fallbackNode ? [...relationshipGraph.nodes, fallbackNode] : relationshipGraph.nodes;
-    return buildNodeRelationshipHierarchyRows({
-      nodes,
-      relationships: relationshipGraph.relationships,
-      nodeIDs: requestedIDs,
-    });
-  }, [companyID, nodeID, relationshipGraph.nodes, relationshipGraph.relationships, relationshipNodeTitle]);
-  const relationshipCount = Math.max(0, relationshipRows.length - (relationshipRows.some((row) => row.nodeID === nodeID) ? 1 : 0));
-  const projectRelationshipCount = projectRelationshipRows.length;
-  const relationshipRowCountLabel = `${relationshipRows.length} linked`;
   const nodePriorityUnassignedForLogicGate = useMemo(() => {
     const raw = nodePriorityDraft.trim();
     if (!raw || raw === "0") return true;
@@ -753,116 +539,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [assignedLogicGateLabel, companyID, nodeID, primaryAssignedLogicGateID]);
 
-  const goToRelationshipNode = useCallback((row: NodeRelationshipHierarchyRow) => {
-    const cleanNodeID = row.nodeID.trim();
-    if (!cleanNodeID) return;
-    setRelationshipMenuOpen(false);
-    setRelationshipHoveredNodeID("");
-    setRelationshipCreateMenuOpen(false);
-    setRelationshipRowContextMenu(null);
-    publishLiveSelection({
-      companyID,
-      entityKind: "node",
-      entityID: cleanNodeID,
-      label: row.title || cleanNodeID,
-      sourceFrameID: `${scope}:relationships-menu`,
-      sourceModule: "editor",
-      targetFrameIDs: [scope],
-      selectionIntent: "navigate",
-    });
-  }, [companyID, scope]);
-
-  const goToProjectRelationship = useCallback((row: ProjectRelationshipProjection) => {
-    const projectID = row.project_id.trim();
-    if (!projectID) return;
-    setRelationshipMenuOpen(false);
-    setRelationshipCreateMenuOpen(false);
-    setRelationshipRowContextMenu(null);
-    emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
-      companyID,
-      sourceFrameID: `${scope}:relationships-menu`,
-      kind: "project",
-      id: projectID,
-      label: row.project_name?.trim() || projectID,
-      selectedTreeID: `project-${projectID}`,
-      changedAt: Date.now(),
-    });
-  }, [companyID, scope]);
-
-  const openRelationshipRowContextMenu = useCallback((row: NodeRelationshipHierarchyRow, event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (!canEdit) return;
-    const width = 164;
-    const height = 42;
-    const viewportWidth = typeof window !== "undefined" ? window.innerWidth : event.clientX + width;
-    const viewportHeight = typeof window !== "undefined" ? window.innerHeight : event.clientY + height;
-    setRelationshipCreateMenuOpen(false);
-    setRelationshipRowContextMenu({
-      row,
-      x: Math.max(8, Math.min(event.clientX, viewportWidth - width - 8)),
-      y: Math.max(8, Math.min(event.clientY, viewportHeight - height - 8)),
-    });
-  }, [canEdit]);
-
-  const deleteRelationshipRowNode = useCallback(async (row: NodeRelationshipHierarchyRow) => {
-    if (!canEdit) return;
-    const cleanNodeID = row.nodeID.trim();
-    if (!companyID || !cleanNodeID || relationshipDeletingNodeID) return;
-    const fallbackRow = relationshipRows.find((item) => item.nodeID !== cleanNodeID);
-    setRelationshipRowContextMenu(null);
-    setRelationshipCreateMenuOpen(false);
-    setRelationshipDeletingNodeID(cleanNodeID);
-    try {
-      await requestJSON<{ status: string }>(`/v1/nodes/${encodeURIComponent(cleanNodeID)}?company_id=${encodeURIComponent(companyID)}`, {
-        method: "DELETE",
-      });
-      invalidateNodeRecordStoreCaches(apiBase, companyID, cleanNodeID);
-      removeNodeRelationshipGraphNode(apiBase, companyID, cleanNodeID);
-      invalidateWorkspaceSnapshot(apiBase, companyID);
-      if (cleanNodeID === nodeID && fallbackRow) {
-        setRelationshipMenuOpen(false);
-        publishLiveSelection({
-          companyID,
-          entityKind: "node",
-          entityID: fallbackRow.nodeID,
-          label: fallbackRow.title || fallbackRow.nodeID,
-          sourceFrameID: `${scope}:relationships-menu`,
-          sourceModule: "editor",
-          targetFrameIDs: [scope],
-          selectionIntent: "navigate",
-        });
-      }
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "failed_to_delete_node");
-    } finally {
-      setRelationshipDeletingNodeID("");
-    }
-  }, [apiBase, canEdit, companyID, nodeID, onError, relationshipDeletingNodeID, relationshipRows, requestJSON, scope]);
-
-  const createRelationshipNode = useCallback(async (kind: RelationshipCreateKind) => {
-    if (!canEdit) return;
-    const cleanNodeID = nodeID.trim();
-    const option = RELATIONSHIP_CREATE_OPTIONS.find((item) => item.kind === kind);
-    if (!companyID || !cleanNodeID || !option) return;
-    setRelationshipCreateMenuOpen(false);
-    setRelationshipCreatingKind(kind);
-    try {
-      await createNodeFromSelectionTitle({
-        companyID,
-        title: option.title,
-        sourceNodeID: cleanNodeID,
-        relationshipKind: kind,
-        apiBase,
-        requestJSON,
-      });
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "failed_to_create_related_node");
-    } finally {
-      setRelationshipCreatingKind("");
-    }
-  }, [apiBase, canEdit, companyID, nodeID, onError, requestJSON]);
-
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -878,51 +554,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, []);
 
   useEffect(() => {
-    const updateRelationshipGraph = () => {
-      const snapshot = getNodeRelationshipGraphSnapshot(apiBase, companyID);
-      setRelationshipGraph({ nodes: snapshot.nodes ?? [], relationships: snapshot.relationships ?? [] });
-    };
-    updateRelationshipGraph();
-    return subscribeNodeRelationshipGraph(apiBase, companyID, updateRelationshipGraph);
-  }, [apiBase, companyID]);
-
-  useEffect(() => {
-    const cleanNodeID = nodeID.trim();
-    if (!relationshipMenuOpen || !companyID || !cleanNodeID) {
-      setProjectRelationshipsLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setProjectRelationshipsLoading(true);
-    void listProjectRelationshipsForResource({
-      companyID,
-      resourceType: "node",
-      resourceID: cleanNodeID,
-    })
-      .then((payload) => {
-        if (!cancelled) setProjectRelationshipRows(payload.relationships ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setProjectRelationshipRows([]);
-      })
-      .finally(() => {
-        if (!cancelled) setProjectRelationshipsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyID, nodeID, relationshipMenuOpen]);
-
-  useEffect(() => {
     setLogicGateAssignerOpen(false);
-    setRelationshipMenuOpen(false);
-    setRelationshipHoveredNodeID("");
-    setRelationshipCreateMenuOpen(false);
-    setRelationshipCreatingKind("");
-    setRelationshipRowContextMenu(null);
-    setRelationshipDeletingNodeID("");
-    setProjectRelationshipRows([]);
-    setProjectRelationshipsLoading(false);
     setLogicGateSearch("");
     setAssigningLogicGateID("");
     setLastAssignedLogicGateID("");
@@ -934,12 +566,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   useEffect(() => {
     if (canEdit) return;
     setLogicGateAssignerOpen(false);
-    setRelationshipMenuOpen(false);
-    setRelationshipHoveredNodeID("");
-    setRelationshipCreateMenuOpen(false);
-    setRelationshipCreatingKind("");
-    setRelationshipRowContextMenu(null);
-    setRelationshipDeletingNodeID("");
     setEmailPickerTargetBlockID(null);
     setDropActive(false);
     setDeleteTextBlockConfirmation(null);
@@ -961,20 +587,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [logicGateAssignerOpen]);
-
-  useEffect(() => {
-    if (!relationshipRowContextMenu) return;
-    const close = () => setRelationshipRowContextMenu(null);
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("scroll", close, true);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("scroll", close, true);
-    };
-  }, [relationshipRowContextMenu]);
 
   useEffect(() => {
     const layout = readStoredTextPaneLayout(companyID, nodeID);
@@ -2344,8 +1956,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 aria-expanded={logicGateAssignerOpen}
                 onClick={() => {
                   setLogicGateAssignerOpen((open) => !open);
-                  setRelationshipMenuOpen(false);
-                  setRelationshipCreateMenuOpen(false);
                   setLogicGateAssignStatus("");
                 }}
                 style={{
@@ -2403,321 +2013,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               Go to Logic Gate
             </button>
           )}
-          <div style={{ position: "relative", display: "inline-flex", flex: "0 0 auto", minWidth: 0 }}>
-            <button
-              type="button"
-              title="Relationships"
-              aria-expanded={relationshipMenuOpen}
-              onClick={() => {
-                setRelationshipMenuOpen((open) => {
-                  const next = !open;
-                  if (!next) setRelationshipCreateMenuOpen(false);
-                  if (!next) setRelationshipRowContextMenu(null);
-                  return next;
-                });
-                setRelationshipHoveredNodeID("");
-                setRelationshipRowContextMenu(null);
-                setLogicGateAssignerOpen(false);
-              }}
-              style={{
-                minHeight: 30,
-                borderRadius: 9,
-                border: relationshipMenuOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-                background: relationshipMenuOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
-                color: relationshipMenuOpen ? accent : surfaceText,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 7,
-                padding: "0 10px",
-                cursor: "pointer",
-                fontSize: 12,
-                fontWeight: 900,
-                letterSpacing: 0,
-                whiteSpace: "nowrap",
-                flex: "0 0 auto",
-                boxShadow: EDITOR_NEU_SHADOW,
-              }}
-            >
-              <ExplorerRowIcon kind="node" />
-              <span>Relationships</span>
-              {relationshipCount + projectRelationshipCount > 0 && (
-                <span style={{ minWidth: 18, height: 18, borderRadius: 999, display: "grid", placeItems: "center", background: "rgba(100,116,139,0.12)", color: accent, fontSize: 10, fontWeight: 900, padding: "0 5px", boxSizing: "border-box" }}>
-                  {relationshipCount + projectRelationshipCount}
-                </span>
-              )}
-            </button>
-            {relationshipMenuOpen && (
-              <div
-                className="mango-editor-hover-highlight"
-                onWheel={(event) => event.stopPropagation()}
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 9px)",
-                  left: "50%",
-                  width: "min(430px, calc(100vw - 32px))",
-                  maxHeight: 320,
-                  zIndex: 90,
-                  minHeight: 0,
-                  display: "grid",
-                  gridTemplateRows: "auto minmax(0, 1fr)",
-                  overflow: "hidden",
-                  transform: "translateX(-50%)",
-                  border: "1px solid transparent",
-                  borderRadius: 10,
-                  background: `${panelBackground} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-                  color: surfaceText,
-                  boxShadow: `${EDITOR_NEU_PANEL_SHADOW}, 0 0 18px rgba(183,124,255,0.18)`,
-                  cursor: "default",
-                }}
-              >
-                <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 10, padding: "10px 11px 8px", borderBottom: `1px solid ${ruleColor}`, background: `linear-gradient(135deg, rgba(6,182,212,0.12), rgba(255,255,255,0.72) 44%, rgba(124,58,237,0.12))` }}>
-                  <div style={{ minWidth: 0, display: "grid", gap: 2 }}>
-                    <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12, fontWeight: 950 }}>
-                      Relationships
-                    </div>
-                    <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10, fontWeight: 760 }}>
-                      {relationshipNodeTitle || "Current node"}
-                    </div>
-                  </div>
-                  <div style={{ position: "relative", minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
-                    <span style={{ flex: "0 0 auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 999, padding: "3px 7px", background: EDITOR_NEU_SURFACE, color: accent, fontSize: 10, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>
-                      {relationshipRowCountLabel} · {projectRelationshipCount} project{projectRelationshipCount === 1 ? "" : "s"}
-                    </span>
-                    {canEdit && (
-                      <div style={{ position: "relative", flex: "0 0 auto" }}>
-                        <button
-                          type="button"
-                          aria-label="Create related node"
-                          aria-haspopup="menu"
-                          aria-expanded={relationshipCreateMenuOpen}
-                          title="Create related node"
-                          disabled={!!relationshipCreatingKind}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setRelationshipRowContextMenu(null);
-                            setRelationshipCreateMenuOpen((open) => !open);
-                          }}
-                          style={{
-                            width: 24,
-                            height: 24,
-                            borderRadius: 8,
-                            border: relationshipCreateMenuOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-                            background: relationshipCreateMenuOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
-                            color: accent,
-                            cursor: relationshipCreatingKind ? "wait" : "pointer",
-                            display: "grid",
-                            placeItems: "center",
-                            padding: 0,
-                            fontSize: 17,
-                            fontWeight: 600,
-                            lineHeight: 1,
-                            boxShadow: relationshipCreateMenuOpen ? `${EDITOR_NEU_SHADOW}, 0 0 14px rgba(183,124,255,0.18)` : EDITOR_NEU_SHADOW,
-                            opacity: relationshipCreatingKind ? 0.66 : 1,
-                          }}
-                        >
-                          +
-                        </button>
-                        {relationshipCreateMenuOpen && (
-                          <div
-                            role="menu"
-                            aria-label="Create related node"
-                            style={{
-                              position: "absolute",
-                              top: "calc(100% + 6px)",
-                              right: 0,
-                              width: 184,
-                              padding: 5,
-                              border: "1px solid transparent",
-                              borderRadius: 8,
-                              background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-                              boxShadow: `${EDITOR_NEU_PANEL_SHADOW}, 0 10px 24px rgba(15,23,42,0.14)`,
-                              display: "grid",
-                              gap: 3,
-                              zIndex: 2,
-                            }}
-                          >
-                            {RELATIONSHIP_CREATE_OPTIONS.map((option) => (
-                              <button
-                                key={option.kind}
-                                type="button"
-                                role="menuitem"
-                                disabled={!!relationshipCreatingKind}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void createRelationshipNode(option.kind);
-                                }}
-                                style={{
-                                  width: "100%",
-                                  minHeight: 30,
-                                  border: 0,
-                                  borderRadius: 5,
-                                  background: "transparent",
-                                  color: surfaceText,
-                                  cursor: relationshipCreatingKind ? "wait" : "pointer",
-                                  textAlign: "left",
-                                  padding: "6px 8px",
-                                  fontSize: 11,
-                                  fontWeight: 800,
-                                  letterSpacing: 0,
-                                }}
-                              >
-                                {option.label}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div
-                  className="editor-document-scroll"
-                  role="tree"
-                  aria-label="Node relationships"
-                  style={{
-                    minHeight: 0,
-                    overflowY: "auto",
-                    padding: 8,
-                    display: "grid",
-                    alignContent: "start",
-                    gap: 5,
-                    background: "rgba(255,255,255,0.58)",
-                    ["--editor-document-scroll-accent" as string]: scrollbarAccent,
-                    ["--editor-document-scroll-track" as string]: scrollbarTrack,
-                  }}
-                >
-                  <div style={{ display: "grid", gap: 5, paddingBottom: projectRelationshipCount > 0 || projectRelationshipsLoading ? 6 : 0, borderBottom: projectRelationshipCount > 0 || projectRelationshipsLoading ? `1px solid ${ruleColor}` : 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, color: surfaceText, opacity: 0.74, fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>
-                      <ExplorerRowIcon kind="project" />
-                      <span>Projects</span>
-                    </div>
-                    {projectRelationshipsLoading ? (
-                      <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, padding: 9, color: surfaceText, opacity: 0.62, fontSize: 11, fontWeight: 760 }}>
-                        Loading projects
-                      </div>
-                    ) : projectRelationshipCount === 0 ? (
-                      <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, padding: 9, color: surfaceText, opacity: 0.62, fontSize: 11, fontWeight: 760 }}>
-                        No project relationships
-                      </div>
-                    ) : projectRelationshipRows.map((row) => {
-                      const projectID = row.project_id.trim();
-                      const label = row.project_name?.trim() || `Project ${projectID.slice(0, 8)}`;
-                      return (
-                        <button
-                          key={row.relationship_id}
-                          type="button"
-                          onClick={() => goToProjectRelationship(row)}
-                          title={label}
-                          style={{
-                            width: "100%",
-                            minHeight: 30,
-                            display: "grid",
-                            gridTemplateColumns: "18px minmax(0, 1fr)",
-                            alignItems: "center",
-                            gap: 7,
-                            border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-                            borderRadius: 8,
-                            background: EDITOR_NEU_SURFACE,
-                            color: surfaceText,
-                            cursor: "pointer",
-                            padding: "5px 8px",
-                            boxShadow: EDITOR_NEU_SHADOW,
-                            font: "inherit",
-                            textAlign: "left",
-                          }}
-                        >
-                          <ExplorerRowIcon kind="project" />
-                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 850 }}>
-                            {label}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {relationshipRows.length === 0 ? (
-                    <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 760 }}>
-                      No related nodes
-                    </div>
-                  ) : relationshipRows.map((row) => (
-                    <RelationshipMenuRow
-                      key={`${row.nodeID}:${row.depth}`}
-                      row={row}
-                      current={row.nodeID === nodeID}
-                      hovered={relationshipHoveredNodeID === row.nodeID}
-                      accent={accent}
-                      surfaceText={surfaceText}
-                      strokeColor={strokeColor}
-                      onOpen={goToRelationshipNode}
-                      onHover={setRelationshipHoveredNodeID}
-                      onContextMenu={openRelationshipRowContextMenu}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-            {relationshipRowContextMenu && (
-              <>
-                <div
-                  aria-hidden="true"
-                  onMouseDown={() => setRelationshipRowContextMenu(null)}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    setRelationshipRowContextMenu(null);
-                  }}
-                  style={{
-                    position: "fixed",
-                    inset: 0,
-                    zIndex: 98,
-                    background: "transparent",
-                  }}
-                />
-                <div
-                  role="menu"
-                  aria-label="Relationship node actions"
-                  onMouseDown={(event) => event.stopPropagation()}
-                  style={{
-                    position: "fixed",
-                    left: relationshipRowContextMenu.x,
-                    top: relationshipRowContextMenu.y,
-                    zIndex: 99,
-                    width: 164,
-                    padding: 5,
-                    border: "1px solid transparent",
-                    borderRadius: 8,
-                    background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-                    boxShadow: `${EDITOR_NEU_PANEL_SHADOW}, 0 10px 24px rgba(15,23,42,0.16)`,
-                    display: "grid",
-                    gap: 3,
-                  }}
-                >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={!!relationshipDeletingNodeID}
-                    onClick={() => { void deleteRelationshipRowNode(relationshipRowContextMenu.row); }}
-                    style={{
-                      width: "100%",
-                      minHeight: 30,
-                      border: 0,
-                      borderRadius: 5,
-                      background: "transparent",
-                      color: relationshipDeletingNodeID ? "rgba(100,116,139,0.58)" : "#b91c1c",
-                      cursor: relationshipDeletingNodeID ? "wait" : "pointer",
-                      textAlign: "left",
-                      padding: "6px 8px",
-                      fontSize: 11,
-                      fontWeight: 850,
-                      letterSpacing: 0,
-                    }}
-                  >
-                    Delete node
-                  </button>
-                </div>
-              </>
-            )}
           </div>
-        </div>
 
         {blocks.length === 0 && (
           <>
