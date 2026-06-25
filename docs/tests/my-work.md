@@ -73,6 +73,7 @@ MW46 - The My Work grouping settings panel opens and closes only from the groupi
 MW47 - Me, Team, and All scope menus open from click and close after selecting a scope or clicking outside the scope menu.
 MW48 - The active My Work saved-view row is visibly highlighted.
 MW49 - Right-clicking a My Work saved-view row exposes rename and move up/down commands. Renames persist to the saved-view name and reorder persists through saved-view `position`.
+MW50 - Dragging a node between My Work cells updates both target priority and target GVIC role. A logic-gate-backed node must keep the same logic-gate relationship while moving, for example from priority 1 Generated to priority 3 Consulted.
 
 ## Projection Sync Events
 
@@ -144,7 +145,7 @@ Expected:
 ### Scenario MW-S3: Grouping, Open Behavior, And Creation
 
 Business logic covered:
-- MW25 through MW31, MW37 through MW49
+- MW25 through MW31, MW37 through MW50
 
 Given:
 - A user changes My Work grouping settings.
@@ -175,6 +176,7 @@ Expected:
 - The My Work node context menu shows only Rename, Pin, and Delete, with Delete separated.
 - Created work receives the selected priority and creator GVIC role.
 - A dropped node that already belongs to a logic gate keeps that logic-gate relationship and visibly remains under that logic gate after the move.
+- A dropped node appears in the target priority and GVIC role cell after the move.
 - A dropped standalone node can use the target cell creation path.
 - Deleting a My Work node hides it optimistically, restores it on failure, and refreshes My Work on success.
 - Updates grouping supports Project and Logic Gate as ordinary grouping choices while staying separate from My Work active-work grouping.

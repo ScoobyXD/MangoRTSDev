@@ -6,7 +6,7 @@ import type { LogicGateAssignmentCommandResult, GVICMatrixProjectionRow } from "
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "../../../../frontend/src/pages/home/homeConstants.js";
-import { addMyLogicGateShortcutsCommand, addSharedInboxGVICPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxGVICPrincipalCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateGVICMatrixNode, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxGVICAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { addMyLogicGateShortcutsCommand, addSharedInboxGVICPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxGVICPrincipalCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateGVICMatrixNode, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeMoveMyWorkNodeToCell, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxGVICAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 
 const timestamp = "2026-01-01T00:00:00Z";
 
@@ -356,6 +356,64 @@ test("Home node drop dedupes selected nodes and falls back to each node status",
   assert.deepEqual(updated.gvic_projection_rows.map((row) => row.node_id), ["node-1", "node-2"]);
   assert.deepEqual(statuses, ["done", "pending"]);
   assert.deepEqual(priorities, [null, null]);
+});
+
+test("My Work node drop uses the dedicated move command for role and priority placement", async () => {
+  const nodes = new Map([
+    ["node-1", node("node-1", { priority: 1, logic_gate_ids: ["gate-1"] })],
+    ["node-2", node("node-2", { priority: 2, logic_gate_ids: ["gate-1"] })],
+  ]);
+  const calls: Array<Parameters<HomeMoveMyWorkNodeToCell>[0]> = [];
+  const moveMyWorkNodeToCell: HomeMoveMyWorkNodeToCell = async (input) => {
+    calls.push(input);
+    const sourceNode = nodes.get(input.nodeID) ?? node(input.nodeID);
+    return {
+      company_id: input.companyID,
+      node: { ...sourceNode, priority: input.priority, logic_gate_ids: input.logicGateID ? [input.logicGateID] : sourceNode.logic_gate_ids } as NodeRecord,
+      gvic_projection_rows: [projectionRow(input.nodeID, {
+        projection_row_id: `consulted-${input.nodeID}`,
+        user_id: input.targetUserID ?? "user-1",
+        gvic_assignment: input.targetGVICRole,
+        logic_gate_id: input.logicGateID ?? "",
+      })],
+      removed_projection_row_ids: ["old-generated-row", `old-${input.nodeID}`, "old-generated-row"],
+    };
+  };
+
+  const updated = await moveMyWorkNodesToCellCommand({
+    apiBase: "https://api.example.test",
+    companyID: "company-1",
+    nodeIDs: ["node-1", "missing", "node-1", "node-2"],
+    priority: 3,
+    targetGVICRole: "consulted",
+    targetUserID: "user-2",
+    logicGateID: "gate-1",
+    fromLogicGateID: "gate-1",
+    nodeByID: nodes,
+    moveMyWorkNodeToCell,
+  });
+
+  assert.deepEqual(calls.map((call) => ({
+    companyID: call.companyID,
+    nodeID: call.nodeID,
+    targetUserID: call.targetUserID,
+    targetGVICRole: call.targetGVICRole,
+    priority: call.priority,
+    logicGateID: call.logicGateID,
+    fromLogicGateID: call.fromLogicGateID,
+  })), [
+    { companyID: "company-1", nodeID: "node-1", targetUserID: "user-2", targetGVICRole: "consulted", priority: 3, logicGateID: "gate-1", fromLogicGateID: "gate-1" },
+    { companyID: "company-1", nodeID: "node-2", targetUserID: "user-2", targetGVICRole: "consulted", priority: 3, logicGateID: "gate-1", fromLogicGateID: "gate-1" },
+  ]);
+  assert.deepEqual(updated.nodes.map((item) => [item.node_id, item.priority, item.logic_gate_ids]), [
+    ["node-1", 3, ["gate-1"]],
+    ["node-2", 3, ["gate-1"]],
+  ]);
+  assert.deepEqual(updated.gvic_projection_rows.map((row) => [row.node_id, row.gvic_assignment, row.user_id]), [
+    ["node-1", "consulted", "user-2"],
+    ["node-2", "consulted", "user-2"],
+  ]);
+  assert.deepEqual(updated.removed_projection_row_ids, ["old-generated-row", "old-node-1", "old-node-2"]);
 });
 
 test("Home logic gate creation sends creator GVIC role through batch create", async () => {

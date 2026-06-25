@@ -26,6 +26,13 @@ export type MyWorkMatrixLoadResult = {
   failures: MyWorkMatrixLoadFailure[];
 };
 
+export type MyWorkMatrixPatch = {
+  companyID: string;
+  rows: MyWorkMatrixRow[];
+  removedProjectionRowIDs: string[];
+  targetUserIDs?: string[];
+};
+
 export type MyWorkMatrixFetcher = (targetUserID: string) => Promise<MyWorkMatrixResponse>;
 
 export type MyWorkMatrixCacheState = MyWorkMatrixLoadResult & {
@@ -98,6 +105,56 @@ export function readMyWorkMatrixCache(cacheKey: string): MyWorkMatrixCacheState 
 export function readMyWorkMatrixCacheSummary(cacheKey: string, hit = "unknown"): MyWorkDebugCacheSummary {
   const cleanCacheKey = cacheKey.trim();
   return summarizeMyWorkMatrixCache(cleanCacheKey, cleanCacheKey ? myWorkMatrixCache.get(cleanCacheKey) : undefined, hit);
+}
+
+export function patchMyWorkMatrixCells(cells: MyWorkMatrixCellWithUser[], patch: MyWorkMatrixPatch): MyWorkMatrixCellWithUser[] {
+  const cleanCompanyID = patch.companyID.trim();
+  const targetUsers = new Set(uniqueNonEmptyStrings(patch.targetUserIDs ?? []));
+  const removedIDs = new Set(uniqueNonEmptyStrings(patch.removedProjectionRowIDs));
+  const byProjectionID = new Map<string, MyWorkMatrixCellWithUser>();
+  const passthrough: MyWorkMatrixCellWithUser[] = [];
+  for (const cell of cells) {
+    const projectionRowID = cell.projection_row_id?.trim() ?? "";
+    if (projectionRowID && removedIDs.has(projectionRowID)) continue;
+    if (projectionRowID) byProjectionID.set(projectionRowID, cell);
+    else passthrough.push(cell);
+  }
+  for (const row of patch.rows ?? []) {
+    const userID = row.user_id?.trim() ?? "";
+    if (!userID || (targetUsers.size > 0 && !targetUsers.has(userID))) continue;
+    const projectionRowID = row.projection_row_id?.trim() ?? "";
+    if (!projectionRowID) continue;
+    byProjectionID.set(projectionRowID, {
+      ...row,
+      companyID: row.company_id?.trim() || cleanCompanyID,
+      userID,
+    });
+  }
+  const next = [...passthrough, ...byProjectionID.values()];
+  next.sort(sortMyWorkMatrixCells);
+  return next;
+}
+
+export function patchMyWorkMatrixCacheEntry(cacheKey: string, patch: MyWorkMatrixPatch): void {
+  const cleanCacheKey = cacheKey.trim();
+  if (!cleanCacheKey) return;
+  const entry = myWorkMatrixCache.get(cleanCacheKey);
+  if (!entry?.hasValue) return;
+  const next: MyWorkMatrixCacheState = {
+    ...entry,
+    cells: patchMyWorkMatrixCells(entry.cells, { ...patch, targetUserIDs: patch.targetUserIDs ?? entry.targetUserIDs }),
+    stale: false,
+    fetchedAt: Date.now(),
+    promise: undefined,
+  };
+  myWorkMatrixCache.set(cleanCacheKey, next);
+  publishMyWorkMatrixCacheSummary(cleanCacheKey, next, "patched", next.targetUserIDs);
+  myWorkDebugLog("cache.patch", {
+    cacheKey: cleanCacheKey,
+    rows: patch.rows.length,
+    removedProjectionRowIDs: patch.removedProjectionRowIDs.length,
+    cells: next.cells.length,
+  });
 }
 
 export function markMyWorkMatrixCacheStale(cacheKey: string): void {
@@ -394,4 +451,18 @@ function userIDFromProjectionDelta(value: unknown): string {
   const row = recordValue(delta.row);
   const rowKey = recordValue(delta.row_key);
   return cleanString(row?.user_id) || cleanString(rowKey?.user_id);
+}
+
+function sortMyWorkMatrixCells(left: MyWorkMatrixCellWithUser, right: MyWorkMatrixCellWithUser): number {
+  if (left.userID !== right.userID) return left.userID.localeCompare(right.userID);
+  const leftRole = left.gvic_assignment?.trim() ?? "";
+  const rightRole = right.gvic_assignment?.trim() ?? "";
+  if (leftRole !== rightRole) return leftRole.localeCompare(rightRole);
+  const leftPriority = Number.isFinite(Number(left.priority)) ? Number(left.priority) : 99;
+  const rightPriority = Number.isFinite(Number(right.priority)) ? Number(right.priority) : 99;
+  if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+  const leftSort = Number.isFinite(Number(left.sort_order)) ? Number(left.sort_order) : 0;
+  const rightSort = Number.isFinite(Number(right.sort_order)) ? Number(right.sort_order) : 0;
+  if (leftSort !== rightSort) return leftSort - rightSort;
+  return (left.projection_row_id ?? "").localeCompare(right.projection_row_id ?? "");
 }

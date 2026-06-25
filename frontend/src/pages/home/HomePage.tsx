@@ -82,7 +82,7 @@ import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_BATCH_FLUSH_DELAY_MS, ARCHIVE_BATCH_SIZE, AUTO_ARCHIVE_SCROLL_DELAY_MS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
-import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
+import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
@@ -3302,6 +3302,35 @@ export function HomePage({
     event.stopPropagation();
     openLogicGateBulkEditMenuAt(logicGateID, event.clientX, event.clientY);
   }, [openLogicGateBulkEditMenuAt]);
+  const moveMyWorkNodesIntoCell = useCallback(async (input: { logicGateID?: string; nodeIDs: string[]; priority: InboxPriority; fromLogicGateID?: string; creatorGVICRole?: LogicGateGVICRole; targetUserID?: string }) => {
+    const targetGVICRole = input.creatorGVICRole;
+    const nodeIDs = cleanIDList(input.nodeIDs).filter((nodeID) => nodeByID.has(nodeID));
+    if (!targetGVICRole || nodeIDs.length === 0) return null;
+    setBusy("my-work-node-drop");
+    setError("");
+    try {
+      const result = await moveMyWorkNodesToCellCommand({
+        apiBase,
+        companyID,
+        nodeIDs,
+        priority: input.priority,
+        targetGVICRole,
+        targetUserID: input.targetUserID,
+        logicGateID: input.logicGateID,
+        fromLogicGateID: input.fromLogicGateID,
+        nodeByID,
+      });
+      applyGVICMatrixProjectionRows(result.gvic_projection_rows);
+      for (const node of result.nodes) mergeUpdatedNode(node);
+      setNotice(nodeIDs.length === 1 ? "My Work node moved." : `${nodeIDs.length} My Work nodes moved.`);
+      return result;
+    } catch (dropError) {
+      setError(formatError(dropError, "Failed to move My Work node"));
+      return null;
+    } finally {
+      setBusy("");
+    }
+  }, [apiBase, applyGVICMatrixProjectionRows, companyID, mergeUpdatedNode, nodeByID]);
   const dropNodesIntoInboxLogicGate = useCallback(async (input: { logicGateID: string; nodeIDs: string[]; priority: InboxPriority; status?: GVICInboxStatus; fromLogicGateID?: string }) => {
     const logicGateID = input.logicGateID.trim();
     const fromLogicGateID = input.fromLogicGateID?.trim() ?? "";
@@ -3930,7 +3959,7 @@ export function HomePage({
               onRenameNode={renameMyWorkNode}
               onRequestDeleteNode={(nodeID, position) => requestDeleteBulkEditTargets("node", [nodeID], position)}
               onCreateNodeInCell={(input) => { void createNodeInInboxCell(input); }}
-              onDropNodes={(input) => { void dropNodesIntoInboxLogicGate(input); }}
+              onDropNodes={(input) => moveMyWorkNodesIntoCell(input)}
               onDropNodesInCell={(input) => { void dropNodesIntoNewInboxLogicGate(input); }}
               onDropLogicGates={(input) => { void moveLogicGatesIntoInboxCell(input); }}
               onDropProjects={(input) => { void moveProjectsIntoInboxCell(input); }}

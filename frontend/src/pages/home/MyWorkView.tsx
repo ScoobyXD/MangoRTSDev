@@ -10,7 +10,7 @@ import { GVICMatrixRealtimeScope } from "../../modules/gvic/gvicMatrixProjection
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
-import { listMyWorkMatrixRows } from "../../modules/work-items/workItemReadApi";
+import { listMyWorkMatrixRows, type MyWorkMatrixRow } from "../../modules/work-items/workItemReadApi";
 import { cleanIDList, logicGateTitle } from "./homeUtils";
 import {
   homeColorWithAlpha,
@@ -30,6 +30,8 @@ import {
   markMyWorkMatrixCachesStaleForTargetUsers,
   myWorkMatrixCacheKey,
   myWorkProjectionDeltaAffectsTargetUsers,
+  patchMyWorkMatrixCacheEntry,
+  patchMyWorkMatrixCells,
   readMyWorkMatrixCache,
   readMyWorkMatrixCacheSummary,
   uniqueMyWorkTargetUserIDs,
@@ -87,7 +89,7 @@ type MyWorkViewProps = {
   onRequestDeleteNode?: (nodeID: string, position?: ConfirmActionMenuPosition) => void;
   onOpenLogicGateBulkMenu?: (logicGateID: string, event: React.MouseEvent) => void;
   onCreateNodeInCell?: (input: MyWorkCellCreateInput) => void;
-  onDropNodes?: (input: MyWorkNodeDropInput) => void;
+  onDropNodes?: (input: MyWorkNodeDropInput) => MyWorkNodeDropResult | Promise<MyWorkNodeDropResult>;
   onDropNodesInCell?: (input: MyWorkCellNodeDropInput) => void;
   onDropLogicGates?: (input: MyWorkCellLogicGateDropInput) => void;
   onDropProjects?: (input: MyWorkCellProjectDropInput) => void;
@@ -107,11 +109,12 @@ const MY_WORK_MATRIX_ROLES: LogicGateGVICRole[] = ["generated", "verified", "con
 const MY_WORK_MATRIX_PRIORITIES = [1, 2, 3, 4, 5, 0] as const;
 type MyWorkMatrixPriority = typeof MY_WORK_MATRIX_PRIORITIES[number];
 type MyWorkCellCreateInput = { priority: MyWorkMatrixPriority; creatorGVICRole?: LogicGateGVICRole };
-type MyWorkNodeDropInput = { logicGateID: string; nodeIDs: string[]; priority: MyWorkMatrixPriority; fromLogicGateID?: string };
+type MyWorkNodeDropInput = MyWorkCellCreateInput & { logicGateID?: string; nodeIDs: string[]; fromLogicGateID?: string; targetUserID?: string };
 type MyWorkCellNodeDropInput = MyWorkCellCreateInput & { nodeIDs: string[]; fromLogicGateID?: string };
 type MyWorkCellLogicGateDropInput = MyWorkCellCreateInput & { logicGateIDs: string[]; nodeIDsByLogicGateID?: Record<string, string[]> };
 type MyWorkCellProjectDropInput = MyWorkCellCreateInput & { projectIDs: string[]; logicGateIDsByProjectID?: Record<string, string[]>; nodeIDsByProjectID?: Record<string, string[]>; nodeIDsByLogicGateID?: Record<string, string[]> };
-type MyWorkNodeDragPayload = { nodeIDs: string[]; fromLogicGateID?: string };
+type MyWorkNodeDropResult = { gvic_projection_rows?: MyWorkMatrixRow[]; removed_projection_row_ids?: string[] } | null | undefined | void;
+type MyWorkNodeDragPayload = { nodeIDs: string[]; fromLogicGateID?: string; targetUserID?: string };
 type MyWorkLogicGateDragPayload = { logicGateIDs: string[]; nodeIDsByLogicGateID?: Record<string, string[]> };
 type MyWorkProjectDragPayload = { projectIDs: string[]; logicGateIDsByProjectID?: Record<string, string[]>; nodeIDsByProjectID?: Record<string, string[]>; nodeIDsByLogicGateID?: Record<string, string[]> };
 type MyWorkRoleColumnWidths = Record<LogicGateGVICRole, number>;
@@ -453,6 +456,30 @@ export function MyWorkView({
       for (const unsubscribe of unsubscribes) unsubscribe();
     };
   }, [apiBase, companyID, matrixCacheKey, matrixTargetUserIDs, requestMatrixRefresh]);
+
+  const applyNodeDropResult = useCallback((result: MyWorkNodeDropResult) => {
+    const rows = result?.gvic_projection_rows ?? [];
+    const removedProjectionRowIDs = result?.removed_projection_row_ids ?? [];
+    if (rows.length === 0 && removedProjectionRowIDs.length === 0) return;
+    const patch = {
+      companyID,
+      rows,
+      removedProjectionRowIDs,
+      targetUserIDs: matrixTargetUserIDs,
+    };
+    setMatrixCells((previous) => patchMyWorkMatrixCells(previous, patch));
+    setMatrixStateCacheKey(matrixCacheKey);
+    patchMyWorkMatrixCacheEntry(matrixCacheKey, patch);
+  }, [companyID, matrixCacheKey, matrixTargetUserIDs]);
+
+  const handleDropNodes = useCallback((input: MyWorkNodeDropInput) => {
+    const result = onDropNodes?.(input);
+    if (result && typeof (result as Promise<MyWorkNodeDropResult>).then === "function") {
+      void (result as Promise<MyWorkNodeDropResult>).then(applyNodeDropResult);
+      return;
+    }
+    applyNodeDropResult(result as MyWorkNodeDropResult);
+  }, [applyNodeDropResult, onDropNodes]);
 
   const persistSavedSetting = useCallback((setting: MyWorkSavedGroupingSetting) => {
     if (!apiBase || !companyID.trim()) return;
@@ -854,7 +881,7 @@ export function MyWorkView({
             onRenameNode={onRenameNode}
             onRequestDeleteNode={onRequestDeleteNode}
             onCreateNodeInCell={onCreateNodeInCell}
-            onDropNodes={onDropNodes}
+            onDropNodes={handleDropNodes}
             onDropNodesInCell={onDropNodesInCell}
             onDropLogicGates={onDropLogicGates}
             onDropProjects={onDropProjects}
@@ -1399,6 +1426,7 @@ function MyWorkDisplayRowItem({
   const row = displayRow.row;
   const status = row.status?.trim() || "No status";
   const rowLogicGateID = row.logicGateIDs[0]?.trim() ?? "";
+  const rowTargetUserID = row.participantUserIDs[0]?.trim() ?? "";
   return (
     <div style={logicGateSectionBlockStyle}>
       <div
@@ -1410,7 +1438,7 @@ function MyWorkDisplayRowItem({
           setContextMenu({ x: event.clientX, y: event.clientY });
         }}
         onDragStart={(event) => {
-          writeMyWorkDragPayload(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME, { nodeIDs: [row.id], fromLogicGateID: rowLogicGateID });
+          writeMyWorkDragPayload(event.dataTransfer, HOME_INBOX_NODE_DRAG_MIME, { nodeIDs: [row.id], fromLogicGateID: rowLogicGateID, targetUserID: rowTargetUserID });
         }}
       >
         <button
@@ -1804,8 +1832,9 @@ function MyWorkMatrix({
                   if (logicGateIDs.length > 0 && onDropLogicGates) onDropLogicGates({ ...createInput, logicGateIDs, nodeIDsByLogicGateID: gatePayload?.nodeIDsByLogicGateID });
                   if (nodeIDs.length > 0) {
                     const sourceLogicGateID = nodePayload?.fromLogicGateID?.trim() ?? "";
-                    if (sourceLogicGateID && onDropNodes) {
-                      onDropNodes({ ...createInput, logicGateID: sourceLogicGateID, nodeIDs, fromLogicGateID: sourceLogicGateID });
+                    const targetUserID = nodePayload?.targetUserID?.trim() ?? "";
+                    if (onDropNodes) {
+                      onDropNodes({ ...createInput, logicGateID: sourceLogicGateID || undefined, nodeIDs, fromLogicGateID: sourceLogicGateID || undefined, targetUserID });
                     } else if (onDropNodesInCell) {
                       onDropNodesInCell({ ...createInput, nodeIDs });
                     }
