@@ -27,6 +27,15 @@ MT16 - Explicit conversion priority must be between 1 and 5.
 MT17 - Successful conversion removes the converted messages from My Triage and returns the deleted message IDs.
 MT18 - Successful conversion emits the triage/workspace/projection events needed for other views to refresh.
 MT19 - Reverting a converted email restores the triage item from the email-node placement and removes the workspace record that was created from that conversion.
+MT20 - My Triage and Shared Triage must continue to live-update when mailbox messages are created, updated, or deleted.
+MT21 - My Triage and Shared Triage primary inboxes must show a fixed, predictable message batch size of 20 messages per page.
+MT22 - My Triage and Shared Triage primary inboxes must prefetch the next message page after the visible page loads.
+MT23 - Scrolling a My Triage or Shared Triage primary inbox must not archive messages and must not load the next primary-inbox page.
+MT24 - Advancing a My Triage or Shared Triage primary inbox page is an explicit user action that archives only the messages visible on the current page.
+MT25 - Advancing must display the prefetched next page before archiving the previous page whenever a prefetched page is available.
+MT26 - Advancing must freeze the previous page's message IDs at click time so live updates cannot change what gets archived.
+MT27 - The advance/archive action must be disabled while its archive request is in flight to prevent double submission.
+MT28 - If no next page is available, advancing archives the current visible page and leaves the primary inbox empty until live updates or a refresh provide more messages.
 
 ## Scenarios
 
@@ -118,3 +127,31 @@ Expected:
 - Reverting restores the message to My Triage.
 - Reverting removes the workspace node/card created by that conversion.
 - Reverting does not remove unrelated workspace records.
+
+### Scenario MT-S5: Live Triage Paging And Explicit Archive Advance
+
+Business logic covered:
+- MT20
+- MT21
+- MT22
+- MT23
+- MT24
+- MT25
+- MT26
+- MT27
+- MT28
+
+Given:
+- A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
+- The mailbox has more than 20 messages available.
+- The first visible page and the next page can be read from the mailbox provider.
+
+Expected:
+- The visible page contains no more than 20 messages.
+- The next page is prefetched after the visible page loads.
+- Created, updated, and deleted message events still refresh the triage list live.
+- Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
+- Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and archives only the frozen previous-page IDs.
+- The advance action is disabled while the archive request is in flight.
+- If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
+- If there is no next page, clicking the advance action archives the visible page and leaves the list empty until more messages arrive or a refresh reloads the inbox.

@@ -1831,49 +1831,6 @@ export const mailMessageListFrameStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
-export function mailAutoArchiveGuideStyle(top: number): React.CSSProperties {
-  return {
-    position: "absolute",
-    top: Math.max(0, top - 16),
-    left: 12,
-    right: 14,
-    zIndex: 4,
-    height: 17,
-    pointerEvents: "none",
-    display: "grid",
-    gridTemplateRows: "12px 1px",
-    gap: 4,
-    alignItems: "center",
-  };
-}
-
-export const mailAutoArchiveGuideLabelStyle: React.CSSProperties = {
-  justifySelf: "center",
-  height: 12,
-  padding: "0 6px",
-  borderRadius: 6,
-  background: "rgba(248, 250, 252, 0.92)",
-  color: "rgba(100, 116, 139, 0.9)",
-  fontSize: 9,
-  fontWeight: 600,
-  lineHeight: "12px",
-  letterSpacing: 0,
-};
-
-export const mailAutoArchiveGuideLineStyle: React.CSSProperties = {
-  width: "100%",
-  height: 1,
-  background: "linear-gradient(90deg, transparent, rgba(100, 116, 139, 0.62) 12%, rgba(100, 116, 139, 0.62) 88%, transparent)",
-  boxShadow: "0 1px 0 rgba(255, 255, 255, 0.92), 0 -12px 22px rgba(148, 163, 184, 0.16)",
-};
-
-export function mailAutoArchiveTailSpacerStyle(height: number): React.CSSProperties {
-  return {
-    minHeight: Math.max(260, Math.round(height)),
-    pointerEvents: "none",
-  };
-}
-
 export const loadingMoreStyle: React.CSSProperties = {
   minHeight: 28,
   display: "grid",
@@ -1910,14 +1867,11 @@ export function messageRowStyle(active: boolean, unread: boolean, hovered = fals
   };
 }
 
-export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, pendingAutoArchive = false, hovered = false, autoArchiveProgress = 0, pendingStarred = false): React.CSSProperties {
+export function triageMessageRowStyle(active: boolean, unread: boolean, draggable: boolean, hovered = false, pendingStarred = false): React.CSSProperties {
   const framed = active || hovered || pendingStarred;
   const outlined = framed || unread;
   const frameBackground = pendingStarred ? HOME_MAIL_STAR_EDGE_FRAME : unread ? HOME_MAIL_UNREAD_EDGE_FRAME : HOME_KEY_EDGE_FRAME_GRADIENT;
-  const archiveProgress = Math.max(pendingAutoArchive ? 1 : 0, Math.min(1, Math.max(0, autoArchiveProgress)));
-  const archiveVisualActive = !pendingStarred && archiveProgress > 0.01;
-  const borderColor = pendingStarred || outlined ? "transparent" : archiveVisualActive ? "rgba(148, 163, 184, 0.22)" : HOME_KEY_SOFT_BORDER;
-  const archiveShadowAlpha = 0.12 + archiveProgress * 0.14;
+  const borderColor = pendingStarred || outlined ? "transparent" : HOME_KEY_SOFT_BORDER;
   return {
     display: "grid",
     gridTemplateColumns: "20px minmax(0, 1fr) 108px",
@@ -1926,13 +1880,11 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
     minHeight: 82,
     border: `1px solid ${borderColor}`,
     borderRadius: HOME_KEY_ELEVATED_RADIUS,
-    background: archiveVisualActive
-      ? "linear-gradient(145deg, #f4f5f7 0%, #e6e9ee 100%)"
-      : outlined
-        ? `${active ? HOME_KEY_ACTIVE_SURFACE : HOME_KEY_SURFACE} padding-box, ${frameBackground} border-box`
-        : HOME_KEY_SURFACE,
+    background: outlined
+      ? `${active ? HOME_KEY_ACTIVE_SURFACE : HOME_KEY_SURFACE} padding-box, ${frameBackground} border-box`
+      : HOME_KEY_SURFACE,
     cursor: draggable ? "grab" : "pointer",
-    color: archiveVisualActive ? `rgba(15, 23, 42, ${Math.max(0.68, 1 - archiveProgress * 0.3)})` : "#111827",
+    color: "#111827",
     font: "inherit",
     fontSize: 12,
     padding: "10px 10px 9px",
@@ -1942,10 +1894,7 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
       ? `${HOME_KEY_RAISED_SHADOW}, ${HOME_MAIL_STAR_EDGE_SHADOW}`
       : framed
       ? `${active ? HOME_KEY_ACTIVE_SHADOW : HOME_KEY_RAISED_SHADOW}, ${HOME_KEY_EDGE_FRAME_SHADOW}`
-      : archiveVisualActive
-        ? `inset 0 0 0 1px rgba(148, 163, 184, ${archiveShadowAlpha}), inset 0 0 ${Math.round(10 + archiveProgress * 18)}px rgba(100, 116, 139, ${0.04 + archiveProgress * 0.08})`
-        : unread ? HOME_KEY_RAISED_SHADOW : HOME_KEY_SHADOW,
-    filter: archiveVisualActive ? `grayscale(${Math.round(archiveProgress * 78)}%) saturate(${Math.max(0.54, 1 - archiveProgress * 0.46).toFixed(2)})` : undefined,
+      : unread ? HOME_KEY_RAISED_SHADOW : HOME_KEY_SHADOW,
     letterSpacing: 0,
     transform: pendingStarred ? "translateY(-1px)" : hovered ? "translateY(-2px)" : "translateY(0)",
     transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease, color 120ms ease, filter 120ms ease, opacity 120ms ease",
