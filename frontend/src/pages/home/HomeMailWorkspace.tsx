@@ -44,6 +44,8 @@ import {
   selectedCountStyle,
   snippetStyle,
   triageDateStyle,
+  triageAdvanceButtonDockStyle,
+  triageAdvanceButtonStyle,
   triageMailListHeaderStyle,
   triageMessageContentStyle,
   triageMessageActionRowStyle,
@@ -443,17 +445,6 @@ export function HomeMailWorkspace({
               {mailFilterStatus && <span style={selectedCountStyle}>{mailFilterStatus}</span>}
             </div>
           )}
-          {triageAdvanceEnabled && (
-            <button
-              className="mango-elevated-action"
-              type="button"
-              style={{ ...mailPanelPrimaryButtonStyle, width: "100%" }}
-              disabled={advanceDisabled}
-              onClick={onAdvanceTriagePage}
-            >
-              {busy === "advance-archive" ? "Archiving" : hasNextMessagePage ? "Archive page and next" : "Archive page"}
-            </button>
-          )}
           {!isArchivableListView && (
             <div style={listHeaderStyle}>
               <span>{mailboxLabel(mailbox)}</span>
@@ -580,6 +571,19 @@ export function HomeMailWorkspace({
             })}
             {loadingMoreMessages && <div style={loadingMoreStyle}>Loading</div>}
           </div>
+          {triageAdvanceEnabled && (
+            <div style={triageAdvanceButtonDockStyle}>
+              <button
+                className="mango-elevated-action"
+                type="button"
+                style={triageAdvanceButtonStyle}
+                disabled={advanceDisabled}
+                onClick={onAdvanceTriagePage}
+              >
+                {busy === "advance-archive" ? "Archiving" : hasNextMessagePage ? "Archive page and next" : "Archive page"}
+              </button>
+            </div>
+          )}
         </div>
       </section>
 

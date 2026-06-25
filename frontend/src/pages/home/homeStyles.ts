@@ -1831,6 +1831,22 @@ export const mailMessageListFrameStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
+export const triageAdvanceButtonDockStyle: React.CSSProperties = {
+  position: "absolute",
+  right: 14,
+  bottom: 14,
+  zIndex: 5,
+  pointerEvents: "none",
+};
+
+export const triageAdvanceButtonStyle: React.CSSProperties = {
+  ...mailPanelPrimaryButtonStyle,
+  minWidth: 178,
+  minHeight: 38,
+  pointerEvents: "auto",
+  whiteSpace: "nowrap",
+};
+
 export const loadingMoreStyle: React.CSSProperties = {
   minHeight: 28,
   display: "grid",
