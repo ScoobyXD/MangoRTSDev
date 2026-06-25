@@ -220,7 +220,7 @@ run("v2 tree rows preserve the existing tree shell ids and metadata", () => {
   assert.equal(rows[3]?.parentEntityID, "gate-entity");
 });
 
-run("v2 tree rows preserve duplicate native resources in separate parent contexts", () => {
+run("v2 tree rows hide project relationship children to keep one Explorer instance per resource", () => {
   const rows = buildCompanyExplorerV2TreeRows({
     expanded: new Set(["folder-root", "workspace-folder-folder-a", "project-project-a"]),
     rows: [
@@ -291,14 +291,13 @@ run("v2 tree rows preserve duplicate native resources in separate parent context
   assert.deepEqual(rows.map((row) => row.id), [
     "folder-root",
     "workspace-folder-folder-a",
-    "logic-gate-gate-a-context-edge-gate-folder",
+    "logic-gate-gate-a",
     "project-project-a",
-    "logic-gate-gate-a-context-project-entity",
   ]);
   assert.equal(rows[2]?.parentEntityID, "folder-a");
   assert.equal(rows[2]?.edgeID, "edge-gate-folder");
-  assert.equal(rows[4]?.parentEntityID, "project-entity");
-  assert.equal(rows[4]?.edgeID, undefined);
+  assert.equal(rows[3]?.hasChildren, false);
+  assert.equal(rows.some((row) => row.parentEntityID === "project-entity"), false);
 });
 
 run("v2 delete targets keep explorer entity identity separate from source ids", () => {

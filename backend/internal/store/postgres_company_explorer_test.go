@@ -62,7 +62,7 @@ func TestPostgresCompanyExplorerLazyUsesFinalItemsAndNoScopedFolders(t *testing.
 	}
 }
 
-func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndNativeChildren(t *testing.T) {
+func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLogicGateNativeChildren(t *testing.T) {
 	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_company_explorer_v2.go: %v", err)
@@ -73,8 +73,7 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndNativeChildren(t *testin
 		"func (r *postgresrepo) querycompanyexplorerfinalcontainerchildren",
 		"from company_explorer_folders folder",
 		"from company_explorer_items item",
-		"func (r *postgresrepo) querycompanyexplorerfinalprojectchildren",
-		"from project_relationship_projection projection",
+		"case companyexplorerv2entityproject: rows = []companyexplorerv2row{}",
 		"func (r *postgresrepo) querycompanyexplorerfinallogicgatechildren",
 		"from node_logic_gate_assignments assignment",
 		"insert into company_explorer_items",
@@ -91,6 +90,8 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndNativeChildren(t *testin
 		"company_explorer_subscriptions",
 		"querycompanyexplorerv2derivedgroups",
 		"ensurecompanyexplorerv2nativeentities",
+		"querycompanyexplorerfinalprojectchildren",
+		"from project_relationship_projection projection",
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("final company explorer rows kept removed V2 copy-graph marker %q", forbidden)
@@ -165,26 +166,6 @@ func TestPostgresCompanyExplorerV2NativeChildrenUseCompactArgs(t *testing.T) {
 	}
 	if strings.Contains(nativeArgs, "query.parententityid") {
 		t.Fatalf("companyExplorerNativeChildrenArgs must not include query.ParentEntityID")
-	}
-
-	projectRows := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) queryCompanyExplorerFinalProjectChildren")), " "))
-	for _, want := range []string{
-		"companyexplorernativechildrenargs(query, projectid)",
-		"projection.project_id=$4::uuid",
-		"companyexplorernativechildreneffectiveaccessselect",
-		"companyexplorernativechildrenaccesspredicate",
-	} {
-		if !strings.Contains(projectRows, want) {
-			t.Fatalf("queryCompanyExplorerFinalProjectChildren missing %q", want)
-		}
-	}
-	for _, forbidden := range []string{
-		"companyexplorerfinalargs(query)",
-		"projection.project_id=$5::uuid",
-	} {
-		if strings.Contains(projectRows, forbidden) {
-			t.Fatalf("queryCompanyExplorerFinalProjectChildren kept stale arg shape marker %q", forbidden)
-		}
 	}
 
 	logicGateRows := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) queryCompanyExplorerFinalLogicGateChildren")), " "))
