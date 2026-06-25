@@ -28,6 +28,7 @@ export type EditorDocumentSurfaceProps = {
   onInput: React.FormEventHandler<HTMLDivElement>;
   onSelect: React.ReactEventHandler<HTMLDivElement>;
   onClick: React.MouseEventHandler<HTMLDivElement>;
+  onDoubleClick: React.MouseEventHandler<HTMLDivElement>;
   onContextMenu: React.MouseEventHandler<HTMLDivElement>;
   onPointerDown: React.PointerEventHandler<HTMLDivElement>;
   onPointerMove: React.PointerEventHandler<HTMLDivElement>;
@@ -62,6 +63,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
   onInput,
   onSelect,
   onClick,
+  onDoubleClick,
   onContextMenu,
   onPointerDown,
   onPointerMove,
@@ -156,6 +158,13 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
       }}
       onSelect={onSelect}
       onClick={onClick}
+      onDoubleClick={(event) => {
+        if (!documentIsEditable) {
+          event.preventDefault();
+          return;
+        }
+        onDoubleClick(event);
+      }}
       onContextMenu={(event) => {
         if (!documentIsEditable) {
           event.preventDefault();

@@ -511,6 +511,26 @@ function copyImageAttachmentToClipboard(attachment: EditorChatAttachment, clipbo
   return wroteEventClipboard || wroteSystemClipboard;
 }
 
+function downloadChatAttachment(attachment: EditorChatAttachment): boolean {
+  if (!attachment.dataURL || typeof document === "undefined") return false;
+  const link = document.createElement("a");
+  link.href = attachment.dataURL;
+  link.download = attachment.name.trim() || "attachment";
+  link.rel = "noopener noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  return true;
+}
+
+function openChatAttachment(attachment: EditorChatAttachment, onPreviewImage: (attachment: EditorChatAttachment) => void): boolean {
+  if (isImageAttachment(attachment)) {
+    onPreviewImage(attachment);
+    return true;
+  }
+  return downloadChatAttachment(attachment);
+}
+
 function readImageDraftFromFrame(blockID: string, frame: HTMLElement, wrapper: HTMLElement): TextBlockImageDraft | null {
   const imageData = readEditorImageData(frame);
   if (!imageData?.src) return null;
@@ -1006,6 +1026,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         }}
         onSelect={documentSurfaceHandlers.onSelect}
         onClick={documentSurfaceHandlers.onClick}
+        onDoubleClick={documentSurfaceHandlers.onDoubleClick}
         onContextMenu={(event) => {
           if (!editable) {
             event.preventDefault();
@@ -2049,40 +2070,56 @@ type ChatAttachmentListProps = {
   onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, surfaceText, strokeColor, onPreviewImage }) => (
-  <div style={{ minWidth: 0, display: "flex", flexWrap: "wrap", gap: 5 }}>
-    {attachments.map((attachment) => {
-      const image = isImageAttachment(attachment);
-      const content = (
-        <>
-          <AttachmentThumb attachment={attachment} />
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
-          <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
-        </>
-      );
-      const style: React.CSSProperties = {
-        maxWidth: "100%",
-        minHeight: 30,
-        display: "inline-grid",
-        gridTemplateColumns: "24px minmax(0, 1fr) auto",
-        alignItems: "center",
-        gap: 6,
-        border: `1px solid ${strokeColor}`,
-        borderRadius: 6,
-        background: "#ffffff",
-        color: surfaceText,
-        padding: "3px 6px",
-        fontSize: 10,
-        fontWeight: 800,
-        letterSpacing: 0,
-        textDecoration: "none",
-      };
-      if (image) {
+const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, surfaceText, strokeColor, onPreviewImage }) => {
+  const [selectedAttachmentID, setSelectedAttachmentID] = useState("");
+
+  useEffect(() => {
+    if (selectedAttachmentID && !attachments.some((attachment) => attachment.id === selectedAttachmentID)) {
+      setSelectedAttachmentID("");
+    }
+  }, [attachments, selectedAttachmentID]);
+
+  const selectAttachment = (event: React.MouseEvent, attachmentID: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedAttachmentID(attachmentID);
+  };
+
+  const openAttachment = (event: React.MouseEvent, attachment: EditorChatAttachment) => {
+    selectAttachment(event, attachment.id);
+    openChatAttachment(attachment, onPreviewImage);
+  };
+
+  return (
+    <div style={{ minWidth: 0, display: "flex", flexWrap: "wrap", gap: 5 }}>
+      {attachments.map((attachment) => {
+        const selected = selectedAttachmentID === attachment.id;
+        const style: React.CSSProperties = {
+          maxWidth: "100%",
+          minHeight: 30,
+          display: "inline-grid",
+          gridTemplateColumns: "24px minmax(0, 1fr) auto",
+          alignItems: "center",
+          gap: 6,
+          border: selected ? "1px solid transparent" : `1px solid ${strokeColor}`,
+          borderRadius: 6,
+          background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "#ffffff",
+          color: surfaceText,
+          padding: "3px 6px",
+          fontSize: 10,
+          fontWeight: 800,
+          letterSpacing: 0,
+          textDecoration: "none",
+          cursor: "pointer",
+          boxShadow: selected ? "0 7px 18px rgba(15,23,42,0.10), 0 0 0 2px rgba(92,238,255,0.14), inset 1px 1px 0 rgba(255,255,255,0.86)" : "none",
+        };
         return (
           <button
             key={attachment.id}
             type="button"
-            data-mango-copyable-image="true"
+            data-mango-copyable-image={isImageAttachment(attachment) ? "true" : undefined}
+            aria-pressed={selected}
+            title={isImageAttachment(attachment) ? "Double-click to preview" : attachment.dataURL ? "Double-click to download" : attachment.name}
             onCopy={(event) => {
               if (!copyImageAttachmentToClipboard(attachment, event.clipboardData)) return;
               event.preventDefault();
@@ -2093,23 +2130,19 @@ const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, su
               event.preventDefault();
               event.stopPropagation();
             }}
-            onClick={() => onPreviewImage(attachment)}
-            style={{ ...style, cursor: "pointer" }}
+            onClick={(event) => selectAttachment(event, attachment.id)}
+            onDoubleClick={(event) => openAttachment(event, attachment)}
+            style={style}
           >
-            {content}
+            <AttachmentThumb attachment={attachment} />
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
+            <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
           </button>
         );
-      }
-      return attachment.dataURL ? (
-        <a key={attachment.id} href={attachment.dataURL} download={attachment.name} style={style}>
-          {content}
-        </a>
-      ) : (
-        <span key={attachment.id} style={style}>{content}</span>
-      );
-    })}
-  </div>
-);
+      })}
+    </div>
+  );
+};
 
 type DraftAttachmentListProps = {
   attachments: EditorChatAttachment[];
@@ -2119,38 +2152,102 @@ type DraftAttachmentListProps = {
   onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, surfaceText, strokeColor, onRemove, onPreviewImage }) => (
-  <div style={{ minWidth: 0, display: "flex", flexWrap: "wrap", gap: 5 }}>
-    {attachments.map((attachment) => (
-      <span key={attachment.id} style={{ maxWidth: "100%", minHeight: 30, display: "inline-grid", gridTemplateColumns: "24px minmax(0, 1fr) auto 18px", alignItems: "center", gap: 5, border: `1px solid ${strokeColor}`, borderRadius: 6, background: "#ffffff", color: surfaceText, padding: "3px 4px 3px 5px", fontSize: 10, fontWeight: 800, letterSpacing: 0 }}>
-        <button
-          type="button"
-          data-mango-copyable-image={isImageAttachment(attachment) ? "true" : undefined}
-          aria-label={isImageAttachment(attachment) ? `Preview ${attachment.name}` : attachment.name}
-          onCopy={(event) => {
-            if (!copyImageAttachmentToClipboard(attachment, event.clipboardData)) return;
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          onKeyDown={(event) => {
-            if (!isCopyShortcut(event) || !copyImageAttachmentToClipboard(attachment)) return;
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          onClick={() => { if (isImageAttachment(attachment)) onPreviewImage(attachment); }}
-          style={{ width: 24, height: 24, border: "none", background: "transparent", padding: 0, cursor: isImageAttachment(attachment) ? "pointer" : "default" }}
-        >
-          <AttachmentThumb attachment={attachment} />
-        </button>
-        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
-        <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
-        <button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => onRemove(attachment.id)} style={{ width: 18, height: 18, border: "none", borderRadius: 4, background: "transparent", color: surfaceText, cursor: "pointer", fontSize: 12, fontWeight: 800, lineHeight: 1 }}>
-          x
-        </button>
-      </span>
-    ))}
-  </div>
-);
+const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, surfaceText, strokeColor, onRemove, onPreviewImage }) => {
+  const [selectedAttachmentID, setSelectedAttachmentID] = useState("");
+
+  useEffect(() => {
+    if (selectedAttachmentID && !attachments.some((attachment) => attachment.id === selectedAttachmentID)) {
+      setSelectedAttachmentID("");
+    }
+  }, [attachments, selectedAttachmentID]);
+
+  const selectAttachment = (event: React.MouseEvent | React.KeyboardEvent, attachmentID: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedAttachmentID(attachmentID);
+  };
+
+  const openAttachment = (event: React.MouseEvent, attachment: EditorChatAttachment) => {
+    selectAttachment(event, attachment.id);
+    openChatAttachment(attachment, onPreviewImage);
+  };
+
+  return (
+    <div style={{ minWidth: 0, display: "flex", flexWrap: "wrap", gap: 5 }}>
+      {attachments.map((attachment) => {
+        const selected = selectedAttachmentID === attachment.id;
+        return (
+          <span
+            key={attachment.id}
+            role="button"
+            tabIndex={0}
+            aria-pressed={selected}
+            title={isImageAttachment(attachment) ? "Double-click to preview" : attachment.dataURL ? "Double-click to download" : attachment.name}
+            onClick={(event) => selectAttachment(event, attachment.id)}
+            onDoubleClick={(event) => openAttachment(event, attachment)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              selectAttachment(event, attachment.id);
+            }}
+            style={{
+              maxWidth: "100%",
+              minHeight: 30,
+              display: "inline-grid",
+              gridTemplateColumns: "24px minmax(0, 1fr) auto 18px",
+              alignItems: "center",
+              gap: 5,
+              border: selected ? "1px solid transparent" : `1px solid ${strokeColor}`,
+              borderRadius: 6,
+              background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "#ffffff",
+              color: surfaceText,
+              padding: "3px 4px 3px 5px",
+              fontSize: 10,
+              fontWeight: 800,
+              letterSpacing: 0,
+              cursor: "pointer",
+              boxShadow: selected ? "0 7px 18px rgba(15,23,42,0.10), 0 0 0 2px rgba(92,238,255,0.14), inset 1px 1px 0 rgba(255,255,255,0.86)" : "none",
+            }}
+          >
+            <button
+              type="button"
+              data-mango-copyable-image={isImageAttachment(attachment) ? "true" : undefined}
+              aria-label={`Select ${attachment.name}`}
+              onCopy={(event) => {
+                if (!copyImageAttachmentToClipboard(attachment, event.clipboardData)) return;
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onKeyDown={(event) => {
+                if (!isCopyShortcut(event) || !copyImageAttachmentToClipboard(attachment)) return;
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={(event) => selectAttachment(event, attachment.id)}
+              onDoubleClick={(event) => openAttachment(event, attachment)}
+              style={{ width: 24, height: 24, border: "none", background: "transparent", padding: 0, cursor: "pointer" }}
+            >
+              <AttachmentThumb attachment={attachment} />
+            </button>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
+            <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
+            <button
+              type="button"
+              aria-label={`Remove ${attachment.name}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemove(attachment.id);
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+              style={{ width: 18, height: 18, border: "none", borderRadius: 4, background: "transparent", color: surfaceText, cursor: "pointer", fontSize: 12, fontWeight: 800, lineHeight: 1 }}
+            >
+              x
+            </button>
+          </span>
+        );
+      })}
+    </div>
+  );
+};
 
 const AttachmentThumb: React.FC<{ attachment: EditorChatAttachment }> = ({ attachment }) => {
   if (isImageAttachment(attachment)) {

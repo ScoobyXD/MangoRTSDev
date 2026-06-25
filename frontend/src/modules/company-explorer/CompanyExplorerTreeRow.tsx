@@ -198,6 +198,15 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
     transition: "background 120ms ease, box-shadow 140ms ease, transform 140ms ease",
     transform: isTriageDropTarget ? "translateX(1px)" : "none",
   };
+  const toggleFolderExpanded = React.useCallback(() => {
+    if (!isFolder || !isExpandable) return;
+    onSetExpanded((previous) => {
+      const next = new Set(previous);
+      if (next.has(row.id)) next.delete(row.id);
+      else next.add(row.id);
+      return next;
+    });
+  }, [isExpandable, isFolder, onSetExpanded, row.id]);
 
   return (
     <div
@@ -216,6 +225,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
           return;
         }
         onSelectTreeRow(row, event);
+        if (event.detail <= 1) toggleFolderExpanded();
       }}
       onContextMenu={(event) => onOpenContextMenu(event, row)}
       onDragStart={(event) => {
@@ -377,7 +387,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         padding: "2px 8px",
         paddingLeft: TREE_BASE_LEFT_PX + row.depth * TREE_INDENT_PX,
         fontSize: 12,
-        cursor: "default",
+        cursor: isFolder && isExpandable ? "pointer" : "default",
         opacity: isDragging ? 0.55 : 1,
         ["--company-explorer-hover-bg" as string]: isDarkTheme ? "rgba(255,255,255,0.07)" : "rgba(71, 85, 105, 0.12)",
         ["--company-explorer-selected-bg" as string]: selectedRowBackground,
@@ -396,12 +406,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
             onDoubleClick={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
-              onSetExpanded((previous) => {
-                const next = new Set(previous);
-                if (next.has(row.id)) next.delete(row.id);
-                else next.add(row.id);
-                return next;
-              });
+              toggleFolderExpanded();
             }}
             style={{ border: "none", background: "transparent", width: TREE_TOGGLE_SLOT_PX, height: 20, cursor: "pointer", color: folderToggleColor, display: "grid", placeItems: "center", padding: 0, flexShrink: 0 }}
           >

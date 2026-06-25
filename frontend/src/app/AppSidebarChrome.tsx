@@ -781,11 +781,17 @@ export function AppSidebar({
         style={appSidebarSharedFolderRowStyle(row.depth, active, rowDropPlacement, hovered)}
         onPointerEnter={() => setHoveredSharedFolderID(folder.folder_id)}
         onPointerLeave={() => setHoveredSharedFolderID((current) => current === folder.folder_id ? "" : current)}
-        onClick={(event) => selectSharedFolderRow(row, event)}
+        onClick={(event) => {
+          selectSharedFolderRow(row, event);
+          if (!isSharedInbox && row.hasChildren && event.detail <= 1 && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+            toggleSharedFolder(folder.folder_id);
+          }
+        }}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
           event.preventDefault();
           selectSharedFolderRow(row);
+          if (!isSharedInbox && row.hasChildren) toggleSharedFolder(folder.folder_id);
         }}
         onDoubleClick={(event) => {
           event.preventDefault();
@@ -949,6 +955,10 @@ export function AppSidebar({
           <div
             style={appSidebarSharedTriageRowStyle(sharedTriageActive, dropTarget?.folderID === "", true, sharedTriageOpen)}
             onContextMenu={(event) => openSharedContextMenu(event, null)}
+            onClick={() => {
+              onHomeViewSelect("shared-root");
+              setSharedTriageOpen((open) => !open);
+            }}
             onDragOver={handleSharedRootDragOver}
             onDragLeave={() => setDropTarget((current) => current?.folderID === "" ? null : current)}
             onDrop={handleSharedRootDrop}
@@ -2258,6 +2268,7 @@ function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, el
       background: active || dropActive ? SIDEBAR_NEUMORPHIC_ACTIVE_SURFACE : "transparent",
       color: SIDEBAR_ACTIVE_TEXT,
       minWidth: 0,
+      cursor: "pointer",
       transition: "background 120ms ease",
     };
   }
@@ -2273,6 +2284,7 @@ function appSidebarSharedTriageRowStyle(active: boolean, dropActive: boolean, el
     background: active ? SIDEBAR_STATE_ACTIVE_BG : dropActive ? SIDEBAR_STATE_DROP_BG : "transparent",
     color: active ? SIDEBAR_ACTIVE_TEXT : "#334155",
     minWidth: 0,
+    cursor: "pointer",
   };
 }
 

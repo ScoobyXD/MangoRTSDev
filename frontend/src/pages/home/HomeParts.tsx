@@ -1229,6 +1229,7 @@ export function HomeSidebar({
 
   const renderSharedRow = (row: SharedInboxTreeRow) => {
     const folder = row.folder;
+    const isSharedInbox = folder.entry_type === "shared_inbox";
     const isRenaming = renamingSharedFolderID === folder.folder_id;
     const active = activeViewID === row.treeID || selectedSharedTreeIDs.has(row.treeID);
     const hovered = hoveredSharedFolderID === folder.folder_id;
@@ -1244,20 +1245,22 @@ export function HomeSidebar({
         onMouseEnter={() => setHoveredSharedFolderID(folder.folder_id)}
         onMouseLeave={() => setHoveredSharedFolderID((current) => current === folder.folder_id ? "" : current)}
         onClick={(event) => {
-          if (!folderHasAccess) {
-            if (row.hasChildren) toggleSharedFolder(folder.folder_id);
-            return;
+          if (folderHasAccess) {
+            selectSharedFolderRow(row, event);
           }
-          selectSharedFolderRow(row, event);
+          if (!isSharedInbox && row.hasChildren && event.detail <= 1 && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+            toggleSharedFolder(folder.folder_id);
+          }
         }}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
           event.preventDefault();
-          if (!folderHasAccess) {
-            if (row.hasChildren) toggleSharedFolder(folder.folder_id);
-            return;
+          if (folderHasAccess) {
+            selectSharedFolderRow(row);
           }
-          selectSharedFolderRow(row);
+          if (!isSharedInbox && row.hasChildren) {
+            toggleSharedFolder(folder.folder_id);
+          }
         }}
         onDoubleClick={(event) => {
           event.preventDefault();
@@ -1376,8 +1379,13 @@ export function HomeSidebar({
               minWidth: 0,
               borderRadius: 6,
               boxShadow: dropTarget?.folderID === "" ? `inset 0 0 0 2px ${homeColorWithAlpha(HOME_CYAN, 0.35)}` : undefined,
+              cursor: "pointer",
             }}
             onContextMenu={(event) => openSharedContextMenu(event, null)}
+            onClick={() => {
+              onSelectView("shared-root", "primary");
+              setSharedRootOpen((open) => !open);
+            }}
             onDragOver={handleRootDragOver}
             onDragLeave={() => setDropTarget((current) => current?.folderID === "" ? null : current)}
             onDrop={handleRootDrop}
