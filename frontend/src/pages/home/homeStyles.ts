@@ -486,7 +486,6 @@ export const panelStyle: React.CSSProperties = {
 export function mailViewerPanelStyle(attached: boolean): React.CSSProperties {
   return {
     ...panelStyle,
-    position: "relative",
     gridTemplateRows: "minmax(0, 1fr)",
     marginLeft: attached ? -HOME_COLUMN_RESIZER_WIDTH : 0,
     borderRadius: attached ? `0 ${HOME_KEY_COLUMN_RADIUS}px ${HOME_KEY_COLUMN_RADIUS}px 0` : HOME_KEY_COLUMN_RADIUS,
@@ -1724,6 +1723,11 @@ export const mailComposeSentActionsStyle: React.CSSProperties = {
   alignItems: "center",
 };
 
+export const mailComposeSentTriageActionsStyle: React.CSSProperties = {
+  ...mailComposeSentActionsStyle,
+  gridTemplateColumns: "minmax(88px, 0.8fr) minmax(82px, 0.75fr) minmax(164px, 1.45fr)",
+};
+
 export const mailUnreadFilterRowStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 24,
@@ -1832,31 +1836,10 @@ export const mailMessageListFrameStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
-export const triageAdvanceButtonDockStyle: React.CSSProperties = {
-  position: "absolute",
-  left: 14,
-  bottom: 14,
-  zIndex: 5,
-  pointerEvents: "none",
-};
-
 export const triageAdvanceButtonStyle: React.CSSProperties = {
-  ...mailPanelPrimaryButtonStyle,
-  width: 136,
-  height: 58,
-  minHeight: 58,
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto",
-  alignItems: "center",
-  gap: 8,
-  padding: "8px 10px",
-  borderRadius: 8,
+  ...mailArchiveActionButtonStyle(false),
+  padding: "0 8px",
   fontSize: 10,
-  fontWeight: 800,
-  lineHeight: 1.1,
-  pointerEvents: "auto",
-  textAlign: "left",
-  whiteSpace: "normal",
 };
 
 export const loadingMoreStyle: React.CSSProperties = {

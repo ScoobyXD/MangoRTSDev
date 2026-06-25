@@ -19,6 +19,7 @@ import {
   mailArchiveActionLabelStyle,
   mailArchiveActionsStyle,
   mailComposeSentActionsStyle,
+  mailComposeSentTriageActionsStyle,
   mailFiltersRowStyle,
   mailListTitleStackStyle,
   mailListToolbarStyle,
@@ -44,7 +45,6 @@ import {
   selectedCountStyle,
   snippetStyle,
   triageDateStyle,
-  triageAdvanceButtonDockStyle,
   triageAdvanceButtonStyle,
   triageMailListHeaderStyle,
   triageMessageContentStyle,
@@ -94,15 +94,6 @@ function SendPointerIcon() {
     <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
       <path d="M2.1 2.35 14 8 2.1 13.65l1.45-4.25L8.2 8 3.55 6.6z" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinejoin="round" />
       <path d="M8.2 8H3.65" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function ArrowRightIcon() {
-  return (
-    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" style={{ display: "block", flexShrink: 0 }}>
-      <path d="M3.25 9h10.2" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
-      <path d="m9.9 4.8 4.2 4.2-4.2 4.2" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -399,7 +390,7 @@ export function HomeMailWorkspace({
             </div>
           )}
           {isArchivableListView && (
-            <div style={mailComposeSentActionsStyle}>
+            <div style={triageAdvanceEnabled ? mailComposeSentTriageActionsStyle : mailComposeSentActionsStyle}>
               <button className="mango-elevated-action" style={compose.open ? mailArchiveActionButtonStyle(true) : mailPanelPrimaryButtonStyle} onClick={onOpenNewCompose}>Compose</button>
               <button
                 className="mango-elevated-action"
@@ -412,6 +403,17 @@ export function HomeMailWorkspace({
                 <span style={mailArchiveActionLabelStyle}>Sent</span>
                 <SendPointerIcon />
               </button>
+              {triageAdvanceEnabled && (
+                <button
+                  className="mango-elevated-action"
+                  type="button"
+                  style={triageAdvanceButtonStyle}
+                  disabled={advanceDisabled}
+                  onClick={onAdvanceTriagePage}
+                >
+                  {busy === "advance-archive" ? "Archiving" : hasNextMessagePage ? "Archive page and go next ->" : "Archive page ->"}
+                </button>
+              )}
             </div>
           )}
           {!isArchivableListView && (
@@ -586,20 +588,6 @@ export function HomeMailWorkspace({
       {showDetailResizeHandle && <HomeColumnResizeHandle dividerIndex={1} onPointerDown={onColumnResizeStart} />}
 
       <section style={mailViewerPanelStyle(showDetailResizeHandle)}>
-        {triageAdvanceEnabled && (
-          <div style={triageAdvanceButtonDockStyle}>
-            <button
-              className="mango-elevated-action"
-              type="button"
-              style={triageAdvanceButtonStyle}
-              disabled={advanceDisabled}
-              onClick={onAdvanceTriagePage}
-            >
-              <span>{busy === "advance-archive" ? "Archiving" : hasNextMessagePage ? "Archive page and next" : "Archive page"}</span>
-              <ArrowRightIcon />
-            </button>
-          </div>
-        )}
         {compose.open ? (
           <ComposePanel
             compose={compose}
