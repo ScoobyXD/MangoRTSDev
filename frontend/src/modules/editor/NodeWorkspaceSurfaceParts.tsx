@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ConfirmActionMenu } from "../../app/ConfirmActionMenu.js";
+import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
@@ -109,8 +109,16 @@ type TextBlockActionsMenuProps = {
   surfaceText: string;
   panelBackground: string;
   strokeColor: string;
-  onDelete: () => void;
+  onDelete: (position: ConfirmActionMenuPosition) => void;
 };
+
+function textBlockDeleteConfirmPositionFromElement(element: Element): ConfirmActionMenuPosition {
+  const rect = element.getBoundingClientRect();
+  return {
+    x: Math.max(12, Math.round(rect.right - 300)),
+    y: Math.round(rect.bottom + 8),
+  };
+}
 
 export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
   accent,
@@ -172,9 +180,10 @@ export const TextBlockActionsMenu: React.FC<TextBlockActionsMenuProps> = ({
           <button
             type="button"
             role="menuitem"
-            onClick={() => {
+            onClick={(event) => {
+              const position = textBlockDeleteConfirmPositionFromElement(event.currentTarget);
               setOpen(false);
-              onDelete();
+              onDelete(position);
             }}
             style={{ ...menuItemStyle, color: "#dc2626" }}
           >
@@ -193,6 +202,7 @@ type DeleteTextBlockConfirmationModalProps = {
   surfaceText: string;
   panelBackground: string;
   ruleColor: string;
+  position?: ConfirmActionMenuPosition | null;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -201,12 +211,14 @@ export const DeleteTextBlockConfirmationModal: React.FC<DeleteTextBlockConfirmat
   title,
   chatCount,
   surfaceText,
+  position,
   onConfirm,
   onCancel,
 }) => (
   <ConfirmActionMenu
     title="Are you sure you want to delete this?"
     detail={`This removes "${title}" from the middle column${chatCount > 0 ? ` and deletes ${chatCount} chat repl${chatCount === 1 ? "y" : "ies"} attached to it` : ""}.`}
+    position={position}
     isDarkTheme={surfaceText !== "#111111"}
     onConfirm={onConfirm}
     onCancel={onCancel}

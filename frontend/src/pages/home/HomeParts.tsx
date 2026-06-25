@@ -1182,7 +1182,10 @@ export function HomeSidebar({
     setSelectedSharedTreeIDs(new Set(nextSelectedIDs));
     setSharedSelectionAnchorTreeID(selected.anchorID);
     const primaryTreeID = (selected.selectedIDs.has(row.treeID) ? row.treeID : nextSelectedIDs[0]) ?? row.treeID;
-    onSelectView(primaryTreeID as HomeViewID, "primary");
+    const primaryRow = sharedRows.find((item) => item.treeID === primaryTreeID) ?? row;
+    if (primaryRow.folder.entry_type === "shared_inbox") {
+      onSelectView(primaryTreeID as HomeViewID, "primary");
+    }
   }, [onSelectView, selectedSharedTreeIDs, sharedRows, sharedSelectionAnchorTreeID]);
 
   const canDropSharedFolder = useCallback((sourceFolderID: string, targetFolderID: string) => {
@@ -1383,7 +1386,6 @@ export function HomeSidebar({
             }}
             onContextMenu={(event) => openSharedContextMenu(event, null)}
             onClick={() => {
-              onSelectView("shared-root", "primary");
               setSharedRootOpen((open) => !open);
             }}
             onDragOver={handleRootDragOver}
@@ -1393,11 +1395,14 @@ export function HomeSidebar({
             <button
               type="button"
               style={{
-                ...navButtonStyle(activeViewID === "shared-root" || activeViewID.startsWith("shared:")),
+                ...navButtonStyle(activeViewID.startsWith("shared:")),
                 minHeight: 30,
                 paddingLeft: 8,
               }}
-              onClick={() => onSelectView("shared-root", "primary")}
+              onClick={(event) => {
+                event.stopPropagation();
+                setSharedRootOpen((open) => !open);
+              }}
             >
               <span style={navLabelStyle}>Shared Triage</span>
               {loadingSharedInboxes && <span style={navMetaStyle}>Loading</span>}

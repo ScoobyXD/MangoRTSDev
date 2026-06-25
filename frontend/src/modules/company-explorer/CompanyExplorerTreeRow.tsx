@@ -198,15 +198,15 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
     transition: "background 120ms ease, box-shadow 140ms ease, transform 140ms ease",
     transform: isTriageDropTarget ? "translateX(1px)" : "none",
   };
-  const toggleFolderExpanded = React.useCallback(() => {
-    if (!isFolder || !isExpandable) return;
+  const toggleRowExpanded = React.useCallback(() => {
+    if (!isExpandable) return;
     onSetExpanded((previous) => {
       const next = new Set(previous);
       if (next.has(row.id)) next.delete(row.id);
       else next.add(row.id);
       return next;
     });
-  }, [isExpandable, isFolder, onSetExpanded, row.id]);
+  }, [isExpandable, onSetExpanded, row.id]);
 
   return (
     <div
@@ -225,7 +225,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
           return;
         }
         onSelectTreeRow(row, event);
-        if (event.detail <= 1) toggleFolderExpanded();
+        if (isFolder && event.detail <= 1) toggleRowExpanded();
       }}
       onContextMenu={(event) => onOpenContextMenu(event, row)}
       onDragStart={(event) => {
@@ -406,7 +406,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
             onDoubleClick={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
-              toggleFolderExpanded();
+              toggleRowExpanded();
             }}
             style={{ border: "none", background: "transparent", width: TREE_TOGGLE_SLOT_PX, height: 20, cursor: "pointer", color: folderToggleColor, display: "grid", placeItems: "center", padding: 0, flexShrink: 0 }}
           >

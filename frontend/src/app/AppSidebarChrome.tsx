@@ -276,7 +276,7 @@ export function AppSidebar({
     () => sharedTriageOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [],
     [expandedSharedFolderIDs, sharedInboxes, sharedTriageOpen],
   );
-  const sharedTriageActive = homeActive && (activeHomeView === "shared-root" || activeHomeView.startsWith("shared:"));
+  const sharedTriageActive = homeActive && activeHomeView.startsWith("shared:");
   const myTriageNotificationCount = useMemo(
     () => mailUnreadCounts.myTriage,
     [mailUnreadCounts.myTriage],
@@ -747,7 +747,10 @@ export function AppSidebar({
     setSelectedSharedTreeIDs(new Set(nextSelectedIDs));
     setSharedSelectionAnchorTreeID(selected.anchorID);
     const primaryTreeID = (selected.selectedIDs.has(row.treeID) ? row.treeID : nextSelectedIDs[0]) ?? row.treeID;
-    onHomeViewSelect(primaryTreeID as HomeSidebarView);
+    const primaryRow = sharedRows.find((item) => item.treeID === primaryTreeID) ?? row;
+    if (primaryRow.folder.entry_type === "shared_inbox") {
+      onHomeViewSelect(primaryTreeID as HomeSidebarView);
+    }
   }, [onHomeViewSelect, selectedSharedTreeIDs, sharedRows, sharedSelectionAnchorTreeID]);
   const handleSharedRootDragOver = useCallback((event: React.DragEvent<HTMLElement>) => {
     const sourceFolderID = readSharedTriageFolderDrag(event.dataTransfer) || draggingSharedFolderID;
@@ -956,7 +959,6 @@ export function AppSidebar({
             style={appSidebarSharedTriageRowStyle(sharedTriageActive, dropTarget?.folderID === "", true, sharedTriageOpen)}
             onContextMenu={(event) => openSharedContextMenu(event, null)}
             onClick={() => {
-              onHomeViewSelect("shared-root");
               setSharedTriageOpen((open) => !open);
             }}
             onDragOver={handleSharedRootDragOver}
@@ -966,7 +968,10 @@ export function AppSidebar({
             <button
               type="button"
               style={appSidebarSharedTriageButtonStyle}
-              onClick={() => onHomeViewSelect("shared-root")}
+              onClick={(event) => {
+                event.stopPropagation();
+                setSharedTriageOpen((open) => !open);
+              }}
             >
               <span style={appSidebarSharedIconStyle}><HeaderSharedTriageIcon color="#8b5cf6" /></span>
               <span style={appSidebarTextStyle}>Shared Triage</span>
