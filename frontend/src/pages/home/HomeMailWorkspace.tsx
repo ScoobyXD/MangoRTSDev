@@ -98,6 +98,15 @@ function SendPointerIcon() {
   );
 }
 
+function ArrowRightIcon() {
+  return (
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" style={{ display: "block", flexShrink: 0 }}>
+      <path d="M3.25 9h10.2" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+      <path d="m9.9 4.8 4.2 4.2-4.2 4.2" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function MessageReadStatusText({ message }: { message: EmailMessage }) {
   const label = messageReadStatusLabel(message.read_status);
   if (!label) return null;
@@ -571,25 +580,26 @@ export function HomeMailWorkspace({
             })}
             {loadingMoreMessages && <div style={loadingMoreStyle}>Loading</div>}
           </div>
-          {triageAdvanceEnabled && (
-            <div style={triageAdvanceButtonDockStyle}>
-              <button
-                className="mango-elevated-action"
-                type="button"
-                style={triageAdvanceButtonStyle}
-                disabled={advanceDisabled}
-                onClick={onAdvanceTriagePage}
-              >
-                {busy === "advance-archive" ? "Archiving" : hasNextMessagePage ? "Archive page and next" : "Archive page"}
-              </button>
-            </div>
-          )}
         </div>
       </section>
 
       {showDetailResizeHandle && <HomeColumnResizeHandle dividerIndex={1} onPointerDown={onColumnResizeStart} />}
 
       <section style={mailViewerPanelStyle(showDetailResizeHandle)}>
+        {triageAdvanceEnabled && (
+          <div style={triageAdvanceButtonDockStyle}>
+            <button
+              className="mango-elevated-action"
+              type="button"
+              style={triageAdvanceButtonStyle}
+              disabled={advanceDisabled}
+              onClick={onAdvanceTriagePage}
+            >
+              <span>{busy === "advance-archive" ? "Archiving" : hasNextMessagePage ? "Archive page and next" : "Archive page"}</span>
+              <ArrowRightIcon />
+            </button>
+          </div>
+        )}
         {compose.open ? (
           <ComposePanel
             compose={compose}
