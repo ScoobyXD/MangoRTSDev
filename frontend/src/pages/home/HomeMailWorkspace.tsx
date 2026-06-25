@@ -14,10 +14,6 @@ import {
   inlineNoticeStyle,
   listHeaderStyle,
   loadingMoreStyle,
-  mailAutoArchiveGuideStyle,
-  mailAutoArchiveGuideLabelStyle,
-  mailAutoArchiveGuideLineStyle,
-  mailAutoArchiveTailSpacerStyle,
   mailArchiveActionButtonStyle,
   mailArchiveActionCountStyle,
   mailArchiveActionLabelStyle,
@@ -62,10 +58,6 @@ import {
 
 type TriageMailboxCountKey = Extract<EmailMailbox, "primary" | "starred">;
 type TriageMailboxCounts = Partial<Record<TriageMailboxCountKey, number>>;
-type ArchiveProgressByMessageID = Record<string, number>;
-
-const ARCHIVE_GUIDE_FALLBACK_TOP = 176;
-const ARCHIVE_TAIL_SPACER_MIN_HEIGHT = 260;
 
 function formatMailboxCount(count: number | undefined): string {
   if (typeof count !== "number" || !Number.isFinite(count)) return "";
@@ -80,40 +72,6 @@ function MailboxActionContent({ label, count }: { label: string; count?: number 
       {formattedCount && <span style={mailArchiveActionCountStyle}>{formattedCount}</span>}
     </>
   );
-}
-
-function collectScrolledOutMessageIDs(container: HTMLDivElement): string[] {
-  if (container.scrollTop <= 0) return [];
-  const thresholdTop = container.getBoundingClientRect().top;
-  const ids: string[] = [];
-  container.querySelectorAll<HTMLElement>("[data-home-mail-message-id]").forEach((row) => {
-    if (row.getBoundingClientRect().bottom > thresholdTop + 1) return;
-    const messageID = row.dataset.homeMailMessageId?.trim();
-    if (messageID) ids.push(messageID);
-  });
-  return ids;
-}
-
-function clampArchiveGuideTop(container: HTMLDivElement, top: number): number {
-  const maxTop = Math.max(56, container.clientHeight - 24);
-  return Math.max(56, Math.min(maxTop, top));
-}
-
-function measureArchiveGuideTop(container: HTMLDivElement): number {
-  const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-home-mail-message-id]"));
-  if (rows.length >= 2) {
-    const firstBottom = rows[0].offsetTop + rows[0].offsetHeight;
-    return clampArchiveGuideTop(container, firstBottom + (rows[1].offsetTop - firstBottom) / 2);
-  }
-  if (rows.length === 1) return clampArchiveGuideTop(container, rows[0].offsetTop + rows[0].offsetHeight + 10);
-  return clampArchiveGuideTop(container, ARCHIVE_GUIDE_FALLBACK_TOP);
-}
-
-function archiveProgressMapsEqual(left: ArchiveProgressByMessageID, right: ArchiveProgressByMessageID): boolean {
-  const leftKeys = Object.keys(left);
-  const rightKeys = Object.keys(right);
-  if (leftKeys.length !== rightKeys.length) return false;
-  return leftKeys.every((key) => left[key] === right[key]);
 }
 
 function StarIcon({ filled }: { filled: boolean }) {
@@ -188,7 +146,6 @@ export function HomeMailWorkspace({
   companyUsers,
   notice,
   noticeAction,
-  pendingAutoArchiveMessageIDs,
   pendingStarredMessageIDs,
   searchDraft,
   selectedMessage,
@@ -199,8 +156,10 @@ export function HomeMailWorkspace({
   showDetailResizeHandle,
   unreadOnly,
   unreadMessageCount,
+  canAdvanceTriagePage,
+  hasNextMessagePage,
   onArchiveSelected,
-  onAutoArchiveMessages,
+  onAdvanceTriagePage,
   onCancelCompose,
   onColumnResizeStart,
   onComposeChange,
@@ -253,7 +212,6 @@ export function HomeMailWorkspace({
   companyUsers: CompanyUser[];
   notice: string;
   noticeAction?: HomeMailNoticeAction | null;
-  pendingAutoArchiveMessageIDs: Set<string>;
   pendingStarredMessageIDs: Set<string>;
   searchDraft: string;
   selectedMessage: EmailMessage | null;
@@ -264,8 +222,10 @@ export function HomeMailWorkspace({
   showDetailResizeHandle: boolean;
   unreadOnly: boolean;
   unreadMessageCount: number;
+  canAdvanceTriagePage: boolean;
+  hasNextMessagePage: boolean;
   onArchiveSelected: () => void;
-  onAutoArchiveMessages: (messageIDs: string[]) => void;
+  onAdvanceTriagePage: () => void;
   onCancelCompose: () => void;
   onColumnResizeStart: (dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => void;
   onComposeChange: React.Dispatch<React.SetStateAction<ComposeState>>;
@@ -296,63 +256,8 @@ export function HomeMailWorkspace({
 }) {
   const [hoveredMessageID, setHoveredMessageID] = React.useState("");
   const [hoveredStarMessageID, setHoveredStarMessageID] = React.useState("");
-  const [archiveGuideTop, setArchiveGuideTop] = React.useState(ARCHIVE_GUIDE_FALLBACK_TOP);
-  const [archiveTailSpacerHeight, setArchiveTailSpacerHeight] = React.useState(ARCHIVE_TAIL_SPACER_MIN_HEIGHT);
-  const [archiveProgressByMessageID, setArchiveProgressByMessageID] = React.useState<ArchiveProgressByMessageID>({});
-  const archiveVisualFrameRef = React.useRef<number | null>(null);
-  const autoArchiveEnabled = isArchivableListView && mailbox === "primary";
-
-  const updateArchiveVisuals = React.useCallback(() => {
-    const list = messageListRef.current;
-    if (!autoArchiveEnabled || !list) {
-      setArchiveProgressByMessageID((current) => Object.keys(current).length === 0 ? current : {});
-      return;
-    }
-    const nextGuideTop = measureArchiveGuideTop(list);
-    setArchiveGuideTop((current) => Math.abs(current - nextGuideTop) < 0.5 ? current : nextGuideTop);
-    const nextSpacerHeight = Math.max(ARCHIVE_TAIL_SPACER_MIN_HEIGHT, list.clientHeight + 24);
-    setArchiveTailSpacerHeight((current) => Math.abs(current - nextSpacerHeight) < 1 ? current : nextSpacerHeight);
-    const containerTop = list.getBoundingClientRect().top;
-    const nextProgress: ArchiveProgressByMessageID = {};
-    list.querySelectorAll<HTMLElement>("[data-home-mail-message-id]").forEach((row) => {
-      const messageID = row.dataset.homeMailMessageId?.trim();
-      if (!messageID) return;
-      const rect = row.getBoundingClientRect();
-      const rowCenter = rect.top + rect.height / 2 - containerTop;
-      const progress = Math.max(0, Math.min(1, (nextGuideTop - rowCenter) / Math.max(1, nextGuideTop)));
-      if (progress > 0.01) nextProgress[messageID] = Math.round(progress * 1000) / 1000;
-    });
-    setArchiveProgressByMessageID((current) => archiveProgressMapsEqual(current, nextProgress) ? current : nextProgress);
-  }, [autoArchiveEnabled, messageListRef]);
-
-  const scheduleArchiveVisuals = React.useCallback(() => {
-    if (archiveVisualFrameRef.current !== null) return;
-    archiveVisualFrameRef.current = window.requestAnimationFrame(() => {
-      archiveVisualFrameRef.current = null;
-      updateArchiveVisuals();
-    });
-  }, [updateArchiveVisuals]);
-
-  React.useLayoutEffect(() => {
-    updateArchiveVisuals();
-  }, [messages.length, autoArchiveEnabled, updateArchiveVisuals]);
-
-  React.useEffect(() => {
-    return () => {
-      if (archiveVisualFrameRef.current !== null) {
-        window.cancelAnimationFrame(archiveVisualFrameRef.current);
-        archiveVisualFrameRef.current = null;
-      }
-    };
-  }, []);
-
-  React.useEffect(() => {
-    const list = messageListRef.current;
-    if (!autoArchiveEnabled || !list || typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(scheduleArchiveVisuals);
-    observer.observe(list);
-    return () => observer.disconnect();
-  }, [autoArchiveEnabled, messageListRef, scheduleArchiveVisuals]);
+  const triageAdvanceEnabled = isArchivableListView && mailbox === "primary";
+  const advanceDisabled = !canAdvanceTriagePage || !!busy || loadingMessages || loadingMoreMessages || messages.length === 0;
 
   if (unassignedSharedInbox) {
     return (
@@ -538,6 +443,17 @@ export function HomeMailWorkspace({
               {mailFilterStatus && <span style={selectedCountStyle}>{mailFilterStatus}</span>}
             </div>
           )}
+          {triageAdvanceEnabled && (
+            <button
+              className="mango-elevated-action"
+              type="button"
+              style={{ ...mailPanelPrimaryButtonStyle, width: "100%" }}
+              disabled={advanceDisabled}
+              onClick={onAdvanceTriagePage}
+            >
+              {busy === "advance-archive" ? "Archiving" : hasNextMessagePage ? "Archive page and next" : "Archive page"}
+            </button>
+          )}
           {!isArchivableListView && (
             <div style={listHeaderStyle}>
               <span>{mailboxLabel(mailbox)}</span>
@@ -546,25 +462,14 @@ export function HomeMailWorkspace({
           )}
         </div>
         <div style={mailMessageListFrameStyle}>
-          {autoArchiveEnabled && messages.length > 0 && (
-            <div aria-hidden="true" style={mailAutoArchiveGuideStyle(archiveGuideTop)}>
-              <span style={mailAutoArchiveGuideLabelStyle}>archive</span>
-              <span style={mailAutoArchiveGuideLineStyle} />
-            </div>
-          )}
           <div
             className="mango-home-scroll"
             ref={messageListRef}
             style={messageListStyle}
             onScroll={(event) => {
+              if (triageAdvanceEnabled) return;
               const target = event.currentTarget;
-              if (autoArchiveEnabled) {
-                scheduleArchiveVisuals();
-                const scrolledOutIDs = collectScrolledOutMessageIDs(target);
-                if (scrolledOutIDs.length > 0) onAutoArchiveMessages(scrolledOutIDs);
-              }
-              const tailReserve = autoArchiveEnabled && messages.length > 0 ? target.clientHeight : 0;
-              const remaining = target.scrollHeight - target.scrollTop - target.clientHeight - tailReserve;
+              const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
               const prefetchDistance = Math.max(800, target.clientHeight * 2);
               if (remaining < prefetchDistance) onPrefetchMessages();
               if (remaining < 160) onLoadMoreMessages();
@@ -578,7 +483,6 @@ export function HomeMailWorkspace({
               const triageView = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:");
               const draftRow = mailbox === "drafts" || isDraftMessage(message);
               const draggable = triageView && !draftRow && canDragTriageMessageFromMailbox(mailbox);
-              const pendingAutoArchive = mailbox === "primary" && pendingAutoArchiveMessageIDs.has(message.id);
               const pendingStarred = pendingStarredMessageIDs.has(message.id);
               const starHovered = hoveredStarMessageID === message.id;
               const starHighlighted = pendingStarred || message.starred || mailbox === "starred" || starHovered;
@@ -591,7 +495,7 @@ export function HomeMailWorkspace({
                   role="button"
                   tabIndex={0}
                   style={isArchivableListView
-                    ? triageMessageRowStyle(active, message.unread, draggable, pendingAutoArchive, hovered, archiveProgressByMessageID[message.id] ?? 0, false)
+                    ? triageMessageRowStyle(active, message.unread, draggable, hovered, false)
                     : messageRowStyle(active, message.unread, hovered, false)}
                   draggable={draggable}
                   onPointerEnter={() => setHoveredMessageID(message.id)}
@@ -675,13 +579,6 @@ export function HomeMailWorkspace({
               );
             })}
             {loadingMoreMessages && <div style={loadingMoreStyle}>Loading</div>}
-            {autoArchiveEnabled && messages.length > 0 && (
-              <div
-                aria-hidden="true"
-                data-home-mail-auto-archive-spacer="true"
-                style={mailAutoArchiveTailSpacerStyle(archiveTailSpacerHeight)}
-              />
-            )}
           </div>
         </div>
       </section>
