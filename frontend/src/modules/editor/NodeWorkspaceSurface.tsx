@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { humanLabelOrFallback } from "../entityLabels.js";
 import { getLogicGateRecordSingleFlight } from "../logic-gate-map/LogicGateRecordStore.js";
@@ -596,7 +597,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   });
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
-  const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number } | null>(null);
+  const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number; position: ConfirmActionMenuPosition } | null>(null);
   const autoCreatedTextBlockNodeIDsRef = useRef(new Set<string>());
 
   const projectionIdentity = useMemo(() => projectionsKey(projections), [projections]);
@@ -1421,13 +1422,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [canEdit, chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
 
-  const requestDeleteTextBlock = useCallback((blockID: string) => {
+  const requestDeleteTextBlock = useCallback((blockID: string, position: ConfirmActionMenuPosition) => {
     if (!canEdit) return;
     const chatCount = chatMessages.filter((message) => message.blockID === blockID).length;
     setDeleteTextBlockConfirmation({
       blockID,
       title: "text box",
       chatCount,
+      position,
     });
   }, [canEdit, chatMessages]);
 
@@ -2978,7 +2980,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         surfaceText={surfaceText}
                         panelBackground={panelBackground}
                         strokeColor={strokeColor}
-                        onDelete={() => requestDeleteTextBlock(block.id)}
+                        onDelete={(position) => requestDeleteTextBlock(block.id, position)}
                       />
                     ) : (
                       <div aria-hidden="true" style={{ width: 26, height: 24 }} />
@@ -3096,6 +3098,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           surfaceText={surfaceText}
           panelBackground={panelBackground}
           ruleColor={ruleColor}
+          position={deleteTextBlockConfirmation.position}
           onConfirm={() => {
             const blockID = deleteTextBlockConfirmation.blockID;
             setDeleteTextBlockConfirmation(null);

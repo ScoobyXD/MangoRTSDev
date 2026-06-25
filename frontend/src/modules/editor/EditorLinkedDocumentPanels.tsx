@@ -434,7 +434,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               minWidth: 0,
               maxWidth: "100%",
               display: "grid",
-              gridTemplateColumns: gvicStrip && !nodePresetFields ? "minmax(0, min(780px, 1fr)) max-content" : "minmax(0, min(780px, 100%))",
+              gridTemplateColumns: gvicStrip ? "minmax(0, min(780px, 1fr)) max-content" : "minmax(0, min(780px, 100%))",
               alignItems: "center",
               gap: 8,
             }}
@@ -517,14 +517,14 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               {linkedNodeTitle || "\u00A0"}
             </span>
           </div>
-          {gvicStrip && !nodePresetFields && gvicStrip}
+          {gvicStrip}
           </div>
           {nodePresetFields && (
             <div
               className="mango-editor-hover-highlight"
               style={{
                 display: "grid",
-                gridTemplateColumns: "164px 250px minmax(260px, 340px) 160px max-content",
+                gridTemplateColumns: "164px 250px minmax(260px, 340px) 160px",
                 justifyContent: "start",
                 columnGap: 8,
                 rowGap: 6,
@@ -820,11 +820,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   {priorityRequirementError && <span style={{ color: "#b00020", fontSize: 11, fontWeight: 800, lineHeight: 1.2 }}>{priorityRequirementError}</span>}
                 </span>
               </label>
-              {gvicStrip && (
-                <div style={{ gridColumn: 5, gridRow: 1, minWidth: 0, alignSelf: "start", justifySelf: "start" }}>
-                  {gvicStrip}
-                </div>
-              )}
             </div>
           )}
           {linkedNodeInfoPreview.length > 0 && <div style={{ minWidth: 0, fontSize: 10, opacity: 0.7, overflowWrap: "anywhere", wordBreak: "break-word" }}>{linkedNodeInfoPreview.join(" - ")}</div>}
@@ -920,8 +915,8 @@ function GVICCompactStrip({
         style={{
           minWidth: 0,
           display: "grid",
-          gridTemplateColumns: "repeat(4, 38px)",
-          gap: 6,
+          gridTemplateColumns: "repeat(4, 42px)",
+          gap: 7,
           alignItems: "center",
           justifyContent: "start",
         }}
@@ -940,8 +935,8 @@ function GVICCompactStrip({
               aria-expanded={active}
               onClick={() => setOpenRole((current) => current === item.role ? "" : item.role)}
               style={{
-                width: 38,
-                height: 38,
+                width: 42,
+                height: 42,
                 display: "grid",
                 gridTemplateRows: "1fr auto",
                 placeItems: "center",
@@ -961,10 +956,10 @@ function GVICCompactStrip({
                 transform: active ? "translateY(-1px)" : "none",
               }}
             >
-              <span aria-hidden="true" style={{ fontSize: 15, fontWeight: 900, lineHeight: 1 }}>
+              <span aria-hidden="true" style={{ fontSize: 17, fontWeight: 900, lineHeight: 1 }}>
                 {GVIC_ROLE_SHORT_LABELS[item.role]}
               </span>
-              <span aria-hidden="true" style={{ minWidth: 14, height: 14, borderRadius: 999, display: "grid", placeItems: "center", background: roleAssignments.length > 0 ? roleAccent : "rgba(255,255,255,0.72)", color: roleAssignments.length > 0 ? "#ffffff" : roleAccent, fontSize: 9, fontWeight: 900, lineHeight: 1, padding: "0 3px" }}>
+              <span aria-hidden="true" style={{ minWidth: 16, height: 16, borderRadius: 999, display: "grid", placeItems: "center", background: roleAssignments.length > 0 ? roleAccent : "rgba(255,255,255,0.72)", color: roleAssignments.length > 0 ? "#ffffff" : roleAccent, fontSize: 9.5, fontWeight: 900, lineHeight: 1, padding: "0 3px" }}>
                 {roleAssignments.length}
               </span>
             </button>
