@@ -107,6 +107,10 @@ func TestPostgresCompanyExplorerSearchUsesVisibleExplorerLocations(t *testing.T)
 	source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
 	for _, want := range []string{
 		"with recursive visible_folder_paths as",
+		"folder.created_timestamp",
+		"folder.updated_timestamp",
+		"child.created_timestamp",
+		"child.updated_timestamp",
 		"companyexploreraccesspredicate(\"'folder'\", \"folder.folder_id\", \"$3\", \"$4\")",
 		"companyexploreraccesspredicate(\"'folder'\", \"child.folder_id\", \"$3\", \"$4\")",
 		"visible_item_locations as",

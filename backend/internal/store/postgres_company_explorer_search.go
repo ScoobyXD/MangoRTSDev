@@ -67,6 +67,8 @@ with recursive visible_folder_paths as (
          folder.folder_id,
          folder.parent_folder_id,
          folder.name,
+         folder.created_timestamp,
+         folder.updated_timestamp,
          '[]'::jsonb as parent_path,
          jsonb_build_array(jsonb_build_object(
            'entity_type', 'folder',
@@ -82,6 +84,8 @@ with recursive visible_folder_paths as (
          child.folder_id,
          child.parent_folder_id,
          child.name,
+         child.created_timestamp,
+         child.updated_timestamp,
          parent.path as parent_path,
          parent.path || jsonb_build_array(jsonb_build_object(
            'entity_type', 'folder',
