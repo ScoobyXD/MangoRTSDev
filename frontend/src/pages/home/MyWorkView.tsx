@@ -119,6 +119,7 @@ const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
 const HOME_INBOX_LOGIC_GATE_DRAG_MIME = "application/x-mangorts-home-inbox-logic-gate";
 const HOME_INBOX_PROJECT_DRAG_MIME = "application/x-mangorts-home-inbox-project";
 const MY_WORK_ROLE_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.myWork.roleColumnWidths.v1";
+const MY_WORK_SELECTED_VIEW_STORAGE_KEY = "mangorts.myWork.selectedView.v1";
 const MY_WORK_PRIORITY_COLUMN_WIDTH = 104;
 const MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH = 282;
 const MY_WORK_ROLE_COLUMN_MIN_WIDTH = 190;
@@ -271,8 +272,13 @@ export function MyWorkView({
       if (cancelled) return;
       const next = savedViewsToMyWorkSettings(savedViews, fallbackSetting, currentUserID);
       const settingsForState = next.length > 0 ? next : [fallbackSetting];
+      const preferredSettingID = readMyWorkSelectedViewID(companyID, currentUserID);
+      const nextSelectedSettingID = settingsForState.find((setting) => setting.setting_id === preferredSettingID)?.setting_id
+        ?? settingsForState[0]?.setting_id
+        ?? "";
       setSettings(settingsForState);
-      setSelectedSettingID(settingsForState[0]?.setting_id ?? "");
+      setSelectedSettingID(nextSelectedSettingID);
+      if (nextSelectedSettingID) storeMyWorkSelectedViewID(companyID, currentUserID, nextSelectedSettingID);
     }).catch((error) => {
       if (cancelled) return;
       setSettings([fallbackSetting]);
@@ -284,8 +290,10 @@ export function MyWorkView({
 
   useEffect(() => {
     if (settings.some((setting) => setting.setting_id === selectedSettingID)) return;
-    setSelectedSettingID(settings[0]?.setting_id ?? "");
-  }, [selectedSettingID, settings]);
+    const nextSettingID = settings[0]?.setting_id ?? "";
+    setSelectedSettingID(nextSettingID);
+    if (nextSettingID) storeMyWorkSelectedViewID(companyID, currentUserID, nextSettingID);
+  }, [companyID, currentUserID, selectedSettingID, settings]);
 
   const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
   const targetUserIDs = useMemo(() => userIDsForSelectedScope(selectedScope, companyUsers, childGroupsByParentID, membersByGroupID), [childGroupsByParentID, companyUsers, membersByGroupID, selectedScope]);
@@ -495,11 +503,6 @@ export function MyWorkView({
 
   const selectScopeLevel = useCallback((level: MyWorkScopeLevel) => {
     const nextScope = defaultScopeForLevel(level);
-    if (level === "me") {
-      setSelectedScope(nextScope);
-      setScopeMenuLevel(null);
-      return;
-    }
     if (selectedScope.level !== level) {
       setSelectedScope(nextScope);
     }
@@ -522,20 +525,62 @@ export function MyWorkView({
       name: `View ${nextNumber}`,
       selected_scope: selectedScope,
       panel_collapsed: true,
+      position: nextSavedViewPosition(settings),
       created_timestamp: now,
       updated_timestamp: now,
     };
     setSettings((current) => [...current, setting]);
     setSelectedSettingID(setting.setting_id);
+    storeMyWorkSelectedViewID(companyID, currentUserID, setting.setting_id);
     persistSavedSetting(setting);
-  }, [currentUserID, persistSavedSetting, selectedScope, selectedSetting, settings.length]);
+  }, [companyID, currentUserID, persistSavedSetting, selectedScope, selectedSetting, settings]);
+
+  const selectSavedView = useCallback((settingID: string) => {
+    setSelectedSettingID(settingID);
+    storeMyWorkSelectedViewID(companyID, currentUserID, settingID);
+  }, [companyID, currentUserID]);
+
+  const renameSavedView = useCallback((settingID: string) => {
+    const setting = settings.find((item) => item.setting_id === settingID);
+    if (!setting) return;
+    const nextName = window.prompt("Rename view", setting.name)?.trim();
+    if (!nextName || nextName === setting.name) return;
+    const next = { ...setting, name: nextName, updated_timestamp: new Date().toISOString() };
+    setSettings((current) => current.map((item) => (item.setting_id === settingID ? next : item)));
+    persistSavedSetting(next);
+  }, [persistSavedSetting, settings]);
+
+  const moveSavedView = useCallback((settingID: string, direction: -1 | 1) => {
+    const currentIndex = settings.findIndex((item) => item.setting_id === settingID);
+    const targetIndex = currentIndex + direction;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= settings.length) return;
+    const reordered = [...settings];
+    [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
+    const now = new Date().toISOString();
+    const nextSettings = reordered.map((setting, index) => {
+      const previous = settings.find((item) => item.setting_id === setting.setting_id);
+      const position = (index + 1) * 1000;
+      return previous?.position === position
+        ? setting
+        : { ...setting, position, updated_timestamp: now };
+    });
+    setSettings(nextSettings);
+    for (const setting of nextSettings) {
+      const previous = settings.find((item) => item.setting_id === setting.setting_id);
+      if (previous?.position !== setting.position) persistSavedSetting(setting);
+    }
+  }, [persistSavedSetting, settings]);
 
   const deleteSavedView = useCallback((settingID: string) => {
     const setting = settings.find((item) => item.setting_id === settingID);
     setSettings((current) => {
       if (current.length <= 1) return current;
       const next = current.filter((setting) => setting.setting_id !== settingID);
-      if (selectedSettingID === settingID) setSelectedSettingID(next[0]?.setting_id ?? "");
+      if (selectedSettingID === settingID) {
+        const nextSettingID = next[0]?.setting_id ?? "";
+        setSelectedSettingID(nextSettingID);
+        if (nextSettingID) storeMyWorkSelectedViewID(companyID, currentUserID, nextSettingID);
+      }
       return next;
     });
     if (apiBase && companyID.trim() && setting) {
@@ -543,7 +588,7 @@ export function MyWorkView({
         setSettingsError(savedViewErrorMessage(error, "Failed to delete view"));
       });
     }
-  }, [apiBase, companyID, selectedSettingID, settings]);
+  }, [apiBase, companyID, currentUserID, selectedSettingID, settings]);
 
   const updateGrouping = useCallback((index: number, grouping: MyWorkGroupingSetting) => {
     updateSelectedSetting((setting) => ({
@@ -755,8 +800,10 @@ export function MyWorkView({
           addableFields={addableFields}
           addGroupingOpen={addGroupingOpen}
           groupingFieldMenuIndex={groupingFieldMenuIndex}
-          onSelectSetting={setSelectedSettingID}
+          onSelectSetting={selectSavedView}
           onAddSavedView={addSavedView}
+          onRenameSavedView={renameSavedView}
+          onMoveSavedView={moveSavedView}
           onDeleteSavedView={deleteSavedView}
           onSelectScopeLevel={selectScopeLevel}
           onSelectScope={selectScope}
@@ -833,6 +880,8 @@ function GroupingPanel({
   groupingFieldMenuIndex,
   onSelectSetting,
   onAddSavedView,
+  onRenameSavedView,
+  onMoveSavedView,
   onDeleteSavedView,
   onSelectScopeLevel,
   onSelectScope,
@@ -854,6 +903,8 @@ function GroupingPanel({
   groupingFieldMenuIndex: number | null;
   onSelectSetting: (settingID: string) => void;
   onAddSavedView: () => void;
+  onRenameSavedView: (settingID: string) => void;
+  onMoveSavedView: (settingID: string, direction: -1 | 1) => void;
   onDeleteSavedView: (settingID: string) => void;
   onSelectScopeLevel: (level: MyWorkScopeLevel) => void;
   onSelectScope: (scope: MyWorkSelectedScope) => void;
@@ -866,7 +917,8 @@ function GroupingPanel({
   onAddGrouping: (field: MyWorkGroupingField) => void;
 }) {
   const [collapsedScopeRowKeys, setCollapsedScopeRowKeys] = useState<Set<string>>(new Set());
-  const [groupingFlyoutOpen, setGroupingFlyoutOpen] = useState(false);
+  const [savedViewContextMenu, setSavedViewContextMenu] = useState<{ settingID: string; x: number; y: number } | null>(null);
+  const scopeMenuRef = useRef<HTMLDivElement>(null);
   const scopeRowsWithChildren = useMemo(() => scopeRows.map((row, index) => ({
     ...row,
     hasChildren: Boolean(scopeRows[index + 1] && scopeRows[index + 1].depth > row.depth),
@@ -892,20 +944,30 @@ function GroupingPanel({
       return next;
     });
   }, []);
-  const groupingPanelOpen = !setting.panel_collapsed || groupingFlyoutOpen;
+  useEffect(() => {
+    if (!scopeMenuLevel) return undefined;
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Node && scopeMenuRef.current?.contains(target)) return;
+      onSetScopeMenuLevel(null);
+    };
+    const timer = window.setTimeout(() => window.addEventListener("mousedown", handleOutsideClick, true), 0);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("mousedown", handleOutsideClick, true);
+    };
+  }, [onSetScopeMenuLevel, scopeMenuLevel]);
+  const groupingPanelOpen = !setting.panel_collapsed;
+  const contextSettingIndex = savedViewContextMenu ? settings.findIndex((item) => item.setting_id === savedViewContextMenu.settingID) : -1;
+  const contextSetting = contextSettingIndex >= 0 ? settings[contextSettingIndex] : null;
 
   return (
     <div
       className="mango-my-work-header-controls"
       style={groupingPanelStyle}
-      onMouseLeave={() => onSetScopeMenuLevel(null)}
-      onBlur={(event) => {
-        const nextTarget = event.relatedTarget;
-        if (!nextTarget || !event.currentTarget.contains(nextTarget)) onSetScopeMenuLevel(null);
-      }}
     >
       <div style={scopeControlRowStyle}>
-        <div style={scopeTabsAnchorStyle}>
+        <div ref={scopeMenuRef} style={scopeTabsAnchorStyle}>
           <div style={scopeTabsStyle}>
             {(["me", "team", "all"] as const).map((level) => (
               <button
@@ -913,8 +975,6 @@ function GroupingPanel({
                 type="button"
                 className={`mango-my-work-scope-tab${selectedScope.level === level ? " is-active" : ""}`}
                 style={scopeTabStyle(level, selectedScope.level === level)}
-                onMouseEnter={() => onSetScopeMenuLevel(level)}
-                onFocus={() => onSetScopeMenuLevel(level)}
                 onClick={() => onSelectScopeLevel(level)}
               >
                 {level === "me" ? "Me" : level === "team" ? "Team" : "All"}
@@ -966,22 +1026,7 @@ function GroupingPanel({
             </div>
           )}
         </div>
-        <div
-          style={groupingMenuAnchorStyle}
-          onMouseEnter={() => {
-            onSetScopeMenuLevel(null);
-            setGroupingFlyoutOpen(true);
-          }}
-          onMouseLeave={() => setGroupingFlyoutOpen(false)}
-          onFocus={() => {
-            onSetScopeMenuLevel(null);
-            setGroupingFlyoutOpen(true);
-          }}
-          onBlur={(event) => {
-            const nextTarget = event.relatedTarget;
-            if (!nextTarget || !event.currentTarget.contains(nextTarget)) setGroupingFlyoutOpen(false);
-          }}
-        >
+        <div style={groupingMenuAnchorStyle}>
           <button
             type="button"
             className="mango-my-work-icon-button"
@@ -989,7 +1034,6 @@ function GroupingPanel({
             style={collapseButtonStyle}
             onClick={() => {
               onSetScopeMenuLevel(null);
-              setGroupingFlyoutOpen(true);
               onToggleCollapsed();
             }}
           >
@@ -1000,8 +1044,24 @@ function GroupingPanel({
               <div style={savedViewsStyle}>
                 <div style={savedViewsListStyle}>
                   {settings.map((item) => (
-                    <div key={item.setting_id} style={savedViewRowStyle(item.setting_id === setting.setting_id)}>
-                      <button type="button" className="mango-my-work-subtle-button" style={savedViewButtonStyle} onClick={() => onSelectSetting(item.setting_id)}>
+                    <div
+                      key={item.setting_id}
+                      style={savedViewRowStyle(item.setting_id === setting.setting_id)}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setSavedViewContextMenu({ settingID: item.setting_id, x: event.clientX, y: event.clientY });
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="mango-my-work-subtle-button"
+                        style={savedViewButtonStyle}
+                        onClick={() => {
+                          setSavedViewContextMenu(null);
+                          onSelectSetting(item.setting_id);
+                        }}
+                      >
                         {item.name}
                       </button>
                       <button type="button" className="mango-my-work-icon-button" title="Delete view" style={savedViewDeleteStyle} disabled={settings.length <= 1} onClick={() => onDeleteSavedView(item.setting_id)}>x</button>
@@ -1080,6 +1140,42 @@ function GroupingPanel({
                 </div>
               </div>
             </div>
+          )}
+          {savedViewContextMenu && contextSetting && (
+            <FrameRightClickMenu x={savedViewContextMenu.x} y={savedViewContextMenu.y} onClose={() => setSavedViewContextMenu(null)} minWidth={170}>
+              <button
+                type="button"
+                style={sharedInboxContextMenuButtonStyle}
+                onClick={() => {
+                  onRenameSavedView(contextSetting.setting_id);
+                  setSavedViewContextMenu(null);
+                }}
+              >
+                Rename
+              </button>
+              <button
+                type="button"
+                style={sharedInboxContextMenuButtonStyle}
+                disabled={contextSettingIndex <= 0}
+                onClick={() => {
+                  onMoveSavedView(contextSetting.setting_id, -1);
+                  setSavedViewContextMenu(null);
+                }}
+              >
+                Move up
+              </button>
+              <button
+                type="button"
+                style={sharedInboxContextMenuButtonStyle}
+                disabled={contextSettingIndex >= settings.length - 1}
+                onClick={() => {
+                  onMoveSavedView(contextSetting.setting_id, 1);
+                  setSavedViewContextMenu(null);
+                }}
+              >
+                Move down
+              </button>
+            </FrameRightClickMenu>
           )}
         </div>
       </div>
@@ -1878,6 +1974,14 @@ function myWorkRoleColumnWidthsStorageKey(companyID: string): string {
   return cleanCompanyID ? `${MY_WORK_ROLE_COLUMN_WIDTHS_STORAGE_KEY}:${cleanCompanyID}` : MY_WORK_ROLE_COLUMN_WIDTHS_STORAGE_KEY;
 }
 
+function myWorkSelectedViewStorageKey(companyID: string, userID: string): string {
+  const cleanCompanyID = companyID.trim();
+  const cleanUserID = userID.trim();
+  return cleanCompanyID && cleanUserID
+    ? `${MY_WORK_SELECTED_VIEW_STORAGE_KEY}:${cleanCompanyID}:${cleanUserID}`
+    : MY_WORK_SELECTED_VIEW_STORAGE_KEY;
+}
+
 function clampMyWorkRoleColumnWidth(width: number): number {
   return Math.max(MY_WORK_ROLE_COLUMN_MIN_WIDTH, Math.min(MY_WORK_ROLE_COLUMN_MAX_WIDTH, Math.round(width)));
 }
@@ -1905,6 +2009,22 @@ function readMyWorkRoleColumnWidths(companyID: string): MyWorkRoleColumnWidths {
 function storeMyWorkRoleColumnWidths(companyID: string, widths: MyWorkRoleColumnWidths): void {
   try {
     localStorage.setItem(myWorkRoleColumnWidthsStorageKey(companyID), JSON.stringify(widths));
+  } catch {}
+}
+
+function readMyWorkSelectedViewID(companyID: string, userID: string): string {
+  try {
+    return localStorage.getItem(myWorkSelectedViewStorageKey(companyID, userID))?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function storeMyWorkSelectedViewID(companyID: string, userID: string, settingID: string): void {
+  const cleanSettingID = settingID.trim();
+  if (!cleanSettingID) return;
+  try {
+    localStorage.setItem(myWorkSelectedViewStorageKey(companyID, userID), cleanSettingID);
   } catch {}
 }
 
@@ -2099,6 +2219,7 @@ function createDefaultGroupingSetting(companyID: string, currentUserID: string):
     selected_scope: defaultMyWorkSelectedScope(currentUserID),
     groupings: [...DEFAULT_MY_WORK_GROUPINGS],
     panel_collapsed: true,
+    position: 1000,
     created_timestamp: now,
     updated_timestamp: now,
   };
@@ -2122,6 +2243,7 @@ function savedViewToMyWorkSetting(view: SavedView, fallback: MyWorkSavedGrouping
     selected_scope: fallback.selected_scope,
     groupings: view.groupings,
     panel_collapsed: fallback.panel_collapsed,
+    position: view.position,
     created_timestamp: view.created_timestamp,
     updated_timestamp: view.updated_timestamp,
   }, fallback, currentUserID);
@@ -2136,7 +2258,12 @@ function myWorkSettingToSavedViewInput(setting: MyWorkSavedGroupingSetting, comp
     principal_id: (setting.principal === "group" ? setting.principal_id : currentUserID).trim(),
     name: setting.name,
     groupings: setting.groupings,
+    position: setting.position,
   };
+}
+
+function nextSavedViewPosition(settings: MyWorkSavedGroupingSetting[]): number {
+  return Math.max(0, ...settings.map((setting) => Number.isFinite(setting.position) ? setting.position : 0)) + 1000;
 }
 
 function savedViewErrorMessage(error: unknown, fallback: string): string {
@@ -2600,9 +2727,10 @@ function savedViewRowStyle(active: boolean): React.CSSProperties {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) 18px",
     alignItems: "center",
-    border: active ? "1px solid rgba(15, 118, 110, 0.20)" : "1px solid transparent",
+    border: active ? "1px solid rgba(15, 118, 110, 0.34)" : "1px solid transparent",
     borderRadius: 6,
-    background: active ? "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(204,251,241,0.48))" : "transparent",
+    background: active ? "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(153,246,228,0.56))" : "transparent",
+    boxShadow: active ? "inset 3px 0 0 rgba(15, 118, 110, 0.72)" : "none",
   };
 }
 

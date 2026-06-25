@@ -1,4 +1,4 @@
-Last updated: 2026-06-23
+Last updated: 2026-06-25
 
 # My Work Rules
 
@@ -67,6 +67,12 @@ MW40 - Dragging a node without existing logic-gate context into an empty My Work
 MW41 - The My Work node context menu is a compact command list with Rename, Pin, and Delete. Delete is visually separated from the non-destructive commands.
 MW42 - A node deleted from My Work may be hidden optimistically while the delete request is pending. On delete failure the hidden row is restored; on success My Work is refreshed.
 MW43 - Updates grouping supports project and logic gate as normal grouping fields, with no Projects toggle. Updates remains an event/mention feed and must not share My Work's active-work semantics.
+MW44 - My Work saved grouping settings persist through the saved-views API. `logic_gate` is a valid My Work saved-view grouping field and must round-trip through save and reload.
+MW45 - My Work remembers the selected saved view per company and current user so returning to the My Work tab does not reset to the first saved view.
+MW46 - The My Work grouping settings panel opens and closes only from the grouping arrow click, not from hover or focus.
+MW47 - Me, Team, and All scope menus open from click and close after selecting a scope or clicking outside the scope menu.
+MW48 - The active My Work saved-view row is visibly highlighted.
+MW49 - Right-clicking a My Work saved-view row exposes rename and move up/down commands. Renames persist to the saved-view name and reorder persists through saved-view `position`.
 
 ## Projection Sync Events
 
@@ -138,11 +144,14 @@ Expected:
 ### Scenario MW-S3: Grouping, Open Behavior, And Creation
 
 Business logic covered:
-- MW25 through MW31, MW37 through MW43
+- MW25 through MW31, MW37 through MW49
 
 Given:
 - A user changes My Work grouping settings.
 - Saved local grouping settings include duplicates or malformed fields.
+- The user switches between saved My Work views and leaves/re-enters the My Work tab.
+- The user opens and closes My Work grouping settings and scope menus.
+- The user right-clicks a saved My Work view.
 - The user opens work rows and creates work from a priority/role cell.
 - The user right-clicks a My Work node.
 - The user drags both logic-gate-backed and standalone nodes between matrix cells.
@@ -152,7 +161,13 @@ Expected:
 - Supported My Work grouping fields are account, due date, logic gate, person, project, status, and team.
 - The default grouping is project ascending.
 - Saved grouping settings are isolated by company and user.
+- Logic Gate grouping saves and reloads through the saved-views API.
+- The selected saved view is restored when returning to My Work.
 - Malformed or duplicate settings are normalized.
+- The grouping settings panel opens and closes only when the grouping arrow is clicked.
+- Me, Team, and All open on click and close on outside click or after a scope is selected.
+- The active saved view row is highlighted.
+- Right-clicking a saved view can rename it or move it up/down, and those changes persist.
 - Opening a row navigates to the node with available path context.
 - Expanding a group does not accidentally open the work item.
 - Collapsing or expanding a group in one matrix cell does not collapse or expand matching groups in any other cell.

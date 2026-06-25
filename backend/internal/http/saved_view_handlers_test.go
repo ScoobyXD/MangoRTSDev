@@ -23,8 +23,8 @@ func TestSavedViewsPersonalLifecycle(t *testing.T) {
 		"surface":"my_work",
 		"principal":"user",
 		"principal_id":"` + user.UserID + `",
-		"name":"Project by Person",
-		"groupings":[{"field":"project","direction":"asc"},{"field":"person","direction":"desc"}]
+		"name":"Project by Logic Gate",
+		"groupings":[{"field":"project","direction":"asc"},{"field":"logic_gate","direction":"desc"}]
 	}`
 	createRec := httptest.NewRecorder()
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/saved-views", bytes.NewBufferString(createBody))
@@ -38,6 +38,9 @@ func TestSavedViewsPersonalLifecycle(t *testing.T) {
 	}
 	if created.SavedViewID == "" || created.Surface != store.SavedViewSurfaceMyWork || created.Principal != store.SavedViewPrincipalUser {
 		t.Fatalf("created saved view = %+v", created)
+	}
+	if len(created.Groupings) != 2 || created.Groupings[1].Field != "logic_gate" {
+		t.Fatalf("created saved view groupings = %+v", created.Groupings)
 	}
 
 	listRec := httptest.NewRecorder()
