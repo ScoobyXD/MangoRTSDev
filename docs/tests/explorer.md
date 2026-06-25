@@ -1,4 +1,4 @@
-Last updated: 2026-06-23
+Last updated: 2026-06-24
 
 # Explorer Tests
 
@@ -16,8 +16,8 @@ E5 - Explorer reads return only resources where the viewer has effective view ac
 E6 - Explorer rows include effective access so the UI can decide available actions.
 E7 - Explorer rows include has-children information so the UI can lazy-load branches.
 E8 - Explorer rows sort by position, then creation time, then name, then entity ID.
-E9 - The final Explorer tree includes folders plus derived project, logic gate, and node children.
-E10 - Project children are derived from project relationships.
+E9 - The final Explorer tree is a single-placement tree: each folder, project, logic gate, and node resource has at most one visible Explorer row.
+E10 - Project rows are standalone leaf rows; project relationships do not render nested Explorer child rows.
 E11 - Logic gate children are derived from node assignments.
 E12 - Creating an Explorer folder requires company, actor, permission user, parent entity, and nonblank folder name.
 E13 - New Explorer folders default to edit access unless a no-access default is explicitly requested.
@@ -43,6 +43,7 @@ E32 - Search result display renders the Explorer location path as nested Explore
 E33 - The default Unfiled folder and its Projects, Logic Gates, and Nodes child folders cannot be renamed or deleted, but resources inside those folders can still be moved or deleted through normal resource actions.
 E34 - While the Explorer search box contains text, the left sidebar hides non-Explorer sections and uses the remaining column for Explorer search results; clearing the search restores the normal sidebar.
 E35 - Dropping a node into an Explorer folder must create or move a Company Explorer folder placement and must not treat a logic-gate assignment or project relationship edge as an Explorer folder-item edge.
+E36 - Once a resource is visible anywhere in Company Explorer, no project relationship branch may create a second visible instance of that resource.
 
 ## Scenarios
 
@@ -73,7 +74,9 @@ Expected:
 - Only viewable resources are returned.
 - Rows include effective access and has-children.
 - Rows sort by position, creation time, name, and entity ID.
-- Project and logic gate/node children are derived from their relationship sources.
+- The final Explorer tree shows one visible placement for each folder, project, logic gate, and node resource.
+- Projects render as standalone leaf rows, even when project relationships exist.
+- Logic gate children are derived from node assignments.
 
 ### Scenario E-S2: Folder And Placement Mutations
 
@@ -163,12 +166,15 @@ Business logic covered:
 - E17
 - E18
 - E35
+- E36
 
 Given:
 - A node can appear under a logic gate through a logic-gate assignment edge.
+- A logic gate or node can also be related to a project through a project relationship edge.
 - A user drags that node into a normal Company Explorer folder.
 
 Expected:
 - The folder drop writes a Company Explorer folder placement for the node.
 - The logic-gate assignment edge is not reused as a Company Explorer placement edge.
+- The project relationship edge is not rendered as a nested Project child or reused as a Company Explorer placement edge.
 - The drop does not fail with access_denied because of an edge-type mismatch.

@@ -36,7 +36,14 @@ Each explorer row represents one company "file" entity with a normalized type:
 
 - `node`
 - `logic_gate`
+- `project`
 - `kanban`
+
+Golden rule:
+
+- Company Explorer shows one visible instance of each folder, project, logic gate, and node resource.
+- `company_explorer_items` owns placement for canonical project, logic-gate, and node resources.
+- Project relationships belong to the Project UI and project read models; they do not create nested Project children in Company Explorer.
 
 ### 2.3 Tree UX rules
 
@@ -194,6 +201,11 @@ Folder runtime update (2026-05-02):
   `company_explorer_folders`, and scrolling the first requested row into view.
   This uses entity IDs and indexed folder data, not DOM scanning, so the cost is
   bounded by the requested batch and folder ancestry.
+
+Project leaf update (2026-06-24):
+- Project rows are standalone Company Explorer resources and do not expose nested project-relationship children.
+- A project relationship can still exist for the Project UI, but it must not create a second Company Explorer row for the related node, logic gate, or project.
+- Explorer placement remains single-parent/single-instance: moving a resource changes its `company_explorer_items` placement rather than adding another visible location.
 
 Kanban Explorer update (2026-05-04):
 - Kanban boards are durable Explorer items with `item_type=kanban` and a fixed three-column board icon.

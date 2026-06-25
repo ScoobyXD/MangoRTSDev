@@ -184,15 +184,6 @@ func companyExplorerFinalHasChildrenExpr(entityTypeExpr, entityIDExpr string) st
       )
     )
     or (
-      ` + entityTypeExpr + `='project'
-      and exists (
-        select 1
-        from project_relationship_projection projection
-        where projection.company_id=$1::uuid
-          and projection.project_id=` + entityIDExpr + `
-      )
-    )
-    or (
       ` + entityTypeExpr + `='logic_gate'
       and exists (
         select 1
@@ -252,7 +243,7 @@ func (r *PostgresRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2Row
 	case CompanyExplorerV2EntityFolder:
 		rows, err = r.queryCompanyExplorerFinalContainerChildren(ctx, query)
 	case CompanyExplorerV2EntityProject:
-		rows, err = r.queryCompanyExplorerFinalProjectChildren(ctx, query, parent.ResourceID)
+		rows = []CompanyExplorerV2Row{}
 	case CompanyExplorerV2EntityLogicGate:
 		rows, err = r.queryCompanyExplorerFinalLogicGateChildren(ctx, query, parent.ResourceID)
 	default:
@@ -510,58 +501,6 @@ select all_rows.company_id::text,
 from all_rows
 where `+companyExplorerFinalAccessPredicate("all_rows.entity_type", "all_rows.entity_id")+`
 order by all_rows.position asc, all_rows.created_timestamp asc, all_rows.name asc, all_rows.entity_id asc`, companyExplorerFinalArgs(query)...)
-	if err != nil {
-		return nil, err
-	}
-	return scanCompanyExplorerV2Rows(rows)
-}
-
-func (r *PostgresRepo) queryCompanyExplorerFinalProjectChildren(ctx context.Context, query CompanyExplorerV2RowsQuery, projectID string) ([]CompanyExplorerV2Row, error) {
-	args := companyExplorerNativeChildrenArgs(query, projectID)
-	rows, err := r.db.QueryContext(ctx, `
-with project_rows as (
-  select projection.company_id,
-         projection.resource_id as entity_id,
-         projection.resource_type as entity_type,
-         projection.resource_id,
-         coalesce(project.name, logic_gate.header, node.name, projection.resource_id::text) as name,
-         projection.project_id as parent_entity_id,
-         projection.relationship_id as edge_id,
-         projection.position,
-         projection.relationship_created_timestamp as created_timestamp,
-         projection.relationship_updated_timestamp as updated_timestamp
-  from project_relationship_projection projection
-  left join projects project
-    on projection.resource_type='project'
-   and project.company_id=projection.company_id
-   and project.project_id=projection.resource_id
-  left join logic_gates logic_gate
-    on projection.resource_type='logic_gate'
-   and logic_gate.company_id=projection.company_id
-   and logic_gate.logic_gate_id=projection.resource_id
-  left join nodes node
-    on projection.resource_type='node'
-   and node.company_id=projection.company_id
-   and node.node_id=projection.resource_id
-  where projection.company_id=$1::uuid
-    and projection.project_id=$4::uuid
-)
-select project_rows.company_id::text,
-       project_rows.entity_id::text,
-       project_rows.entity_type,
-       project_rows.resource_id::text,
-       project_rows.name,
-       project_rows.parent_entity_id::text,
-       project_rows.edge_id::text,
-       project_rows.position,
-       `+companyExplorerFinalHasChildrenExpr("project_rows.entity_type", "project_rows.entity_id")+` as has_children,
-       `+companyExplorerNativeChildrenEffectiveAccessSelect("project_rows.entity_type", "project_rows.entity_id")+` as effective_access,
-       `+companyExplorerFinalNativeContext("project_rows.entity_type", "project_rows.entity_id", "project_rows.resource_id")+` as native_context,
-       project_rows.created_timestamp,
-       project_rows.updated_timestamp
-from project_rows
-where `+companyExplorerNativeChildrenAccessPredicate("project_rows.entity_type", "project_rows.entity_id")+`
-order by project_rows.position asc, project_rows.created_timestamp asc, project_rows.name asc, project_rows.entity_id asc`, args...)
 	if err != nil {
 		return nil, err
 	}

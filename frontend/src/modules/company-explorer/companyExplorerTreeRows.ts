@@ -493,10 +493,17 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
   const rowCountByEntityID = new Map<string, number>();
   for (const row of uniqueRows) {
     if (!rowByEntityID.has(row.entity_id)) rowByEntityID.set(row.entity_id, row);
+  }
+  const visibleRows = uniqueRows.filter((row) => {
+    const parentEntityID = row.parent_entity_id?.trim() ?? "";
+    const parent = parentEntityID ? rowByEntityID.get(parentEntityID) : undefined;
+    return parent?.entity_type !== "project";
+  });
+  for (const row of visibleRows) {
     rowCountByEntityID.set(row.entity_id, (rowCountByEntityID.get(row.entity_id) ?? 0) + 1);
   }
   const rowsByParentEntityID = new Map<string, CompanyExplorerV2Row[]>();
-  for (const row of uniqueRows) {
+  for (const row of visibleRows) {
     const parentID = row.parent_entity_id?.trim() ?? "";
     const bucket = rowsByParentEntityID.get(parentID) ?? [];
     bucket.push(row);
@@ -569,7 +576,7 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
       scopeLevel: depth,
       position: row.position || TREE_ROW_POSITION_STEP,
       createdTimestamp: String(row.created_timestamp ?? ""),
-      hasChildren: Boolean(row.has_children),
+      hasChildren: row.entity_type === "project" ? false : Boolean(row.has_children),
     };
   };
 
