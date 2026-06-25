@@ -105,7 +105,7 @@ export const nodeEditorOverlayResizeHandles: Array<{
   { key: "right", edges: { right: true }, cursor: "ew-resize", style: { right: -4, top: 18, bottom: 18, width: 8 } },
 ];
 
-export const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { left: 0.11, top: 0.06, width: 0.78, height: 0.82 };
+export const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { left: 0.02, top: 0.02, width: 0.96, height: 0.94 };
 const NODE_EDITOR_OVERLAY_SIDEBAR_BUFFER_PX = 14;
 
 type NodeEditorOverlayClampOptions = {
@@ -114,7 +114,7 @@ type NodeEditorOverlayClampOptions = {
 };
 
 export function nodeEditorOverlayRatioStorageKey(companyID: string, frameID: string): string {
-  return `kanban-node-editor-overlay-ratio-v1:${companyID}:${frameID}`;
+  return `kanban-node-editor-overlay-ratio-v2:${companyID}:${frameID}`;
 }
 
 function finiteRatio(value: unknown, fallback: number): number {

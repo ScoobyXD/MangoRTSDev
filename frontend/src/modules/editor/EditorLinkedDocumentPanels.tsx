@@ -1,4 +1,5 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { EditorTabID } from "./editorTabs";
 import { normalizeNodeDueDateDraft } from "./editorDates";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
@@ -96,6 +97,75 @@ const GVIC_ROLE_ACCENTS: Record<LogicGateGVICRole, string> = {
   consulted: "#7c3aed",
   informed: "#059669",
 };
+
+const GVIC_ROLE_SHORT_LABELS: Record<LogicGateGVICRole, string> = {
+  generated: "G",
+  verified: "V",
+  consulted: "C",
+  informed: "I",
+};
+
+const GVIC_FLOATING_LAYER_Z_INDEX = 10060;
+
+type FloatingLayerPosition = {
+  left: number;
+  top: number;
+  width: number;
+  maxHeight: number;
+};
+
+function useFloatingLayerPosition(
+  anchorRef: React.RefObject<HTMLElement | null>,
+  open: boolean,
+  options: { width: number; maxHeight: number; gutter?: number },
+): FloatingLayerPosition | null {
+  const [position, setPosition] = useState<FloatingLayerPosition | null>(null);
+  const gutter = options.gutter ?? 8;
+
+  useLayoutEffect(() => {
+    if (!open || typeof window === "undefined") {
+      setPosition(null);
+      return undefined;
+    }
+
+    const update = () => {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const viewportWidth = window.innerWidth || 1;
+      const viewportHeight = window.innerHeight || 1;
+      const width = Math.max(180, Math.min(options.width, viewportWidth - gutter * 2));
+      const maxHeight = Math.max(120, Math.min(options.maxHeight, viewportHeight - gutter * 2));
+      const belowSpace = viewportHeight - rect.bottom - gutter;
+      const aboveSpace = rect.top - gutter;
+      const openAbove = belowSpace < Math.min(170, maxHeight) && aboveSpace > belowSpace;
+      const belowMaxHeight = Math.min(maxHeight, Math.max(120, belowSpace));
+      const aboveMaxHeight = Math.min(maxHeight, Math.max(120, aboveSpace));
+      const top = openAbove
+        ? Math.max(gutter, rect.top - aboveMaxHeight - 6)
+        : Math.max(gutter, Math.min(rect.bottom + 6, viewportHeight - gutter - belowMaxHeight));
+      const availableHeight = openAbove ? Math.max(120, rect.top - top - 6) : Math.max(120, viewportHeight - top - gutter);
+      const left = Math.max(gutter, Math.min(rect.left, viewportWidth - width - gutter));
+
+      setPosition({
+        left,
+        top,
+        width,
+        maxHeight: Math.min(maxHeight, availableHeight),
+      });
+    };
+
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [anchorRef, gutter, open, options.maxHeight, options.width]);
+
+  return position;
+}
 
 type LogicGateGVICPrincipalPickerOption = {
   principalType: LogicGateGVICPrincipalType;
@@ -338,11 +408,37 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     }
     window.requestAnimationFrame(() => selectEditableTitleContents(editingTitleRef.current));
   };
+  const gvicStrip = gvicFields ? (
+    <GVICCompactStrip
+      linkedEntityKind={linkedEntityKind}
+      assignments={gvicFields.assignments}
+      companyUsers={companyUsers}
+      companyUserGroups={companyUserGroups}
+      companyUserGroupMembers={companyUserGroupMembers}
+      accent={accent}
+      panelBackground={panelBackground}
+      ruleColor={ruleColor}
+      canEdit={canEditGVIC}
+      disabledReason={gvicFields.readOnlyReason}
+      onAddPrincipal={onAddGVICPrincipal}
+      onRemovePrincipal={onRemoveGVICPrincipal}
+    />
+  ) : null;
 
   return (
     <>
       {(activeTab === "editor" || activeTab === "outline-styles") && (
         <div className="mango-editor-hover-highlight" style={{ display: "grid", gap: 8, pointerEvents: "auto" }}>
+          <div
+            style={{
+              minWidth: 0,
+              maxWidth: "100%",
+              display: "grid",
+              gridTemplateColumns: gvicStrip && !nodePresetFields ? "minmax(0, min(780px, 1fr)) max-content" : "minmax(0, min(780px, 100%))",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
           <div
             onMouseDown={(event) => {
               if (!canEdit) return;
@@ -421,12 +517,14 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               {linkedNodeTitle || "\u00A0"}
             </span>
           </div>
+          {gvicStrip && !nodePresetFields && gvicStrip}
+          </div>
           {nodePresetFields && (
             <div
               className="mango-editor-hover-highlight"
               style={{
                 display: "grid",
-                gridTemplateColumns: "164px 250px minmax(260px, 340px) 160px",
+                gridTemplateColumns: "164px 250px minmax(260px, 340px) 160px max-content",
                 justifyContent: "start",
                 columnGap: 8,
                 rowGap: 6,
@@ -722,45 +820,11 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   {priorityRequirementError && <span style={{ color: "#b00020", fontSize: 11, fontWeight: 800, lineHeight: 1.2 }}>{priorityRequirementError}</span>}
                 </span>
               </label>
-            </div>
-          )}
-          {gvicFields && (
-            <div
-              className="mango-editor-hover-highlight"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-                columnGap: 8,
-                rowGap: 8,
-                maxWidth: "100%",
-                padding: "2px 0 8px",
-                borderBottom: `1px dashed ${ruleColor}`,
-                fontFamily: "var(--mango-font-family)",
-                fontSize: 12,
-                lineHeight: 1.3,
-                color: "inherit",
-                pointerEvents: "auto",
-              }}
-            >
-              {GVIC_ROLES.map((column) => (
-                <GVICRoleEditor
-                  key={column.role}
-                  role={column.role}
-                  label={column.label}
-                  linkedEntityKind={linkedEntityKind}
-                  assignments={gvicFields.assignments.filter((assignment) => assignment.role === column.role)}
-                  companyUsers={companyUsers}
-                  companyUserGroups={companyUserGroups}
-                  companyUserGroupMembers={companyUserGroupMembers}
-                  accent={accent}
-                  panelBackground={panelBackground}
-                  ruleColor={ruleColor}
-                  canEdit={canEditGVIC}
-                  disabledReason={gvicFields.readOnlyReason}
-                  onAddPrincipal={onAddGVICPrincipal}
-                  onRemovePrincipal={onRemoveGVICPrincipal}
-                />
-              ))}
+              {gvicStrip && (
+                <div style={{ gridColumn: 5, gridRow: 1, minWidth: 0, alignSelf: "start", justifySelf: "start" }}>
+                  {gvicStrip}
+                </div>
+              )}
             </div>
           )}
           {linkedNodeInfoPreview.length > 0 && <div style={{ minWidth: 0, fontSize: 10, opacity: 0.7, overflowWrap: "anywhere", wordBreak: "break-word" }}>{linkedNodeInfoPreview.join(" - ")}</div>}
@@ -792,6 +856,164 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
     </>
   );
 };
+
+function GVICCompactStrip({
+  linkedEntityKind,
+  assignments,
+  companyUsers,
+  companyUserGroups,
+  companyUserGroupMembers,
+  accent,
+  panelBackground,
+  ruleColor,
+  canEdit,
+  disabledReason,
+  onAddPrincipal,
+  onRemovePrincipal,
+}: {
+  linkedEntityKind: "" | "node" | "logic_gate";
+  assignments: LogicGateGVICAssignment[];
+  companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
+  companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
+  companyUserGroupMembers: Array<{ group_id: string; user_id: string }>;
+  accent: string;
+  panelBackground: string;
+  ruleColor: string;
+  canEdit: boolean;
+  disabledReason?: string;
+  onAddPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
+  onRemovePrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
+}) {
+  const [openRole, setOpenRole] = useState<LogicGateGVICRole | "">("");
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const popoverPosition = useFloatingLayerPosition(stripRef, Boolean(openRole), { width: 390, maxHeight: 430 });
+  const selectedRole = GVIC_ROLES.find((item) => item.role === openRole) ?? null;
+
+  useEffect(() => {
+    if (!openRole) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (stripRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
+      setOpenRole("");
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenRole("");
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [openRole]);
+
+  useEffect(() => {
+    if (!selectedRole) setOpenRole("");
+  }, [selectedRole]);
+
+  return (
+    <>
+      <div
+        ref={stripRef}
+        aria-label="GVIC assignments"
+        style={{
+          minWidth: 0,
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 38px)",
+          gap: 6,
+          alignItems: "center",
+          justifyContent: "start",
+        }}
+      >
+        {GVIC_ROLES.map((item) => {
+          const roleAssignments = assignments.filter((assignment) => assignment.role === item.role);
+          const roleAccent = GVIC_ROLE_ACCENTS[item.role];
+          const active = openRole === item.role;
+          return (
+            <button
+              key={item.role}
+              type="button"
+              title={`${item.label}: ${roleAssignments.length} assigned`}
+              aria-label={`${item.label}: ${roleAssignments.length} assigned`}
+              aria-haspopup="dialog"
+              aria-expanded={active}
+              onClick={() => setOpenRole((current) => current === item.role ? "" : item.role)}
+              style={{
+                width: 38,
+                height: 38,
+                display: "grid",
+                gridTemplateRows: "1fr auto",
+                placeItems: "center",
+                border: "1px solid transparent",
+                borderRadius: 8,
+                background: active
+                  ? `${hexWithAlpha(roleAccent, "24")} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "dd")}, rgba(255,255,255,0.92)) border-box`
+                  : `${hexWithAlpha(roleAccent, "14")} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "88")}, rgba(255,255,255,0.84)) border-box`,
+                color: roleAccent,
+                cursor: "pointer",
+                padding: "4px 3px 3px",
+                boxShadow: active
+                  ? `0 9px 22px ${hexWithAlpha(roleAccent, "24")}, inset 1px 1px 0 rgba(255,255,255,0.9)`
+                  : "3px 3px 8px rgba(174,174,192,0.16), -3px -3px 8px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.84)",
+                font: "inherit",
+                transition: "background 120ms ease, box-shadow 140ms ease, transform 140ms ease",
+                transform: active ? "translateY(-1px)" : "none",
+              }}
+            >
+              <span aria-hidden="true" style={{ fontSize: 15, fontWeight: 900, lineHeight: 1 }}>
+                {GVIC_ROLE_SHORT_LABELS[item.role]}
+              </span>
+              <span aria-hidden="true" style={{ minWidth: 14, height: 14, borderRadius: 999, display: "grid", placeItems: "center", background: roleAssignments.length > 0 ? roleAccent : "rgba(255,255,255,0.72)", color: roleAssignments.length > 0 ? "#ffffff" : roleAccent, fontSize: 9, fontWeight: 900, lineHeight: 1, padding: "0 3px" }}>
+                {roleAssignments.length}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {selectedRole && popoverPosition && typeof document !== "undefined" && createPortal(
+        <div
+          ref={popoverRef}
+          role="dialog"
+          aria-label={`${selectedRole.label} GVIC assignments`}
+          data-frame-interactive="true"
+          style={{
+            position: "fixed",
+            left: popoverPosition.left,
+            top: popoverPosition.top,
+            width: popoverPosition.width,
+            maxHeight: popoverPosition.maxHeight,
+            overflowY: "auto",
+            zIndex: GVIC_FLOATING_LAYER_Z_INDEX,
+            padding: 8,
+            border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+            borderRadius: 12,
+            background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND,
+            boxShadow: "0 18px 42px rgba(15,23,42,0.24), inset 1px 1px 0 rgba(255,255,255,0.88)",
+          }}
+        >
+          <GVICRoleEditor
+            role={selectedRole.role}
+            label={selectedRole.label}
+            linkedEntityKind={linkedEntityKind}
+            assignments={assignments.filter((assignment) => assignment.role === selectedRole.role)}
+            companyUsers={companyUsers}
+            companyUserGroups={companyUserGroups}
+            companyUserGroupMembers={companyUserGroupMembers}
+            accent={accent}
+            panelBackground={panelBackground}
+            ruleColor={ruleColor}
+            canEdit={canEdit}
+            disabledReason={disabledReason}
+            onAddPrincipal={onAddPrincipal}
+            onRemovePrincipal={onRemovePrincipal}
+          />
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
 
 function GVICRoleEditor({
   role,
@@ -831,6 +1053,10 @@ function GVICRoleEditor({
   const [disabledTooltipPosition, setDisabledTooltipPosition] = useState<{ x: number; y: number } | null>(null);
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(() => new Set());
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const assignedAnchorRef = useRef<HTMLDivElement | null>(null);
+  const assignedListRef = useRef<HTMLDivElement | null>(null);
+  const inputAnchorRef = useRef<HTMLDivElement | null>(null);
+  const pickerListRef = useRef<HTMLDivElement | null>(null);
   const assignedPrincipalKeys = useMemo(() => new Set(assignments.map(logicGateGVICAssignmentSubjectKey)), [assignments]);
   const roleAccent = GVIC_ROLE_ACCENTS[role];
   const singleUserOnly = (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && (role === "generated" || role === "verified");
@@ -842,6 +1068,8 @@ function GVICRoleEditor({
     : `People (${assignments.length})`;
   const showAssignedButton = !singleUserOnly || assignments.length > 0;
   const showDisabledTooltip = inheritedReadOnly && Boolean(disabledReason && disabledTooltipPosition);
+  const assignedListPosition = useFloatingLayerPosition(assignedAnchorRef, assignedOpen && showAssignedButton && !singleUserOnly, { width: 320, maxHeight: 240 });
+  const pickerListPosition = useFloatingLayerPosition(inputAnchorRef, canEdit && open, { width: 360, maxHeight: 290 });
   const toggleGroupExpanded = (groupID: string) => {
     const cleanGroupID = groupID.trim();
     if (!cleanGroupID) return;
@@ -994,7 +1222,8 @@ function GVICRoleEditor({
   useEffect(() => {
     if (!open && !assignedOpen) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (containerRef.current?.contains(event.target as Node)) return;
+      const target = event.target as Node;
+      if (containerRef.current?.contains(target) || assignedListRef.current?.contains(target) || pickerListRef.current?.contains(target)) return;
       setOpen(false);
       setAssignedOpen(false);
     };
@@ -1060,7 +1289,7 @@ function GVICRoleEditor({
         <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, background: roleAccent, boxShadow: `0 0 10px ${hexWithAlpha(roleAccent, "66")}` }} />
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
       </strong>
-      <div style={{ position: "relative", minHeight: 25, minWidth: 0 }}>
+      <div ref={assignedAnchorRef} style={{ position: "relative", minHeight: 25, minWidth: 0 }}>
         {showAssignedButton && (
           <button
             type="button"
@@ -1087,12 +1316,13 @@ function GVICRoleEditor({
             <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: singleUserOnly ? 11 : 9, fontWeight: 900 }}>{singleUserOnly ? "x" : assignedOpen ? "^" : "v"}</span>
           </button>
         )}
-        {assignedOpen && showAssignedButton && !singleUserOnly && (
+        {assignedOpen && showAssignedButton && !singleUserOnly && assignedListPosition && typeof document !== "undefined" && createPortal(
           <div
+            ref={assignedListRef}
             id={`${inputID}-assigned-users`}
             role="listbox"
             aria-label={singleUserOnly ? `${label} user` : `${label} people and groups`}
-            style={{ position: "absolute", zIndex: 32, top: "calc(100% + 6px)", left: 0, width: "min(320px, 86vw)", maxHeight: 240, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
+            style={{ position: "fixed", zIndex: GVIC_FLOATING_LAYER_Z_INDEX + 1, top: assignedListPosition.top, left: assignedListPosition.left, width: assignedListPosition.width, maxHeight: assignedListPosition.maxHeight, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
           >
             {assignments.length === 0 ? (
               <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 650 }}>{singleUserOnly ? "No user" : "No people"}</div>
@@ -1129,10 +1359,12 @@ function GVICRoleEditor({
                 </div>
               );
             })}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
       <div
+        ref={inputAnchorRef}
         onMouseEnter={(event) => {
           if (!inheritedReadOnly || !disabledReason) return;
           setDisabledTooltipPosition({ x: event.clientX, y: event.clientY });
@@ -1210,12 +1442,13 @@ function GVICRoleEditor({
             {disabledReason}
           </div>
         )}
-        {canEdit && open && (
+        {canEdit && open && pickerListPosition && typeof document !== "undefined" && createPortal(
           <div
+            ref={pickerListRef}
             id={`${inputID}-options`}
             role="listbox"
             aria-label={pickerAriaLabel}
-            style={{ position: "absolute", zIndex: 30, top: "calc(100% + 6px)", left: 0, width: "min(360px, 86vw)", maxHeight: 290, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
+            style={{ position: "fixed", zIndex: GVIC_FLOATING_LAYER_Z_INDEX + 2, top: pickerListPosition.top, left: pickerListPosition.left, width: pickerListPosition.width, maxHeight: pickerListPosition.maxHeight, overflowY: "auto", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
           >
             {pickerRows.length === 0 ? (
               <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>
@@ -1267,7 +1500,8 @@ function GVICRoleEditor({
                 </div>
               );
             })}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
     </div>

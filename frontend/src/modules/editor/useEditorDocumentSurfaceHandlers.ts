@@ -101,6 +101,7 @@ export type EditorDocumentSurfaceHandlers = Pick<
   | "onInput"
   | "onSelect"
   | "onClick"
+  | "onDoubleClick"
   | "onContextMenu"
   | "onPointerDown"
   | "onPointerMove"
@@ -1595,6 +1596,21 @@ type EditorImagePreviewDraft = {
   html: string;
 };
 
+function previewEditorImageFrame(
+  root: HTMLElement,
+  frame: HTMLSpanElement,
+  onPreviewImage?: (preview: EditorImagePreviewDraft) => void,
+): boolean {
+  const data = readEditorImageData(frame);
+  if (!data || !onPreviewImage) return false;
+  onPreviewImage({
+    src: data.src,
+    label: "Editor image",
+    html: createEditorImageClipboardHTML(root.ownerDocument, data),
+  });
+  return true;
+}
+
 const EDITOR_MENTION_MENU_WIDTH_PX = 320;
 const EDITOR_MENTION_MENU_MAX_HEIGHT_PX = 242;
 const EDITOR_MENTION_MENU_MARGIN_PX = 8;
@@ -2167,7 +2183,6 @@ function startEditorImagePointerInteraction(
   documentUndoHistory: EditorDocumentUndoHistory,
   scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
   scheduleIndentGuideUpdate: (text: string) => void,
-  onPreviewImage?: (preview: EditorImagePreviewDraft) => void,
 ) {
   const ownerDocument = root.ownerDocument;
   const frameRect = frame.getBoundingClientRect();
@@ -2300,17 +2315,7 @@ function startEditorImagePointerInteraction(
     ownerDocument.removeEventListener("pointerup", finish);
     ownerDocument.removeEventListener("pointercancel", finish);
     ownerDocument.body.style.cursor = previousCursor;
-    if (!moved) {
-      const data = readEditorImageData(frame);
-      if (data && onPreviewImage) {
-        onPreviewImage({
-          src: data.src,
-          label: "Editor image",
-          html: createEditorImageClipboardHTML(root.ownerDocument, data),
-        });
-      }
-      return;
-    }
+    if (!moved) return;
     if (interaction.kind === "drag" && shouldReanchorAfterDrag && reanchorEditorImageForVisualTop(root, frame, latestDragVisualTop)) {
       frame.style.marginTop = `${DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX}px`;
     }
@@ -3083,6 +3088,18 @@ export function useEditorDocumentSurfaceHandlers({
       event.stopPropagation();
       if (event.ctrlKey || event.metaKey) window.open(anchor.href, "_blank", "noopener,noreferrer");
     },
+    onDoubleClick(event) {
+      const root = event.currentTarget;
+      const frame = findEditorImageFrame(root, event.target);
+      if (!frame) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pendingEditorFontSizeRef.current = null;
+      setActiveTableContextMenu(null);
+      root.focus({ preventScroll: true });
+      selectEditorImageFrame(root, frame);
+      previewEditorImageFrame(root, frame, setActiveImagePreview);
+    },
     onContextMenu(event) {
       openTableContextMenu(event.currentTarget, event);
     },
@@ -3121,7 +3138,6 @@ export function useEditorDocumentSurfaceHandlers({
           documentUndoHistoryRef.current,
           scheduleDocumentSave,
           scheduleIndentGuideUpdate,
-          setActiveImagePreview,
         );
       }
     },
