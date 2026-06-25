@@ -8,12 +8,13 @@ import (
 
 var savedViewGroupingFieldsBySurface = map[string]map[string]bool{
 	SavedViewSurfaceMyWork: {
-		"account":  true,
-		"due_date": true,
-		"person":   true,
-		"project":  true,
-		"status":   true,
-		"team":     true,
+		"account":    true,
+		"due_date":   true,
+		"logic_gate": true,
+		"person":     true,
+		"project":    true,
+		"status":     true,
+		"team":       true,
 	},
 	SavedViewSurfaceUpdates: {
 		"type": true,

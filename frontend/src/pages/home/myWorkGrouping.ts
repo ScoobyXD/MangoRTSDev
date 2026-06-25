@@ -40,6 +40,7 @@ export type MyWorkSavedGroupingSetting = {
   selected_scope: MyWorkSelectedScope;
   groupings: MyWorkGroupingSetting[];
   panel_collapsed: boolean;
+  position: number;
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -154,6 +155,7 @@ export function normalizeMyWorkSavedGroupingSetting(
   const candidate = value as Partial<MyWorkSavedGroupingSetting>;
   const settingID = typeof candidate.setting_id === "string" && candidate.setting_id.trim() ? candidate.setting_id.trim() : fallback.setting_id;
   const name = typeof candidate.name === "string" && candidate.name.trim() ? candidate.name.trim() : fallback.name;
+  const position = Number.isFinite(Number(candidate.position)) ? Number(candidate.position) : fallback.position;
   const created = typeof candidate.created_timestamp === "string" && candidate.created_timestamp.trim() ? candidate.created_timestamp : fallback.created_timestamp;
   const updated = typeof candidate.updated_timestamp === "string" && candidate.updated_timestamp.trim() ? candidate.updated_timestamp : fallback.updated_timestamp;
   return {
@@ -167,6 +169,7 @@ export function normalizeMyWorkSavedGroupingSetting(
     selected_scope: normalizeMyWorkSelectedScope(candidate.selected_scope, currentUserID),
     groupings: normalizeMyWorkGroupingStack(candidate.groupings),
     panel_collapsed: candidate.panel_collapsed === true,
+    position,
     created_timestamp: created,
     updated_timestamp: updated,
   };
