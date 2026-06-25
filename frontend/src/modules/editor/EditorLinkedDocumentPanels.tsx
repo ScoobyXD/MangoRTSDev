@@ -526,13 +526,13 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               className="mango-editor-hover-highlight"
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(150px, 170px) minmax(210px, 245px)",
+                gridTemplateColumns: "minmax(132px, 150px) minmax(170px, 210px) minmax(190px, 230px) minmax(136px, 148px)",
                 justifyContent: "start",
                 columnGap: 8,
-                rowGap: 6,
-                maxWidth: "min(440px, 100%)",
+                rowGap: 4,
+                maxWidth: "min(760px, 100%)",
                 overflow: "visible",
-                padding: "1px 0 6px",
+                padding: "1px 0 4px",
                 borderBottom: `1px dashed ${ruleColor}`,
                 fontFamily: "var(--mango-font-family)",
                 fontSize: 12,
@@ -645,8 +645,8 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   )}
                 </span>
               </div>
-              <div style={{ gridColumn: "1 / span 2", gridRow: 2, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
-                <strong style={{ paddingTop: 7 }}>Accounts:</strong>
+              <div style={{ gridColumn: 3, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+                <strong>Accounts:</strong>
                 <AccountFilterControl
                   accounts={nodePresetFields.accountOptions}
                   selectedAccountIDs={nodePresetFields.accounts.map((account) => account.account_id)}
@@ -655,12 +655,12 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   compact
                   showLabel={false}
                   placeholder="Search accounts"
-                  style={{ minWidth: 0, width: "min(320px, 100%)" }}
+                  style={{ minWidth: 0, width: "min(220px, 100%)" }}
                 />
               </div>
-              <label style={{ gridColumn: "1 / span 2", gridRow: 3, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+              <label style={{ gridColumn: 4, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Due Date:</strong>
-                <span style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: 148 }}>
+                <span style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: 138 }}>
                   <input
                     value={nodePresetFields.dueDateDraft}
                     disabled={!canEdit}
@@ -711,10 +711,10 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   />
                 </span>
               </label>
-              <label style={{ gridColumn: 2, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "start" }}>
-                <strong style={{ paddingTop: 3 }}>Priority:</strong>
+              <label style={{ gridColumn: 2, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+                <strong>Priority:</strong>
                 <span style={{ display: "grid", gap: 4, minWidth: 0 }}>
-                  <span ref={priorityMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 250px)" }}>
+                  <span ref={priorityMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 200px)" }}>
                     <button
                       type="button"
                       aria-haspopup="listbox"
@@ -978,6 +978,7 @@ function GVICRoleEditor({
     ? (assignments.length === 0 ? "" : assignments.length === 1 ? GVICAssignmentLabel(assignments[0]) : `${GVICAssignmentLabel(assignments[0])} +${assignments.length - 1}`)
     : `People (${assignments.length})`;
   const showAssignedButton = !singleUserOnly || assignments.length > 0;
+  const assignmentChipLabel = showAssignedButton ? assignedSummary : "No user";
   const showDisabledTooltip = inheritedReadOnly && Boolean(disabledReason && disabledTooltipPosition);
   const assignedListPosition = useFloatingLayerPosition(assignedAnchorRef, assignedOpen && showAssignedButton && !singleUserOnly, { width: 320, maxHeight: 240 });
   const pickerListPosition = useFloatingLayerPosition(inputAnchorRef, canEdit && open, { width: 360, maxHeight: 290 });
@@ -1196,47 +1197,52 @@ function GVICRoleEditor({
         position: "relative",
         minWidth: 0,
         display: "grid",
-        gap: 5,
+        gap: 4,
         alignContent: "start",
         border: "1px solid transparent",
         borderRadius: 9,
         background: `linear-gradient(145deg, rgba(255,255,255,0.96), ${hexWithAlpha(roleAccent, "12")}) padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "aa")}, rgba(255,255,255,0.84)) border-box`,
         boxShadow: "4px 4px 12px rgba(174,174,192,0.16), -4px -4px 12px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.84)",
-        padding: 6,
+        padding: "5px 6px 6px",
       }}
     >
       <strong style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#111827" }}>
         <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, background: roleAccent, boxShadow: `0 0 10px ${hexWithAlpha(roleAccent, "66")}` }} />
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
       </strong>
-      <div ref={assignedAnchorRef} style={{ position: "relative", minHeight: 25, minWidth: 0 }}>
-        {showAssignedButton && (
-          <button
-            type="button"
-            aria-label={singleUserOnly && assignments[0] ? `Remove ${GVICAssignmentLabel(assignments[0])} from ${label}` : `${label} people`}
-            aria-haspopup={singleUserOnly ? undefined : "listbox"}
-            aria-expanded={singleUserOnly ? undefined : assignedOpen}
-            aria-controls={singleUserOnly ? undefined : `${inputID}-assigned-users`}
-            disabled={singleUserOnly && !canEdit}
-            onClick={() => {
-              if (singleUserOnly) {
-                const assignment = assignments[0];
-                if (!canEdit || !assignment) return;
-                onRemovePrincipal(role, logicGateGVICAssignmentPrincipalType(assignment), logicGateGVICAssignmentPrincipalID(assignment));
-                setAssignedOpen(false);
+      <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
+        <div ref={assignedAnchorRef} style={{ position: "relative", minHeight: 25, minWidth: 0, flex: "1 1 auto" }}>
+          {showAssignedButton ? (
+            <button
+              type="button"
+              aria-label={singleUserOnly && assignments[0] ? `Remove ${GVICAssignmentLabel(assignments[0])} from ${label}` : `${label} people`}
+              aria-haspopup={singleUserOnly ? undefined : "listbox"}
+              aria-expanded={singleUserOnly ? undefined : assignedOpen}
+              aria-controls={singleUserOnly ? undefined : `${inputID}-assigned-users`}
+              disabled={singleUserOnly && !canEdit}
+              onClick={() => {
+                if (singleUserOnly) {
+                  const assignment = assignments[0];
+                  if (!canEdit || !assignment) return;
+                  onRemovePrincipal(role, logicGateGVICAssignmentPrincipalType(assignment), logicGateGVICAssignmentPrincipalID(assignment));
+                  setAssignedOpen(false);
+                  setOpen(false);
+                  return;
+                }
+                setAssignedOpen((current) => !current);
                 setOpen(false);
-                return;
-              }
-              setAssignedOpen((current) => !current);
-              setOpen(false);
-            }}
-            style={{ width: "fit-content", maxWidth: "100%", minHeight: 25, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedOpen ? "70" : "2f")}`, borderRadius: 999, background: assignedOpen ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: singleUserOnly && !canEdit ? "default" : "pointer", padding: "2px 8px", font: "inherit", fontSize: 11, fontWeight: 800, opacity: singleUserOnly && !canEdit ? 0.66 : 1, boxShadow: assignedOpen ? `0 7px 15px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 7px rgba(174,174,192,0.15), -2px -2px 7px rgba(255,255,255,0.74), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
-          >
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assignedSummary}</span>
-            <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: singleUserOnly ? 11 : 9, fontWeight: 900 }}>{singleUserOnly ? "x" : assignedOpen ? "^" : "v"}</span>
-          </button>
-        )}
-        {assignedOpen && showAssignedButton && !singleUserOnly && assignedListPosition && typeof document !== "undefined" && createPortal(
+              }}
+              style={{ width: "fit-content", maxWidth: "100%", minHeight: 25, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${hexWithAlpha(roleAccent, assignedOpen ? "70" : "2f")}`, borderRadius: 999, background: assignedOpen ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: "#111827", cursor: singleUserOnly && !canEdit ? "default" : "pointer", padding: "2px 8px", font: "inherit", fontSize: 11, fontWeight: 800, opacity: singleUserOnly && !canEdit ? 0.66 : 1, boxShadow: assignedOpen ? `0 7px 15px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 7px rgba(174,174,192,0.15), -2px -2px 7px rgba(255,255,255,0.74), inset 1px 1px 0 rgba(255,255,255,0.82)" }}
+            >
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assignedSummary}</span>
+              <span aria-hidden="true" style={{ color: roleAccent || accent, fontSize: singleUserOnly ? 11 : 9, fontWeight: 900 }}>{singleUserOnly ? "x" : assignedOpen ? "^" : "v"}</span>
+            </button>
+          ) : (
+            <span style={{ maxWidth: "100%", minHeight: 25, display: "inline-flex", alignItems: "center", border: `1px dashed ${hexWithAlpha(roleAccent, "32")}`, borderRadius: 999, background: "rgba(255,255,255,0.52)", color: "#64748b", padding: "2px 8px", fontSize: 11, fontWeight: 760, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {assignmentChipLabel}
+            </span>
+          )}
+          {assignedOpen && showAssignedButton && !singleUserOnly && assignedListPosition && typeof document !== "undefined" && createPortal(
           <div
             ref={assignedListRef}
             id={`${inputID}-assigned-users`}
@@ -1281,21 +1287,21 @@ function GVICRoleEditor({
             })}
           </div>,
           document.body,
-        )}
-      </div>
-      <div
-        ref={inputAnchorRef}
-        onMouseEnter={(event) => {
-          if (!inheritedReadOnly || !disabledReason) return;
-          setDisabledTooltipPosition({ x: event.clientX, y: event.clientY });
-        }}
-        onMouseMove={(event) => {
-          if (!inheritedReadOnly || !disabledReason) return;
-          setDisabledTooltipPosition({ x: event.clientX, y: event.clientY });
-        }}
-        onMouseLeave={() => setDisabledTooltipPosition(null)}
-        style={{ position: "relative", minWidth: 0, width: "min(174px, 100%)", justifySelf: "start" }}
-      >
+          )}
+        </div>
+        <div
+          ref={inputAnchorRef}
+          onMouseEnter={(event) => {
+            if (!inheritedReadOnly || !disabledReason) return;
+            setDisabledTooltipPosition({ x: event.clientX, y: event.clientY });
+          }}
+          onMouseMove={(event) => {
+            if (!inheritedReadOnly || !disabledReason) return;
+            setDisabledTooltipPosition({ x: event.clientX, y: event.clientY });
+          }}
+          onMouseLeave={() => setDisabledTooltipPosition(null)}
+          style={{ position: "relative", minWidth: 0, flex: "0 0 auto" }}
+        >
         <button
           type="button"
           id={inputID}
@@ -1309,7 +1315,7 @@ function GVICRoleEditor({
             setAssignedOpen(false);
             setOpen((current) => !current);
           }}
-          style={{ width: "fit-content", minWidth: 74, minHeight: 27, boxSizing: "border-box", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, border: open ? "1px solid transparent" : `1px solid ${hexWithAlpha(roleAccent, "3f")}`, borderRadius: 8, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "bb")}, rgba(255,255,255,0.86)) border-box` : EDITOR_NEU_SURFACE, color: canEdit ? roleAccent : "#64748b", font: "inherit", fontSize: 11, fontWeight: 850, padding: "3px 9px", outline: "none", cursor: canEdit ? "pointer" : "default", pointerEvents: canEdit ? "auto" : "none", opacity: canEdit ? 1 : 0.58, boxShadow: open ? `0 8px 18px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 8px rgba(174,174,192,0.18), -2px -2px 8px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.86)" }}
+          style={{ width: "fit-content", minWidth: 58, minHeight: 25, boxSizing: "border-box", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, border: open ? "1px solid transparent" : `1px solid ${hexWithAlpha(roleAccent, "3f")}`, borderRadius: 8, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "bb")}, rgba(255,255,255,0.86)) border-box` : EDITOR_NEU_SURFACE, color: canEdit ? roleAccent : "#64748b", font: "inherit", fontSize: 11, fontWeight: 850, padding: "2px 8px", outline: "none", cursor: canEdit ? "pointer" : "default", pointerEvents: canEdit ? "auto" : "none", opacity: canEdit ? 1 : 0.58, boxShadow: open ? `0 8px 18px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 8px rgba(174,174,192,0.18), -2px -2px 8px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.86)" }}
         >
           <span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1 }}>+</span>
           <span>{disabledReason ? "Locked" : "Add"}</span>
@@ -1420,6 +1426,7 @@ function GVICRoleEditor({
           </div>,
           document.body,
         )}
+        </div>
       </div>
     </div>
   );
