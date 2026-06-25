@@ -2219,7 +2219,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
   const fullFrameTabActive = activeTab === "relationships" || activeTab === "permissions";
   const fallbackDocumentTopPx = fullFrameTabActive ? 46 : linkedEntityKind === "node" ? 128 : linkedEntityKind === "logic_gate" ? 188 : EDITOR_DOCUMENT_TOP_PX;
-  const documentTopPx = hasLinkedDocument ? Math.max(fallbackDocumentTopPx, editorHeaderHeightPx + 6) : fallbackDocumentTopPx;
+  const documentTopPx = hasLinkedDocument && editorHeaderHeightPx > 0 ? editorHeaderHeightPx + 6 : fallbackDocumentTopPx;
   const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
   const documentBottomBufferPx = Math.round(documentLineHeightPx * EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
