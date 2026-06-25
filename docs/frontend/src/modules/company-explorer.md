@@ -207,6 +207,11 @@ Project leaf update (2026-06-24):
 - A project relationship can still exist for the Project UI, but it must not create a second Company Explorer row for the related node, logic gate, or project.
 - Explorer placement remains single-parent/single-instance: moving a resource changes its `company_explorer_items` placement rather than adding another visible location.
 
+Explorer move/search update (2026-06-24):
+- Dragging a node onto a logic gate in Company Explorer uses logic-gate assignment semantics, not the work-state change endpoint used by My Work/GVIC cell moves.
+- When a folder-placement node is assigned to a logic gate from Company Explorer, the old Explorer placement is removed so the node keeps one visible Explorer instance.
+- Company Explorer search is limited to resources reachable through visible Explorer paths; hidden folder ancestry must hide the search result even when the underlying resource has direct view access.
+
 Kanban Explorer update (2026-05-04):
 - Kanban boards are durable Explorer items with `item_type=kanban` and a fixed three-column board icon.
 - Kanban boards can be placed in either node folders or logic-gate folders. Folder kinds remain `node` and `logic_gate`; Kanban is an item type, not a third map scope.

@@ -44,6 +44,9 @@ E33 - The default Unfiled folder and its Projects, Logic Gates, and Nodes child 
 E34 - While the Explorer search box contains text, the left sidebar hides non-Explorer sections and uses the remaining column for Explorer search results; clearing the search restores the normal sidebar.
 E35 - Dropping a node into an Explorer folder must create or move a Company Explorer folder placement and must not treat a logic-gate assignment or project relationship edge as an Explorer folder-item edge.
 E36 - Once a resource is visible anywhere in Company Explorer, no project relationship branch may create a second visible instance of that resource.
+E37 - Company Explorer search returns only resources reachable through visible Explorer paths; a resource inside a hidden Explorer folder must not appear in search even if the underlying resource has direct view access.
+E38 - Dropping a node onto a logic gate in Company Explorer assigns or reassigns the node to that logic gate and does not call the logic-gate work state-change endpoint.
+E39 - Logic-gate work state-change endpoints are reserved for work-state moves such as My Work or GVIC cell moves where status, column, priority, issue state, or position is intentionally changed.
 
 ## Scenarios
 
@@ -151,12 +154,15 @@ Business logic covered:
 - E31
 - E32
 - E34
+- E37
 
 Given:
 - Matching logic gates, nodes, projects, and folders exist across folders and lazy branches that have not necessarily been opened.
+- Another matching resource exists under an Explorer folder the viewer cannot access.
 
 Expected:
 - Search returns matches from the whole company, not only loaded UI branches.
+- Search excludes matches whose Explorer placement or folder ancestry is not visible to the viewer.
 - Logic gates are listed before nodes, nodes before projects, and projects before folders.
 - Each result includes resource_type, resource_id, display name, match reason, and Explorer location path.
 - The UI renders the location path as nested Explorer rows and selecting a resource result opens the resource directly without switching node results to the map background.
@@ -167,14 +173,19 @@ Business logic covered:
 - E18
 - E35
 - E36
+- E38
+- E39
 
 Given:
 - A node can appear under a logic gate through a logic-gate assignment edge.
 - A logic gate or node can also be related to a project through a project relationship edge.
 - A user drags that node into a normal Company Explorer folder.
+- A user drags a normal Explorer folder-placement node onto a logic gate row.
 
 Expected:
 - The folder drop writes a Company Explorer folder placement for the node.
 - The logic-gate assignment edge is not reused as a Company Explorer placement edge.
 - The project relationship edge is not rendered as a nested Project child or reused as a Company Explorer placement edge.
 - The drop does not fail with access_denied because of an edge-type mismatch.
+- The logic-gate drop writes a logic-gate assignment or reassignment without requiring work-state fields.
+- My Work or GVIC cell moves remain the place where logic-gate work state changes are sent.

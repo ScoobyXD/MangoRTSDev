@@ -119,6 +119,17 @@ export function getExplorerRowContainerID(row: ExplorerTreeNode): string | null 
   return null;
 }
 
+export function shouldRemoveExplorerPlacementAfterLogicGateDrop(
+  row: ExplorerTreeNode | undefined,
+  parentEntityType: string | undefined,
+  fromLogicGateID = "",
+): boolean {
+  const edgeID = row?.edgeID?.trim() ?? "";
+  if (!edgeID || fromLogicGateID.trim()) return false;
+  const parentEntityID = row?.parentEntityID?.trim() ?? "";
+  return !parentEntityID || parentEntityType === "folder";
+}
+
 export function getExplorerRowOrderKind(row: ExplorerTreeNode): CompanyExplorerItemType | CompanyExplorerFolderKind | null {
   if (row.kind === "folder") return row.folderKind ?? (row.entityID ? "logic_gate" : null);
   return row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : row.kind === "kanban" ? "kanban" : null;

@@ -29,6 +29,7 @@ import {
   getExplorerSelectionDomain,
   readRootRowOrderFromStorage,
   readScrollTopFromStorage,
+  shouldRemoveExplorerPlacementAfterLogicGateDrop,
   TREE_ROW_POSITION_STEP,
 } from "./companyExplorerDragDrop";
 import {
@@ -55,7 +56,7 @@ import { getActiveCompanyID } from "../../auth/currentCompany";
 import { createRequestJSON } from "../api/requestJSON";
 import { convertTriageMessagesToExplorerTarget, listCompanyUserGroups, listCompanyUsers, type CommunicationsTriageConversionTarget, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
 import { createProject, type ProjectRecord } from "../project-management/projectManagementApi";
-import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
+import { assignNodeToLogicGateStatus } from "../kanban/kanbanApi";
 import { listMyLogicGates, listGVICMatrixProjectionRows, type WorkItemLogicGateInboxItem } from "../work-items/workItemReadApi";
 import {
   buildDeleteConfirmationSummary,
@@ -3533,6 +3534,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
     setError("");
     const sourceLogicGateIDs = new Set<string>();
+    const sourceExplorerParentEntityIDs = new Set<string>();
+    const sourcePlacementEdgeIDs = new Set<string>();
     try {
       for (const move of normalizedMoves) {
         const sourceParentEntityID = move.sourceRow?.parentEntityID?.trim() ?? "";
@@ -3540,22 +3543,38 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           || getLogicGateRowForContainerID(sourceParentEntityID)?.logicGateID?.trim()
           || "";
         if (fromLogicGateID) sourceLogicGateIDs.add(fromLogicGateID);
-        const result = await moveLogicGateAssignment({
+        const sourcePlacementEdgeID = move.sourceRow?.edgeID?.trim() ?? "";
+        const sourceParentRow = sourceParentEntityID
+          ? companyExplorerV2RowsRef.current.find((row) => row.entity_id === sourceParentEntityID)
+          : undefined;
+        if (companyExplorerV2Active && shouldRemoveExplorerPlacementAfterLogicGateDrop(move.sourceRow, sourceParentRow?.entity_type, fromLogicGateID)) {
+          sourcePlacementEdgeIDs.add(sourcePlacementEdgeID);
+          sourceExplorerParentEntityIDs.add(sourceParentEntityID);
+        }
+        const result = await assignNodeToLogicGateStatus({
           apiBase,
           companyID,
           logicGateID: targetLogicGateID,
           nodeID: move.nodeID,
-          fromLogicGateID: fromLogicGateID || undefined,
-          mutationOrigin: "matrix",
+          mutationOrigin: "company_explorer",
           position: move.position,
         });
         dispatchExplorerStore({ type: "replaceNode", node: result.node });
         upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
       }
+      if (companyExplorerV2Active && sourcePlacementEdgeIDs.size > 0) {
+        for (const edgeID of sourcePlacementEdgeIDs) {
+          await requestJSON(`/v1/company-explorer/items/${encodeURIComponent(edgeID)}?company_id=${encodeURIComponent(companyID)}`, {
+            method: "DELETE",
+          });
+        }
+        dispatchExplorerStore({ type: "removeV2Edges", edgeIDs: sourcePlacementEdgeIDs });
+      }
       const expandedTreeID = logicGateTreeID || getLogicGateRowForContainerID(targetLogicGateID)?.id || "";
       if (expandedTreeID) setExpanded((previous) => new Set(previous).add(expandedTreeID));
       if (companyExplorerV2Active) {
         const branchIDs = new Set(sourceLogicGateIDs);
+        for (const branchID of sourceExplorerParentEntityIDs) branchIDs.add(branchID);
         branchIDs.add(targetLogicGateID);
         for (const branchID of branchIDs) {
           activeCompanyExplorerBranchesRef.current.add(companyExplorerBranchKey(branchID));
@@ -3568,7 +3587,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       setError(err instanceof Error ? err.message : "failed_to_move_node_to_logic_gate");
       return false;
     }
-  }, [apiBase, companyExplorerBranchKey, companyExplorerV2Active, companyID, getLogicGateRowForContainerID, refreshCompanyExplorerBranch]);
+  }, [apiBase, companyExplorerBranchKey, companyExplorerV2Active, companyID, getLogicGateRowForContainerID, refreshCompanyExplorerBranch, requestJSON]);
 
   const canPlaceExplorerItemsAtTarget = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
     if (isProtectedGVICRoleRow(target)) return false;
