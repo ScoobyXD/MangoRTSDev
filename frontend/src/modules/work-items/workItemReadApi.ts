@@ -65,6 +65,13 @@ export type MyWorkMatrixResponse = {
   rows: MyWorkMatrixRow[];
 };
 
+export type MyWorkNodeMoveResult = {
+  company_id: string;
+  node: NodeRecord;
+  gvic_projection_rows: GVICMatrixProjectionRow[];
+  removed_projection_row_ids: string[];
+};
+
 export async function listGeneratedInboxNodes(params: WorkItemInboxReadParams): Promise<GeneratedInboxNodesResponse> {
   return fetchWorkItemInboxRead<GeneratedInboxNodesResponse>(params, "/v1/work-items/generated-inbox");
 }
@@ -87,6 +94,35 @@ export async function listGVICMatrixProjectionRows(params: WorkItemInboxReadPara
 
 export async function listMyWorkMatrixRows(params: WorkItemInboxReadParams): Promise<MyWorkMatrixResponse> {
   return fetchWorkItemInboxRead<MyWorkMatrixResponse>(params, "/v1/work-items/my-work-matrix");
+}
+
+export async function moveMyWorkNodeToCell(params: {
+  apiBase: string;
+  companyID: string;
+  nodeID: string;
+  targetUserID?: string;
+  targetGVICRole: LogicGateGVICRole;
+  priority?: number | null;
+  logicGateID?: string;
+  fromLogicGateID?: string;
+}): Promise<MyWorkNodeMoveResult> {
+  const payload = await requestJSON<Partial<MyWorkNodeMoveResult> & { node: NodeRecord }>(params.apiBase, `/v1/work-items/my-work-matrix/nodes/${encodeURIComponent(params.nodeID)}/move`, {
+    method: "POST",
+    json: {
+      company_id: params.companyID,
+      target_user_id: params.targetUserID,
+      target_gvic_role: params.targetGVICRole,
+      priority: params.priority,
+      logic_gate_id: params.logicGateID,
+      from_logic_gate_id: params.fromLogicGateID,
+    },
+  });
+  return {
+    company_id: payload.company_id ?? params.companyID,
+    node: payload.node,
+    gvic_projection_rows: Array.isArray(payload.gvic_projection_rows) ? payload.gvic_projection_rows : [],
+    removed_projection_row_ids: Array.isArray(payload.removed_projection_row_ids) ? payload.removed_projection_row_ids : [],
+  };
 }
 
 async function fetchWorkItemInboxRead<T>(params: WorkItemInboxReadParams, path: string): Promise<T> {

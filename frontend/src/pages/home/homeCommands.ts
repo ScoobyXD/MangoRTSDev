@@ -49,6 +49,10 @@ import {
   type KanbanBoardsUpdatedDetail,
 } from "../../modules/kanban/shared.js";
 import type { NodeRecord } from "../../modules/node-map/shared.js";
+import {
+  moveMyWorkNodeToCell as defaultMoveMyWorkNodeToCell,
+  type MyWorkNodeMoveResult,
+} from "../../modules/work-items/workItemReadApi.js";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../../modules/workspace/workspaceEntityCommands.js";
 import {
   cleanIDList,
@@ -77,6 +81,7 @@ export type HomeDeleteEmailMessage = typeof defaultDeleteEmailMessage;
 export type HomeUpdateEmailMessage = typeof defaultUpdateEmailMessage;
 export type HomeSendEmail = typeof defaultSendEmail;
 export type HomeBulkUpdateNode = typeof defaultUpdateNode;
+export type HomeMoveMyWorkNodeToCell = typeof defaultMoveMyWorkNodeToCell;
 export type HomeAddMyLogicGateShortcuts = typeof defaultAddMyLogicGateShortcuts;
 export type HomeRemoveMyLogicGateShortcut = typeof defaultRemoveMyLogicGateShortcut;
 export type HomeConvertTriageMessagesToExplorerTarget = typeof defaultConvertTriageMessagesToExplorerTarget;
@@ -118,6 +123,12 @@ export type HomeMailMessagesCommandResult = {
 
 export type HomeMailMessageCommandResult = {
   message: EmailMessage;
+};
+
+export type HomeMyWorkNodeMoveCommandResult = {
+  nodes: NodeRecord[];
+  gvic_projection_rows: GVICMatrixProjectionRow[];
+  removed_projection_row_ids: string[];
 };
 
 export type HomeSendMailCommandResult = {
@@ -404,6 +415,52 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
   return {
     nodes: assignmentResults.map((result) => result.node),
     gvic_projection_rows: assignmentResults.flatMap((result) => result.gvic_projection_rows),
+  };
+}
+
+export async function moveMyWorkNodesToCellCommand(args: {
+  apiBase: string;
+  companyID: string;
+  nodeIDs: string[];
+  priority: InboxPriority;
+  targetGVICRole: LogicGateGVICRole;
+  targetUserID?: string;
+  logicGateID?: string;
+  fromLogicGateID?: string;
+  nodeByID: Map<string, NodeRecord>;
+  moveMyWorkNodeToCell?: HomeMoveMyWorkNodeToCell;
+}): Promise<HomeMyWorkNodeMoveCommandResult> {
+  const nodeIDs = cleanIDList(args.nodeIDs).filter((nodeID) => args.nodeByID.has(nodeID));
+  if (nodeIDs.length === 0) return { nodes: [], gvic_projection_rows: [], removed_projection_row_ids: [] };
+
+  const moveMyWorkNodeToCell = args.moveMyWorkNodeToCell ?? defaultMoveMyWorkNodeToCell;
+  const priority = args.priority === 0 ? null : args.priority;
+  const results = await Promise.all(nodeIDs.map((nodeID) => moveMyWorkNodeToCell({
+    apiBase: args.apiBase,
+    companyID: args.companyID,
+    nodeID,
+    targetUserID: args.targetUserID,
+    targetGVICRole: args.targetGVICRole,
+    priority,
+    logicGateID: args.logicGateID,
+    fromLogicGateID: args.fromLogicGateID,
+  })));
+
+  const removedProjectionRowIDs: string[] = [];
+  const seenRemovedIDs = new Set<string>();
+  for (const result of results) {
+    for (const projectionRowID of result.removed_projection_row_ids ?? []) {
+      const cleanID = projectionRowID.trim();
+      if (!cleanID || seenRemovedIDs.has(cleanID)) continue;
+      seenRemovedIDs.add(cleanID);
+      removedProjectionRowIDs.push(cleanID);
+    }
+  }
+
+  return {
+    nodes: results.map((result: MyWorkNodeMoveResult) => result.node).filter((node): node is NodeRecord => Boolean(node)),
+    gvic_projection_rows: results.flatMap((result) => result.gvic_projection_rows ?? []),
+    removed_projection_row_ids: removedProjectionRowIDs,
   };
 }
 

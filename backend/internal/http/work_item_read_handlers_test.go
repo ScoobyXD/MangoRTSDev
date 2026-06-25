@@ -181,6 +181,97 @@ func TestWorkItemInboxReadEndpointsReturnContracts(t *testing.T) {
 	}
 }
 
+func TestMyWorkMatrixNodeMoveUpdatesRolePriorityAndPreservesLogicGate(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-565656565656"
+	repo.EnsureCompany(companyID, "My Work Move Company")
+	user, err := repo.UpsertAuthUser("my-work-move-user", "my-work-move@example.com", "My Work Move User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("my-work-move-user", companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "My Work Move Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []store.LogicGateGVICAssignmentInput{{Role: domain.GVICRoleGenerated, UserID: user.UserID}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Move me from generated to consulted")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    testPriority(1),
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+
+	handler := NewServer(repo).Routes()
+	rec := postMyWorkMatrixMoveJSON(t, handler, node.NodeID, user.UserID, companyID, domain.RoleCompanyAdmin, map[string]any{
+		"company_id":         companyID,
+		"target_user_id":     user.UserID,
+		"target_gvic_role":   domain.GVICRoleConsulted,
+		"logic_gate_id":      logicGate.LogicGateID,
+		"from_logic_gate_id": logicGate.LogicGateID,
+		"priority":           3,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("move status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var payload struct {
+		Node                    domain.Node                     `json:"node"`
+		Rows                    []store.GVICMatrixProjectionRow `json:"gvic_projection_rows"`
+		RemovedProjectionRowIDs []string                        `json:"removed_projection_row_ids"`
+	}
+	decodeWorkItemInboxReadPayload(t, rec, &payload)
+	if payload.Node.Priority == nil || *payload.Node.Priority != 3 {
+		t.Fatalf("node priority = %+v, want 3", payload.Node.Priority)
+	}
+	if len(payload.Node.LogicGateIDs) != 1 || payload.Node.LogicGateIDs[0] != logicGate.LogicGateID {
+		t.Fatalf("node logic_gate_ids = %+v, want preserved gate %s", payload.Node.LogicGateIDs, logicGate.LogicGateID)
+	}
+	if !inboxReadHTTPMyWorkHasNode(payload.Rows, node.NodeID, domain.GVICRoleConsulted) {
+		t.Fatalf("response rows missing consulted node: %+v", payload.Rows)
+	}
+	if inboxReadHTTPMyWorkHasNode(payload.Rows, node.NodeID, domain.GVICRoleGenerated) {
+		t.Fatalf("response rows still include generated node: %+v", payload.Rows)
+	}
+	if len(payload.RemovedProjectionRowIDs) == 0 {
+		t.Fatalf("removed projection row IDs empty, want old generated row removed")
+	}
+
+	myWorkRec := getWorkItemInboxRead(t, handler, "/v1/work-items/my-work-matrix?company_id="+companyID, user.UserID, companyID, domain.RoleCompanyAdmin)
+	var myWorkPayload struct {
+		Rows []store.GVICMatrixProjectionRow `json:"rows"`
+	}
+	decodeWorkItemInboxReadPayload(t, myWorkRec, &myWorkPayload)
+	if !inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, node.NodeID, domain.GVICRoleConsulted) {
+		t.Fatalf("my work rows missing consulted node after move: %+v", myWorkPayload.Rows)
+	}
+	if inboxReadHTTPMyWorkHasNode(myWorkPayload.Rows, node.NodeID, domain.GVICRoleGenerated) {
+		t.Fatalf("my work rows still include generated node after move: %+v", myWorkPayload.Rows)
+	}
+	assignments, err := repo.ListNodeLogicGateAssignments(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListNodeLogicGateAssignments: %v", err)
+	}
+	if len(assignments) != 1 || assignments[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("logic gate assignments = %+v, want preserved gate", assignments)
+	}
+}
+
 func TestWorkItemMyWorkMatrixLogsRepoError(t *testing.T) {
 	companyID := "11111111-1111-4111-8111-999999999999"
 	userID := "22222222-2222-4222-8222-999999999999"
@@ -542,6 +633,20 @@ func decodeWorkItemInboxReadPayload(t *testing.T, rec *httptest.ResponseRecorder
 	if err := json.NewDecoder(rec.Body).Decode(target); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
+}
+
+func postMyWorkMatrixMoveJSON(t *testing.T, handler http.Handler, nodeID, userID, companyID, role string, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/work-items/my-work-matrix/nodes/"+nodeID+"/move", bytes.NewReader(encoded))
+	req.Header.Set("Content-Type", "application/json")
+	req = workItemInboxReadRequestWithActor(req, userID, companyID, role, false)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
 }
 
 func mustSetWorkItemReadNodeGVIC(t *testing.T, repo *store.MemoryRepo, companyID, nodeID, userID string) {
