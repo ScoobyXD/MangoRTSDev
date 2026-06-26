@@ -8,7 +8,6 @@ import {
   type CompanyExplorerSystemFolderKey,
 } from "../folders/companyExplorerFolders.js";
 import { collectFolderSubtreeIDs } from "./companyExplorerDragDrop.js";
-import type { CompanyExplorerV2EntityType } from "./companyExplorerLazyApi.js";
 import {
   type ExplorerDeleteTarget,
   type ExplorerDeleteTargetWithLabel,
@@ -102,10 +101,8 @@ export type CompanyExplorerSearchSelectionRequest = {
 };
 
 export type CompanyExplorerTriageMessageDropTarget =
-  | { kind: "folder"; folderID?: string; parentEntityID?: string; entityType?: CompanyExplorerV2EntityType; label: string }
   | { kind: "project"; projectID: string; parentEntityID?: string; label: string }
-  | { kind: "logic_gate"; logicGateID: string; parentEntityID?: string; label: string }
-  | { kind: "node"; logicGateID?: string; nodeID: string; parentEntityID?: string; label: string };
+  | { kind: "logic_gate"; logicGateID: string; parentEntityID?: string; label: string };
 
 export type CompanyExplorerTriageMessageDropHandler = (
   target: CompanyExplorerTriageMessageDropTarget,
@@ -134,7 +131,6 @@ export type CompanyExplorerContextMenuActionID =
   | "pin"
   | "folder_permissions"
   | "create_folder"
-  | "create_node"
   | "create_logic_gate"
   | "create_project"
   | "rename"
@@ -151,7 +147,6 @@ export function buildCompanyExplorerContextMenuSections(input: {
   pinEnabled?: boolean;
   permissionsEnabled: boolean;
   createFolderEnabled: boolean;
-  createNodeEnabled: boolean;
   createLogicGateEnabled: boolean;
   createProjectEnabled: boolean;
   renameEnabled: boolean;
@@ -168,7 +163,6 @@ export function buildCompanyExplorerContextMenuSections(input: {
     ],
     [
       { id: "create_folder", label: "Create New Folder", enabled: input.createFolderEnabled },
-      { id: "create_node", label: "Create Node", enabled: input.createNodeEnabled },
       { id: "create_logic_gate", label: "Create Logic Gate", enabled: input.createLogicGateEnabled },
       { id: "create_project", label: "Create Project", enabled: input.createProjectEnabled },
     ],
@@ -285,6 +279,7 @@ export function filterExplorerRowsForCustomTopLevel(input: {
   const customRows: ExplorerTreeNode[] = [];
   let skippedRootDepth: number | null = null;
   for (const row of input.rows) {
+    if (row.kind === "node") continue;
     if (skippedRootDepth !== null) {
       if (row.depth > skippedRootDepth) continue;
       skippedRootDepth = null;

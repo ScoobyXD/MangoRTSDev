@@ -239,22 +239,11 @@ func TestMemoryEmailConversionCommandAttachesEmailToExistingNode(t *testing.T) {
 	}
 }
 
-func TestMemoryEmailConversionCommandCreatesNodeInExplorerFolderTarget(t *testing.T) {
+func TestMemoryEmailConversionCommandRejectsExplorerFolderTarget(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-111111111107"
 	repo.EnsureCompany(companyID, "Email Conversion Company")
 	user, _ := setupEmailConversionUserAndGate(t, repo, companyID)
-	roots, err := repo.ListCompanyExplorerV2RootRows(CompanyExplorerV2RowsQuery{
-		CompanyID:        companyID,
-		View:             CompanyExplorerLazyScopeAll,
-		PermissionUserID: user.UserID,
-	})
-	if err != nil {
-		t.Fatalf("ListCompanyExplorerV2RootRows: %v", err)
-	}
-	if findCompanyExplorerV2Row(roots.Rows, CompanyExplorerV2EntityCompany, companyID) != nil {
-		t.Fatalf("roots included synthetic company root: %+v", roots.Rows)
-	}
 	targetFolder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
 		CompanyID:        companyID,
 		ParentEntityID:   companyID,
@@ -277,7 +266,7 @@ func TestMemoryEmailConversionCommandCreatesNodeInExplorerFolderTarget(t *testin
 		t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
 	}
 
-	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+	_, err = repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
 		UserID:    user.UserID,
 		CompanyID: companyID,
 		Target: CommunicationsTriageConversionTarget{
@@ -286,27 +275,20 @@ func TestMemoryEmailConversionCommandCreatesNodeInExplorerFolderTarget(t *testin
 		},
 		MessageIDs: []string{message.ID},
 	})
-	if err != nil {
-		t.Fatalf("ConvertCommunicationsTriageItems folder target: %v", err)
-	}
-	if len(result.Nodes) != 1 || result.Nodes[0].Title != message.Subject {
-		t.Fatalf("nodes = %+v, want one created email node", result.Nodes)
-	}
-	if len(result.ExplorerV2Rows) != 1 || result.ExplorerV2Rows[0].ParentEntityID != targetFolder.EntityID || result.ExplorerV2Rows[0].ResourceID != result.Nodes[0].NodeID {
-		t.Fatalf("explorer v2 rows = %+v, want node under target folder", result.ExplorerV2Rows)
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("ConvertCommunicationsTriageItems folder target err = %v, want ErrInvalid", err)
 	}
 
 	triageItems, err := repo.ListCommunicationsTriageItems(user.UserID)
-	if err != nil || len(triageItems) != 0 {
-		t.Fatalf("triage items after folder conversion = %+v err=%v, want deleted", triageItems, err)
+	if err != nil || len(triageItems) != 1 || triageItems[0].MessageID != message.ID {
+		t.Fatalf("triage items after rejected folder conversion = %+v err=%v, want original item", triageItems, err)
 	}
 	durable, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: afterSequence, Limit: 20})
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	wantTypes := []string{WorkItemEmailConvertedEventType, "node_created", "node_updated", "company_explorer_item_placed"}
-	if gotTypes := domainEventTypes(durable); !reflect.DeepEqual(gotTypes, wantTypes) {
-		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
+	if len(durable) != 0 {
+		t.Fatalf("durable event types after rejected folder conversion = %+v, want none", domainEventTypes(durable))
 	}
 }
 

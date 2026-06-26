@@ -102,16 +102,7 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 		input.Target.ProjectID = ""
 		input.Target.ParentEntityID = ""
 	case CommunicationsEmailConversionTargetFolder:
-		if input.Target.FolderID == "" && input.Target.ParentEntityID == "" {
-			return CommunicationsTriageConversionInput{}, ErrInvalid
-		}
-		input.LogicGateID = ""
-		input.NodeID = ""
-		input.NewLogicGateHeader = ""
-		input.Target.LogicGateID = ""
-		input.Target.NodeID = ""
-		input.Target.Header = ""
-		input.Target.ProjectID = ""
+		return CommunicationsTriageConversionInput{}, ErrInvalid
 	case CommunicationsEmailConversionTargetProject:
 		if input.Target.ProjectID == "" {
 			return CommunicationsTriageConversionInput{}, ErrInvalid
@@ -148,14 +139,6 @@ func normalizeCommunicationsEmailConversionTargetMode(mode string) string {
 	default:
 		return "invalid"
 	}
-}
-
-func communicationsExplorerTargetParentEntityID(target CommunicationsTriageConversionTarget) string {
-	parentEntityID := strings.TrimSpace(target.ParentEntityID)
-	if parentEntityID == "" && target.Mode == CommunicationsEmailConversionTargetFolder {
-		parentEntityID = strings.TrimSpace(target.FolderID)
-	}
-	return parentEntityID
 }
 
 func communicationsEmailConversionWorkspaceEventInputs(result CommunicationsTriageConversionResult, meta workItemAssignmentEventMetadata) []DomainEventInput {

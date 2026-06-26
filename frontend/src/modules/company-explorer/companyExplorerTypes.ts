@@ -39,7 +39,7 @@ export type ExplorerTreeNode = {
   hasChildren?: boolean;
   parentLogicGateID?: string;
   GVICRole?: LogicGateGVICRole | "other";
-  syntheticKind?: "GVIC_folder" | "logic_gate_children" | "default_scope_folder" | "search_path";
+  syntheticKind?: "GVIC_folder" | "logic_gate_children" | "default_scope_folder" | "search_path" | "search_result";
 };
 
 export type ExplorerDragPayload = ExplorerDropPayload;
@@ -73,13 +73,10 @@ export type CompanyExplorerContextMenuState = {
   renameLabel: string;
   contextKind: CompanyExplorerFolderKind | null;
   createPosition: number;
-  createNodeLogicGateID: string;
-  createNodeLogicGateTreeID: string;
   createLogicGateGVICRole: LogicGateGVICRole | "";
   createFolderScopeType?: CompanyExplorerFolderScopeType;
   createFolderScopeID?: string;
   canCreateFolder: boolean;
-  canCreateNode: boolean;
   canCreateLogicGate: boolean;
   canCreateProject: boolean;
 };

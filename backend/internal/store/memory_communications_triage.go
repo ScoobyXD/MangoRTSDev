@@ -387,18 +387,8 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToStandaloneNodeLocked(input
 }
 
 func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
-	targetParentEntityID := communicationsExplorerTargetParentEntityID(input.Target)
-	if targetParentEntityID != "" {
-		input.Target.ParentEntityID = targetParentEntityID
-	}
 	if input.Target.Mode == CommunicationsEmailConversionTargetProject {
 		if _, ok := r.projects[key(input.CompanyID, input.Target.ProjectID)]; !ok {
-			return CommunicationsTriageConversionResult{}, ErrNotFound
-		}
-	}
-	if targetParentEntityID != "" {
-		r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
-		if _, ok := r.companyExplorerV2Entities[key(input.CompanyID, targetParentEntityID)]; !ok {
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
 	}
@@ -429,32 +419,6 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 		}
 		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
-		if targetParentEntityID != "" {
-			entity := r.ensureCompanyExplorerV2NativeEntityLocked(input.CompanyID, CompanyExplorerV2EntityNode, nodeID, node.Title, now, now)
-			position := input.Target.Position
-			if position <= 0 {
-				position = r.nextCompanyExplorerV2EdgePositionLocked(input.CompanyID, targetParentEntityID)
-			}
-			edge := memoryCompanyExplorerV2Edge{
-				CompanyID:        input.CompanyID,
-				EdgeID:           companyExplorerV2EdgeID(input.CompanyID, targetParentEntityID, entity.EntityID),
-				ParentEntityID:   targetParentEntityID,
-				ChildEntityID:    entity.EntityID,
-				Position:         position,
-				CreatedTimestamp: now,
-				UpdatedTimestamp: now,
-			}
-			for edgeKey, existing := range r.companyExplorerV2Edges {
-				if existing.CompanyID == input.CompanyID && existing.ChildEntityID == entity.EntityID {
-					delete(r.companyExplorerV2Edges, edgeKey)
-					if !existing.CreatedTimestamp.IsZero() {
-						edge.CreatedTimestamp = existing.CreatedTimestamp
-					}
-				}
-			}
-			r.companyExplorerV2Edges[key(input.CompanyID, edge.EdgeID)] = edge
-			result.ExplorerV2Rows = append(result.ExplorerV2Rows, r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, entity, &edge))
-		}
 		if input.Target.Mode == CommunicationsEmailConversionTargetProject {
 			relationship, deltas, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
 			if err != nil {

@@ -114,11 +114,6 @@ type AppSidebarProps = {
 
 function sidebarExplorerTriageConversionTarget(target: Parameters<CompanyExplorerTriageMessageDropHandler>[0]): CommunicationsTriageConversionTarget | null {
   switch (target.kind) {
-    case "folder": {
-      const folderID = target.folderID?.trim() ?? "";
-      const parentEntityID = target.parentEntityID?.trim() ?? "";
-      return folderID || parentEntityID ? { mode: "folder", folderID: folderID || undefined, parentEntityID: parentEntityID || undefined } : null;
-    }
     case "project": {
       const projectID = target.projectID.trim();
       return projectID ? { mode: "project", projectID } : null;
@@ -126,11 +121,6 @@ function sidebarExplorerTriageConversionTarget(target: Parameters<CompanyExplore
     case "logic_gate": {
       const logicGateID = target.logicGateID.trim();
       return logicGateID ? { mode: "existing_logic_gate", logicGateID } : null;
-    }
-    case "node": {
-      const nodeID = target.nodeID.trim();
-      const logicGateID = target.logicGateID?.trim() ?? "";
-      return nodeID ? { mode: "existing_node", nodeID, logicGateID: logicGateID || undefined } : null;
     }
     default:
       return null;
@@ -1169,7 +1159,7 @@ export function AppSidebar({
         >
           <div style={appSidebarPriorityMenuTitleStyle}>Priority</div>
           <div style={appSidebarPriorityMenuTargetStyle}>
-            {explorerTriagePriorityMenu.target.kind === "node" ? "Attach to" : "Create in"} {explorerTriagePriorityMenu.target.label}
+            Create in {explorerTriagePriorityMenu.target.label}
           </div>
           {INBOX_PRIORITIES.map((priority) => (
             <button

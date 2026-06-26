@@ -16,9 +16,6 @@ func (r *PostgresRepo) ListCompanyExplorerRootRows(query CompanyExplorerLazyRows
 	if rows.Folders, err = r.queryCompanyExplorerLazyFolders(ctx, query, true); err != nil {
 		return CompanyExplorerLazyRows{}, err
 	}
-	if rows.Nodes, err = r.queryCompanyExplorerLazyRootNodes(ctx, query); err != nil {
-		return CompanyExplorerLazyRows{}, err
-	}
 	if rows.LogicGates, err = r.queryCompanyExplorerLazyRootLogicGates(ctx, query); err != nil {
 		return CompanyExplorerLazyRows{}, err
 	}
@@ -47,9 +44,6 @@ func (r *PostgresRepo) ListCompanyExplorerFolderChildRows(query CompanyExplorerL
 	if rows.FolderItems, err = r.queryCompanyExplorerLazyFolderItems(ctx, query); err != nil {
 		return CompanyExplorerLazyRows{}, err
 	}
-	if rows.Nodes, err = r.queryCompanyExplorerLazyFolderNodes(ctx, query); err != nil {
-		return CompanyExplorerLazyRows{}, err
-	}
 	if rows.LogicGates, err = r.queryCompanyExplorerLazyFolderLogicGates(ctx, query); err != nil {
 		return CompanyExplorerLazyRows{}, err
 	}
@@ -64,11 +58,7 @@ func (r *PostgresRepo) ListCompanyExplorerLogicGateChildRows(query CompanyExplor
 	if err != nil {
 		return CompanyExplorerLazyRows{}, err
 	}
-	nodes, err := r.queryCompanyExplorerLazyLogicGateNodes(context.Background(), query)
-	if err != nil {
-		return CompanyExplorerLazyRows{}, err
-	}
-	return CompanyExplorerLazyRows{Nodes: nodes}, nil
+	return CompanyExplorerLazyRows{}, nil
 }
 
 func companyExplorerLazyNullable(value string) any {
@@ -99,22 +89,6 @@ with lazy_params as (
 )`
 
 func companyExplorerLazyFolderScopePredicate(alias string) string {
-	return `true`
-}
-
-func companyExplorerLazyNodeScopePredicate(alias string) string {
-	return `true`
-}
-
-func companyExplorerLazyLogicGateScopePredicate(alias string) string {
-	return `true`
-}
-
-func companyExplorerLazyProjectScopePredicate(alias string) string {
-	return `true`
-}
-
-func companyExplorerLazyFolderItemScopePredicate(alias string) string {
 	return `true`
 }
 
@@ -177,10 +151,7 @@ where item.company_id=$1::uuid
     $4::uuid is null
     or (
       mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.parent_folder_id, $4::uuid, $6::text)
-      and (
-        item.target_type not in ('node', 'logic_gate', 'project')
-        or mangorts_user_can_access_resource(item.company_id, item.target_type, item.target_id, $4::uuid, $6::text)
-      )
+      and mangorts_user_can_access_resource(item.company_id, item.target_type, item.target_id, $4::uuid, $6::text)
     )
   )
 order by item.position asc, item.created_timestamp asc, item.target_type asc, item.target_id asc`, companyExplorerLazyArgs(query)...)
@@ -209,75 +180,6 @@ func scanCompanyExplorerLazyFolderItemRows(rows *sql.Rows) ([]domain.CompanyExpl
 		items = append(items, item)
 	}
 	return items, rows.Err()
-}
-
-func (r *PostgresRepo) queryCompanyExplorerLazyRootNodes(ctx context.Context, query CompanyExplorerLazyRowsQuery) ([]domain.Node, error) {
-	rows, err := r.db.QueryContext(ctx, companyExplorerLazyScopeCTE+`
-select `+nodeSelectColumns+`
-from company_explorer_items item
-join nodes n
-  on n.company_id=item.company_id
- and n.node_id=item.target_id
-`+nodeStatusJoin+`
-where item.company_id=$1::uuid
-  and item.parent_folder_id is null
-  and item.target_type='node'
-  and ($4::uuid is null or mangorts_user_can_access_resource(n.company_id, 'node', n.node_id, $4::uuid, $6::text))
-order by item.position asc, item.created_timestamp asc, n.node_id::text asc`, companyExplorerLazyArgs(query)...)
-	if err != nil {
-		return nil, err
-	}
-	return scanCompanyExplorerNodeSummaryRows(rows)
-}
-
-func (r *PostgresRepo) queryCompanyExplorerLazyFolderNodes(ctx context.Context, query CompanyExplorerLazyRowsQuery) ([]domain.Node, error) {
-	rows, err := r.db.QueryContext(ctx, companyExplorerLazyScopeCTE+`
-select `+nodeSelectColumns+`
-from company_explorer_items item
-join company_explorer_folders folder
-  on folder.company_id=item.company_id
- and folder.folder_id=item.parent_folder_id
-join nodes n
-  on n.company_id=item.company_id
- and n.node_id=item.target_id
-`+nodeStatusJoin+`
-where item.company_id=$1::uuid
-  and item.parent_folder_id=$5::uuid
-  and item.target_type='node'
-  and (
-    $4::uuid is null
-    or (
-      mangorts_user_can_access_resource(folder.company_id, 'company_explorer_folder', folder.folder_id, $4::uuid, $6::text)
-      and mangorts_user_can_access_resource(n.company_id, 'node', n.node_id, $4::uuid, $6::text)
-    )
-  )
-order by item.position asc, item.created_timestamp asc, n.node_id::text asc`, companyExplorerLazyArgs(query)...)
-	if err != nil {
-		return nil, err
-	}
-	return scanCompanyExplorerNodeSummaryRows(rows)
-}
-
-func (r *PostgresRepo) queryCompanyExplorerLazyLogicGateNodes(ctx context.Context, query CompanyExplorerLazyRowsQuery) ([]domain.Node, error) {
-	rows, err := r.db.QueryContext(ctx, companyExplorerLazyScopeCTE+`
-select `+nodeSelectColumns+`
-from node_logic_gate_assignments logic_gate_assignment
-join logic_gates gate
-  on gate.company_id=logic_gate_assignment.company_id
- and gate.logic_gate_id=logic_gate_assignment.logic_gate_id
-join nodes n
-  on n.company_id=logic_gate_assignment.company_id
- and n.node_id=logic_gate_assignment.node_id
-`+nodeStatusJoin+`
-where logic_gate_assignment.company_id=$1::uuid
-  and logic_gate_assignment.logic_gate_id=$5::uuid
-  and `+companyExplorerLazyLogicGateScopePredicate("gate")+`
-  and ($4::uuid is null or mangorts_user_can_access_resource(n.company_id, 'node', n.node_id, $4::uuid, $6::text))
-order by logic_gate_assignment.position asc, logic_gate_assignment.created_timestamp asc, n.node_id::text asc`, companyExplorerLazyArgs(query)...)
-	if err != nil {
-		return nil, err
-	}
-	return scanCompanyExplorerNodeSummaryRows(rows)
 }
 
 func (r *PostgresRepo) queryCompanyExplorerLazyRootLogicGates(ctx context.Context, query CompanyExplorerLazyRowsQuery) ([]domain.LogicGate, error) {

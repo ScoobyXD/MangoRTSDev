@@ -30,19 +30,13 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNode hidden: %v", err)
 	}
-	folder, err := base.CreateCompanyExplorerFolder(companyID, "", "node", "V4 Mini Folder")
+	folder, err := base.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "V4 Mini Folder")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder: %v", err)
 	}
-	hiddenFolder, err := base.CreateCompanyExplorerFolder(companyID, "", "node", "Hidden V4 Mini Folder")
+	hiddenFolder, err := base.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Hidden V4 Mini Folder")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder hidden: %v", err)
-	}
-	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", visibleNode.NodeID, 1000); err != nil {
-		t.Fatalf("Assign visible folder item: %v", err)
-	}
-	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", hiddenNode.NodeID, 2000); err != nil {
-		t.Fatalf("Assign hidden folder item: %v", err)
 	}
 	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:  companyID,
@@ -118,8 +112,8 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 	if containsNodeID(snapshot.Nodes, hiddenNode.NodeID) || !containsNodeID(snapshot.Nodes, visibleNode.NodeID) {
 		t.Fatalf("snapshot nodes = %+v, want visible node only", snapshot.Nodes)
 	}
-	if containsFolderItem(snapshot.FolderItems, hiddenNode.NodeID) || !containsFolderItem(snapshot.FolderItems, visibleNode.NodeID) {
-		t.Fatalf("snapshot folder_items = %+v, want visible item only", snapshot.FolderItems)
+	if len(snapshot.FolderItems) != 0 {
+		t.Fatalf("snapshot folder_items = %+v, want no node company explorer items", snapshot.FolderItems)
 	}
 	if containsFolderID(snapshot.Folders, hiddenFolder.FolderID) || !containsFolderID(snapshot.Folders, folder.FolderID) {
 		t.Fatalf("snapshot folders = %+v, want visible folder only", snapshot.Folders)
@@ -138,8 +132,8 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 	if err := json.NewDecoder(nodeMapRec.Body).Decode(&nodeMapSnapshot); err != nil {
 		t.Fatalf("decode node map workspace snapshot: %v", err)
 	}
-	if containsFolderID(nodeMapSnapshot.Folders, hiddenFolder.FolderID) || !containsFolderID(nodeMapSnapshot.Folders, folder.FolderID) {
-		t.Fatalf("node map snapshot folders = %+v, want visible folder only", nodeMapSnapshot.Folders)
+	if len(nodeMapSnapshot.Folders) != 0 {
+		t.Fatalf("node map snapshot folders = %+v, want no company explorer folders", nodeMapSnapshot.Folders)
 	}
 
 	hiddenReq := httptest.NewRequest(http.MethodGet, "/v1/nodes/"+hiddenNode.NodeID+"?company_id="+companyID, nil)

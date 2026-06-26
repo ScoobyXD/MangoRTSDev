@@ -34,7 +34,7 @@ func ensureCompanyExplorerDefaultFoldersTx(ctx context.Context, tx *sql.Tx, comp
 		return companyExplorerDefaultFolders{}, ErrInvalid
 	}
 	folders := companyExplorerDefaultFolderIDs(companyID)
-	if folders.UnfiledFolderID == "" || folders.ProjectsFolderID == "" || folders.LogicGatesFolderID == "" || folders.NodesFolderID == "" {
+	if folders.UnfiledFolderID == "" || folders.ProjectsFolderID == "" || folders.LogicGatesFolderID == "" {
 		return companyExplorerDefaultFolders{}, ErrInvalid
 	}
 	upsert := func(folderID string, parentFolderID any, name string, position int) error {
@@ -65,9 +65,6 @@ on conflict (company_id, folder_id) do update set
 		return companyExplorerDefaultFolders{}, err
 	}
 	if err := upsert(folders.LogicGatesFolderID, folders.UnfiledFolderID, CompanyExplorerDefaultLogicGatesFolderName, 2000); err != nil {
-		return companyExplorerDefaultFolders{}, err
-	}
-	if err := upsert(folders.NodesFolderID, folders.UnfiledFolderID, CompanyExplorerDefaultNodesFolderName, 3000); err != nil {
 		return companyExplorerDefaultFolders{}, err
 	}
 	return folders, nil
@@ -163,31 +160,7 @@ where logic_gate.company_id=$1::uuid
 order by logic_gate.created_timestamp, logic_gate.logic_gate_id`); err != nil {
 		return err
 	}
-	return backfillBareCompanyExplorerItemsForTypeTx(ctx, tx, companyID, EntityTypeNode, `
-select node.node_id::text
-from nodes node
-where node.company_id=$1::uuid
-  and not exists (
-    select 1
-    from company_explorer_items item
-    where item.company_id=node.company_id
-      and item.target_type='node'
-      and item.target_id=node.node_id
-  )
-  and not exists (
-    select 1
-    from project_relationships relationship
-    where relationship.company_id=node.company_id
-      and relationship.resource_type='node'
-      and relationship.resource_id=node.node_id
-  )
-  and not exists (
-    select 1
-    from node_logic_gate_assignments assignment
-    where assignment.company_id=node.company_id
-      and assignment.node_id=node.node_id
-  )
-order by node.created_timestamp, node.node_id`)
+	return nil
 }
 
 func backfillBareCompanyExplorerItemsForTypeTx(ctx context.Context, tx *sql.Tx, companyID, targetType, query string) error {

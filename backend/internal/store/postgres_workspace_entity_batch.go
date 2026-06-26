@@ -12,6 +12,9 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	ctx := ContextWithTimingRecorder(context.Background(), input.TimingRecorder)
 	defer observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.transaction")()
 	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
+	if input.EntityKind == EntityTypeNode && strings.TrimSpace(input.FolderID) != "" {
+		return WorkspaceEntityBatchResult{}, ErrInvalid
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return WorkspaceEntityBatchResult{}, err
@@ -35,11 +38,11 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 		input.CreatorUserID = creatorUser.UserID
 	}
 
-	syncFolderItems := strings.TrimSpace(input.FolderID) != "" && MutationOriginNeedsCompanyExplorerFolderItem(input.MutationOrigin)
+	syncFolderItems := input.EntityKind != EntityTypeNode && strings.TrimSpace(input.FolderID) != "" && MutationOriginNeedsCompanyExplorerFolderItem(input.MutationOrigin)
 	if strings.TrimSpace(input.FolderID) != "" && (input.MutationOrigin == MutationOriginNodeMap || input.MutationOrigin == MutationOriginLogicGateMap) {
-		syncFolderItems = true
+		syncFolderItems = input.EntityKind != EntityTypeNode
 	}
-	syncDefaultFolderItems := strings.TrimSpace(input.FolderID) == "" && MutationOriginNeedsCompanyExplorerDefaultPlacement(input.MutationOrigin)
+	syncDefaultFolderItems := input.EntityKind != EntityTypeNode && strings.TrimSpace(input.FolderID) == "" && MutationOriginNeedsCompanyExplorerDefaultPlacement(input.MutationOrigin)
 	syncMapPositions := (input.EntityKind == "node" && MutationOriginNeedsNodeMapPosition(input.MutationOrigin)) ||
 		(input.EntityKind == "logic_gate" && MutationOriginNeedsLogicGateMapPosition(input.MutationOrigin))
 

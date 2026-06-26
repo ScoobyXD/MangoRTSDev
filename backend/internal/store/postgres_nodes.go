@@ -50,27 +50,11 @@ left join lateral (
 var nodeStatusJoin = nodeStatusJoinBase + "\n" + postgresAccountSnapshotsForNodeLateralSQL("n")
 
 const postgresNodeMapWindowCTE = `
-with recursive folder_scope as (
-  select company_id, folder_id
-  from company_explorer_folders
-  where company_id=$1
-    and folder_id=$2::uuid
-  union all
-  select child.company_id, child.folder_id
-  from company_explorer_folders child
-  join folder_scope parent
-    on child.company_id=parent.company_id
-   and child.parent_folder_id=parent.folder_id
-), windowed_positions as (
+with windowed_positions as (
   select position.company_id, position.node_id, position.x, position.y, position.updated_timestamp
   from node_map_positions position
-  join company_explorer_items item
-    on item.company_id=position.company_id
-   and item.target_type='node'
-   and item.target_id=position.node_id
-  join folder_scope folder
-    on folder.folder_id=item.parent_folder_id
   where position.company_id=$1
+    and false
     and position.x >= $3
     and position.x <= $4
     and position.y >= $5
@@ -495,48 +479,7 @@ func (r *PostgresRepo) ListNodesInFolderSubtree(companyID, folderID string) ([]d
 	if folderID == "" {
 		return r.ListNodes(companyID)
 	}
-	ctx := context.Background()
-	rows, err := r.db.QueryContext(ctx,
-		`with recursive folder_scope as (
-		   select company_id, folder_id
-		   from company_explorer_folders
-		   where company_id=$1 and folder_id=$2::uuid
-		   union all
-		   select child.company_id, child.folder_id
-		   from company_explorer_folders child
-		   join folder_scope parent
-		     on child.company_id=parent.company_id
-		    and child.parent_folder_id=parent.folder_id
-		 ), visible_nodes as (
-		   select item.target_id as node_id
-		   from company_explorer_items item
-		   join folder_scope folder on folder.folder_id=item.parent_folder_id
-		   where item.company_id=$1::uuid and item.target_type='node'
-		 )
-		 select `+nodeSelectColumns+`
-		 from nodes n
-		 join visible_nodes visible on visible.node_id=n.node_id
-		 `+nodeStatusJoin+`
-		 where n.company_id=$1
-		 order by n.created_timestamp asc`,
-		companyID, folderID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]domain.Node, 0)
-	for rows.Next() {
-		item, err := scanNode(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return []domain.Node{}, nil
 }
 
 func (r *PostgresRepo) ListVisibleNodesInFolderSubtree(companyID, folderID, userID string) ([]domain.Node, error) {
@@ -549,50 +492,7 @@ func (r *PostgresRepo) ListVisibleNodesInFolderSubtree(companyID, folderID, user
 	if folderID == "" {
 		return r.ListVisibleNodes(companyID, userID)
 	}
-
-	ctx := context.Background()
-	rows, err := r.db.QueryContext(ctx,
-		`with recursive folder_scope as (
-		   select company_id, folder_id
-		   from company_explorer_folders
-		   where company_id=$1::uuid and folder_id=$2::uuid
-		   union all
-		   select child.company_id, child.folder_id
-		   from company_explorer_folders child
-		   join folder_scope parent
-		     on child.company_id=parent.company_id
-		    and child.parent_folder_id=parent.folder_id
-		 ), folder_nodes as (
-		   select distinct item.target_id as node_id
-		   from company_explorer_items item
-		   join folder_scope folder on folder.folder_id=item.parent_folder_id
-		   where item.company_id=$1::uuid and item.target_type='node'
-		 )
-		 select `+nodeSelectColumns+`
-		 from nodes n
-		 join folder_nodes visible on visible.node_id=n.node_id
-		 `+nodeStatusJoin+`
-		 where n.company_id=$1::uuid
-		   and mangorts_user_can_access_resource(n.company_id, 'node', n.node_id, $3::uuid, $4::text)
-		 order by n.created_timestamp asc, n.node_id::text asc`,
-		companyID, folderID, userID, EntityPermissionView,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]domain.Node, 0)
-	for rows.Next() {
-		item, err := scanNode(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return r.attachNodeEffectiveAccessLevels(ctx, companyID, userID, items)
+	return []domain.Node{}, nil
 }
 
 func (r *PostgresRepo) attachNodeEffectiveAccessLevels(ctx context.Context, companyID, userID string, items []domain.Node) ([]domain.Node, error) {
@@ -651,53 +551,7 @@ func (r *PostgresRepo) ListNodeRelationshipsInFolderSubtree(companyID, folderID 
 	if folderID == "" {
 		return r.ListNodeRelationships(companyID)
 	}
-	ctx := context.Background()
-	rows, err := r.db.QueryContext(ctx,
-		`with recursive folder_scope as (
-		   select company_id, folder_id
-		   from company_explorer_folders
-		   where company_id=$1 and folder_id=$2::uuid
-		   union all
-		   select child.company_id, child.folder_id
-		   from company_explorer_folders child
-		   join folder_scope parent
-		     on child.company_id=parent.company_id
-		    and child.parent_folder_id=parent.folder_id
-		 ), visible_nodes as (
-		   select item.target_id as node_id
-		   from company_explorer_items item
-		   join folder_scope folder on folder.folder_id=item.parent_folder_id
-		   where item.company_id=$1::uuid and item.target_type='node'
-		 )
-		 select rel.company_id, rel.node_relationship_id, rel.node_id_a, rel.node_id_b, rel.a_position::text, rel.b_position::text, rel.created_timestamp
-		 from node_relationships rel
-		 join visible_nodes a on a.node_id=rel.node_id_a
-		 join visible_nodes b on b.node_id=rel.node_id_b
-		 where rel.company_id=$1
-		 order by rel.created_timestamp asc`,
-		companyID, folderID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]domain.NodeRelationship, 0)
-	for rows.Next() {
-		var item domain.NodeRelationship
-		if err := rows.Scan(
-			&item.CompanyID,
-			&item.NodeRelationshipID,
-			&item.NodeIDA,
-			&item.NodeIDB,
-			&item.APosition,
-			&item.BPosition,
-			&item.CreatedTimestamp,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	return []domain.NodeRelationship{}, nil
 }
 func (r *PostgresRepo) DeleteNodeRelationship(companyID, relationshipID string) error {
 	ctx := context.Background()
@@ -845,41 +699,7 @@ func (r *PostgresRepo) ListNodeMapPositionsInFolderSubtree(companyID, folderID s
 	if folderID == "" {
 		return r.ListNodeMapPositions(companyID)
 	}
-	rows, err := r.db.Query(`
-with recursive folder_scope as (
-  select company_id, folder_id
-  from company_explorer_folders
-  where company_id=$1 and folder_id=$2::uuid
-  union all
-  select child.company_id, child.folder_id
-  from company_explorer_folders child
-  join folder_scope parent
-    on child.company_id=parent.company_id
-   and child.parent_folder_id=parent.folder_id
-), visible_nodes as (
-  select item.target_id as node_id
-  from company_explorer_items item
-  join folder_scope folder on folder.folder_id=item.parent_folder_id
-  where item.company_id=$1::uuid and item.target_type='node'
-)
-select position.company_id, position.node_id, position.x, position.y, position.updated_timestamp
-from node_map_positions position
-join visible_nodes visible on visible.node_id=position.node_id
-where position.company_id=$1
-order by position.node_id asc`, companyID, folderID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]domain.NodeMapPosition, 0)
-	for rows.Next() {
-		var item domain.NodeMapPosition
-		if err := rows.Scan(&item.CompanyID, &item.NodeID, &item.X, &item.Y, &item.UpdatedTimestamp); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	return []domain.NodeMapPosition{}, nil
 }
 func (r *PostgresRepo) ListNodeMapPositionsWindow(query NodeMapWindowQuery) ([]domain.NodeMapPosition, error) {
 	query, err := NormalizeNodeMapWindowQuery(query)
@@ -918,7 +738,7 @@ func (r *PostgresRepo) ListNodeMapWindow(query NodeMapWindowQuery) (NodeMapWindo
 	if err != nil {
 		return NodeMapWindowResult{}, err
 	}
-	folders, err := r.ListCompanyExplorerFolderSubtree(query.CompanyID, query.FolderID, "node")
+	folders, err := r.ListCompanyExplorerFolderSubtree(query.CompanyID, query.FolderID, "")
 	if err != nil {
 		return NodeMapWindowResult{}, err
 	}
@@ -995,35 +815,6 @@ order by rel.created_timestamp asc`, args...)
 		return NodeMapWindowResult{}, err
 	}
 
-	itemRows, err := r.db.QueryContext(ctx, postgresNodeMapWindowCTE+`
-select item.company_id::text, coalesce(item.parent_folder_id::text, '') as folder_id, item.target_type, item.target_id::text, item.position, item.created_timestamp, item.updated_timestamp
-from company_explorer_items item
-join windowed_positions visible on visible.node_id=item.target_id
-where item.company_id=$1::uuid
-  and item.target_type='node'
-order by item.position asc, item.created_timestamp asc`, args...)
-	if err != nil {
-		return NodeMapWindowResult{}, err
-	}
-	defer itemRows.Close()
-	for itemRows.Next() {
-		var item domain.CompanyExplorerFolderItem
-		if err := itemRows.Scan(
-			&item.CompanyID,
-			&item.FolderID,
-			&item.ItemType,
-			&item.ItemID,
-			&item.Position,
-			&item.CreatedTimestamp,
-			&item.UpdatedTimestamp,
-		); err != nil {
-			return NodeMapWindowResult{}, err
-		}
-		result.FolderItems = append(result.FolderItems, item)
-	}
-	if err := itemRows.Err(); err != nil {
-		return NodeMapWindowResult{}, err
-	}
 	return result, nil
 }
 func (r *PostgresRepo) UpsertNodeMapPositions(companyID string, positions []domain.NodeMapPosition) ([]domain.NodeMapPosition, error) {

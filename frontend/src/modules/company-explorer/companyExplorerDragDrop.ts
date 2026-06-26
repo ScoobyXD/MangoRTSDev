@@ -22,9 +22,6 @@ export function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPaylo
   if (row.kind === "folder" && row.folderID && (row.folderKind || row.entityType === "folder")) {
     return { kind: "folder", folderID: row.folderID, folderKind: row.folderKind ?? "logic_gate" };
   }
-  if (row.kind === "node" && row.nodeID) {
-    return { kind: "node", itemID: row.nodeID, itemType: "node", sourceTreeID: row.id };
-  }
   if (row.kind === "logic_gate" && row.logicGateID) {
     return { kind: "logic_gate", itemID: row.logicGateID, itemType: "logic_gate", sourceTreeID: row.id };
   }
@@ -38,7 +35,6 @@ export function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPaylo
 }
 
 export function getExplorerItemPayload(row: ExplorerTreeNode): { itemID: string; itemType: CompanyExplorerItemType } | null {
-  if (row.kind === "node" && row.nodeID) return { itemID: row.nodeID, itemType: "node" };
   if (row.kind === "logic_gate" && row.logicGateID) return { itemID: row.logicGateID, itemType: "logic_gate" };
   if (row.kind === "project" && row.projectID) return { itemID: row.projectID, itemType: "project" };
   if (row.kind === "kanban" && row.kanbanBoardID) return { itemID: row.kanbanBoardID, itemType: "kanban" };
@@ -73,7 +69,7 @@ export function readExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDra
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ExplorerDragPayload;
     if (parsed.kind === "folder" && parsed.folderID && parsed.folderKind) return parsed;
-    if ((parsed.kind === "node" || parsed.kind === "logic_gate" || parsed.kind === "project" || parsed.kind === "kanban") && parsed.itemID && parsed.itemType) return {
+    if ((parsed.kind === "logic_gate" || parsed.kind === "project" || parsed.kind === "kanban") && parsed.itemID && parsed.itemType) return {
       ...parsed,
       sourceTreeID: typeof parsed.sourceTreeID === "string" ? parsed.sourceTreeID : undefined,
     };
@@ -114,25 +110,14 @@ export function sortExplorerRowsByPosition(rows: ExplorerTreeNode[]): ExplorerTr
 
 export function getExplorerRowContainerID(row: ExplorerTreeNode): string | null {
   if (row.kind === "folder") return row.parentEntityID ?? row.parentFolderID ?? "";
-  if (row.kind === "node" && row.parentLogicGateID) return row.parentLogicGateID;
+  if (row.kind === "node") return null;
   if (row.folderKind || row.parentEntityID) return row.parentEntityID ?? row.folderID ?? "";
   return null;
 }
 
-export function shouldRemoveExplorerPlacementAfterLogicGateDrop(
-  row: ExplorerTreeNode | undefined,
-  parentEntityType: string | undefined,
-  fromLogicGateID = "",
-): boolean {
-  const edgeID = row?.edgeID?.trim() ?? "";
-  if (!edgeID || fromLogicGateID.trim()) return false;
-  const parentEntityID = row?.parentEntityID?.trim() ?? "";
-  return !parentEntityID || parentEntityType === "folder";
-}
-
 export function getExplorerRowOrderKind(row: ExplorerTreeNode): CompanyExplorerItemType | CompanyExplorerFolderKind | null {
   if (row.kind === "folder") return row.folderKind ?? (row.entityID ? "logic_gate" : null);
-  return row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : row.kind === "kanban" ? "kanban" : null;
+  return row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : row.kind === "kanban" ? "kanban" : null;
 }
 
 export function getExplorerSelectionDomain(row?: ExplorerTreeNode | null): ExplorerSelectionDomain {

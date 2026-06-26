@@ -70,24 +70,11 @@ func companyExplorerRootArgs(query CompanyExplorerV2RowsQuery) []any {
 	}
 }
 
-func companyExplorerNativeChildrenArgs(query CompanyExplorerV2RowsQuery, parentEntityID string) []any {
-	return []any{
-		query.CompanyID,
-		companyExplorerLazyNullable(query.PermissionUserID),
-		EntityPermissionView,
-		parentEntityID,
-	}
-}
-
 func companyExplorerFinalEffectiveAccessSelect(entityTypeExpr, entityIDExpr string) string {
 	return companyExplorerEffectiveAccessSelect(entityTypeExpr, entityIDExpr, "$3")
 }
 
 func companyExplorerRootEffectiveAccessSelect(entityTypeExpr, entityIDExpr string) string {
-	return companyExplorerEffectiveAccessSelect(entityTypeExpr, entityIDExpr, "$2")
-}
-
-func companyExplorerNativeChildrenEffectiveAccessSelect(entityTypeExpr, entityIDExpr string) string {
 	return companyExplorerEffectiveAccessSelect(entityTypeExpr, entityIDExpr, "$2")
 }
 
@@ -117,10 +104,6 @@ func companyExplorerFinalAccessPredicate(entityTypeExpr, entityIDExpr string) st
 }
 
 func companyExplorerRootAccessPredicate(entityTypeExpr, entityIDExpr string) string {
-	return companyExplorerAccessPredicate(entityTypeExpr, entityIDExpr, "$2", "$3")
-}
-
-func companyExplorerNativeChildrenAccessPredicate(entityTypeExpr, entityIDExpr string) string {
 	return companyExplorerAccessPredicate(entityTypeExpr, entityIDExpr, "$2", "$3")
 }
 
@@ -183,15 +166,6 @@ func companyExplorerFinalHasChildrenExpr(entityTypeExpr, entityIDExpr string) st
         )
       )
     )
-    or (
-      ` + entityTypeExpr + `='logic_gate'
-      and exists (
-        select 1
-        from node_logic_gate_assignments assignment
-        where assignment.company_id=$1::uuid
-          and assignment.logic_gate_id=` + entityIDExpr + `
-      )
-    )
   )`
 }
 
@@ -242,10 +216,8 @@ func (r *PostgresRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2Row
 		rows, err = r.queryCompanyExplorerFinalRootChildren(ctx, query)
 	case CompanyExplorerV2EntityFolder:
 		rows, err = r.queryCompanyExplorerFinalContainerChildren(ctx, query)
-	case CompanyExplorerV2EntityProject:
+	case CompanyExplorerV2EntityProject, CompanyExplorerV2EntityLogicGate:
 		rows = []CompanyExplorerV2Row{}
-	case CompanyExplorerV2EntityLogicGate:
-		rows, err = r.queryCompanyExplorerFinalLogicGateChildren(ctx, query, parent.ResourceID)
 	default:
 		rows = []CompanyExplorerV2Row{}
 	}
@@ -377,7 +349,7 @@ with folder_rows as (
          item.target_id as entity_id,
          item.target_type as entity_type,
          item.target_id as resource_id,
-         coalesce(project.name, logic_gate.header, node.name, item.target_id::text) as name,
+         coalesce(project.name, logic_gate.header, item.target_id::text) as name,
          null::uuid as parent_entity_id,
          item.item_id as edge_id,
          item.position,
@@ -392,16 +364,11 @@ with folder_rows as (
     on item.target_type='logic_gate'
    and logic_gate.company_id=item.company_id
    and logic_gate.logic_gate_id=item.target_id
-  left join nodes node
-    on item.target_type='node'
-   and node.company_id=item.company_id
-   and node.node_id=item.target_id
   where item.company_id=$1::uuid
     and item.parent_folder_id is null
     and (
       (item.target_type='project' and project.project_id is not null)
       or (item.target_type='logic_gate' and logic_gate.logic_gate_id is not null)
-      or (item.target_type='node' and node.node_id is not null)
     )
 ), all_rows as (
   select * from folder_rows
@@ -454,7 +421,7 @@ with folder_rows as (
          item.target_id as entity_id,
          item.target_type as entity_type,
          item.target_id as resource_id,
-         coalesce(project.name, logic_gate.header, node.name, item.target_id::text) as name,
+         coalesce(project.name, logic_gate.header, item.target_id::text) as name,
          `+parentEntityExpr+` as parent_entity_id,
          item.item_id as edge_id,
          item.position,
@@ -469,16 +436,11 @@ with folder_rows as (
     on item.target_type='logic_gate'
    and logic_gate.company_id=item.company_id
    and logic_gate.logic_gate_id=item.target_id
-  left join nodes node
-    on item.target_type='node'
-   and node.company_id=item.company_id
-   and node.node_id=item.target_id
   where item.company_id=$1::uuid
     and `+itemParentPredicate+`
     and (
       (item.target_type='project' and project.project_id is not null)
       or (item.target_type='logic_gate' and logic_gate.logic_gate_id is not null)
-      or (item.target_type='node' and node.node_id is not null)
     )
 ), all_rows as (
   select * from folder_rows
@@ -501,49 +463,6 @@ select all_rows.company_id::text,
 from all_rows
 where `+companyExplorerFinalAccessPredicate("all_rows.entity_type", "all_rows.entity_id")+`
 order by all_rows.position asc, all_rows.created_timestamp asc, all_rows.name asc, all_rows.entity_id asc`, companyExplorerFinalArgs(query)...)
-	if err != nil {
-		return nil, err
-	}
-	return scanCompanyExplorerV2Rows(rows)
-}
-
-func (r *PostgresRepo) queryCompanyExplorerFinalLogicGateChildren(ctx context.Context, query CompanyExplorerV2RowsQuery, logicGateID string) ([]CompanyExplorerV2Row, error) {
-	args := companyExplorerNativeChildrenArgs(query, logicGateID)
-	rows, err := r.db.QueryContext(ctx, `
-with logic_gate_rows as (
-  select assignment.company_id,
-         assignment.node_id as entity_id,
-         'node'::text as entity_type,
-         assignment.node_id as resource_id,
-         node.name,
-         assignment.logic_gate_id as parent_entity_id,
-         assignment.assignment_id as edge_id,
-         assignment.position,
-         assignment.created_timestamp,
-         assignment.updated_timestamp
-  from node_logic_gate_assignments assignment
-  join nodes node
-    on node.company_id=assignment.company_id
-   and node.node_id=assignment.node_id
-  where assignment.company_id=$1::uuid
-    and assignment.logic_gate_id=$4::uuid
-)
-select logic_gate_rows.company_id::text,
-       logic_gate_rows.entity_id::text,
-       logic_gate_rows.entity_type,
-       logic_gate_rows.resource_id::text,
-       logic_gate_rows.name,
-       logic_gate_rows.parent_entity_id::text,
-       logic_gate_rows.edge_id::text,
-       logic_gate_rows.position,
-       `+companyExplorerFinalHasChildrenExpr("logic_gate_rows.entity_type", "logic_gate_rows.entity_id")+` as has_children,
-       `+companyExplorerNativeChildrenEffectiveAccessSelect("logic_gate_rows.entity_type", "logic_gate_rows.entity_id")+` as effective_access,
-       `+companyExplorerFinalNativeContext("logic_gate_rows.entity_type", "logic_gate_rows.entity_id", "logic_gate_rows.resource_id")+` as native_context,
-       logic_gate_rows.created_timestamp,
-       logic_gate_rows.updated_timestamp
-from logic_gate_rows
-where `+companyExplorerNativeChildrenAccessPredicate("logic_gate_rows.entity_type", "logic_gate_rows.entity_id")+`
-order by logic_gate_rows.position asc, logic_gate_rows.created_timestamp asc, logic_gate_rows.name asc, logic_gate_rows.entity_id asc`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -661,7 +580,7 @@ func (r *PostgresRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeIn
 		targetType = child.EntityType
 		targetID = child.ResourceID
 	}
-	if targetType != EntityTypeProject && targetType != EntityTypeLogicGate && targetType != EntityTypeNode {
+	if targetType != EntityTypeProject && targetType != EntityTypeLogicGate {
 		return CompanyExplorerV2Row{}, ErrInvalid
 	}
 	if targetID == "" {

@@ -1439,7 +1439,7 @@ create table if not exists company_explorer_items (
   created_by_user_id uuid,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint company_explorer_items_target_type_chk check (target_type in ('project', 'logic_gate', 'node')),
+  constraint company_explorer_items_target_type_chk check (target_type in ('project', 'logic_gate')),
   primary key (company_id, item_id),
   unique (company_id, target_type, target_id),
   foreign key (company_id, parent_folder_id) references company_explorer_folders(company_id, folder_id) on delete cascade,
@@ -1477,13 +1477,8 @@ from (
              on item.target_type='logic_gate'
             and logic_gate.company_id=item.company_id
             and logic_gate.logic_gate_id=item.target_id
-           left join nodes node
-             on item.target_type='node'
-            and node.company_id=item.company_id
-            and node.node_id=item.target_id
            where (item.target_type='project' and project.project_id is not null)
               or (item.target_type='logic_gate' and logic_gate.logic_gate_id is not null)
-              or (item.target_type='node' and node.node_id is not null)
          )::bigint as actual_count
 ) check_row
 union all

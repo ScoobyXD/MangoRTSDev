@@ -251,25 +251,7 @@ func (r *MemoryRepo) ListNodesInFolderSubtree(companyID, folderID string) ([]dom
 	if folderID == "" {
 		return r.ListNodes(companyID)
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "node")
-	visible := map[string]bool{}
-	for _, item := range r.folderItems {
-		if item.CompanyID == companyID && item.ItemType == "node" && folderIDs[item.FolderID] {
-			visible[item.ItemID] = true
-		}
-	}
-	items := make([]domain.Node, 0, len(visible))
-	for _, node := range r.nodes {
-		if node.CompanyID == companyID && visible[node.NodeID] {
-			items = append(items, r.withNodeReadModelLocked(node))
-		}
-	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
-	})
-	return items, nil
+	return []domain.Node{}, nil
 }
 
 func (r *MemoryRepo) ListVisibleNodesInFolderSubtree(companyID, folderID, userID string) ([]domain.Node, error) {
@@ -282,36 +264,7 @@ func (r *MemoryRepo) ListVisibleNodesInFolderSubtree(companyID, folderID, userID
 	if folderID == "" {
 		return r.ListVisibleNodes(companyID, userID)
 	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "node")
-	folderNodes := map[string]bool{}
-	for _, item := range r.folderItems {
-		if item.CompanyID == companyID && item.ItemType == "node" && folderIDs[item.FolderID] {
-			folderNodes[item.ItemID] = true
-		}
-	}
-	items := make([]domain.Node, 0, len(folderNodes))
-	for _, node := range r.nodes {
-		if node.CompanyID != companyID || !folderNodes[node.NodeID] {
-			continue
-		}
-		if !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, node.NodeID, EntityPermissionView) {
-			continue
-		}
-		node = r.withNodeReadModelLocked(node)
-		node.EffectiveAccess = r.effectiveAccessLevelForUserLocked(companyID, userID, EntityTypeNode, node.NodeID)
-		items = append(items, node)
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
-			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
-		}
-		return items[i].NodeID < items[j].NodeID
-	})
-	return items, nil
+	return []domain.Node{}, nil
 }
 func (r *MemoryRepo) GetNode(companyID, nodeID string) (domain.Node, error) {
 	r.mu.RLock()
@@ -340,25 +293,7 @@ func (r *MemoryRepo) ListNodeRelationshipsInFolderSubtree(companyID, folderID st
 	if folderID == "" {
 		return r.ListNodeRelationships(companyID)
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "node")
-	visible := map[string]bool{}
-	for _, item := range r.folderItems {
-		if item.CompanyID == companyID && item.ItemType == "node" && folderIDs[item.FolderID] {
-			visible[item.ItemID] = true
-		}
-	}
-	items := make([]domain.NodeRelationship, 0)
-	for _, rel := range r.nodeRels[companyID] {
-		if visible[rel.NodeIDA] && visible[rel.NodeIDB] {
-			items = append(items, rel)
-		}
-	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
-	})
-	return items, nil
+	return []domain.NodeRelationship{}, nil
 }
 func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 	r.mu.Lock()
@@ -479,60 +414,10 @@ func (r *MemoryRepo) ListNodeMapPositionsInFolderSubtree(companyID, folderID str
 	if folderID == "" {
 		return r.ListNodeMapPositions(companyID)
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "node")
-	visible := map[string]bool{}
-	for _, item := range r.folderItems {
-		if item.CompanyID == companyID && item.ItemType == "node" && folderIDs[item.FolderID] {
-			visible[item.ItemID] = true
-		}
-	}
-	items := make([]domain.NodeMapPosition, 0)
-	for _, item := range r.nodeMapPositions {
-		if item.CompanyID == companyID && visible[item.NodeID] {
-			items = append(items, item)
-		}
-	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].NodeID < items[j].NodeID
-	})
-	return items, nil
+	return []domain.NodeMapPosition{}, nil
 }
-func nodeMapPositionInWindow(position domain.NodeMapPosition, window NodeMapWindowBounds) bool {
-	return position.X >= window.MinX && position.X <= window.MaxX && position.Y >= window.MinY && position.Y <= window.MaxY
-}
-
-func sortNodeMapWindowPositions(items []domain.NodeMapPosition) {
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].X != items[j].X {
-			return items[i].X < items[j].X
-		}
-		if items[i].Y != items[j].Y {
-			return items[i].Y < items[j].Y
-		}
-		return items[i].NodeID < items[j].NodeID
-	})
-}
-
 func (r *MemoryRepo) nodeMapWindowPositionsLocked(query NodeMapWindowQuery, folderIDs map[string]bool) []domain.NodeMapPosition {
-	visibleFolderNodes := map[string]bool{}
-	for _, item := range r.folderItems {
-		if item.CompanyID == query.CompanyID && item.ItemType == "node" && folderIDs[item.FolderID] {
-			visibleFolderNodes[item.ItemID] = true
-		}
-	}
-	items := make([]domain.NodeMapPosition, 0)
-	for _, item := range r.nodeMapPositions {
-		if item.CompanyID == query.CompanyID && visibleFolderNodes[item.NodeID] && nodeMapPositionInWindow(item, query.Window) {
-			items = append(items, item)
-		}
-	}
-	sortNodeMapWindowPositions(items)
-	if len(items) > query.Limit {
-		items = items[:query.Limit]
-	}
-	return items
+	return []domain.NodeMapPosition{}
 }
 
 func (r *MemoryRepo) ListNodeMapPositionsWindow(query NodeMapWindowQuery) ([]domain.NodeMapPosition, error) {
@@ -542,7 +427,7 @@ func (r *MemoryRepo) ListNodeMapPositionsWindow(query NodeMapWindowQuery) ([]dom
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, query.CompanyID, query.FolderID, "node")
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, query.CompanyID, query.FolderID, "")
 	if len(folderIDs) == 0 {
 		return nil, ErrNotFound
 	}
@@ -556,17 +441,12 @@ func (r *MemoryRepo) ListNodeMapWindow(query NodeMapWindowQuery) (NodeMapWindowR
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, query.CompanyID, query.FolderID, "node")
+	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, query.CompanyID, query.FolderID, "")
 	if len(folderIDs) == 0 {
 		return NodeMapWindowResult{}, ErrNotFound
 	}
 
 	positions := r.nodeMapWindowPositionsLocked(query, folderIDs)
-	visibleNodes := map[string]bool{}
-	for _, position := range positions {
-		visibleNodes[position.NodeID] = true
-	}
-
 	result := NodeMapWindowResult{
 		CompanyID:        query.CompanyID,
 		FolderID:         query.FolderID,
@@ -595,36 +475,6 @@ func (r *MemoryRepo) ListNodeMapWindow(query NodeMapWindowQuery) (NodeMapWindowR
 			return result.Folders[i].FolderID < result.Folders[j].FolderID
 		}
 		return result.Folders[i].Position < result.Folders[j].Position
-	})
-	for _, node := range r.nodes {
-		if node.CompanyID == query.CompanyID && visibleNodes[node.NodeID] {
-			result.Nodes = append(result.Nodes, r.withNodeReadModelLocked(node))
-		}
-	}
-	sort.Slice(result.Nodes, func(i, j int) bool {
-		return result.Nodes[i].CreatedTimestamp.Before(result.Nodes[j].CreatedTimestamp)
-	})
-	for _, rel := range r.nodeRels[query.CompanyID] {
-		if visibleNodes[rel.NodeIDA] && visibleNodes[rel.NodeIDB] {
-			result.Relationships = append(result.Relationships, rel)
-		}
-	}
-	sort.Slice(result.Relationships, func(i, j int) bool {
-		return result.Relationships[i].CreatedTimestamp.Before(result.Relationships[j].CreatedTimestamp)
-	})
-	for _, item := range r.folderItems {
-		if item.CompanyID == query.CompanyID && item.ItemType == "node" && folderIDs[item.FolderID] && visibleNodes[item.ItemID] {
-			result.FolderItems = append(result.FolderItems, item)
-		}
-	}
-	sort.Slice(result.FolderItems, func(i, j int) bool {
-		if result.FolderItems[i].Position == result.FolderItems[j].Position {
-			if !result.FolderItems[i].CreatedTimestamp.Equal(result.FolderItems[j].CreatedTimestamp) {
-				return result.FolderItems[i].CreatedTimestamp.Before(result.FolderItems[j].CreatedTimestamp)
-			}
-			return result.FolderItems[i].ItemID < result.FolderItems[j].ItemID
-		}
-		return result.FolderItems[i].Position < result.FolderItems[j].Position
 	})
 	return result, nil
 }

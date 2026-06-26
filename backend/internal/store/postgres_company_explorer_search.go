@@ -108,26 +108,26 @@ with recursive visible_folder_paths as (
     on parent.company_id=item.company_id
    and parent.folder_id=item.parent_folder_id
   where item.company_id=$1::uuid
-    and item.target_type in ('project', 'logic_gate', 'node')
+    and item.target_type in ('project', 'logic_gate')
     and (item.parent_folder_id is null or parent.folder_id is not null)
     and `+companyExplorerAccessPredicate("item.target_type", "item.target_id", "$3", "$4")+`
 ), visible_logic_gate_locations as (
   select location.company_id,
          location.target_type,
          location.target_id,
-         location.location_path,
+         coalesce(location.location_path, '[]'::jsonb) as location_path,
          location.source_priority
   from visible_item_locations location
   where location.target_type='logic_gate'
-), visible_node_locations as (
+), visible_project_locations as (
   select location.company_id,
          location.target_type,
          location.target_id,
-         location.location_path,
+         coalesce(location.location_path, '[]'::jsonb) as location_path,
          location.source_priority
   from visible_item_locations location
-  where location.target_type='node'
-  union all
+  where location.target_type='project'
+), visible_node_locations as (
   select assignment.company_id,
          'node'::text as target_type,
          assignment.node_id as target_id,
@@ -147,6 +147,27 @@ with recursive visible_folder_paths as (
    and logic_gate_location.target_id=assignment.logic_gate_id
   where assignment.company_id=$1::uuid
     and `+companyExplorerAccessPredicate("'node'", "assignment.node_id", "$3", "$4")+`
+  union all
+  select relationship.company_id,
+         'node'::text as target_type,
+         relationship.resource_id as target_id,
+         project_location.location_path || jsonb_build_array(jsonb_build_object(
+           'entity_type', 'project',
+           'entity_id', project.project_id::text,
+           'resource_id', project.project_id::text,
+           'name', project.name
+         )) as location_path,
+         30 as source_priority
+  from project_relationships relationship
+  join projects project
+    on project.company_id=relationship.company_id
+   and project.project_id=relationship.project_id
+  join visible_project_locations project_location
+    on project_location.company_id=relationship.company_id
+   and project_location.target_id=relationship.project_id
+  where relationship.company_id=$1::uuid
+    and relationship.resource_type='node'
+    and `+companyExplorerAccessPredicate("'node'", "relationship.resource_id", "$3", "$4")+`
 ), all_locations as (
   select item.target_type,
          item.target_id,
@@ -187,15 +208,16 @@ with recursive visible_folder_paths as (
          node.node_id as resource_id,
          node.node_id as entity_id,
          node.name as display_name,
-         location.location_path,
+         coalesce(location.location_path, '[]'::jsonb) as location_path,
          node.created_timestamp,
          node.created_timestamp as updated_timestamp
   from nodes node
-  join ranked_locations location
+  left join ranked_locations location
     on location.rank=1
    and location.target_type='node'
    and location.target_id=node.node_id
   where node.company_id=$1::uuid
+    and `+companyExplorerAccessPredicate("'node'", "node.node_id", "$3", "$4")+`
   union all
   select project.company_id,
          'project'::text as resource_type,

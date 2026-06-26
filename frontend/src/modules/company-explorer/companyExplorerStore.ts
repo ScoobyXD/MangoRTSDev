@@ -49,8 +49,6 @@ export type CompanyExplorerStoreAction =
   | { type: "upsertFolder"; folder: CompanyExplorerFolder }
   | { type: "replaceFolder"; folder: CompanyExplorerFolder }
   | { type: "upsertFolderItems"; folderItems: CompanyExplorerFolderItem[] }
-  | { type: "upsertNode"; node: NodeRecord }
-  | { type: "replaceNode"; node: NodeRecord }
   | { type: "upsertLogicGate"; logicGate: LogicGateRecord }
   | { type: "replaceLogicGate"; logicGate: LogicGateRecord }
   | { type: "upsertProject"; project: ProjectRecord }
@@ -116,8 +114,8 @@ export function reduceCompanyExplorerStore(
         logicGates: (action.snapshot.logic_gates ?? []).map(toLogicGateCanvasRecord),
         projects: action.snapshot.projects ?? [],
         folders: action.snapshot.folders ?? [],
-        folderItems: action.snapshot.folder_items ?? [],
-        rows: action.snapshot.rows ?? [],
+        folderItems: filterCompanyExplorerFolderItemsForExplorer(action.snapshot.folder_items ?? []),
+        rows: filterCompanyExplorerV2RowsForExplorer(action.snapshot.rows ?? []),
         folderSnapshotLoaded: true,
       };
     case "mergeSnapshot":
@@ -143,10 +141,6 @@ export function reduceCompanyExplorerStore(
       return { ...state, folders: replaceByID(state.folders, action.folder, (folder) => folder.folder_id) };
     case "upsertFolderItems":
       return { ...state, folderItems: upsertFolderItems(state.folderItems, action.folderItems) };
-    case "upsertNode":
-      return { ...state, nodes: upsertByID(state.nodes, action.node, (node) => node.node_id) };
-    case "replaceNode":
-      return { ...state, nodes: replaceByID(state.nodes, action.node, (node) => node.node_id) };
     case "upsertLogicGate":
       return { ...state, logicGates: upsertByID(state.logicGates, action.logicGate, (logicGate) => logicGate.logic_gate_id) };
     case "replaceLogicGate":
@@ -233,7 +227,7 @@ export function companyExplorerRefreshPlanFromAffectedScopes({
       }
       continue;
     }
-    if (targetType === "project" || targetType === "logic_gate" || targetType === "node") {
+    if (targetType === "project" || targetType === "logic_gate") {
       addRowsForResource(targetType, targetID);
     }
   }
@@ -300,19 +294,6 @@ function applyWorkspaceEnvelope(
   if (envelope.company_id !== companyID) return state;
   const data = envelope.data ?? {};
 
-  if (envelope.type === "node_created" || envelope.type === "node_updated") {
-    const node = asNodeRecord(data.node);
-    return node ? { ...state, nodes: upsertByID(state.nodes, node, (item) => item.node_id) } : state;
-  }
-  if (envelope.type === "node_deleted") {
-    const nodeID = typeof data.node_id === "string" ? data.node_id : "";
-    if (!nodeID) return state;
-    return {
-      ...state,
-      nodes: state.nodes.filter((node) => node.node_id !== nodeID),
-      folderItems: state.folderItems.filter((item) => item.item_type !== "node" || item.item_id !== nodeID),
-    };
-  }
   if (envelope.type === "logic_gate_created" || envelope.type === "logic_gate_updated") {
     const logicGate = asLogicGateApiRecord(data.logic_gate);
     if (!logicGate) return state;
@@ -409,13 +390,11 @@ function removeDeletedEntities(
     rows: state.rows.filter((row) =>
       !action.deletedFolderIDs.has(row.entity_id)
       && !action.deletedFolderIDs.has(row.parent_entity_id ?? "")
-      && (row.entity_type !== "node" || !action.deletedNodeIDs.has(row.resource_id ?? ""))
       && (row.entity_type !== "logic_gate" || !action.deletedLogicGateIDs.has(row.resource_id ?? ""))
       && (row.entity_type !== "project" || !action.deletedProjectIDs.has(row.resource_id ?? ""))
     ),
     folderItems: state.folderItems.filter((item) =>
       !action.deletedFolderIDs.has(item.folder_id)
-      && (item.item_type !== "node" || !action.deletedNodeIDs.has(item.item_id))
       && (item.item_type !== "logic_gate" || !action.deletedLogicGateIDs.has(item.item_id))
       && (item.item_type !== "project" || !action.deletedProjectIDs.has(item.item_id))
       && (item.item_type !== "kanban" || !action.deletedKanbanBoardIDs.has(item.item_id))
@@ -446,13 +425,21 @@ function upsertFolderItems(
   folderItems: CompanyExplorerFolderItem[],
 ): CompanyExplorerFolderItem[] {
   let next = previous;
-  for (const item of folderItems) {
+  for (const item of filterCompanyExplorerFolderItemsForExplorer(folderItems)) {
     const exists = next.some((row) => row.item_type === item.item_type && row.item_id === item.item_id);
     next = exists
       ? next.map((row) => (row.item_type === item.item_type && row.item_id === item.item_id ? item : row))
       : [...next, item];
   }
   return next;
+}
+
+function filterCompanyExplorerFolderItemsForExplorer(items: CompanyExplorerFolderItem[]): CompanyExplorerFolderItem[] {
+  return items.filter((item) => item.item_type !== "node");
+}
+
+function filterCompanyExplorerV2RowsForExplorer(rows: CompanyExplorerV2Row[]): CompanyExplorerV2Row[] {
+  return rows.filter((row) => row.entity_type !== "node");
 }
 
 function companyExplorerV2RowKey(row: CompanyExplorerV2Row): string {
@@ -466,7 +453,7 @@ function upsertCompanyExplorerV2Rows(
   rows: CompanyExplorerV2Row[],
 ): CompanyExplorerV2Row[] {
   let next = previous;
-  for (const row of rows) {
+  for (const row of filterCompanyExplorerV2RowsForExplorer(rows)) {
     const rowKey = companyExplorerV2RowKey(row);
     if (!rowKey) continue;
     let replaced = false;
@@ -518,13 +505,6 @@ function cleanStringList(value: unknown): string[] {
     out.push(clean);
   }
   return out;
-}
-
-function asNodeRecord(value: unknown): NodeRecord | null {
-  if (!isObjectRecord(value) || typeof value.node_id !== "string" || typeof value.created_timestamp !== "string") return null;
-  const name = typeof value.name === "string" ? value.name : "";
-  if (!name.trim()) return null;
-  return { ...(value as NodeRecord), name };
 }
 
 function asLogicGateApiRecord(value: unknown): LogicGateApiRecord | null {

@@ -9,6 +9,7 @@ import (
 
 const (
 	companyExplorerFinalCutoverMigration        = "20260620_company_explorer_final_cutover.sql"
+	companyExplorerNoNodeItemsMigration         = "20260626_company_explorer_no_node_items.sql"
 	companyExplorerAccessHelperCutoverMigration = "20260620_z_company_explorer_access_helper_cutover.sql"
 )
 
@@ -26,7 +27,7 @@ func TestCompanyExplorerFinalSchemaDefinesContainmentTables(t *testing.T) {
 		"create table if not exists company_explorer_items",
 		"target_type text not null",
 		"target_id uuid not null",
-		"constraint company_explorer_items_target_type_chk check (target_type in ('project', 'logic_gate', 'node'))",
+		"constraint company_explorer_items_target_type_chk check (target_type in ('project', 'logic_gate'))",
 		"unique (company_id, target_type, target_id)",
 		"foreign key (company_id, parent_folder_id) references company_explorer_folders(company_id, folder_id) on delete cascade",
 		"create index if not exists idx_company_explorer_items_parent_position",
@@ -84,10 +85,29 @@ func TestCompanyExplorerFinalCutoverMigratesAndDropsLegacyStorage(t *testing.T) 
 	}
 }
 
+func TestCompanyExplorerNoNodeItemsMigrationDeletesNodePlacement(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", companyExplorerNoNodeItemsMigration))
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	normalized := normalizeSQLForCompanyExplorerV2Test(string(raw))
+	for _, want := range []string{
+		"delete from company_explorer_items where target_type='node'",
+		"unfiled_nodes",
+		"check (target_type in ('project', 'logic_gate'))",
+		"create or replace view company_explorer_final_backfill_verification",
+	} {
+		if !strings.Contains(normalized, want) {
+			t.Fatalf("no-node migration missing marker %q", want)
+		}
+	}
+}
+
 func TestCompanyExplorerFinalVerificationViewCoversCutoverInvariants(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join("..", "..", "db", "schema.sql"),
 		filepath.Join("..", "..", "db", "migrations", companyExplorerFinalCutoverMigration),
+		filepath.Join("..", "..", "db", "migrations", companyExplorerNoNodeItemsMigration),
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {

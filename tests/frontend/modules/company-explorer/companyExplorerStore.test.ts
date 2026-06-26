@@ -46,14 +46,14 @@ const folder = (id: string, parent = "") => ({
   company_id: "c",
   folder_id: id,
   parent_folder_id: parent,
-  folder_kind: "node" as const,
+  folder_kind: "logic_gate" as const,
   name: id,
   position: 1000,
   created_timestamp: id,
   updated_timestamp: id,
 });
 
-const folderItem = (folderID: string, itemType: "node" | "logic_gate" | "kanban", itemID: string) => ({
+const folderItem = (folderID: string, itemType: "node" | "logic_gate" | "project" | "kanban", itemID: string) => ({
   company_id: "c",
   folder_id: folderID,
   item_type: itemType,
@@ -92,7 +92,8 @@ run("snapshot reducer replaces explorer snapshot and preserves board list", () =
       nodes: [node("node-a", "Alpha")],
       logic_gates: [logicGate("gate-a", "Gate A")],
       folders: [folder("folder-a")],
-      folder_items: [folderItem("folder-a", "node", "node-a")],
+      folder_items: [folderItem("folder-a", "node", "node-a"), folderItem("folder-a", "logic_gate", "gate-a")],
+      rows: [v2Row({ entityID: "node-entity", entityType: "node", resourceID: "node-a", parentEntityID: "folder-a", edgeID: "edge-node-a" })],
     },
   });
 
@@ -100,7 +101,8 @@ run("snapshot reducer replaces explorer snapshot and preserves board list", () =
   assert.deepEqual(state.nodes.map((item) => item.name), ["Alpha"]);
   assert.deepEqual(state.logicGates.map((item) => [item.logic_gate_id, item.node_id, item.title]), [["gate-a", "gate-a", "Gate A"]]);
   assert.deepEqual(state.folders.map((item) => item.folder_id), ["folder-a"]);
-  assert.deepEqual(state.folderItems.map((item) => `${item.item_type}:${item.item_id}`), ["node:node-a"]);
+  assert.deepEqual(state.folderItems.map((item) => `${item.item_type}:${item.item_id}`), ["logic_gate:gate-a"]);
+  assert.deepEqual(state.rows, []);
   assert.deepEqual(state.kanbanBoards.map((item) => item.board_id), ["board-a"]);
 });
 
@@ -123,14 +125,14 @@ run("workspace stream reducer upserts and removes explorer entities", () => {
     companyID: "c",
     envelope: { company_id: "c", type: "node_updated", data: { node: node("node-a", "New") } },
   });
-  assert.equal(state.nodes[0]?.name, "New");
+  assert.equal(state.nodes[0]?.name, "Old");
 
   state = reduceCompanyExplorerStore(state, {
     type: "applyWorkspaceEnvelope",
     companyID: "c",
     envelope: { company_id: "c", type: "node_deleted", data: { node_id: "node-a" } },
   });
-  assert.deepEqual(state.nodes, []);
+  assert.deepEqual(state.nodes.map((item) => item.name), ["Old"]);
   assert.deepEqual(state.folderItems.map((item) => `${item.item_type}:${item.item_id}`), ["logic_gate:gate-a"]);
 
   state = reduceCompanyExplorerStore(state, {
@@ -291,7 +293,7 @@ run("affected scope helpers plan only matching Company Explorer branch refreshes
   assert.equal(plan.hasAffectedScopes, true);
   assert.equal(plan.hasCompanyExplorerScopes, true);
   assert.equal(plan.refreshRoot, true);
-  assert.deepEqual(plan.parentEntityIDs.sort(), ["folder-entity", "node-entity", "project-entity", "root-entity"].sort());
+  assert.deepEqual(plan.parentEntityIDs.sort(), ["folder-entity", "root-entity"].sort());
 });
 
 run("affected scope helpers ignore non-Explorer semantic scopes", () => {

@@ -1122,16 +1122,6 @@ func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID
 		return err
 	}
 	stop()
-	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.company_explorer_items_delete")
-	if _, err := tx.ExecContext(ctx,
-		`delete from company_explorer_items
-		 where company_id=$1::uuid and target_type='node' and target_id=$2::uuid`,
-		companyID, nodeID,
-	); err != nil {
-		stop()
-		return err
-	}
-	stop()
 	if deleteProjectionRows {
 		stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.kanban_projection_delete")
 		if _, err := tx.ExecContext(ctx,
@@ -1373,7 +1363,7 @@ func assignCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, company
 	var exists bool
 	var existsQuery string
 	if itemType == "node" {
-		existsQuery = `select exists(select 1 from nodes where company_id=$1 and node_id=$2)`
+		return domain.CompanyExplorerFolderItem{}, nil, ErrInvalid
 	} else if itemType == "logic_gate" {
 		existsQuery = `select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`
 	} else if itemType == EntityTypeProject {
@@ -1565,15 +1555,12 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerFolderItems(companyID, folderID
 		   and ($2::uuid is null or item.parent_folder_id=$2::uuid)
 		   and ($3::text is null or item.target_type=$3)
 		   and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.parent_folder_id, $4::uuid, $5)
-		   and (
-		     item.target_type not in ('node', 'logic_gate', 'project')
-		     or mangorts_user_can_access_resource(
-		       item.company_id,
-		       item.target_type,
-		       item.target_id,
-		       $4::uuid,
-		       $5
-		     )
+		   and mangorts_user_can_access_resource(
+		     item.company_id,
+		     item.target_type,
+		     item.target_id,
+		     $4::uuid,
+		     $5
 		   )
 		 order by item.position asc, item.created_timestamp asc`,
 		companyID, folderParam, itemTypeParam, userID, EntityPermissionView,
@@ -1695,15 +1682,12 @@ join company_explorer_folders folder
 where item.company_id=$1::uuid
   and ($3::text is null or item.target_type=$3)
   and mangorts_user_can_access_resource(item.company_id, 'company_explorer_folder', item.parent_folder_id, $4::uuid, $5)
-  and (
-    item.target_type not in ('node', 'logic_gate', 'project')
-    or mangorts_user_can_access_resource(
-      item.company_id,
-      item.target_type,
-      item.target_id,
-      $4::uuid,
-      $5
-    )
+  and mangorts_user_can_access_resource(
+    item.company_id,
+    item.target_type,
+    item.target_id,
+    $4::uuid,
+    $5
   )
 order by item.position asc, item.created_timestamp asc`, companyID, folderID, itemTypeParam, userID, EntityPermissionView)
 	if err != nil {
@@ -1780,35 +1764,7 @@ func (r *PostgresRepo) ListCompanyExplorerNodeSummariesInFolderSubtree(companyID
 	if folderID == "" {
 		return r.ListCompanyExplorerNodeSummaries(companyID)
 	}
-	rows, err := r.db.QueryContext(context.Background(), `
-with recursive folder_scope as (
-  select company_id, folder_id
-  from company_explorer_folders
-  where company_id=$1
-    and folder_id=$2::uuid
-  union all
-  select child.company_id, child.folder_id
-  from company_explorer_folders child
-  join folder_scope parent
-    on child.company_id=parent.company_id
-   and child.parent_folder_id=parent.folder_id
-), visible_nodes as (
-  select distinct item.target_id as node_id
-  from company_explorer_items item
-  join folder_scope folder on folder.folder_id=item.parent_folder_id
-  where item.company_id=$1::uuid
-    and item.target_type='node'
-)
-select `+nodeSelectColumns+`
-from nodes n
-`+nodeStatusJoin+`
-join visible_nodes visible on visible.node_id=n.node_id
-where n.company_id=$1
-order by n.created_timestamp asc, n.node_id::text asc`, companyID, folderID)
-	if err != nil {
-		return nil, err
-	}
-	return scanCompanyExplorerNodeSummaryRows(rows)
+	return []domain.Node{}, nil
 }
 
 func (r *PostgresRepo) ListVisibleCompanyExplorerNodeSummariesInFolderSubtree(companyID, folderID, userID string) ([]domain.Node, error) {
@@ -1821,38 +1777,7 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerNodeSummariesInFolderSubtree(co
 	if folderID == "" {
 		return r.ListVisibleCompanyExplorerNodeSummaries(companyID, userID)
 	}
-	rows, err := r.db.QueryContext(context.Background(), `
-with recursive folder_scope as (
-  select company_id, folder_id
-  from company_explorer_folders
-  where company_id=$1::uuid
-    and folder_id=$2::uuid
-    and mangorts_user_can_access_resource(company_id, 'company_explorer_folder', folder_id, $3::uuid, $4)
-  union all
-  select child.company_id, child.folder_id
-  from company_explorer_folders child
-  join folder_scope parent
-    on child.company_id=parent.company_id
-   and child.parent_folder_id=parent.folder_id
-  where mangorts_user_can_access_resource(child.company_id, 'company_explorer_folder', child.folder_id, $3::uuid, $4)
-), folder_nodes as (
-  select distinct item.target_id as node_id
-  from company_explorer_items item
-  join folder_scope folder on folder.folder_id=item.parent_folder_id
-  where item.company_id=$1::uuid
-    and item.target_type='node'
-)
-select `+nodeSelectColumns+`
-from nodes n
-`+nodeStatusJoin+`
-join folder_nodes visible on visible.node_id=n.node_id
-where n.company_id=$1::uuid
-  and mangorts_user_can_access_resource(n.company_id, 'node', n.node_id, $3::uuid, $4)
-order by n.created_timestamp asc, n.node_id::text asc`, companyID, folderID, userID, EntityPermissionView)
-	if err != nil {
-		return nil, err
-	}
-	return scanCompanyExplorerNodeSummaryRows(rows)
+	return []domain.Node{}, nil
 }
 
 func scanCompanyExplorerLogicGateSummaryRows(rows *sql.Rows) ([]domain.LogicGate, error) {

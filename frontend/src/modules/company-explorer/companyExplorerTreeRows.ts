@@ -1,4 +1,4 @@
-import { getNodeTitle, type NodeRecord } from "../node-map/shared.js";
+import { type NodeRecord } from "../node-map/shared.js";
 import { getNodeTitle as getLogicGateTitle, type NodeRecord as LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind } from "../folders/companyExplorerFolders.js";
 import type { KanbanBoard } from "../kanban/shared.js";
@@ -30,8 +30,8 @@ type BuildCompanyExplorerV2TreeRowsInput = {
 
 const ROOT_ROW_POSITION_OFFSET: Record<CompanyExplorerFolderKind, number> = {
   node: 0,
-  logic_gate: 100_000_000,
-  project: 200_000_000,
+  logic_gate: 0,
+  project: 100_000_000,
 };
 
 function normalizeFolderName(value: string): string {
@@ -70,19 +70,6 @@ export function buildScopedCompanyExplorerTreeRows(rows: ExplorerTreeNode[], roo
   return scopedRows;
 }
 
-function getLocalISODate(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function normalizeISODate(value: string | null | undefined): string {
-  const trimmed = typeof value === "string" ? value.trim() : "";
-  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : "";
-}
-
 export function buildCompanyExplorerTreeRows({
   expanded,
   nodes,
@@ -94,10 +81,10 @@ export function buildCompanyExplorerTreeRows({
   rootRowOrder,
   todayISODate,
 }: BuildCompanyExplorerTreeRowsInput): ExplorerTreeNode[] {
+  void nodes;
   void kanbanBoards;
   const rows: ExplorerTreeNode[] = [];
-  const currentDate = normalizeISODate(todayISODate) || getLocalISODate();
-  const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
+  void todayISODate;
   const logicGateByID = new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
   const projectByID = new Map(projects.map((project) => [project.project_id, project]));
   const folderByID = new Map(folders.map((folder) => [folder.folder_id, folder]));
@@ -124,19 +111,8 @@ export function buildCompanyExplorerTreeRows({
     folderPathLabelByID.set(folderID, label);
     return label;
   };
-  const assignedNodes = new Set(folderItems.filter((item) => item.item_type === "node").map((item) => item.item_id));
   const assignedLogicGates = new Set(folderItems.filter((item) => item.item_type === "logic_gate").map((item) => item.item_id));
   const assignedProjects = new Set(folderItems.filter((item) => item.item_type === "project").map((item) => item.item_id));
-  const nodesByLogicGateID = new Map<string, NodeRecord[]>();
-  for (const node of nodes) {
-    for (const logicGateID of node.logic_gate_ids ?? []) {
-      const cleanLogicGateID = logicGateID.trim();
-      if (!cleanLogicGateID) continue;
-      const bucket = nodesByLogicGateID.get(cleanLogicGateID) ?? [];
-      bucket.push(node);
-      nodesByLogicGateID.set(cleanLogicGateID, bucket);
-    }
-  }
   const foldersByParent = new Map<string, CompanyExplorerFolder[]>();
   for (const folder of folders) {
     const key = folder.parent_folder_id ?? "";
@@ -156,29 +132,6 @@ export function buildCompanyExplorerTreeRows({
     return rootRowOrder[rowID] ?? position + ROOT_ROW_POSITION_OFFSET[folderKind];
   };
 
-  const getLogicGateChildNodes = (logicGateID: string): NodeRecord[] => {
-    return [...(nodesByLogicGateID.get(logicGateID) ?? [])].sort((a, b) => (
-      getNodeTitle(a).localeCompare(getNodeTitle(b))
-      || a.created_timestamp.localeCompare(b.created_timestamp)
-      || a.node_id.localeCompare(b.node_id)
-    ));
-  };
-
-  const buildLogicGateChildNodeRows = (logicGateID: string, depth: number): ExplorerTreeNode[] => {
-    return getLogicGateChildNodes(logicGateID).map((node, index) => ({
-      id: `logic-gate-${logicGateID}-node-${node.node_id}`,
-      label: getNodeTitle(node) || node.node_id,
-      depth,
-      kind: "node",
-      nodeID: node.node_id,
-      scopeLevel: depth,
-      position: (index + 1) * TREE_ROW_POSITION_STEP,
-      createdTimestamp: node.created_timestamp,
-      parentLogicGateID: logicGateID,
-      syntheticKind: "logic_gate_children",
-    }));
-  };
-
   const buildFolderBranchRows = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number): ExplorerTreeNode[] => {
     const parentFolder = folderByID.get(parentFolderID);
     const parentFolderKind = (parentFolder?.folder_kind ?? folderKind) as CompanyExplorerFolderKind;
@@ -186,25 +139,6 @@ export function buildCompanyExplorerTreeRows({
     const directItems = itemsByFolder.get(parentFolderID) ?? [];
     const branchRows: ExplorerTreeNode[] = [];
     let syntheticRootPosition = 0;
-    if (parentFolderID === "" && folderKind === "node") {
-      for (const node of nodes) {
-        if (assignedNodes.has(node.node_id)) continue;
-        syntheticRootPosition += TREE_ROW_POSITION_STEP;
-        const rowID = `node-${node.node_id}`;
-        branchRows.push({
-          id: rowID,
-          label: getNodeTitle(node) || node.node_id,
-          depth,
-          kind: "node",
-          nodeID: node.node_id,
-          folderID: "",
-          folderKind,
-          scopeLevel: depth,
-          position: getRootAwarePosition(folderKind, rowID, syntheticRootPosition),
-          createdTimestamp: node.created_timestamp,
-        });
-      }
-    }
     if (parentFolderID === "" && folderKind === "logic_gate") {
       for (const logicGate of logicGates) {
         if (assignedLogicGates.has(logicGate.logic_gate_id)) continue;
@@ -221,7 +155,7 @@ export function buildCompanyExplorerTreeRows({
           scopeLevel: depth,
           position: getRootAwarePosition(folderKind, rowID, syntheticRootPosition),
           createdTimestamp: logicGate.created_timestamp,
-          hasChildren: true,
+          hasChildren: false,
         });
       }
     }
@@ -245,25 +179,7 @@ export function buildCompanyExplorerTreeRows({
       }
     }
     for (const item of directItems) {
-      if (item.item_type === "node") {
-        const node = nodeByID.get(item.item_id);
-        if (node) {
-          branchRows.push({
-            id: `node-${node.node_id}`,
-            label: getNodeTitle(node) || node.node_id,
-            depth,
-            kind: "node",
-            nodeID: node.node_id,
-            folderID: parentFolderID,
-            folderKind: parentFolderKind,
-            ...parentFolderScope,
-            folderLabel: getFolderPathLabel(parentFolderID),
-            scopeLevel: depth,
-            position: parentFolderID === "" ? getRootAwarePosition(folderKind, `node-${node.node_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
-            createdTimestamp: item.created_timestamp,
-          });
-        }
-      } else if (item.item_type === "logic_gate") {
+      if (item.item_type === "logic_gate") {
         const logicGate = logicGateByID.get(item.item_id);
         if (logicGate) {
           branchRows.push({
@@ -279,7 +195,7 @@ export function buildCompanyExplorerTreeRows({
             scopeLevel: depth,
             position: parentFolderID === "" ? getRootAwarePosition(folderKind, `logic-gate-${logicGate.logic_gate_id}`, item.position || TREE_ROW_POSITION_STEP) : item.position || TREE_ROW_POSITION_STEP,
             createdTimestamp: item.created_timestamp,
-            hasChildren: true,
+            hasChildren: false,
           });
         }
       } else if (item.item_type === "project") {
@@ -329,35 +245,13 @@ export function buildCompanyExplorerTreeRows({
     return sortExplorerRowsByPosition(branchRows);
   };
 
-  const buildSystemFolderContentRows = (systemKey: string | undefined, depth: number): ExplorerTreeNode[] => {
-    const contentRows: ExplorerTreeNode[] = [];
-    if (systemKey === "history") {
-      let historyPosition = 0;
-      for (const node of nodes) {
-        const dueDate = normalizeISODate(node.due_date);
-        if (!dueDate || dueDate >= currentDate) continue;
-        historyPosition += TREE_ROW_POSITION_STEP;
-        contentRows.push({
-          id: `system-history-node-${node.node_id}`,
-          label: getNodeTitle(node) || node.node_id,
-          depth,
-          kind: "node",
-          nodeID: node.node_id,
-          scopeLevel: depth,
-          position: historyPosition,
-          createdTimestamp: node.created_timestamp,
-        });
-      }
-    }
-    return contentRows;
+  const buildSystemFolderContentRows = (_systemKey: string | undefined, _depth: number): ExplorerTreeNode[] => {
+    return [];
   };
 
   const pushFolderBranch = (folderKind: CompanyExplorerFolderKind, parentFolderID: string, depth: number) => {
     for (const row of buildFolderBranchRows(folderKind, parentFolderID, depth)) {
       rows.push(row);
-      if (row.kind === "logic_gate" && expanded.has(row.id) && row.logicGateID) {
-        rows.push(...buildLogicGateChildNodeRows(row.logicGateID, row.depth + 1));
-      }
       if (row.kind !== "folder" || !expanded.has(row.id) || !row.folderID) continue;
       for (const systemRow of buildSystemFolderContentRows(row.systemKey, depth + 1)) rows.push(systemRow);
       pushFolderBranch(folderKind, row.folderID, depth + 1);
@@ -368,14 +262,10 @@ export function buildCompanyExplorerTreeRows({
   // Unplaced root entities use local view positions until a folder placement
   // row exists, because their order is personal UI state rather than graph data.
   for (const row of sortExplorerRowsByPosition([
-    ...buildFolderBranchRows("node", "", 0),
     ...buildFolderBranchRows("logic_gate", "", 0),
     ...buildFolderBranchRows("project", "", 0),
   ])) {
     rows.push(row);
-    if (row.kind === "logic_gate" && expanded.has(row.id) && row.logicGateID) {
-      rows.push(...buildLogicGateChildNodeRows(row.logicGateID, row.depth + 1));
-    }
     if (row.kind !== "folder" || !expanded.has(row.id) || !row.folderID || !row.folderKind) continue;
     for (const systemRow of buildSystemFolderContentRows(row.systemKey, 1)) rows.push(systemRow);
     pushFolderBranch(row.folderKind, row.folderID, 1);
@@ -392,9 +282,10 @@ function explorerKindForSearchEntity(entityType: CompanyExplorerV2EntityType): E
 }
 
 function explorerFolderKindForSearchEntity(entityType: CompanyExplorerV2EntityType): CompanyExplorerFolderKind | undefined {
-  if (entityType === "node") return "node";
   if (entityType === "project") return "project";
-  return "logic_gate";
+  if (entityType === "logic_gate") return "logic_gate";
+  if (entityType === "folder") return "logic_gate";
+  return undefined;
 }
 
 function searchTreeIDForEntity(entityType: CompanyExplorerV2EntityType, resourceID: string, entityID: string, prefix: string): string {
@@ -410,7 +301,7 @@ function isProtectedDefaultFolderContext(nativeContext?: Record<string, string>)
 }
 
 export function isCompanyExplorerV2FolderItemPlacementRow(row: CompanyExplorerV2Row, rows: CompanyExplorerV2Row[]): boolean {
-  if (!row.edge_id || row.entity_type === "company" || row.entity_type === "folder") return false;
+  if (!row.edge_id || row.entity_type === "company" || row.entity_type === "folder" || row.entity_type === "node") return false;
   const parentEntityID = row.parent_entity_id?.trim() ?? "";
   if (!parentEntityID) return true;
   return rows.some((candidate) => candidate.entity_id === parentEntityID && candidate.entity_type === "folder");
@@ -474,11 +365,14 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
       scopeLevel: result.location_path.length,
       position: ((resultIndex + 1) * TREE_ROW_POSITION_STEP) + result.location_path.length,
       createdTimestamp: result.created_timestamp,
-      hasChildren: Boolean(result.has_children),
+      hasChildren: result.resource_type === "folder" ? Boolean(result.has_children) : false,
+      syntheticKind: "search_result",
     });
   });
   return rows;
-}export function buildCompanyExplorerV2TreeRows({
+}
+
+export function buildCompanyExplorerV2TreeRows({
   expanded,
   rows,
 }: BuildCompanyExplorerV2TreeRowsInput): ExplorerTreeNode[] {
@@ -488,7 +382,7 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
     if (!rowKey) continue;
     rowByKey.set(rowKey, row);
   }
-  const uniqueRows = [...rowByKey.values()];
+  const uniqueRows = [...rowByKey.values()].filter((row) => row.entity_type !== "node");
   const rowByEntityID = new Map<string, CompanyExplorerV2Row>();
   const rowCountByEntityID = new Map<string, number>();
   for (const row of uniqueRows) {
@@ -497,7 +391,7 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
   const visibleRows = uniqueRows.filter((row) => {
     const parentEntityID = row.parent_entity_id?.trim() ?? "";
     const parent = parentEntityID ? rowByEntityID.get(parentEntityID) : undefined;
-    return parent?.entity_type !== "project";
+    return parent?.entity_type !== "project" && parent?.entity_type !== "logic_gate";
   });
   for (const row of visibleRows) {
     rowCountByEntityID.set(row.entity_id, (rowCountByEntityID.get(row.entity_id) ?? 0) + 1);
@@ -525,25 +419,18 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
     const contextSuffix = (rowCountByEntityID.get(row.entity_id) ?? 0) > 1 && row.parent_entity_id
       ? `-context-${row.edge_id || row.parent_entity_id}`
       : "";
-    if (row.entity_type === "node") {
-      const parent = row.parent_entity_id ? rowByEntityID.get(row.parent_entity_id) : undefined;
-      if (parent?.entity_type === "logic_gate" && parent.resource_id) return `logic-gate-${parent.resource_id}-node-${resourceID}`;
-      return `node-${resourceID}${contextSuffix}`;
-    }
     if (row.entity_type === "logic_gate") return `logic-gate-${resourceID}${contextSuffix}`;
     if (row.entity_type === "project") return `project-${resourceID}${contextSuffix}`;
     return `company-explorer-${row.entity_type}-${row.entity_id}`;
   };
 
   const rowKindForEntity = (row: CompanyExplorerV2Row): ExplorerTreeNode["kind"] => {
-    if (row.entity_type === "node") return "node";
     if (row.entity_type === "logic_gate") return "logic_gate";
     if (row.entity_type === "project") return "project";
     return "folder";
   };
 
   const folderKindForRow = (row: CompanyExplorerV2Row): CompanyExplorerFolderKind | undefined => {
-    if (row.entity_type === "node") return "node";
     if (row.entity_type === "logic_gate") return "logic_gate";
     if (row.entity_type === "project") return "project";
     if (row.entity_type === "folder") return "logic_gate";
@@ -565,7 +452,6 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
       edgeID: row.edge_id,
       parentEntityID: row.parent_entity_id ?? "",
       resourceID: resourceID || undefined,
-      nodeID: row.entity_type === "node" && resourceID ? resourceID : undefined,
       logicGateID: row.entity_type === "logic_gate" && resourceID ? resourceID : undefined,
       projectID: row.entity_type === "project" && resourceID ? resourceID : undefined,
       folderID: kind === "folder" ? row.entity_id : row.parent_entity_id,
@@ -576,7 +462,7 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
       scopeLevel: depth,
       position: row.position || TREE_ROW_POSITION_STEP,
       createdTimestamp: String(row.created_timestamp ?? ""),
-      hasChildren: row.entity_type === "project" ? false : Boolean(row.has_children),
+      hasChildren: row.entity_type === "folder" ? Boolean(row.has_children) : false,
     };
   };
 
@@ -585,6 +471,7 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
     for (const row of rowsByParentEntityID.get(parentEntityID) ?? []) {
       const treeRow = toTreeRow(row, depth);
       out.push(treeRow);
+      if (row.entity_type !== "folder" && row.entity_type !== "company") continue;
       const loadedChildren = rowsByParentEntityID.get(row.entity_id) ?? [];
       if ((!row.has_children && loadedChildren.length === 0) || seen.has(row.entity_id)) continue;
       if (!expanded.has(treeRow.id) && !expanded.has("*")) continue;

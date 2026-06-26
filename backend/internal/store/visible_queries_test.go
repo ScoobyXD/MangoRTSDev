@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -69,10 +70,6 @@ func TestMemoryVisibleFolderAndSearchReadsUseEffectiveAccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder node parent: %v", err)
 	}
-	nodeChild, err := repo.CreateCompanyExplorerFolder(companyID, nodeParent.FolderID, "node", "Node child")
-	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder node child: %v", err)
-	}
 	logicParent, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Logic parent")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder logic parent: %v", err)
@@ -89,9 +86,9 @@ func TestMemoryVisibleFolderAndSearchReadsUseEffectiveAccess(t *testing.T) {
 	adminGate := mustCreateVisibleQueryGate(t, repo, companyID, "Approval admin gate")
 	hiddenGate := mustCreateVisibleQueryGate(t, repo, companyID, "Approval hidden gate")
 
-	mustAssignVisibleQueryFolderItem(t, repo, companyID, nodeParent.FolderID, "node", viewNode.NodeID)
-	mustAssignVisibleQueryFolderItem(t, repo, companyID, nodeChild.FolderID, "node", editNode.NodeID)
-	mustAssignVisibleQueryFolderItem(t, repo, companyID, nodeChild.FolderID, "node", hiddenNode.NodeID)
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeParent.FolderID, "node", viewNode.NodeID, 1000); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("AssignCompanyExplorerFolderItem node error = %v, want ErrInvalid", err)
+	}
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicParent.FolderID, "logic_gate", viewGate.LogicGateID)
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicChild.FolderID, "logic_gate", adminGate.LogicGateID)
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicChild.FolderID, "logic_gate", hiddenGate.LogicGateID)
@@ -107,8 +104,9 @@ func TestMemoryVisibleFolderAndSearchReadsUseEffectiveAccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListVisibleNodesInFolderSubtree: %v", err)
 	}
-	assertVisibleQueryNodeIDs(t, nodes, viewNode.NodeID, editNode.NodeID)
-	assertVisibleQueryNodesDoNotContain(t, nodes, hiddenNode.NodeID)
+	if len(nodes) != 0 {
+		t.Fatalf("visible node folder subtree = %+v, want none because nodes are not Company Explorer folder items", nodes)
+	}
 
 	gates, err := repo.ListVisibleLogicGatesInFolderSubtree(companyID, logicParent.FolderID, viewer.UserID)
 	if err != nil {
@@ -156,8 +154,9 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	hiddenNode := mustCreateVisibleQueryNode(t, repo, companyID, "Explorer hidden node")
 	visibleGate := mustCreateVisibleQueryGate(t, repo, companyID, "Explorer visible gate")
 	hiddenGate := mustCreateVisibleQueryGate(t, repo, companyID, "Explorer hidden gate")
-	mustAssignVisibleQueryFolderItem(t, repo, companyID, nodeFolder.FolderID, "node", visibleNode.NodeID)
-	mustAssignVisibleQueryFolderItem(t, repo, companyID, nodeFolder.FolderID, "node", hiddenNode.NodeID)
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeFolder.FolderID, "node", visibleNode.NodeID, 1000); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("AssignCompanyExplorerFolderItem node error = %v, want ErrInvalid", err)
+	}
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicFolder.FolderID, "logic_gate", visibleGate.LogicGateID)
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicFolder.FolderID, "logic_gate", hiddenGate.LogicGateID)
 
@@ -189,7 +188,7 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	if err != nil {
 		t.Fatalf("ListVisibleCompanyExplorerFolderItems: %v", err)
 	}
-	assertVisibleQueryFolderItemIDs(t, folderItems, "node", visibleNode.NodeID, "logic_gate", visibleGate.LogicGateID)
+	assertVisibleQueryFolderItemIDs(t, folderItems, "logic_gate", visibleGate.LogicGateID)
 	assertVisibleQueryFolderItemsDoNotContain(t, folderItems, "node", hiddenNode.NodeID, "logic_gate", hiddenGate.LogicGateID)
 
 	nodeSummaries, err := repo.ListVisibleCompanyExplorerNodeSummaries(companyID, viewer.UserID)
@@ -255,8 +254,9 @@ func TestMemoryVisibleCompanyExplorerFoldersUseFolderPermissions(t *testing.T) {
 	visibleGate := mustCreateVisibleQueryGate(t, repo, companyID, "Visible parent gate")
 	hiddenNestedGate := mustCreateVisibleQueryGate(t, repo, companyID, "Hidden nested gate")
 
-	mustAssignVisibleQueryFolderItem(t, repo, companyID, visibleNodeFolder.FolderID, "node", visibleNode.NodeID)
-	mustAssignVisibleQueryFolderItem(t, repo, companyID, hiddenNodeFolder.FolderID, "node", hiddenFolderNode.NodeID)
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, visibleNodeFolder.FolderID, "node", visibleNode.NodeID, 1000); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("AssignCompanyExplorerFolderItem node error = %v, want ErrInvalid", err)
+	}
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, logicParent.FolderID, "logic_gate", visibleGate.LogicGateID)
 	mustAssignVisibleQueryFolderItem(t, repo, companyID, hiddenNestedLogicFolder.FolderID, "logic_gate", hiddenNestedGate.LogicGateID)
 
@@ -278,7 +278,7 @@ func TestMemoryVisibleCompanyExplorerFoldersUseFolderPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListVisibleCompanyExplorerFolderItems: %v", err)
 	}
-	assertVisibleQueryFolderItemIDs(t, folderItems, "node", visibleNode.NodeID, "logic_gate", visibleGate.LogicGateID)
+	assertVisibleQueryFolderItemIDs(t, folderItems, "logic_gate", visibleGate.LogicGateID)
 	assertVisibleQueryFolderItemsDoNotContain(t, folderItems, "node", hiddenFolderNode.NodeID, "logic_gate", hiddenNestedGate.LogicGateID)
 
 	hiddenNodeSubtreeItems, err := repo.ListVisibleCompanyExplorerFolderItemsInFolderSubtree(companyID, hiddenNodeFolder.FolderID, "node", viewer.UserID)
@@ -322,7 +322,7 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 		"func (r *postgresrepo) listvisiblenodes",
 		"mangorts_user_can_access_resource(n.company_id, 'node', n.node_id",
 		"func (r *postgresrepo) listvisiblenodesinfoldersubtree",
-		"join folder_nodes visible on visible.node_id=n.node_id",
+		"return []domain.node{}, nil",
 	} {
 		if !strings.Contains(nodeSource, needle) {
 			t.Fatalf("Postgres visible node query missing %q", needle)
@@ -368,7 +368,7 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 		"func (r *postgresrepo) listvisiblecompanyexplorerlogicgatesummaries",
 		"mangorts_user_can_access_resource",
 		"mangorts_user_can_access_resource(folder.company_id, 'company_explorer_folder', folder.folder_id, $2::uuid, $3)",
-		"item.target_type not in ('node', 'logic_gate', 'project')",
+		"item.company_id, item.target_type, item.target_id",
 	} {
 		if !strings.Contains(companyExplorerSource, needle) {
 			t.Fatalf("Postgres visible company explorer query missing %q", needle)
