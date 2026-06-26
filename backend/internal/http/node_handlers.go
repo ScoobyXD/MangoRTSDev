@@ -141,7 +141,7 @@ func parseOptionalPriorityField(fields map[string]json.RawMessage) (*int, bool, 
 }
 
 type timedCompanyExplorerDeleteRepository interface {
-	DeleteCompanyExplorerTargetsWithTiming(companyID string, targets []store.CompanyExplorerDeleteTargetInput, recorder store.TimingRecorder) (store.CompanyExplorerDeleteResult, error)
+	DeleteCompanyExplorerTargetsWithTiming(companyID string, targets []store.CompanyExplorerDeleteTargetInput, deletedByUserID string, recorder store.TimingRecorder) (store.CompanyExplorerDeleteResult, error)
 }
 
 func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
@@ -269,14 +269,18 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			stop()
+			deletedByUserID, ok := requireAuthenticatedActorUserID(w, r)
+			if !ok {
+				return
+			}
 			targets := []store.CompanyExplorerDeleteTargetInput{{Kind: "node", ID: nodeID}}
 			stop = timings.observeAccounted("source.transaction")
 			var result store.CompanyExplorerDeleteResult
 			var err error
 			if repo, ok := s.repo.(timedCompanyExplorerDeleteRepository); ok {
-				result, err = repo.DeleteCompanyExplorerTargetsWithTiming(companyID, targets, timings)
+				result, err = repo.DeleteCompanyExplorerTargetsWithTiming(companyID, targets, deletedByUserID, timings)
 			} else {
-				result, err = s.repo.DeleteCompanyExplorerTargets(companyID, targets)
+				result, err = s.repo.DeleteCompanyExplorerTargets(companyID, targets, deletedByUserID)
 			}
 			stop()
 			if errors.Is(err, store.ErrNotFound) {

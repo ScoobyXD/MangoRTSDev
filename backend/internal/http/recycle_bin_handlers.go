@@ -17,7 +17,11 @@ func (s *Server) handleRecycleBin(w http.ResponseWriter, r *http.Request) {
 	if !requireCompanyAccess(w, r, companyID) {
 		return
 	}
-	items, err := s.repo.ListRecycleBinItems(companyID)
+	deletedByUserID, ok := requireAuthenticatedActorUserID(w, r)
+	if !ok {
+		return
+	}
+	items, err := s.repo.ListRecycleBinItems(companyID, deletedByUserID)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
@@ -46,7 +50,11 @@ func (s *Server) handleRecycleBinRestore(w http.ResponseWriter, r *http.Request)
 	if !requireCompanyAccess(w, r, req.CompanyID) {
 		return
 	}
-	result, err := s.repo.RestoreRecycleBinItems(req.CompanyID, req.ItemIDs)
+	deletedByUserID, ok := requireAuthenticatedActorUserID(w, r)
+	if !ok {
+		return
+	}
+	result, err := s.repo.RestoreRecycleBinItems(req.CompanyID, deletedByUserID, req.ItemIDs)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "recycle_bin_item_ids_required")
 		return
@@ -83,7 +91,11 @@ func (s *Server) handleRecycleBinPermanentDelete(w http.ResponseWriter, r *http.
 	if !requireCompanyAccess(w, r, req.CompanyID) {
 		return
 	}
-	if err := s.repo.PermanentlyDeleteRecycleBinItems(req.CompanyID, req.ItemIDs); errors.Is(err, store.ErrInvalid) {
+	deletedByUserID, ok := requireAuthenticatedActorUserID(w, r)
+	if !ok {
+		return
+	}
+	if err := s.repo.PermanentlyDeleteRecycleBinItems(req.CompanyID, deletedByUserID, req.ItemIDs); errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "recycle_bin_item_ids_required")
 		return
 	} else if errors.Is(err, store.ErrNotFound) {
@@ -94,6 +106,20 @@ func (s *Server) handleRecycleBinPermanentDelete(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func requireAuthenticatedActorUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return "", false
+	}
+	userID := strings.TrimSpace(actor.User.UserID)
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return "", false
+	}
+	return userID, true
 }
 
 func (s *Server) publishCompanyExplorerRestoredTargets(companyID string, targets []store.CompanyExplorerDeletedTarget) {

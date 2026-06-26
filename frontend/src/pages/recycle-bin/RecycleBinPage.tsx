@@ -39,6 +39,7 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
   const dragSelectRef = useRef<DragSelectState>(EMPTY_DRAG_STATE);
   const orderedIDs = useMemo(() => items.map((item) => item.recycle_bin_item_id), [items]);
   const selectedItemIDs = useMemo(() => orderedIDs.filter((id) => selectedIDs.has(id)), [orderedIDs, selectedIDs]);
+  const allItemsSelected = orderedIDs.length > 0 && selectedItemIDs.length === orderedIDs.length;
 
   const loadItems = useCallback(() => {
     if (!companyID) return;
@@ -105,6 +106,17 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
     setSelectedIDs(next);
   }, [orderedIDs]);
 
+  const toggleSelectAll = useCallback(() => {
+    if (busy || orderedIDs.length === 0) return;
+    if (allItemsSelected) {
+      setSelectedIDs(new Set());
+      setSelectionAnchorID("");
+      return;
+    }
+    setSelectedIDs(new Set(orderedIDs));
+    setSelectionAnchorID(orderedIDs[0] ?? "");
+  }, [allItemsSelected, busy, orderedIDs]);
+
   const restoreSelected = useCallback(async () => {
     if (!companyID || selectedItemIDs.length === 0 || busy) return;
     setBusy(true);
@@ -152,6 +164,9 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
           <span style={recycleCountStyle}>{items.length}</span>
         </div>
         <div style={recycleToolbarStyle}>
+          <button type="button" disabled={busy || orderedIDs.length === 0} onClick={toggleSelectAll} style={toolbarButtonStyle("primary", busy || orderedIDs.length === 0)}>
+            {allItemsSelected ? "Clear selection" : "Select all"}
+          </button>
           <button type="button" disabled={busy || selectedItemIDs.length === 0} onClick={restoreSelected} style={toolbarButtonStyle("primary", busy || selectedItemIDs.length === 0)}>
             Restore
           </button>

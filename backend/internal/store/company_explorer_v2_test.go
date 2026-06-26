@@ -334,6 +334,7 @@ func TestMemoryProjectRelationshipMovesResourceBetweenProjects(t *testing.T) {
 func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesContainerDescendants(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-220000000004"
+	deleterUserID := "22222222-2222-4222-8222-220000000004"
 	repo.EnsureCompany(companyID, "Recycle Summary Co")
 
 	folder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
@@ -395,7 +396,7 @@ func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesContainerDescendants(t *
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
 
-	result, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folder.EntityID}})
+	result, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folder.EntityID}}, deleterUserID)
 	if err != nil {
 		t.Fatalf("DeleteCompanyExplorerTargets folder: %v", err)
 	}
@@ -404,7 +405,7 @@ func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesContainerDescendants(t *
 	requireDeletedTarget(t, result.Targets, EntityTypeLogicGate, logicGate.LogicGateID)
 	requireDeletedTarget(t, result.Targets, EntityTypeNode, node.NodeID)
 
-	items, err := repo.ListRecycleBinItems(companyID)
+	items, err := repo.ListRecycleBinItems(companyID, deleterUserID)
 	if err != nil {
 		t.Fatalf("ListRecycleBinItems: %v", err)
 	}
@@ -419,10 +420,11 @@ func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesProjectAndLogicGateChild
 	t.Run("project", func(t *testing.T) {
 		repo := NewMemoryRepo()
 		companyID := "11111111-1111-4111-8111-220000000005"
+		deleterUserID := "22222222-2222-4222-8222-220000000005"
 		repo.EnsureCompany(companyID, "Recycle Project Summary Co")
 		project, logicGate, node := createProjectGateNodeTree(t, repo, companyID)
 
-		result, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: EntityTypeProject, ID: project.ProjectID}})
+		result, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: EntityTypeProject, ID: project.ProjectID}}, deleterUserID)
 		if err != nil {
 			t.Fatalf("DeleteCompanyExplorerTargets project: %v", err)
 		}
@@ -434,7 +436,7 @@ func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesProjectAndLogicGateChild
 		if _, err := repo.GetNode(companyID, node.NodeID); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("GetNode after project delete err = %v, want ErrNotFound", err)
 		}
-		items, err := repo.ListRecycleBinItems(companyID)
+		items, err := repo.ListRecycleBinItems(companyID, deleterUserID)
 		if err != nil {
 			t.Fatalf("ListRecycleBinItems project: %v", err)
 		}
@@ -446,10 +448,11 @@ func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesProjectAndLogicGateChild
 	t.Run("logic_gate", func(t *testing.T) {
 		repo := NewMemoryRepo()
 		companyID := "11111111-1111-4111-8111-220000000006"
+		deleterUserID := "22222222-2222-4222-8222-220000000006"
 		repo.EnsureCompany(companyID, "Recycle Gate Summary Co")
 		_, logicGate, node := createProjectGateNodeTree(t, repo, companyID)
 
-		result, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: EntityTypeLogicGate, ID: logicGate.LogicGateID}})
+		result, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: EntityTypeLogicGate, ID: logicGate.LogicGateID}}, deleterUserID)
 		if err != nil {
 			t.Fatalf("DeleteCompanyExplorerTargets logic gate: %v", err)
 		}
@@ -457,7 +460,7 @@ func TestMemoryCompanyExplorerDeleteRecycleBinSummarizesProjectAndLogicGateChild
 		if _, err := repo.GetNode(companyID, node.NodeID); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("GetNode after logic gate delete err = %v, want ErrNotFound", err)
 		}
-		items, err := repo.ListRecycleBinItems(companyID)
+		items, err := repo.ListRecycleBinItems(companyID, deleterUserID)
 		if err != nil {
 			t.Fatalf("ListRecycleBinItems logic gate: %v", err)
 		}
@@ -695,7 +698,7 @@ func TestMemoryCompanyExplorerDefaultFoldersAreProtected(t *testing.T) {
 		t.Fatalf("unfiled native context = %+v, want protected default marker", unfiled.NativeContext)
 	}
 
-	if _, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: defaults.UnfiledFolderID}}); !errors.Is(err, ErrInvalid) {
+	if _, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: defaults.UnfiledFolderID}}, user.UserID); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("DeleteCompanyExplorerTargets Unfiled err = %v, want ErrInvalid", err)
 	}
 	if err := repo.DeleteCompanyExplorerV2Folder(companyID, defaults.LogicGatesFolderID); !errors.Is(err, ErrInvalid) {

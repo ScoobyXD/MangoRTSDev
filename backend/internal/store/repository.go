@@ -355,7 +355,7 @@ type CompanyExplorerRepository interface {
 	SetCompanyExplorerFolderScope(companyID, folderID, scopeType, scopeID string) (domain.CompanyExplorerFolder, error)
 	RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
 	DeleteCompanyExplorerFolder(companyID, folderID string) error
-	DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput) (CompanyExplorerDeleteResult, error)
+	DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput, deletedByUserID string) (CompanyExplorerDeleteResult, error)
 	CreateCommunicationsSharedInboxFolder(companyID, parentFolderID, name, accountEmail string) (domain.CompanyExplorerFolder, error)
 	ListCommunicationsSharedInboxFolders(companyID string) ([]domain.CompanyExplorerFolder, error)
 	ListVisibleCommunicationsSharedInboxFolders(companyID, userID string) ([]domain.CompanyExplorerFolder, error)
@@ -1410,9 +1410,9 @@ type RecycleBinRestoreResult struct {
 }
 
 type RecycleBinRepository interface {
-	ListRecycleBinItems(companyID string) ([]domain.RecycleBinItem, error)
-	RestoreRecycleBinItems(companyID string, itemIDs []string) (RecycleBinRestoreResult, error)
-	PermanentlyDeleteRecycleBinItems(companyID string, itemIDs []string) error
+	ListRecycleBinItems(companyID, deletedByUserID string) ([]domain.RecycleBinItem, error)
+	RestoreRecycleBinItems(companyID, deletedByUserID string, itemIDs []string) (RecycleBinRestoreResult, error)
+	PermanentlyDeleteRecycleBinItems(companyID, deletedByUserID string, itemIDs []string) error
 }
 
 const (

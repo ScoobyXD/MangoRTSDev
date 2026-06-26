@@ -1297,6 +1297,7 @@ func TestCompanyExplorerBatchDeleteTargetsMovesV2RowsToRecycleBinAndRestores(t *
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "company-explorer-batch-delete-test"
+	deleteActor := domain.User{UserID: "batch-delete-user", Email: "batch-delete@example.com", DisplayName: "Batch Delete User"}
 	repo.EnsureCompany(companyID, "Batch Delete")
 
 	folder, err := repo.CreateCompanyExplorerV2Folder(store.CompanyExplorerV2FolderInput{
@@ -1339,6 +1340,7 @@ func TestCompanyExplorerBatchDeleteTargetsMovesV2RowsToRecycleBinAndRestores(t *
 		`{"kind":"node","id":"` + nodeB.NodeID + `","edge_id":"` + rowB.EdgeID + `"}` +
 		`]}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/delete-targets", bytes.NewReader(body))
+	req = requestWithActorForTest(req, deleteActor, companyID)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1359,7 +1361,7 @@ func TestCompanyExplorerBatchDeleteTargetsMovesV2RowsToRecycleBinAndRestores(t *
 	if _, err := repo.GetNode(companyID, nodeA.NodeID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("GetNode A after delete err = %v, want ErrNotFound", err)
 	}
-	recycleItems, err := repo.ListRecycleBinItems(companyID)
+	recycleItems, err := repo.ListRecycleBinItems(companyID, deleteActor.UserID)
 	if err != nil {
 		t.Fatalf("ListRecycleBinItems after delete: %v", err)
 	}
@@ -1389,7 +1391,7 @@ func TestCompanyExplorerBatchDeleteTargetsMovesV2RowsToRecycleBinAndRestores(t *
 	for _, item := range recycleItems {
 		itemIDs = append(itemIDs, item.RecycleBinItemID)
 	}
-	if _, err := repo.RestoreRecycleBinItems(companyID, itemIDs); err != nil {
+	if _, err := repo.RestoreRecycleBinItems(companyID, deleteActor.UserID, itemIDs); err != nil {
 		t.Fatalf("RestoreRecycleBinItems failed: %v", err)
 	}
 	children, err = repo.ListCompanyExplorerV2ChildRows(store.CompanyExplorerV2RowsQuery{
@@ -1405,6 +1407,94 @@ func TestCompanyExplorerBatchDeleteTargetsMovesV2RowsToRecycleBinAndRestores(t *
 	}
 }
 
+func TestRecycleBinHandlersScopeItemsToDeletingUser(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "recycle-bin-user-scope-test"
+	userA := domain.User{UserID: "recycle-user-a", Email: "recycle-a@example.com", DisplayName: "Recycle A"}
+	userB := domain.User{UserID: "recycle-user-b", Email: "recycle-b@example.com", DisplayName: "Recycle B"}
+	repo.EnsureCompany(companyID, "Recycle User Scope")
+
+	nodeA, err := repo.CreateNode(companyID, "User A node")
+	if err != nil {
+		t.Fatalf("CreateNode A: %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "User B node")
+	if err != nil {
+		t.Fatalf("CreateNode B: %v", err)
+	}
+	postDeleteTargetForUser := func(t *testing.T, user domain.User, nodeID string) {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{
+			"company_id": companyID,
+			"targets":    []map[string]string{{"kind": "node", "id": nodeID}},
+		})
+		if err != nil {
+			t.Fatalf("Marshal delete target request: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/delete-targets", bytes.NewReader(body))
+		req = requestWithActorForTest(req, user, companyID)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST delete target for user %s status = %d, want %d body=%s", user.UserID, rec.Code, http.StatusOK, rec.Body.String())
+		}
+	}
+	listRecycleForUser := func(t *testing.T, user domain.User) []domain.RecycleBinItem {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/recycle-bin?company_id="+companyID, nil)
+		req = requestWithActorForTest(req, user, companyID)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET recycle bin for user %s status = %d, want %d body=%s", user.UserID, rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var payload struct {
+			Items []domain.RecycleBinItem `json:"items"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("Unmarshal recycle bin response: %v", err)
+		}
+		return payload.Items
+	}
+	postRecycleMutationForUser := func(t *testing.T, path string, user domain.User, itemID string) int {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{"company_id": companyID, "item_ids": []string{itemID}})
+		if err != nil {
+			t.Fatalf("Marshal recycle mutation request: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		req = requestWithActorForTest(req, user, companyID)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	postDeleteTargetForUser(t, userA, nodeA.NodeID)
+	postDeleteTargetForUser(t, userB, nodeB.NodeID)
+
+	itemsA := listRecycleForUser(t, userA)
+	if len(itemsA) != 1 || itemsA[0].ObjectID != nodeA.NodeID || itemsA[0].DeletedByUserID != userA.UserID {
+		t.Fatalf("user A recycle items = %+v, want only user A node", itemsA)
+	}
+	itemsB := listRecycleForUser(t, userB)
+	if len(itemsB) != 1 || itemsB[0].ObjectID != nodeB.NodeID || itemsB[0].DeletedByUserID != userB.UserID {
+		t.Fatalf("user B recycle items = %+v, want only user B node", itemsB)
+	}
+	if code := postRecycleMutationForUser(t, "/v1/recycle-bin/restore", userB, itemsA[0].RecycleBinItemID); code != http.StatusNotFound {
+		t.Fatalf("cross-user restore status = %d, want %d", code, http.StatusNotFound)
+	}
+	if code := postRecycleMutationForUser(t, "/v1/recycle-bin/delete", userB, itemsA[0].RecycleBinItemID); code != http.StatusNotFound {
+		t.Fatalf("cross-user permanent delete status = %d, want %d", code, http.StatusNotFound)
+	}
+	if code := postRecycleMutationForUser(t, "/v1/recycle-bin/restore", userA, itemsA[0].RecycleBinItemID); code != http.StatusOK {
+		t.Fatalf("owner restore status = %d, want %d", code, http.StatusOK)
+	}
+}
+
 func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t *testing.T) {
 	t.Parallel()
 
@@ -1412,6 +1502,7 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 	server := NewServer(repo)
 	handler := server.Routes()
 	companyID := "company-explorer-large-batch-delete-test"
+	deleteActor := domain.User{UserID: "large-batch-delete-user", Email: "large-batch-delete@example.com", DisplayName: "Large Batch Delete User"}
 	repo.EnsureCompany(companyID, "Large Batch Delete")
 
 	folder, err := repo.CreateCompanyExplorerV2Folder(store.CompanyExplorerV2FolderInput{
@@ -1446,6 +1537,7 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 		t.Fatalf("Marshal request: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/delete-targets", bytes.NewReader(body))
+	req = requestWithActorForTest(req, deleteActor, companyID)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1471,7 +1563,7 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 	if len(children.Rows) != 0 {
 		t.Fatalf("children after large batch edge delete = %d, want empty", len(children.Rows))
 	}
-	recycleItems, err := repo.ListRecycleBinItems(companyID)
+	recycleItems, err := repo.ListRecycleBinItems(companyID, deleteActor.UserID)
 	if err != nil {
 		t.Fatalf("ListRecycleBinItems after large delete: %v", err)
 	}
@@ -1482,7 +1574,7 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 	for _, item := range recycleItems {
 		itemIDs = append(itemIDs, item.RecycleBinItemID)
 	}
-	if _, err := repo.RestoreRecycleBinItems(companyID, itemIDs); err != nil {
+	if _, err := repo.RestoreRecycleBinItems(companyID, deleteActor.UserID, itemIDs); err != nil {
 		t.Fatalf("RestoreRecycleBinItems large batch failed: %v", err)
 	}
 	children, err = repo.ListCompanyExplorerV2ChildRows(store.CompanyExplorerV2RowsQuery{
@@ -1501,12 +1593,13 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 		t.Fatalf("Marshal second large delete request: %v", err)
 	}
 	deleteAgainReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/delete-targets", bytes.NewReader(deleteAgainBody))
+	deleteAgainReq = requestWithActorForTest(deleteAgainReq, deleteActor, companyID)
 	deleteAgainRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteAgainRec, deleteAgainReq)
 	if deleteAgainRec.Code != http.StatusOK {
 		t.Fatalf("POST second large batch delete status = %d, want %d body=%s", deleteAgainRec.Code, http.StatusOK, deleteAgainRec.Body.String())
 	}
-	recycleItems, err = repo.ListRecycleBinItems(companyID)
+	recycleItems, err = repo.ListRecycleBinItems(companyID, deleteActor.UserID)
 	if err != nil {
 		t.Fatalf("ListRecycleBinItems after second large delete: %v", err)
 	}
@@ -1514,10 +1607,10 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 	for _, item := range recycleItems {
 		itemIDs = append(itemIDs, item.RecycleBinItemID)
 	}
-	if err := repo.PermanentlyDeleteRecycleBinItems(companyID, itemIDs); err != nil {
+	if err := repo.PermanentlyDeleteRecycleBinItems(companyID, deleteActor.UserID, itemIDs); err != nil {
 		t.Fatalf("PermanentlyDeleteRecycleBinItems large batch failed: %v", err)
 	}
-	remainingRecycleItems, err := repo.ListRecycleBinItems(companyID)
+	remainingRecycleItems, err := repo.ListRecycleBinItems(companyID, deleteActor.UserID)
 	if err != nil {
 		t.Fatalf("ListRecycleBinItems after permanent delete: %v", err)
 	}

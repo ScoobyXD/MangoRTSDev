@@ -601,6 +601,13 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "company_id_and_targets_required")
 		return
 	}
+	if !requireCompanyAccess(w, r, req.CompanyID) {
+		return
+	}
+	deletedByUserID, ok := requireAuthenticatedActorUserID(w, r)
+	if !ok {
+		return
+	}
 
 	deleteTargets := make([]store.CompanyExplorerDeleteTargetInput, 0, len(req.Targets))
 	for _, target := range req.Targets {
@@ -622,7 +629,7 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 
 	result := store.CompanyExplorerDeleteResult{Targets: []store.CompanyExplorerDeletedTarget{}}
 	var err error
-	result, err = s.repo.DeleteCompanyExplorerTargets(req.CompanyID, deleteTargets)
+	result, err = s.repo.DeleteCompanyExplorerTargets(req.CompanyID, deleteTargets, deletedByUserID)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
 		return

@@ -51,16 +51,17 @@ type memoryRecycleBinSnapshot struct {
 	logicGateShortcuts            map[string]domain.UserLogicGateShortcut
 }
 
-func (r *MemoryRepo) ListRecycleBinItems(companyID string) ([]domain.RecycleBinItem, error) {
+func (r *MemoryRepo) ListRecycleBinItems(companyID, deletedByUserID string) ([]domain.RecycleBinItem, error) {
 	companyID = strings.TrimSpace(companyID)
-	if companyID == "" {
+	deletedByUserID = strings.TrimSpace(deletedByUserID)
+	if companyID == "" || deletedByUserID == "" {
 		return nil, ErrInvalid
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	items := make([]domain.RecycleBinItem, 0)
 	for _, record := range r.recycleBin {
-		if record.Item.CompanyID == companyID {
+		if record.Item.CompanyID == companyID && record.Item.DeletedByUserID == deletedByUserID {
 			items = append(items, record.Item)
 		}
 	}
@@ -73,10 +74,11 @@ func (r *MemoryRepo) ListRecycleBinItems(companyID string) ([]domain.RecycleBinI
 	return items, nil
 }
 
-func (r *MemoryRepo) PermanentlyDeleteRecycleBinItems(companyID string, itemIDs []string) error {
+func (r *MemoryRepo) PermanentlyDeleteRecycleBinItems(companyID, deletedByUserID string, itemIDs []string) error {
 	companyID = strings.TrimSpace(companyID)
+	deletedByUserID = strings.TrimSpace(deletedByUserID)
 	itemIDs = normalizeRecycleBinItemIDs(itemIDs)
-	if companyID == "" || len(itemIDs) == 0 {
+	if companyID == "" || deletedByUserID == "" || len(itemIDs) == 0 {
 		return ErrInvalid
 	}
 	r.mu.Lock()
@@ -84,7 +86,7 @@ func (r *MemoryRepo) PermanentlyDeleteRecycleBinItems(companyID string, itemIDs 
 	deleted := 0
 	for _, itemID := range itemIDs {
 		record, ok := r.recycleBin[key(companyID, itemID)]
-		if !ok || record.Item.CompanyID != companyID {
+		if !ok || record.Item.CompanyID != companyID || record.Item.DeletedByUserID != deletedByUserID {
 			continue
 		}
 		delete(r.recycleBin, key(companyID, itemID))
@@ -96,10 +98,11 @@ func (r *MemoryRepo) PermanentlyDeleteRecycleBinItems(companyID string, itemIDs 
 	return nil
 }
 
-func (r *MemoryRepo) RestoreRecycleBinItems(companyID string, itemIDs []string) (RecycleBinRestoreResult, error) {
+func (r *MemoryRepo) RestoreRecycleBinItems(companyID, deletedByUserID string, itemIDs []string) (RecycleBinRestoreResult, error) {
 	companyID = strings.TrimSpace(companyID)
+	deletedByUserID = strings.TrimSpace(deletedByUserID)
 	itemIDs = normalizeRecycleBinItemIDs(itemIDs)
-	if companyID == "" || len(itemIDs) == 0 {
+	if companyID == "" || deletedByUserID == "" || len(itemIDs) == 0 {
 		return RecycleBinRestoreResult{}, ErrInvalid
 	}
 	r.mu.Lock()
@@ -110,7 +113,7 @@ func (r *MemoryRepo) RestoreRecycleBinItems(companyID string, itemIDs []string) 
 	var snapshot *memoryRecycleBinSnapshot
 	for _, itemID := range itemIDs {
 		record, ok := r.recycleBin[key(companyID, itemID)]
-		if !ok || record.Item.CompanyID != companyID {
+		if !ok || record.Item.CompanyID != companyID || record.Item.DeletedByUserID != deletedByUserID {
 			continue
 		}
 		items = append(items, record.Item)
@@ -130,8 +133,9 @@ func (r *MemoryRepo) RestoreRecycleBinItems(companyID string, itemIDs []string) 
 	return RecycleBinRestoreResult{Items: items, Targets: targets}, nil
 }
 
-func (r *MemoryRepo) createRecycleBinItemsLocked(companyID string, targets []CompanyExplorerDeletedTarget, snapshot memoryRecycleBinSnapshot) {
+func (r *MemoryRepo) createRecycleBinItemsLocked(companyID, deletedByUserID string, targets []CompanyExplorerDeletedTarget, snapshot memoryRecycleBinSnapshot) {
 	now := time.Now().UTC()
+	deletedByUserID = strings.TrimSpace(deletedByUserID)
 	seen := map[string]bool{}
 	for _, target := range targets {
 		if target.Kind == "kanban" {
@@ -151,6 +155,7 @@ func (r *MemoryRepo) createRecycleBinItemsLocked(companyID string, targets []Com
 			ObjectLabel:      r.recycleTargetLabelLocked(companyID, target),
 			ObjectFolderKind: target.FolderKind,
 			ContainedItems:   recycleContainedItemsFromMemorySnapshot(domain.RecycleBinItem{CompanyID: companyID, ObjectKind: target.Kind, ObjectID: target.ID}, snapshot),
+			DeletedByUserID:  deletedByUserID,
 			DeletedTimestamp: now,
 		}
 		if strings.TrimSpace(item.ObjectLabel) == "" {
