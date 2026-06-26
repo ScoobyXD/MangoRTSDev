@@ -81,7 +81,7 @@ import { myWorkDebugLog, recordMyWorkDebugCause } from "./myWorkPerformanceDebug
 import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
-import { HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
+import { ARCHIVE_QUEUE_MAX_EMAILS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
@@ -220,6 +220,12 @@ type PrefetchedMessagePage = {
   page: MessagePage;
 };
 
+type QueuedArchiveBatch = {
+  companyID: string;
+  sharedInboxID?: string;
+  messageIDs: string[];
+};
+
 type SharedInboxEmailConnectionDialogState = {
   accountEmail: string;
   canConnect: boolean;
@@ -309,6 +315,7 @@ export function HomePage({
   const [selectedMessageIDs, setSelectedMessageIDs] = useState<Set<string>>(new Set());
   const [selectionAnchorMessageID, setSelectionAnchorMessageID] = useState("");
   const [selectedMessage, setSelectedMessage] = useState<EmailMessage | null>(null);
+  const [queuedArchiveEmailCount, setQueuedArchiveEmailCount] = useState(0);
   const [pendingStarredMessageIDs, setPendingStarredMessageIDs] = useState<Set<string>>(new Set());
   const [messageContextMenu, setMessageContextMenu] = useState<{ x: number; y: number; messageIDs: string[] } | null>(null);
   const [bulkEditMenu, setBulkEditMenu] = useState<{ x: number; y: number; kind: "node" | "logic_gate"; ids: string[] } | null>(null);
@@ -401,6 +408,9 @@ export function HomePage({
   const selectedMessageRef = useRef<EmailMessage | null>(null);
   const activeViewIDRef = useRef<HomeViewID>(initialViewID);
   const initialViewIDRef = useRef<HomeViewID>(initialViewID);
+  const queuedArchiveBatchesRef = useRef<Map<string, QueuedArchiveBatch>>(new Map());
+  const pendingArchiveMessageKeysRef = useRef<Set<string>>(new Set());
+  const archiveQueueFlushTimerRef = useRef<number | null>(null);
   const pendingStarredMessageIDsRef = useRef<Set<string>>(new Set());
   const folderReloadTimerRef = useRef<number | null>(null);
   const workspacePanelReloadTimerRef = useRef<number | null>(null);
@@ -625,6 +635,12 @@ export function HomePage({
   }, [removePendingStarredMessages]);
   useEffect(() => {
     return () => {
+      if (archiveQueueFlushTimerRef.current !== null) {
+        window.clearTimeout(archiveQueueFlushTimerRef.current);
+        archiveQueueFlushTimerRef.current = null;
+      }
+      queuedArchiveBatchesRef.current.clear();
+      pendingArchiveMessageKeysRef.current.clear();
       pendingStarredMessageIDsRef.current.clear();
     };
   }, []);
@@ -834,6 +850,13 @@ export function HomePage({
       const next = await fetchCommunicationsStatus();
       setStatus(next);
       if (!next.connected && !homeViewUsesSharedEmailConnection(activeViewIDRef.current)) {
+        if (archiveQueueFlushTimerRef.current !== null) {
+          window.clearTimeout(archiveQueueFlushTimerRef.current);
+          archiveQueueFlushTimerRef.current = null;
+        }
+        queuedArchiveBatchesRef.current.clear();
+        pendingArchiveMessageKeysRef.current.clear();
+        setQueuedArchiveEmailCount(0);
         cancelPendingStarredMessages(Array.from(pendingStarredMessageIDsRef.current));
         setMailboxCountOverrides({});
         setFolders([]);
@@ -854,6 +877,13 @@ export function HomePage({
   }, [cancelPendingStarredMessages]);
   const handleEmailAccessExpired = useCallback(async (accessError: unknown) => {
     setNotice("");
+    if (archiveQueueFlushTimerRef.current !== null) {
+      window.clearTimeout(archiveQueueFlushTimerRef.current);
+      archiveQueueFlushTimerRef.current = null;
+    }
+    queuedArchiveBatchesRef.current.clear();
+    pendingArchiveMessageKeysRef.current.clear();
+    setQueuedArchiveEmailCount(0);
     cancelPendingStarredMessages(Array.from(pendingStarredMessageIDsRef.current));
     invalidateCommunicationsCache();
     setMailboxCountOverrides({});
@@ -907,9 +937,12 @@ export function HomePage({
     }
   }, [canRepairSharedInboxConnection, companyID, handleEmailAccessExpired, sharedInboxes]);
   const scheduleFolderMetadataRefresh = useCallback(() => {
-    window.setTimeout(() => {
+    invalidateCommunicationsFolderCache();
+    if (folderReloadTimerRef.current !== null) window.clearTimeout(folderReloadTimerRef.current);
+    folderReloadTimerRef.current = window.setTimeout(() => {
+      folderReloadTimerRef.current = null;
       void loadFolders();
-    }, 0);
+    }, 300);
   }, [loadFolders]);
   const loadSharedInboxes = useCallback(async (): Promise<boolean> => {
     if (sharedInboxesRequestInFlightRef.current) return false;
@@ -1323,6 +1356,88 @@ export function HomePage({
       void loadMessagesRef.current?.({ refresh });
     }, delayMs);
   }, [canLoadMailForView]);
+  const archiveQueueBatchKey = useCallback((nextCompanyID: string, sharedInboxID?: string) => (
+    `${nextCompanyID.trim()}\x1f${sharedInboxID?.trim() ?? ""}`
+  ), []);
+  const archiveQueueMessageKey = useCallback((nextCompanyID: string, sharedInboxID: string | undefined, messageID: string) => (
+    `${archiveQueueBatchKey(nextCompanyID, sharedInboxID)}\x1f${messageID.trim()}`
+  ), [archiveQueueBatchKey]);
+  const syncQueuedArchiveEmailCount = useCallback(() => {
+    setQueuedArchiveEmailCount(pendingArchiveMessageKeysRef.current.size);
+  }, []);
+  const archiveQueueCanAccept = useCallback((messageIDs: string[], nextCompanyID: string, sharedInboxID?: string) => {
+    const pending = pendingArchiveMessageKeysRef.current;
+    let newCount = 0;
+    for (const messageID of cleanIDList(messageIDs)) {
+      if (!pending.has(archiveQueueMessageKey(nextCompanyID, sharedInboxID, messageID))) newCount++;
+    }
+    return pending.size + newCount <= ARCHIVE_QUEUE_MAX_EMAILS;
+  }, [archiveQueueMessageKey]);
+  const flushQueuedArchiveMessages = useCallback(() => {
+    if (archiveQueueFlushTimerRef.current !== null) {
+      window.clearTimeout(archiveQueueFlushTimerRef.current);
+      archiveQueueFlushTimerRef.current = null;
+    }
+    const batches = Array.from(queuedArchiveBatchesRef.current.values())
+      .map((batch) => ({ ...batch, messageIDs: cleanIDList(batch.messageIDs) }))
+      .filter((batch) => batch.messageIDs.length > 0);
+    queuedArchiveBatchesRef.current.clear();
+    if (batches.length === 0) return;
+    for (const batch of batches) {
+      void archiveHomeMailMessagesCommand({
+        companyID: batch.companyID,
+        sharedInboxID: batch.sharedInboxID,
+        messageIDs: batch.messageIDs,
+      })
+        .then((result) => {
+          const failed = result?.failed ?? [];
+          if (failed.length > 0) {
+            setError(failed.length === 1 ? "Failed to archive 1 message." : `Failed to archive ${failed.length} messages.`);
+            scheduleMessageListRefresh(0);
+          }
+        })
+        .catch((archiveError) => {
+          if (isEmailAccessExpiredError(archiveError)) {
+            void handleEmailAccessExpired(archiveError);
+            return;
+          }
+          setError(formatError(archiveError, "Failed to archive queued messages"));
+          scheduleMessageListRefresh(0);
+        })
+        .finally(() => {
+          for (const messageID of batch.messageIDs) {
+            pendingArchiveMessageKeysRef.current.delete(archiveQueueMessageKey(batch.companyID, batch.sharedInboxID, messageID));
+          }
+          syncQueuedArchiveEmailCount();
+          scheduleFolderMetadataRefresh();
+        });
+    }
+  }, [archiveQueueMessageKey, handleEmailAccessExpired, scheduleFolderMetadataRefresh, scheduleMessageListRefresh, syncQueuedArchiveEmailCount]);
+  const queueArchiveMessages = useCallback((args: { companyID: string; sharedInboxID?: string; messageIDs: string[] }): string[] => {
+    const messageIDs = cleanIDList(args.messageIDs);
+    if (messageIDs.length === 0) return [];
+    const sharedInboxID = args.sharedInboxID?.trim() || undefined;
+    const batchKey = archiveQueueBatchKey(args.companyID, sharedInboxID);
+    const batch = queuedArchiveBatchesRef.current.get(batchKey) ?? { companyID: args.companyID, sharedInboxID, messageIDs: [] };
+    const queuedIDs: string[] = [];
+    for (const messageID of messageIDs) {
+      const messageKey = archiveQueueMessageKey(args.companyID, sharedInboxID, messageID);
+      if (pendingArchiveMessageKeysRef.current.has(messageKey)) continue;
+      pendingArchiveMessageKeysRef.current.add(messageKey);
+      batch.messageIDs.push(messageID);
+      queuedIDs.push(messageID);
+    }
+    if (batch.messageIDs.length > 0) queuedArchiveBatchesRef.current.set(batchKey, batch);
+    if (queuedIDs.length === 0) return [];
+    syncQueuedArchiveEmailCount();
+    if (archiveQueueFlushTimerRef.current === null) {
+      archiveQueueFlushTimerRef.current = window.setTimeout(() => {
+        archiveQueueFlushTimerRef.current = null;
+        flushQueuedArchiveMessages();
+      }, 0);
+    }
+    return queuedIDs;
+  }, [archiveQueueBatchKey, archiveQueueMessageKey, flushQueuedArchiveMessages, syncQueuedArchiveEmailCount]);
   const advanceTriageMailPage = useCallback(async () => {
     if (!canMutateCurrentMailView || !activeMailViewHasEmailConnection || loadingMessagesRef.current || loadingMoreMessagesRef.current || busy) return;
     if (!isPrimaryTriageMailbox(activeViewIDRef.current, mailboxRef.current)) return;
@@ -1330,10 +1445,10 @@ export function HomePage({
     if (previousMessageIDs.length === 0) return;
     const countKey = mailCountKey(companyID, activeViewIDRef.current);
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current) || undefined;
+    if (!archiveQueueCanAccept(previousMessageIDs, companyID, sharedInboxID)) return;
     const pageToken = nextPageTokenRef.current.trim();
     const filterKey = currentMessageFilterKey();
     let displayedNextPage = false;
-    setBusy("advance-archive");
     setError("");
     setNotice("");
     try {
@@ -1376,18 +1491,8 @@ export function HomePage({
           void prefetchNextMessagePage(nextToken);
         }, 0);
       }
-      const result = await archiveHomeMailMessagesCommand({ companyID, sharedInboxID, messageIDs: previousMessageIDs });
-      const failed = result?.failed ?? [];
-      const failedIDs = new Set(cleanIDList(failed.map((failure) => failure.message_id)));
-      const archivedIDs = cleanIDList(result?.messageIDs ?? previousMessageIDs).filter((id) => !failedIDs.has(id));
-      adjustPrimaryMailboxCount(countKey, -archivedIDs.length);
-      if (failed.length > 0) {
-        setError(failed.length === 1 ? "Failed to archive 1 message." : `Failed to archive ${failed.length} messages.`);
-        scheduleMessageListRefresh(0);
-      } else {
-        setNotice(previousMessageIDs.length === 1 ? "Page archived." : `${previousMessageIDs.length} messages archived.`);
-      }
-      scheduleFolderMetadataRefresh();
+      const queuedIDs = queueArchiveMessages({ companyID, sharedInboxID, messageIDs: previousMessageIDs });
+      adjustPrimaryMailboxCount(countKey, -queuedIDs.length);
     } catch (advanceError) {
       if (isEmailAccessExpiredError(advanceError)) {
         await handleEmailAccessExpired(advanceError);
@@ -1397,9 +1502,8 @@ export function HomePage({
       if (displayedNextPage) scheduleMessageListRefresh(0);
     } finally {
       setLoadingMoreMessages(false);
-      setBusy((current) => current === "advance-archive" ? "" : current);
     }
-  }, [activeMailViewHasEmailConnection, adjustPrimaryMailboxCount, busy, canMutateCurrentMailView, companyID, consumePrefetchedMessagePage, currentMessageFilterKey, handleEmailAccessExpired, prefetchNextMessagePage, replaceVisibleMessagesForAdvance, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
+  }, [activeMailViewHasEmailConnection, adjustPrimaryMailboxCount, archiveQueueCanAccept, busy, canMutateCurrentMailView, companyID, consumePrefetchedMessagePage, currentMessageFilterKey, handleEmailAccessExpired, prefetchNextMessagePage, queueArchiveMessages, replaceVisibleMessagesForAdvance, scheduleMessageListRefresh]);
   const fillMessageListAfterRemoval = useCallback(() => {
     window.setTimeout(() => {
       const list = messageListRef.current;
@@ -3820,6 +3924,10 @@ export function HomePage({
       detail: { companyID, viewID: activeViewID, unreadCount: unreadMessageCount },
     }));
   }, [activeMailViewHasEmailConnection, activeViewID, companyID, isInboxMatrixView, isMyWorkView, isUpdatesView, unreadMessageCount]);
+  const visibleArchiveCandidateCount = isPrimaryTriageMailbox(activeViewID, mailbox)
+    ? cleanIDList(messages.map((message) => message.id)).length
+    : 0;
+  const archiveQueueHasRoomForVisiblePage = queuedArchiveEmailCount + visibleArchiveCandidateCount <= ARCHIVE_QUEUE_MAX_EMAILS;
   const mailFilterStatus = selectedMessageIDs.size > 1
     ? `${selectedMessageIDs.size} selected`
     : (loadingMessages || loadingMoreMessages) ? "Loading" : "";
@@ -4071,7 +4179,7 @@ export function HomePage({
             showDetailResizeHandle={!isNarrow}
             unreadOnly={unreadOnly}
             unreadMessageCount={unreadMessageCount}
-            canAdvanceTriagePage={canMutateCurrentMailView && activeMailViewHasEmailConnection && isPrimaryTriageMailbox(activeViewID, mailbox)}
+            canAdvanceTriagePage={canMutateCurrentMailView && activeMailViewHasEmailConnection && isPrimaryTriageMailbox(activeViewID, mailbox) && archiveQueueHasRoomForVisiblePage}
             hasNextMessagePage={!!nextPageToken}
             onAdvanceTriagePage={() => { void advanceTriageMailPage(); }}
             onArchiveSelected={archiveSelected}

@@ -40,6 +40,7 @@ import {
   invalidateLogicGateArenaViewCache as defaultInvalidateLogicGateArenaViewCache,
   moveLogicGateAssignment as defaultMoveLogicGateAssignment,
 } from "../../modules/kanban/kanbanApi.js";
+import { ARCHIVE_QUEUE_BATCH_SIZE } from "./homeConstants.js";
 import type { LogicGateAssignmentCommandResult, GVICMatrixProjectionRow } from "../../modules/kanban/kanbanApi.js";
 import {
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
@@ -251,9 +252,24 @@ export async function archiveHomeMailMessagesCommand(args: {
     return { messageIDs };
   }
   const archiveEmailMessagesBatch = args.archiveEmailMessagesBatch ?? defaultArchiveEmailMessagesBatch;
-  const result = await archiveEmailMessagesBatch(messageIDs, sharedInboxID, args.companyID);
-  const archivedIDs = cleanIDList(result.archived_ids);
-  const failed = result.failed ?? [];
+  const chunks: string[][] = [];
+  for (let index = 0; index < messageIDs.length; index += ARCHIVE_QUEUE_BATCH_SIZE) {
+    chunks.push(messageIDs.slice(index, index + ARCHIVE_QUEUE_BATCH_SIZE));
+  }
+  const settled = await Promise.allSettled(chunks.map((chunk) => archiveEmailMessagesBatch(chunk, sharedInboxID, args.companyID)));
+  const archivedIDs: string[] = [];
+  const failed: ArchiveEmailMessagesBatchResult["failed"] = [];
+  settled.forEach((item, index) => {
+    if (item.status === "fulfilled") {
+      archivedIDs.push(...cleanIDList(item.value.archived_ids));
+      failed.push(...(item.value.failed ?? []));
+    } else {
+      const error = item.reason instanceof Error ? item.reason.message : "archive_failed";
+      for (const messageID of chunks[index] ?? []) {
+        failed.push({ message_id: messageID, error });
+      }
+    }
+  });
   if (archivedIDs.length === 0 && failed.length > 0) {
     throw new Error(failed[0]?.error || "archive_failed");
   }

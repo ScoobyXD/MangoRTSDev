@@ -56,12 +56,15 @@ ST45 - Scrolling a Shared Triage mailbox inbox must not archive messages and mus
 ST46 - Advancing a Shared Triage mailbox inbox page is an explicit user action that archives only the messages visible on the current page.
 ST47 - Advancing must display the prefetched next page before archiving the previous page whenever a prefetched page is available.
 ST48 - Advancing must freeze the previous page's message IDs at click time so live updates cannot change what gets archived.
-ST49 - The advance/archive action must be disabled while its archive request is in flight to prevent double submission.
-ST50 - The advance/archive action must send the frozen visible message IDs as one frontend batch archive request instead of splitting the page into smaller client-side archive batches.
-ST51 - Advancing must prioritize showing the prefetched next page, completing the archive request, and making the action usable again before any folder metadata reconciliation.
-ST52 - Folder metadata refresh after archive or unarchive is only a count/metadata reconciliation step and must not fetch the next message page or block the prefetched page from being shown.
-ST53 - If folder metadata reconciliation is slow or fails after archive or unarchive, the Shared Triage mailbox list remains usable and counts can reconcile later.
-ST54 - If no next page is available, advancing archives the current visible page and leaves the mailbox inbox empty until live updates or a refresh provide more messages.
+ST49 - The advance/archive action must remain immediately reusable after a page advances unless accepting the visible page would exceed the hidden archive queue limit.
+ST50 - Advancing must enqueue the frozen visible message IDs for background archive work instead of waiting for those provider mutations before allowing the user to continue.
+ST51 - The hidden archive queue may contain no more than 100 pending emails across queued and in-flight archive work.
+ST52 - If accepting the current visible page would exceed 100 pending archive emails, the advance/archive action is disabled until enough queued archive work completes.
+ST53 - Background archive work must send archive requests in two-message client batches and run those batches in parallel so the provider gate, not the UI, controls final throughput.
+ST54 - Advancing must prioritize showing the prefetched next page, enqueueing the previous page, and making the action usable again before any folder metadata reconciliation.
+ST55 - Folder metadata refresh after archive or unarchive is only a count/metadata reconciliation step and must not fetch the next message page or block the prefetched page from being shown.
+ST56 - If folder metadata reconciliation is slow or fails after archive or unarchive, the Shared Triage mailbox list remains usable and counts can reconcile later.
+ST57 - If no next page is available, advancing archives the current visible page and leaves the mailbox inbox empty until live updates or a refresh provide more messages.
 
 ## Scenarios
 
@@ -268,6 +271,9 @@ Business logic covered:
 - ST52
 - ST53
 - ST54
+- ST55
+- ST56
+- ST57
 
 Given:
 - A user opens a mailbox-capable Shared Triage inbox with view access to the shared mailbox.
@@ -279,10 +285,10 @@ Expected:
 - The next page is prefetched after the visible page loads.
 - Created, updated, and deleted message events still refresh the active mailbox view live.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
-- Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and archives only the frozen previous-page IDs.
-- The frozen previous-page IDs are sent in one frontend batch archive request.
-- The advance action is disabled while the archive request is in flight.
-- After the archive request completes, the advance action can become usable again without waiting for folder/count metadata refresh.
+- Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.
+- The frozen previous-page IDs are sent in two-message client batch requests that run in parallel in the background.
+- The advance action becomes usable again immediately after the next page is shown and the previous page is queued.
+- The hidden archive queue accepts at most 100 pending emails; if adding the current page would exceed that limit, the advance action is disabled until enough background archive work completes.
 - Folder metadata refresh runs after the primary archive-and-next work as reconciliation only; it does not fetch the next email page.
 - If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
 - If there is no next page, clicking the advance action archives the visible page and leaves the list empty until more messages arrive or a refresh reloads the inbox.
