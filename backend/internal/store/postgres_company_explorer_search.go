@@ -168,6 +168,17 @@ with recursive visible_folder_paths as (
   where relationship.company_id=$1::uuid
     and relationship.resource_type='node'
     and `+companyExplorerAccessPredicate("'node'", "relationship.resource_id", "$3", "$4")+`
+), node_organization_links as (
+  select distinct assignment.company_id,
+         assignment.node_id as target_id
+  from node_logic_gate_assignments assignment
+  where assignment.company_id=$1::uuid
+  union
+  select distinct relationship.company_id,
+         relationship.resource_id as target_id
+  from project_relationships relationship
+  where relationship.company_id=$1::uuid
+    and relationship.resource_type='node'
 ), all_locations as (
   select item.target_type,
          item.target_id,
@@ -216,8 +227,12 @@ with recursive visible_folder_paths as (
     on location.rank=1
    and location.target_type='node'
    and location.target_id=node.node_id
+  left join node_organization_links node_link
+    on node_link.company_id=node.company_id
+   and node_link.target_id=node.node_id
   where node.company_id=$1::uuid
     and `+companyExplorerAccessPredicate("'node'", "node.node_id", "$3", "$4")+`
+    and (location.target_id is not null or node_link.target_id is null)
   union all
   select project.company_id,
          'project'::text as resource_type,

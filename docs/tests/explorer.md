@@ -40,7 +40,7 @@ E29 - The `company_explorer_items.target_type` constraint allows only `project` 
 E30 - Creating, moving, dragging, batch-placing, or communications-converting a node into Company Explorer is rejected instead of hidden or rerouted.
 E31 - Company Explorer search queries the whole company graph, not only branches that the lazy UI has already opened.
 E32 - Company Explorer search still returns node matches from the source of truth rather than from `company_explorer_items`.
-E33 - Node search result paths are derived from visible Logic Gate assignments and visible project relationships when available; standalone accessible nodes can still appear with no Explorer path.
+E33 - Node search results with Logic Gate assignments or project relationships are returned only when at least one of those organizational paths is visible to the viewer; standalone accessible nodes can still appear with no Explorer path.
 E34 - Company Explorer search orders result types as Logic Gates, nodes, projects, then folders.
 E35 - Company Explorer search results include resource_type, resource_id, display name, match reason, and Explorer location path.
 E36 - Search result display renders the Explorer location path as nested Explorer rows with normal icons.
@@ -182,6 +182,7 @@ Expected:
 - Search returns matches from the whole company, not only loaded UI branches.
 - Search returns node matches from source-of-truth node storage, not from Company Explorer item rows.
 - Node result paths use visible Logic Gate assignment and project relationship context when available.
+- A node whose only Logic Gate assignment or project relationship paths are hidden from the viewer is excluded, even when the viewer has direct access to the node.
 - Standalone accessible node results can appear with an empty Explorer path.
 - Search excludes matches whose Explorer placement or folder ancestry is not visible to the viewer.
 - Logic Gates are listed before nodes, nodes before projects, and projects before folders.
