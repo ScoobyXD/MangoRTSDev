@@ -487,7 +487,7 @@ export function HomeMailWorkspace({
               const draggable = triageView && !draftRow && canDragTriageMessageFromMailbox(mailbox);
               const pendingStarred = pendingStarredMessageIDs.has(message.id);
               const starHovered = hoveredStarMessageID === message.id;
-              const starHighlighted = pendingStarred || message.starred || mailbox === "starred" || starHovered;
+              const starHighlighted = pendingStarred || message.starred || starHovered;
               const rowAddressLabel = draftRow ? (formatAddressList(message.to) || "Draft") : (formatAddressList(message.from) || "Unknown sender");
               const showReadStatus = mailbox === "sent" && !draftRow;
               return (

@@ -3851,6 +3851,10 @@ export function HomePage({
     setNotice("Signature saved.");
   }, [companyID, currentUserID, emailSignature]);
   const activeMessageListKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
+  const activeMailViewCanLoadMessages = canLoadMailForView(activeViewID);
+  const messageListIsCurrent = !activeMailViewCanLoadMessages || loadedMessageListKey === activeMessageListKey;
+  const visibleMessages = messageListIsCurrent ? messages : [];
+  const visibleLoadingMessages = loadingMessages || (activeMailViewCanLoadMessages && !messageListIsCurrent);
   const baseMailboxCounts = useMemo(() => mailboxCountsFromFolders(folders), [folders]);
   const currentMailboxCountKey = mailCountKey(companyID, activeViewID);
   const currentMailboxCountOverrides = mailboxCountOverrides[currentMailboxCountKey] ?? {};
@@ -3903,7 +3907,7 @@ export function HomePage({
   const archiveQueueHasRoomForVisiblePage = queuedArchiveEmailCount + visibleArchiveCandidateCount <= ARCHIVE_QUEUE_MAX_EMAILS;
   const mailFilterStatus = selectedMessageIDs.size > 1
     ? `${selectedMessageIDs.size} selected`
-    : (loadingMessages || loadingMoreMessages) ? "Loading" : "";
+    : (visibleLoadingMessages || loadingMoreMessages) ? "Loading" : "";
   const showLocalEntityRail = !embedded;
   const layoutColumnWidths = isNarrow || isInboxMatrixView || isMyWorkView || isUpdatesView
     ? columnWidths
@@ -4125,13 +4129,13 @@ export function HomePage({
             isArchiveMailbox={isArchiveMailbox}
             listViewLabel={listViewLabel}
             loadingDetail={loadingDetail}
-            loadingMessages={loadingMessages}
+            loadingMessages={visibleLoadingMessages}
             loadingMoreMessages={loadingMoreMessages}
             mailFilterStatus={mailFilterStatus}
             mailbox={mailbox}
             mailboxCounts={mailboxCounts}
             messageListRef={messageListRef}
-            messages={messages}
+            messages={visibleMessages}
             companyUsers={companyUsers}
             notice={notice}
             noticeAction={mailNoticeAction}
