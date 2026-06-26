@@ -1,10 +1,10 @@
-Last updated: 2026-06-20
+Last updated: 2026-06-25
 
 # Updates Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: 0% (rule IDs are not mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project and Logic Gate grouping fields. Other rule IDs are not mapped to automated tests yet.
 
 ## Business Logic
 
@@ -32,6 +32,7 @@ U21 - Updates visibility filters out notifications whose project, logic gate, or
 U22 - Malformed legacy notification IDs are ignored or sanitized before access checks so the feed does not crash.
 U23 - Realtime notification created, deleted, and cleared events preserve affected scopes and trigger feed refreshes.
 U24 - Read-state changes refetch the feed instead of locally inventing or mutating unrelated feed rows.
+U25 - Updates saved grouping views persist Project and Logic Gate grouping fields through the saved-views API.
 
 ## Scenarios
 
@@ -109,3 +110,17 @@ Expected:
 - Clearing notifications can be scoped and publishes a cleared event.
 - Summary counts update after read/delete operations.
 - Realtime events trigger refetches instead of fabricated local feed rows.
+
+### Scenario U-S4: Saved Grouping Views
+
+Business logic covered:
+- U25
+
+Given:
+- A user saves an Updates view grouped by Project and Logic Gate.
+- The user leaves and later reloads Updates saved views.
+
+Expected:
+- Project and Logic Gate grouping fields save through the saved-views API.
+- The saved fields reload in the same grouping order and direction.
+- Unknown Updates grouping fields are rejected instead of silently stored.

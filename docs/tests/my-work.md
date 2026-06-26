@@ -62,12 +62,12 @@ MW36 - My Work pulls only active work. Standalone nodes are active when they are
     d. Done projects do not make their related nodes visible
 MW37 - Expanding or collapsing a grouping row is scoped to the exact matrix cell where the user clicked; the same grouping label/path in another role or priority cell must not change.
 MW38 - Project and Logic Gate are normal My Work grouping fields. Removing either field from the grouping stack hides that grouping/path section while preserving node leaves and any remaining path context.
-MW39 - Dragging a node from one My Work cell to another preserves an existing logic-gate relationship when the dragged row already came from a logic gate; the drop updates that same logic gate assignment/status/priority context instead of moving the node out of the gate or creating a different gate.
-MW40 - Dragging a node without existing logic-gate context into an empty My Work cell can create/add the node to the target cell's new logic-gate context.
-MW41 - The My Work node context menu is a compact command list with Rename, Pin, and Delete. Delete is visually separated from the non-destructive commands.
+MW39 - Dragging a node from one My Work cell to another preserves an existing logic-gate relationship when the dragged row already came from a logic gate; the drop updates that same logic gate GVIC assignment and node priority context instead of moving the node out of the gate or creating a different gate.
+MW40 - Dragging a node without existing logic-gate context between My Work cells updates the node's own priority and GVIC assignment without attaching it to a logic gate.
+MW41 - The My Work node context menu is a compact command list with Open in new browser tab, Rename, Pin, and Delete. Delete is visually separated from the non-destructive commands.
 MW42 - A node deleted from My Work may be hidden optimistically while the delete request is pending. On delete failure the hidden row is restored; on success My Work is refreshed.
-MW43 - Updates grouping supports project and logic gate as normal grouping fields, with no Projects toggle. Updates remains an event/mention feed and must not share My Work's active-work semantics.
-MW44 - My Work saved grouping settings persist through the saved-views API. `logic_gate` is a valid My Work saved-view grouping field and must round-trip through save and reload.
+MW43 - Updates grouping supports project and logic gate as normal grouping fields, and those fields persist through the saved-views API. Updates remains an event/mention feed and must not share My Work's active-work semantics.
+MW44 - My Work saved grouping views persist through the saved-views API. `logic_gate` is a valid My Work saved-view grouping field and must round-trip through save and reload.
 MW45 - My Work remembers the selected saved view per company and current user so returning to the My Work tab does not reset to the first saved view.
 MW46 - The My Work grouping settings panel opens and closes only from the grouping arrow click, not from hover or focus.
 MW47 - Me, Team, and All scope menus open from click and close after selecting a scope or clicking outside the scope menu.
@@ -131,7 +131,7 @@ Expected:
 - Cells are grouped by role and priority.
 - Roles sort generated, verified, consulted, informed.
 - Priorities sort 1 through 5, then no priority.
-- Closed, archived, done, complete, and completed node paths are excluded.
+- Standalone node paths with closed, archived, done, complete, or completed status are excluded unless an active project context keeps the node visible.
 - Closed, archived, done, complete, and completed project contexts are excluded.
 - A standalone `Done` node is excluded.
 - A node marked `Done` remains visible when it is in a relationship with an active project.
@@ -149,7 +149,7 @@ Business logic covered:
 
 Given:
 - A user changes My Work grouping settings.
-- Saved local grouping settings include duplicates or malformed fields.
+- Saved API-backed grouping settings include duplicates or malformed fields.
 - The user switches between saved My Work views and leaves/re-enters the My Work tab.
 - The user opens and closes My Work grouping settings and scope menus.
 - The user right-clicks a saved My Work view.
@@ -161,7 +161,7 @@ Given:
 Expected:
 - Supported My Work grouping fields are account, due date, logic gate, person, project, status, and team.
 - The default grouping is project ascending.
-- Saved grouping settings are isolated by company and user.
+- API-backed saved grouping views are isolated by company and user.
 - Logic Gate grouping saves and reloads through the saved-views API.
 - The selected saved view is restored when returning to My Work.
 - Malformed or duplicate settings are normalized.
@@ -173,11 +173,11 @@ Expected:
 - Expanding a group does not accidentally open the work item.
 - Collapsing or expanding a group in one matrix cell does not collapse or expand matching groups in any other cell.
 - Project and Logic Gate grouping can be removed independently without removing node leaves.
-- The My Work node context menu shows only Rename, Pin, and Delete, with Delete separated.
+- The My Work node context menu shows Open in new browser tab, Rename, Pin, and Delete, with Delete separated.
 - Created work receives the selected priority and creator GVIC role.
 - A dropped node that already belongs to a logic gate keeps that logic-gate relationship and visibly remains under that logic gate after the move.
 - A dropped node appears in the target priority and GVIC role cell after the move.
-- A dropped standalone node can use the target cell creation path.
+- A dropped standalone node updates its own target priority and GVIC role and remains standalone.
 - Deleting a My Work node hides it optimistically, restores it on failure, and refreshes My Work on success.
 - Updates grouping supports Project and Logic Gate as ordinary grouping choices while staying separate from My Work active-work grouping.
 
