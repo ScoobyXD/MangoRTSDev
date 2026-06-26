@@ -19,7 +19,7 @@ export const TeamsContent: React.FC<TeamsContentProps> = ({ accent = "#6366f1", 
   const companyID = getActiveCompanyID();
   const selectedMembership = me?.memberships.find((membership) => membership.company_id === companyID) ?? null;
   const companyLabel = selectedMembership?.company_name?.trim() || "Selected company";
-  const canManageTeams = Boolean(companyID) && (!me || me.is_dev_admin || selectedMembership?.role === "company_admin");
+  const canManageTeams = Boolean(companyID) && (!me || me.is_dev_admin || selectedMembership?.role === "company_admin" || selectedMembership?.role === "company_manager");
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
   const [members, setMembers] = useState<CompanyUserGroupMember[]>([]);
@@ -226,7 +226,7 @@ export const TeamsContent: React.FC<TeamsContentProps> = ({ accent = "#6366f1", 
         {!companyID ? (
           <div style={teamsEmptyStateStyle}>Select a company to manage teams.</div>
         ) : !canManageTeams ? (
-          <div style={teamsEmptyStateStyle}>Company admin access is required to manage teams.</div>
+          <div style={teamsEmptyStateStyle}>Manager or admin access is required to manage teams.</div>
         ) : (
           <div style={teamsLayoutStyle}>
           <section style={teamsColumnStyle}>

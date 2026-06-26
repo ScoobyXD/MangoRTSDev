@@ -219,17 +219,8 @@ func TestResourceAdminCanViewButCannotEditPermissions(t *testing.T) {
 	getReq.Header.Set("Authorization", resourceAdminToken)
 	getRes := httptest.NewRecorder()
 	handler.ServeHTTP(getRes, getReq)
-	if getRes.Code != http.StatusOK {
-		t.Fatalf("resource admin GET permissions status = %d, want %d body=%s", getRes.Code, http.StatusOK, strings.TrimSpace(getRes.Body.String()))
-	}
-	var getPayload struct {
-		CanEditPermissions bool `json:"can_edit_permissions"`
-	}
-	if err := json.Unmarshal(getRes.Body.Bytes(), &getPayload); err != nil {
-		t.Fatalf("decode permissions: %v", err)
-	}
-	if getPayload.CanEditPermissions {
-		t.Fatalf("resource admin can_edit_permissions = true, want false for non-company-admin")
+	if getRes.Code != http.StatusForbidden {
+		t.Fatalf("resource admin GET permissions status = %d, want %d body=%s", getRes.Code, http.StatusForbidden, strings.TrimSpace(getRes.Body.String()))
 	}
 
 	body, _ := json.Marshal(map[string]any{
@@ -265,6 +256,94 @@ func TestResourceAdminCanViewButCannotEditPermissions(t *testing.T) {
 	}
 	if !companyPayload.CanEditPermissions {
 		t.Fatalf("company admin can_edit_permissions = false, want true")
+	}
+}
+
+func TestCompanyManagerCanEditUserPermissionsButNotManagerRows(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-11111111111a"
+	repo.EnsureCompany(companyID, "Permission Manager Co")
+
+	if _, err := repo.UpsertAuthUser("permission-manager", "manager@example.com", "Manager User"); err != nil {
+		t.Fatalf("UpsertAuthUser manager: %v", err)
+	}
+	peerManager, err := repo.UpsertAuthUser("permission-peer-manager", "peer-manager@example.com", "Peer Manager")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser peer manager: %v", err)
+	}
+	targetUser, err := repo.UpsertAuthUser("permission-manager-target", "target@example.com", "Target User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser target: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("permission-manager", companyID, domain.RoleCompanyManager); err != nil {
+		t.Fatalf("AddCompanyMembership manager: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("permission-peer-manager", companyID, domain.RoleCompanyManager); err != nil {
+		t.Fatalf("AddCompanyMembership peer manager: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("permission-manager-target", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership target: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Manager permission gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
+	managerToken := "Bearer " + testJWT(t, key, "kid", "permission-manager", "manager@example.com")
+
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions?company_id="+companyID, nil)
+	getReq.Header.Set("Authorization", managerToken)
+	getRes := httptest.NewRecorder()
+	handler.ServeHTTP(getRes, getReq)
+	if getRes.Code != http.StatusOK {
+		t.Fatalf("manager GET permissions status = %d, want %d body=%s", getRes.Code, http.StatusOK, strings.TrimSpace(getRes.Body.String()))
+	}
+	var getPayload struct {
+		CanEditPermissions        bool `json:"can_edit_permissions"`
+		CanEditManagerPermissions bool `json:"can_edit_manager_permissions"`
+	}
+	if err := json.Unmarshal(getRes.Body.Bytes(), &getPayload); err != nil {
+		t.Fatalf("decode manager permissions: %v", err)
+	}
+	if !getPayload.CanEditPermissions {
+		t.Fatalf("manager can_edit_permissions = false, want true")
+	}
+	if getPayload.CanEditManagerPermissions {
+		t.Fatalf("manager can_edit_manager_permissions = true, want false")
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"company_id":     companyID,
+		"default_access": store.ResourceDefaultAccessEdit,
+		"override_user_ids": []string{
+			peerManager.UserID,
+			targetUser.UserID,
+		},
+	})
+	putReq := httptest.NewRequest(http.MethodPut, "/v1/logic-gates/"+logicGate.LogicGateID+"/permissions", strings.NewReader(string(body)))
+	putReq.Header.Set("Authorization", managerToken)
+	putReq.Header.Set("Content-Type", "application/json")
+	putRes := httptest.NewRecorder()
+	handler.ServeHTTP(putRes, putReq)
+	if putRes.Code != http.StatusOK {
+		t.Fatalf("manager PUT permissions status = %d, want %d body=%s", putRes.Code, http.StatusOK, strings.TrimSpace(putRes.Body.String()))
+	}
+	if access, err := repo.UserCanAccessEntity(companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, peerManager.UserID, store.EntityPermissionEdit); err != nil || !access {
+		t.Fatalf("peer manager access = %v err=%v, want true", access, err)
+	}
+	if access, err := repo.UserCanAccessEntity(companyID, store.EntityTypeLogicGate, logicGate.LogicGateID, targetUser.UserID, store.EntityPermissionEdit); err != nil || access {
+		t.Fatalf("target user access = %v err=%v, want false", access, err)
+	}
+	permissions, err := repo.ListEntityPermissions(companyID, store.EntityTypeLogicGate, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("ListEntityPermissions: %v", err)
+	}
+	if len(permissions) != 1 || permissions[0].SubjectID != targetUser.UserID || permissions[0].AccessLevel != store.EntityPermissionNoAccess {
+		t.Fatalf("permissions = %+v, want only target no_access row", permissions)
 	}
 }
 

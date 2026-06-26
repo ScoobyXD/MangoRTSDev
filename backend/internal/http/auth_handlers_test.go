@@ -538,6 +538,52 @@ func TestCreateInvitationRejectsCompanyUser(t *testing.T) {
 	}
 }
 
+func TestCompanyManagerInvitationRoleCeiling(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-1111111111aa"
+	const subject = "company-manager-subject"
+	repo.EnsureCompany(companyID, "MangoRTS Dev")
+	if _, err := repo.UpsertAuthUser(subject, "manager@example.com", "Manager User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyManager); err != nil {
+		t.Fatal(err)
+	}
+	cognito := &recordingCognitoAdmin{}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		CognitoAdmin:  cognito,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, "manager@example.com")
+
+	for _, tc := range []struct {
+		email string
+		role  string
+	}{
+		{email: "new-user@example.com", role: domain.RoleCompanyUser},
+		{email: "new-manager@example.com", role: domain.RoleCompanyManager},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/v1/invitations", strings.NewReader(`{"company_id":"`+companyID+`","email":"`+tc.email+`","role":"`+tc.role+`"}`))
+		req.Header.Set("Authorization", token)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusCreated {
+			t.Fatalf("manager invite role %s status = %d, want %d, body=%s", tc.role, res.Code, http.StatusCreated, strings.TrimSpace(res.Body.String()))
+		}
+	}
+
+	adminReq := httptest.NewRequest(http.MethodPost, "/v1/invitations", strings.NewReader(`{"company_id":"`+companyID+`","email":"new-admin@example.com","role":"company_admin"}`))
+	adminReq.Header.Set("Authorization", token)
+	adminRes := httptest.NewRecorder()
+	handler.ServeHTTP(adminRes, adminReq)
+	if adminRes.Code != http.StatusBadRequest {
+		t.Fatalf("manager invite company_admin status = %d, want %d, body=%s", adminRes.Code, http.StatusBadRequest, strings.TrimSpace(adminRes.Body.String()))
+	}
+}
+
 func TestInvitationAcceptRejectsOlderTokenForSameCompanyEmail(t *testing.T) {
 	t.Parallel()
 

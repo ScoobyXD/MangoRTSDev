@@ -178,6 +178,10 @@ func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusConflict, "cannot_delete_self")
 		return
 	}
+	if !actorCanManageCompany(actor, companyID) && domain.CanBypassResourcePermissions(target.Role) {
+		writeError(w, http.StatusForbidden, "company_admin_required")
+		return
+	}
 	var emailConnections []domain.UserEmailConnection
 	if s.nylasClient != nil {
 		emailConnections, err = s.repo.ListUserEmailConnections(userID)
@@ -836,8 +840,8 @@ func requireCompanyManager(w http.ResponseWriter, r *http.Request, companyID str
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return false
 	}
-	if !actorCanManageCompany(actor, companyID) {
-		writeError(w, http.StatusForbidden, "company_admin_required")
+	if !actorCanManageCompanyUsers(actor, companyID) {
+		writeError(w, http.StatusForbidden, "company_manager_required")
 		return false
 	}
 	return true
@@ -866,4 +870,11 @@ func actorCanManageCompany(actor ActorContext, companyID string) bool {
 		return true
 	}
 	return actorRoleForCompany(actor, companyID) == domain.RoleCompanyAdmin
+}
+
+func actorCanManageCompanyUsers(actor ActorContext, companyID string) bool {
+	if actorCanManageCompany(actor, companyID) {
+		return true
+	}
+	return actorRoleForCompany(actor, companyID) == domain.RoleCompanyManager
 }

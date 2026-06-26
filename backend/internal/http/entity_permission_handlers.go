@@ -120,6 +120,16 @@ func (s *Server) requireEntityAdmin(w http.ResponseWriter, r *http.Request, comp
 	return s.requireEntityAccess(w, r, companyID, entityType, entityID, store.EntityPermissionAdmin, notFoundCode)
 }
 
+func (s *Server) actorCanEditEntityPermissions(actor ActorContext, companyID, entityType, entityID string) (bool, error) {
+	if actorCanManageCompany(actor, companyID) {
+		return true, nil
+	}
+	if actorRoleForCompany(actor, companyID) != domain.RoleCompanyManager {
+		return false, nil
+	}
+	return s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, entityType, entityID, store.EntityPermissionEdit)
+}
+
 func (s *Server) visibleEntityIDSet(r *http.Request, companyID, entityType string, entityIDs []string) (map[string]bool, error) {
 	cleanIDs := make([]string, 0, len(entityIDs))
 	seen := map[string]bool{}
@@ -577,6 +587,15 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		if !s.requireEntityView(w, r, companyID, entityType, entityID, notFoundCode) {
 			return
 		}
+		actor, ok := authenticatedActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if !actorCanManageCompanyUsers(actor, companyID) {
+			writeError(w, http.StatusForbidden, "company_manager_required")
+			return
+		}
 		permissions, err := s.repo.ListEntityPermissions(companyID, entityType, entityID)
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_entity_permissions")
@@ -616,17 +635,26 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 			writeError(w, http.StatusInternalServerError, "failed_to_load_entity_default_access")
 			return
 		}
-		actor, _ := authenticatedActor(r)
+		canEditPermissions, err := s.actorCanEditEntityPermissions(actor, companyID, entityType, entityID)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_check_entity_permission")
+			return
+		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-			"company_id":           companyID,
-			"entity_type":          entityType,
-			"entity_id":            entityID,
-			"default_access":       defaultAccess,
-			"permissions":          permissions,
-			"access_grants":        permissions,
-			"override_user_ids":    entityPermissionUserIDs(permissions),
-			"effective_access":     effectiveAccess,
-			"can_edit_permissions": actorCanManageCompany(actor, companyID),
+			"company_id":                   companyID,
+			"entity_type":                  entityType,
+			"entity_id":                    entityID,
+			"default_access":               defaultAccess,
+			"permissions":                  permissions,
+			"access_grants":                permissions,
+			"override_user_ids":            entityPermissionUserIDs(permissions),
+			"effective_access":             effectiveAccess,
+			"can_edit_permissions":         canEditPermissions,
+			"can_edit_manager_permissions": actorCanManageCompany(actor, companyID),
 		})
 		return
 	}
@@ -640,10 +668,18 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	req.CompanyID = strings.TrimSpace(req.CompanyID)
-	if !requireCompanyManager(w, r, req.CompanyID) {
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	actor, _ := authenticatedActor(r)
+	if !actorCanManageCompanyUsers(actor, req.CompanyID) {
+		writeError(w, http.StatusForbidden, "company_manager_required")
+		return
+	}
+	if !actorCanManageCompany(actor, req.CompanyID) && !s.requireEntityAccess(w, r, req.CompanyID, entityType, entityID, store.EntityPermissionEdit, notFoundCode) {
+		return
+	}
 	permissions, err := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        req.CompanyID,
 		EntityType:       entityType,
@@ -721,7 +757,7 @@ func (s *Server) entityEffectiveAccessByUser(companyID, entityType, entityID str
 			if userID == "" {
 				continue
 			}
-			if domain.CanManageCompany(user.Role) {
+			if domain.CanBypassResourcePermissions(user.Role) {
 				out = append(out, map[string]string{"user_id": userID, "access_level": store.EntityPermissionAdmin})
 				continue
 			}

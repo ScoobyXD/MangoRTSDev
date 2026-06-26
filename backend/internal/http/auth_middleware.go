@@ -348,7 +348,7 @@ func actorRoleForCompany(actor ActorContext, companyID string) string {
 }
 
 func (s *Server) authorizeCompanyRequest(w http.ResponseWriter, r *http.Request, actor ActorContext, companyID, role string) bool {
-	if actor.IsDevAdmin || role == domain.RoleCompanyAdmin || role == domain.RoleCompanyUser {
+	if actor.IsDevAdmin || role == domain.RoleCompanyAdmin || role == domain.RoleCompanyManager || role == domain.RoleCompanyUser {
 		return true
 	}
 	writeError(w, http.StatusForbidden, "company_access_denied")

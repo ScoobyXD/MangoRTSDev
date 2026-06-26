@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	RoleDevAdmin     = "dev_admin"
-	RoleCompanyAdmin = "company_admin"
-	RoleCompanyUser  = "company_user"
+	RoleDevAdmin       = "dev_admin"
+	RoleCompanyAdmin   = "company_admin"
+	RoleCompanyManager = "company_manager"
+	RoleCompanyUser    = "company_user"
 )
 
 const (
@@ -23,6 +24,8 @@ func NormalizeRole(role string) string {
 		return RoleDevAdmin
 	case RoleCompanyAdmin, "owner", "admin":
 		return RoleCompanyAdmin
+	case RoleCompanyManager, "manager":
+		return RoleCompanyManager
 	case RoleCompanyUser, "member", "agent", "":
 		return RoleCompanyUser
 	default:
@@ -32,7 +35,25 @@ func NormalizeRole(role string) string {
 
 func CanManageCompany(role string) bool {
 	role = NormalizeRole(role)
+	return role == RoleDevAdmin || role == RoleCompanyAdmin || role == RoleCompanyManager
+}
+
+func CanBypassResourcePermissions(role string) bool {
+	role = NormalizeRole(role)
 	return role == RoleDevAdmin || role == RoleCompanyAdmin
+}
+
+func CanInviteCompanyRole(inviterRole, targetRole string) bool {
+	inviterRole = NormalizeRole(inviterRole)
+	targetRole = NormalizeRole(targetRole)
+	switch inviterRole {
+	case RoleDevAdmin, RoleCompanyAdmin:
+		return targetRole == RoleCompanyAdmin || targetRole == RoleCompanyManager || targetRole == RoleCompanyUser
+	case RoleCompanyManager:
+		return targetRole == RoleCompanyManager || targetRole == RoleCompanyUser
+	default:
+		return false
+	}
 }
 
 type User struct {

@@ -173,25 +173,25 @@ func TestCommunicationsSharedInboxAccessRouteDoesNotConvertGVICAssignmentsToPerm
 	}
 }
 
-func TestCommunicationsSharedInboxAdminCanManageAccess(t *testing.T) {
+func TestCommunicationsSharedInboxManagerCanManageAccess(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
-	companyID := "company-shared-inbox-resource-admin"
-	repo.EnsureCompany(companyID, "Shared Inbox Resource Admin")
+	companyID := "company-shared-inbox-manager"
+	repo.EnsureCompany(companyID, "Shared Inbox Manager")
 	handler := server.Routes()
 
-	adminUser, err := repo.UpsertAuthUser("subject-shared-resource-admin", "resource-admin@example.com", "Resource Admin")
+	managerUser, err := repo.UpsertAuthUser("subject-shared-resource-manager", "resource-manager@example.com", "Resource Manager")
 	if err != nil {
-		t.Fatalf("UpsertAuthUser admin error = %v", err)
+		t.Fatalf("UpsertAuthUser manager error = %v", err)
 	}
 	targetUser, err := repo.UpsertAuthUser("subject-shared-resource-target", "resource-target@example.com", "Resource Target")
 	if err != nil {
 		t.Fatalf("UpsertAuthUser target error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership(adminUser.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
-		t.Fatalf("AddCompanyMembership admin error = %v", err)
+	if _, err := repo.AddCompanyMembership(managerUser.CognitoSubject, companyID, domain.RoleCompanyManager); err != nil {
+		t.Fatalf("AddCompanyMembership manager error = %v", err)
 	}
 	if _, err := repo.AddCompanyMembership(targetUser.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership target error = %v", err)
@@ -206,9 +206,9 @@ func TestCommunicationsSharedInboxAdminCanManageAccess(t *testing.T) {
 		EntityID:         folder.FolderID,
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
-		OverrideUserIDs:  []string{adminUser.UserID},
+		OverrideUserIDs:  []string{managerUser.UserID},
 	}); err != nil {
-		t.Fatalf("SetEntityPermissions admin error = %v", err)
+		t.Fatalf("SetEntityPermissions manager error = %v", err)
 	}
 
 	body, _ := json.Marshal(map[string]any{
@@ -220,22 +220,22 @@ func TestCommunicationsSharedInboxAdminCanManageAccess(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+folder.FolderID+"/access", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), actorContextKey{}, ActorContext{
-		User: adminUser,
+		User: managerUser,
 		Memberships: []domain.CompanyMembership{
-			{CompanyID: companyID, UserID: adminUser.UserID, Role: domain.RoleCompanyUser},
+			{CompanyID: companyID, UserID: managerUser.UserID, Role: domain.RoleCompanyManager},
 		},
 	}))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT shared inbox access as resource admin status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		t.Fatalf("PUT shared inbox access as manager status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	allowed, err := repo.UserHasEffectiveAccess(companyID, targetUser.UserID, store.EntityTypeSharedInboxFolder, folder.FolderID, store.EntityPermissionView)
 	if err != nil {
 		t.Fatalf("UserHasEffectiveAccess target: %v", err)
 	}
 	if !allowed {
-		t.Fatal("resource admin access update did not grant target view access")
+		t.Fatal("manager access update did not grant target view access")
 	}
 }
 

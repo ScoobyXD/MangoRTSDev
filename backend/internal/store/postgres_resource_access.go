@@ -158,7 +158,23 @@ do update set updated_timestamp=now()`, companyID, resourceType, resourceID, use
 	return err
 }
 
-func postgresResourceOverrideUserIDsFromInput(ctx context.Context, tx *sql.Tx, input EntityPermissionUpdateInput, defaultAccess string) ([]string, error) {
+func postgresActorCanMutateManagerOverrides(ctx context.Context, tx *sql.Tx, companyID, actorUserID string) (bool, error) {
+	actorUserID = cleanUUIDText(actorUserID)
+	if actorUserID == "" {
+		return true, nil
+	}
+	var allowed bool
+	err := tx.QueryRowContext(ctx, `
+select exists(
+  select 1
+  from company_memberships
+  where user_id=$1::uuid
+    and (role='dev_admin' or (company_id=$2::uuid and role='company_admin'))
+)`, actorUserID, companyID).Scan(&allowed)
+	return allowed, err
+}
+
+func postgresResourceOverrideUserIDsFromInput(ctx context.Context, tx *sql.Tx, input EntityPermissionUpdateInput, defaultAccess string, canMutateManagerOverrides bool) ([]string, error) {
 	if ctx == nil || tx == nil {
 		return nil, ErrInvalid
 	}
@@ -185,7 +201,11 @@ where company_id=$1::uuid and user_id=$2::uuid`, companyID, userID).Scan(&role)
 		if err != nil {
 			return err
 		}
-		if domain.CanManageCompany(role) {
+		role = domain.NormalizeRole(role)
+		if domain.CanBypassResourcePermissions(role) {
+			return nil
+		}
+		if role == domain.RoleCompanyManager && !canMutateManagerOverrides {
 			return nil
 		}
 		seen[userID] = true
@@ -287,6 +307,11 @@ func setPostgresResourceAccessPolicyTx(ctx context.Context, tx *sql.Tx, input En
 	if err != nil {
 		return err
 	}
+	oldDefaultAccess := defaultAccess
+	canMutateManagerOverrides, err := postgresActorCanMutateManagerOverrides(ctx, tx, companyID, input.ActorUserID)
+	if err != nil {
+		return err
+	}
 	defaultAccessChanged := false
 	if input.DefaultAccessSet {
 		defaultAccess, ok = NormalizeResourceDefaultAccess(input.DefaultAccess)
@@ -309,9 +334,25 @@ func setPostgresResourceAccessPolicyTx(ctx context.Context, tx *sql.Tx, input En
 			return err
 		}
 	}
-	overrideUserIDs, err := postgresResourceOverrideUserIDsFromInput(ctx, tx, input, defaultAccess)
+	overrideUserIDs, err := postgresResourceOverrideUserIDsFromInput(ctx, tx, input, defaultAccess, canMutateManagerOverrides)
 	if err != nil {
 		return err
+	}
+	if !canMutateManagerOverrides {
+		preservedManagerOverrideUserIDs, err := postgresPreservedManagerOverrideUserIDs(ctx, tx, companyID, entityType, entityID, oldDefaultAccess, defaultAccess)
+		if err != nil {
+			return err
+		}
+		seen := make(map[string]bool, len(overrideUserIDs)+len(preservedManagerOverrideUserIDs))
+		for _, userID := range overrideUserIDs {
+			seen[userID] = true
+		}
+		for _, userID := range preservedManagerOverrideUserIDs {
+			if !seen[userID] {
+				overrideUserIDs = append(overrideUserIDs, userID)
+				seen[userID] = true
+			}
+		}
 	}
 	if err := deletePostgresResourceOverridesTx(ctx, tx, companyID, entityType, entityID); err != nil {
 		return err
@@ -329,6 +370,41 @@ where company_id=$1::uuid
 		}
 	}
 	return nil
+}
+
+func postgresPreservedManagerOverrideUserIDs(ctx context.Context, tx *sql.Tx, companyID, entityType, entityID, oldDefaultAccess, newDefaultAccess string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `
+select membership.user_id::text,
+       access.user_id is not null as has_override
+from company_memberships membership
+left join resource_permissions access
+  on access.company_id=membership.company_id
+ and access.resource_type=$2
+ and access.resource_id=$3::uuid
+ and access.user_id=membership.user_id
+where membership.company_id=$1::uuid
+  and membership.role='company_manager'
+order by membership.user_id::text`, companyID, entityType, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var userID string
+		var hasOverride bool
+		if err := rows.Scan(&userID, &hasOverride); err != nil {
+			return nil, err
+		}
+		effectiveAccess := oldDefaultAccess
+		if hasOverride {
+			effectiveAccess = OppositeResourceDefaultAccess(oldDefaultAccess)
+		}
+		if effectiveAccess != newDefaultAccess {
+			out = append(out, userID)
+		}
+	}
+	return out, rows.Err()
 }
 
 func copyPostgresLogicGateAccessPolicyToNodeTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID, nodeID string) error {

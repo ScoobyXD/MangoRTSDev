@@ -784,20 +784,28 @@ func (r *PostgresRepo) CreateInvitation(input CreateInvitationInput) (domain.Inv
 	if !companyExists {
 		return domain.Invitation{}, ErrNotFound
 	}
-	var inviterCanManage bool
+	var inviterRole string
 	if err = tx.QueryRow(
-		`select exists(
-		   select 1
-		   from company_memberships
-		   where user_id = $1
-		     and (role = 'dev_admin' or (company_id = $2 and role = 'company_admin'))
-		 )`,
+		`select role
+		 from company_memberships
+		 where user_id = $1
+		   and (role = 'dev_admin' or company_id = $2)
+		 order by case
+		   when role = 'dev_admin' then 3
+		   when role = 'company_admin' then 2
+		   when role = 'company_manager' then 1
+		   else 0
+		 end desc
+		 limit 1`,
 		invitedByUserID,
 		companyID,
-	).Scan(&inviterCanManage); err != nil {
+	).Scan(&inviterRole); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Invitation{}, ErrInvalid
+		}
 		return domain.Invitation{}, err
 	}
-	if !inviterCanManage {
+	if !domain.CanInviteCompanyRole(inviterRole, role) {
 		return domain.Invitation{}, ErrInvalid
 	}
 	var existingCompanyUser bool

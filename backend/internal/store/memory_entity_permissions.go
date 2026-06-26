@@ -389,7 +389,7 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 			if !ok {
 				return nil, ErrPrincipalNotInCompany
 			}
-			if (entityType == EntityTypeNode || entityType == EntityTypeLogicGate) && permission == EntityPermissionNoAccess && domain.CanManageCompany(membership.Role) {
+			if (entityType == EntityTypeNode || entityType == EntityTypeLogicGate) && permission == EntityPermissionNoAccess && domain.CanBypassResourcePermissions(membership.Role) {
 				continue
 			}
 		} else if _, ok := r.userGroups[userGroupKey(companyID, subjectID)]; !ok {
@@ -515,6 +515,11 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 		return nil, ErrNotFound
 	}
 	defaultAccess, _ := r.defaultAccessForResourceLocked(companyID, entityType, entityID)
+	oldDefaultAccess := defaultAccess
+	canMutateManagerOverrides := true
+	if strings.TrimSpace(input.ActorUserID) != "" {
+		canMutateManagerOverrides = r.userCanMutateManagerResourceOverridesLocked(companyID, input.ActorUserID)
+	}
 	defaultAccessChanged := false
 	if input.DefaultAccessSet {
 		nextDefaultAccess, ok := NormalizeResourceDefaultAccess(input.DefaultAccess)
@@ -573,7 +578,11 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 		if !ok {
 			return ErrPrincipalNotInCompany
 		}
-		if domain.CanManageCompany(membership.Role) {
+		role := domain.NormalizeRole(membership.Role)
+		if domain.CanBypassResourcePermissions(role) {
+			return nil
+		}
+		if role == domain.RoleCompanyManager && !canMutateManagerOverrides {
 			return nil
 		}
 		overrideUserIDs[userID] = true
@@ -627,6 +636,21 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 			}
 		}
 	}
+	if !canMutateManagerOverrides {
+		for _, membership := range r.memberships {
+			if membership.CompanyID != companyID || domain.NormalizeRole(membership.Role) != domain.RoleCompanyManager {
+				continue
+			}
+			hasOverride := r.resourceAccessOverrideExistsLocked(companyID, entityType, entityID, membership.UserID)
+			effectiveAccess := oldDefaultAccess
+			if hasOverride {
+				effectiveAccess = OppositeResourceDefaultAccess(oldDefaultAccess)
+			}
+			if effectiveAccess != defaultAccess {
+				overrideUserIDs[membership.UserID] = true
+			}
+		}
+	}
 
 	for permissionKey, permission := range r.entityPermissions {
 		if permission.CompanyID == companyID && permission.EntityType == entityType && permission.EntityID == entityID {
@@ -670,6 +694,21 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 	}
 	sortEntityPermissions(out)
 	return out, nil
+}
+
+func (r *MemoryRepo) userCanMutateManagerResourceOverridesLocked(companyID, userID string) bool {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return false
+	}
+	for _, membership := range r.memberships {
+		if membership.UserID == userID && domain.NormalizeRole(membership.Role) == domain.RoleDevAdmin {
+			return true
+		}
+	}
+	membership, ok := r.memberships[membershipKey(companyID, userID)]
+	return ok && domain.NormalizeRole(membership.Role) == domain.RoleCompanyAdmin
 }
 
 func (r *MemoryRepo) UserCanViewEntity(companyID, entityType, entityID, userID string) (bool, error) {

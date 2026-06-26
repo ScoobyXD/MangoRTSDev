@@ -701,7 +701,7 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 			if err != nil {
 				return nil, err
 			}
-			if (entityType == EntityTypeNode || entityType == EntityTypeLogicGate) && item.permission == EntityPermissionNoAccess && domain.CanManageCompany(role) {
+			if (entityType == EntityTypeNode || entityType == EntityTypeLogicGate) && item.permission == EntityPermissionNoAccess && domain.CanBypassResourcePermissions(role) {
 				continue
 			}
 		case EntityPermissionSubjectGroup:

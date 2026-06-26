@@ -752,7 +752,7 @@ func (r *MemoryRepo) CreateInvitation(input CreateInvitationInput) (domain.Invit
 	if _, ok := r.companies[companyID]; !ok {
 		return domain.Invitation{}, ErrNotFound
 	}
-	if !r.userCanCreateInvitationLocked(invitedByUserID, companyID) {
+	if !domain.CanInviteCompanyRole(r.companyInvitationRoleForUserLocked(invitedByUserID, companyID), role) {
 		return domain.Invitation{}, ErrInvalid
 	}
 	for _, user := range r.users {
@@ -929,17 +929,24 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 	return invitation, nil
 }
 
-func (r *MemoryRepo) userCanCreateInvitationLocked(userID, companyID string) bool {
+func (r *MemoryRepo) companyInvitationRoleForUserLocked(userID, companyID string) string {
 	userID = strings.TrimSpace(userID)
 	companyID = strings.TrimSpace(companyID)
 	if userID == "" || companyID == "" {
-		return false
+		return ""
 	}
 	for _, membership := range r.memberships {
 		if membership.UserID == userID && membership.Role == domain.RoleDevAdmin {
-			return true
+			return domain.RoleDevAdmin
 		}
 	}
 	membership, ok := r.memberships[membershipKey(companyID, userID)]
-	return ok && membership.Role == domain.RoleCompanyAdmin
+	if !ok {
+		return ""
+	}
+	return domain.NormalizeRole(membership.Role)
+}
+
+func (r *MemoryRepo) userCanCreateInvitationLocked(userID, companyID string) bool {
+	return domain.CanManageCompany(r.companyInvitationRoleForUserLocked(userID, companyID))
 }
