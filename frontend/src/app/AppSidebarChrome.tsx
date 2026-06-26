@@ -25,6 +25,7 @@ import {
   type CommunicationsTriageConversionTarget,
   type EmailProvider,
 } from "../modules/communications/communicationsApi";
+import { assignNodeToLogicGateStatus } from "../modules/kanban/kanbanApi";
 import { INBOX_PRIORITIES } from "../pages/home/homeConstants";
 import { convertMessagesToExplorerTargetCommand } from "../pages/home/homeCommands";
 import {
@@ -37,6 +38,13 @@ import {
   type SharedInboxDropPlacement,
   type SharedInboxTreeRow,
 } from "../pages/home/homeUtils";
+import {
+  hasSidebarPinSectionDrop,
+  readSidebarPinnedResourceDropAction,
+  sidebarPinAcceptsPinnedResourceDrop,
+  type SidebarPinDropPlacement,
+  type SidebarPinnedResourceDropAction,
+} from "./sidebarPinDrops";
 
 const SidebarCompanyExplorerContent = React.lazy(() => import("../modules/company-explorer/CompanyExplorerContent").then((module) => ({ default: module.CompanyExplorerContent })));
 const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorContent").then((module) => ({
@@ -131,6 +139,14 @@ type SidebarExplorerTriagePriorityMenuState = {
   y: number;
   target: Parameters<CompanyExplorerTriageMessageDropHandler>[0];
   messageIDs: string[];
+};
+
+type SidebarPinTriageDropAction = Extract<SidebarPinnedResourceDropAction, { kind: "triage_to_logic_gate" | "triage_to_node" }>;
+
+type SidebarPinTriagePriorityMenuState = {
+  x: number;
+  y: number;
+  action: SidebarPinTriageDropAction;
 };
 
 type SidebarSharedInboxCreateDialogState = {
@@ -252,9 +268,11 @@ export function AppSidebar({
   const [sharedDeleteDialog, setSharedDeleteDialog] = useState<SidebarSharedInboxDeleteDialogState | null>(null);
   const [sharedEmailConnectionDialog, setSharedEmailConnectionDialog] = useState<{ accountEmail: string } | null>(null);
   const [pinContextMenu, setPinContextMenu] = useState<{ x: number; y: number; pin: SidebarPin } | null>(null);
-  const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: "before" | "after" } | null>(null);
+  const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: SidebarPinDropPlacement } | null>(null);
   const [explorerTriagePriorityMenu, setExplorerTriagePriorityMenu] = useState<SidebarExplorerTriagePriorityMenuState | null>(null);
+  const [pinTriagePriorityMenu, setPinTriagePriorityMenu] = useState<SidebarPinTriagePriorityMenuState | null>(null);
   const [explorerTriageBusy, setExplorerTriageBusy] = useState(false);
+  const [pinnedResourceDropBusy, setPinnedResourceDropBusy] = useState(false);
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
@@ -330,6 +348,78 @@ export function AppSidebar({
       setExplorerTriageBusy(false);
     }
   }, [companyID, explorerTriageBusy, explorerTriagePriorityMenu]);
+
+  const pinAcceptsResourceDrop = useCallback((pin: SidebarPin, dataTransfer: DataTransfer): boolean => (
+    !pinnedResourceDropBusy && sidebarPinAcceptsPinnedResourceDrop(pin, dataTransfer)
+  ), [pinnedResourceDropBusy]);
+
+  const pinSectionHasValidDrag = useCallback((dataTransfer: DataTransfer): boolean => (
+    hasSidebarPinSectionDrop(dataTransfer) || pins.some((pin) => pinAcceptsResourceDrop(pin, dataTransfer))
+  ), [pinAcceptsResourceDrop, pins]);
+
+  const assignNodesToPinnedLogicGate = useCallback(async (action: Extract<SidebarPinnedResourceDropAction, { kind: "nodes_to_logic_gate" }>) => {
+    const cleanCompanyID = companyID.trim();
+    if (pinnedResourceDropBusy || !cleanCompanyID || action.nodeIDs.length === 0) return;
+    setPinnedResourceDropBusy(true);
+    setSharedError("");
+    try {
+      await Promise.all(action.nodeIDs.map((nodeID) => assignNodeToLogicGateStatus({
+        apiBase: readAuthConfig().apiBase,
+        companyID: cleanCompanyID,
+        logicGateID: action.logicGateID,
+        nodeID,
+        status: "pending",
+        priority: null,
+        position: 0,
+      })));
+    } catch (error) {
+      console.error("Failed to add pinned drop nodes to Logic Gate", error);
+      setSharedError(error instanceof Error ? error.message : "Failed to add node to pinned Logic Gate.");
+    } finally {
+      setPinnedResourceDropBusy(false);
+    }
+  }, [companyID, pinnedResourceDropBusy]);
+
+  const pickPinnedResourceTriagePriority = useCallback(async (priority: number) => {
+    const menu = pinTriagePriorityMenu;
+    const cleanCompanyID = companyID.trim();
+    if (!menu || pinnedResourceDropBusy || !cleanCompanyID) return;
+    setPinTriagePriorityMenu(null);
+    setPinnedResourceDropBusy(true);
+    setSharedError("");
+    try {
+      const target: CommunicationsTriageConversionTarget = menu.action.kind === "triage_to_logic_gate"
+        ? { mode: "existing_logic_gate", logicGateID: menu.action.logicGateID }
+        : { mode: "existing_node", nodeID: menu.action.nodeID };
+      await convertMessagesToExplorerTargetCommand({
+        apiBase: readAuthConfig().apiBase,
+        companyID: cleanCompanyID,
+        target,
+        messageIDs: menu.action.messageIDs,
+        priority,
+      });
+    } catch (error) {
+      console.error("Failed to assign triage email from sidebar pin", error);
+      setSharedError(error instanceof Error ? error.message : "Failed to assign email.");
+    } finally {
+      setPinnedResourceDropBusy(false);
+    }
+  }, [companyID, pinTriagePriorityMenu, pinnedResourceDropBusy]);
+
+  const handlePinnedResourceDrop = useCallback((pin: SidebarPin, event: React.DragEvent<HTMLElement>): boolean => {
+    if (pinnedResourceDropBusy) return false;
+    const action = readSidebarPinnedResourceDropAction(pin, event.dataTransfer);
+    if (!action) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    setPinDropTarget(null);
+    if (action.kind === "nodes_to_logic_gate") {
+      void assignNodesToPinnedLogicGate(action);
+      return true;
+    }
+    setPinTriagePriorityMenu({ x: event.clientX, y: event.clientY, action });
+    return true;
+  }, [assignNodesToPinnedLogicGate, pinnedResourceDropBusy]);
 
   useEffect(() => {
     if (activeHomeView.startsWith("shared:")) return;
@@ -1019,7 +1109,11 @@ export function AppSidebar({
       <section
         style={appSidebarPinnedSectionStyle(pinDropActive || !!pinDropTarget)}
         aria-label="Pinned"
-        onDragEnter={onPinDragEnter}
+        onDragEnter={(event) => {
+          if (hasSidebarPinDrag(event.dataTransfer) || pinSectionHasValidDrag(event.dataTransfer)) {
+            onPinDragEnter();
+          }
+        }}
         onDragOver={(event) => {
           if (hasSidebarPinDrag(event.dataTransfer)) {
             event.preventDefault();
@@ -1065,20 +1159,35 @@ export function AppSidebar({
                   setPinDropTarget(null);
                 }}
                 onDragEnd={() => setPinDropTarget(null)}
+                onDragLeave={(event) => {
+                  const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+                  if (related && event.currentTarget.contains(related)) return;
+                  setPinDropTarget((current) => current?.key === pinKey ? null : current);
+                }}
                 onDragOver={(event) => {
-                  if (!hasSidebarPinDrag(event.dataTransfer)) return;
+                  if (hasSidebarPinDrag(event.dataTransfer)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.dataTransfer.dropEffect = "move";
+                    setPinDropTarget({ key: pinKey, placement: getPinDropPlacement(event) });
+                    return;
+                  }
+                  if (!pinAcceptsResourceDrop(pin, event.dataTransfer)) return;
                   event.preventDefault();
                   event.stopPropagation();
-                  event.dataTransfer.dropEffect = "move";
-                  setPinDropTarget({ key: pinKey, placement: getPinDropPlacement(event) });
+                  event.dataTransfer.dropEffect = "copy";
+                  setPinDropTarget({ key: pinKey, placement: "inside" });
                 }}
                 onDrop={(event) => {
                   const movingPin = readDraggedSidebarPin(event.dataTransfer);
-                  if (!movingPin) return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onPinReorder(movingPin, pin, getPinDropPlacement(event));
-                  setPinDropTarget(null);
+                  if (movingPin) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onPinReorder(movingPin, pin, getPinDropPlacement(event));
+                    setPinDropTarget(null);
+                    return;
+                  }
+                  handlePinnedResourceDrop(pin, event);
                 }}
                 onContextMenu={(event) => {
                   event.preventDefault();
@@ -1168,6 +1277,32 @@ export function AppSidebar({
               style={appSidebarPriorityMenuButtonStyle}
               disabled={explorerTriageBusy}
               onClick={() => void pickExplorerTriagePriority(priority.value)}
+            >
+              {priority.label.replace(/\u00A0/g, " ")}
+            </button>
+          ))}
+        </FrameRightClickMenu>
+      )}
+      {pinTriagePriorityMenu && (
+        <FrameRightClickMenu
+          x={pinTriagePriorityMenu.x}
+          y={pinTriagePriorityMenu.y}
+          width={244}
+          minWidth={244}
+          maxWidth={244}
+          onClose={() => setPinTriagePriorityMenu(null)}
+        >
+          <div style={appSidebarPriorityMenuTitleStyle}>Priority</div>
+          <div style={appSidebarPriorityMenuTargetStyle}>
+            {pinTriagePriorityMenu.action.kind === "triage_to_node" ? "Attach to" : "Create in"} {pinTriagePriorityMenu.action.pin.name}
+          </div>
+          {INBOX_PRIORITIES.map((priority) => (
+            <button
+              key={priority.value}
+              type="button"
+              style={appSidebarPriorityMenuButtonStyle}
+              disabled={pinnedResourceDropBusy}
+              onClick={() => void pickPinnedResourceTriagePriority(priority.value)}
             >
               {priority.label.replace(/\u00A0/g, " ")}
             </button>
@@ -2476,7 +2611,7 @@ const appSidebarEmptyStyle: React.CSSProperties = {
   fontWeight: 600,
 };
 
-function appSidebarPinRowStyle(dropPlacement: "before" | "after" | null): React.CSSProperties {
+function appSidebarPinRowStyle(dropPlacement: SidebarPinDropPlacement | null): React.CSSProperties {
   return {
     minWidth: 0,
     display: "grid",
@@ -2484,11 +2619,15 @@ function appSidebarPinRowStyle(dropPlacement: "before" | "after" | null): React.
     alignItems: "center",
     gap: 4,
     cursor: "grab",
+    borderRadius: 7,
+    background: dropPlacement === "inside" ? "rgba(14, 165, 233, 0.08)" : undefined,
     boxShadow: dropPlacement === "before"
       ? "inset 0 2px 0 rgba(100, 116, 139, 0.58)"
       : dropPlacement === "after"
         ? "inset 0 -2px 0 rgba(100, 116, 139, 0.58)"
-        : undefined,
+        : dropPlacement === "inside"
+          ? "inset 0 0 0 2px rgba(14, 165, 233, 0.26)"
+          : undefined,
   };
 }
 

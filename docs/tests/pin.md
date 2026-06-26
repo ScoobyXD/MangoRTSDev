@@ -1,4 +1,4 @@
-Last updated: 2026-06-24
+Last updated: 2026-06-26
 
 # Pin Tests
 
@@ -24,6 +24,10 @@ PIN13 - Pinned-resource right-click menus put Open in new browser tab first and 
 PIN14 - The sidebar pin section must not read, write, hydrate, or recover pins from browser storage.
 PIN15 - The only frontend pin API surface is /v1/user-pins, /v1/user-pins/{pin_id}, and /v1/user-pins/order; legacy /v1/pins, pinsApi, SIDEBAR_PINS_KEY, label, and addedAt pin compatibility are not allowed.
 PIN16 - The user_pins table is not canonical and must be dropped; backend storage reads and writes the pins table.
+PIN17 - Only pinned nodes and pinned logic gates are valid email drop targets; pinned projects and empty pin-section space are not email drop targets.
+PIN18 - Dropping triage or shared-triage email on a pinned logic gate uses the existing communications conversion path to create node(s) in that logic gate, including the normal priority, permission, GVIC, cache invalidation, and event behavior.
+PIN19 - Dropping triage or shared-triage email on a pinned node attaches the email to that existing node through the existing node conversion path and must not create a duplicate node.
+PIN20 - Dropping a node on a pinned logic gate assigns the existing node to that logic gate through the normal logic-gate node assignment path and must not duplicate the node.
 
 ## Scenarios
 
@@ -132,3 +136,24 @@ Expected:
 - If the API write fails, the frontend does not persist a UI-only pin in browser storage.
 - A fresh incognito session shows the same pins as a normal session after the database row exists.
 - DBeaver queries against public.pins show the saved rows, and public.user_pins does not remain as the app's storage table.
+
+### Scenario PIN-S7: Valid Drop Targets For Pinned Nodes And Logic Gates
+
+Business logic covered:
+- PIN17
+- PIN18
+- PIN19
+- PIN20
+
+Given:
+- A user has pinned a node, a logic gate, and a project.
+- The user drags selected email from My Triage or Shared Triage.
+- The user drags an existing node from a node-capable surface.
+
+Expected:
+- Email over the pinned node and pinned logic gate shows a valid drop target.
+- Email over the pinned project or empty pin-section space is not accepted.
+- Dropping email on the pinned logic gate opens the normal priority selection, then creates node(s) in that logic gate through the communications conversion path.
+- Dropping email on the pinned node opens the normal priority selection, then attaches the email to that existing node without creating a duplicate node.
+- Dropping a node on the pinned logic gate assigns the existing node to the logic gate through the normal assignment endpoint without creating a duplicate node.
+- Permission, GVIC assignment, cache invalidation, and event behavior come from the existing conversion and assignment paths rather than a pin-specific backend shortcut.

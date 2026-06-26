@@ -7,8 +7,6 @@ import FrameRightClickMenu from "./framerightclickmenu";
 import { MangoWordmark } from "./MangoLogo";
 import ModulePickerMenu from "./menus/ModulePickerMenu";
 import { MODULE_LIBRARY as FRAME_MODULE_LIBRARY, preloadModuleKind } from "../modules";
-import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../modules/company-explorer/companyExplorerDragDrop";
-import { EXPLORER_ENTITY_DRAG_MIME, KANBAN_CARD_DRAG_MIME, KANBAN_COLUMN_DRAG_MIME } from "../modules/kanban/shared";
 import type { FrameDataModel, DragState } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { shouldDeferToNativeTextEditing } from "../hooks/keyboardShortcutRouting";
@@ -43,8 +41,9 @@ import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/l
 import { AppLiveFreshnessBridge } from "./AppLiveFreshnessBridge";
 import { useFrameDragResize } from "./useFrameDragResize";
 import { AppNodeEditorPopup, AppSidebar, SIDEBAR_EXPLORER_WIDGET_ID, type HomeSidebarView, type SidebarPin } from "./AppSidebarChrome";
-import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackName, type SidebarPinDraft, type SidebarPinKind, type SidebarPinRequestDetail } from "./sidebarPins";
+import { EVENT_APP_SIDEBAR_PIN_REQUESTED, sidebarPinFallbackName, type SidebarPinDraft, type SidebarPinRequestDetail } from "./sidebarPins";
 import { createSidebarPin, deleteSidebarPin, fetchSidebarPins, reorderSidebarPins } from "./sidebarPinsApi";
+import { hasMangoDragPayload, hasSidebarPinSectionDrop, isSidebarPinKind, sidebarPinsFromDrop } from "./sidebarPinDrops";
 import { TextSelectionNodeCreator } from "../modules/node-map/TextSelectionNodeCreator";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import { AppTaskbar } from "./AppTaskbar";
@@ -199,10 +198,6 @@ function saveSidebarWidth(width: number): void {
   } catch {}
 }
 
-function isSidebarPinKind(value: unknown): value is SidebarPinKind {
-  return value === "node" || value === "logic_gate" || value === "project";
-}
-
 function sidebarPinIdentity(pin: Pick<SidebarPin, "pinID" | "kind" | "id">): string {
   const pinID = pin.pinID.trim();
   return pinID ? `pin:${pinID}` : `${pin.kind}:${pin.id}`;
@@ -237,40 +232,6 @@ function moveSidebarPin(items: SidebarPin[], moving: SidebarPin, target: Sidebar
   const next = [...withoutMoving];
   next.splice(Math.max(0, Math.min(insertIndex, next.length)), 0, movingPin);
   return next;
-}
-
-function sidebarPinsFromDrop(dataTransfer: DataTransfer): SidebarPinDraft[] {
-  const payload = readExplorerDragPayload(dataTransfer);
-  if (!payload) return [];
-  const droppedText = dataTransfer.getData("text/plain").trim();
-
-  if (isSidebarPinKind(payload.kind) && payload.itemID) {
-    const kind = payload.kind;
-    return [{
-      id: payload.itemID.trim(),
-      kind,
-      name: droppedText || sidebarPinFallbackName(kind, payload.itemID),
-    }];
-  }
-
-  if (payload.kind === "batch" && isSidebarPinKind(payload.itemType)) {
-    const kind = payload.itemType;
-    return (payload.items ?? []).map((item) => ({
-      id: item.itemID.trim(),
-      kind,
-      name: sidebarPinFallbackName(kind, item.itemID),
-    }));
-  }
-
-  return [];
-}
-
-function hasMangoDragPayload(dataTransfer: DataTransfer): boolean {
-  const types = Array.from(dataTransfer.types);
-  return types.includes(EXPLORER_DRAG_MIME)
-    || types.includes(EXPLORER_ENTITY_DRAG_MIME)
-    || types.includes(KANBAN_CARD_DRAG_MIME)
-    || types.includes(KANBAN_COLUMN_DRAG_MIME);
 }
 
 function pageForTab(tab: ViewTab): PrimaryPage | null {
@@ -1793,7 +1754,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           onPinDragEnter={() => setPinDropActive(true)}
           onPinDragLeave={() => setPinDropActive(false)}
           onPinDragOver={(event) => {
-            if (sidebarPinsFromDrop(event.dataTransfer).length === 0) return;
+            if (!hasSidebarPinSectionDrop(event.dataTransfer)) return;
             event.preventDefault();
             event.dataTransfer.dropEffect = "copy";
             setPinDropActive(true);
