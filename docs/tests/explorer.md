@@ -1,4 +1,4 @@
-Last updated: 2026-06-24
+Last updated: 2026-06-26
 
 # Explorer Tests
 
@@ -11,14 +11,14 @@ Coverage Status:
 E1 - Explorer V2 root and child reads require a company ID.
 E2 - Explorer V2 supports the all scope and rejects old Me/Team scope behavior.
 E3 - Root reads load the company root containers for the viewer.
-E4 - Child reads require a parent ID that is either the company root or a valid Explorer resource ID.
+E4 - Child reads require a parent ID that is either the company root or a valid Explorer folder resource ID.
 E5 - Explorer reads return only resources where the viewer has effective view access or higher.
 E6 - Explorer rows include effective access so the UI can decide available actions.
-E7 - Explorer rows include has-children information so the UI can lazy-load branches.
+E7 - Explorer rows include has-children information for folder rows so the UI can lazy-load folder branches.
 E8 - Explorer rows sort by position, then creation time, then name, then entity ID.
-E9 - The final Explorer tree is a single-placement tree: each folder, project, logic gate, and node resource has at most one visible Explorer row.
+E9 - The final Company Explorer tree contains folders, subfolders, Logic Gates, and projects only; nodes are not Company Explorer rows.
 E10 - Project rows are standalone leaf rows; project relationships do not render nested Explorer child rows.
-E11 - Logic gate children are derived from node assignments.
+E11 - Logic Gate rows are standalone leaf rows; node assignments do not render as nested Explorer child rows.
 E12 - Creating an Explorer folder requires company, actor, permission user, parent entity, and nonblank folder name.
 E13 - New Explorer folders default to edit access unless a no-access default is explicitly requested.
 E14 - Explorer folders can be created only under the company root or another folder.
@@ -33,20 +33,23 @@ E22 - Explorer placement, update, and removal events publish the affected parent
 E23 - The frontend refreshes loaded branch identities after Explorer events instead of reloading unrelated branches.
 E24 - When refresh context is incomplete, parent entity ID fallback is used to decide which loaded branch should refresh.
 E25 - Every company has one default root folder named Unfiled.
-E26 - Unfiled has exactly three default child folders, in this order: Projects, Logic Gates, Nodes.
-E27 - Bare projects, logic gates, and nodes created outside Company Explorer route to Unfiled/Projects, Unfiled/Logic Gates, and Unfiled/Nodes respectively.
-E28 - Resources explicitly created at the Company Explorer root remain at the root and are not routed into Unfiled.
-E29 - Company Explorer search queries the whole company graph, not only branches that the lazy UI has already opened.
-E30 - Company Explorer search orders result types as logic gates, nodes, projects, then folders.
-E31 - Company Explorer search results include resource_type, resource_id, display name, match reason, and Explorer location path.
-E32 - Search result display renders the Explorer location path as nested Explorer rows with normal icons, and selecting a resource result opens that resource without switching node results to the map background.
-E33 - The default Unfiled folder and its Projects, Logic Gates, and Nodes child folders cannot be renamed or deleted, but resources inside those folders can still be moved or deleted through normal resource actions.
-E34 - While the Explorer search box contains text, the left sidebar hides non-Explorer sections and uses the remaining column for Explorer search results; clearing the search restores the normal sidebar.
-E35 - Dropping a node into an Explorer folder must create or move a Company Explorer folder placement and must not treat a logic-gate assignment or project relationship edge as an Explorer folder-item edge.
-E36 - Once a resource is visible anywhere in Company Explorer, no project relationship branch may create a second visible instance of that resource.
-E37 - Company Explorer search returns only resources reachable through visible Explorer paths; a resource inside a hidden Explorer folder must not appear in search even if the underlying resource has direct view access.
-E38 - Dropping a node onto a logic gate in Company Explorer assigns or reassigns the node to that logic gate and does not call the logic-gate work state-change endpoint.
-E39 - Logic-gate work state-change endpoints are reserved for work-state moves such as My Work or GVIC cell moves where status, column, priority, issue state, or position is intentionally changed.
+E26 - Unfiled has exactly two default child folders, in this order: Projects, Logic Gates.
+E27 - Bare projects and Logic Gates created outside Company Explorer route to Unfiled/Projects and Unfiled/Logic Gates respectively.
+E28 - Bare nodes created outside Company Explorer do not create a Company Explorer item, do not create a Nodes folder, and do not appear in the main Company Explorer tree.
+E29 - The `company_explorer_items.target_type` constraint allows only `project` and `logic_gate`; migrations delete existing node item rows and the old default Nodes folder.
+E30 - Creating, moving, dragging, batch-placing, or communications-converting a node into Company Explorer is rejected instead of hidden or rerouted.
+E31 - Company Explorer search queries the whole company graph, not only branches that the lazy UI has already opened.
+E32 - Company Explorer search still returns node matches from the source of truth rather than from `company_explorer_items`.
+E33 - Node search result paths are derived from visible Logic Gate assignments and visible project relationships when available; standalone accessible nodes can still appear with no Explorer path.
+E34 - Company Explorer search orders result types as Logic Gates, nodes, projects, then folders.
+E35 - Company Explorer search results include resource_type, resource_id, display name, match reason, and Explorer location path.
+E36 - Search result display renders the Explorer location path as nested Explorer rows with normal icons.
+E37 - Node search result rows are open-only: they can be opened, but cannot be expanded, renamed, deleted, pinned, dragged, dropped, or used as creation targets.
+E38 - The default Unfiled folder and its Projects and Logic Gates child folders cannot be renamed or deleted, but resources inside those folders can still be moved or deleted through normal resource actions.
+E39 - While the Explorer search box contains text, the left sidebar hides non-Explorer sections and uses the remaining column for Explorer search results; clearing the search restores the normal sidebar.
+E40 - Once a resource is visible anywhere in Company Explorer, no project relationship branch may create a second visible instance of that resource.
+E41 - Company Explorer live refresh ignores node events and node relationship events; folder, project, and Logic Gate Explorer events still refresh affected loaded branches.
+E42 - Node-map folder-scoped queries through Company Explorer return no nodes for non-root folders because nodes no longer have Company Explorer folder placement.
 
 ## Scenarios
 
@@ -66,20 +69,20 @@ Business logic covered:
 - E11
 
 Given:
-- A company has Explorer folders, projects, logic gates, and nodes.
+- A company has Explorer folders, projects, Logic Gates, and source-of-truth nodes.
 - The viewer has access to some resources but not others.
 
 Expected:
 - Root and child reads require company ID.
 - Old Me/Team scopes are rejected.
 - Root reads load company root containers.
-- Child reads require the company root or a valid resource parent ID.
-- Only viewable resources are returned.
-- Rows include effective access and has-children.
+- Child reads require the company root or a valid folder parent ID.
+- Only viewable Explorer resources are returned.
+- Rows include effective access and folder has-children state.
 - Rows sort by position, creation time, name, and entity ID.
-- The final Explorer tree shows one visible placement for each folder, project, logic gate, and node resource.
+- The final Company Explorer tree shows folders, subfolders, projects, and Logic Gates only.
 - Projects render as standalone leaf rows, even when project relationships exist.
-- Logic gate children are derived from node assignments.
+- Logic Gates render as standalone leaf rows, even when node assignments exist.
 
 ### Scenario E-S2: Folder And Placement Mutations
 
@@ -94,11 +97,14 @@ Business logic covered:
 - E19
 - E20
 - E21
+- E29
+- E30
 
 Given:
 - A user can edit one Explorer folder and only view another.
-- A protected system folder exists.
-- A target node exists in one parent and is moved to another parent.
+- A protected default folder exists.
+- A target project and a target Logic Gate exist.
+- A target node exists in source-of-truth node storage.
 
 Expected:
 - Creating a folder requires the required company, actor, permission user, parent, and name fields.
@@ -107,8 +113,10 @@ Expected:
 - Rename requires edit access.
 - Moving resolves the parent and target and changes placement without duplicating the target.
 - Deleting a placement edge does not delete the target resource.
-- Protected/system folders cannot be renamed or deleted.
+- Protected/default folders cannot be renamed or deleted.
 - Target deletion happens only through the explicit target deletion path.
+- `company_explorer_items` accepts only project and Logic Gate target types.
+- Any attempt to place a node into Company Explorer is rejected.
 
 ### Scenario E-S3: Explorer Refresh Events
 
@@ -116,15 +124,19 @@ Business logic covered:
 - E22
 - E23
 - E24
+- E41
 
 Given:
 - A user has several Explorer branches loaded.
-- A folder placement, update, or removal event arrives for one parent entity.
+- A folder, project, or Logic Gate placement, update, or removal event arrives for one parent entity.
+- A node update or node relationship event also arrives.
 
 Expected:
-- Events include the affected parent entity ID.
+- Explorer events include the affected parent entity ID.
 - Only loaded branches related to the affected parent refresh.
 - Parent entity ID fallback is used when the event does not include richer branch context.
+- Node and node relationship events do not cause Company Explorer branch refresh work.
+
 ### Scenario E-S4: Default Unfiled Placement
 
 Business logic covered:
@@ -132,60 +144,73 @@ Business logic covered:
 - E26
 - E27
 - E28
-- E33
+- E38
 
 Given:
 - A company has no user-created Explorer folders.
-- A project, logic gate, or node is created outside Company Explorer without an explicit folder placement.
-- Another resource is created explicitly at the Company Explorer root.
+- A project, Logic Gate, or node is created outside Company Explorer without an explicit folder placement.
+- Another project or Logic Gate is created explicitly at the Company Explorer root.
 
 Expected:
 - The root contains the default Unfiled folder.
-- Unfiled contains Projects, Logic Gates, and Nodes in that order.
-- Bare outside-created resources appear in the matching Unfiled child folder.
-- Explicit root-created resources stay at the Company Explorer root and do not also appear in Unfiled.
-- Unfiled, Projects, Logic Gates, and Nodes do not expose rename/delete actions and direct delete/rename attempts are rejected.
+- Unfiled contains Projects and Logic Gates in that order.
+- Bare outside-created projects and Logic Gates appear in the matching Unfiled child folder.
+- Bare outside-created nodes remain queryable source-of-truth nodes but do not appear in Company Explorer.
+- Explicit root-created projects and Logic Gates stay at the Company Explorer root and do not also appear in Unfiled.
+- Unfiled, Projects, and Logic Gates do not expose rename/delete actions and direct delete/rename attempts are rejected.
 
 ### Scenario E-S5: Whole-Company Search
 
 Business logic covered:
-- E29
-- E30
 - E31
 - E32
+- E33
 - E34
+- E35
+- E36
 - E37
+- E39
 
 Given:
-- Matching logic gates, nodes, projects, and folders exist across folders and lazy branches that have not necessarily been opened.
+- Matching Logic Gates, nodes, projects, and folders exist across folders and lazy branches that have not necessarily been opened.
+- A matching node is assigned to a visible Logic Gate.
+- A matching node is related to a visible project.
+- A matching source-of-truth node has no visible Explorer path.
 - Another matching resource exists under an Explorer folder the viewer cannot access.
 
 Expected:
 - Search returns matches from the whole company, not only loaded UI branches.
+- Search returns node matches from source-of-truth node storage, not from Company Explorer item rows.
+- Node result paths use visible Logic Gate assignment and project relationship context when available.
+- Standalone accessible node results can appear with an empty Explorer path.
 - Search excludes matches whose Explorer placement or folder ancestry is not visible to the viewer.
-- Logic gates are listed before nodes, nodes before projects, and projects before folders.
+- Logic Gates are listed before nodes, nodes before projects, and projects before folders.
 - Each result includes resource_type, resource_id, display name, match reason, and Explorer location path.
-- The UI renders the location path as nested Explorer rows and selecting a resource result opens the resource directly without switching node results to the map background.
-### Scenario E-S6: Folder Drops Preserve Edge Semantics
+- The UI renders the location path as nested Explorer rows and selecting a resource result opens that resource directly.
+- Node result rows are open-only and do not expose Explorer mutation affordances.
+
+### Scenario E-S6: Folder Drops And Source-Truth Relationships
 
 Business logic covered:
+- E10
+- E11
 - E17
 - E18
-- E35
-- E36
-- E38
-- E39
+- E29
+- E30
+- E40
+- E42
 
 Given:
-- A node can appear under a logic gate through a logic-gate assignment edge.
-- A logic gate or node can also be related to a project through a project relationship edge.
-- A user drags that node into a normal Company Explorer folder.
-- A user drags a normal Explorer folder-placement node onto a logic gate row.
+- A node can appear under a Logic Gate through a source-of-truth Logic Gate assignment.
+- A Logic Gate or node can also be related to a project through a source-of-truth project relationship.
+- A user drags a project or Logic Gate into a normal Company Explorer folder.
+- A user attempts to drag a node into a normal Company Explorer folder or onto a Logic Gate row.
 
 Expected:
-- The folder drop writes a Company Explorer folder placement for the node.
-- The logic-gate assignment edge is not reused as a Company Explorer placement edge.
-- The project relationship edge is not rendered as a nested Project child or reused as a Company Explorer placement edge.
-- The drop does not fail with access_denied because of an edge-type mismatch.
-- The logic-gate drop writes a logic-gate assignment or reassignment without requiring work-state fields.
-- My Work or GVIC cell moves remain the place where logic-gate work state changes are sent.
+- Project and Logic Gate folder drops write Company Explorer placement edges.
+- Logic Gate assignment edges are not reused as Company Explorer placement edges.
+- Project relationship edges are not rendered as nested Project child rows or reused as Company Explorer placement edges.
+- Dragging or placing nodes through Company Explorer is rejected.
+- Nodes continue to be found by search through source-of-truth relationships.
+- Folder-scoped node-map queries do not return nodes for non-root Company Explorer folders.

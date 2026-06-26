@@ -20,13 +20,13 @@ import {
   shouldAcceptClearedMapSelectionAfterExplorerSelection,
   shouldAcceptMapSelectionAfterExplorerSelection,
 } from "../../../../frontend/src/modules/company-explorer/treePresentation.js";
-import { getExplorerRowContainerID, shouldRemoveExplorerPlacementAfterLogicGateDrop } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
+import { getExplorerRowContainerID } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { buildCompanyExplorerSearchTreeRows, buildCompanyExplorerTreeRows, buildCompanyExplorerV2TreeRows, buildScopedCompanyExplorerTreeRows, findCompanyExplorerRootFolderByName, isCompanyExplorerV2FolderItemPlacementRow } from "../../../../frontend/src/modules/company-explorer/companyExplorerTreeRows.js";
 import { buildCompanyExplorerContextMenuSections, createInitialCompanyExplorerExpandedRows, filterExplorerRowsForCustomTopLevel } from "../../../../frontend/src/modules/company-explorer/CompanyExplorerContentModel.js";
 
 const systemFolders = [
-  { company_id: "c", folder_id: "system-active", folder_kind: "node" as const, system_key: "active_nodes" as const, name: "Active Nodes", position: 200, created_timestamp: "0", updated_timestamp: "0" },
-  { company_id: "c", folder_id: "system-history", folder_kind: "node" as const, system_key: "history" as const, name: "History", position: 300, created_timestamp: "0", updated_timestamp: "0" },
+  { company_id: "c", folder_id: "logic-root", folder_kind: "logic_gate" as const, name: "Logic Gates", position: 200, created_timestamp: "0", updated_timestamp: "0" },
+  { company_id: "c", folder_id: "project-root", folder_kind: "project" as const, name: "Projects", position: 300, created_timestamp: "0", updated_timestamp: "0" },
 ];
 
 function run(name: string, fn: () => void): void {
@@ -54,7 +54,7 @@ run("company explorer starts each page load with collapsed rows", () => {
   assert.deepEqual([...createInitialCompanyExplorerExpandedRows()], []);
 });
 
-run("logic gate child node rows use the logic gate as their reorder container", () => {
+run("node rows do not participate in Company Explorer reordering", () => {
   assert.equal(getExplorerRowContainerID({
     id: "logic-gate-gate-1-node-node-1",
     label: "Node 1",
@@ -66,40 +66,13 @@ run("logic gate child node rows use the logic gate as their reorder container", 
     createdTimestamp: "0",
     parentLogicGateID: "gate-1",
     syntheticKind: "logic_gate_children",
-  }), "gate-1");
-});
-
-run("logic gate drops clean up folder placements but not assignment rows", () => {
-  const folderNode = {
-    id: "node-node-1",
-    label: "Node 1",
-    depth: 1,
-    kind: "node" as const,
-    nodeID: "node-1",
-    edgeID: "explorer-item-edge",
-    parentEntityID: "folder-1",
-    scopeLevel: 1,
-    position: 1000,
-    createdTimestamp: "0",
-  };
-  const logicGateNode = {
-    ...folderNode,
-    id: "logic-gate-gate-1-node-node-1",
-    edgeID: "assignment-edge",
-    parentEntityID: "gate-1",
-  };
-
-  assert.equal(shouldRemoveExplorerPlacementAfterLogicGateDrop(folderNode, "folder"), true);
-  assert.equal(shouldRemoveExplorerPlacementAfterLogicGateDrop({ ...folderNode, parentEntityID: "" }, undefined), true);
-  assert.equal(shouldRemoveExplorerPlacementAfterLogicGateDrop(logicGateNode, "logic_gate", "gate-1"), false);
-  assert.equal(shouldRemoveExplorerPlacementAfterLogicGateDrop({ ...folderNode, edgeID: "" }, "folder"), false);
+  }), null);
 });
 
 run("company explorer context menu keeps fixed sections with disabled unavailable actions", () => {
   const sections = buildCompanyExplorerContextMenuSections({
     permissionsEnabled: true,
     createFolderEnabled: true,
-    createNodeEnabled: false,
     createLogicGateEnabled: true,
     createProjectEnabled: true,
     renameEnabled: false,
@@ -108,12 +81,12 @@ run("company explorer context menu keeps fixed sections with disabled unavailabl
 
   assert.deepEqual(sections.map((section) => section.map((action) => action.label)), [
     ["Folder Permissions"],
-    ["Create New Folder", "Create Node", "Create Logic Gate", "Create Project"],
+    ["Create New Folder", "Create Logic Gate", "Create Project"],
     ["Rename", "Delete"],
   ]);
   assert.deepEqual(sections.map((section) => section.map((action) => action.enabled)), [
     [true],
-    [true, false, true, true],
+    [true, true, true],
     [false, true],
   ]);
 });
@@ -133,10 +106,10 @@ run("tree rows render a blank root when the workspace is empty", () => {
     folderItems: [],
     rootRowOrder: {},
   });
-  assert.deepEqual(rows.map((row) => row.id), ["workspace-folder-system-active", "workspace-folder-system-history"]);
+  assert.deepEqual(rows.map((row) => row.id), ["workspace-folder-logic-root", "workspace-folder-project-root"]);
 });
 
-run("tree rows render root content without a synthetic Company folder", () => {
+run("tree rows ignore source nodes in the main Company Explorer", () => {
   const rows = buildCompanyExplorerTreeRows({
     expanded: new Set(),
     nodes: [{ company_id: "c", node_id: "node-a", name: "Alpha", created_timestamp: "1" }],
@@ -147,8 +120,8 @@ run("tree rows render root content without a synthetic Company folder", () => {
     folderItems: [],
     rootRowOrder: {},
   });
-  assert.deepEqual(rows.map((row) => row.id), ["workspace-folder-system-active", "workspace-folder-system-history", "node-node-a"]);
-  assert.equal(rows[rows.length - 1]?.depth, 0);
+  assert.deepEqual(rows.map((row) => row.id), ["workspace-folder-logic-root", "workspace-folder-project-root"]);
+  assert.equal(rows.some((row) => row.kind === "node"), false);
 });
 
 
@@ -169,13 +142,33 @@ run("search tree rows render backend location path as nested explorer rows", () 
       created_timestamp: "3",
       updated_timestamp: "3",
     },
+    {
+      company_id: "c",
+      resource_type: "node",
+      resource_id: "node-a",
+      entity_id: "node-a",
+      display_name: "Search Node",
+      match_reason: "name_exact",
+      location_path: [
+        { entity_type: "folder", entity_id: "unfiled", name: "Unfiled" },
+        { entity_type: "logic_gate", entity_id: "gate-a", resource_id: "gate-a", name: "Search Gate" },
+      ],
+      has_children: true,
+      created_timestamp: "4",
+      updated_timestamp: "4",
+    },
   ]);
 
-  assert.deepEqual(rows.map((row) => row.label), ["Unfiled", "Logic Gates", "Search Gate"]);
-  assert.deepEqual(rows.map((row) => row.depth), [0, 1, 2]);
-  assert.deepEqual(rows.map((row) => row.kind), ["folder", "folder", "logic_gate"]);
+  assert.deepEqual(rows.map((row) => row.label), ["Unfiled", "Logic Gates", "Search Gate", "Unfiled", "Search Gate", "Search Node"]);
+  assert.deepEqual(rows.map((row) => row.depth), [0, 1, 2, 0, 1, 2]);
+  assert.deepEqual(rows.map((row) => row.kind), ["folder", "folder", "logic_gate", "folder", "logic_gate", "node"]);
   assert.equal(rows[2]?.logicGateID, "gate-a");
   assert.equal(rows[2]?.folderLabel, "Unfiled / Logic Gates");
+  assert.equal(rows[2]?.syntheticKind, "search_result");
+  assert.equal(rows[2]?.hasChildren, false);
+  assert.equal(rows[5]?.nodeID, "node-a");
+  assert.equal(rows[5]?.syntheticKind, "search_result");
+  assert.equal(rows[5]?.hasChildren, false);
 });
 run("v2 tree rows preserve the existing tree shell ids and metadata", () => {
   const rows = buildCompanyExplorerV2TreeRows({
@@ -236,14 +229,13 @@ run("v2 tree rows preserve the existing tree shell ids and metadata", () => {
     "folder-root",
     "workspace-folder-folder-a",
     "logic-gate-gate-a",
-    "logic-gate-gate-a-node-node-a",
   ]);
   assert.equal(rows[1]?.entityType, "folder");
   assert.equal(rows[1]?.folderID, "folder-a");
   assert.equal(rows[1]?.edgeID, "edge-folder-a");
   assert.equal(rows[2]?.logicGateID, "gate-a");
-  assert.equal(rows[3]?.nodeID, "node-a");
-  assert.equal(rows[3]?.parentEntityID, "gate-entity");
+  assert.equal(rows[2]?.hasChildren, false);
+  assert.equal(rows.some((row) => row.kind === "node"), false);
 });
 
 run("v2 tree rows hide project relationship children to keep one Explorer instance per resource", () => {
@@ -383,7 +375,8 @@ run("v2 delete targets keep explorer entity identity separate from source ids", 
 
   assert.deepEqual(resolveExplorerDeleteTarget(rows[1]), { kind: "folder", id: "folder-a", folderKind: "logic_gate", entityID: "folder-a", entityType: "folder" });
   assert.deepEqual(resolveExplorerDeleteTarget(rows[2]), { kind: "logic_gate", id: "gate-a", entityID: "gate-entity", entityType: "logic_gate", edgeID: "edge-gate-a" });
-  assert.deepEqual(resolveExplorerDeleteTarget(rows[3]), { kind: "node", id: "node-a", entityID: "node-entity", entityType: "node" });
+  assert.equal(rows.some((row) => row.kind === "node"), false);
+  assert.equal(resolveExplorerDeleteTarget({ kind: "node", nodeID: "node-a", entityID: "node-entity", entityType: "node" }), null);
 });
 
 run("v2 native rows without source resource ids are not deletable as source records", () => {
@@ -393,7 +386,9 @@ run("v2 native rows without source resource ids are not deletable as source reco
     entityID: "node-entity",
     entityType: "node",
   }), null);
-});run("protected default folder rows do not resolve destructive actions", () => {
+});
+
+run("protected default folder rows do not resolve destructive actions", () => {
   const row = {
     id: "workspace-folder-unfiled",
     kind: "folder" as const,
@@ -405,7 +400,7 @@ run("v2 native rows without source resource ids are not deletable as source reco
   assert.equal(resolveExplorerRenameTarget(row), null);
 });
 
-run("v2 folder item placement detection ignores native relationship edges", () => {
+run("v2 folder item placement detection rejects node rows", () => {
   const rows = [
     { company_id: "c", entity_id: "folder-a", entity_type: "folder" as const, name: "Folder A", position: 1000, has_children: true, created_timestamp: "1", updated_timestamp: "1" },
     { company_id: "c", entity_id: "gate-a", entity_type: "logic_gate" as const, resource_id: "gate-a", name: "Gate A", position: 1000, has_children: true, created_timestamp: "2", updated_timestamp: "2" },
@@ -414,33 +409,27 @@ run("v2 folder item placement detection ignores native relationship edges", () =
     { company_id: "c", entity_id: "node-assigned", entity_type: "node" as const, resource_id: "node-assigned", name: "Assigned Node", parent_entity_id: "gate-a", edge_id: "logic-gate-assignment-edge", position: 1000, has_children: false, created_timestamp: "5", updated_timestamp: "5" },
   ];
 
-  assert.equal(isCompanyExplorerV2FolderItemPlacementRow(rows[2], rows), true);
-  assert.equal(isCompanyExplorerV2FolderItemPlacementRow(rows[3], rows), true);
+  assert.equal(isCompanyExplorerV2FolderItemPlacementRow(rows[2], rows), false);
+  assert.equal(isCompanyExplorerV2FolderItemPlacementRow(rows[3], rows), false);
   assert.equal(isCompanyExplorerV2FolderItemPlacementRow(rows[4], rows), false);
 });
-run("automatic folders hold active node placements and due-date history", () => {
+
+run("tree rows ignore stale node folder items", () => {
   const rows = buildCompanyExplorerTreeRows({
-    expanded: new Set(["workspace-folder-system-active", "workspace-folder-system-history"]),
+    expanded: new Set(["workspace-folder-logic-root"]),
     nodes: [
-      { company_id: "c", node_id: "future", name: "Future", due_date: "2026-05-08", created_timestamp: "1" },
-      { company_id: "c", node_id: "past", name: "Past", due_date: "2026-05-06", created_timestamp: "2" },
-      { company_id: "c", node_id: "today", name: "Today", due_date: "2026-05-07", created_timestamp: "3" },
+      { company_id: "c", node_id: "future", name: "Future", created_timestamp: "1" },
     ],
     logicGates: [],
     projects: [],
-    kanbanBoards: [{ company_id: "c", board_id: "board-1", title: "Launch", position: 1000, created_timestamp: "4", updated_timestamp: "4" }],
+    kanbanBoards: [],
     folders: systemFolders,
-    folderItems: [{ company_id: "c", folder_id: "system-active", item_type: "node", item_id: "future", position: 1000, created_timestamp: "5", updated_timestamp: "5" }],
+    folderItems: [{ company_id: "c", folder_id: "logic-root", item_type: "node", item_id: "future", position: 1000, created_timestamp: "5", updated_timestamp: "5" }],
     rootRowOrder: {},
-    todayISODate: "2026-05-07",
   });
   assert.deepEqual(rows.map((row) => row.id), [
-    "workspace-folder-system-active",
-    "node-future",
-    "workspace-folder-system-history",
-    "system-history-node-past",
-    "node-past",
-    "node-today",
+    "workspace-folder-logic-root",
+    "workspace-folder-project-root",
   ]);
 });
 
@@ -454,16 +443,15 @@ run("root folders from different domains can be locally ordered together", () =>
     folders: [
       ...systemFolders,
       { company_id: "c", folder_id: "node-root", folder_kind: "node", name: "Node Root", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
-      { company_id: "c", folder_id: "logic-root", folder_kind: "logic_gate", name: "Logic Root", position: 1000, created_timestamp: "2", updated_timestamp: "2" },
+      { company_id: "c", folder_id: "logic-custom", folder_kind: "logic_gate", name: "Logic Custom", position: 1000, created_timestamp: "2", updated_timestamp: "2" },
     ],
     folderItems: [],
     rootRowOrder: { "workspace-folder-logic-root": 500 },
   });
   assert.deepEqual(rows.map((row) => row.id), [
-    "workspace-folder-system-active",
-    "workspace-folder-system-history",
     "workspace-folder-logic-root",
-    "workspace-folder-node-root",
+    "workspace-folder-logic-custom",
+    "workspace-folder-project-root",
   ]);
 });
 
@@ -485,7 +473,7 @@ run("custom top-level rows exclude default roots and keep custom branches", () =
       rows,
       hiddenRootFolderNames: ["Logic Gates by Function", "Mango GVIC Generated"],
     }).map((row) => row.id),
-    ["workspace-folder-custom", "logic-gate-custom", "node-root"],
+    ["workspace-folder-custom", "logic-gate-custom"],
   );
 });
 
@@ -553,7 +541,7 @@ run("raw scoped tree rows keep custom folders under default-named parents", () =
   ]);
 });
 
-run("custom logic gate rows render assigned nodes when expanded", () => {
+run("custom logic gate rows stay leaves when expanded", () => {
   const rows = buildCompanyExplorerTreeRows({
     expanded: new Set(["workspace-folder-custom", "logic-gate-gate-a"]),
     nodes: [{ company_id: "c", node_id: "node-a", name: "Nested node", logic_gate_ids: ["gate-a"], created_timestamp: "5" }],
@@ -574,10 +562,9 @@ run("custom logic gate rows render assigned nodes when expanded", () => {
 
   const logicGateIndex = rows.findIndex((row) => row.id === "logic-gate-gate-a");
   assert.notEqual(logicGateIndex, -1);
-  assert.equal(rows[logicGateIndex]?.hasChildren, true);
-  assert.deepEqual(rows.slice(logicGateIndex, logicGateIndex + 2).map((row) => [row.id, row.depth, row.kind, row.parentLogicGateID ?? ""]), [
+  assert.equal(rows[logicGateIndex]?.hasChildren, false);
+  assert.deepEqual(rows.slice(logicGateIndex, logicGateIndex + 1).map((row) => [row.id, row.depth, row.kind, row.parentLogicGateID ?? ""]), [
     ["logic-gate-gate-a", 1, "logic_gate", ""],
-    ["logic-gate-gate-a-node-node-a", 2, "node", "gate-a"],
   ]);
 });
 
@@ -586,10 +573,10 @@ run("context creation targets nested logic gate folders", () => {
   assert.deepEqual(targets, {
     preferredFolderKind: "logic_gate",
     preferredFolderParentID: "logic-folder-1",
-    nodeFolderParentID: "logic-folder-1",
+    nodeFolderParentID: "",
     logicGateFolderParentID: "logic-folder-1",
     projectFolderParentID: "",
-    nodeParentFolderID: "logic-folder-1",
+    nodeParentFolderID: "",
     logicGateParentFolderID: "logic-folder-1",
     projectParentFolderID: "logic-folder-1",
   });
@@ -609,23 +596,23 @@ run("context creation defaults blank areas to root custom folders", () => {
   });
 });
 
-run("context creation targets node siblings from a node row", () => {
+run("context creation ignores node row placement", () => {
   const targets = resolveExplorerCreationTargets({ kind: "node", folderKind: "node", folderID: "node-folder-1" });
   assert.deepEqual(targets, {
-    preferredFolderKind: "node",
-    preferredFolderParentID: "node-folder-1",
-    nodeFolderParentID: "node-folder-1",
+    preferredFolderKind: "logic_gate",
+    preferredFolderParentID: "",
+    nodeFolderParentID: "",
     logicGateFolderParentID: "",
     projectFolderParentID: "",
-    nodeParentFolderID: "node-folder-1",
-    logicGateParentFolderID: "node-folder-1",
-    projectParentFolderID: "node-folder-1",
+    nodeParentFolderID: "",
+    logicGateParentFolderID: "",
+    projectParentFolderID: "",
   });
 });
 
 run("rename targets only resolve for concrete folders and entities", () => {
-  assert.deepEqual(resolveExplorerRenameTarget({ kind: "folder", folderKind: "node", folderID: "folder-1" }), { kind: "folder", id: "folder-1" });
-  assert.deepEqual(resolveExplorerRenameTarget({ kind: "node", nodeID: "node-1" }), { kind: "node", id: "node-1" });
+  assert.equal(resolveExplorerRenameTarget({ kind: "folder", folderKind: "node", folderID: "folder-1" }), null);
+  assert.equal(resolveExplorerRenameTarget({ kind: "node", nodeID: "node-1" }), null);
   assert.deepEqual(resolveExplorerRenameTarget({ kind: "logic_gate", logicGateID: "gate-1" }), { kind: "logic_gate", id: "gate-1" });
   assert.equal(resolveExplorerRenameTarget({ kind: "kanban", kanbanBoardID: "board-1" }), null);
   assert.equal(resolveExplorerRenameTarget({ kind: "folder", folderKind: "node" }), null);
@@ -633,8 +620,8 @@ run("rename targets only resolve for concrete folders and entities", () => {
 });
 
 run("delete targets only resolve for concrete folders and entities", () => {
-  assert.deepEqual(resolveExplorerDeleteTarget({ kind: "folder", folderKind: "node", folderID: "folder-1" }), { kind: "folder", id: "folder-1", folderKind: "node" });
-  assert.deepEqual(resolveExplorerDeleteTarget({ kind: "node", nodeID: "node-1" }), { kind: "node", id: "node-1" });
+  assert.equal(resolveExplorerDeleteTarget({ kind: "folder", folderKind: "node", folderID: "folder-1" }), null);
+  assert.equal(resolveExplorerDeleteTarget({ kind: "node", nodeID: "node-1" }), null);
   assert.deepEqual(resolveExplorerDeleteTarget({ kind: "logic_gate", logicGateID: "gate-1" }), { kind: "logic_gate", id: "gate-1" });
   assert.deepEqual(resolveExplorerDeleteTarget({ kind: "kanban", kanbanBoardID: "board-1" }), { kind: "kanban", id: "board-1" });
   assert.equal(resolveExplorerDeleteTarget({ kind: "folder", folderKind: "node" }), null);
@@ -642,12 +629,12 @@ run("delete targets only resolve for concrete folders and entities", () => {
 });
 
 run("drop targets resolve item rows to their containing folder", () => {
-  assert.deepEqual(
+  assert.equal(
     resolveExplorerDropTarget(
       { kind: "node", folderKind: "node", folderID: "test-folder", nodeID: "node-1" },
       { kind: "folder", folderKind: "node", folderID: "lotion-folder" },
     ),
-    { folderID: "test-folder", folderKind: "node", treeID: "workspace-folder-test-folder" },
+    null,
   );
 
   assert.deepEqual(

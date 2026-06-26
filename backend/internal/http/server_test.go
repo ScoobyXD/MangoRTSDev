@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1230,7 +1231,7 @@ func TestWorkspaceSnapshotDefaultUsesLightweightCompanyExplorerReadModel(t *test
 	handler := server.Routes()
 	companyID := "company-explorer-light-snapshot-test"
 
-	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Work")
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Work")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder() error = %v", err)
 	}
@@ -1246,7 +1247,7 @@ func TestWorkspaceSnapshotDefaultUsesLightweightCompanyExplorerReadModel(t *test
 	if err != nil {
 		t.Fatalf("CreateLogicGate() error = %v", err)
 	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", nodeA.NodeID, 1000); err != nil {
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "logic_gate", logicGate.LogicGateID, 1000); err != nil {
 		t.Fatalf("AssignCompanyExplorerFolderItem() error = %v", err)
 	}
 	if _, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Peer", "Peer"); err != nil {
@@ -1402,11 +1403,6 @@ func TestWorkspaceSnapshotNodeMapScopeUsesFolderSubtree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
 	}
-	sibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Sibling")
-	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder sibling error = %v", err)
-	}
-
 	nodeA, err := repo.CreateNode(companyID, "Scoped A")
 	if err != nil {
 		t.Fatalf("CreateNode A error = %v", err)
@@ -1419,18 +1415,11 @@ func TestWorkspaceSnapshotNodeMapScopeUsesFolderSubtree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNode C error = %v", err)
 	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeA.NodeID, 1000); err != nil {
-		t.Fatalf("AssignCompanyExplorerFolderItem A error = %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, "node", nodeB.NodeID, 2000); err != nil {
-		t.Fatalf("AssignCompanyExplorerFolderItem B error = %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, sibling.FolderID, "node", nodeC.NodeID, 3000); err != nil {
-		t.Fatalf("AssignCompanyExplorerFolderItem C error = %v", err)
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeA.NodeID, 1000); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("AssignCompanyExplorerFolderItem A error = %v, want ErrInvalid", err)
 	}
 
-	scopedRelationship, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Peer", "Peer")
-	if err != nil {
+	if _, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Peer", "Peer"); err != nil {
 		t.Fatalf("CreateNodeRelationship scoped error = %v", err)
 	}
 	if _, err := repo.CreateNodeRelationship(companyID, nodeB.NodeID, nodeC.NodeID, "Peer", "Peer"); err != nil {
@@ -1485,17 +1474,17 @@ func TestWorkspaceSnapshotNodeMapScopeUsesFolderSubtree(t *testing.T) {
 	for _, node := range payload.Nodes {
 		nodeIDs = append(nodeIDs, node.NodeID)
 	}
-	assertIDs("nodes", nodeIDs, nodeA.NodeID, nodeB.NodeID)
+	assertIDs("nodes", nodeIDs)
 	relationshipIDs := make([]string, 0, len(payload.Relationships))
 	for _, relationship := range payload.Relationships {
 		relationshipIDs = append(relationshipIDs, relationship.NodeRelationshipID)
 	}
-	assertIDs("relationships", relationshipIDs, scopedRelationship.NodeRelationshipID)
+	assertIDs("relationships", relationshipIDs)
 	positionIDs := make([]string, 0, len(payload.NodeMapPositions))
 	for _, position := range payload.NodeMapPositions {
 		positionIDs = append(positionIDs, position.NodeID)
 	}
-	assertIDs("node_map_positions", positionIDs, nodeA.NodeID, nodeB.NodeID)
+	assertIDs("node_map_positions", positionIDs)
 	folderIDs := make([]string, 0, len(payload.Folders))
 	for _, folder := range payload.Folders {
 		folderIDs = append(folderIDs, folder.FolderID)
@@ -1505,7 +1494,7 @@ func TestWorkspaceSnapshotNodeMapScopeUsesFolderSubtree(t *testing.T) {
 	for _, item := range payload.FolderItems {
 		folderItemIDs = append(folderItemIDs, item.ItemID)
 	}
-	assertIDs("folder_items", folderItemIDs, nodeA.NodeID, nodeB.NodeID)
+	assertIDs("folder_items", folderItemIDs)
 
 	etag := rec.Header().Get("ETag")
 	if etag == "" {
@@ -1536,11 +1525,6 @@ func TestWorkspaceSnapshotNodeMapWindowBoundsPayloadAndPreservesBroadCompatibili
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
 	}
-	sibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Window sibling")
-	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder sibling error = %v", err)
-	}
-
 	nodeA, err := repo.CreateNode(companyID, "Window A")
 	if err != nil {
 		t.Fatalf("CreateNode A error = %v", err)
@@ -1557,21 +1541,11 @@ func TestWorkspaceSnapshotNodeMapWindowBoundsPayloadAndPreservesBroadCompatibili
 	if err != nil {
 		t.Fatalf("CreateNode outside window error = %v", err)
 	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeA.NodeID, 1000); err != nil {
-		t.Fatalf("Assign node A error = %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, "node", nodeB.NodeID, 2000); err != nil {
-		t.Fatalf("Assign node B error = %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, sibling.FolderID, "node", nodeOutsideFolder.NodeID, 3000); err != nil {
-		t.Fatalf("Assign outside folder node error = %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeOutsideWindow.NodeID, 4000); err != nil {
-		t.Fatalf("Assign outside window node error = %v", err)
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeA.NodeID, 1000); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("Assign node A error = %v, want ErrInvalid", err)
 	}
 
-	visibleRelationship, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Peer", "Peer")
-	if err != nil {
+	if _, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Peer", "Peer"); err != nil {
 		t.Fatalf("CreateNodeRelationship visible error = %v", err)
 	}
 	if _, err := repo.CreateNodeRelationship(companyID, nodeB.NodeID, nodeOutsideFolder.NodeID, "Peer", "Peer"); err != nil {
@@ -1613,10 +1587,10 @@ func TestWorkspaceSnapshotNodeMapWindowBoundsPayloadAndPreservesBroadCompatibili
 	if payload.Scope != "node_map_window" || payload.FolderID != parent.FolderID || payload.Limit != 10 || payload.Window.MaxX != 300 || payload.Window.MaxY != 300 {
 		t.Fatalf("window metadata = scope %q folder %q limit %d window %+v", payload.Scope, payload.FolderID, payload.Limit, payload.Window)
 	}
-	assertHTTPNodeMapIDs(t, "window nodes", httpNodeIDs(payload.Nodes), nodeA.NodeID, nodeB.NodeID)
-	assertHTTPNodeMapIDs(t, "window positions", httpPositionNodeIDs(payload.NodeMapPositions), nodeA.NodeID, nodeB.NodeID)
-	assertHTTPNodeMapIDs(t, "window relationships", httpRelationshipIDs(payload.Relationships), visibleRelationship.NodeRelationshipID)
-	assertHTTPNodeMapIDs(t, "window folder_items", httpFolderItemIDs(payload.FolderItems), nodeA.NodeID, nodeB.NodeID)
+	assertHTTPNodeMapIDs(t, "window nodes", httpNodeIDs(payload.Nodes))
+	assertHTTPNodeMapIDs(t, "window positions", httpPositionNodeIDs(payload.NodeMapPositions))
+	assertHTTPNodeMapIDs(t, "window relationships", httpRelationshipIDs(payload.Relationships))
+	assertHTTPNodeMapIDs(t, "window folder_items", httpFolderItemIDs(payload.FolderItems))
 	assertHTTPNodeMapIDs(t, "window folders", httpFolderIDs(payload.Folders), parent.FolderID, child.FolderID)
 
 	layoutReq := httptest.NewRequest(http.MethodGet, "/v1/map-layout?company_id="+companyID+"&map_type=node&folder_id="+parent.FolderID+"&min_x=0&min_y=0&max_x=300&max_y=300&limit=10", nil)
@@ -1631,7 +1605,7 @@ func TestWorkspaceSnapshotNodeMapWindowBoundsPayloadAndPreservesBroadCompatibili
 	if err := json.NewDecoder(layoutRec.Body).Decode(&layoutPayload); err != nil {
 		t.Fatalf("decode bounded map-layout payload: %v", err)
 	}
-	assertHTTPNodeMapIDs(t, "bounded map-layout positions", httpPositionNodeIDs(layoutPayload.Positions), nodeA.NodeID, nodeB.NodeID)
+	assertHTTPNodeMapIDs(t, "bounded map-layout positions", httpPositionNodeIDs(layoutPayload.Positions))
 
 	broadReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=node_map", nil)
 	broadRec := httptest.NewRecorder()
@@ -1720,8 +1694,8 @@ func TestWorkspaceSnapshotNodeMapWindowConditionalGetAndEventFilters(t *testing.
 	if err != nil {
 		t.Fatalf("CreateNode error = %v", err)
 	}
-	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", node.NodeID, 1000); err != nil {
-		t.Fatalf("AssignCompanyExplorerFolderItem error = %v", err)
+	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", node.NodeID, 1000); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("AssignCompanyExplorerFolderItem error = %v, want ErrInvalid", err)
 	}
 	if _, err := base.UpsertNodeMapPositions(companyID, []domain.NodeMapPosition{{NodeID: node.NodeID, X: 25, Y: 25}}); err != nil {
 		t.Fatalf("UpsertNodeMapPositions error = %v", err)
@@ -2177,10 +2151,6 @@ func TestWorkspaceSnapshotCompanyExplorerScopeUsesFolderSubtree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder node child error = %v", err)
 	}
-	nodeSibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Node sibling")
-	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder node sibling error = %v", err)
-	}
 	logicParent, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Logic parent")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder logic parent error = %v", err)
@@ -2198,14 +2168,6 @@ func TestWorkspaceSnapshotCompanyExplorerScopeUsesFolderSubtree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNode A error = %v", err)
 	}
-	nodeB, err := repo.CreateNode(companyID, "Node B")
-	if err != nil {
-		t.Fatalf("CreateNode B error = %v", err)
-	}
-	nodeOutside, err := repo.CreateNode(companyID, "Node outside")
-	if err != nil {
-		t.Fatalf("CreateNode outside error = %v", err)
-	}
 	gateA, err := repo.CreateLogicGate(companyID, "Gate A")
 	if err != nil {
 		t.Fatalf("CreateLogicGate A error = %v", err)
@@ -2219,14 +2181,8 @@ func TestWorkspaceSnapshotCompanyExplorerScopeUsesFolderSubtree(t *testing.T) {
 		t.Fatalf("CreateLogicGate outside error = %v", err)
 	}
 
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeParent.FolderID, "node", nodeA.NodeID, 1000); err != nil {
-		t.Fatalf("Assign node A error = %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeChild.FolderID, "node", nodeB.NodeID, 2000); err != nil {
-		t.Fatalf("Assign node B error = %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeSibling.FolderID, "node", nodeOutside.NodeID, 3000); err != nil {
-		t.Fatalf("Assign outside node error = %v", err)
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeParent.FolderID, "node", nodeA.NodeID, 1000); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("Assign node A error = %v, want ErrInvalid", err)
 	}
 	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, logicParent.FolderID, "logic_gate", gateA.LogicGateID, 1000); err != nil {
 		t.Fatalf("Assign gate A error = %v", err)
@@ -2279,7 +2235,7 @@ func TestWorkspaceSnapshotCompanyExplorerScopeUsesFolderSubtree(t *testing.T) {
 	for _, node := range nodePayload.Nodes {
 		nodeIDs = append(nodeIDs, node.NodeID)
 	}
-	assertIDs("node summaries", nodeIDs, nodeA.NodeID, nodeB.NodeID)
+	assertIDs("node summaries", nodeIDs)
 	if len(nodePayload.LogicGates) != 0 {
 		t.Fatalf("node subtree logic gates = %+v, want none", nodePayload.LogicGates)
 	}
@@ -2292,7 +2248,7 @@ func TestWorkspaceSnapshotCompanyExplorerScopeUsesFolderSubtree(t *testing.T) {
 	for _, item := range nodePayload.FolderItems {
 		folderItemIDs = append(folderItemIDs, item.ItemID)
 	}
-	assertIDs("node folder items", folderItemIDs, nodeA.NodeID, nodeB.NodeID)
+	assertIDs("node folder items", folderItemIDs)
 
 	logicReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/snapshot?company_id="+companyID+"&scope=company_explorer&folder_kind=logic_gate&folder_id="+logicParent.FolderID, nil)
 	logicRec := httptest.NewRecorder()
@@ -2940,8 +2896,8 @@ func TestWorkspaceSnapshotNodeMapWindowConditionalGetUsesReadVersionRow(t *testi
 	if err != nil {
 		t.Fatalf("CreateNode error = %v", err)
 	}
-	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", node.NodeID, 1000); err != nil {
-		t.Fatalf("AssignCompanyExplorerFolderItem error = %v", err)
+	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", node.NodeID, 1000); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("AssignCompanyExplorerFolderItem error = %v, want ErrInvalid", err)
 	}
 	if _, err := base.UpsertNodeMapPositions(companyID, []domain.NodeMapPosition{{NodeID: node.NodeID, X: 25, Y: 25}}); err != nil {
 		t.Fatalf("UpsertNodeMapPositions error = %v", err)
@@ -3023,8 +2979,8 @@ func TestMapLayoutWindowConditionalGetsUseReadVersionRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNode error = %v", err)
 	}
-	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, nodeFolder.FolderID, "node", node.NodeID, 1000); err != nil {
-		t.Fatalf("AssignCompanyExplorerFolderItem node error = %v", err)
+	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, nodeFolder.FolderID, "node", node.NodeID, 1000); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("AssignCompanyExplorerFolderItem node error = %v, want ErrInvalid", err)
 	}
 	if _, err := base.UpsertNodeMapPositions(companyID, []domain.NodeMapPosition{{NodeID: node.NodeID, X: 25, Y: 25}}); err != nil {
 		t.Fatalf("UpsertNodeMapPositions error = %v", err)
@@ -3134,8 +3090,8 @@ func TestWorkspaceSnapshotMissingReadVersionRowFallsBackWithoutPayloadOn304(t *t
 	if err != nil {
 		t.Fatalf("CreateNode error = %v", err)
 	}
-	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", node.NodeID, 1000); err != nil {
-		t.Fatalf("AssignCompanyExplorerFolderItem error = %v", err)
+	if _, _, err := base.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", node.NodeID, 1000); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("AssignCompanyExplorerFolderItem error = %v, want ErrInvalid", err)
 	}
 	if _, err := base.UpsertNodeMapPositions(companyID, []domain.NodeMapPosition{{NodeID: node.NodeID, X: 25, Y: 25}}); err != nil {
 		t.Fatalf("UpsertNodeMapPositions error = %v", err)

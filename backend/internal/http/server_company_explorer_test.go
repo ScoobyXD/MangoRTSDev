@@ -22,17 +22,17 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	companyID := "company-folder-api-test"
 	repo.EnsureCompany(companyID, "Folder API Company")
 
-	node, err := repo.CreateNode(companyID, "Foldered node")
+	gate, err := repo.CreateLogicGate(companyID, "Foldered gate")
 	if err != nil {
-		t.Fatalf("CreateNode() error = %v", err)
+		t.Fatalf("CreateLogicGate() error = %v", err)
 	}
-	secondNode, err := repo.CreateNode(companyID, "Second foldered node")
+	secondGate, err := repo.CreateLogicGate(companyID, "Second foldered gate")
 	if err != nil {
-		t.Fatalf("CreateNode(second) error = %v", err)
+		t.Fatalf("CreateLogicGate(second) error = %v", err)
 	}
-	thirdNode, err := repo.CreateNode(companyID, "Third foldered node")
+	thirdGate, err := repo.CreateLogicGate(companyID, "Third foldered gate")
 	if err != nil {
-		t.Fatalf("CreateNode(third) error = %v", err)
+		t.Fatalf("CreateLogicGate(third) error = %v", err)
 	}
 
 	createFolder := func(name, parentFolderID string) string {
@@ -40,7 +40,7 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 		body, _ := json.Marshal(map[string]string{
 			"company_id":       companyID,
 			"parent_folder_id": parentFolderID,
-			"folder_kind":      "node",
+			"folder_kind":      "logic_gate",
 			"name":             name,
 		})
 		req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(body))
@@ -125,7 +125,7 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 		body := map[string]any{
 			"company_id":       companyID,
 			"parent_entity_id": childID,
-			"target_type":      "node",
+			"target_type":      "logic_gate",
 			"target_id":        targetID,
 		}
 		if position != 0 {
@@ -143,18 +143,18 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 		if err := json.NewDecoder(rec.Body).Decode(&row); err != nil {
 			t.Fatalf("decode company explorer item: %v", err)
 		}
-		if row.EdgeID == "" || row.EntityType != "node" || row.ResourceID != targetID || row.ParentEntityID != childID {
-			t.Fatalf("placed row = %+v, want node target %s under child folder", row, targetID)
+		if row.EdgeID == "" || row.EntityType != "logic_gate" || row.ResourceID != targetID || row.ParentEntityID != childID {
+			t.Fatalf("placed row = %+v, want Logic Gate target %s under child folder", row, targetID)
 		}
 		return row
 	}
 
-	placeItem(node.NodeID, 0)
-	placeItem(secondNode.NodeID, 0)
+	placeItem(gate.LogicGateID, 0)
+	placeItem(secondGate.LogicGateID, 0)
 	mixedFolderBody, _ := json.Marshal(map[string]string{
 		"company_id":       companyID,
 		"parent_folder_id": childID,
-		"folder_kind":      "node",
+		"folder_kind":      "logic_gate",
 		"name":             "Mixed sibling folder",
 	})
 	mixedFolderReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/folders", bytes.NewReader(mixedFolderBody))
@@ -173,12 +173,12 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if mixedFolder.Position != 3000 {
 		t.Fatalf("mixed sibling folder position = %d, want 3000 after two item rows", mixedFolder.Position)
 	}
-	thirdAssigned := placeItem(thirdNode.NodeID, 0)
+	thirdAssigned := placeItem(thirdGate.LogicGateID, 0)
 	if thirdAssigned.Position != 4000 {
 		t.Fatalf("third item position = %d, want 4000 after folder sibling", thirdAssigned.Position)
 	}
 
-	placeItem(node.NodeID, 5000)
+	placeItem(gate.LogicGateID, 5000)
 
 	childrenReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/children?company_id="+companyID+"&parent_id="+childID, nil)
 	childrenRec := httptest.NewRecorder()
@@ -190,22 +190,22 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	if err := json.NewDecoder(childrenRec.Body).Decode(&children); err != nil {
 		t.Fatalf("decode folder children: %v", err)
 	}
-	nodeRows := make([]store.CompanyExplorerV2Row, 0, 3)
+	logicGateRows := make([]store.CompanyExplorerV2Row, 0, 3)
 	foundMixedFolder := false
 	for _, row := range children.Rows {
 		if row.EntityType == "folder" && row.Name == "Mixed sibling folder" && row.ParentEntityID == childID && row.Position == 3000 {
 			foundMixedFolder = true
 			continue
 		}
-		if row.EntityType == "node" {
-			nodeRows = append(nodeRows, row)
+		if row.EntityType == "logic_gate" {
+			logicGateRows = append(logicGateRows, row)
 		}
 	}
 	if !foundMixedFolder {
 		t.Fatalf("children rows = %+v, want mixed child folder at position 3000", children.Rows)
 	}
-	if len(nodeRows) != 3 || nodeRows[0].ResourceID != secondNode.NodeID || nodeRows[1].ResourceID != thirdNode.NodeID || nodeRows[1].Position != 4000 || nodeRows[2].ResourceID != node.NodeID || nodeRows[2].Position != 5000 {
-		t.Fatalf("node child rows = %+v, want reordered final item refs in child folder", nodeRows)
+	if len(logicGateRows) != 3 || logicGateRows[0].ResourceID != secondGate.LogicGateID || logicGateRows[1].ResourceID != thirdGate.LogicGateID || logicGateRows[1].Position != 4000 || logicGateRows[2].ResourceID != gate.LogicGateID || logicGateRows[2].Position != 5000 {
+		t.Fatalf("Logic Gate child rows = %+v, want reordered final item refs in child folder", logicGateRows)
 	}
 
 	siblingReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/children?company_id="+companyID+"&parent_id="+siblingID, nil)
@@ -778,38 +778,38 @@ func TestCompanyExplorerFolderAndItemListEndpointsSupportSubtreeReads(t *testing
 	handler := server.Routes()
 	companyID := "company-folder-list-subtree-test"
 
-	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Parent")
+	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Parent")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder parent error = %v", err)
 	}
-	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "node", "Child")
+	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "logic_gate", "Child")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
 	}
-	sibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Sibling")
+	sibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Sibling")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder sibling error = %v", err)
 	}
-	nodeA, err := repo.CreateNode(companyID, "Node A")
+	gateA, err := repo.CreateLogicGate(companyID, "Gate A")
 	if err != nil {
-		t.Fatalf("CreateNode A error = %v", err)
+		t.Fatalf("CreateLogicGate A error = %v", err)
 	}
-	nodeB, err := repo.CreateNode(companyID, "Node B")
+	gateB, err := repo.CreateLogicGate(companyID, "Gate B")
 	if err != nil {
-		t.Fatalf("CreateNode B error = %v", err)
+		t.Fatalf("CreateLogicGate B error = %v", err)
 	}
-	nodeOutside, err := repo.CreateNode(companyID, "Node outside")
+	gateOutside, err := repo.CreateLogicGate(companyID, "Gate outside")
 	if err != nil {
-		t.Fatalf("CreateNode outside error = %v", err)
+		t.Fatalf("CreateLogicGate outside error = %v", err)
 	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeA.NodeID, 1000); err != nil {
-		t.Fatalf("Assign node A error = %v", err)
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "logic_gate", gateA.LogicGateID, 1000); err != nil {
+		t.Fatalf("Assign gate A error = %v", err)
 	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, "node", nodeB.NodeID, 2000); err != nil {
-		t.Fatalf("Assign node B error = %v", err)
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, "logic_gate", gateB.LogicGateID, 2000); err != nil {
+		t.Fatalf("Assign gate B error = %v", err)
 	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, sibling.FolderID, "node", nodeOutside.NodeID, 3000); err != nil {
-		t.Fatalf("Assign outside node error = %v", err)
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, sibling.FolderID, "logic_gate", gateOutside.LogicGateID, 3000); err != nil {
+		t.Fatalf("Assign outside gate error = %v", err)
 	}
 
 	assertIDs := func(label string, got []string, want ...string) {
@@ -828,7 +828,7 @@ func TestCompanyExplorerFolderAndItemListEndpointsSupportSubtreeReads(t *testing
 		}
 	}
 
-	foldersReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=node&folder_id="+parent.FolderID, nil)
+	foldersReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=logic_gate&folder_id="+parent.FolderID, nil)
 	foldersRec := httptest.NewRecorder()
 	handler.ServeHTTP(foldersRec, foldersReq)
 	if foldersRec.Code != http.StatusOK {
@@ -846,7 +846,7 @@ func TestCompanyExplorerFolderAndItemListEndpointsSupportSubtreeReads(t *testing
 	}
 	assertIDs("folders", folderIDs, parent.FolderID, child.FolderID)
 
-	invalidFolderReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=node&folder_id=bad-folder-id", nil)
+	invalidFolderReq := httptest.NewRequest(http.MethodGet, "/v1/company-explorer/folders?company_id="+companyID+"&folder_kind=logic_gate&folder_id=bad-folder-id", nil)
 	invalidFolderRec := httptest.NewRecorder()
 	handler.ServeHTTP(invalidFolderRec, invalidFolderReq)
 	if invalidFolderRec.Code != http.StatusBadRequest {
@@ -1033,6 +1033,23 @@ func TestCompanyExplorerItemPlacementDoesNotBreakNativeRelationships(t *testing.
 			t.Fatalf("POST company explorer item %s/%s status = %d, want %d body=%s", itemType, itemID, rec.Code, http.StatusCreated, rec.Body.String())
 		}
 	}
+	assignInvalid := func(folderID, itemType, itemID string, position int) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"company_id":       companyID,
+			"parent_entity_id": folderID,
+			"target_type":      itemType,
+			"target_id":        itemID,
+			"position":         position,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/items", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST invalid company explorer item %s/%s status = %d, want %d body=%s", itemType, itemID, rec.Code, http.StatusBadRequest, rec.Body.String())
+		}
+	}
 
 	nodeA, err := repo.CreateNode(companyID, "Node A")
 	if err != nil {
@@ -1044,32 +1061,32 @@ func TestCompanyExplorerItemPlacementDoesNotBreakNativeRelationships(t *testing.
 	}
 	nodeFolderA := createFolder("node", "Node Folder A")
 	nodeFolderB := createFolder("node", "Node Folder B")
-	assign(nodeFolderA, "node", nodeA.NodeID, 0)
-	assign(nodeFolderA, "node", nodeB.NodeID, 0)
+	assignInvalid(nodeFolderA, "node", nodeA.NodeID, 0)
+	assignInvalid(nodeFolderA, "node", nodeB.NodeID, 0)
 	if _, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Peer", "Peer"); err != nil {
 		t.Fatalf("CreateNodeRelationship error = %v", err)
 	}
 
-	assign(nodeFolderB, "node", nodeA.NodeID, 0)
+	assignInvalid(nodeFolderB, "node", nodeA.NodeID, 0)
 	nodeRelationships, err := repo.ListNodeRelationships(companyID)
 	if err != nil {
-		t.Fatalf("ListNodeRelationships after move error = %v", err)
+		t.Fatalf("ListNodeRelationships after invalid placement error = %v", err)
 	}
 	if len(nodeRelationships) != 1 {
-		t.Fatalf("node relationships after cross-folder reference move = %d, want 1", len(nodeRelationships))
+		t.Fatalf("node relationships after invalid placement = %d, want 1", len(nodeRelationships))
 	}
 
-	assign(nodeFolderB, "node", nodeB.NodeID, 0)
+	assignInvalid(nodeFolderB, "node", nodeB.NodeID, 0)
 	if _, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Parent", "Child"); err != nil {
 		t.Fatalf("CreateNodeRelationship same-folder error = %v", err)
 	}
-	assign(nodeFolderB, "node", nodeA.NodeID, 9000)
+	assignInvalid(nodeFolderB, "node", nodeA.NodeID, 9000)
 	nodeRelationships, err = repo.ListNodeRelationships(companyID)
 	if err != nil {
-		t.Fatalf("ListNodeRelationships after reorder error = %v", err)
+		t.Fatalf("ListNodeRelationships after invalid reorder error = %v", err)
 	}
 	if len(nodeRelationships) != 2 {
-		t.Fatalf("node relationships after same-folder reorder = %d, want 2", len(nodeRelationships))
+		t.Fatalf("node relationships after invalid reorder = %d, want 2", len(nodeRelationships))
 	}
 
 	gateA, err := repo.CreateLogicGate(companyID, "Gate A")
@@ -1115,10 +1132,6 @@ func TestCompanyExplorerBatchItemPlacementSupportsMixedResourceTypes(t *testing.
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerV2Folder: %v", err)
 	}
-	node, err := repo.CreateNode(companyID, "Batch Node")
-	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
 	logicGate, err := repo.CreateLogicGate(companyID, "Batch Gate")
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
@@ -1134,9 +1147,8 @@ func TestCompanyExplorerBatchItemPlacementSupportsMixedResourceTypes(t *testing.
 	body, err := json.Marshal(map[string]any{
 		"company_id": companyID,
 		"items": []map[string]any{
-			{"parent_entity_id": folder.EntityID, "target_type": "node", "target_id": node.NodeID, "position": 1000},
-			{"parent_entity_id": folder.EntityID, "target_type": "logic_gate", "target_id": logicGate.LogicGateID, "position": 2000},
-			{"parent_entity_id": folder.EntityID, "target_type": "project", "target_id": projectResult.Project.ProjectID, "position": 3000},
+			{"parent_entity_id": folder.EntityID, "target_type": "logic_gate", "target_id": logicGate.LogicGateID, "position": 1000},
+			{"parent_entity_id": folder.EntityID, "target_type": "project", "target_id": projectResult.Project.ProjectID, "position": 2000},
 		},
 	})
 	if err != nil {
@@ -1155,8 +1167,8 @@ func TestCompanyExplorerBatchItemPlacementSupportsMixedResourceTypes(t *testing.
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatalf("Decode batch placement response: %v", err)
 	}
-	if len(response.Rows) != 3 {
-		t.Fatalf("batch placement rows = %d, want 3: %+v", len(response.Rows), response.Rows)
+	if len(response.Rows) != 2 {
+		t.Fatalf("batch placement rows = %d, want 2: %+v", len(response.Rows), response.Rows)
 	}
 
 	children, err := repo.ListCompanyExplorerV2ChildRows(store.CompanyExplorerV2RowsQuery{
@@ -1172,13 +1184,33 @@ func TestCompanyExplorerBatchItemPlacementSupportsMixedResourceTypes(t *testing.
 		seen[row.EntityType+":"+row.ResourceID] = true
 	}
 	for _, want := range []string{
-		"node:" + node.NodeID,
 		"logic_gate:" + logicGate.LogicGateID,
 		"project:" + projectResult.Project.ProjectID,
 	} {
 		if !seen[want] {
 			t.Fatalf("batch placement children missing %q: %+v", want, children.Rows)
 		}
+	}
+
+	node, err := repo.CreateNode(companyID, "Rejected Batch Node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	invalidBody, err := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"items": []map[string]any{
+			{"parent_entity_id": folder.EntityID, "target_type": "node", "target_id": node.NodeID, "position": 3000},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Marshal invalid batch placement request: %v", err)
+	}
+	invalidReq := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/items", bytes.NewReader(invalidBody))
+	invalidReq.Header.Set("Content-Type", "application/json")
+	invalidRec := httptest.NewRecorder()
+	handler.ServeHTTP(invalidRec, invalidReq)
+	if invalidRec.Code != http.StatusBadRequest {
+		t.Fatalf("POST node batch company explorer items status = %d, want %d body=%s", invalidRec.Code, http.StatusBadRequest, invalidRec.Body.String())
 	}
 }
 
@@ -1242,30 +1274,30 @@ func TestCompanyExplorerLazyFolderChildrenReturnImmediateRowsOnly(t *testing.T) 
 	companyID := "company-lazy-folder-children-test"
 	repo.EnsureCompany(companyID, "Lazy Folder Children")
 
-	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Parent")
+	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Parent")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder parent error = %v", err)
 	}
-	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "node", "Child")
+	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "logic_gate", "Child")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder child error = %v", err)
 	}
-	grandchild, err := repo.CreateCompanyExplorerFolder(companyID, child.FolderID, "node", "Grandchild")
+	grandchild, err := repo.CreateCompanyExplorerFolder(companyID, child.FolderID, "logic_gate", "Grandchild")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder grandchild error = %v", err)
 	}
-	parentNode, err := repo.CreateNode(companyID, "Parent node")
+	parentGate, err := repo.CreateLogicGate(companyID, "Parent gate")
 	if err != nil {
-		t.Fatalf("CreateNode parent error = %v", err)
+		t.Fatalf("CreateLogicGate parent error = %v", err)
 	}
-	childNode, err := repo.CreateNode(companyID, "Child node")
+	childGate, err := repo.CreateLogicGate(companyID, "Child gate")
 	if err != nil {
-		t.Fatalf("CreateNode child error = %v", err)
+		t.Fatalf("CreateLogicGate child error = %v", err)
 	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", parentNode.NodeID, 1000); err != nil {
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "logic_gate", parentGate.LogicGateID, 1000); err != nil {
 		t.Fatalf("AssignCompanyExplorerFolderItem parent error = %v", err)
 	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, "node", childNode.NodeID, 1000); err != nil {
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, "logic_gate", childGate.LogicGateID, 1000); err != nil {
 		t.Fatalf("AssignCompanyExplorerFolderItem child error = %v", err)
 	}
 
@@ -1277,15 +1309,15 @@ func TestCompanyExplorerLazyFolderChildrenReturnImmediateRowsOnly(t *testing.T) 
 	}
 	payload := decodeCompanyExplorerLazyRowsForTest(t, rec)
 	folders := companyExplorerLazyFolderIDSet(payload)
-	nodes := companyExplorerLazyNodeIDSet(payload)
+	logicGates := companyExplorerLazyLogicGateIDSet(payload)
 	items := companyExplorerLazyFolderItemIDSet(payload)
 	if !folders[child.FolderID] || folders[grandchild.FolderID] {
 		t.Fatalf("lazy child folders = %v, want child only and no grandchild", folders)
 	}
-	if !nodes[parentNode.NodeID] || nodes[childNode.NodeID] {
-		t.Fatalf("lazy child nodes = %v, want parent node only", nodes)
+	if !logicGates[parentGate.LogicGateID] || logicGates[childGate.LogicGateID] {
+		t.Fatalf("lazy child Logic Gates = %v, want parent Logic Gate only", logicGates)
 	}
-	if !items[parentNode.NodeID] || items[childNode.NodeID] {
+	if !items[parentGate.LogicGateID] || items[childGate.LogicGateID] {
 		t.Fatalf("lazy child folder items = %v, want parent item only", items)
 	}
 }
@@ -1307,19 +1339,19 @@ func TestCompanyExplorerBatchDeleteTargetsMovesV2RowsToRecycleBinAndRestores(t *
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerV2Folder: %v", err)
 	}
-	nodeA, err := repo.CreateNode(companyID, "Batch node A")
+	gateA, err := repo.CreateLogicGate(companyID, "Batch gate A")
 	if err != nil {
-		t.Fatalf("CreateNode A: %v", err)
+		t.Fatalf("CreateLogicGate A: %v", err)
 	}
-	nodeB, err := repo.CreateNode(companyID, "Batch node B")
+	gateB, err := repo.CreateLogicGate(companyID, "Batch gate B")
 	if err != nil {
-		t.Fatalf("CreateNode B: %v", err)
+		t.Fatalf("CreateLogicGate B: %v", err)
 	}
 	rowA, err := repo.UpsertCompanyExplorerV2Edge(store.CompanyExplorerV2EdgeInput{
 		CompanyID:       companyID,
 		ParentEntityID:  folder.EntityID,
-		ChildEntityType: store.CompanyExplorerV2EntityNode,
-		ChildResourceID: nodeA.NodeID,
+		ChildEntityType: store.CompanyExplorerV2EntityLogicGate,
+		ChildResourceID: gateA.LogicGateID,
 	})
 	if err != nil {
 		t.Fatalf("UpsertCompanyExplorerV2Edge A: %v", err)
@@ -1327,16 +1359,16 @@ func TestCompanyExplorerBatchDeleteTargetsMovesV2RowsToRecycleBinAndRestores(t *
 	rowB, err := repo.UpsertCompanyExplorerV2Edge(store.CompanyExplorerV2EdgeInput{
 		CompanyID:       companyID,
 		ParentEntityID:  folder.EntityID,
-		ChildEntityType: store.CompanyExplorerV2EntityNode,
-		ChildResourceID: nodeB.NodeID,
+		ChildEntityType: store.CompanyExplorerV2EntityLogicGate,
+		ChildResourceID: gateB.LogicGateID,
 	})
 	if err != nil {
 		t.Fatalf("UpsertCompanyExplorerV2Edge B: %v", err)
 	}
 
 	body := []byte(`{"company_id":"` + companyID + `","targets":[` +
-		`{"kind":"node","id":"` + nodeA.NodeID + `","edge_id":"` + rowA.EdgeID + `"},` +
-		`{"kind":"node","id":"` + nodeB.NodeID + `","edge_id":"` + rowB.EdgeID + `"}` +
+		`{"kind":"logic_gate","id":"` + gateA.LogicGateID + `","edge_id":"` + rowA.EdgeID + `"},` +
+		`{"kind":"logic_gate","id":"` + gateB.LogicGateID + `","edge_id":"` + rowB.EdgeID + `"}` +
 		`]}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/delete-targets", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -1356,8 +1388,8 @@ func TestCompanyExplorerBatchDeleteTargetsMovesV2RowsToRecycleBinAndRestores(t *
 	if len(children.Rows) != 0 {
 		t.Fatalf("children after batch edge delete = %+v, want empty", children.Rows)
 	}
-	if _, err := repo.GetNode(companyID, nodeA.NodeID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("GetNode A after delete err = %v, want ErrNotFound", err)
+	if _, err := repo.GetLogicGate(companyID, gateA.LogicGateID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetLogicGate A after delete err = %v, want ErrNotFound", err)
 	}
 	recycleItems, err := repo.ListRecycleBinItems(companyID)
 	if err != nil {
@@ -1378,12 +1410,12 @@ func TestCompanyExplorerBatchDeleteTargetsMovesV2RowsToRecycleBinAndRestores(t *
 	}
 	removed := 0
 	for _, event := range events {
-		if event.Type == "node_deleted" {
+		if event.Type == "logic_gate_deleted" {
 			removed++
 		}
 	}
 	if removed != 2 {
-		t.Fatalf("node_deleted events = %d, want 2; events=%+v", removed, events)
+		t.Fatalf("logic_gate_deleted events = %d, want 2; events=%+v", removed, events)
 	}
 	itemIDs := make([]string, 0, len(recycleItems))
 	for _, item := range recycleItems {
@@ -1425,20 +1457,20 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 	count := store.CompanyExplorerFolderItemBatchMaxItems + 25
 	targets := make([]map[string]string, 0, count)
 	for index := 0; index < count; index++ {
-		node, err := repo.CreateNode(companyID, fmt.Sprintf("Large batch node %03d", index))
+		logicGate, err := repo.CreateLogicGate(companyID, fmt.Sprintf("Large batch gate %03d", index))
 		if err != nil {
-			t.Fatalf("CreateNode %d: %v", index, err)
+			t.Fatalf("CreateLogicGate %d: %v", index, err)
 		}
 		row, err := repo.UpsertCompanyExplorerV2Edge(store.CompanyExplorerV2EdgeInput{
 			CompanyID:       companyID,
 			ParentEntityID:  folder.EntityID,
-			ChildEntityType: store.CompanyExplorerV2EntityNode,
-			ChildResourceID: node.NodeID,
+			ChildEntityType: store.CompanyExplorerV2EntityLogicGate,
+			ChildResourceID: logicGate.LogicGateID,
 		})
 		if err != nil {
 			t.Fatalf("UpsertCompanyExplorerV2Edge %d: %v", index, err)
 		}
-		targets = append(targets, map[string]string{"kind": "node", "id": node.NodeID, "edge_id": row.EdgeID})
+		targets = append(targets, map[string]string{"kind": "logic_gate", "id": logicGate.LogicGateID, "edge_id": row.EdgeID})
 	}
 
 	body, err := json.Marshal(map[string]any{"company_id": companyID, "targets": targets})
@@ -1457,8 +1489,9 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Unmarshal response: %v", err)
 	}
-	if len(response.Targets) != count {
-		t.Fatalf("deleted targets = %d, want %d", len(response.Targets), count)
+	expectedDeletedTargets := count * 2 // each Logic Gate delete also deletes its generated kanban board.
+	if len(response.Targets) != expectedDeletedTargets {
+		t.Fatalf("deleted targets = %d, want %d", len(response.Targets), expectedDeletedTargets)
 	}
 	children, err := repo.ListCompanyExplorerV2ChildRows(store.CompanyExplorerV2RowsQuery{
 		CompanyID:      companyID,
@@ -1526,7 +1559,7 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 	}
 }
 
-func TestCompanyExplorerLazyLogicGateChildrenReturnDirectNodes(t *testing.T) {
+func TestCompanyExplorerLazyLogicGateChildrenReturnNoNodes(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -1581,8 +1614,8 @@ func TestCompanyExplorerLazyLogicGateChildrenReturnDirectNodes(t *testing.T) {
 		t.Fatalf("GET lazy logic gate children status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	nodes := companyExplorerLazyNodeIDSet(decodeCompanyExplorerLazyRowsForTest(t, rec))
-	if !nodes[nodeA.NodeID] || nodes[nodeB.NodeID] {
-		t.Fatalf("lazy logic gate child nodes = %v, want only %s", nodes, nodeA.NodeID)
+	if len(nodes) != 0 {
+		t.Fatalf("lazy logic gate child nodes = %v, want none because Logic Gates are leaf rows", nodes)
 	}
 }
 

@@ -202,16 +202,9 @@ func TestMemoryRepoCompanyExplorerDeleteMovesNodeToRecycleBinAndRestores(t *test
 	companyID := "11111111-1111-1111-1111-111111111111"
 	repo.EnsureCompany(companyID, "Recycle Company")
 
-	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Node folder")
-	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder failed: %v", err)
-	}
 	node, err := repo.CreateNode(companyID, "Restorable node")
 	if err != nil {
 		t.Fatalf("CreateNode failed: %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, "node", node.NodeID, 1000); err != nil {
-		t.Fatalf("AssignCompanyExplorerFolderItem failed: %v", err)
 	}
 
 	if _, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "node", ID: node.NodeID}}); err != nil {
@@ -244,13 +237,6 @@ func TestMemoryRepoCompanyExplorerDeleteMovesNodeToRecycleBinAndRestores(t *test
 	}
 	if restored.Title != "Restorable node" {
 		t.Fatalf("restored title = %q, want original", restored.Title)
-	}
-	folderItems, err := repo.ListCompanyExplorerFolderItems(companyID, folder.FolderID, "node")
-	if err != nil {
-		t.Fatalf("ListCompanyExplorerFolderItems failed: %v", err)
-	}
-	if len(folderItems) != 1 || folderItems[0].ItemID != node.NodeID {
-		t.Fatalf("folder items after restore = %+v, want restored placement", folderItems)
 	}
 	remaining, err := repo.ListRecycleBinItems(companyID)
 	if err != nil {
@@ -723,14 +709,6 @@ func TestMemoryRepo_CompanyExplorerSubtreeSummariesAreBounded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder node parent failed: %v", err)
 	}
-	nodeChild, err := repo.CreateCompanyExplorerFolder(companyID, nodeParent.FolderID, "node", "Node child")
-	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder node child failed: %v", err)
-	}
-	nodeSibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Node sibling")
-	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder node sibling failed: %v", err)
-	}
 	logicParent, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Logic parent")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder logic parent failed: %v", err)
@@ -747,14 +725,6 @@ func TestMemoryRepo_CompanyExplorerSubtreeSummariesAreBounded(t *testing.T) {
 	nodeA, err := repo.CreateNode(companyID, "Node A")
 	if err != nil {
 		t.Fatalf("CreateNode A failed: %v", err)
-	}
-	nodeB, err := repo.CreateNode(companyID, "Node B")
-	if err != nil {
-		t.Fatalf("CreateNode B failed: %v", err)
-	}
-	nodeOutside, err := repo.CreateNode(companyID, "Node outside")
-	if err != nil {
-		t.Fatalf("CreateNode outside failed: %v", err)
 	}
 	if _, err := repo.CreateNode(companyID, "Node unplaced"); err != nil {
 		t.Fatalf("CreateNode unplaced failed: %v", err)
@@ -775,14 +745,8 @@ func TestMemoryRepo_CompanyExplorerSubtreeSummariesAreBounded(t *testing.T) {
 		t.Fatalf("CreateLogicGate unplaced failed: %v", err)
 	}
 
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeParent.FolderID, "node", nodeA.NodeID, 1000); err != nil {
-		t.Fatalf("Assign node A failed: %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeChild.FolderID, "node", nodeB.NodeID, 2000); err != nil {
-		t.Fatalf("Assign node B failed: %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeSibling.FolderID, "node", nodeOutside.NodeID, 3000); err != nil {
-		t.Fatalf("Assign outside node failed: %v", err)
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, nodeParent.FolderID, "node", nodeA.NodeID, 1000); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Assign node A error = %v, want ErrInvalid", err)
 	}
 	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, logicParent.FolderID, "logic_gate", gateA.LogicGateID, 1000); err != nil {
 		t.Fatalf("Assign gate A failed: %v", err)
@@ -798,12 +762,8 @@ func TestMemoryRepo_CompanyExplorerSubtreeSummariesAreBounded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerNodeSummariesInFolderSubtree failed: %v", err)
 	}
-	nodeIDs := map[string]bool{}
-	for _, node := range nodes {
-		nodeIDs[node.NodeID] = true
-	}
-	if len(nodeIDs) != 2 || !nodeIDs[nodeA.NodeID] || !nodeIDs[nodeB.NodeID] || nodeIDs[nodeOutside.NodeID] {
-		t.Fatalf("node subtree summaries = %+v, want parent and child only", nodes)
+	if len(nodes) != 0 {
+		t.Fatalf("node subtree summaries = %+v, want none because nodes are not Company Explorer folder items", nodes)
 	}
 
 	logicGates, err := repo.ListCompanyExplorerLogicGateSummariesInFolderSubtree(companyID, logicParent.FolderID)

@@ -885,9 +885,7 @@ func (r *MemoryRepo) validateCompanyExplorerFolderItemAssignmentLocked(companyID
 		return ErrNotFound
 	}
 	if itemType == "node" {
-		if _, ok := r.nodes[key(companyID, itemID)]; !ok {
-			return ErrNotFound
-		}
+		return ErrInvalid
 	} else if itemType == "logic_gate" {
 		if _, ok := r.logicGates[key(companyID, itemID)]; !ok {
 			return ErrNotFound
@@ -974,7 +972,7 @@ func (r *MemoryRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemTyp
 		if item.CompanyID != companyID {
 			continue
 		}
-		if item.ItemType == "kanban" {
+		if item.ItemType == "kanban" || item.ItemType == "node" {
 			continue
 		}
 		if folderID != "" && item.FolderID != folderID {
@@ -1015,7 +1013,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerFolderItems(companyID, folderID, 
 		return items, nil
 	}
 	for _, item := range r.folderItems {
-		if item.CompanyID != companyID || item.ItemType == "kanban" {
+		if item.CompanyID != companyID || item.ItemType == "kanban" || item.ItemType == "node" {
 			continue
 		}
 		if folderID != "" && item.FolderID != folderID {
@@ -1081,7 +1079,7 @@ func (r *MemoryRepo) ListCompanyExplorerFolderItemsInFolderSubtree(companyID, fo
 	ids := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "")
 	items := make([]domain.CompanyExplorerFolderItem, 0)
 	for _, item := range r.folderItems {
-		if item.CompanyID != companyID || item.ItemType == "kanban" || !ids[item.FolderID] {
+		if item.CompanyID != companyID || item.ItemType == "kanban" || item.ItemType == "node" || !ids[item.FolderID] {
 			continue
 		}
 		if itemType != "" && item.ItemType != itemType {
@@ -1124,7 +1122,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerFolderItemsInFolderSubtree(compan
 	ids := r.visibleCompanyExplorerFolderSubtreeIDsLocked(companyID, folderID, "", userID)
 	items := make([]domain.CompanyExplorerFolderItem, 0)
 	for _, item := range r.folderItems {
-		if item.CompanyID != companyID || item.ItemType == "kanban" || !ids[item.FolderID] {
+		if item.CompanyID != companyID || item.ItemType == "kanban" || item.ItemType == "node" || !ids[item.FolderID] {
 			continue
 		}
 		if itemType != "" && item.ItemType != itemType {
@@ -1202,25 +1200,7 @@ func (r *MemoryRepo) ListCompanyExplorerNodeSummariesInFolderSubtree(companyID, 
 	if folderID == "" {
 		return r.ListCompanyExplorerNodeSummaries(companyID)
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "node")
-	items := make([]domain.Node, 0)
-	seen := map[string]bool{}
-	for _, folderItem := range r.folderItems {
-		if folderItem.CompanyID != companyID || folderItem.ItemType != "node" || !folderIDs[folderItem.FolderID] || seen[folderItem.ItemID] {
-			continue
-		}
-		node, ok := r.nodes[key(companyID, folderItem.ItemID)]
-		if !ok {
-			continue
-		}
-		seen[folderItem.ItemID] = true
-		items = append(items, companyExplorerNodeSummary(r.withNodeReadModelLocked(node)))
-	}
-	sortCompanyExplorerNodeSummaries(items)
-	return items, nil
+	return []domain.Node{}, nil
 }
 
 func (r *MemoryRepo) ListVisibleCompanyExplorerNodeSummariesInFolderSubtree(companyID, folderID, userID string) ([]domain.Node, error) {
@@ -1233,29 +1213,7 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerNodeSummariesInFolderSubtree(comp
 	if folderID == "" {
 		return r.ListVisibleCompanyExplorerNodeSummaries(companyID, userID)
 	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	folderIDs := r.visibleCompanyExplorerFolderSubtreeIDsLocked(companyID, folderID, "node", userID)
-	items := make([]domain.Node, 0)
-	seen := map[string]bool{}
-	for _, folderItem := range r.folderItems {
-		if folderItem.CompanyID != companyID || folderItem.ItemType != "node" || !folderIDs[folderItem.FolderID] || seen[folderItem.ItemID] {
-			continue
-		}
-		if !r.companyExplorerFolderItemVisibleLocked(companyID, userID, folderItem) {
-			continue
-		}
-		node, ok := r.nodes[key(companyID, folderItem.ItemID)]
-		if !ok {
-			continue
-		}
-		seen[folderItem.ItemID] = true
-		items = append(items, companyExplorerNodeSummary(r.withNodeReadModelLocked(node)))
-	}
-	sortCompanyExplorerNodeSummaries(items)
-	return items, nil
+	return []domain.Node{}, nil
 }
 
 func companyExplorerLogicGateSummary(gate domain.LogicGate) domain.LogicGate {

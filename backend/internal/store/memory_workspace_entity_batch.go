@@ -11,6 +11,9 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 	defer r.mu.Unlock()
 
 	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
+	if input.EntityKind == EntityTypeNode && strings.TrimSpace(input.FolderID) != "" {
+		return WorkspaceEntityBatchResult{}, ErrInvalid
+	}
 	now := time.Now().UTC()
 	result := WorkspaceEntityBatchResult{
 		CompanyID:      input.CompanyID,
@@ -27,8 +30,8 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 
 	targetFolderID := strings.TrimSpace(input.FolderID)
 	targetFolderKind := input.EntityKind
-	syncDefaultFolderItems := targetFolderID == "" && MutationOriginNeedsCompanyExplorerDefaultPlacement(input.MutationOrigin)
-	if targetFolderID != "" {
+	syncDefaultFolderItems := input.EntityKind != EntityTypeNode && targetFolderID == "" && MutationOriginNeedsCompanyExplorerDefaultPlacement(input.MutationOrigin)
+	if targetFolderID != "" && input.EntityKind != EntityTypeNode {
 		folder, ok := r.folders[key(input.CompanyID, targetFolderID)]
 		if !ok {
 			return WorkspaceEntityBatchResult{}, ErrNotFound

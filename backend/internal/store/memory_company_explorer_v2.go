@@ -79,6 +79,9 @@ func (r *MemoryRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQ
 	if parent.EntityType == CompanyExplorerV2EntityCompany {
 		return r.listCompanyExplorerV2RootRowsLocked(query), nil
 	}
+	if parent.EntityType != CompanyExplorerV2EntityFolder {
+		return CompanyExplorerV2Rows{Rows: []CompanyExplorerV2Row{}}, nil
+	}
 	rows := CompanyExplorerV2Rows{Rows: []CompanyExplorerV2Row{}}
 	for _, edge := range r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, parent.EntityID) {
 		child, ok := r.companyExplorerV2Entities[key(query.CompanyID, edge.ChildEntityID)]
@@ -158,39 +161,11 @@ func (r *MemoryRepo) companyExplorerV2DirectTreeEdgesLocked(companyID string) []
 			bestByParentChild[edgeKey] = candidate
 		}
 	}
-	for _, assignment := range r.nodeLogicGateAssignments {
-		if assignment.CompanyID != companyID {
-			continue
-		}
-		parent, ok := r.companyExplorerV2EntityForNativeLocked(companyID, CompanyExplorerV2EntityLogicGate, assignment.LogicGateID)
-		if !ok {
-			continue
-		}
-		child, ok := r.companyExplorerV2EntityForNativeLocked(companyID, CompanyExplorerV2EntityNode, assignment.NodeID)
-		if !ok {
-			continue
-		}
-		add(memoryCompanyExplorerV2TreeEdge{CompanyID: companyID, ParentEntityID: parent.EntityID, ChildEntityID: child.EntityID, Position: assignment.Position, CreatedTimestamp: assignment.CreatedTimestamp, UpdatedTimestamp: assignment.UpdatedTimestamp, SourcePriority: 10})
-	}
-	for _, projection := range r.projectRelationshipProjection {
-		if projection.CompanyID != companyID {
-			continue
-		}
-		parent, ok := r.companyExplorerV2EntityForNativeLocked(companyID, CompanyExplorerV2EntityProject, projection.ProjectID)
-		if !ok {
-			continue
-		}
-		child, ok := r.companyExplorerV2EntityForNativeLocked(companyID, projection.ResourceType, projection.ResourceID)
-		if !ok {
-			continue
-		}
-		add(memoryCompanyExplorerV2TreeEdge{CompanyID: companyID, ParentEntityID: parent.EntityID, ChildEntityID: child.EntityID, Position: projection.Position, CreatedTimestamp: projection.RelationshipCreatedTimestamp, UpdatedTimestamp: projection.RelationshipUpdatedTimestamp, SourcePriority: 20})
-	}
 	for _, edge := range r.companyExplorerV2Edges {
 		if edge.CompanyID != companyID {
 			continue
 		}
-		add(memoryCompanyExplorerV2TreeEdge{CompanyID: edge.CompanyID, EdgeID: edge.EdgeID, ParentEntityID: edge.ParentEntityID, ChildEntityID: edge.ChildEntityID, Position: edge.Position, CreatedTimestamp: edge.CreatedTimestamp, UpdatedTimestamp: edge.UpdatedTimestamp, SourcePriority: 30})
+		add(memoryCompanyExplorerV2TreeEdge{CompanyID: edge.CompanyID, EdgeID: edge.EdgeID, ParentEntityID: edge.ParentEntityID, ChildEntityID: edge.ChildEntityID, Position: edge.Position, CreatedTimestamp: edge.CreatedTimestamp, UpdatedTimestamp: edge.UpdatedTimestamp, SourcePriority: 10})
 	}
 	edges := make([]memoryCompanyExplorerV2TreeEdge, 0, len(bestByParentChild))
 	for _, edge := range bestByParentChild {
@@ -357,12 +332,18 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 	if input.PermissionUserID != "" && !r.companyExplorerV2EntityCanEditLocked(input.CompanyID, input.PermissionUserID, parent) {
 		return CompanyExplorerV2Row{}, ErrNotFound
 	}
+	if parent.EntityType != CompanyExplorerV2EntityCompany && parent.EntityType != CompanyExplorerV2EntityFolder {
+		return CompanyExplorerV2Row{}, ErrInvalid
+	}
 	child, ok := r.companyExplorerV2Entities[key(input.CompanyID, input.ChildEntityID)]
 	if !ok {
 		child, ok = r.companyExplorerV2EntityForNativeLocked(input.CompanyID, input.ChildEntityType, input.ChildResourceID)
 	}
 	if !ok || !r.companyExplorerV2EntityVisibleLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child) {
 		return CompanyExplorerV2Row{}, ErrNotFound
+	}
+	if child.EntityType != CompanyExplorerV2EntityProject && child.EntityType != CompanyExplorerV2EntityLogicGate {
+		return CompanyExplorerV2Row{}, ErrInvalid
 	}
 	if r.companyExplorerV2CreatesCycleLocked(input.CompanyID, input.ParentEntityID, child.EntityID) {
 		return CompanyExplorerV2Row{}, ErrInvalid
@@ -462,7 +443,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []st
 		if parent, ok := r.companyExplorerV2Entities[key(companyID, edge.ParentEntityID)]; ok && parent.EntityType == CompanyExplorerV2EntityFolder {
 			if child, ok := r.companyExplorerV2Entities[key(companyID, edge.ChildEntityID)]; ok {
 				switch child.EntityType {
-				case CompanyExplorerV2EntityNode, CompanyExplorerV2EntityLogicGate, CompanyExplorerV2EntityProject:
+				case CompanyExplorerV2EntityLogicGate, CompanyExplorerV2EntityProject:
 					delete(r.folderItems, folderItemKey(companyID, child.EntityType, child.ResourceID))
 				}
 			}
@@ -973,6 +954,9 @@ func (r *MemoryRepo) userHasCompanyMembershipLocked(companyID, userID string) bo
 }
 
 func (r *MemoryRepo) companyExplorerV2HasChildrenLocked(companyID string, entity memoryCompanyExplorerV2Entity) bool {
+	if entity.EntityType != CompanyExplorerV2EntityCompany && entity.EntityType != CompanyExplorerV2EntityFolder {
+		return false
+	}
 	for _, edge := range r.companyExplorerV2DirectTreeEdgesLocked(companyID) {
 		if edge.ParentEntityID == entity.EntityID {
 			return true
@@ -1069,7 +1053,7 @@ func (r *MemoryRepo) shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child mem
 		r.folders[key(child.CompanyID, child.EntityID)] = folder
 		return
 	}
-	if child.EntityType != CompanyExplorerV2EntityNode && child.EntityType != CompanyExplorerV2EntityLogicGate && child.EntityType != CompanyExplorerV2EntityProject {
+	if child.EntityType != CompanyExplorerV2EntityLogicGate && child.EntityType != CompanyExplorerV2EntityProject {
 		return
 	}
 	item := domain.CompanyExplorerFolderItem{

@@ -4,10 +4,10 @@ import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
-import { getNodeTitle as getNodeRecordTitle, type NodeRecord } from "../node-map/shared";
+import { type NodeRecord } from "../node-map/shared";
 import { getNodeTitle as getLogicGateRecordTitle, toLogicGateCanvasRecord, type LogicGateGVICRole, type LogicGateRecord as LogicGateApiRecord, type NodeRecord as LogicGateCanvasRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../node-map/eventbus";
-import { removeCompanyExplorerFolderInNodeRelationshipGraph, removeNodeRelationshipGraphNode, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
+import { removeCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
 import { removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { type ExplorerSelectionState } from "./explorerSync";
 import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerFolderScopeType, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
@@ -29,7 +29,6 @@ import {
   getExplorerSelectionDomain,
   readRootRowOrderFromStorage,
   readScrollTopFromStorage,
-  shouldRemoveExplorerPlacementAfterLogicGateDrop,
   TREE_ROW_POSITION_STEP,
 } from "./companyExplorerDragDrop";
 import {
@@ -56,7 +55,6 @@ import { getActiveCompanyID } from "../../auth/currentCompany";
 import { createRequestJSON } from "../api/requestJSON";
 import { convertTriageMessagesToExplorerTarget, listCompanyUserGroups, listCompanyUsers, type CommunicationsTriageConversionTarget, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
 import { createProject, type ProjectRecord } from "../project-management/projectManagementApi";
-import { assignNodeToLogicGateStatus } from "../kanban/kanbanApi";
 import { listMyLogicGates, listGVICMatrixProjectionRows, type WorkItemLogicGateInboxItem } from "../work-items/workItemReadApi";
 import {
   buildDeleteConfirmationSummary,
@@ -119,6 +117,7 @@ function getOpenInNewTabTargetForExplorerRow(row?: ExplorerTreeNode | null): Com
 }
 
 function getPinTargetForExplorerRow(row?: ExplorerTreeNode | null): CompanyExplorerPinTarget | null {
+  if (row?.syntheticKind === "search_result") return null;
   const target = getOpenInNewTabTargetForExplorerRow(row);
   if (!target) return null;
   return { ...target, name: row?.label?.trim() || target.id };
@@ -219,16 +218,14 @@ function shouldRefreshGVICExplorerProjectionForGap(gap: WorkspaceStreamGapSignal
 function shouldRefreshGVICExplorerProjectionForEnvelope(companyID: string, envelope: CompanyExplorerWorkspaceStreamEnvelope): boolean {
   if (envelope.company_id !== companyID) return false;
   const type = envelope.type?.trim() ?? "";
-  return type === "node_created"
-    || type === "node_updated"
-    || type === "node_deleted"
-    || type === "node_permissions_updated"
-    || type === "logic_gate_created"
+  return type === "logic_gate_created"
     || type === "logic_gate_updated"
     || type === "logic_gate_deleted"
     || type === "logic_gate_gvic_updated"
     || type === "logic_gate_permissions_updated"
-    || type.startsWith("work_item.");
+    || type === "project_created"
+    || type === "project_updated"
+    || type === "project_deleted";
 }
 
 function cleanExplorerID(value: string | null | undefined): string {
@@ -241,11 +238,6 @@ function cleanExplorerIDs(values: string[]): string[] {
 
 function companyExplorerTriageConversionTarget(target: CompanyExplorerTriageMessageDropTarget): CommunicationsTriageConversionTarget | null {
   switch (target.kind) {
-    case "folder": {
-      const folderID = cleanExplorerID(target.folderID);
-      const parentEntityID = cleanExplorerID(target.parentEntityID);
-      return { mode: "folder", folderID: folderID || undefined, parentEntityID: parentEntityID || undefined };
-    }
     case "project": {
       const projectID = cleanExplorerID(target.projectID);
       return projectID ? { mode: "project", projectID } : null;
@@ -253,11 +245,6 @@ function companyExplorerTriageConversionTarget(target: CompanyExplorerTriageMess
     case "logic_gate": {
       const logicGateID = cleanExplorerID(target.logicGateID);
       return logicGateID ? { mode: "existing_logic_gate", logicGateID } : null;
-    }
-    case "node": {
-      const nodeID = cleanExplorerID(target.nodeID);
-      const logicGateID = cleanExplorerID(target.logicGateID);
-      return nodeID ? { mode: "existing_node", nodeID, logicGateID: logicGateID || undefined } : null;
     }
     default:
       return null;
@@ -414,27 +401,16 @@ function filterCompanyExplorerDataForScope(input: {
       .filter((logicGate) => logicGateOwnedByAnyUser(logicGate, ownerUserIDs))
       .map((logicGate) => logicGate.logic_gate_id),
   );
-  const visibleNodeIDs = new Set<string>();
-  for (const node of input.nodes) {
-    if ((node.logic_gate_ids ?? []).some((logicGateID) => visibleLogicGateIDs.has(cleanExplorerID(logicGateID)))) {
-      visibleNodeIDs.add(node.node_id);
-    }
-  }
-
   const folderByID = new Map(input.folders.map((folder) => [folder.folder_id, folder]));
   const visibleFolderIDs = new Set<string>();
   const scopedFolderItems = input.folderItems.filter((item) => {
-    const visible = item.item_type === "node"
-      ? visibleNodeIDs.has(item.item_id)
-      : item.item_type === "logic_gate"
-        ? visibleLogicGateIDs.has(item.item_id)
-        : false;
+    const visible = item.item_type === "logic_gate" && visibleLogicGateIDs.has(item.item_id);
     if (visible) addFolderAncestors(item.folder_id, folderByID, visibleFolderIDs);
     return visible;
   });
 
   return {
-    nodes: input.nodes.filter((node) => visibleNodeIDs.has(node.node_id)),
+    nodes: [],
     logicGates: input.logicGates.filter((logicGate) => visibleLogicGateIDs.has(logicGate.logic_gate_id)),
     folders: input.folders,
     folderItems: scopedFolderItems,
@@ -461,24 +437,8 @@ function GVICLogicGateTreeID(role: CompanyExplorerGVICFolderRole, logicGateID: s
   return `GVIC-${role}-logic-gate-${logicGateID}`;
 }
 
-function GVICNodeTreeID(role: CompanyExplorerGVICFolderRole, logicGateID: string, nodeID: string): string {
-  return `GVIC-${role}-logic-gate-${logicGateID}-node-${nodeID}`;
-}
-
-function GVICNoLogicGateTreeID(role: CompanyExplorerGVICFolderRole): string {
-  return `GVIC-${role}-no-logic-gate`;
-}
-
-function GVICNoLogicGateNodeTreeID(role: CompanyExplorerGVICFolderRole, nodeID: string): string {
-  return `GVIC-${role}-no-logic-gate-node-${nodeID}`;
-}
-
 function GVICVisualLogicGateTreeID(role: CompanyExplorerGVICFolderRole, folderID: string, logicGateID: string): string {
   return `GVIC-${role}-folder-${folderID}-logic-gate-${logicGateID}`;
-}
-
-function GVICVisualNodeTreeID(role: CompanyExplorerGVICFolderRole, folderID: string, nodeID: string): string {
-  return `GVIC-${role}-folder-${folderID}-node-${nodeID}`;
 }
 
 function isProtectedGVICRoleRow(row: ExplorerTreeNode | null | undefined): boolean {
@@ -663,12 +623,10 @@ function buildGVICCompanyExplorerRows(input: {
   const GVICCreationScope = currentGVICUserID
     ? { folderScopeType: "user" as const, folderScopeID: currentGVICUserID }
     : {};
+  void input.nodes;
+  void input.folderNodes;
+  void input.customFolderNodes;
   const emptyProjectByID = new Map<string, ProjectRecord>();
-  const nodeByID = new Map<string, NodeRecord>();
-  for (const node of input.folderNodes) nodeByID.set(node.node_id, node);
-  for (const node of input.nodes) nodeByID.set(node.node_id, node);
-  const GVICNodeByID = new Map<string, NodeRecord>();
-  for (const node of input.nodes) GVICNodeByID.set(node.node_id, node);
   const logicGateByID = new Map<string, ExplorerLogicGateRecord>();
   for (const logicGate of input.folderLogicGates) logicGateByID.set(logicGate.logic_gate_id, logicGate);
   for (const logicGate of input.logicGates) logicGateByID.set(logicGate.logic_gate_id, logicGate);
@@ -676,8 +634,6 @@ function buildGVICCompanyExplorerRows(input: {
   for (const logicGate of input.logicGates) GVICLogicGateByID.set(logicGate.logic_gate_id, logicGate);
   const projectByID = new Map<string, ProjectRecord>();
   for (const project of input.projects ?? []) projectByID.set(project.project_id, project);
-  const customNodeByID = new Map(nodeByID);
-  for (const node of input.customFolderNodes ?? []) customNodeByID.set(node.node_id, node);
   const customLogicGateByID = new Map(logicGateByID);
   for (const logicGate of input.customFolderLogicGates ?? []) customLogicGateByID.set(logicGate.logic_gate_id, logicGate);
   const customProjectByID = new Map(projectByID);
@@ -756,16 +712,6 @@ function buildGVICCompanyExplorerRows(input: {
   };
   const itemOwnerUserIDs = (item: CompanyExplorerFolderItem): Set<string> => {
     if (item.item_type === "logic_gate") return logicGateOwnerUserIDs(customLogicGateByID.get(item.item_id));
-    if (item.item_type === "node") {
-      const ownerIDs = new Set<string>();
-      const node = customNodeByID.get(item.item_id);
-      for (const logicGateID of node?.logic_gate_ids ?? []) {
-        for (const userID of logicGateOwnerUserIDs(customLogicGateByID.get(cleanExplorerID(logicGateID)))) {
-          ownerIDs.add(userID);
-        }
-      }
-      return ownerIDs;
-    }
     return new Set<string>();
   };
   if (input.includeCustomRootFolders) {
@@ -801,30 +747,6 @@ function buildGVICCompanyExplorerRows(input: {
       }
     }
   }
-
-  const nodesByLogicGateID = new Map<string, NodeRecord[]>();
-  const nodesWithoutLogicGate: NodeRecord[] = [];
-  for (const node of input.nodes) {
-    const logicGateIDs = Array.from(new Set((node.logic_gate_ids ?? []).map(cleanExplorerID).filter(Boolean)));
-    if (logicGateIDs.length === 0) {
-      nodesWithoutLogicGate.push(node);
-      continue;
-    }
-    for (const cleanLogicGateID of logicGateIDs) {
-      const bucket = nodesByLogicGateID.get(cleanLogicGateID) ?? [];
-      bucket.push(node);
-      nodesByLogicGateID.set(cleanLogicGateID, bucket);
-    }
-  }
-  const customNodesByLogicGateID = new Map<string, NodeRecord[]>();
-  for (const node of input.customFolderNodes ?? input.folderNodes) {
-    const logicGateIDs = Array.from(new Set((node.logic_gate_ids ?? []).map(cleanExplorerID).filter(Boolean)));
-    for (const cleanLogicGateID of logicGateIDs) {
-      const bucket = customNodesByLogicGateID.get(cleanLogicGateID) ?? [];
-      bucket.push(node);
-      customNodesByLogicGateID.set(cleanLogicGateID, bucket);
-    }
-  }
   const logicGatesByRole = new Map<CompanyExplorerGVICFolderRole, ExplorerLogicGateRecord[]>();
   for (const logicGate of input.logicGates) {
     for (const role of logicGateGVICRolesForUser(logicGate, input.currentUserID)) {
@@ -833,11 +755,11 @@ function buildGVICCompanyExplorerRows(input: {
       logicGatesByRole.set(role, bucket);
     }
   }
-  const placedByRole = new Map<CompanyExplorerGVICFolderRole, { logicGateIDs: Set<string>; nodeIDs: Set<string> }>();
+  const placedByRole = new Map<CompanyExplorerGVICFolderRole, { logicGateIDs: Set<string> }>();
   const placementForRole = (role: CompanyExplorerGVICFolderRole) => {
     let placement = placedByRole.get(role);
     if (!placement) {
-      placement = { logicGateIDs: new Set<string>(), nodeIDs: new Set<string>() };
+      placement = { logicGateIDs: new Set<string>() };
       placedByRole.set(role, placement);
     }
     return placement;
@@ -849,22 +771,18 @@ function buildGVICCompanyExplorerRows(input: {
     for (const placementRole of role ? [role] : GVIC_FOLDER_ROWS.map((folder) => folder.role)) {
       const placement = placementForRole(placementRole);
       const placementLogicGateByID = role ? GVICLogicGateByID : customLogicGateByID;
-      const placementNodeByID = role ? GVICNodeByID : customNodeByID;
       if (item.item_type === "logic_gate" && placementLogicGateByID.has(item.item_id)) placement.logicGateIDs.add(item.item_id);
-      if (item.item_type === "node" && placementNodeByID.has(item.item_id)) placement.nodeIDs.add(item.item_id);
     }
   }
 
   const visualFolderHasChildren = (
     folderID: string,
-    sourceNodeByID = nodeByID,
     sourceLogicGateByID = logicGateByID,
     sourceProjectByID = projectByID,
   ): boolean => {
     if ((foldersByParent.get(folderID) ?? []).length > 0) return true;
     return (itemsByFolder.get(folderID) ?? []).some((item) => (
       (item.item_type === "logic_gate" && sourceLogicGateByID.has(item.item_id))
-      || (item.item_type === "node" && sourceNodeByID.has(item.item_id))
       || (item.item_type === "project" && sourceProjectByID.has(item.item_id))
     ));
   };
@@ -876,29 +794,26 @@ function buildGVICCompanyExplorerRows(input: {
   );
   function visualFolderHasGVICVisibleChildren(
     folderID: string,
-    sourceNodeByID = GVICNodeByID,
     sourceLogicGateByID = GVICLogicGateByID,
     sourceProjectByID = emptyProjectByID,
   ): boolean {
     for (const child of foldersByParent.get(folderID) ?? []) {
-      if (visualFolderVisibleForCurrentGVICUser(child, sourceNodeByID, sourceLogicGateByID, sourceProjectByID)) return true;
+      if (visualFolderVisibleForCurrentGVICUser(child, sourceLogicGateByID, sourceProjectByID)) return true;
     }
     return (itemsByFolder.get(folderID) ?? []).some((item) => (
       (item.item_type === "logic_gate" && sourceLogicGateByID.has(item.item_id))
-      || (item.item_type === "node" && sourceNodeByID.has(item.item_id))
       || (item.item_type === "project" && sourceProjectByID.has(item.item_id))
     ));
   }
   function visualFolderVisibleForCurrentGVICUser(
     folder: CompanyExplorerFolder,
-    sourceNodeByID = GVICNodeByID,
     sourceLogicGateByID = GVICLogicGateByID,
     sourceProjectByID = emptyProjectByID,
   ): boolean {
     if (folderMatchesCurrentGVICUserScope(folder)) return true;
     if (folder.scope_type === "user" || folder.scope_type === "team") return false;
     return shouldShowGVICCompanyScopedFolderShell(folder.scope_type)
-      || visualFolderHasGVICVisibleChildren(folder.folder_id, sourceNodeByID, sourceLogicGateByID, sourceProjectByID);
+      || visualFolderHasGVICVisibleChildren(folder.folder_id, sourceLogicGateByID, sourceProjectByID);
   }
 
   const pushVisualLogicGateBranch = (
@@ -909,17 +824,8 @@ function buildGVICCompanyExplorerRows(input: {
     depth: number,
     position: number,
     createdTimestamp: string,
-    sourceNodesByLogicGateID = nodesByLogicGateID,
   ) => {
-    const placed = placementForRole(role);
     const rowID = prefixTreeID(GVICVisualLogicGateTreeID(role, folderID, logicGate.logic_gate_id));
-    const nestedNodes = [...(sourceNodesByLogicGateID.get(logicGate.logic_gate_id) ?? [])]
-      .filter((node) => !placed.nodeIDs.has(node.node_id))
-      .sort((a, b) => (
-        getNodeRecordTitle(a).localeCompare(getNodeRecordTitle(b))
-        || a.created_timestamp.localeCompare(b.created_timestamp)
-        || a.node_id.localeCompare(b.node_id)
-      ));
     rows.push({
       id: rowID,
       label: getLogicGateRecordTitle(logicGate) || logicGate.logic_gate_id,
@@ -932,35 +838,17 @@ function buildGVICCompanyExplorerRows(input: {
       scopeLevel: rowDepth(depth),
       position,
       createdTimestamp,
-      hasChildren: true,
+      hasChildren: false,
       GVICRole: role,
       syntheticKind: "logic_gate_children",
     });
-    if (!isExpanded(rowID)) return;
-    for (const [nodeIndex, node] of nestedNodes.entries()) {
-      rows.push({
-        id: prefixTreeID(GVICNodeTreeID(role, logicGate.logic_gate_id, node.node_id)),
-        label: getNodeRecordTitle(node) || node.node_id,
-        depth: rowDepth(depth + 1),
-        kind: "node",
-        nodeID: node.node_id,
-        scopeLevel: rowDepth(depth + 1),
-        position: (nodeIndex + 1) * TREE_ROW_POSITION_STEP,
-        createdTimestamp: node.created_timestamp,
-        parentLogicGateID: logicGate.logic_gate_id,
-        GVICRole: role,
-        syntheticKind: "logic_gate_children",
-      });
-    }
   };
 
   const pushVisualFolderBranch = (
     role: CompanyExplorerGVICFolderRole,
     parentFolderID: string,
     depth: number,
-    sourceNodeByID = nodeByID,
     sourceLogicGateByID = logicGateByID,
-    sourceNodesByLogicGateID = nodesByLogicGateID,
     sourceProjectByID = projectByID,
     filterFoldersToCurrentGVICUser = false,
   ) => {
@@ -970,7 +858,7 @@ function buildGVICCompanyExplorerRows(input: {
       | { kind: "item"; item: CompanyExplorerFolderItem; position: number; createdTimestamp: string; label: string }
     > = [];
     for (const folder of foldersByParent.get(parentFolderID) ?? []) {
-      if (filterFoldersToCurrentGVICUser && !visualFolderVisibleForCurrentGVICUser(folder, sourceNodeByID, sourceLogicGateByID, sourceProjectByID)) continue;
+      if (filterFoldersToCurrentGVICUser && !visualFolderVisibleForCurrentGVICUser(folder, sourceLogicGateByID, sourceProjectByID)) continue;
       branchRows.push({
         kind: "folder",
         folder,
@@ -989,16 +877,6 @@ function buildGVICCompanyExplorerRows(input: {
           position: item.position || TREE_ROW_POSITION_STEP,
           createdTimestamp: item.created_timestamp,
           label: getLogicGateRecordTitle(logicGate) || logicGate.logic_gate_id,
-        });
-      } else if (item.item_type === "node") {
-        const node = sourceNodeByID.get(item.item_id);
-        if (!node) continue;
-        branchRows.push({
-          kind: "item",
-          item,
-          position: item.position || TREE_ROW_POSITION_STEP,
-          createdTimestamp: item.created_timestamp,
-          label: getNodeRecordTitle(node) || node.node_id,
         });
       } else if (item.item_type === "project") {
         const project = sourceProjectByID.get(item.item_id);
@@ -1030,37 +908,19 @@ function buildGVICCompanyExplorerRows(input: {
           position: folder.position || TREE_ROW_POSITION_STEP,
           createdTimestamp: folder.created_timestamp,
           hasChildren: filterFoldersToCurrentGVICUser
-            ? visualFolderHasGVICVisibleChildren(folder.folder_id, sourceNodeByID, sourceLogicGateByID, sourceProjectByID)
-            : visualFolderHasChildren(folder.folder_id, sourceNodeByID, sourceLogicGateByID, sourceProjectByID),
+            ? visualFolderHasGVICVisibleChildren(folder.folder_id, sourceLogicGateByID, sourceProjectByID)
+            : visualFolderHasChildren(folder.folder_id, sourceLogicGateByID, sourceProjectByID),
           GVICRole: role,
           syntheticKind: "logic_gate_children",
         });
-        if (isExpanded(rowID)) pushVisualFolderBranch(role, folder.folder_id, depth + 1, sourceNodeByID, sourceLogicGateByID, sourceNodesByLogicGateID, sourceProjectByID, filterFoldersToCurrentGVICUser);
+        if (isExpanded(rowID)) pushVisualFolderBranch(role, folder.folder_id, depth + 1, sourceLogicGateByID, sourceProjectByID, filterFoldersToCurrentGVICUser);
         continue;
       }
       const item = entry.item;
       if (item.item_type === "logic_gate") {
         const logicGate = sourceLogicGateByID.get(item.item_id);
         if (!logicGate) continue;
-        pushVisualLogicGateBranch(role, parentFolderID, parentFolderKind as CompanyExplorerFolderKind, logicGate, depth, item.position || TREE_ROW_POSITION_STEP, item.created_timestamp, sourceNodesByLogicGateID);
-      } else if (item.item_type === "node") {
-        const node = sourceNodeByID.get(item.item_id);
-        if (!node) continue;
-        rows.push({
-          id: prefixTreeID(GVICVisualNodeTreeID(role, parentFolderID, node.node_id)),
-          label: getNodeRecordTitle(node) || node.node_id,
-          depth: rowDepth(depth),
-          kind: "node",
-          nodeID: node.node_id,
-          folderID: parentFolderID,
-          folderKind: parentFolderKind as CompanyExplorerFolderKind,
-          ...GVICFolderScopeForID(parentFolderID),
-          scopeLevel: rowDepth(depth),
-          position: item.position || TREE_ROW_POSITION_STEP,
-          createdTimestamp: item.created_timestamp,
-          GVICRole: role,
-          syntheticKind: "logic_gate_children",
-        });
+        pushVisualLogicGateBranch(role, parentFolderID, parentFolderKind as CompanyExplorerFolderKind, logicGate, depth, item.position || TREE_ROW_POSITION_STEP, item.created_timestamp);
       } else if (item.item_type === "project") {
         const project = sourceProjectByID.get(item.item_id);
         if (!project) continue;
@@ -1106,10 +966,10 @@ function buildGVICCompanyExplorerRows(input: {
         scopeLevel: rowDepth(0),
         position: folder.position || TREE_ROW_POSITION_STEP,
         createdTimestamp: folder.created_timestamp,
-        hasChildren: visualFolderHasChildren(folder.folder_id, customNodeByID, customLogicGateByID, customProjectByID),
+        hasChildren: visualFolderHasChildren(folder.folder_id, customLogicGateByID, customProjectByID),
         syntheticKind: "logic_gate_children",
       });
-      if (isExpanded(rowID)) pushVisualFolderBranch("other", folder.folder_id, 1, customNodeByID, customLogicGateByID, customNodesByLogicGateID, customProjectByID);
+      if (isExpanded(rowID)) pushVisualFolderBranch("other", folder.folder_id, 1, customLogicGateByID, customProjectByID);
     }
   };
 
@@ -1134,16 +994,8 @@ function buildGVICCompanyExplorerRows(input: {
     const folderID = prefixTreeID(GVICFolderTreeID(folder.role));
     const visualRootFolder = roleRootByRole.get(folder.role);
     const visualRootFolderID = visualRootFolder?.folder_id ?? "";
-    const visualRootHasChildren = visualRootFolderID ? visualFolderHasGVICVisibleChildren(visualRootFolderID, GVICNodeByID, GVICLogicGateByID, emptyProjectByID) : false;
+    const visualRootHasChildren = visualRootFolderID ? visualFolderHasGVICVisibleChildren(visualRootFolderID, GVICLogicGateByID, emptyProjectByID) : false;
     const placed = placementForRole(folder.role);
-    const noLogicGateNodes = folder.role === "other"
-      ? [...nodesWithoutLogicGate].filter((node) => !placed.nodeIDs.has(node.node_id)).sort((a, b) => (
-        getNodeRecordTitle(a).localeCompare(getNodeRecordTitle(b))
-        || a.created_timestamp.localeCompare(b.created_timestamp)
-        || a.node_id.localeCompare(b.node_id)
-      ))
-      : [];
-    const noLogicGateRowID = GVICNoLogicGateTreeID(folder.role);
     const logicGateRows = [...(logicGatesByRole.get(folder.role) ?? [])].sort((a, b) => (
       getLogicGateRecordTitle(a).localeCompare(getLogicGateRecordTitle(b))
       || a.created_timestamp.localeCompare(b.created_timestamp)
@@ -1161,55 +1013,16 @@ function buildGVICCompanyExplorerRows(input: {
       scopeLevel: rowDepth(1),
       position: (folderIndex + 1) * TREE_ROW_POSITION_STEP,
       createdTimestamp: visualRootFolder?.created_timestamp ?? "",
-      hasChildren: visualRootHasChildren || logicGateRows.length > 0 || noLogicGateNodes.length > 0,
+      hasChildren: visualRootHasChildren || logicGateRows.length > 0,
       GVICRole: folder.role,
       syntheticKind: "GVIC_folder",
     });
     if (!isExpanded(folderID)) continue;
 
-    if (visualRootFolderID) pushVisualFolderBranch(folder.role, visualRootFolderID, 2, GVICNodeByID, GVICLogicGateByID, nodesByLogicGateID, emptyProjectByID, true);
+    if (visualRootFolderID) pushVisualFolderBranch(folder.role, visualRootFolderID, 2, GVICLogicGateByID, emptyProjectByID, true);
 
-    if (noLogicGateNodes.length > 0) {
-      rows.push({
-        id: prefixTreeID(noLogicGateRowID),
-        label: "No Logic Gate",
-        depth: rowDepth(2),
-        kind: "folder",
-        folderKind: "node",
-        ...GVICCreationScope,
-        scopeLevel: rowDepth(2),
-        position: TREE_ROW_POSITION_STEP,
-        createdTimestamp: "",
-        hasChildren: noLogicGateNodes.length > 0,
-        GVICRole: folder.role,
-        syntheticKind: "logic_gate_children",
-      });
-      if (isExpanded(prefixTreeID(noLogicGateRowID))) {
-        for (const [nodeIndex, node] of noLogicGateNodes.entries()) {
-          rows.push({
-            id: prefixTreeID(GVICNoLogicGateNodeTreeID(folder.role, node.node_id)),
-            label: getNodeRecordTitle(node) || node.node_id,
-            depth: rowDepth(3),
-            kind: "node",
-            nodeID: node.node_id,
-            scopeLevel: rowDepth(3),
-            position: (nodeIndex + 1) * TREE_ROW_POSITION_STEP,
-            createdTimestamp: node.created_timestamp,
-            GVICRole: folder.role,
-            syntheticKind: "logic_gate_children",
-          });
-        }
-      }
-    }
-
-    const logicGatePositionOffset = noLogicGateNodes.length > 0 ? 1 : 0;
     for (const [logicGateIndex, logicGate] of logicGateRows.entries()) {
       const logicGateRowID = prefixTreeID(GVICLogicGateTreeID(folder.role, logicGate.logic_gate_id));
-      const nestedNodes = [...(nodesByLogicGateID.get(logicGate.logic_gate_id) ?? [])].filter((node) => !placed.nodeIDs.has(node.node_id)).sort((a, b) => (
-        getNodeRecordTitle(a).localeCompare(getNodeRecordTitle(b))
-        || a.created_timestamp.localeCompare(b.created_timestamp)
-        || a.node_id.localeCompare(b.node_id)
-      ));
       rows.push({
         id: logicGateRowID,
         label: getLogicGateRecordTitle(logicGate) || logicGate.logic_gate_id,
@@ -1220,29 +1033,12 @@ function buildGVICCompanyExplorerRows(input: {
         folderKind: visualRootFolderID ? "logic_gate" : undefined,
         ...GVICFolderScopeForFolder(visualRootFolder),
         scopeLevel: rowDepth(2),
-        position: (logicGateIndex + 1 + logicGatePositionOffset) * TREE_ROW_POSITION_STEP,
+        position: (logicGateIndex + 1) * TREE_ROW_POSITION_STEP,
         createdTimestamp: logicGate.created_timestamp,
-        hasChildren: true,
+        hasChildren: false,
         GVICRole: folder.role,
         syntheticKind: "logic_gate_children",
       });
-      if (!isExpanded(logicGateRowID)) continue;
-
-      for (const [nodeIndex, node] of nestedNodes.entries()) {
-        rows.push({
-          id: prefixTreeID(GVICNodeTreeID(folder.role, logicGate.logic_gate_id, node.node_id)),
-          label: getNodeRecordTitle(node) || node.node_id,
-          depth: rowDepth(3),
-          kind: "node",
-          nodeID: node.node_id,
-          scopeLevel: rowDepth(3),
-          position: (nodeIndex + 1) * TREE_ROW_POSITION_STEP,
-          createdTimestamp: node.created_timestamp,
-          parentLogicGateID: logicGate.logic_gate_id,
-          GVICRole: folder.role,
-          syntheticKind: "logic_gate_children",
-        });
-      }
     }
   }
   return rows;
@@ -1745,14 +1541,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     const refreshAllLoadedBranchTypes = new Set([
       "company_explorer_folder_deleted",
       "company_explorer_item_removed",
-      "project_relationship_upserted",
-      "project_relationship_deleted",
-      "work_item.logic_gate_assignment_saved",
-      "work_item.logic_gate_assignment_moved",
-      "work_item.logic_gate_assignment_removed",
-      "node_created",
-      "node_updated",
-      "node_deleted",
       "logic_gate_created",
       "logic_gate_updated",
       "logic_gate_deleted",
@@ -2747,80 +2535,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     });
   }, [companyExplorerV2Active, companyExplorerV2RootEntityID, companyExplorerV2TreeIDForEntityID]);
 
-  const createNodeAtFolder = useCallback(async (parentFolderID: string, position?: number, logicGateID?: string, logicGateTreeID?: string, priority?: number) => {
-    setError("");
-    const targetLogicGateID = logicGateID?.trim() ?? "";
-    const targetLogicGateTreeID = logicGateTreeID?.trim() ?? "";
-    const targetPriority = typeof priority === "number" && Number.isInteger(priority) && priority >= 1 && priority <= 5 ? priority : undefined;
-    if (targetLogicGateID && targetPriority === undefined) {
-      setError("Priority is required");
-      return;
-    }
-    try {
-      const response = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
-        companyID,
-        entityKind: "node",
-        folderID: (targetLogicGateID || companyExplorerV2Active) ? "" : parentFolderID,
-        mutationOrigin: "company_explorer",
-        items: [{
-          client_id: createWorkspaceEntityBatchClientID("explorer-node"),
-          name: "new node",
-          x: 120,
-          y: 120,
-          position,
-        }],
-        requestJSON,
-      });
-      const node = response.nodes?.[0];
-      if (!node) throw new Error("node_batch_create_missing_node");
-      for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
-      let createdFolderID = response.folder_items?.find((item) => item.item_type === "node" && item.item_id === node.node_id)?.folder_id ?? parentFolderID;
-      if (companyExplorerV2Active && !targetLogicGateID) {
-        const parentEntityID = parentFolderID || companyExplorerV2RootEntityID;
-        if (parentEntityID) {
-          const row = await requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
-            method: "POST",
-            body: JSON.stringify({
-              company_id: companyID,
-              parent_entity_id: parentEntityID,
-              target_type: "node",
-              target_id: node.node_id,
-              position,
-            }),
-          });
-          dispatchExplorerStore({ type: "upsertV2Rows", rows: [row] });
-          createdFolderID = parentEntityID;
-        }
-      }
-      dispatchExplorerStore({ type: "upsertNode", node });
-      upsertNodeRelationshipGraphNode(apiBase, companyID, node);
-      if (targetLogicGateID) {
-        const assignment = await assignNodeToLogicGateStatus({
-          apiBase,
-          companyID,
-          logicGateID: targetLogicGateID,
-          nodeID: node.node_id,
-          mutationOrigin: "matrix",
-          priority: targetPriority,
-        });
-        dispatchExplorerStore({ type: "replaceNode", node: assignment.node });
-        upsertNodeRelationshipGraphNode(apiBase, companyID, assignment.node);
-        if (targetLogicGateTreeID) setExpanded((previous) => new Set(previous).add(targetLogicGateTreeID));
-        if (companyExplorerV2Active) {
-          activeCompanyExplorerBranchesRef.current.add(companyExplorerBranchKey(targetLogicGateID));
-          await refreshCompanyExplorerBranch(targetLogicGateID);
-        }
-        requestGVICExplorerProjectionRefreshRef.current();
-      }
-      if (!createdFolderID && position && position > 0) {
-        setRootRowOrder((previous) => ({ ...previous, [`node-${node.node_id}`]: position }));
-      }
-      expandCreatedItemTarget(createdFolderID);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_create_node");
-    }
-  }, [apiBase, companyExplorerBranchKey, companyExplorerV2Active, companyExplorerV2RootEntityID, companyID, expandCreatedItemTarget, refreshCompanyExplorerBranch, requestJSON, upsertOptimisticFolderItem]);
-
   const createLogicGateAtFolder = useCallback(async (parentFolderID: string, position?: number, GVICRole?: string) => {
     setError("");
     const creatorLogicGateGVICRole: WorkspaceEntityBatchCreatorLogicGateGVICRole | undefined = isLogicGateGVICRole(GVICRole) ? GVICRole : undefined;
@@ -3031,9 +2745,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           removeCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folderID);
         }
       }
-      if (deletedNodeIDs.size > 0) {
-        for (const nodeID of deletedNodeIDs) removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
-      }
       if (deletedLogicGateIDs.size > 0) {
         for (const logicGateID of deletedLogicGateIDs) removeLogicGateRelationshipGraphNode(apiBase, companyID, logicGateID);
       }
@@ -3149,13 +2860,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         dispatchExplorerStore({ type: "replaceFolder", folder });
         upsertCompanyExplorerFolderInNodeRelationshipGraph(apiBase, companyID, folder);
         upsertCompanyExplorerFolderInLogicGateRelationshipGraph(apiBase, companyID, folder);
-      } else if (activeRename.target.kind === "node") {
-        const node = await requestJSON<NodeRecord>(`/v1/nodes/${activeRename.target.id}`, {
-          method: "PUT",
-          body: JSON.stringify({ company_id: companyID, name: value }),
-        });
-        dispatchExplorerStore({ type: "replaceNode", node });
-        upsertNodeRelationshipGraphNode(apiBase, companyID, node);
       } else if (activeRename.target.kind === "logic_gate") {
         const updated = await requestJSON<LogicGateApiRecord>(`/v1/logic-gates/${activeRename.target.id}`, {
           method: "PUT",
@@ -3515,84 +3219,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     ));
   }, [baseTreeRows]);
 
-  const moveExplorerNodesToLogicGate = useCallback(async (
-    moves: Array<{ nodeID: string; position?: number; sourceRow?: ExplorerTreeNode }>,
-    logicGateID: string,
-    logicGateTreeID?: string,
-  ): Promise<boolean> => {
-    const targetLogicGateID = logicGateID.trim();
-    if (!targetLogicGateID) return false;
-    const normalizedMoves: Array<{ nodeID: string; position?: number; sourceRow?: ExplorerTreeNode }> = [];
-    const seenNodeIDs = new Set<string>();
-    for (const move of moves) {
-      const nodeID = move.nodeID.trim();
-      if (!nodeID || seenNodeIDs.has(nodeID)) continue;
-      seenNodeIDs.add(nodeID);
-      normalizedMoves.push({ ...move, nodeID });
-    }
-    if (normalizedMoves.length === 0) return false;
-
-    setError("");
-    const sourceLogicGateIDs = new Set<string>();
-    const sourceExplorerParentEntityIDs = new Set<string>();
-    const sourcePlacementEdgeIDs = new Set<string>();
-    try {
-      for (const move of normalizedMoves) {
-        const sourceParentEntityID = move.sourceRow?.parentEntityID?.trim() ?? "";
-        const fromLogicGateID = move.sourceRow?.parentLogicGateID?.trim()
-          || getLogicGateRowForContainerID(sourceParentEntityID)?.logicGateID?.trim()
-          || "";
-        if (fromLogicGateID) sourceLogicGateIDs.add(fromLogicGateID);
-        const sourcePlacementEdgeID = move.sourceRow?.edgeID?.trim() ?? "";
-        const sourceParentRow = sourceParentEntityID
-          ? companyExplorerV2RowsRef.current.find((row) => row.entity_id === sourceParentEntityID)
-          : undefined;
-        if (companyExplorerV2Active && shouldRemoveExplorerPlacementAfterLogicGateDrop(move.sourceRow, sourceParentRow?.entity_type, fromLogicGateID)) {
-          sourcePlacementEdgeIDs.add(sourcePlacementEdgeID);
-          sourceExplorerParentEntityIDs.add(sourceParentEntityID);
-        }
-        const result = await assignNodeToLogicGateStatus({
-          apiBase,
-          companyID,
-          logicGateID: targetLogicGateID,
-          nodeID: move.nodeID,
-          mutationOrigin: "company_explorer",
-          position: move.position,
-        });
-        dispatchExplorerStore({ type: "replaceNode", node: result.node });
-        upsertNodeRelationshipGraphNode(apiBase, companyID, result.node);
-      }
-      if (companyExplorerV2Active && sourcePlacementEdgeIDs.size > 0) {
-        for (const edgeID of sourcePlacementEdgeIDs) {
-          await requestJSON(`/v1/company-explorer/items/${encodeURIComponent(edgeID)}?company_id=${encodeURIComponent(companyID)}`, {
-            method: "DELETE",
-          });
-        }
-        dispatchExplorerStore({ type: "removeV2Edges", edgeIDs: sourcePlacementEdgeIDs });
-      }
-      const expandedTreeID = logicGateTreeID || getLogicGateRowForContainerID(targetLogicGateID)?.id || "";
-      if (expandedTreeID) setExpanded((previous) => new Set(previous).add(expandedTreeID));
-      if (companyExplorerV2Active) {
-        const branchIDs = new Set(sourceLogicGateIDs);
-        for (const branchID of sourceExplorerParentEntityIDs) branchIDs.add(branchID);
-        branchIDs.add(targetLogicGateID);
-        for (const branchID of branchIDs) {
-          activeCompanyExplorerBranchesRef.current.add(companyExplorerBranchKey(branchID));
-          await refreshCompanyExplorerBranch(branchID);
-        }
-      }
-      requestGVICExplorerProjectionRefreshRef.current();
-      return true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_move_node_to_logic_gate");
-      return false;
-    }
-  }, [apiBase, companyExplorerBranchKey, companyExplorerV2Active, companyID, getLogicGateRowForContainerID, refreshCompanyExplorerBranch, requestJSON]);
-
   const canPlaceExplorerItemsAtTarget = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
     if (isProtectedGVICRoleRow(target)) return false;
     const itemTypes = getExplorerDropPayloadItemTypes(payload);
-    if (itemTypes.size === 0 || itemTypes.has("kanban")) return false;
+    if (itemTypes.size === 0 || itemTypes.has("kanban") || itemTypes.has("node")) return false;
     if (scopedAllowedItemType && (itemTypes.size !== 1 || !itemTypes.has(scopedAllowedItemType))) return false;
     const targetKind = getExplorerRowOrderKind(target);
     if (isGVICScopedRow(target) && (itemTypes.size !== 1 || !itemTypes.has(targetKind as CompanyExplorerItemType))) return false;
@@ -3601,40 +3231,23 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     if (itemRows.length === 0 || itemRows.some((row) => row.id === target.id)) return false;
     const targetContainer = getExplorerRowContainerID(target);
     if (targetContainer == null) return false;
-    if (getLogicGateRowForContainerID(targetContainer)) return itemTypes.size === 1 && itemTypes.has("node");
+    if (getLogicGateRowForContainerID(targetContainer)) return false;
     return targetContainer !== "" || itemRows.every((row) => getExplorerRowContainerID(row) === "");
   }, [getExplorerItemRowsForPayload, getLogicGateRowForContainerID, scopedAllowedItemType]);
 
   const canDropExplorerPayloadOnRow = useCallback((payload: ExplorerDragPayload | null, target: ExplorerTreeNode): boolean => {
     const itemType = getExplorerDropPayloadItemType(payload);
-    if (!itemType || itemType === "kanban") return false;
-    if (isProtectedGVICRoleRow(target)) return false;
-    if (target.kind === "logic_gate" && target.logicGateID && itemType === "node") {
-      return getExplorerDropPayloadItems(payload).some((item) => item.itemType === "node" && item.itemID.trim());
-    }
+    void target;
+    if (!itemType || itemType === "kanban" || itemType === "node") return false;
     return false;
   }, []);
 
   const dropExplorerPayloadOnRow = useCallback(async (payload: ExplorerDragPayload | null, target: ExplorerTreeNode): Promise<boolean> => {
     const itemType = getExplorerDropPayloadItemType(payload);
-    if (!itemType || itemType === "kanban") return false;
-
-    if (target.kind === "logic_gate" && target.logicGateID && itemType === "node") {
-      const nodeRowsByID = new Map(getExplorerItemRowsForPayload(payload).filter((row) => row.kind === "node" && row.nodeID).map((row) => [row.nodeID ?? "", row]));
-      const nodeItems = getExplorerDropPayloadItems(payload).filter((item) => item.itemType === "node" && item.itemID.trim());
-      if (nodeItems.length === 0) return false;
-      return moveExplorerNodesToLogicGate(
-        nodeItems.map((item) => {
-          const nodeID = item.itemID.trim();
-          return { nodeID, sourceRow: nodeRowsByID.get(nodeID) };
-        }),
-        target.logicGateID,
-        target.id,
-      );
-    }
-
+    void target;
+    if (!itemType || itemType === "kanban" || itemType === "node") return false;
     return false;
-  }, [getExplorerItemRowsForPayload, moveExplorerNodesToLogicGate]);
+  }, []);
 
   const isFolderDescendantOf = useCallback((candidateFolderID: string, ancestorFolderID: string): boolean => {
     if (!candidateFolderID || !ancestorFolderID) return false;
@@ -3697,15 +3310,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       });
     }
 
-    const reorderContainer = getExplorerRowContainerID(source);
-    const logicGateContainer = reorderContainer ? getLogicGateRowForContainerID(reorderContainer) : undefined;
-    if (logicGateContainer?.logicGateID) {
-      const nodeMoves = updates
-        .filter(({ row }) => row.kind === "node" && Boolean(row.nodeID))
-        .map(({ row, position }) => ({ nodeID: row.nodeID ?? "", position, sourceRow: row }));
-      return moveExplorerNodesToLogicGate(nodeMoves, logicGateContainer.logicGateID, logicGateContainer.id);
-    }
-
     const itemAssignments: CompanyExplorerFolderItemAssignment[] = [];
     const folderMoves: Array<Promise<void>> = [];
     for (const { row, position } of updates) {
@@ -3713,14 +3317,14 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         folderMoves.push(moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false }));
         continue;
       }
-      const itemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : null;
-      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : row.kind === "project" ? row.projectID : "";
+      const itemType: CompanyExplorerItemType | null = row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : null;
+      const itemID = row.kind === "logic_gate" ? row.logicGateID : row.kind === "project" ? row.projectID : "";
       if (row.folderID && itemType && itemID) itemAssignments.push({ folder_id: row.folderID, item_type: itemType, item_id: itemID, position });
     }
     await Promise.all(folderMoves);
     if (itemAssignments.length > 0) await assignItemsToFolders(itemAssignments);
     return true;
-  }, [assignItemsToFolders, getLogicGateRowForContainerID, getReorderRowsForTarget, moveExplorerNodesToLogicGate, moveFolder]);
+  }, [assignItemsToFolders, getReorderRowsForTarget, moveFolder]);
 
   const placeExplorerFolderAtTarget = useCallback(async (source: ExplorerTreeNode, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
     if (!source.folderID || !source.folderKind || !canPlaceExplorerFolderAtTarget(source, target)) return false;
@@ -3757,8 +3361,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         folderMoves.push(moveFolder(row.folderID, parentFolderID, { position, parentProvided: row.id === source.id }));
         continue;
       }
-      const rowItemType: CompanyExplorerFolderKind | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : null;
-      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : row.kind === "project" ? row.projectID : "";
+      const rowItemType: CompanyExplorerFolderKind | null = row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : null;
+      const itemID = row.kind === "logic_gate" ? row.logicGateID : row.kind === "project" ? row.projectID : "";
       if (targetContainer && rowItemType && itemID) itemAssignments.push({ folder_id: targetContainer, item_type: rowItemType, item_id: itemID, position });
     }
     await Promise.all(folderMoves);
@@ -3768,7 +3372,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
   const placeExplorerItemsAtTarget = useCallback(async (payload: ExplorerDragPayload | null, target: ExplorerTreeNode, placement: ExplorerRowDropPlacement) => {
     const items = getExplorerDropPayloadItems(payload);
-    if (items.length === 0 || items.some((item) => item.itemType === "kanban")) return false;
+    if (items.length === 0 || items.some((item) => item.itemType === "kanban" || item.itemType === "node")) return false;
     const targetContainer = getExplorerRowContainerID(target);
     if (targetContainer == null || !canPlaceExplorerItemsAtTarget(payload, target)) return false;
 
@@ -3802,14 +3406,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       });
     }
 
-    const logicGateContainer = getLogicGateRowForContainerID(targetContainer);
-    if (logicGateContainer?.logicGateID) {
-      const nodeMoves = updates
-        .filter(({ row }) => row.kind === "node" && Boolean(row.nodeID))
-        .map(({ row, position }) => ({ nodeID: row.nodeID ?? "", position, sourceRow: row }));
-      return moveExplorerNodesToLogicGate(nodeMoves, logicGateContainer.logicGateID, logicGateContainer.id);
-    }
-
     const itemAssignments: CompanyExplorerFolderItemAssignment[] = [];
     const folderMoves: Array<Promise<void>> = [];
     for (const { row, position } of updates) {
@@ -3817,17 +3413,17 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         folderMoves.push(moveFolder(row.folderID, row.parentFolderID ?? "", { position, parentProvided: false }));
         continue;
       }
-      const rowItemType: CompanyExplorerItemType | null = row.kind === "node" ? "node" : row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : null;
-      const itemID = row.kind === "node" ? row.nodeID : row.kind === "logic_gate" ? row.logicGateID : row.kind === "project" ? row.projectID : "";
+      const rowItemType: CompanyExplorerItemType | null = row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : null;
+      const itemID = row.kind === "logic_gate" ? row.logicGateID : row.kind === "project" ? row.projectID : "";
       if (targetContainer && rowItemType && itemID) itemAssignments.push({ folder_id: targetContainer, item_type: rowItemType, item_id: itemID, position });
     }
     await Promise.all(folderMoves);
     if (itemAssignments.length > 0) await assignItemsToFolders(itemAssignments);
     return true;
-  }, [assignItemsToFolders, baseTreeRows, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, getLogicGateRowForContainerID, moveExplorerNodesToLogicGate, moveFolder]);
+  }, [assignItemsToFolders, baseTreeRows, canPlaceExplorerItemsAtTarget, getExplorerItemRowsForPayload, moveFolder]);
 
   const assignExplorerPayloadItemsToFolder = useCallback(async (targetFolderID: string, payload: ExplorerDragPayload) => {
-    const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemID.trim() && item.itemType !== "kanban");
+    const items = getExplorerDropPayloadItems(payload).filter((item) => item.itemID.trim() && item.itemType !== "kanban" && item.itemType !== "node");
     if (scopedAllowedItemType && items.some((item) => item.itemType !== scopedAllowedItemType)) return;
     if (!targetFolderID || items.length === 0) return;
     const existingRows = baseTreeRows.filter((row) => {
@@ -3873,16 +3469,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       if (selectedTreeIDs.has(row.id)) focusTreeRow(row, { selectionIntent: "navigate" });
       else selectTreeRow(row, undefined, { selectionIntent: "navigate" });
     }
-    const creationRow = row ?? (GVICExplorerActive || teamCompanyExplorerActive ? null : scopedRootRow);
+    const searchSyntheticRow = row?.syntheticKind === "search_path" || row?.syntheticKind === "search_result";
+    const creationRow = searchSyntheticRow ? null : (row ?? (GVICExplorerActive || teamCompanyExplorerActive ? null : scopedRootRow));
     const protectedGVICRow = isProtectedGVICRoleRow(row);
     const syntheticScopeHeader = row?.syntheticKind === "default_scope_folder" && !row.folderID;
     const creationTargetRow = syntheticScopeHeader ? null : creationRow;
-    const canCreateForContext = !protectedGVICRow || Boolean(row?.folderID);
+    const canCreateForContext = !searchSyntheticRow && (!protectedGVICRow || Boolean(row?.folderID));
     const contextKind: CompanyExplorerFolderKind | null = creationTargetRow?.folderKind ?? (creationTargetRow?.kind === "node" ? "node" : creationTargetRow?.kind === "logic_gate" ? "logic_gate" : creationTargetRow?.kind === "project" ? "project" : null);
-    const createNodeLogicGateID = creationTargetRow?.kind === "logic_gate"
-      ? (creationTargetRow.logicGateID ?? "")
-      : (creationTargetRow?.parentLogicGateID ?? "");
-    const createNodeLogicGateTreeID = creationTargetRow?.kind === "logic_gate" && createNodeLogicGateID ? (creationTargetRow.id ?? "") : "";
     const createLogicGateGVICRole = isLogicGateGVICRole(creationTargetRow?.GVICRole) ? creationTargetRow.GVICRole : "";
     const targets = resolveExplorerCreationTargets(creationTargetRow ?? null);
     const createFolderScope = resolveCreateFolderScope(targets.preferredFolderParentID, targets.folderScopeType, targets.folderScopeID);
@@ -3909,34 +3502,19 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       renameLabel: row?.label ?? "",
       contextKind,
       createPosition: getContextCreatePosition(row, event),
-      createNodeLogicGateID,
-      createNodeLogicGateTreeID,
       createLogicGateGVICRole,
       createFolderScopeType: createFolderScope?.scope_type,
       createFolderScopeID: createFolderScope?.scope_id,
       canCreateFolder: canCreateForContext && (!scopedKind || Boolean(scopedRootFolder)),
-      canCreateNode: canCreateForContext && !scopedKind,
       canCreateLogicGate: canCreateForContext && (scopedKind ? scopedKind === "logic_gate" && Boolean(scopedRootFolder) : true),
       canCreateProject: canCreateForContext && (scopedKind ? scopedKind === "project" && Boolean(scopedRootFolder) : true),
     });
   }, [focusTreeRow, getContextCreatePosition, getDeleteTargetsForRows, GVICExplorerActive, resolveCreateFolderScope, scopedKind, scopedRootFolder, scopedRootRow, selectTreeRow, selectedTreeIDs, teamCompanyExplorerActive, treeRows]);
 
-  // Kanban accepts node cards only. A mixed Explorer selection is still valid
-  // for navigation, but the drag payload intentionally exports node rows only.
   const getKanbanDragItemsForRow = useCallback((row: ExplorerTreeNode): ExplorerEntityDragItem[] => {
-    const dragIDs = selectedTreeIDs.has(row.id) ? selectedTreeIDs : new Set([row.id]);
-    const items: ExplorerEntityDragItem[] = [];
-    const seen = new Set<string>();
-    for (const item of treeRows) {
-      if (!dragIDs.has(item.id) || item.kind !== "node" || !item.nodeID || seen.has(item.nodeID)) continue;
-      seen.add(item.nodeID);
-      items.push({ nodeID: item.nodeID, label: item.label });
-    }
-    if (items.length === 0 && row.kind === "node" && row.nodeID) {
-      items.push({ nodeID: row.nodeID, label: row.label });
-    }
-    return items;
-  }, [selectedTreeIDs, treeRows]);
+    void row;
+    return [];
+  }, []);
 
   useCompanyExplorerSelectionBridge({
     companyID,
@@ -4005,7 +3583,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         messageIDs: internalTriageDropMenu.messageIDs,
         priority,
       });
-      for (const node of result.nodes ?? []) dispatchExplorerStore({ type: "upsertNode", node });
       if (result.folder_items && result.folder_items.length > 0) dispatchExplorerStore({ type: "upsertFolderItems", folderItems: result.folder_items });
       if (result.explorer_v2_rows && result.explorer_v2_rows.length > 0) dispatchExplorerStore({ type: "upsertV2Rows", rows: result.explorer_v2_rows });
       setInternalTriageDropMenu(null);
@@ -4135,10 +3712,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         onClose={() => setExplorerContextMenu(null)}
         onCreateFolder={(folderKind, parentFolderID, position, scopeType, scopeID) => {
           void createFolder(folderKind, parentFolderID, position, scopeType, scopeID);
-          setExplorerContextMenu(null);
-        }}
-        onCreateNode={(parentFolderID, position, logicGateID, logicGateTreeID, priority) => {
-          void createNodeAtFolder(parentFolderID, position, logicGateID, logicGateTreeID, priority);
           setExplorerContextMenu(null);
         }}
         onCreateLogicGate={(parentFolderID, position, GVICRole) => {

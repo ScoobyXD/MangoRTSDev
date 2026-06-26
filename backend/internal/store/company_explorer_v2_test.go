@@ -71,14 +71,15 @@ func TestMemoryCompanyExplorerV2FinalViewReadsCompanyTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
-		CompanyID:    companyID,
-		ProjectID:    project.ProjectID,
-		ResourceType: EntityTypeLogicGate,
-		ResourceID:   logicGate.LogicGateID,
-		ActorUserID:  user.UserID,
-	}); err != nil {
-		t.Fatalf("UpsertProjectRelationship: %v", err)
+	logicGateRow, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:        companyID,
+		ParentEntityID:   folder.EntityID,
+		ChildEntityType:  CompanyExplorerV2EntityLogicGate,
+		ChildResourceID:  logicGate.LogicGateID,
+		PermissionUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge logic gate: %v", err)
 	}
 	node, err := repo.CreateNode(companyID, "Launch Node")
 	if err != nil {
@@ -133,6 +134,7 @@ func TestMemoryCompanyExplorerV2FinalViewReadsCompanyTree(t *testing.T) {
 		t.Fatalf("ListCompanyExplorerV2ChildRows folder: %v", err)
 	}
 	requireCompanyExplorerV2Row(t, folderChildren.Rows, CompanyExplorerV2EntityProject, project.ProjectID)
+	requireCompanyExplorerV2Row(t, folderChildren.Rows, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID)
 	projectChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
 		View:             CompanyExplorerLazyScopeAll,
@@ -142,7 +144,9 @@ func TestMemoryCompanyExplorerV2FinalViewReadsCompanyTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerV2ChildRows project: %v", err)
 	}
-	logicGateRow := requireCompanyExplorerV2Row(t, projectChildren.Rows, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID)
+	if len(projectChildren.Rows) != 0 {
+		t.Fatalf("project children = %+v, want leaf project", projectChildren.Rows)
+	}
 	teamGateChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
 		View:             CompanyExplorerLazyScopeAll,
@@ -152,7 +156,9 @@ func TestMemoryCompanyExplorerV2FinalViewReadsCompanyTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerV2ChildRows logic gate: %v", err)
 	}
-	requireCompanyExplorerV2Row(t, teamGateChildren.Rows, CompanyExplorerV2EntityNode, node.NodeID)
+	if len(teamGateChildren.Rows) != 0 {
+		t.Fatalf("logic gate children = %+v, want leaf logic gate", teamGateChildren.Rows)
+	}
 }
 
 func TestMemoryCompanyExplorerV2PreservesManualAndNativeParentContexts(t *testing.T) {
@@ -254,9 +260,8 @@ func TestMemoryCompanyExplorerV2PreservesManualAndNativeParentContexts(t *testin
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerV2ChildRows project: %v", err)
 	}
-	projectGate := requireCompanyExplorerV2Row(t, projectChildren.Rows, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID)
-	if projectGate.ParentEntityID != projectRow.EntityID || projectGate.EdgeID != "" {
-		t.Fatalf("project gate row = %+v, want native relationship under project", projectGate)
+	if len(projectChildren.Rows) != 0 {
+		t.Fatalf("project children = %+v, want project relationship outside Explorer tree", projectChildren.Rows)
 	}
 }
 func TestMemoryProjectRelationshipMovesResourceBetweenProjects(t *testing.T) {
@@ -562,24 +567,38 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	placedNode, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+	if _, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
 		CompanyID:        companyID,
 		ParentEntityID:   privateFolder.EntityID,
 		ChildEntityType:  CompanyExplorerV2EntityNode,
 		ChildResourceID:  node.NodeID,
 		Position:         2000,
 		PermissionUserID: admin.UserID,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("UpsertCompanyExplorerV2Edge node err = %v, want ErrInvalid", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Placed gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	placedGate, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:        companyID,
+		ParentEntityID:   privateFolder.EntityID,
+		ChildEntityType:  CompanyExplorerV2EntityLogicGate,
+		ChildResourceID:  logicGate.LogicGateID,
+		Position:         2000,
+		PermissionUserID: admin.UserID,
 	})
 	if err != nil {
-		t.Fatalf("UpsertCompanyExplorerV2Edge node: %v", err)
+		t.Fatalf("UpsertCompanyExplorerV2Edge logic gate: %v", err)
 	}
-	if placedNode.EntityType != CompanyExplorerV2EntityNode || placedNode.ResourceID != node.NodeID || placedNode.EdgeID == "" {
-		t.Fatalf("placed node row = %+v, want node resource with stored edge", placedNode)
+	if placedGate.EntityType != CompanyExplorerV2EntityLogicGate || placedGate.ResourceID != logicGate.LogicGateID || placedGate.EdgeID == "" {
+		t.Fatalf("placed gate row = %+v, want logic gate resource with stored edge", placedGate)
 	}
 
-	movedNode, err := repo.MoveCompanyExplorerV2Edge(CompanyExplorerV2MoveEdgeInput{
+	movedGate, err := repo.MoveCompanyExplorerV2Edge(CompanyExplorerV2MoveEdgeInput{
 		CompanyID:        companyID,
-		EdgeID:           placedNode.EdgeID,
+		EdgeID:           placedGate.EdgeID,
 		ParentEntityID:   openFolder.EntityID,
 		Position:         3000,
 		PermissionUserID: admin.UserID,
@@ -587,8 +606,8 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MoveCompanyExplorerV2Edge: %v", err)
 	}
-	if movedNode.ParentEntityID != openFolder.EntityID || movedNode.Position != 3000 {
-		t.Fatalf("moved node row = %+v, want parent %s position 3000", movedNode, openFolder.EntityID)
+	if movedGate.ParentEntityID != openFolder.EntityID || movedGate.Position != 3000 {
+		t.Fatalf("moved gate row = %+v, want parent %s position 3000", movedGate, openFolder.EntityID)
 	}
 
 	privateChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
@@ -600,8 +619,8 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerV2ChildRows private: %v", err)
 	}
-	if findCompanyExplorerV2Row(privateChildren.Rows, CompanyExplorerV2EntityNode, node.NodeID) != nil {
-		t.Fatalf("moved node still appears under old parent")
+	if findCompanyExplorerV2Row(privateChildren.Rows, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID) != nil {
+		t.Fatalf("moved logic gate still appears under old parent")
 	}
 	openChildren, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
@@ -612,8 +631,8 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerV2ChildRows open: %v", err)
 	}
-	if findCompanyExplorerV2Row(openChildren.Rows, CompanyExplorerV2EntityNode, node.NodeID) == nil {
-		t.Fatalf("moved node not found under new parent")
+	if findCompanyExplorerV2Row(openChildren.Rows, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID) == nil {
+		t.Fatalf("moved logic gate not found under new parent")
 	}
 
 	if err := repo.DeleteCompanyExplorerV2Folder(companyID, privateFolder.EntityID); err != nil {
@@ -661,7 +680,7 @@ func TestMemoryCompanyExplorerDefaultUnfiledFolders(t *testing.T) {
 		t.Fatalf("ListCompanyExplorerV2ChildRows unfiled: %v", err)
 	}
 	gotNames := companyExplorerV2RowNames(children.Rows)
-	wantNames := []string{CompanyExplorerDefaultProjectsFolderName, CompanyExplorerDefaultLogicGatesFolderName, CompanyExplorerDefaultNodesFolderName}
+	wantNames := []string{CompanyExplorerDefaultProjectsFolderName, CompanyExplorerDefaultLogicGatesFolderName}
 	if len(gotNames) != len(wantNames) {
 		t.Fatalf("default child names = %v, want %v", gotNames, wantNames)
 	}
@@ -701,9 +720,6 @@ func TestMemoryCompanyExplorerDefaultFoldersAreProtected(t *testing.T) {
 	if err := repo.DeleteCompanyExplorerV2Folder(companyID, defaults.LogicGatesFolderID); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("DeleteCompanyExplorerV2Folder Logic Gates err = %v, want ErrInvalid", err)
 	}
-	if _, err := repo.UpdateCompanyExplorerV2Folder(CompanyExplorerV2FolderUpdateInput{CompanyID: companyID, EntityID: defaults.NodesFolderID, Name: "Renamed", PermissionUserID: user.UserID}); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("UpdateCompanyExplorerV2Folder Nodes err = %v, want ErrInvalid", err)
-	}
 	if _, err := repo.RenameCompanyExplorerFolder(companyID, defaults.UnfiledFolderID, "Renamed"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("RenameCompanyExplorerFolder Unfiled err = %v, want ErrInvalid", err)
 	}
@@ -715,8 +731,8 @@ func TestMemoryCompanyExplorerDefaultFoldersAreProtected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerV2ChildRows after blocked mutations: %v", err)
 	}
-	if gotNames := companyExplorerV2RowNames(children.Rows); len(gotNames) != 3 {
-		t.Fatalf("default child rows after blocked mutations = %v, want three child folders", gotNames)
+	if gotNames := companyExplorerV2RowNames(children.Rows); len(gotNames) != 2 {
+		t.Fatalf("default child rows after blocked mutations = %v, want two child folders", gotNames)
 	}
 }
 func TestMemoryCompanyExplorerDefaultPlacementAndExplicitRootException(t *testing.T) {
@@ -757,8 +773,8 @@ func TestMemoryCompanyExplorerDefaultPlacementAndExplicitRootException(t *testin
 	if err != nil {
 		t.Fatalf("CreateWorkspaceEntityBatch node: %v", err)
 	}
-	if len(nodeBatch.FolderItems) != 1 || nodeBatch.FolderItems[0].FolderID != defaults.NodesFolderID {
-		t.Fatalf("node folder items = %+v, want Nodes folder %s", nodeBatch.FolderItems, defaults.NodesFolderID)
+	if len(nodeBatch.FolderItems) != 0 {
+		t.Fatalf("node folder items = %+v, want no Company Explorer placement", nodeBatch.FolderItems)
 	}
 
 	rootBatch, err := repo.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
@@ -846,6 +862,18 @@ func TestMemoryCompanyExplorerSearchOrdersTypesAndReturnsLocationPath(t *testing
 	if err != nil {
 		t.Fatalf("CreateWorkspaceEntityBatch node: %v", err)
 	}
+	gateID := gateBatch.EntityMappings[0].EntityID
+	nodeID := nodeBatch.EntityMappings[0].EntityID
+	assignmentPriority := 2
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: gateID,
+		NodeID:      nodeID,
+		Priority:    &assignmentPriority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
 	projectResult, err := repo.CreateProject(ProjectInput{
 		CompanyID:                       companyID,
 		Name:                            "Search Alpha",
@@ -885,11 +913,9 @@ func TestMemoryCompanyExplorerSearchOrdersTypesAndReturnsLocationPath(t *testing
 		}
 	}
 
-	gateID := gateBatch.EntityMappings[0].EntityID
-	nodeID := nodeBatch.EntityMappings[0].EntityID
 	projectID := projectResult.Project.ProjectID
 	requireCompanyExplorerSearchPath(t, results.Results, EntityTypeLogicGate, gateID, []string{CompanyExplorerDefaultRootFolderName, CompanyExplorerDefaultLogicGatesFolderName})
-	requireCompanyExplorerSearchPath(t, results.Results, EntityTypeNode, nodeID, []string{CompanyExplorerDefaultRootFolderName, CompanyExplorerDefaultNodesFolderName})
+	requireCompanyExplorerSearchPath(t, results.Results, EntityTypeNode, nodeID, []string{CompanyExplorerDefaultRootFolderName, CompanyExplorerDefaultLogicGatesFolderName, "Search Alpha"})
 	requireCompanyExplorerSearchPath(t, results.Results, EntityTypeProject, projectID, []string{CompanyExplorerDefaultRootFolderName, CompanyExplorerDefaultProjectsFolderName})
 	requireCompanyExplorerSearchPath(t, results.Results, CompanyExplorerV2EntityFolder, folder.EntityID, []string{})
 	for _, result := range results.Results[:4] {

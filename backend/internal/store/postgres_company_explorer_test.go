@@ -39,15 +39,17 @@ func TestPostgresCompanyExplorerLazyUsesFinalItemsAndNoScopedFolders(t *testing.
 		"from company_explorer_items item",
 		"item.parent_folder_id is null",
 		"item.parent_folder_id=$5::uuid",
-		"item.target_type='node'",
 		"item.target_type='logic_gate'",
 		"item.target_type='project'",
+		"mangorts_user_can_access_resource(item.company_id, item.target_type, item.target_id",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("lazy company explorer SQL missing %q", want)
 		}
 	}
 	for _, forbidden := range []string{
+		"item.target_type='node'",
+		"item.target_type not in",
 		"company_explorer_folder_items",
 		".scope_id",
 		".scope_type",
@@ -62,7 +64,7 @@ func TestPostgresCompanyExplorerLazyUsesFinalItemsAndNoScopedFolders(t *testing.
 	}
 }
 
-func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLogicGateNativeChildren(t *testing.T) {
+func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLeafItems(t *testing.T) {
 	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_company_explorer_v2.go: %v", err)
@@ -73,9 +75,7 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLogicGateNativeChildren(
 		"func (r *postgresrepo) querycompanyexplorerfinalcontainerchildren",
 		"from company_explorer_folders folder",
 		"from company_explorer_items item",
-		"case companyexplorerv2entityproject: rows = []companyexplorerv2row{}",
-		"func (r *postgresrepo) querycompanyexplorerfinallogicgatechildren",
-		"from node_logic_gate_assignments assignment",
+		"case companyexplorerv2entityproject, companyexplorerv2entitylogicgate: rows = []companyexplorerv2row{}",
 		"insert into company_explorer_items",
 		"update company_explorer_items",
 		"delete from company_explorer_items",
@@ -91,7 +91,11 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLogicGateNativeChildren(
 		"querycompanyexplorerv2derivedgroups",
 		"ensurecompanyexplorerv2nativeentities",
 		"querycompanyexplorerfinalprojectchildren",
+		"querycompanyexplorerfinallogicgatechildren",
+		"companyexplorernativechildren",
 		"from project_relationship_projection projection",
+		"from node_logic_gate_assignments assignment",
+		"item.target_type='node'",
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("final company explorer rows kept removed V2 copy-graph marker %q", forbidden)
@@ -117,19 +121,24 @@ func TestPostgresCompanyExplorerSearchUsesVisibleExplorerLocations(t *testing.T)
 		"and (item.parent_folder_id is null or parent.folder_id is not null)",
 		"companyexploreraccesspredicate(\"item.target_type\", \"item.target_id\", \"$3\", \"$4\")",
 		"visible_logic_gate_locations as",
+		"visible_project_locations as",
 		"from node_logic_gate_assignments assignment",
 		"join visible_logic_gate_locations logic_gate_location",
 		"companyexploreraccesspredicate(\"'node'\", \"assignment.node_id\", \"$3\", \"$4\")",
+		"from project_relationships relationship",
+		"join visible_project_locations project_location",
+		"relationship.resource_id as target_id",
+		"relationship.resource_type='node'",
+		"left join ranked_locations location",
+		"coalesce(location.location_path, '[]'::jsonb) as location_path",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("company explorer search SQL missing %q", want)
 		}
 	}
 	for _, forbidden := range []string{
-		"from project_relationships relationship",
-		"project_locations",
-		"relationship.resource_id as target_id",
-		"from candidates candidate left join ranked_locations",
+		"where item.target_type='node'",
+		"item.target_type in ('project', 'logic_gate', 'node')",
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("company explorer search SQL kept hidden/project relationship search marker %q", forbidden)
@@ -185,44 +194,21 @@ func TestPostgresCompanyExplorerV2RootRowsUseContiguousRootArgs(t *testing.T) {
 	}
 }
 
-func TestPostgresCompanyExplorerV2NativeChildrenUseCompactArgs(t *testing.T) {
+func TestPostgresCompanyExplorerV2LeafRowsDoNotUseNativeChildren(t *testing.T) {
 	raw, err := os.ReadFile("postgres_company_explorer_v2.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_company_explorer_v2.go: %v", err)
 	}
-	source := string(raw)
-	nativeArgs := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func companyExplorerNativeChildrenArgs")), " "))
-	for _, want := range []string{
-		"query.companyid",
-		"companyexplorerlazynullable(query.permissionuserid)",
-		"entitypermissionview",
-		"parententityid",
-	} {
-		if !strings.Contains(nativeArgs, want) {
-			t.Fatalf("companyExplorerNativeChildrenArgs missing %q", want)
-		}
-	}
-	if strings.Contains(nativeArgs, "query.parententityid") {
-		t.Fatalf("companyExplorerNativeChildrenArgs must not include query.ParentEntityID")
-	}
-
-	logicGateRows := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) queryCompanyExplorerFinalLogicGateChildren")), " "))
-	for _, want := range []string{
-		"companyexplorernativechildrenargs(query, logicgateid)",
-		"assignment.logic_gate_id=$4::uuid",
+	source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+	for _, forbidden := range []string{
+		"func companyexplorernativechildrenargs",
 		"companyexplorernativechildreneffectiveaccessselect",
 		"companyexplorernativechildrenaccesspredicate",
+		"querycompanyexplorerfinallogicgatechildren",
+		"assignment.logic_gate_id=",
 	} {
-		if !strings.Contains(logicGateRows, want) {
-			t.Fatalf("queryCompanyExplorerFinalLogicGateChildren missing %q", want)
-		}
-	}
-	for _, forbidden := range []string{
-		"companyexplorerfinalargs(query)",
-		"assignment.logic_gate_id=$5::uuid",
-	} {
-		if strings.Contains(logicGateRows, forbidden) {
-			t.Fatalf("queryCompanyExplorerFinalLogicGateChildren kept stale arg shape marker %q", forbidden)
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("Company Explorer V2 kept removed native-child marker %q", forbidden)
 		}
 	}
 }

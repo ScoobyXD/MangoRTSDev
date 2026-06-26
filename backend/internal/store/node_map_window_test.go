@@ -18,11 +18,6 @@ func TestMemoryRepoListNodeMapWindowBoundsFolderWindowAndRelationships(t *testin
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder child failed: %v", err)
 	}
-	sibling, err := repo.CreateCompanyExplorerFolder(companyID, "", "node", "Sibling")
-	if err != nil {
-		t.Fatalf("CreateCompanyExplorerFolder sibling failed: %v", err)
-	}
-
 	nodeA, err := repo.CreateNode(companyID, "A")
 	if err != nil {
 		t.Fatalf("CreateNode A failed: %v", err)
@@ -39,21 +34,11 @@ func TestMemoryRepoListNodeMapWindowBoundsFolderWindowAndRelationships(t *testin
 	if err != nil {
 		t.Fatalf("CreateNode outside window failed: %v", err)
 	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeA.NodeID, 1000); err != nil {
-		t.Fatalf("Assign A failed: %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, "node", nodeB.NodeID, 2000); err != nil {
-		t.Fatalf("Assign B failed: %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, sibling.FolderID, "node", nodeOutsideFolder.NodeID, 3000); err != nil {
-		t.Fatalf("Assign outside folder failed: %v", err)
-	}
-	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeOutsideWindow.NodeID, 4000); err != nil {
-		t.Fatalf("Assign outside window failed: %v", err)
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, parent.FolderID, "node", nodeA.NodeID, 1000); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Assign A error = %v, want ErrInvalid", err)
 	}
 
-	visibleRelationship, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Peer", "Peer")
-	if err != nil {
+	if _, err := repo.CreateNodeRelationship(companyID, nodeA.NodeID, nodeB.NodeID, "Peer", "Peer"); err != nil {
 		t.Fatalf("Create visible relationship failed: %v", err)
 	}
 	if _, err := repo.CreateNodeRelationship(companyID, nodeB.NodeID, nodeOutsideFolder.NodeID, "Peer", "Peer"); err != nil {
@@ -81,17 +66,17 @@ func TestMemoryRepoListNodeMapWindowBoundsFolderWindowAndRelationships(t *testin
 	if err != nil {
 		t.Fatalf("ListNodeMapWindow failed: %v", err)
 	}
-	assertNodeMapIDs(t, "nodes", nodeIDsFromNodes(result.Nodes), nodeA.NodeID, nodeB.NodeID)
-	assertNodeMapIDs(t, "positions", nodeIDsFromPositions(result.NodeMapPositions), nodeA.NodeID, nodeB.NodeID)
-	assertNodeMapIDs(t, "relationships", relationshipIDs(result.Relationships), visibleRelationship.NodeRelationshipID)
-	assertNodeMapIDs(t, "folder_items", itemIDs(result.FolderItems), nodeA.NodeID, nodeB.NodeID)
+	assertNodeMapIDs(t, "nodes", nodeIDsFromNodes(result.Nodes))
+	assertNodeMapIDs(t, "positions", nodeIDsFromPositions(result.NodeMapPositions))
+	assertNodeMapIDs(t, "relationships", relationshipIDs(result.Relationships))
+	assertNodeMapIDs(t, "folder_items", itemIDs(result.FolderItems))
 	assertNodeMapIDs(t, "folders", folderIDs(result.Folders), parent.FolderID, child.FolderID)
 
 	positions, err := repo.ListNodeMapPositionsWindow(query)
 	if err != nil {
 		t.Fatalf("ListNodeMapPositionsWindow failed: %v", err)
 	}
-	assertNodeMapIDs(t, "positions-only", nodeIDsFromPositions(positions), nodeA.NodeID, nodeB.NodeID)
+	assertNodeMapIDs(t, "positions-only", nodeIDsFromPositions(positions))
 
 	limited := query
 	limited.Limit = 1
@@ -99,7 +84,7 @@ func TestMemoryRepoListNodeMapWindowBoundsFolderWindowAndRelationships(t *testin
 	if err != nil {
 		t.Fatalf("ListNodeMapWindow limited failed: %v", err)
 	}
-	assertNodeMapIDs(t, "limited nodes", nodeIDsFromNodes(limitedResult.Nodes), nodeA.NodeID)
+	assertNodeMapIDs(t, "limited nodes", nodeIDsFromNodes(limitedResult.Nodes))
 	if len(limitedResult.Relationships) != 0 {
 		t.Fatalf("limited relationships = %+v, want none because only one endpoint is visible", limitedResult.Relationships)
 	}

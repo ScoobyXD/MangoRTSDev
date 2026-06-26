@@ -83,13 +83,8 @@ type CompanyExplorerTreeRowProps = {
 };
 
 function getTriageMessageDropTarget(row: ExplorerTreeNode, treeRows: ExplorerTreeNode[]): CompanyExplorerTriageMessageDropTarget | null {
+  void treeRows;
   const parentEntityID = row.entityID?.trim() ?? "";
-  if (row.kind === "folder") {
-    const folderID = row.folderID?.trim() || row.entityID?.trim() || "";
-    return folderID || parentEntityID
-      ? { kind: "folder", folderID: folderID || undefined, parentEntityID: parentEntityID || undefined, entityType: row.entityType, label: row.label }
-      : null;
-  }
   if (row.kind === "project") {
     const projectID = row.projectID?.trim() || (row.entityType === "project" ? row.resourceID?.trim() ?? "" : "");
     return projectID ? { kind: "project", projectID, parentEntityID: parentEntityID || undefined, label: row.label } : null;
@@ -97,15 +92,6 @@ function getTriageMessageDropTarget(row: ExplorerTreeNode, treeRows: ExplorerTre
   if (row.kind === "logic_gate") {
     const logicGateID = row.logicGateID?.trim() ?? "";
     return logicGateID ? { kind: "logic_gate", logicGateID, parentEntityID: parentEntityID || undefined, label: row.label } : null;
-  }
-  if (row.kind === "node") {
-    const nodeID = row.nodeID?.trim() ?? "";
-    if (!nodeID) return null;
-    const directLogicGateID = row.parentLogicGateID?.trim() ?? "";
-    const parentLogicGateID = directLogicGateID || (row.parentEntityID
-      ? treeRows.find((candidate) => candidate.entityID === row.parentEntityID && candidate.kind === "logic_gate")?.logicGateID?.trim() ?? ""
-      : "");
-    return { kind: "node", logicGateID: parentLogicGateID || undefined, nodeID, parentEntityID: parentEntityID || undefined, label: row.label };
   }
   return null;
 }

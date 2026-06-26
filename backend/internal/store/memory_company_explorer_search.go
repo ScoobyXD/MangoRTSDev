@@ -69,7 +69,6 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 	upsertFolder(folders.UnfiledFolderID, rootEntityID, CompanyExplorerDefaultRootFolderName, "logic_gate", 1000)
 	upsertFolder(folders.ProjectsFolderID, folders.UnfiledFolderID, CompanyExplorerDefaultProjectsFolderName, "project", 1000)
 	upsertFolder(folders.LogicGatesFolderID, folders.UnfiledFolderID, CompanyExplorerDefaultLogicGatesFolderName, "logic_gate", 2000)
-	upsertFolder(folders.NodesFolderID, folders.UnfiledFolderID, CompanyExplorerDefaultNodesFolderName, "node", 3000)
 	return folders
 }
 
@@ -85,12 +84,6 @@ func (r *MemoryRepo) backfillBareCompanyExplorerItemsLocked(companyID string) {
 			continue
 		}
 		r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeLogicGate, logicGate.LogicGateID)
-	}
-	for _, node := range r.nodes {
-		if node.CompanyID != companyID || r.companyExplorerV2HasManualEdgeLocked(companyID, CompanyExplorerV2EntityNode, node.NodeID) || r.companyExplorerNodeHasNativeParentLocked(companyID, node.NodeID) {
-			continue
-		}
-		r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeNode, node.NodeID)
 	}
 }
 
@@ -143,20 +136,6 @@ func (r *MemoryRepo) companyExplorerLogicGateHasProjectParentLocked(companyID, l
 	return false
 }
 
-func (r *MemoryRepo) companyExplorerNodeHasNativeParentLocked(companyID, nodeID string) bool {
-	for _, projection := range r.projectRelationshipProjection {
-		if projection.CompanyID == companyID && projection.ResourceType == EntityTypeNode && projection.ResourceID == nodeID {
-			return true
-		}
-	}
-	for _, assignment := range r.nodeLogicGateAssignments {
-		if assignment.CompanyID == companyID && assignment.NodeID == nodeID {
-			return true
-		}
-	}
-	return false
-}
-
 func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (CompanyExplorerSearchResults, error) {
 	query, err := normalizeCompanyExplorerSearchQuery(query)
 	if err != nil {
@@ -187,6 +166,12 @@ func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (Co
 		}
 		_ = priority
 		_ = matchPriority
+		locationPath := r.companyExplorerV2LocationPathLocked(query.CompanyID, entity.EntityID)
+		hasChildren := len(r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, entity.EntityID)) > 0
+		if entity.EntityType == CompanyExplorerV2EntityNode {
+			locationPath = r.companyExplorerNodeSearchLocationPathLocked(query.CompanyID, entity.ResourceID)
+			hasChildren = false
+		}
 		matches = append(matches, CompanyExplorerSearchResult{
 			CompanyID:              entity.CompanyID,
 			ResourceType:           entity.EntityType,
@@ -194,9 +179,9 @@ func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (Co
 			EntityID:               entity.EntityID,
 			DisplayName:            entity.Name,
 			MatchReason:            reason,
-			LocationPath:           r.companyExplorerV2LocationPathLocked(query.CompanyID, entity.EntityID),
+			LocationPath:           locationPath,
 			ProtectedDefaultFolder: entity.EntityType == CompanyExplorerV2EntityFolder && isCompanyExplorerDefaultFolderID(query.CompanyID, entity.EntityID),
-			HasChildren:            len(r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, entity.EntityID)) > 0,
+			HasChildren:            hasChildren,
 			CreatedTimestamp:       entity.CreatedTimestamp,
 			UpdatedTimestamp:       entity.UpdatedTimestamp,
 		})
@@ -229,6 +214,40 @@ func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (Co
 		matches = matches[:query.Limit]
 	}
 	return CompanyExplorerSearchResults{Results: matches}, nil
+}
+
+func (r *MemoryRepo) companyExplorerNodeSearchLocationPathLocked(companyID, nodeID string) []CompanyExplorerLocationSegment {
+	for _, assignment := range r.nodeLogicGateAssignments {
+		if assignment.CompanyID != companyID || assignment.NodeID != nodeID {
+			continue
+		}
+		gate, ok := r.companyExplorerV2EntityForNativeLocked(companyID, CompanyExplorerV2EntityLogicGate, assignment.LogicGateID)
+		if !ok {
+			continue
+		}
+		return append(r.companyExplorerV2LocationPathLocked(companyID, gate.EntityID), CompanyExplorerLocationSegment{
+			EntityType: gate.EntityType,
+			EntityID:   gate.EntityID,
+			ResourceID: gate.ResourceID,
+			Name:       r.companyExplorerV2EntityNameLocked(gate),
+		})
+	}
+	for _, projection := range r.projectRelationshipProjection {
+		if projection.CompanyID != companyID || projection.ResourceType != EntityTypeNode || projection.ResourceID != nodeID {
+			continue
+		}
+		project, ok := r.companyExplorerV2EntityForNativeLocked(companyID, CompanyExplorerV2EntityProject, projection.ProjectID)
+		if !ok {
+			continue
+		}
+		return append(r.companyExplorerV2LocationPathLocked(companyID, project.EntityID), CompanyExplorerLocationSegment{
+			EntityType: project.EntityType,
+			EntityID:   project.EntityID,
+			ResourceID: project.ResourceID,
+			Name:       r.companyExplorerV2EntityNameLocked(project),
+		})
+	}
+	return []CompanyExplorerLocationSegment{}
 }
 
 func companyExplorerSearchTypePriority(entityType string) (int, bool) {

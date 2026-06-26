@@ -164,7 +164,8 @@ export function getExplorerDropPayloadItemTypes(payload?: ExplorerDropPayload | 
 
 export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | null, payload?: ExplorerDropPayload | null): ExplorerDropTarget | null {
   if (!row || !payload || !row.folderID) return null;
-  if (row.syntheticKind === "default_scope_folder") return null;
+  if (row.syntheticKind === "default_scope_folder" || row.syntheticKind === "search_path" || row.syntheticKind === "search_result") return null;
+  if (row.kind === "node" || row.folderKind === "node") return null;
   const isGVICScopedRow = row.syntheticKind === "GVIC_folder" || Boolean(row.GVICRole);
   const genericV2Container = Boolean(row.entityID) && (row.entityType === "company" || row.entityType === "folder");
 
@@ -172,14 +173,14 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
   // its containing folderID, so users can drop anywhere inside that visible
   // folder section without us scanning the DOM or the full tree on every hover.
   if (payload.kind === "folder") {
-    if (!payload.folderID || payload.folderID === row.folderID) return null;
+    if (!payload.folderID || payload.folderID === row.folderID || payload.folderKind === "node") return null;
     if (isGVICScopedRow && payload.folderKind !== row.folderKind) return null;
     const folderKind = row.folderKind ?? payload.folderKind ?? "logic_gate";
     return { folderID: row.folderID, folderKind, treeID: row.id ?? `workspace-folder-${row.folderID}` };
   }
 
   const items = getExplorerDropPayloadItems(payload).filter((item): item is ExplorerDropPayloadItem & { itemType: CompanyExplorerFolderKind } => (
-    Boolean(item.itemID.trim()) && item.itemType !== "kanban"
+    Boolean(item.itemID.trim()) && item.itemType !== "kanban" && item.itemType !== "node"
   ));
   if (items.length === 0) return null;
   if (!genericV2Container && items.some((item) => item.itemType !== row.folderKind)) return null;
@@ -262,20 +263,20 @@ export function buildExplorerRowBatchReorderPlan(
 }
 
 export function resolveExplorerCreationTargets(row?: ExplorerCreationContextRow | null): ExplorerCreationTargets {
-  const containingFolderID = row?.folderID ?? "";
-  const nodeParentFolderID = containingFolderID;
+  const containingFolderID = row?.folderKind === "logic_gate" || row?.folderKind === "project" ? row.folderID ?? "" : "";
+  const nodeParentFolderID = "";
   const logicGateParentFolderID = containingFolderID;
   const projectParentFolderID = containingFolderID;
-  const nodeFolderParentID = nodeParentFolderID;
+  const nodeFolderParentID = "";
   const logicGateFolderParentID = row?.folderKind === "logic_gate" ? containingFolderID : "";
   const projectFolderParentID = row?.folderKind === "project" ? containingFolderID : "";
-  const preferredFolderKind: CompanyExplorerFolderKind = row?.folderKind ?? (row?.kind === "project" ? "project" : row?.kind === "node" ? "node" : "logic_gate");
+  const preferredFolderKind: CompanyExplorerFolderKind = row?.folderKind === "project" ? "project" : "logic_gate";
   const folderScopeType = row?.folderScopeType;
   const folderScopeID = row?.folderScopeID;
 
   return {
     preferredFolderKind,
-    preferredFolderParentID: preferredFolderKind === "logic_gate" ? logicGateParentFolderID : preferredFolderKind === "project" ? projectParentFolderID : nodeParentFolderID,
+    preferredFolderParentID: preferredFolderKind === "logic_gate" ? logicGateParentFolderID : projectParentFolderID,
     ...(folderScopeType ? { folderScopeType } : {}),
     ...(folderScopeID ? { folderScopeID } : {}),
     nodeFolderParentID,
@@ -392,18 +393,15 @@ export type ExplorerDeleteTarget =
 
 export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | null): ExplorerDeleteTarget | null {
   if (!row) return null;
-  if (row.systemKey || row.protectedDefaultFolder || row.syntheticKind === "search_path") return null;
+  if (row.systemKey || row.protectedDefaultFolder || row.syntheticKind === "search_path" || row.syntheticKind === "search_result") return null;
   const entityID = row.entityID?.trim() ?? "";
   const entityType = row.entityType;
   const edgeID = row.edgeID?.trim() ?? "";
   const v2Metadata = entityID && entityType ? { entityID, entityType, ...(edgeID && entityType !== "folder" ? { edgeID } : {}) } : {};
-  if (row.kind === "folder" && row.folderID && row.folderKind && (!entityType || entityType === "folder")) {
+  if (row.kind === "folder" && row.folderID && row.folderKind && row.folderKind !== "node" && (!entityType || entityType === "folder")) {
     return { kind: "folder", id: entityType === "folder" ? entityID : row.folderID, folderKind: row.folderKind, ...v2Metadata };
   }
-  if (row.kind === "node") {
-    const id = entityType === "node" ? row.resourceID : row.nodeID;
-    return id ? { kind: "node", id, ...v2Metadata } : null;
-  }
+  if (row.kind === "node") return null;
   if (row.kind === "logic_gate") {
     const id = entityType === "logic_gate" ? row.resourceID : row.logicGateID;
     return id ? { kind: "logic_gate", id, ...v2Metadata } : null;
@@ -419,6 +417,7 @@ export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | n
 export function resolveExplorerRootDropTarget(row?: ExplorerCreationContextRow | null, payload?: ExplorerDropPayload | null): ExplorerDropTarget | null {
   if (!row || row.kind !== "folder" || row.folderID || !payload || payload.kind !== "folder" || !payload.folderID || !payload.folderKind) return null;
   if (row.id && row.id !== EXPLORER_INTERNAL_ROOT_ROW_ID) return null;
+  if (payload.folderKind === "node") return null;
   return { folderID: "", folderKind: payload.folderKind, treeID: "folder-root" };
 }
 
@@ -429,9 +428,9 @@ export function resolveExplorerRenameTarget(row?: ExplorerCreationContextRow | n
   | { kind: "project"; id: string }
   | null {
   if (!row) return null;
-  if (row.systemKey || row.protectedDefaultFolder || row.syntheticKind === "search_path") return null;
-  if (row.kind === "folder" && row.folderID && (!row.entityType || row.entityType === "folder")) return { kind: "folder", id: row.folderID };
-  if (row.kind === "node" && row.nodeID) return { kind: "node", id: row.nodeID };
+  if (row.systemKey || row.protectedDefaultFolder || row.syntheticKind === "search_path" || row.syntheticKind === "search_result") return null;
+  if (row.kind === "folder" && row.folderID && row.folderKind !== "node" && (!row.entityType || row.entityType === "folder")) return { kind: "folder", id: row.folderID };
+  if (row.kind === "node") return null;
   if (row.kind === "logic_gate" && row.logicGateID) return { kind: "logic_gate", id: row.logicGateID };
   if (row.kind === "project" && row.projectID) return { kind: "project", id: row.projectID };
   return null;

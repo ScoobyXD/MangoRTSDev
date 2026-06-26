@@ -575,10 +575,6 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 }
 
 func (r *PostgresRepo) convertCommunicationsTriageItemsToExplorerTargetTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
-	targetParentEntityID := communicationsExplorerTargetParentEntityID(input.Target)
-	if targetParentEntityID != "" {
-		input.Target.ParentEntityID = targetParentEntityID
-	}
 	if input.Target.Mode == CommunicationsEmailConversionTargetProject {
 		var projectExists bool
 		if err := tx.QueryRowContext(ctx, `select exists (select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`, input.CompanyID, input.Target.ProjectID).Scan(&projectExists); err != nil {
@@ -586,11 +582,6 @@ func (r *PostgresRepo) convertCommunicationsTriageItemsToExplorerTargetTx(ctx co
 		}
 		if !projectExists {
 			return CommunicationsTriageConversionResult{}, ErrNotFound
-		}
-	}
-	if targetParentEntityID != "" {
-		if err := postgresCompanyExplorerV2ParentExistsAndCanEdit(ctx, tx, input.CompanyID, targetParentEntityID, input.PermissionUserID); err != nil {
-			return CommunicationsTriageConversionResult{}, err
 		}
 	}
 
@@ -632,15 +623,6 @@ delete from communications_triage_items
 where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if targetParentEntityID != "" {
-			row, err := upsertCommunicationsExplorerV2NodeEdgeTx(ctx, tx, input, nodeID, nodeTitle)
-			if err != nil {
-				return CommunicationsTriageConversionResult{}, err
-			}
-			if row.EntityID != "" {
-				result.ExplorerV2Rows = append(result.ExplorerV2Rows, row)
-			}
-		}
 		if input.Target.Mode == CommunicationsEmailConversionTargetProject {
 			relationship, deltas, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
 			if err != nil {
@@ -668,83 +650,6 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
 	return result, nil
-}
-
-func postgresCompanyExplorerV2ParentExistsAndCanEdit(ctx context.Context, tx *sql.Tx, companyID, parentEntityID, userID string) error {
-	var exists bool
-	if parentEntityID == companyID {
-		exists = true
-	} else if err := tx.QueryRowContext(ctx, `
-select exists (
-  select 1
-  from company_explorer_folders
-  where company_id=$1::uuid and folder_id=$2::uuid
-)`, companyID, parentEntityID).Scan(&exists); err != nil {
-		return err
-	}
-	if !exists {
-		return ErrNotFound
-	}
-	return postgresCompanyExplorerV2ParentCanEdit(ctx, tx, companyID, parentEntityID, userID)
-}
-
-func upsertCommunicationsExplorerV2NodeEdgeTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, nodeID, nodeTitle string) (CompanyExplorerV2Row, error) {
-	parentEntityID := communicationsExplorerTargetParentEntityID(input.Target)
-	var parentFolderID any
-	if parentEntityID == "" || parentEntityID == input.CompanyID {
-		parentEntityID = input.CompanyID
-	} else {
-		var folderExists bool
-		if err := tx.QueryRowContext(ctx, `
-select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid)`,
-			input.CompanyID, parentEntityID).Scan(&folderExists); err != nil {
-			return CompanyExplorerV2Row{}, err
-		}
-		if !folderExists {
-			return CompanyExplorerV2Row{}, nil
-		}
-		parentFolderID = parentEntityID
-	}
-	position := input.Target.Position
-	if position <= 0 {
-		if err := tx.QueryRowContext(ctx, `
-select coalesce(max(position), 0) + 1000
-from company_explorer_items
-where company_id=$1::uuid
-  and (($2::uuid is null and parent_folder_id is null) or parent_folder_id=$2::uuid)`,
-			input.CompanyID, parentFolderID).Scan(&position); err != nil {
-			return CompanyExplorerV2Row{}, err
-		}
-	}
-	itemID := newUUIDv7String()
-	var createdTimestamp time.Time
-	var updatedTimestamp time.Time
-	if err := tx.QueryRowContext(ctx, `
-insert into company_explorer_items (company_id, item_id, parent_folder_id, target_type, target_id, position, created_by_user_id, created_timestamp, updated_timestamp)
-values ($1::uuid, $2::uuid, $3::uuid, 'node', $4::uuid, $5, nullif($6, '')::uuid, now(), now())
-on conflict (company_id, target_type, target_id) do update set
-  parent_folder_id=excluded.parent_folder_id,
-  position=excluded.position,
-  updated_timestamp=now()
-returning item_id::text, created_timestamp, updated_timestamp`,
-		input.CompanyID, itemID, parentFolderID, nodeID, position, input.ActorUserID).Scan(&itemID, &createdTimestamp, &updatedTimestamp); err != nil {
-		return CompanyExplorerV2Row{}, err
-	}
-	return CompanyExplorerV2Row{
-		CompanyID:        input.CompanyID,
-		EntityID:         nodeID,
-		EntityType:       CompanyExplorerV2EntityNode,
-		ResourceID:       nodeID,
-		Name:             nodeTitle,
-		ParentEntityID:   parentEntityID,
-		EdgeID:           itemID,
-		Position:         position,
-		HasChildren:      false,
-		EffectiveAccess:  EntityPermissionEdit,
-		NativeContext:    companyExplorerV2NativeContext(CompanyExplorerV2EntityNode, nodeID, nodeID),
-		CreatedTimestamp: createdTimestamp,
-		UpdatedTimestamp: updatedTimestamp,
-	}, nil
 }
 
 func upsertCommunicationsTriageProjectRelationshipTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, nodeID string) (domain.ProjectRelationshipProjection, []ProjectionDelta, error) {
@@ -1052,11 +957,6 @@ where company_id=$1
 	if _, err := tx.ExecContext(ctx, `
 delete from node_relationships
 where company_id=$1 and (node_id_a=$2 or node_id_b=$2)`, input.CompanyID, link.NodeID); err != nil {
-		return CommunicationsTriageRevertResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from company_explorer_items
-where company_id=$1::uuid and target_type='node' and target_id=$2::uuid`, input.CompanyID, link.NodeID); err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
