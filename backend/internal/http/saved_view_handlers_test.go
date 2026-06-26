@@ -151,6 +151,51 @@ func TestSavedViewsGroupVisibility(t *testing.T) {
 	}
 }
 
+func TestSavedViewsUpdatesProjectLogicGateGroupings(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	handler := NewServer(repo).Routes()
+	companyID := "44444444-4444-4444-8444-444444444444"
+	user := mustCreateSavedViewUser(t, repo, "saved-view-updates", companyID, "updates@example.com", domain.RoleCompanyUser)
+
+	body := `{
+		"company_id":"` + companyID + `",
+		"surface":"updates",
+		"principal":"user",
+		"principal_id":"` + user.UserID + `",
+		"name":"Updates by Path",
+		"groupings":[{"field":"project","direction":"asc"},{"field":"logic_gate","direction":"desc"}]
+	}`
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/saved-views", bytes.NewBufferString(body))
+	handler.ServeHTTP(createRec, savedViewRequestWithActor(createReq, user, companyID, domain.RoleCompanyUser))
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d body=%s", createRec.Code, createRec.Body.String())
+	}
+	var created domain.SavedView
+	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	if created.Surface != store.SavedViewSurfaceUpdates || len(created.Groupings) != 2 || created.Groupings[0].Field != "project" || created.Groupings[1].Field != "logic_gate" {
+		t.Fatalf("created saved view = %+v", created)
+	}
+
+	listRec := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/saved-views?company_id="+companyID+"&surface=updates", nil)
+	handler.ServeHTTP(listRec, savedViewRequestWithActor(listReq, user, companyID, domain.RoleCompanyUser))
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var listPayload struct {
+		SavedViews []domain.SavedView `json:"saved_views"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(listPayload.SavedViews) != 1 || len(listPayload.SavedViews[0].Groupings) != 2 || listPayload.SavedViews[0].Groupings[1].Field != "logic_gate" {
+		t.Fatalf("list saved views = %+v", listPayload.SavedViews)
+	}
+}
+
 func TestSavedViewsRejectInvalidPrincipalAndGrouping(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	handler := NewServer(repo).Routes()
@@ -178,7 +223,7 @@ func TestSavedViewsRejectInvalidPrincipalAndGrouping(t *testing.T) {
 		"principal":"user",
 		"principal_id":"` + user.UserID + `",
 		"name":"Bad Updates",
-		"groupings":[{"field":"project","direction":"asc"}]
+		"groupings":[{"field":"unknown","direction":"asc"}]
 	}`
 	invalidGroupingRec := httptest.NewRecorder()
 	invalidGroupingReq := httptest.NewRequest(http.MethodPost, "/v1/saved-views", bytes.NewBufferString(invalidGroupingBody))
