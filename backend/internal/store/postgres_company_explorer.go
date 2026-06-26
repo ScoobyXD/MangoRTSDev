@@ -969,14 +969,6 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 		for folderID := range folderIDs {
 			grantFolderIDs = append(grantFolderIDs, folderID)
 		}
-		if err := execOptionalPostgresShapeCleanupTx(tx, "resource_access_grants",
-			`delete from resource_access_grants
-			 where company_id=$1 and resource_type in ($2, $3, $4) and resource_id = any(string_to_array($5, ',')::uuid[])`,
-			companyID, EntityTypeSharedInboxFolder, EntityTypeSharedInbox, EntityTypeSharedTriageFolder, strings.Join(grantFolderIDs, ","),
-		); err != nil {
-			stop()
-			return CompanyExplorerDeleteResult{}, err
-		}
 		if err := execOptionalPostgresShapeCleanupTx(tx, "resource_permissions",
 			`delete from resource_permissions
 			 where company_id=$1 and resource_type in ($2, $3, $4) and resource_id = any(string_to_array($5, ',')::uuid[])`,
@@ -1165,16 +1157,6 @@ func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID
 		return err
 	}
 	stop()
-	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.resource_access_grants_delete")
-	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_access_grants",
-		`delete from resource_access_grants
-		 where company_id=$1 and resource_type='node' and resource_id=$2::uuid`,
-		companyID, nodeID,
-	); err != nil {
-		stop()
-		return err
-	}
-	stop()
 	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.resource_permissions_delete")
 	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_permissions",
 		`delete from resource_permissions
@@ -1306,13 +1288,6 @@ func postgresDeleteLogicGateRowsTx(ctx context.Context, tx *sql.Tx, companyID, l
 	if _, err := tx.ExecContext(ctx,
 		`delete from logic_gate_map_positions
 		 where company_id=$1 and logic_gate_id=$2`,
-		companyID, logicGateID,
-	); err != nil {
-		return err
-	}
-	if err := execOptionalPostgresShapeCleanupTx(tx, "resource_access_grants",
-		`delete from resource_access_grants
-		 where company_id=$1 and resource_type='logic_gate' and resource_id=$2::uuid`,
 		companyID, logicGateID,
 	); err != nil {
 		return err

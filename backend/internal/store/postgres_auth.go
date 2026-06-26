@@ -636,9 +636,6 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 			return DeleteCompanyUserResult{}, fmt.Errorf("sync company gvic assignments for user: %w", err)
 		}
 	}
-	if err = optionalCleanup("delete company resource access grants for user", "resource_access_grants", `delete from resource_access_grants where company_id = $1::uuid and principal_type = 'user' and principal_id = $2::uuid`, companyID, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
-	}
 	if err = optionalCleanup("delete company resource permissions for user", "resource_permissions", `delete from resource_permissions where company_id = $1::uuid and user_id = $2::uuid`, companyID, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
@@ -717,9 +714,6 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	if err = optionalCleanup("clear project timeline created-by references for user", "project_management_timeline_items", `update project_management_timeline_items set created_by_user_id = null where created_by_user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
-	if err = optionalCleanup("delete all resource access grants for user", "resource_access_grants", `delete from resource_access_grants where principal_type = 'user' and principal_id = $1::uuid`, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
-	}
 	if err = optionalCleanup("delete all resource permissions for user", "resource_permissions", `delete from resource_permissions where user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
@@ -727,9 +721,6 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 		return DeleteCompanyUserResult{}, err
 	}
 	if err = optionalCleanup("delete all GVICMatrix matrix projection rows for user", "gvic_matrix_projection_table", `delete from gvic_matrix_projection_table where user_id = $1::uuid`, userID); err != nil {
-		return DeleteCompanyUserResult{}, err
-	}
-	if err = optionalCleanup("delete all entity access permissions for user", "entity_access_permissions", `delete from entity_access_permissions where subject_type = 'user' and subject_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, err
 	}
 	if _, err = tx.Exec(`delete from company_memberships where user_id = $1::uuid`, userID); err != nil {

@@ -11,10 +11,10 @@ Coverage Status:
 ST1 - Shared Triage shows shared inbox folders and mailboxes that are visible to the current user.
 ST2 - Normal users only see shared inbox folders where effective access grants at least view access.
 ST3 - Dev admins and company admins can see all shared inbox folders with admin-level effective access; company managers follow shared inbox resource permissions.
-ST4 - Creating a shared inbox folder requires company access, a nonblank name, and edit access to the selected parent when the folder is nested.
-ST5 - Creating a shared inbox initializes default access as no access and gives the creator edit access.
+ST4 - Creating a Shared Triage folder or mailbox-capable shared inbox requires manager/admin authority, a nonblank name, and edit access to the selected parent when the item is nested.
+ST5 - Creating a Shared Triage folder or mailbox-capable shared inbox does not create private creator grants; access remains controlled by the resource default and `resource_permissions` exception rows.
 ST6 - Shared inbox folders and mailbox entries use the same tree model, with mailbox-capable entries identified by a shared inbox entry type, account email, and company email connection link.
-ST7 - Renaming, moving, or changing mailbox linkage for a shared inbox folder requires edit access.
+ST7 - Renaming or moving a Shared Triage folder requires edit access; creating or changing mailbox linkage also requires manager/admin authority.
 ST8 - Deleting a shared inbox folder requires edit access.
 ST9 - Protected shared inbox folders cannot be renamed or deleted.
 ST10 - Deleting a mailbox-capable shared inbox removes the Shared Triage work surface and its shared inbox permissions/GVIC rows, but does not automatically revoke the reusable company-owned mailbox credential.
@@ -25,7 +25,7 @@ ST14 - View-only shared inbox access can read mailbox content but cannot send fr
 ST15 - Reading shared inbox access settings requires manager/admin authority and view access to the shared inbox.
 ST16 - Updating shared inbox access settings requires manager/admin authority and edit access to the shared inbox.
 ST17 - Shared inbox access settings return default access, explicit access grants, GVIC assignments, effective access, whether the actor can edit permissions, and whether the actor can edit manager permissions.
-ST18 - Updating shared inbox access changes resource access grants/default access and must not convert GVIC assignments into permission grants.
+ST18 - Updating shared inbox access changes `resource_permissions` exception rows/default access and must not convert GVIC assignments into permission grants.
 ST19 - Shared inbox access grants support user and group principals.
 ST20 - If shared inbox access storage is unavailable, access endpoints return a service-unavailable error instead of silently succeeding.
 ST21 - Shared inbox GVIC assignment APIs apply only to mailbox/shared inbox resources, not plain organizational folders.
@@ -37,11 +37,11 @@ ST26 - Each mailbox-capable shared inbox stores a company_email_connection_id fo
 ST27 - shared_inboxes.account_email remains display/search metadata, but the credential source of truth is the company_email_connection_id link.
 ST28 - Personal My Triage mailbox credentials stay in user_email_connections as personal-only rows and must not be used as the source of truth for Shared Triage mailbox access.
 ST29 - Shared inbox OAuth setup or reconnect writes or updates company_email_connections for the target company and mailbox.
-ST30 - Creating or reassigning a mailbox-capable shared inbox requires an existing connected company email connection for that company and account email, or starts the shared inbox OAuth repair flow for a user allowed to manage that shared inbox.
+ST30 - Creating or reassigning a mailbox-capable shared inbox requires manager/admin authority and an existing connected company email connection for that company and account email, or starts the shared inbox OAuth repair flow for a manager/admin.
 ST31 - Existing legacy user_email_connections rows with connection_scope = shared are backfilled into company_email_connections, linked to matching shared_inboxes, then removed before the legacy connection_scope column is dropped.
 ST32 - Users with view or edit permission to a shared inbox can open the shared inbox without connecting that mailbox to their personal account.
 ST33 - If a company-owned shared connection is missing or expired, normal permitted users see a repair-required state and do not receive a personal OAuth prompt.
-ST34 - If a company-owned shared connection is missing or expired, users who can manage that shared inbox can start shared inbox OAuth reconnect for the company-owned credential.
+ST34 - If a company-owned shared connection is missing or expired, managers/admins who can edit that shared inbox can start shared inbox OAuth reconnect for the company-owned credential.
 ST35 - Shared inbox mail actions use the company-owned grant but are authorized and audited as the currently logged-in user.
 ST36 - Shared inbox permissions remain stored on resource_permissions with resource_type = shared_inbox and resource_id = shared_inboxes.shared_inbox_id.
 ST37 - Shared inbox GVIC assignments remain stored on resource_gvic_assignments with resource_type = shared_inbox and resource_id = shared_inboxes.shared_inbox_id.
@@ -106,14 +106,16 @@ Business logic covered:
 - ST30
 
 Given:
-- A user can edit one shared inbox parent folder and only view another parent folder.
+- A company manager can edit one shared inbox parent folder and only view another parent folder.
+- A regular user can edit the same editable parent folder.
 - A protected shared inbox folder exists.
 - A mailbox-capable shared inbox has a linked company email connection.
 
 Expected:
-- Creating under the editable parent succeeds and gives the creator edit access while leaving default access as no access.
-- Creating under the view-only parent fails.
-- Rename, move, and mailbox linkage changes require edit access.
+- The manager can create under the editable parent, and the new item stays governed by default access plus `resource_permissions` exceptions.
+- The regular user cannot create Shared Triage folders or shared inbox mailboxes even with edit access.
+- Creating under the view-only parent fails for the manager.
+- Rename and move require edit access; mailbox linkage changes require manager/admin authority and edit access.
 - Protected shared inbox folders cannot be renamed or deleted.
 - Deleting a mailbox-capable shared inbox removes the Shared Triage work surface without treating the company email connection as a user permission record.
 - Successful changes publish workspace refresh events.

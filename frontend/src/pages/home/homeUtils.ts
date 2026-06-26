@@ -755,6 +755,19 @@ export function userHasFullSharedInboxAccess(user: SharedInboxAccessUser | null 
   });
 }
 
+export function userCanManageSharedInboxStructure(user: SharedInboxAccessUser | null | undefined, companyID: string): boolean {
+  if (!user) return false;
+  if (user.is_dev_admin) return true;
+  const cleanCompanyID = companyID.trim();
+  return (user.memberships ?? []).some((membership) => {
+    const role = membership.role?.trim();
+    if (role === "dev_admin") return true;
+    return cleanCompanyID !== "" && membership.company_id?.trim() === cleanCompanyID && (
+      role === "company_admin" || role === "company_manager"
+    );
+  });
+}
+
 function sharedInboxEffectiveAccess(folder: CommunicationsSharedInbox | undefined, userID: string): SharedInboxAccessLevel | "" {
   if (!folder) return "";
   const effective = folder.effective_access_level;

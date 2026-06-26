@@ -678,7 +678,7 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertAuthUser error = %v", err)
 	}
-	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, "company_user"); err != nil {
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyManager); err != nil {
 		t.Fatalf("AddCompanyMembership error = %v", err)
 	}
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
@@ -699,6 +699,7 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 	})
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/communications/shared-inboxes", bytes.NewReader(createBody))
 	createReq.Header.Set("Content-Type", "application/json")
+	createReq = sharedInboxRequestWithActor(createReq, user, companyID, domain.RoleCompanyManager)
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)
 	if createRec.Code != http.StatusCreated {
@@ -750,6 +751,7 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 	})
 	clearReq := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+created.FolderID, bytes.NewReader(clearBody))
 	clearReq.Header.Set("Content-Type", "application/json")
+	clearReq = sharedInboxRequestWithActor(clearReq, user, companyID, domain.RoleCompanyManager)
 	clearRec := httptest.NewRecorder()
 	handler.ServeHTTP(clearRec, clearReq)
 	if clearRec.Code != http.StatusBadRequest {
@@ -763,6 +765,7 @@ func TestCommunicationsSharedInboxAccountEmailAPI(t *testing.T) {
 	})
 	missingReq := httptest.NewRequest(http.MethodPost, "/v1/communications/shared-inboxes", bytes.NewReader(missingBody))
 	missingReq.Header.Set("Content-Type", "application/json")
+	missingReq = sharedInboxRequestWithActor(missingReq, user, companyID, domain.RoleCompanyManager)
 	missingRec := httptest.NewRecorder()
 	handler.ServeHTTP(missingRec, missingReq)
 	if missingRec.Code != http.StatusBadRequest {

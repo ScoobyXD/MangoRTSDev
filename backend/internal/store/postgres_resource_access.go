@@ -357,13 +357,6 @@ func setPostgresResourceAccessPolicyTx(ctx context.Context, tx *sql.Tx, input En
 	if err := deletePostgresResourceOverridesTx(ctx, tx, companyID, entityType, entityID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-delete from resource_access_grants
-where company_id=$1::uuid
-  and resource_type=$2
-  and resource_id=$3::uuid`, companyID, entityType, entityID); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
-		return err
-	}
 	for _, userID := range overrideUserIDs {
 		if err := insertPostgresResourceOverrideTx(ctx, tx, companyID, entityType, entityID, userID); err != nil {
 			return err

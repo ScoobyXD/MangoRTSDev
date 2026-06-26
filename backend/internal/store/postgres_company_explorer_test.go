@@ -216,22 +216,23 @@ func TestPostgresCompanyExplorerV2LeafRowsDoNotUseNativeChildren(t *testing.T) {
 	}
 }
 
-func TestPostgresCompanyExplorerDeleteUsesOptionalAccessCleanup(t *testing.T) {
+func TestPostgresCompanyExplorerDeleteUsesResourcePermissionsCleanup(t *testing.T) {
 	raw, err := os.ReadFile("postgres_company_explorer.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_company_explorer.go: %v", err)
 	}
 	source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
 	for _, want := range []string{
-		`execoptionalpostgresshapecleanuptx(tx, "resource_access_grants"`,
 		`execoptionalpostgresshapecleanuptx(tx, "resource_permissions"`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("company explorer delete cleanup missing %q", want)
 		}
 	}
-	if strings.Contains(source, `!ispostgresundefinedtable(err, "resource_access_grants")`) ||
-		strings.Contains(source, `!ispostgresundefinedtable(err, "resource_permissions")`) {
+	if strings.Contains(source, `resource_access_grants`) {
+		t.Fatalf("company explorer delete cleanup must not reference legacy resource_access_grants")
+	}
+	if strings.Contains(source, `!ispostgresundefinedtable(err, "resource_permissions")`) {
 		t.Fatalf("company explorer delete cleanup must use savepoint-backed optional shape cleanup")
 	}
 
@@ -241,12 +242,14 @@ func TestPostgresCompanyExplorerDeleteUsesOptionalAccessCleanup(t *testing.T) {
 	}
 	projectDelete := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, string(projectRaw), "func postgresDeleteProjectTx")), " "))
 	for _, want := range []string{
-		`execoptionalpostgresshapecleanuptx(tx, "resource_access_grants"`,
 		`execoptionalpostgresshapecleanuptx(tx, "resource_permissions"`,
 	} {
 		if !strings.Contains(projectDelete, want) {
 			t.Fatalf("postgresDeleteProjectTx missing %q", want)
 		}
+	}
+	if strings.Contains(projectDelete, `resource_access_grants`) {
+		t.Fatalf("postgresDeleteProjectTx must not reference legacy resource_access_grants")
 	}
 }
 
