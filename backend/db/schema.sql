@@ -1520,6 +1520,10 @@ create table if not exists recycle_bin_items (
 create index if not exists idx_recycle_bin_items_company_deleted
   on recycle_bin_items(company_id, deleted_timestamp desc, recycle_bin_item_id desc);
 
+create index if not exists idx_recycle_bin_items_company_user_deleted
+  on recycle_bin_items(company_id, deleted_by_user_id, deleted_timestamp desc, recycle_bin_item_id desc)
+  where deleted_by_user_id is not null;
+
 -- Domain event outbox, notification outbox, and recipient feed.
 create table if not exists domain_events (
   event_id uuid not null,

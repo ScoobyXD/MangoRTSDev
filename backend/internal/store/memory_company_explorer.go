@@ -566,12 +566,13 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderI
 }
 
 func (r *MemoryRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {
-	_, err := r.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folderID}})
+	_, err := r.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folderID}}, "")
 	return err
 }
 
-func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput) (CompanyExplorerDeleteResult, error) {
+func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput, deletedByUserID string) (CompanyExplorerDeleteResult, error) {
 	companyID = strings.TrimSpace(companyID)
+	deletedByUserID = strings.TrimSpace(deletedByUserID)
 	if companyID == "" || len(targets) == 0 {
 		return CompanyExplorerDeleteResult{}, ErrInvalid
 	}
@@ -720,7 +721,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	appendSorted("logic_gate", logicGateIDs)
 	appendSorted("project", projectIDs)
 	appendSorted("kanban", kanbanBoardIDs)
-	r.createRecycleBinItemsLocked(companyID, result.Targets, recycleSnapshot)
+	r.createRecycleBinItemsLocked(companyID, deletedByUserID, result.Targets, recycleSnapshot)
 
 	for folderID := range folderIDs {
 		if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeCompanyExplorerFolder, folderID); err != nil {

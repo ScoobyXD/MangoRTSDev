@@ -200,6 +200,7 @@ func TestMemoryRepo_NodeContentChangesTrackUnseenAdditionsDeletionsAndSeenState(
 func TestMemoryRepoCompanyExplorerDeleteMovesNodeToRecycleBinAndRestores(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"
+	deleterUserID := "22222222-2222-4222-8222-222222222222"
 	repo.EnsureCompany(companyID, "Recycle Company")
 
 	node, err := repo.CreateNode(companyID, "Restorable node")
@@ -207,13 +208,13 @@ func TestMemoryRepoCompanyExplorerDeleteMovesNodeToRecycleBinAndRestores(t *test
 		t.Fatalf("CreateNode failed: %v", err)
 	}
 
-	if _, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "node", ID: node.NodeID}}); err != nil {
+	if _, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "node", ID: node.NodeID}}, deleterUserID); err != nil {
 		t.Fatalf("DeleteCompanyExplorerTargets failed: %v", err)
 	}
 	if _, err := repo.GetNode(companyID, node.NodeID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetNode after recycle delete err = %v, want ErrNotFound", err)
 	}
-	items, err := repo.ListRecycleBinItems(companyID)
+	items, err := repo.ListRecycleBinItems(companyID, deleterUserID)
 	if err != nil {
 		t.Fatalf("ListRecycleBinItems failed: %v", err)
 	}
@@ -223,8 +224,11 @@ func TestMemoryRepoCompanyExplorerDeleteMovesNodeToRecycleBinAndRestores(t *test
 	if items[0].ObjectKind != "node" || items[0].ObjectID != node.NodeID || items[0].ObjectLabel != "Restorable node" {
 		t.Fatalf("recycle item = %+v, want deleted node metadata", items[0])
 	}
+	if items[0].DeletedByUserID != deleterUserID {
+		t.Fatalf("recycle item deleted_by_user_id = %q, want %q", items[0].DeletedByUserID, deleterUserID)
+	}
 
-	result, err := repo.RestoreRecycleBinItems(companyID, []string{items[0].RecycleBinItemID})
+	result, err := repo.RestoreRecycleBinItems(companyID, deleterUserID, []string{items[0].RecycleBinItemID})
 	if err != nil {
 		t.Fatalf("RestoreRecycleBinItems failed: %v", err)
 	}
@@ -238,12 +242,59 @@ func TestMemoryRepoCompanyExplorerDeleteMovesNodeToRecycleBinAndRestores(t *test
 	if restored.Title != "Restorable node" {
 		t.Fatalf("restored title = %q, want original", restored.Title)
 	}
-	remaining, err := repo.ListRecycleBinItems(companyID)
+	remaining, err := repo.ListRecycleBinItems(companyID, deleterUserID)
 	if err != nil {
 		t.Fatalf("ListRecycleBinItems after restore failed: %v", err)
 	}
 	if len(remaining) != 0 {
 		t.Fatalf("recycle items after restore = %+v, want empty", remaining)
+	}
+}
+
+func TestMemoryRepoRecycleBinItemsAreScopedToDeletedByUser(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111111"
+	userAID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	userBID := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	repo.EnsureCompany(companyID, "Recycle Scope Company")
+
+	nodeA, err := repo.CreateNode(companyID, "User A deleted node")
+	if err != nil {
+		t.Fatalf("CreateNode A failed: %v", err)
+	}
+	nodeB, err := repo.CreateNode(companyID, "User B deleted node")
+	if err != nil {
+		t.Fatalf("CreateNode B failed: %v", err)
+	}
+	if _, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "node", ID: nodeA.NodeID}}, userAID); err != nil {
+		t.Fatalf("DeleteCompanyExplorerTargets A failed: %v", err)
+	}
+	if _, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "node", ID: nodeB.NodeID}}, userBID); err != nil {
+		t.Fatalf("DeleteCompanyExplorerTargets B failed: %v", err)
+	}
+
+	itemsA, err := repo.ListRecycleBinItems(companyID, userAID)
+	if err != nil {
+		t.Fatalf("ListRecycleBinItems A failed: %v", err)
+	}
+	if len(itemsA) != 1 || itemsA[0].ObjectID != nodeA.NodeID || itemsA[0].DeletedByUserID != userAID {
+		t.Fatalf("user A recycle items = %+v, want only node A", itemsA)
+	}
+	itemsB, err := repo.ListRecycleBinItems(companyID, userBID)
+	if err != nil {
+		t.Fatalf("ListRecycleBinItems B failed: %v", err)
+	}
+	if len(itemsB) != 1 || itemsB[0].ObjectID != nodeB.NodeID || itemsB[0].DeletedByUserID != userBID {
+		t.Fatalf("user B recycle items = %+v, want only node B", itemsB)
+	}
+	if _, err := repo.RestoreRecycleBinItems(companyID, userBID, []string{itemsA[0].RecycleBinItemID}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("RestoreRecycleBinItems cross-user err = %v, want ErrNotFound", err)
+	}
+	if err := repo.PermanentlyDeleteRecycleBinItems(companyID, userBID, []string{itemsA[0].RecycleBinItemID}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("PermanentlyDeleteRecycleBinItems cross-user err = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.RestoreRecycleBinItems(companyID, userAID, []string{itemsA[0].RecycleBinItemID}); err != nil {
+		t.Fatalf("RestoreRecycleBinItems owner failed: %v", err)
 	}
 }
 

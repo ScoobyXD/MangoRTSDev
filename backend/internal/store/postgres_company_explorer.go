@@ -688,16 +688,17 @@ select exists(
 	return exists, nil
 }
 
-func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput) (CompanyExplorerDeleteResult, error) {
-	return r.deleteCompanyExplorerTargets(companyID, targets, nil)
+func (r *PostgresRepo) DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput, deletedByUserID string) (CompanyExplorerDeleteResult, error) {
+	return r.deleteCompanyExplorerTargets(companyID, targets, deletedByUserID, nil)
 }
 
-func (r *PostgresRepo) DeleteCompanyExplorerTargetsWithTiming(companyID string, targets []CompanyExplorerDeleteTargetInput, recorder TimingRecorder) (CompanyExplorerDeleteResult, error) {
-	return r.deleteCompanyExplorerTargets(companyID, targets, recorder)
+func (r *PostgresRepo) DeleteCompanyExplorerTargetsWithTiming(companyID string, targets []CompanyExplorerDeleteTargetInput, deletedByUserID string, recorder TimingRecorder) (CompanyExplorerDeleteResult, error) {
+	return r.deleteCompanyExplorerTargets(companyID, targets, deletedByUserID, recorder)
 }
 
-func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput, recorder TimingRecorder) (CompanyExplorerDeleteResult, error) {
+func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput, deletedByUserID string, recorder TimingRecorder) (CompanyExplorerDeleteResult, error) {
 	companyID = strings.TrimSpace(companyID)
+	deletedByUserID = strings.TrimSpace(deletedByUserID)
 	if companyID == "" || len(targets) == 0 {
 		return CompanyExplorerDeleteResult{}, ErrInvalid
 	}
@@ -911,7 +912,7 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 	}
 	if len(recycleCandidates) > 0 {
 		stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.recycle_bin_write")
-		if err := postgresCreateRecycleBinItemsTx(ctx, tx, companyID, recycleCandidates); err != nil {
+		if err := postgresCreateRecycleBinItemsTx(ctx, tx, companyID, deletedByUserID, recycleCandidates); err != nil {
 			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}

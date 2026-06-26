@@ -67,9 +67,10 @@ func (scope companyExplorerRecycleScope) hasAnyRows() bool {
 	return len(scope.FolderIDs)+len(scope.NodeIDs)+len(scope.LogicGateIDs)+len(scope.ProjectIDs)+len(scope.KanbanBoardIDs) > 0
 }
 
-func (r *PostgresRepo) ListRecycleBinItems(companyID string) ([]domain.RecycleBinItem, error) {
+func (r *PostgresRepo) ListRecycleBinItems(companyID, deletedByUserID string) ([]domain.RecycleBinItem, error) {
 	companyID = strings.TrimSpace(companyID)
-	if companyID == "" {
+	deletedByUserID = strings.TrimSpace(deletedByUserID)
+	if companyID == "" || deletedByUserID == "" {
 		return nil, ErrInvalid
 	}
 	rows, err := r.db.QueryContext(context.Background(), `
@@ -84,7 +85,8 @@ select company_id::text,
        restore_payload
 from recycle_bin_items
 where company_id=$1::uuid
-order by deleted_timestamp desc, recycle_bin_item_id desc`, companyID)
+  and deleted_by_user_id=$2::uuid
+order by deleted_timestamp desc, recycle_bin_item_id desc`, companyID, deletedByUserID)
 	if isPostgresUndefinedTable(err, "recycle_bin_items") {
 		return []domain.RecycleBinItem{}, nil
 	}
@@ -116,16 +118,18 @@ order by deleted_timestamp desc, recycle_bin_item_id desc`, companyID)
 	return items, rows.Err()
 }
 
-func (r *PostgresRepo) PermanentlyDeleteRecycleBinItems(companyID string, itemIDs []string) error {
+func (r *PostgresRepo) PermanentlyDeleteRecycleBinItems(companyID, deletedByUserID string, itemIDs []string) error {
 	companyID = strings.TrimSpace(companyID)
+	deletedByUserID = strings.TrimSpace(deletedByUserID)
 	itemIDs = normalizeRecycleBinItemIDs(itemIDs)
-	if companyID == "" || len(itemIDs) == 0 {
+	if companyID == "" || deletedByUserID == "" || len(itemIDs) == 0 {
 		return ErrInvalid
 	}
 	result, err := r.db.ExecContext(context.Background(), `
 delete from recycle_bin_items
 where company_id=$1::uuid
-  and recycle_bin_item_id = any(string_to_array($2, ',')::uuid[])`, companyID, strings.Join(itemIDs, ","))
+  and deleted_by_user_id=$2::uuid
+  and recycle_bin_item_id = any(string_to_array($3, ',')::uuid[])`, companyID, deletedByUserID, strings.Join(itemIDs, ","))
 	if isPostgresUndefinedTable(err, "recycle_bin_items") {
 		return ErrNotFound
 	}
@@ -142,10 +146,11 @@ where company_id=$1::uuid
 	return nil
 }
 
-func (r *PostgresRepo) RestoreRecycleBinItems(companyID string, itemIDs []string) (RecycleBinRestoreResult, error) {
+func (r *PostgresRepo) RestoreRecycleBinItems(companyID, deletedByUserID string, itemIDs []string) (RecycleBinRestoreResult, error) {
 	companyID = strings.TrimSpace(companyID)
+	deletedByUserID = strings.TrimSpace(deletedByUserID)
 	itemIDs = normalizeRecycleBinItemIDs(itemIDs)
-	if companyID == "" || len(itemIDs) == 0 {
+	if companyID == "" || deletedByUserID == "" || len(itemIDs) == 0 {
 		return RecycleBinRestoreResult{}, ErrInvalid
 	}
 
@@ -168,8 +173,9 @@ select company_id::text,
        restore_payload
 from recycle_bin_items
 where company_id=$1::uuid
-  and recycle_bin_item_id = any(string_to_array($2, ',')::uuid[])
-order by deleted_timestamp asc, recycle_bin_item_id asc`, companyID, strings.Join(itemIDs, ","))
+  and deleted_by_user_id=$2::uuid
+  and recycle_bin_item_id = any(string_to_array($3, ',')::uuid[])
+order by deleted_timestamp asc, recycle_bin_item_id asc`, companyID, deletedByUserID, strings.Join(itemIDs, ","))
 	if isPostgresUndefinedTable(err, "recycle_bin_items") {
 		return RecycleBinRestoreResult{}, ErrNotFound
 	}
@@ -221,7 +227,8 @@ order by deleted_timestamp asc, recycle_bin_item_id asc`, companyID, strings.Joi
 	if _, err := tx.ExecContext(ctx, `
 delete from recycle_bin_items
 where company_id=$1::uuid
-  and recycle_bin_item_id = any(string_to_array($2, ',')::uuid[])`, companyID, strings.Join(itemIDs, ",")); err != nil {
+  and deleted_by_user_id=$2::uuid
+  and recycle_bin_item_id = any(string_to_array($3, ',')::uuid[])`, companyID, deletedByUserID, strings.Join(itemIDs, ",")); err != nil {
 		return RecycleBinRestoreResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -775,7 +782,7 @@ func sortedMapKeys(values map[string]bool) []string {
 	return out
 }
 
-func postgresCreateRecycleBinItemsTx(ctx context.Context, tx *sql.Tx, companyID string, roots []companyExplorerRecycleRootScope) error {
+func postgresCreateRecycleBinItemsTx(ctx context.Context, tx *sql.Tx, companyID, deletedByUserID string, roots []companyExplorerRecycleRootScope) error {
 	if len(roots) == 0 {
 		return nil
 	}
@@ -818,9 +825,10 @@ insert into recycle_bin_items (
   object_id,
   object_label,
   object_folder_kind,
-  restore_payload
-) values ($1::uuid, $2::uuid, $3, $4, $5, nullif($6, ''), $7::jsonb)`,
-			companyID, newUUIDv7String(), root.Target.Kind, root.Target.ID, label, folderKind, string(payload),
+  restore_payload,
+  deleted_by_user_id
+) values ($1::uuid, $2::uuid, $3, $4, $5, nullif($6, ''), $7::jsonb, nullif($8, '')::uuid)`,
+			companyID, newUUIDv7String(), root.Target.Kind, root.Target.ID, label, folderKind, string(payload), deletedByUserID,
 		); err != nil {
 			return err
 		}
