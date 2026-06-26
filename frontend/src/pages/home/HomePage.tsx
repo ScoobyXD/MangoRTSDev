@@ -1572,6 +1572,8 @@ export function HomePage({
     setNodeEditorOverlay(null);
   }, [companyID]);
   useEffect(() => {
+    const loadedListKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
+    if (loadedMessageListKey !== loadedListKey) return;
     if (!nextPageToken || loadingMessages || loadingMoreMessages) return;
     if (isPrimaryTriageMailbox(activeViewID, mailbox)) {
       void prefetchNextMessagePage(nextPageToken);
@@ -1581,7 +1583,7 @@ export function HomePage({
     if (!list) return;
     if (messageListWithinPrefetchDistance()) void prefetchNextMessagePage();
     if (messageListContentScrollHeight(list) <= list.clientHeight + 120) void loadMoreMessages();
-  }, [activeViewID, loadMoreMessages, loadingMessages, loadingMoreMessages, mailbox, messageListWithinPrefetchDistance, messages.length, nextPageToken, prefetchNextMessagePage]);
+  }, [activeViewID, companyID, loadMoreMessages, loadedMessageListKey, loadingMessages, loadingMoreMessages, mailbox, messageListWithinPrefetchDistance, messages.length, nextPageToken, prefetchNextMessagePage, searchQuery, unreadOnly]);
   useEffect(() => {
     if (!activeMailViewHasEmailConnection) return undefined;
     const connectedAccountEmail = activeMailAccountEmail;
