@@ -129,8 +129,11 @@ func TestPostgresCompanyExplorerSearchUsesVisibleExplorerLocations(t *testing.T)
 		"join visible_project_locations project_location",
 		"relationship.resource_id as target_id",
 		"relationship.resource_type='node'",
+		"node_organization_links as",
 		"left join ranked_locations location",
+		"left join node_organization_links node_link",
 		"coalesce(location.location_path, '[]'::jsonb) as location_path",
+		"and (location.target_id is not null or node_link.target_id is null)",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("company explorer search SQL missing %q", want)

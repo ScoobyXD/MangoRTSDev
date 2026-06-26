@@ -924,6 +924,107 @@ func TestMemoryCompanyExplorerSearchOrdersTypesAndReturnsLocationPath(t *testing
 		}
 	}
 }
+
+func TestMemoryCompanyExplorerSearchHidesNodeWithOnlyHiddenLocation(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-220000000104"
+	repo.EnsureCompany(companyID, "Search Permissions Co")
+
+	viewer, err := repo.UpsertAuthUser("explorer-search-permission-user", "explorer-search-permission@example.com", "Explorer Search Permission User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("explorer-search-permission-user", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+
+	hiddenFolder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
+		CompanyID:      companyID,
+		ParentEntityID: companyID,
+		Name:           "Permission Needle Folder",
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       EntityTypeCompanyExplorerFolder,
+		EntityID:         hiddenFolder.EntityID,
+		DefaultAccess:    ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions hidden folder: %v", err)
+	}
+
+	hiddenGate, err := repo.CreateLogicGate(companyID, "Permission Needle Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate hidden: %v", err)
+	}
+	if _, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:       companyID,
+		ParentEntityID:  hiddenFolder.EntityID,
+		ChildEntityType: CompanyExplorerV2EntityLogicGate,
+		ChildResourceID: hiddenGate.LogicGateID,
+	}); err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge hidden gate: %v", err)
+	}
+	hiddenNode, err := repo.CreateNode(companyID, "Permission Needle Hidden Node")
+	if err != nil {
+		t.Fatalf("CreateNode hidden: %v", err)
+	}
+	hiddenPriority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: hiddenGate.LogicGateID,
+		NodeID:      hiddenNode.NodeID,
+		Priority:    &hiddenPriority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus hidden: %v", err)
+	}
+	standaloneNode, err := repo.CreateNode(companyID, "Permission Needle Standalone Node")
+	if err != nil {
+		t.Fatalf("CreateNode standalone: %v", err)
+	}
+	for _, grant := range []struct {
+		entityType string
+		entityID   string
+	}{
+		{EntityTypeLogicGate, hiddenGate.LogicGateID},
+		{EntityTypeNode, hiddenNode.NodeID},
+		{EntityTypeNode, standaloneNode.NodeID},
+	} {
+		if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+			CompanyID:  companyID,
+			EntityType: grant.entityType,
+			EntityID:   grant.entityID,
+			Permissions: []EntityPermissionInput{{
+				SubjectType: EntityPermissionSubjectUser,
+				SubjectID:   viewer.UserID,
+				AccessLevel: EntityPermissionView,
+			}},
+		}); err != nil {
+			t.Fatalf("SetEntityPermissions %s/%s: %v", grant.entityType, grant.entityID, err)
+		}
+	}
+
+	results, err := repo.SearchCompanyExplorer(CompanyExplorerSearchQuery{
+		CompanyID:        companyID,
+		Query:            "Permission Needle",
+		PermissionUserID: viewer.UserID,
+		Limit:            10,
+	})
+	if err != nil {
+		t.Fatalf("SearchCompanyExplorer: %v", err)
+	}
+	requireCompanyExplorerSearchMissing(t, results.Results, EntityTypeLogicGate, hiddenGate.LogicGateID)
+	requireCompanyExplorerSearchMissing(t, results.Results, EntityTypeNode, hiddenNode.NodeID)
+	standaloneResult := requireCompanyExplorerSearchPath(t, results.Results, EntityTypeNode, standaloneNode.NodeID, []string{})
+	if standaloneResult.DisplayName != standaloneNode.Title {
+		t.Fatalf("standalone node result = %+v, want %q", standaloneResult, standaloneNode.Title)
+	}
+}
+
 func createProjectGateNodeTree(t *testing.T, repo *MemoryRepo, companyID string) (domain.Project, domain.LogicGate, domain.Node) {
 	t.Helper()
 	projectResult, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Project Parent", Status: "Active"})
@@ -988,6 +1089,15 @@ func requireCompanyExplorerSearchPath(t *testing.T, results []CompanyExplorerSea
 	}
 	t.Fatalf("missing search result type=%s id=%s in %+v", resourceType, resourceID, results)
 	return CompanyExplorerSearchResult{}
+}
+
+func requireCompanyExplorerSearchMissing(t *testing.T, results []CompanyExplorerSearchResult, resourceType, resourceID string) {
+	t.Helper()
+	for _, result := range results {
+		if result.ResourceType == resourceType && result.ResourceID == resourceID {
+			t.Fatalf("unexpected search result type=%s id=%s in %+v", resourceType, resourceID, results)
+		}
+	}
 }
 
 func requireDeletedTarget(t *testing.T, targets []CompanyExplorerDeletedTarget, kind, id string) {

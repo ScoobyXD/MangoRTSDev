@@ -166,12 +166,20 @@ func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (Co
 		}
 		_ = priority
 		_ = matchPriority
-		locationPath := r.companyExplorerV2LocationPathLocked(query.CompanyID, entity.EntityID)
-		hasChildren := len(r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, entity.EntityID)) > 0
+		var locationPath []CompanyExplorerLocationSegment
+		var pathOK bool
 		if entity.EntityType == CompanyExplorerV2EntityNode {
-			locationPath = r.companyExplorerNodeSearchLocationPathLocked(query.CompanyID, entity.ResourceID)
-			hasChildren = false
+			locationPath, pathOK = r.companyExplorerNodeSearchLocationPathLocked(query.CompanyID, entity.ResourceID, query.PermissionUserID)
+			if !pathOK {
+				return
+			}
+		} else {
+			locationPath, pathOK = r.companyExplorerV2VisibleLocationPathLocked(rowsQuery, entity.EntityID)
+			if !pathOK {
+				return
+			}
 		}
+		hasChildren := entity.EntityType != CompanyExplorerV2EntityNode && len(r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, entity.EntityID)) > 0
 		matches = append(matches, CompanyExplorerSearchResult{
 			CompanyID:              entity.CompanyID,
 			ResourceType:           entity.EntityType,
@@ -216,38 +224,53 @@ func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (Co
 	return CompanyExplorerSearchResults{Results: matches}, nil
 }
 
-func (r *MemoryRepo) companyExplorerNodeSearchLocationPathLocked(companyID, nodeID string) []CompanyExplorerLocationSegment {
+func (r *MemoryRepo) companyExplorerNodeSearchLocationPathLocked(companyID, nodeID, permissionUserID string) ([]CompanyExplorerLocationSegment, bool) {
+	rowsQuery := CompanyExplorerV2RowsQuery{CompanyID: companyID, PermissionUserID: permissionUserID}
+	hasOrganization := false
 	for _, assignment := range r.nodeLogicGateAssignments {
 		if assignment.CompanyID != companyID || assignment.NodeID != nodeID {
 			continue
 		}
+		hasOrganization = true
 		gate, ok := r.companyExplorerV2EntityForNativeLocked(companyID, CompanyExplorerV2EntityLogicGate, assignment.LogicGateID)
 		if !ok {
 			continue
 		}
-		return append(r.companyExplorerV2LocationPathLocked(companyID, gate.EntityID), CompanyExplorerLocationSegment{
+		locationPath, ok := r.companyExplorerV2VisibleLocationPathLocked(rowsQuery, gate.EntityID)
+		if !ok {
+			continue
+		}
+		return append(locationPath, CompanyExplorerLocationSegment{
 			EntityType: gate.EntityType,
 			EntityID:   gate.EntityID,
 			ResourceID: gate.ResourceID,
 			Name:       r.companyExplorerV2EntityNameLocked(gate),
-		})
+		}), true
 	}
 	for _, projection := range r.projectRelationshipProjection {
 		if projection.CompanyID != companyID || projection.ResourceType != EntityTypeNode || projection.ResourceID != nodeID {
 			continue
 		}
+		hasOrganization = true
 		project, ok := r.companyExplorerV2EntityForNativeLocked(companyID, CompanyExplorerV2EntityProject, projection.ProjectID)
 		if !ok {
 			continue
 		}
-		return append(r.companyExplorerV2LocationPathLocked(companyID, project.EntityID), CompanyExplorerLocationSegment{
+		locationPath, ok := r.companyExplorerV2VisibleLocationPathLocked(rowsQuery, project.EntityID)
+		if !ok {
+			continue
+		}
+		return append(locationPath, CompanyExplorerLocationSegment{
 			EntityType: project.EntityType,
 			EntityID:   project.EntityID,
 			ResourceID: project.ResourceID,
 			Name:       r.companyExplorerV2EntityNameLocked(project),
-		})
+		}), true
 	}
-	return []CompanyExplorerLocationSegment{}
+	if hasOrganization {
+		return []CompanyExplorerLocationSegment{}, false
+	}
+	return []CompanyExplorerLocationSegment{}, true
 }
 
 func companyExplorerSearchTypePriority(entityType string) (int, bool) {
@@ -319,4 +342,37 @@ func (r *MemoryRepo) companyExplorerV2LocationPathLocked(companyID, targetEntity
 		}
 	}
 	return []CompanyExplorerLocationSegment{}
+}
+
+func (r *MemoryRepo) companyExplorerV2VisibleLocationPathLocked(query CompanyExplorerV2RowsQuery, targetEntityID string) ([]CompanyExplorerLocationSegment, bool) {
+	rootID := companyExplorerV2NativeEntityID(query.CompanyID, CompanyExplorerV2EntityCompany, query.CompanyID)
+	type queueItem struct {
+		EntityID string
+		Path     []CompanyExplorerLocationSegment
+	}
+	queue := []queueItem{{EntityID: rootID, Path: []CompanyExplorerLocationSegment{}}}
+	seen := map[string]bool{rootID: true}
+	for len(queue) > 0 {
+		item := queue[0]
+		queue = queue[1:]
+		for _, edge := range r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, item.EntityID) {
+			child, ok := r.companyExplorerV2Entities[key(query.CompanyID, edge.ChildEntityID)]
+			if !ok || seen[child.EntityID] || !r.companyExplorerV2EntityVisibleLocked(query, child) {
+				continue
+			}
+			if child.EntityID == targetEntityID {
+				return item.Path, true
+			}
+			segment := CompanyExplorerLocationSegment{
+				EntityType: child.EntityType,
+				EntityID:   child.EntityID,
+				ResourceID: child.ResourceID,
+				Name:       child.Name,
+			}
+			nextPath := append(append([]CompanyExplorerLocationSegment{}, item.Path...), segment)
+			seen[child.EntityID] = true
+			queue = append(queue, queueItem{EntityID: child.EntityID, Path: nextPath})
+		}
+	}
+	return []CompanyExplorerLocationSegment{}, false
 }
