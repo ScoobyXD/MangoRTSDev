@@ -12,6 +12,19 @@ import (
 	"miraeopus/backend/internal/store"
 )
 
+func sharedInboxRequestWithActor(req *http.Request, user domain.User, companyID, role string) *http.Request {
+	return req.WithContext(context.WithValue(req.Context(), actorContextKey{}, ActorContext{
+		User: user,
+		Memberships: []domain.CompanyMembership{{
+			CompanyID: companyID,
+			UserID:    user.UserID,
+			Role:      role,
+		}},
+		CompanyID:   companyID,
+		CompanyRole: role,
+	}))
+}
+
 func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	t.Parallel()
 
@@ -108,6 +121,93 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	}
 	if len(listPayload.SharedInboxes) != 1 || listPayload.SharedInboxes[0].FolderID != created.FolderID || listPayload.SharedInboxes[0].AccountEmail != "shared@example.com" {
 		t.Fatalf("shared inbox list = %+v", listPayload.SharedInboxes)
+	}
+}
+
+func TestCommunicationsSharedInboxCreateRequiresManagerOrAdmin(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-shared-inbox-create-manager-required"
+	repo.EnsureCompany(companyID, "Shared Inbox Create Manager Required")
+
+	member, err := repo.UpsertAuthUser("subject-shared-create-member", "shared-create-member@example.com", "Shared Create Member")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser member error = %v", err)
+	}
+	manager, err := repo.UpsertAuthUser("subject-shared-create-manager", "shared-create-manager@example.com", "Shared Create Manager")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser manager error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(member.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership member error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(manager.CognitoSubject, companyID, domain.RoleCompanyManager); err != nil {
+		t.Fatalf("AddCompanyMembership manager error = %v", err)
+	}
+
+	memberBody, _ := json.Marshal(map[string]string{"company_id": companyID, "name": "Member Folder"})
+	memberReq := httptest.NewRequest(http.MethodPost, "/v1/communications/shared-inboxes", bytes.NewReader(memberBody))
+	memberReq.Header.Set("Content-Type", "application/json")
+	memberReq = sharedInboxRequestWithActor(memberReq, member, companyID, domain.RoleCompanyUser)
+	memberRec := httptest.NewRecorder()
+	handler.ServeHTTP(memberRec, memberReq)
+	if memberRec.Code != http.StatusForbidden {
+		t.Fatalf("POST shared inbox as member status = %d, want %d body=%s", memberRec.Code, http.StatusForbidden, memberRec.Body.String())
+	}
+
+	managerBody, _ := json.Marshal(map[string]string{"company_id": companyID, "name": "Manager Folder"})
+	managerReq := httptest.NewRequest(http.MethodPost, "/v1/communications/shared-inboxes", bytes.NewReader(managerBody))
+	managerReq.Header.Set("Content-Type", "application/json")
+	managerReq = sharedInboxRequestWithActor(managerReq, manager, companyID, domain.RoleCompanyManager)
+	managerRec := httptest.NewRecorder()
+	handler.ServeHTTP(managerRec, managerReq)
+	if managerRec.Code != http.StatusCreated {
+		t.Fatalf("POST shared inbox as manager status = %d, want %d body=%s", managerRec.Code, http.StatusCreated, managerRec.Body.String())
+	}
+}
+
+func TestCommunicationsSharedInboxAccountEmailRequiresManagerOrAdmin(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "company-shared-inbox-email-manager-required"
+	repo.EnsureCompany(companyID, "Shared Inbox Email Manager Required")
+
+	member, err := repo.UpsertAuthUser("subject-shared-email-member", "shared-email-member@example.com", "Shared Email Member")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser member error = %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(member.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership member error = %v", err)
+	}
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "")
+	if err != nil {
+		t.Fatalf("CreateCommunicationsSharedInboxFolder error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"company_id":    companyID,
+		"account_email": "support@example.com",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/v1/communications/shared-inboxes/"+folder.FolderID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = sharedInboxRequestWithActor(req, member, companyID, domain.RoleCompanyUser)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("PUT shared inbox account email as member status = %d, want %d body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	reloaded, err := repo.GetCommunicationsSharedInboxFolder(companyID, folder.FolderID)
+	if err != nil {
+		t.Fatalf("GetCommunicationsSharedInboxFolder error = %v", err)
+	}
+	if reloaded.AccountEmail != nil && *reloaded.AccountEmail != "" {
+		t.Fatalf("account email = %v, want unchanged empty email", *reloaded.AccountEmail)
 	}
 }
 

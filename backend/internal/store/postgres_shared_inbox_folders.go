@@ -724,13 +724,6 @@ where company_id=$1::uuid
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-delete from resource_access_grants
-where company_id=$1::uuid
-  and resource_type=$2
-  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedInboxFolder, idList); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `
 delete from resource_gvic_assignments
 where company_id=$1::uuid
   and resource_type=$2
@@ -766,11 +759,6 @@ where company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_permissions
 where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, EntityTypeSharedInbox, folderID); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from resource_access_grants
-where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, EntityTypeSharedInbox, folderID); err != nil && !isPostgresUndefinedTable(err, "resource_access_grants") {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `

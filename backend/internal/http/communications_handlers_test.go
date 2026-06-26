@@ -270,6 +270,51 @@ func TestCommunicationsAuthURLIncludesSignedState(t *testing.T) {
 	}
 }
 
+func TestCommunicationsAuthURLSharedInboxIntentRequiresManagerOrAdmin(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "company-shared-auth-url-manager-required"
+	repo.EnsureCompany(companyID, "Shared Auth URL Manager Required")
+	member, err := repo.UpsertAuthUser("subject-shared-auth-url-member", "member@example.com", "Member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := repo.UpsertAuthUser("subject-shared-auth-url-manager", "manager@example.com", "Manager")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(member.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(manager.CognitoSubject, companyID, domain.RoleCompanyManager); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   &fakeNylasClient{},
+	}).Routes()
+	path := "/v1/communications/auth-url?provider=google&account_email=support%40example.com&shared_inbox_company_id=" + url.QueryEscape(companyID) + "&shared_inbox_name=Support"
+
+	memberReq := httptest.NewRequest(http.MethodGet, path, nil)
+	memberReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", member.CognitoSubject, member.Email))
+	memberRec := httptest.NewRecorder()
+	handler.ServeHTTP(memberRec, memberReq)
+	if memberRec.Code != http.StatusForbidden {
+		t.Fatalf("shared auth URL as member status = %d, want %d body=%s", memberRec.Code, http.StatusForbidden, memberRec.Body.String())
+	}
+
+	managerReq := httptest.NewRequest(http.MethodGet, path, nil)
+	managerReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", manager.CognitoSubject, manager.Email))
+	managerRec := httptest.NewRecorder()
+	handler.ServeHTTP(managerRec, managerReq)
+	if managerRec.Code != http.StatusOK {
+		t.Fatalf("shared auth URL as manager status = %d, want %d body=%s", managerRec.Code, http.StatusOK, managerRec.Body.String())
+	}
+}
+
 func TestNylasGoogleScopesNormalizeShorthandEnvValues(t *testing.T) {
 	t.Parallel()
 
@@ -583,7 +628,7 @@ func TestNylasCallbackCreatesSharedInboxFromOAuthIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyManager); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
@@ -655,6 +700,75 @@ func TestNylasCallbackCreatesSharedInboxFromOAuthIntent(t *testing.T) {
 	}
 	if shared.AccountEmail != "support@example.com" || shared.GrantID != "shared-oauth-grant" || shared.ConnectedByUserID != user.UserID {
 		t.Fatalf("shared company connection = %+v, want company-owned support grant", shared)
+	}
+}
+
+func TestNylasCallbackRejectsSharedInboxOAuthIntentForCompanyUser(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	const companyID = "company-shared-oauth-create-member-denied"
+	repo.EnsureCompany(companyID, "Shared OAuth Create Member Denied")
+	user, err := repo.UpsertAuthUser("subject-shared-oauth-create-member", "member@example.com", "Member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support Group", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config := testNylasConfig()
+	state, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
+		UserID:                    user.UserID,
+		Email:                     "support@example.com",
+		UserEmail:                 user.Email,
+		Provider:                  "google",
+		StrictEmail:               true,
+		SharedInboxCompanyID:      companyID,
+		SharedInboxParentFolderID: parent.FolderID,
+		SharedInboxName:           "Support",
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "regular-shared-grant", Email: "support@example.com", Provider: "google"}}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		NylasClient: nylas,
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/nylas/oauth/callback?code=abc&state="+url.QueryEscape(state), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	redirect, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if redirect.Query().Get("nylas_error") != "company_manager_required" {
+		t.Fatalf("callback redirect = %s, want company_manager_required", redirect.String())
+	}
+	folders, err := repo.ListCommunicationsSharedInboxFolders(companyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(folders) != 1 || folders[0].FolderID != parent.FolderID {
+		t.Fatalf("shared inbox folders = %+v, want only original parent", folders)
+	}
+	if _, err := repo.GetCompanyEmailConnectionByAccountEmail(companyID, "support@example.com"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("shared company connection error = %v, want ErrNotFound", err)
+	}
+	nylas.mu.Lock()
+	deletedGrants := append([]string(nil), nylas.deletedGrants...)
+	nylas.mu.Unlock()
+	if len(deletedGrants) != 1 || deletedGrants[0] != "regular-shared-grant" {
+		t.Fatalf("deleted grants = %+v, want regular-shared-grant cleanup", deletedGrants)
 	}
 }
 

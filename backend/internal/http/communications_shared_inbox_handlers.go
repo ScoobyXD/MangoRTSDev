@@ -100,7 +100,15 @@ func (s *Server) createCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	if hasActor && req.ParentFolderID != "" && !s.requireCommunicationsSharedInboxAccess(w, r, actor, req.CompanyID, req.ParentFolderID, store.EntityPermissionEdit) {
+	if !hasActor {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if !actorCanManageCompanyUsers(actor, req.CompanyID) {
+		writeError(w, http.StatusForbidden, "company_manager_required")
+		return
+	}
+	if req.ParentFolderID != "" && !s.requireCommunicationsSharedInboxAccess(w, r, actor, req.CompanyID, req.ParentFolderID, store.EntityPermissionEdit) {
 		return
 	}
 
@@ -115,25 +123,6 @@ func (s *Server) createCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_create_shared_inbox")
 		return
-	}
-	if hasActor && !actorCanManageCompany(actor, req.CompanyID) {
-		grants, grantErr := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-			CompanyID:        req.CompanyID,
-			EntityType:       store.CommunicationsSharedInboxResourceType(item),
-			EntityID:         item.FolderID,
-			DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-			DefaultAccessSet: true,
-			OverrideUserIDs:  []string{actor.User.UserID},
-			ActorUserID:      actor.User.UserID,
-		})
-		if grantErr != nil {
-			_ = s.repo.DeleteCommunicationsSharedInboxFolder(req.CompanyID, item.FolderID)
-			writeError(w, http.StatusInternalServerError, "failed_to_initialize_shared_inbox_access")
-			return
-		}
-		item.AccessGrants = grants
-		item.DefaultAccess = store.ResourceDefaultAccessNoAccess
-		item.EffectiveAccess = store.EntityPermissionEdit
 	}
 	resourceType := store.CommunicationsSharedInboxResourceType(item)
 	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_created", map[string]any{"folder_id": item.FolderID, "shared_inbox_id": item.SharedInboxID, "folder_kind": item.FolderKind, "resource_type": resourceType, "folder": item})
@@ -158,7 +147,11 @@ func (s *Server) updateCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	if hasActor && !s.requireCommunicationsSharedInboxAccess(w, r, actor, req.CompanyID, folderID, store.EntityPermissionEdit) {
+	if !hasActor {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if !s.requireCommunicationsSharedInboxAccess(w, r, actor, req.CompanyID, folderID, store.EntityPermissionEdit) {
 		return
 	}
 	item, err := s.loadCommunicationsSharedInboxFolder(req.CompanyID, folderID)
@@ -210,6 +203,10 @@ func (s *Server) updateCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 		changed = true
 	}
 	if req.AccountEmail != nil {
+		if !actorCanManageCompanyUsers(actor, req.CompanyID) {
+			writeError(w, http.StatusForbidden, "company_manager_required")
+			return
+		}
 		accountEmail := strings.ToLower(strings.TrimSpace(*req.AccountEmail))
 		item, err = s.repo.SetCommunicationsSharedInboxAccountEmail(req.CompanyID, folderID, accountEmail)
 		if writeSharedInboxAccountEmailError(w, err) {
@@ -236,7 +233,11 @@ func (s *Server) deleteCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	if hasActor && !s.requireCommunicationsSharedInboxAccess(w, r, actor, companyID, folderID, store.EntityPermissionEdit) {
+	if !hasActor {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if !s.requireCommunicationsSharedInboxAccess(w, r, actor, companyID, folderID, store.EntityPermissionEdit) {
 		return
 	}
 	item, err := s.loadCommunicationsSharedInboxFolder(companyID, folderID)

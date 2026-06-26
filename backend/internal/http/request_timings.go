@@ -137,8 +137,6 @@ func normalizeTimingLabel(label string) string {
 		return "delete.node.rows.node_projection"
 	case "repo.postgresDeleteNodeRowsTx.node_map_positions_delete":
 		return "delete.node.rows.node_map_positions"
-	case "repo.postgresDeleteNodeRowsTx.resource_access_grants_delete":
-		return "delete.node.rows.resource_access_grants"
 	case "repo.postgresDeleteNodeRowsTx.resource_permissions_delete":
 		return "delete.node.rows.resource_permissions"
 	case "repo.postgresDeleteNodeRowsTx.node_delete":

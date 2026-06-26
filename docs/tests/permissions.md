@@ -35,6 +35,8 @@ P24 - Company managers do not bypass resource permissions.
 P25 - Company managers can update permission exceptions for company users only; dev admins and company admins can update manager and user exceptions.
 P26 - Default access has only two states, edit and no access; `resource_permissions` stores only exception rows to that default.
 P27 - When a company manager changes a resource default, manager effective access is preserved while regular company users follow the new default and exceptions.
+P28 - Legacy `resource_access_grants` rows are migrated into `resource_permissions` exception rows before the legacy table is dropped.
+P29 - Runtime permission reads and writes use `resource_permissions` only; `resource_access_grants` and `entity_access_permissions` are not active permission sources.
 
 ## Scenarios
 
@@ -53,6 +55,8 @@ Business logic covered:
 - P10
 - P24
 - P26
+- P28
+- P29
 
 Given:
 - A company has resources with default access, user grants, group grants, and GVIC assignments.

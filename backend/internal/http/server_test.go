@@ -1756,6 +1756,7 @@ func TestWorkspaceSnapshotNodeMapWindowConditionalGetAndEventFilters(t *testing.
 	communicationsBody, _ := json.Marshal(map[string]string{"company_id": companyID, "name": "Shared"})
 	communicationsReq := httptest.NewRequest(http.MethodPost, "/v1/communications/shared-inboxes", bytes.NewReader(communicationsBody))
 	communicationsReq.Header.Set("Content-Type", "application/json")
+	communicationsReq = sharedInboxRequestWithActor(communicationsReq, domain.User{UserID: "snapshot-admin", Email: "admin@example.com"}, companyID, domain.RoleCompanyAdmin)
 	communicationsRec := httptest.NewRecorder()
 	handler.ServeHTTP(communicationsRec, communicationsReq)
 	if communicationsRec.Code != http.StatusCreated {
@@ -2098,6 +2099,7 @@ func TestWorkspaceSnapshotLogicGateMapWindowConditionalGetAndEventFilters(t *tes
 	communicationsBody, _ := json.Marshal(map[string]string{"company_id": companyID, "name": "Shared"})
 	communicationsReq := httptest.NewRequest(http.MethodPost, "/v1/communications/shared-inboxes", bytes.NewReader(communicationsBody))
 	communicationsReq.Header.Set("Content-Type", "application/json")
+	communicationsReq = sharedInboxRequestWithActor(communicationsReq, domain.User{UserID: "snapshot-admin", Email: "admin@example.com"}, companyID, domain.RoleCompanyAdmin)
 	communicationsRec := httptest.NewRecorder()
 	handler.ServeHTTP(communicationsRec, communicationsReq)
 	if communicationsRec.Code != http.StatusCreated {

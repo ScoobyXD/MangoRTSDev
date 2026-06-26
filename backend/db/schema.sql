@@ -687,49 +687,6 @@ create index if not exists idx_resource_gvic_effective_resource_role_user
 create index if not exists idx_resource_gvic_effective_source
   on resource_gvic_effective_assignments(company_id, source_resource_type, source_resource_id);
 
-create table if not exists entity_access_permissions (
-  company_id uuid not null,
-  entity_type text not null,
-  entity_id uuid not null,
-  subject_type text not null,
-  subject_id uuid not null,
-  permission text not null default 'view',
-  created_timestamp timestamptz not null default now(),
-  constraint entity_access_permissions_entity_type_chk check (entity_type in ('node', 'logic_gate', 'project', 'company_explorer_folder')),
-  constraint entity_access_permissions_subject_type_chk check (subject_type in ('user', 'group')),
-  constraint entity_access_permissions_permission_chk check (permission = 'view'),
-  primary key (company_id, entity_type, entity_id, subject_type, subject_id, permission),
-  foreign key (company_id) references companies (company_id) on delete cascade
-);
-
-create index if not exists idx_entity_access_permissions_subject
-  on entity_access_permissions(company_id, subject_type, subject_id, entity_type, entity_id);
-
-create index if not exists idx_entity_access_permissions_entity
-  on entity_access_permissions(company_id, entity_type, entity_id);
-
-
-create table if not exists resource_access_grants (
-  company_id uuid not null,
-  resource_type text not null,
-  resource_id uuid not null,
-  principal_type text not null,
-  principal_id uuid not null,
-  access_level text not null default 'view',
-  created_timestamp timestamptz not null default now(),
-  constraint resource_access_grants_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_inbox_folder', 'shared_inbox')),
-  constraint resource_access_grants_principal_type_chk check (principal_type in ('user', 'group')),
-  constraint resource_access_grants_access_level_chk check (access_level in ('no_access', 'view', 'edit', 'admin')),
-  primary key (company_id, resource_type, resource_id, principal_type, principal_id),
-  foreign key (company_id) references companies (company_id) on delete cascade
-);
-
-create index if not exists idx_resource_access_grants_principal
-  on resource_access_grants(company_id, principal_type, principal_id, resource_type, resource_id);
-
-create index if not exists idx_resource_access_grants_resource
-  on resource_access_grants(company_id, resource_type, resource_id);
-
 create table if not exists resource_permissions (
   company_id uuid not null,
   resource_type text not null,

@@ -258,8 +258,6 @@ var recycleSnapshotTables = map[string]bool{
 	"project_management_timeline_items":      true,
 	"project_management_timeline_projection": true,
 	"resource_gvic_assignments":              true,
-	"entity_access_permissions":              true,
-	"resource_access_grants":                 true,
 	"resource_permissions":                   true,
 	"company_explorer_items":                 true,
 	"communications_email_nodes":             true,
@@ -283,8 +281,6 @@ var recycleRestoreTableOrder = []string{
 	"node_projection_seen_snapshots",
 	"node_account_assignments",
 	"resource_gvic_assignments",
-	"entity_access_permissions",
-	"resource_access_grants",
 	"resource_permissions",
 	"user_logic_gate_shortcuts",
 	"communications_email_nodes",
@@ -485,7 +481,7 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 	if len(accessNodeIDs) > 0 || len(accessLogicGateIDs) > 0 || len(accessProjectIDs) > 0 || len(accessFolderIDs) > 0 {
 		accessWhere, accessArgs := recycleTypedResourceWhere(companyID, accessNodeIDs, accessLogicGateIDs, accessProjectIDs, "resource_type", "resource_id")
 		if accessWhere != "" {
-			for _, tableName := range []string{"resource_gvic_assignments", "resource_access_grants"} {
+			for _, tableName := range []string{"resource_gvic_assignments"} {
 				if err := addTable(tableName, accessWhere, accessArgs...); err != nil {
 					return nil, err
 				}
@@ -494,17 +490,11 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 		if len(accessFolderIDs) > 0 {
 			for _, resourceType := range []string{EntityTypeSharedInboxFolder, EntityTypeSharedInbox} {
 				folderAccessWhere, folderAccessArgs := recycleSingleTypedResourceWhere(companyID, resourceType, accessFolderIDs, "resource_type", "resource_id")
-				for _, tableName := range []string{"resource_gvic_assignments", "resource_access_grants", "resource_permissions"} {
+				for _, tableName := range []string{"resource_gvic_assignments", "resource_permissions"} {
 					if err := addTable(tableName, folderAccessWhere, folderAccessArgs...); err != nil {
 						return nil, err
 					}
 				}
-			}
-		}
-		entityWhere, entityArgs := recycleTypedResourceWhere(companyID, accessNodeIDs, accessLogicGateIDs, accessProjectIDs, "entity_type", "entity_id")
-		if entityWhere != "" {
-			if err := addTable("entity_access_permissions", entityWhere, entityArgs...); err != nil {
-				return nil, err
 			}
 		}
 		permissionWhere, permissionArgs := recycleTypedResourceWhere(companyID, accessNodeIDs, accessLogicGateIDs, accessProjectIDs, "resource_type", "resource_id")

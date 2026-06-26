@@ -424,6 +424,21 @@ export const sharedInboxLabelStackStyle: React.CSSProperties = {
   gap: 1,
 };
 
+export const sharedInboxNameLineStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: 5,
+};
+
+export const sharedInboxPermissionLockStyle: React.CSSProperties = {
+  width: 12,
+  height: 12,
+  display: "block",
+  color: "rgba(71, 85, 105, 0.74)",
+};
+
 export const sharedInboxAccountMetaStyle: React.CSSProperties = {
   minWidth: 0,
   overflow: "hidden",

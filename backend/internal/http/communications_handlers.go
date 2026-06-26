@@ -113,6 +113,10 @@ func (s *Server) handleCommunicationsAuthURL(w http.ResponseWriter, r *http.Requ
 		if !requireCompanyAccess(w, r, sharedInboxCompanyID) {
 			return
 		}
+		if !actorCanManageCompanyUsers(actor, sharedInboxCompanyID) {
+			writeError(w, http.StatusForbidden, "company_manager_required")
+			return
+		}
 		if sharedInboxParentFolderID != "" {
 			if !s.requireCommunicationsSharedInboxAccess(w, r, actor, sharedInboxCompanyID, sharedInboxParentFolderID, store.EntityPermissionEdit) {
 				return
@@ -938,6 +942,28 @@ func communicationsOAuthStateTargetsPersonalMailbox(state nylasOAuthStatePayload
 	return requestedEmail != "" && userEmail != "" && requestedEmail == userEmail
 }
 
+func (s *Server) userCanManageSharedInboxStructure(companyID, userID string) (bool, error) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if companyID == "" || userID == "" {
+		return false, nil
+	}
+	memberships, err := s.repo.ListUserMemberships(userID)
+	if err != nil {
+		return false, err
+	}
+	for _, membership := range memberships {
+		role := domain.NormalizeRole(membership.Role)
+		if role == domain.RoleDevAdmin {
+			return true, nil
+		}
+		if strings.TrimSpace(membership.CompanyID) == companyID && (role == domain.RoleCompanyAdmin || role == domain.RoleCompanyManager) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func grantIDLogValue(grantID string) string {
 	grantID = strings.TrimSpace(grantID)
 	if grantID == "" {
@@ -1013,6 +1039,19 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 	var companyConnection domain.CompanyEmailConnection
 	sharedInboxCompanyID := strings.TrimSpace(state.SharedInboxCompanyID)
 	if connectionScope == "shared" && sharedInboxCompanyID != "" {
+		allowed, roleErr := s.userCanManageSharedInboxStructure(sharedInboxCompanyID, state.UserID)
+		if roleErr != nil {
+			s.deleteNylasOAuthGrantBestEffort(r.Context(), requestCorrelationID(r), "shared_inbox_role_check_failed", grant)
+			log.Printf("nylas_oauth_callback outcome=redirect reason=shared_inbox_role_check_failed request_id=%s user_id=%s company_id=%s provider=%s account_email=%s scope=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, sharedInboxCompanyID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID), roleErr)
+			s.redirectCommunications(w, r, "shared_inbox_create_failed")
+			return
+		}
+		if !allowed {
+			s.deleteNylasOAuthGrantBestEffort(r.Context(), requestCorrelationID(r), "company_manager_required", grant)
+			log.Printf("nylas_oauth_callback outcome=redirect reason=company_manager_required request_id=%s user_id=%s company_id=%s provider=%s account_email=%s scope=%s grant=%s", requestCorrelationID(r), state.UserID, sharedInboxCompanyID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID))
+			s.redirectCommunications(w, r, "company_manager_required")
+			return
+		}
 		companyConnection, err = s.repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
 			CompanyID:         sharedInboxCompanyID,
 			Provider:          provider,

@@ -22,7 +22,7 @@ import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDra
 import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, GVIC_INBOX_SECTIONS, GVIC_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeAttachment, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, GVICInboxRole, GVICInboxStatus } from "./homeTypes";
 import { buildGVICRoleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
-import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxLabelStackStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxLabelStackStyle, sharedInboxNameLineStyle, sharedInboxPermissionLockStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
@@ -64,6 +64,19 @@ const LazyHomeNodeEditorContent = React.lazy(() => import("../../modules/editor/
 
 function isValidSharedInboxEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim().toLowerCase());
+}
+
+function sharedInboxHasPermissionMarker(folder: CommunicationsSharedInbox): boolean {
+  return folder.default_access === "no_access" || (folder.access_grants ?? []).length > 0;
+}
+
+function SharedInboxPermissionLockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" style={sharedInboxPermissionLockStyle}>
+      <rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M8 10V8a4 4 0 0 1 8 0v2" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 type HomePinContextMenuState = {
@@ -949,6 +962,7 @@ export function HomeSidebar({
   sharedInboxes,
   loadingSharedInboxes,
   busy,
+  canManageSharedTriage,
   onSelectView,
   onCreateSharedInbox,
   onRenameSharedInbox,
@@ -961,6 +975,7 @@ export function HomeSidebar({
   sharedInboxes: CommunicationsSharedInbox[];
   loadingSharedInboxes: boolean;
   busy: string;
+  canManageSharedTriage: boolean;
   onSelectView: (viewID: HomeViewID, mailbox?: EmailMailbox) => void;
   onCreateSharedInbox: (parentFolderID: string, name?: string, accountEmail?: string) => Promise<CommunicationsSharedInbox | null>;
   onRenameSharedInbox: (folderID: string, name: string) => Promise<void>;
@@ -1075,6 +1090,7 @@ export function HomeSidebar({
   }, [onRenameSharedInbox, renameDraft, renamingSharedFolderID, sharedInboxes]);
 
   const openSharedInboxCreateDialog = useCallback((parentFolder: CommunicationsSharedInbox | null, mode: "folder" | "shared_inbox") => {
+    if (!canManageSharedTriage) return;
     setSharedContextMenu(null);
     setSharedCreateDialog({
       mode,
@@ -1084,10 +1100,14 @@ export function HomeSidebar({
       accountEmail: mode === "shared_inbox" ? cleanConnectedAccountEmail : "",
       error: "",
     });
-  }, [cleanConnectedAccountEmail]);
+  }, [canManageSharedTriage, cleanConnectedAccountEmail]);
 
   const submitSharedInboxCreateDialog = useCallback(async () => {
     if (!sharedCreateDialog || sharedBusy) return;
+    if (!canManageSharedTriage) {
+      setSharedCreateDialog(null);
+      return;
+    }
     const name = sharedCreateDialog.name.trim();
     const accountEmail = sharedCreateDialog.accountEmail.trim().toLowerCase();
     if (!name) {
@@ -1106,18 +1126,23 @@ export function HomeSidebar({
       setExpandedSharedFolderIDs((previous) => new Set(previous).add(parentFolderID));
     }
     setSharedRootOpen(true);
-  }, [onCreateSharedInbox, sharedBusy, sharedCreateDialog]);
+  }, [canManageSharedTriage, onCreateSharedInbox, sharedBusy, sharedCreateDialog]);
 
   const setSharedFolderAccountEmail = useCallback(async (folderID: string, accountEmail: string) => {
     setSharedContextMenu(null);
+    if (!canManageSharedTriage) return;
     const current = sharedInboxes.find((folder) => folder.folder_id === folderID.trim());
     if (!current || current.entry_type !== "shared_inbox") {
       return;
     }
     await onSetSharedInboxAccountEmail(folderID, accountEmail);
-  }, [onSetSharedInboxAccountEmail, sharedInboxes]);
+  }, [canManageSharedTriage, onSetSharedInboxAccountEmail, sharedInboxes]);
 
   const openSharedEmailDialog = useCallback((folder: CommunicationsSharedInbox) => {
+    if (!canManageSharedTriage) {
+      setSharedContextMenu(null);
+      return;
+    }
     if (folder.entry_type !== "shared_inbox") {
       setSharedContextMenu(null);
       return;
@@ -1128,7 +1153,7 @@ export function HomeSidebar({
       draft: (folder.account_email ?? cleanConnectedAccountEmail).trim().toLowerCase(),
       error: "",
     });
-  }, [cleanConnectedAccountEmail, sharedInboxes]);
+  }, [canManageSharedTriage, cleanConnectedAccountEmail, sharedInboxes]);
 
   const submitSharedEmailDialog = useCallback(() => {
     if (!sharedEmailDialog || sharedBusy) return;
@@ -1163,8 +1188,12 @@ export function HomeSidebar({
   const openSharedContextMenu = useCallback((event: React.MouseEvent, folder: CommunicationsSharedInbox | null) => {
     event.preventDefault();
     event.stopPropagation();
+    if (!folder && !canManageSharedTriage) {
+      setSharedContextMenu(null);
+      return;
+    }
     setSharedContextMenu({ x: event.clientX, y: event.clientY, folder });
-  }, []);
+  }, [canManageSharedTriage]);
 
   const selectSharedFolderRow = useCallback((row: SharedInboxTreeRow, event?: React.MouseEvent) => {
     const orderedIDs = sharedRows.map((item) => item.treeID);
@@ -1238,6 +1267,7 @@ export function HomeSidebar({
     const hovered = hoveredSharedFolderID === folder.folder_id;
     const rowDropPlacement = dropTarget?.folderID === folder.folder_id ? dropTarget.placement : null;
     const folderHasAccess = folder.effective_access_level !== "no_access";
+    const showPermissionMarker = sharedInboxHasPermissionMarker(folder);
     return (
       <div
         key={folder.folder_id}
@@ -1361,7 +1391,14 @@ export function HomeSidebar({
           />
         ) : (
           <span style={sharedInboxLabelStackStyle}>
-            <span style={navLabelStyle}>{folder.name}</span>
+            <span style={sharedInboxNameLineStyle}>
+              <span style={navLabelStyle}>{folder.name}</span>
+              {showPermissionMarker && (
+                <span title="Permissions set" aria-label="Permissions set">
+                  <SharedInboxPermissionLockIcon />
+                </span>
+              )}
+            </span>
             {folder.account_email && <span style={sharedInboxAccountMetaStyle}>{folder.account_email}</span>}
           </span>
         )}
@@ -1434,7 +1471,7 @@ export function HomeSidebar({
         const contextFolderAcceptsChildren = !contextFolder || contextFolder.entry_type !== "shared_inbox";
         return (
           <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)} width={HOME_COMPACT_CONTEXT_MENU_WIDTH}>
-            {contextFolderAcceptsChildren && (
+            {canManageSharedTriage && contextFolderAcceptsChildren && (
               <>
                 <button
                   type="button"
@@ -1456,7 +1493,7 @@ export function HomeSidebar({
             )}
             {contextFolder && (
               <>
-                {contextFolder.entry_type === "shared_inbox" && (
+                {canManageSharedTriage && contextFolder.entry_type === "shared_inbox" && (
                   <button
                     type="button"
                     style={sharedInboxContextMenuButtonStyle}

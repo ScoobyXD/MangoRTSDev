@@ -83,7 +83,7 @@ import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "
 import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_QUEUE_MAX_EMAILS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -539,6 +539,7 @@ export function HomePage({
     GVICMatrixProjectedLogicGateIDsRef.current = new Set();
   }, [activeGVICMatrixUserID, companyID, currentUserID]);
   const currentUserHasFullSharedInboxAccess = userHasFullSharedInboxAccess(me, companyID);
+  const currentUserCanManageSharedInboxStructure = userCanManageSharedInboxStructure(me, companyID);
   const activeSharedInboxFolderID = sharedInboxIDForHomeView(activeViewID);
   const activeSharedTreeViewSelected = activeViewID === "shared-root" || !!activeSharedInboxFolderID;
   const activePersonalMailViewNeedsConnection = activeViewID === "my-triage" || activeViewID === "primary";
@@ -587,11 +588,12 @@ export function HomePage({
       ? sharedInboxTreeUserCanManageMail(sharedInboxes, activeSharedInboxFolderID, currentUserID, currentUserHasFullSharedInboxAccess)
       : true;
   const canRepairSharedInboxConnection = useCallback((folderID: string): boolean => {
+    if (!currentUserCanManageSharedInboxStructure) return false;
     if (currentUserHasFullSharedInboxAccess) return true;
     const cleanFolderID = folderID.trim();
     if (!cleanFolderID) return false;
     return sharedInboxTreeUserCanManageMail(sharedInboxes, cleanFolderID, currentUserID, false);
-  }, [currentUserHasFullSharedInboxAccess, currentUserID, sharedInboxes]);
+  }, [currentUserCanManageSharedInboxStructure, currentUserHasFullSharedInboxAccess, currentUserID, sharedInboxes]);
   useEffect(() => {
     if (!notice || notice !== noticeResourceTextRef.current) {
       noticeResourceTextRef.current = "";
@@ -2316,6 +2318,10 @@ export function HomePage({
   const startSharedInboxEmailConnection = useCallback(async (provider: EmailProvider) => {
     const accountEmail = sharedInboxEmailConnectionDialog?.accountEmail.trim().toLowerCase() ?? "";
     if (!accountEmail || sharedInboxEmailConnectionDialog?.canConnect === false) return;
+    if (!currentUserCanManageSharedInboxStructure) {
+      setError("Only managers and admins can connect shared inbox emails.");
+      return;
+    }
     setBusy("shared-inbox-connect");
     setError("");
     try {
@@ -2325,8 +2331,12 @@ export function HomePage({
       setBusy("");
       setError(formatError(connectError, "Failed to start shared inbox email connection"));
     }
-  }, [sharedInboxEmailConnectionDialog]);
+  }, [currentUserCanManageSharedInboxStructure, sharedInboxEmailConnectionDialog]);
   const createSharedInboxFolder = useCallback(async (parentFolderID: string, rawName = "New Folder", accountEmail = ""): Promise<CommunicationsSharedInbox | null> => {
+    if (!currentUserCanManageSharedInboxStructure) {
+      setError("Only managers and admins can create Shared Triage folders and inboxes.");
+      return null;
+    }
     setBusy("shared-inbox");
     setError("");
     setNotice("");
@@ -2351,9 +2361,13 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [companyID, requestSharedInboxEmailConnection, selectHomeView]);
+  }, [companyID, currentUserCanManageSharedInboxStructure, requestSharedInboxEmailConnection, selectHomeView]);
 
   const setSharedInboxAccountEmail = useCallback(async (folderID: string, accountEmail: string): Promise<void> => {
+    if (!currentUserCanManageSharedInboxStructure) {
+      setError("Only managers and admins can assign Shared Triage emails.");
+      return;
+    }
     if (accountEmail.trim() && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === folderID.trim())) {
       setError("Parent folders cannot have emails assigned.");
       return;
@@ -2377,10 +2391,14 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [companyID, requestSharedInboxEmailConnection, selectHomeView, sharedInboxes]);
+  }, [companyID, currentUserCanManageSharedInboxStructure, requestSharedInboxEmailConnection, selectHomeView, sharedInboxes]);
 
   const assignActiveSharedInboxEmail = useCallback(() => {
     if (!activeSharedInbox) return;
+    if (!currentUserCanManageSharedInboxStructure) {
+      setError("Only managers and admins can assign Shared Triage emails.");
+      return;
+    }
     if (activeSharedInboxIsParent) {
       setError("Parent folders cannot have emails assigned.");
       return;
@@ -2392,7 +2410,7 @@ export function HomePage({
       draft: initialEmail,
       error: "",
     });
-  }, [activeSharedInbox, activeSharedInboxIsParent, connection?.account_email]);
+  }, [activeSharedInbox, activeSharedInboxIsParent, connection?.account_email, currentUserCanManageSharedInboxStructure]);
   const submitSharedInboxEmailAssignment = useCallback(() => {
     if (!sharedInboxEmailAssignmentDialog || busy === "shared-inbox") return;
     const accountEmail = sharedInboxEmailAssignmentDialog.draft.trim().toLowerCase();
@@ -4019,6 +4037,7 @@ export function HomePage({
               sharedInboxes={sharedInboxes}
               loadingSharedInboxes={loadingSharedInboxes}
               busy={busy}
+              canManageSharedTriage={currentUserCanManageSharedInboxStructure}
               onSelectView={selectHomeView}
               onCreateSharedInbox={createSharedInboxFolder}
               onRenameSharedInbox={renameSharedInboxFolder}
@@ -4180,7 +4199,7 @@ export function HomePage({
             unassignedSharedInbox={activeSharedInboxBlocksEmail && activeSharedInbox
               ? { folderName: activeSharedInbox.name, message: "Parent folders cannot have emails assigned." }
               : activeSharedInboxNeedsEmail && activeSharedInbox
-                ? { folderName: activeSharedInbox.name, onAssignEmail: assignActiveSharedInboxEmail }
+                ? { folderName: activeSharedInbox.name, onAssignEmail: currentUserCanManageSharedInboxStructure ? assignActiveSharedInboxEmail : undefined }
                 : undefined}
             showDetailResizeHandle={!isNarrow}
             unreadOnly={unreadOnly}
