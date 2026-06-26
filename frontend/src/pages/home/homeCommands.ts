@@ -240,13 +240,9 @@ export async function archiveHomeMailMessagesCommand(args: {
     return { messageIDs };
   }
   const archiveEmailMessagesBatch = args.archiveEmailMessagesBatch ?? defaultArchiveEmailMessagesBatch;
-  const archivedIDs: string[] = [];
-  const failed: ArchiveEmailMessagesBatchResult["failed"] = [];
-  for (let index = 0; index < messageIDs.length; index += 5) {
-    const result = await archiveEmailMessagesBatch(messageIDs.slice(index, index + 5), sharedInboxID, args.companyID);
-    archivedIDs.push(...cleanIDList(result.archived_ids));
-    failed.push(...(result.failed ?? []));
-  }
+  const result = await archiveEmailMessagesBatch(messageIDs, sharedInboxID, args.companyID);
+  const archivedIDs = cleanIDList(result.archived_ids);
+  const failed = result.failed ?? [];
   if (archivedIDs.length === 0 && failed.length > 0) {
     throw new Error(failed[0]?.error || "archive_failed");
   }

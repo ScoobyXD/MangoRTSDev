@@ -620,7 +620,7 @@ test("Home mail message commands normalize ids and pass shared inbox context", a
   assert.equal(updated?.message.unread, false);
 });
 
-test("Home archive command uses five-message batch chunks by default", async () => {
+test("Home archive command sends all message IDs in one batch by default", async () => {
   const calls: Array<{ messageIDs: string[]; sharedInboxID?: string; companyID?: string }> = [];
   const archiveEmailMessagesBatch: HomeArchiveEmailMessagesBatch = async (messageIDs, sharedInboxID, companyID) => {
     calls.push({ messageIDs, sharedInboxID, companyID });
@@ -638,8 +638,7 @@ test("Home archive command uses five-message batch chunks by default", async () 
   });
 
   assert.deepEqual(calls, [
-    { companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-1", "message-2", "message-3", "message-4", "message-5"] },
-    { companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-6"] },
+    { companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-1", "message-2", "message-3", "message-4", "message-5", "message-6"] },
   ]);
   assert.deepEqual(result?.messageIDs, ["message-1", "message-2", "message-3", "message-4", "message-5"]);
   assert.deepEqual(result?.failed, [{ message_id: "message-6", error: "nylas_rate_limited" }]);

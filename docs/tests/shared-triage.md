@@ -1,4 +1,4 @@
-Last updated: 2026-06-24
+Last updated: 2026-06-26
 
 # Shared Triage Tests
 
@@ -49,6 +49,19 @@ ST38 - Email connection records do not receive Shared Triage permissions or GVIC
 ST39 - Plain Shared Triage folders are organizational containers only; selecting one clears mail state and must not call email folder, message list, message detail, prefetch, or load-more endpoints.
 ST40 - Shared Triage mail refresh is driven by Nylas webhooks through backend communications realtime, with browser focus/visibility refresh as a safety refresh; the browser must not poll the message list every 30 seconds.
 ST41 - Communications realtime events refresh the active mail-capable mailbox view only; active Shared Triage root, plain Shared Triage folders, My Work, Updates, and GVIC matrix views must not issue mail refresh GETs from those events.
+ST42 - Shared Triage mailbox inboxes must continue to live-update when mailbox messages are created, updated, or deleted.
+ST43 - Shared Triage mailbox inboxes must show a fixed, predictable message batch size of 20 messages per page.
+ST44 - Shared Triage mailbox inboxes must prefetch the next message page after the visible page loads.
+ST45 - Scrolling a Shared Triage mailbox inbox must not archive messages and must not load the next primary-inbox page.
+ST46 - Advancing a Shared Triage mailbox inbox page is an explicit user action that archives only the messages visible on the current page.
+ST47 - Advancing must display the prefetched next page before archiving the previous page whenever a prefetched page is available.
+ST48 - Advancing must freeze the previous page's message IDs at click time so live updates cannot change what gets archived.
+ST49 - The advance/archive action must be disabled while its archive request is in flight to prevent double submission.
+ST50 - The advance/archive action must send the frozen visible message IDs as one frontend batch archive request instead of splitting the page into smaller client-side archive batches.
+ST51 - Advancing must prioritize showing the prefetched next page, completing the archive request, and making the action usable again before any folder metadata reconciliation.
+ST52 - Folder metadata refresh after archive or unarchive is only a count/metadata reconciliation step and must not fetch the next message page or block the prefetched page from being shown.
+ST53 - If folder metadata reconciliation is slow or fails after archive or unarchive, the Shared Triage mailbox list remains usable and counts can reconcile later.
+ST54 - If no next page is available, advancing archives the current visible page and leaves the mailbox inbox empty until live updates or a refresh provide more messages.
 
 ## Scenarios
 
@@ -238,3 +251,38 @@ Expected:
 - Nylas message.created, message.updated, message.deleted, and message.opened events may refresh the active mailbox-capable shared inbox.
 - Those realtime events do not trigger mail GETs while Shared Triage root, a plain Shared Triage folder, My Work, Updates, or a GVIC matrix view is active.
 - Focus or visibility return may refresh the active mailbox-capable mail view, but there is no browser-side 30-second message polling loop.
+
+### Scenario ST-S9: Shared Mailbox Paging And Explicit Archive Advance
+
+Business logic covered:
+- ST42
+- ST43
+- ST44
+- ST45
+- ST46
+- ST47
+- ST48
+- ST49
+- ST50
+- ST51
+- ST52
+- ST53
+- ST54
+
+Given:
+- A user opens a mailbox-capable Shared Triage inbox with view access to the shared mailbox.
+- The shared mailbox has more than 20 messages available.
+- The first visible page and the next page can be read from the mailbox provider.
+
+Expected:
+- The visible page contains no more than 20 messages.
+- The next page is prefetched after the visible page loads.
+- Created, updated, and deleted message events still refresh the active mailbox view live.
+- Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
+- Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and archives only the frozen previous-page IDs.
+- The frozen previous-page IDs are sent in one frontend batch archive request.
+- The advance action is disabled while the archive request is in flight.
+- After the archive request completes, the advance action can become usable again without waiting for folder/count metadata refresh.
+- Folder metadata refresh runs after the primary archive-and-next work as reconciliation only; it does not fetch the next email page.
+- If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
+- If there is no next page, clicking the advance action archives the visible page and leaves the list empty until more messages arrive or a refresh reloads the inbox.

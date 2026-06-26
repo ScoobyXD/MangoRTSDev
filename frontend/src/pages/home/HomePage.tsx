@@ -906,6 +906,11 @@ export function HomePage({
       return false;
     }
   }, [canRepairSharedInboxConnection, companyID, handleEmailAccessExpired, sharedInboxes]);
+  const scheduleFolderMetadataRefresh = useCallback(() => {
+    window.setTimeout(() => {
+      void loadFolders();
+    }, 0);
+  }, [loadFolders]);
   const loadSharedInboxes = useCallback(async (): Promise<boolean> => {
     if (sharedInboxesRequestInFlightRef.current) return false;
     sharedInboxesRequestInFlightRef.current = true;
@@ -1382,7 +1387,7 @@ export function HomePage({
       } else {
         setNotice(previousMessageIDs.length === 1 ? "Page archived." : `${previousMessageIDs.length} messages archived.`);
       }
-      await loadFolders();
+      scheduleFolderMetadataRefresh();
     } catch (advanceError) {
       if (isEmailAccessExpiredError(advanceError)) {
         await handleEmailAccessExpired(advanceError);
@@ -1394,7 +1399,7 @@ export function HomePage({
       setLoadingMoreMessages(false);
       setBusy((current) => current === "advance-archive" ? "" : current);
     }
-  }, [activeMailViewHasEmailConnection, adjustPrimaryMailboxCount, busy, canMutateCurrentMailView, companyID, consumePrefetchedMessagePage, currentMessageFilterKey, handleEmailAccessExpired, loadFolders, prefetchNextMessagePage, replaceVisibleMessagesForAdvance, scheduleMessageListRefresh]);
+  }, [activeMailViewHasEmailConnection, adjustPrimaryMailboxCount, busy, canMutateCurrentMailView, companyID, consumePrefetchedMessagePage, currentMessageFilterKey, handleEmailAccessExpired, prefetchNextMessagePage, replaceVisibleMessagesForAdvance, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
   const fillMessageListAfterRemoval = useCallback(() => {
     window.setTimeout(() => {
       const list = messageListRef.current;
@@ -2023,14 +2028,14 @@ export function HomePage({
       } else {
         setNotice(ids.length === 1 ? "Message archived." : `${ids.length} messages archived.`);
       }
-      await loadFolders();
+      scheduleFolderMetadataRefresh();
     } catch (archiveError) {
       setError(formatError(archiveError, ids.length === 1 ? "Failed to archive message" : "Failed to archive messages"));
       scheduleMessageListRefresh(0);
     } finally {
       setBusy("");
     }
-  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, companyID, loadFolders, removeMessagesFromVisibleMailList, scheduleMessageListRefresh]);
+  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, companyID, removeMessagesFromVisibleMailList, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
   const unarchiveMessages = useCallback(async (messageIDs: string[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
@@ -2052,13 +2057,13 @@ export function HomePage({
       setSelectionAnchorMessageID("");
       setMessageContextMenu(null);
       setNotice(ids.length === 1 ? "Message moved to Inbox." : `${ids.length} messages moved to Inbox.`);
-      await loadFolders();
+      scheduleFolderMetadataRefresh();
     } catch (unarchiveError) {
       setError(formatError(unarchiveError, ids.length === 1 ? "Failed to unarchive message" : "Failed to unarchive messages"));
     } finally {
       setBusy("");
     }
-  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, companyID, loadFolders, removeMessagesFromVisibleMailList, selectedMessageID]);
+  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, companyID, removeMessagesFromVisibleMailList, scheduleFolderMetadataRefresh, selectedMessageID]);
   const archiveSelected = async () => {
     if (!selectedMessage || !canMutateCurrentMailView) return;
     if (mailboxRef.current === "archive") await unarchiveMessages([selectedMessage.id]);
