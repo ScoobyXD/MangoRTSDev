@@ -10,7 +10,7 @@ export const MAILBOX_OPTIONS: MailboxOption[] = [
 ];
 export const MESSAGE_BATCH_SIZE = 20;
 export const ARCHIVE_QUEUE_BATCH_SIZE = 2;
-export const ARCHIVE_QUEUE_MAX_EMAILS = 100;
+export const ARCHIVE_QUEUE_MAX_EMAILS = 140;
 export const MESSAGE_EVENT_REFRESH_DELAY_MS = 1_200;
 export const SELF_SEND_DELIVERY_REFRESH_DELAY_MS = 4_000;
 export const TRIAGE_MESSAGE_DRAG_MIME = "application/x-mangorts-communications-triage-messages";

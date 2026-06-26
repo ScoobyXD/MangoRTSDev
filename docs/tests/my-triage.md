@@ -29,7 +29,7 @@ MT18 - Successful conversion emits the triage/workspace/projection events needed
 MT19 - Reverting a converted email restores the triage item from the email-node placement and removes the workspace record that was created from that conversion.
 MT20 - My Triage and Shared Triage must continue to live-update when mailbox messages are created, updated, or deleted.
 MT21 - My Triage and Shared Triage primary inboxes must show a fixed, predictable message batch size of 20 messages per page.
-MT22 - My Triage and Shared Triage primary inboxes must prefetch the next message page after the visible page loads.
+MT22 - My Triage and Shared Triage primary inboxes must immediately prefetch the next message page after the first visible page loads, without waiting for scrolling or the archive/advance action.
 MT23 - Scrolling a My Triage or Shared Triage primary inbox must not archive messages and must not load the next primary-inbox page.
 MT24 - Advancing a My Triage or Shared Triage primary inbox page is an explicit user action that archives only the messages visible on the current page.
 MT25 - Advancing must display the prefetched next page before archiving the previous page whenever a prefetched page is available.
@@ -37,8 +37,8 @@ MT26 - Advancing must freeze the previous page's message IDs at click time so li
 MT27 - The advance/archive action must remain immediately reusable after a page advances unless accepting the visible page would exceed the hidden archive queue limit.
 MT28 - If no next page is available, advancing archives the current visible page and leaves the primary inbox empty until live updates or a refresh provide more messages.
 MT29 - Advancing must enqueue the frozen visible message IDs for background archive work instead of waiting for those provider mutations before allowing the user to continue.
-MT30 - The hidden archive queue may contain no more than 100 pending emails across queued and in-flight archive work.
-MT31 - If accepting the current visible page would exceed 100 pending archive emails, the advance/archive action is disabled until enough queued archive work completes.
+MT30 - The hidden archive queue may contain no more than 140 pending emails across queued and in-flight archive work.
+MT31 - If accepting the current visible page would exceed 140 pending archive emails, the advance/archive action is disabled until enough queued archive work completes.
 MT32 - Background archive work must send archive requests in two-message client batches and run those batches in parallel so the provider gate, not the UI, controls final throughput.
 MT33 - Advancing must prioritize showing the prefetched next page, enqueueing the previous page, and making the action usable again before any folder metadata reconciliation.
 MT34 - Folder metadata refresh after archive or unarchive is only a count/metadata reconciliation step and must not fetch the next message page or block the prefetched page from being shown.
