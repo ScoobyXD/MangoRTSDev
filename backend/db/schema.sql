@@ -64,7 +64,7 @@ create table if not exists company_memberships (
   role text not null default 'company_user',
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint company_memberships_role_chk check (role in ('dev_admin', 'company_admin', 'company_user')),
+    constraint company_memberships_role_chk check (role in ('dev_admin', 'company_admin', 'company_manager', 'company_user')),
   primary key (company_id, user_id),
   foreign key (user_id) references users (user_id) on delete cascade
 );
@@ -180,7 +180,7 @@ create table if not exists invitations (
   constraint invitations_email_nonblank_chk check (btrim(email) <> ''),
   constraint invitations_email_lowercase_chk check (email = lower(btrim(email))),
   constraint invitations_token_hash_nonblank_chk check (btrim(token_hash) <> ''),
-  constraint invitations_role_chk check (role in ('company_admin', 'company_user')),
+    constraint invitations_role_chk check (role in ('company_admin', 'company_manager', 'company_user')),
   constraint invitations_status_chk check (status in ('pending', 'accepted', 'revoked')),
   constraint invitations_cognito_status_chk check (cognito_status in ('not_started', 'not_configured', 'created', 'resent', 'existing_mango_user', 'failed')),
   constraint invitations_invite_email_status_chk check (invite_email_status in ('not_started', 'not_configured', 'sent', 'failed')),

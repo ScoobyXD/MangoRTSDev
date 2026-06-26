@@ -10,7 +10,7 @@ Coverage Status:
 
 ST1 - Shared Triage shows shared inbox folders and mailboxes that are visible to the current user.
 ST2 - Normal users only see shared inbox folders where effective access grants at least view access.
-ST3 - Company managers and dev admins can see shared inbox folders with admin-level effective access.
+ST3 - Dev admins and company admins can see all shared inbox folders with admin-level effective access; company managers follow shared inbox resource permissions.
 ST4 - Creating a shared inbox folder requires company access, a nonblank name, and edit access to the selected parent when the folder is nested.
 ST5 - Creating a shared inbox initializes default access as no access and gives the creator edit access.
 ST6 - Shared inbox folders and mailbox entries use the same tree model, with mailbox-capable entries identified by a shared inbox entry type, account email, and company email connection link.
@@ -22,9 +22,9 @@ ST11 - Reading shared inbox folders and messages uses the company-owned shared m
 ST12 - Shared mailbox caches are scoped by shared account/grant so one shared mailbox does not leak into another.
 ST13 - Sending mail from a shared inbox requires edit access to that shared inbox.
 ST14 - View-only shared inbox access can read mailbox content but cannot send from that mailbox.
-ST15 - Reading shared inbox access settings requires view access to the shared inbox.
-ST16 - Updating shared inbox access settings requires edit/admin-level permission management access.
-ST17 - Shared inbox access settings return default access, explicit access grants, GVIC assignments, effective access, and whether the actor can edit permissions.
+ST15 - Reading shared inbox access settings requires manager/admin authority and view access to the shared inbox.
+ST16 - Updating shared inbox access settings requires manager/admin authority and edit access to the shared inbox.
+ST17 - Shared inbox access settings return default access, explicit access grants, GVIC assignments, effective access, whether the actor can edit permissions, and whether the actor can edit manager permissions.
 ST18 - Updating shared inbox access changes resource access grants/default access and must not convert GVIC assignments into permission grants.
 ST19 - Shared inbox access grants support user and group principals.
 ST20 - If shared inbox access storage is unavailable, access endpoints return a service-unavailable error instead of silently succeeding.
@@ -81,12 +81,13 @@ Business logic covered:
 Given:
 - A company has several shared inbox folders and mailbox-capable shared inboxes.
 - User A has view access to one shared inbox and no access to another.
-- A company manager belongs to the same company.
+- A company admin and a company manager belong to the same company.
 
 Expected:
 - User A only sees the shared inboxes where effective access grants view or higher.
 - User A does not see private personal mailbox messages in Shared Triage.
-- The company manager sees shared inboxes with admin-level effective access.
+- The company admin sees shared inboxes with admin-level effective access.
+- The company manager sees only shared inboxes where effective access grants view or higher.
 - Mailbox-capable entries and plain folder entries are represented in the same tree without mixing their mailbox behavior.
 - User A opens a visible shared inbox without connecting that mailbox to User A's personal account.
 
@@ -158,13 +159,13 @@ Business logic covered:
 
 Given:
 - A shared inbox has default access, user grants, group grants, and GVIC assignments.
-- One user has view access and another has permission-management access.
+- One regular user has view access and a company manager has edit access.
 - The access store can be available or unavailable.
 
 Expected:
-- The view-only user can read access settings but cannot update them.
-- The permission manager can update default access and explicit resource grants.
-- The response includes default access, explicit grants, GVIC assignments, effective access, and can-edit-permissions.
+- The regular view-only user cannot read or update access settings.
+- The company manager can update default access and explicit resource grants for regular company users.
+- The response includes default access, explicit grants, GVIC assignments, effective access, can-edit-permissions, and can-edit-manager-permissions.
 - GVIC assignments are not converted into resource permission grants.
 - User and group grants are both accepted.
 - Permissions and GVIC rows target the shared inbox resource, not the company email connection.

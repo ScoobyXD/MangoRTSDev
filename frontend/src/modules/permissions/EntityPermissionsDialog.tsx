@@ -11,7 +11,7 @@ type CompanyUser = {
   user_id: string;
   email: string;
   display_name?: string;
-  role: "dev_admin" | "company_admin" | "company_user" | string;
+  role: "dev_admin" | "company_admin" | "company_manager" | "company_user" | string;
 };
 
 type CompanyUserGroup = {
@@ -76,6 +76,7 @@ type PermissionPayload = {
   access_grants?: EntityPermission[];
   effective_access?: EntityEffectiveAccess[];
   can_edit_permissions?: boolean;
+  can_edit_manager_permissions?: boolean;
 };
 
 const EXPLICIT_ACCESS_OPTIONS: ReadonlyArray<{ value: ResourceAccessLevel; label: string }> = [
@@ -178,6 +179,8 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const [effectiveAccessByUser, setEffectiveAccessByUser] = useState<Map<string, ResourceAccessLevel>>(new Map());
   const [defaultAccess, setDefaultAccess] = useState<"edit" | "no_access">("edit");
   const [serverCanEditPermissions, setServerCanEditPermissions] = useState(true);
+  const [serverCanEditManagerPermissions, setServerCanEditManagerPermissions] = useState(true);
+  const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -200,8 +203,10 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         ]);
         if (cancelled) return;
         setUsers(companyUsers.map((user) => ({ ...user, email: user.email ?? "", role: user.role ?? "company_user" })));
-        setGroups(groupsPayload.groups ?? []);
+        const loadedGroups = groupsPayload.groups ?? [];
+        setGroups(loadedGroups);
         setMembers(groupsPayload.members ?? []);
+        setExpandedGroupIDs(new Set(loadedGroups.map((group) => group.group_id)));
         const loadedDefaultAccess = permissionsPayload.default_access === "no_access" ? "no_access" : "edit";
         setDefaultAccess(loadedDefaultAccess);
         setAccessBySubject(
@@ -211,6 +216,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         );
         setEffectiveAccessByUser(effectiveAccessToMap(permissionsPayload.effective_access ?? []));
         setServerCanEditPermissions(permissionsPayload.can_edit_permissions === true);
+        setServerCanEditManagerPermissions(permissionsPayload.can_edit_manager_permissions === true);
         setSaved(false);
       } catch (loadError) {
         if (!cancelled) {
@@ -300,6 +306,30 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
       } else {
         next.delete(key);
       }
+      return next;
+    });
+  };
+
+  const canEditDefaultUserOverride = (user: CompanyUser | undefined): boolean => {
+    if (!user || companyUserRoleForcesAdmin(user.role)) return false;
+    if (companyUserRoleIsManager(user.role) && !serverCanEditManagerPermissions) return false;
+    return true;
+  };
+
+  const defaultAccessLabelForUser = (user: CompanyUser | undefined, checked: boolean): string => {
+    if (!user) return checked ? accessLevelLabel(defaultExceptionAccessLevel) : accessLevelLabel(defaultAccess);
+    if (companyUserRoleForcesAdmin(user.role)) return "Admin";
+    if (companyUserRoleIsManager(user.role) && !serverCanEditManagerPermissions) {
+      return accessLevelLabel(effectiveAccessByUser.get(user.user_id) ?? defaultAccess);
+    }
+    return checked ? accessLevelLabel(defaultExceptionAccessLevel) : accessLevelLabel(defaultAccess);
+  };
+
+  const toggleExpandedGroup = (groupID: string) => {
+    setExpandedGroupIDs((previous) => {
+      const next = new Set(previous);
+      if (next.has(groupID)) next.delete(groupID);
+      else next.add(groupID);
       return next;
     });
   };
@@ -407,6 +437,60 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     );
   };
 
+  const renderDefaultUserRow = (user: CompanyUser, label: string, keySuffix: string, depth = 0): React.ReactNode => {
+    const key = `user:${user.user_id}` as PermissionSelectionKey;
+    const checked = accessBySubject.has(key);
+    const editable = canEditDefaultUserOverride(user);
+    return (
+      <label key={keySuffix} style={{ ...permissionRowStyle, marginLeft: depth * 14, opacity: editable || companyUserRoleForcesAdmin(user.role) ? 1 : 0.72 }}>
+        <span>{label}</span>
+        <span style={permissionMutedTextStyle}>{companyUserRoleLabel(user.role)} · {defaultAccessLabelForUser(user, checked)}</span>
+        {companyUserRoleForcesAdmin(user.role) ? (
+          <span style={permissionMutedTextStyle}>Admin</span>
+        ) : (
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(event) => {
+              if (editable) setUserOverride(user.user_id, event.currentTarget.checked);
+            }}
+            disabled={controlsDisabled || !editable}
+            aria-label="Permission exception"
+            style={permissionCheckboxStyle}
+          />
+        )}
+      </label>
+    );
+  };
+
+  const renderDefaultGroup = (group: CompanyUserGroup, depth: number): React.ReactNode => {
+    const groupMembers = membersByGroup.get(group.group_id) ?? [];
+    const children = childrenByParent.get(group.group_id) ?? [];
+    const expanded = expandedGroupIDs.has(group.group_id);
+    const visibleCount = groupMembers.length + children.length;
+    return (
+      <div key={group.group_id} style={{ display: "grid", gap: 4, marginLeft: depth * 14 }}>
+        <div style={permissionGroupRowStyle}>
+          <button
+            type="button"
+            style={permissionDisclosureButtonStyle}
+            onClick={() => toggleExpandedGroup(group.group_id)}
+            aria-label={expanded ? "Collapse group" : "Expand group"}
+          >
+            {expanded ? "-" : "+"}
+          </button>
+          <span style={permissionStrongTextStyle}>{group.name}</span>
+          <span style={permissionMutedTextStyle}>{visibleCount} items</span>
+        </div>
+        {expanded && groupMembers.map((member) => {
+          const user = usersByID.get(member.user_id);
+          return user ? renderDefaultUserRow(user, permissionUserLabel(member), `${group.group_id}:${member.user_id}`, 1) : null;
+        })}
+        {expanded && children.map((child) => renderDefaultGroup(child, depth + 1))}
+      </div>
+    );
+  };
+
   const dialogMode = variant === "dialog";
   const containerStyle = dialogMode ? permissionDialogStyle : permissionEmbeddedStyle;
   const actionButtons = (
@@ -434,41 +518,19 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         <div style={permissionInfoStyle}>
           {permissionSummaryText(saved, assignmentCount, entityType, defaultAccess)}
         </div>
-        {effectiveReadOnly && <div style={permissionReadOnlyNoticeStyle}>Only admins can edit permissions.</div>}
+        {effectiveReadOnly && <div style={permissionReadOnlyNoticeStyle}>Manager or admin edit access is required to edit permissions.</div>}
         {error && <div style={permissionErrorStyle}>{error}</div>}
       </div>
       <div style={permissionListStyle}>
         {usesDefaultAccessPolicy ? (
           <div style={{ display: "grid", gap: 4 }}>
-            <div style={permissionSubheadStyle}>Exception Users</div>
-            {users.filter((user) => !companyUserRoleForcesAdmin(user.role)).sort((a, b) => companyUserLabel(a).localeCompare(companyUserLabel(b))).map((user) => {
-              const key = `user:${user.user_id}` as PermissionSelectionKey;
-              const checked = accessBySubject.has(key);
-              return (
-                <label key={user.user_id} style={permissionRowStyle}>
-                  <span>{companyUserLabel(user)}</span>
-                  <span style={permissionMutedTextStyle}>{checked ? accessLevelLabel(defaultExceptionAccessLevel) : accessLevelLabel(defaultAccess)}</span>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(event) => setUserOverride(user.user_id, event.currentTarget.checked)}
-                    disabled={controlsDisabled}
-                    aria-label="Permission exception"
-                    style={permissionCheckboxStyle}
-                  />
-                </label>
-              );
-            })}
-            {users.some((user) => companyUserRoleForcesAdmin(user.role)) && (
-              <div style={permissionSubheadStyle}>Admins</div>
+            {childrenByParent.get("")?.map((group) => renderDefaultGroup(group, 0))}
+            {ungroupedUsers.length > 0 && (
+              <>
+                <div style={permissionSubheadStyle}>Ungrouped Users</div>
+                {ungroupedUsers.map((user) => renderDefaultUserRow(user, companyUserLabel(user), user.user_id))}
+              </>
             )}
-            {users.filter((user) => companyUserRoleForcesAdmin(user.role)).sort((a, b) => companyUserLabel(a).localeCompare(companyUserLabel(b))).map((user) => (
-              <div key={user.user_id} style={permissionRowStyle}>
-                <span>{companyUserLabel(user)}</span>
-                <span style={permissionMutedTextStyle}>{companyUserRoleLabel(user.role)}</span>
-                <span style={permissionMutedTextStyle}>Admin</span>
-              </div>
-            ))}
           </div>
         ) : (
           <>
@@ -556,25 +618,32 @@ function companyUserRoleForcesAdmin(role: string | undefined): boolean {
   return role === "dev_admin" || role === "company_admin" || role === "owner" || role === "admin";
 }
 
+function companyUserRoleIsManager(role: string | undefined): boolean {
+  return role === "company_manager" || role === "manager";
+}
+
 function companyUserRoleLabel(role: string | undefined): string {
   switch (role) {
     case "dev_admin":
       return "Dev Admin";
     case "company_admin":
       return "Company Admin";
+    case "company_manager":
+    case "manager":
+      return "Manager";
     default:
       return "User";
   }
 }
 
 function permissionSummaryText(saved: boolean, assignmentCount: number, entityType: PermissionEntityType, defaultAccess: "edit" | "no_access"): string {
-  if (saved) return "Permissions saved. Dev admins and company admins always keep admin access.";
+  if (saved) return "Permissions saved. Dev admins and company admins always keep admin access. Managers follow resource permissions.";
   if (entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "company_explorer_folder" || entityType === "shared_triage_folder" || entityType === "shared_inbox_folder" || entityType === "shared_inbox") {
     const defaultLabel = defaultAccess === "edit" ? "Default edit" : "Default no access";
-    if (assignmentCount > 0) return `${defaultLabel}. ${assignmentCount} exception users. Dev admins and company admins always keep admin access.`;
-    return `${defaultLabel}. No exception users. Dev admins and company admins always keep admin access.`;
+    if (assignmentCount > 0) return `${defaultLabel}. ${assignmentCount} exception users. Dev admins and company admins always keep admin access. Managers follow resource permissions.`;
+    return `${defaultLabel}. No exception users. Dev admins and company admins always keep admin access. Managers follow resource permissions.`;
   }
-  if (assignmentCount > 0) return `${assignmentCount} access grants. Dev admins and company admins always keep admin access.`;
+  if (assignmentCount > 0) return `${assignmentCount} access grants. Dev admins and company admins always keep admin access. Managers follow resource permissions.`;
   return "No explicit grants. Access is denied except for dev admins and company admins.";
 }
 
@@ -759,6 +828,25 @@ const permissionRowStyle: React.CSSProperties = {
   borderRadius: 10,
   background: PERMISSION_SURFACE,
   boxShadow: "3px 3px 9px rgba(174, 174, 192, 0.16), -3px -3px 9px rgba(255, 255, 255, 0.78)",
+};
+
+const permissionGroupRowStyle: React.CSSProperties = {
+  ...permissionRowStyle,
+  gridTemplateColumns: "24px minmax(0, 1fr) auto",
+};
+
+const permissionDisclosureButtonStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  border: "1px solid rgba(100, 116, 139, 0.24)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#334155",
+  cursor: "pointer",
+  font: "inherit",
+  fontWeight: 850,
+  lineHeight: 1,
+  padding: 0,
 };
 
 const permissionSelectStyle: React.CSSProperties = {

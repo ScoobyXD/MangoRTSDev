@@ -193,6 +193,7 @@ type InviteCreateResponse = {
 
 const INVITE_ROLE_OPTIONS: SettingsSelectOption[] = [
   { value: "company_user", label: "company_user" },
+  { value: "company_manager", label: "company_manager" },
   { value: "company_admin", label: "company_admin" },
 ];
 
@@ -1113,7 +1114,12 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
     return membershipOptions.find((company) => company.role !== "dev_admin")?.company_id ?? membershipOptions[0]?.company_id ?? activeCompanyID;
   });
   const selectedCompany = companyOptions.find((company) => company.company_id === companyID) ?? null;
-  const canManageSelectedCompany = Boolean(companyID) && (me.is_dev_admin || selectedCompany?.role === "company_admin");
+  const canManageSelectedCompany = Boolean(companyID) && (me.is_dev_admin || selectedCompany?.role === "company_admin" || selectedCompany?.role === "company_manager");
+  const canInviteCompanyAdmins = me.is_dev_admin || (Boolean(companyID) && selectedCompany?.role === "company_admin");
+  const inviteRoleOptions = useMemo(
+    () => canInviteCompanyAdmins ? INVITE_ROLE_OPTIONS : INVITE_ROLE_OPTIONS.filter((option) => option.value !== "company_admin"),
+    [canInviteCompanyAdmins],
+  );
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [onboarding, setOnboarding] = useState<CompanyUserOnboarding[]>([]);
   const [inviteCompanyID, setInviteCompanyID] = useState(() => companyID);
@@ -1194,6 +1200,11 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
     if (!me.is_dev_admin) setInviteCompanyID(companyID);
     else if (!inviteCompanyID && companyID) setInviteCompanyID(companyID);
   }, [companyID, inviteCompanyID, me.is_dev_admin]);
+  useEffect(() => {
+    if (!canInviteCompanyAdmins && inviteRole === "company_admin") {
+      setInviteRole("company_manager");
+    }
+  }, [canInviteCompanyAdmins, inviteRole]);
   return (
     <div style={embedded ? { ...settingsPageStyle, minHeight: "100%", boxSizing: "border-box" } : settingsPageStyle}>
       <div style={settingsHeaderStyle}>
@@ -1314,7 +1325,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
               </div>
             )}
             <input className="mango-settings-input" style={settingsInputStyle} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value.toLowerCase())} type="email" placeholder="Email" />
-            <SettingsSelect value={inviteRole} options={INVITE_ROLE_OPTIONS} onChange={setInviteRole} ariaLabel="User role" />
+            <SettingsSelect value={inviteRole} options={inviteRoleOptions} onChange={setInviteRole} ariaLabel="User role" />
             <button className="mango-settings-action" style={settingsPrimaryButtonStyle}>Invite user</button>
           </form>
           {inviteMessage && <div style={settingsInfoTextStyle}>{inviteMessage}</div>}
@@ -1398,25 +1409,28 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
         </div>
         <div style={{ display: "grid", gap: 6 }}>
           {users.length === 0 && <div style={settingsInfoTextStyle}>No users in this company scope.</div>}
-          {users.map((user) => (
-            <div key={user.user_id} style={userRowStyle}>
-              <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{companyUserLabel(user)}</span>
-              <span>{user.role}</span>
-              <button
-                className="mango-settings-action"
-                type="button"
-                style={{ ...smallButtonStyle, ...dangerButtonStyle }}
-                disabled={user.user_id === me.user.user_id}
-                onClick={(event) => {
-                  setError("");
-                  setDeleteAcknowledged(false);
-                  setDeleteConfirmation({ user, position: confirmMenuPositionFromElement(event.currentTarget) });
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          ))}
+          {users.map((user) => {
+            const canDeleteUser = user.user_id !== me.user.user_id && (me.is_dev_admin || selectedCompany?.role === "company_admin" || (selectedCompany?.role === "company_manager" && user.role !== "company_admin" && user.role !== "dev_admin"));
+            return (
+              <div key={user.user_id} style={userRowStyle}>
+                <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{companyUserLabel(user)}</span>
+                <span>{user.role}</span>
+                <button
+                  className="mango-settings-action"
+                  type="button"
+                  style={{ ...smallButtonStyle, ...dangerButtonStyle }}
+                  disabled={!canDeleteUser}
+                  onClick={(event) => {
+                    setError("");
+                    setDeleteAcknowledged(false);
+                    setDeleteConfirmation({ user, position: confirmMenuPositionFromElement(event.currentTarget) });
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            );
+          })}
         </div>
       </section>}
       {deleteConfirmation && (

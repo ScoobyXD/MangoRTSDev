@@ -356,6 +356,99 @@ func TestMemoryResourceAccessPolicyNewCompanyUserFollowsDefault(t *testing.T) {
 	}
 }
 
+func TestMemoryResourceAccessPolicyManagerActorPreservesManagerAccess(t *testing.T) {
+	repo, companyID, _, allowed, other := setupResourceAccessPolicyTest(t)
+	manager, err := repo.UpsertAuthUser("resource-manager", "resource-manager@example.com", "Resource Manager")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser manager: %v", err)
+	}
+	peerManager, err := repo.UpsertAuthUser("resource-peer-manager", "resource-peer-manager@example.com", "Peer Manager")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser peer manager: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("resource-manager", companyID, domain.RoleCompanyManager); err != nil {
+		t.Fatalf("AddCompanyMembership manager: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("resource-peer-manager", companyID, domain.RoleCompanyManager); err != nil {
+		t.Fatalf("AddCompanyMembership peer manager: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Manager policy node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{allowed.UserID},
+		ActorUserID:      manager.UserID,
+	}); err != nil {
+		t.Fatalf("manager SetEntityPermissions default no_access: %v", err)
+	}
+	for label, userID := range map[string]string{
+		"manager":      manager.UserID,
+		"peer manager": peerManager.UserID,
+		"allowed user": allowed.UserID,
+	} {
+		access, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, userID, EntityPermissionEdit)
+		if err != nil || !access {
+			t.Fatalf("%s access after manager default flip = %v err=%v, want true", label, access, err)
+		}
+	}
+	if access, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionEdit); err != nil || access {
+		t.Fatalf("other user access after manager default flip = %v err=%v, want false", access, err)
+	}
+
+	permissions, err := repo.ListEntityPermissions(companyID, EntityTypeNode, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListEntityPermissions: %v", err)
+	}
+	rows := map[string]string{}
+	for _, permission := range permissions {
+		rows[permission.SubjectID] = permission.AccessLevel
+	}
+	for _, userID := range []string{allowed.UserID, manager.UserID, peerManager.UserID} {
+		if rows[userID] != EntityPermissionEdit {
+			t.Fatalf("permission rows = %+v, want edit row for %s", rows, userID)
+		}
+	}
+
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    ResourceDefaultAccessEdit,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{peerManager.UserID, other.UserID},
+		ActorUserID:      manager.UserID,
+	}); err != nil {
+		t.Fatalf("manager SetEntityPermissions attempted peer deny: %v", err)
+	}
+	if access, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, peerManager.UserID, EntityPermissionEdit); err != nil || !access {
+		t.Fatalf("peer manager access after attempted deny = %v err=%v, want true", access, err)
+	}
+	if access, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionEdit); err != nil || access {
+		t.Fatalf("other user access after deny = %v err=%v, want false", access, err)
+	}
+	permissions, err = repo.ListEntityPermissions(companyID, EntityTypeNode, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListEntityPermissions after attempted peer deny: %v", err)
+	}
+	rows = map[string]string{}
+	for _, permission := range permissions {
+		rows[permission.SubjectID] = permission.AccessLevel
+	}
+	if _, ok := rows[peerManager.UserID]; ok {
+		t.Fatalf("peer manager row after attempted deny = %+v, want no manager row", rows)
+	}
+	if rows[other.UserID] != EntityPermissionNoAccess {
+		t.Fatalf("other user row after deny = %+v, want no_access row", rows)
+	}
+}
+
 func setMemoryResourcePolicyForTest(t *testing.T, repo *MemoryRepo, companyID, entityType, entityID, defaultAccess string, overrideUserIDs []string) {
 	t.Helper()
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{

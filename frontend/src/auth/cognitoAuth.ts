@@ -21,7 +21,7 @@ export type MangoMembership = {
   company_id: string;
   company_name?: string;
   user_id: string;
-  role: "dev_admin" | "company_admin" | "company_user";
+  role: "dev_admin" | "company_admin" | "company_manager" | "company_user";
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -40,7 +40,7 @@ export type MangoInvitation = {
   company_id: string;
   company_name?: string;
   email: string;
-  role: "company_admin" | "company_user";
+  role: "company_admin" | "company_manager" | "company_user";
   status: string;
   cognito_status?: string;
   invite_email_status?: string;
@@ -436,6 +436,8 @@ function friendlyApiError(code: string): string {
       return "The signed-in Cognito session does not include an email address.";
     case "company_admin_required":
       return "You need company admin access for that company.";
+    case "company_manager_required":
+      return "You need manager or admin access for that company.";
     case "dev_admin_required":
       return "You need dev admin access.";
     case "invalid_invitation":

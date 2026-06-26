@@ -289,12 +289,25 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 			writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox_access")
 			return
 		}
+		if hasActor && !actorCanManageCompanyUsers(actor, companyID) {
+			writeError(w, http.StatusForbidden, "company_manager_required")
+			return
+		}
 		canEditPermissions := false
 		resourceType := store.CommunicationsSharedInboxResourceType(folder)
 		if hasActor {
 			if actorCanManageCompany(actor, companyID) {
 				canEditPermissions = true
-			} else if allowed, accessErr := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, resourceType, folderID, store.EntityPermissionEdit); accessErr == nil {
+			} else if actorRoleForCompany(actor, companyID) == domain.RoleCompanyManager {
+				allowed, accessErr := s.repo.UserHasEffectiveAccess(companyID, actor.User.UserID, resourceType, folderID, store.EntityPermissionEdit)
+				if errors.Is(accessErr, store.ErrInvalid) {
+					writeError(w, http.StatusBadRequest, "invalid_shared_inbox_access_check")
+					return
+				}
+				if accessErr != nil {
+					writeError(w, http.StatusInternalServerError, "failed_to_check_shared_inbox_access")
+					return
+				}
 				canEditPermissions = allowed
 			}
 		}
@@ -304,15 +317,26 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 				overrideUserIDs = append(overrideUserIDs, grant.SubjectID)
 			}
 		}
+		effectiveAccess, err := s.entityEffectiveAccessByUser(companyID, resourceType, folderID)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_shared_inbox_access_grants")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_shared_inbox_effective_access")
+			return
+		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-			"company_id":           companyID,
-			"folder_id":            folderID,
-			"default_access":       folder.DefaultAccess,
-			"override_user_ids":    overrideUserIDs,
-			"access_grants":        folder.AccessGrants,
-			"permissions":          folder.AccessGrants,
-			"gvic_assignments":     folder.GVICAssignments,
-			"can_edit_permissions": canEditPermissions,
+			"company_id":                   companyID,
+			"folder_id":                    folderID,
+			"default_access":               folder.DefaultAccess,
+			"override_user_ids":            overrideUserIDs,
+			"access_grants":                folder.AccessGrants,
+			"permissions":                  folder.AccessGrants,
+			"effective_access":             effectiveAccess,
+			"gvic_assignments":             folder.GVICAssignments,
+			"can_edit_permissions":         canEditPermissions,
+			"can_edit_manager_permissions": actorCanManageCompany(actor, companyID),
 		})
 	case http.MethodPut:
 		var req struct {
@@ -332,6 +356,10 @@ func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r 
 		}
 		if !hasActor {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if !actorCanManageCompanyUsers(actor, req.CompanyID) {
+			writeError(w, http.StatusForbidden, "company_manager_required")
 			return
 		}
 		if !s.requireCommunicationsSharedInboxAccess(w, r, actor, req.CompanyID, folderID, store.EntityPermissionEdit) {

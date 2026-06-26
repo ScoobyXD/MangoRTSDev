@@ -6,7 +6,7 @@ MangoRTS uses Amazon Cognito for authentication and Mango-owned PostgreSQL table
 
 The frontend uses custom React pages, Cognito Identity Provider API calls for sign-in, Nylas Hosted OAuth for Google mailbox access, and Cognito password resets:
 
-1. Dev admin or company admin creates an invitation in Mango.
+1. Dev admin, company admin, or company manager creates an invitation in Mango. Company managers can invite users and managers; only dev admins and company admins can invite company admins.
 2. The backend stores a hashed Mango invitation token, creates or reissues the Cognito user with `AdminCreateUser`, and records Cognito status on the invitation.
 3. Mango sends its own SES invitation email with `/accept-invite?token=...`. The email includes the Mango invite token link, not a temporary password.
 4. The user opens the Mango invite link, enters their email, full name, and new password, and accepts the Mango invitation.
@@ -90,9 +90,10 @@ The backend enables auth only when `AUTH_MODE=cognito`.
 - `dev_admin` can access all companies.
 - `dev_admin` can list/search companies through bounded `GET /v1/companies?query=<text>&limit=<n>` for Settings scope selection and invite targeting.
 - Company-scoped routes require company membership or `dev_admin`.
-- `company_admin` manages users inside their company.
-- `company_user` has full access inside their company for now.
-- Company invitations can only be created by `dev_admin` or `company_admin`; this is enforced in both HTTP handlers and repository writes.
+- `company_admin` manages users inside their company and bypasses company resource permissions.
+- `company_manager` manages users, user groups, and permission settings for resources they can edit, but does not bypass resource permissions.
+- `company_user` follows resource permissions and cannot manage invitations, user groups, or permission settings.
+- Company invitations can be created by `dev_admin`, `company_admin`, or `company_manager`; managers can invite `company_user` and `company_manager`, while only dev admins and company admins can invite `company_admin`.
 - Creating a new pending invitation for the same company and email revokes older pending invitations, so only the latest token can be accepted.
 - Mango-owned invitation delivery is tracked independently from Cognito user creation, so admins can see when Cognito succeeded but SES invite delivery failed.
 
@@ -100,7 +101,7 @@ The backend enables auth only when `AUTH_MODE=cognito`.
 
 - `users`: maps Cognito `sub` values to internal user IDs.
 - `companies`: stores tenant/company rows.
-- `company_memberships`: Mango authorization roles: `dev_admin`, `company_admin`, `company_user`.
+- `company_memberships`: Mango authorization roles: `dev_admin`, `company_admin`, `company_manager`, `company_user`.
 - `invitations`: company-scoped pending/accepted invite tokens; only token hashes are stored. It also tracks Cognito creation and Mango invitation email delivery status.
 - `user_email_connections`: one Nylas mailbox grant per Mango user, including provider, account email, grant ID, and connection status.
 
