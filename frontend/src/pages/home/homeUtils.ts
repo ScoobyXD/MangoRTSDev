@@ -230,6 +230,10 @@ export function cleanIDList(values: string[]): string[] {
   return ids;
 }
 
+export function triageMessageIDsFromStreamMessageID(value: string): string[] {
+  return cleanIDList(value.split(","));
+}
+
 export function logicGateTreeID(logicGateID: string): string {
   return `logic-gate-${logicGateID.trim()}`;
 }
