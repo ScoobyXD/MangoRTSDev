@@ -26,6 +26,7 @@ func scanCompanyExplorerV2Row(row companyExplorerV2RowScanner) (CompanyExplorerV
 		&item.Position,
 		&item.HasChildren,
 		&item.EffectiveAccess,
+		&item.HasPermissionRules,
 		&nativeContext,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
@@ -97,6 +98,28 @@ func companyExplorerEffectiveAccessSelect(entityTypeExpr, entityIDExpr, permissi
       and mangorts_user_can_access_resource($1::uuid, ` + entityTypeExpr + `, ` + entityIDExpr + `, ` + permissionUserParam + `::uuid, 'edit') then 'edit'
     else 'view'
   end`
+}
+
+func companyExplorerPermissionRulesSelect(entityTypeExpr, entityIDExpr string) string {
+	return `(
+    ` + entityTypeExpr + `='folder'
+    and (
+      exists (
+        select 1
+        from company_explorer_folders permission_folder
+        where permission_folder.company_id=$1::uuid
+          and permission_folder.folder_id=` + entityIDExpr + `
+          and coalesce(permission_folder.default_access, '` + ResourceDefaultAccessEdit + `')='` + ResourceDefaultAccessNoAccess + `'
+      )
+      or exists (
+        select 1
+        from resource_permissions permission_marker
+        where permission_marker.company_id=$1::uuid
+          and permission_marker.resource_type='` + EntityTypeCompanyExplorerFolder + `'
+          and permission_marker.resource_id=` + entityIDExpr + `
+      )
+    )
+  )`
 }
 
 func companyExplorerFinalAccessPredicate(entityTypeExpr, entityIDExpr string) string {
@@ -308,6 +331,7 @@ select candidate.company_id::text,
        candidate.position,
        `+companyExplorerFinalHasChildrenExpr("candidate.entity_type", "candidate.entity_id")+` as has_children,
        `+companyExplorerFinalEffectiveAccessSelect("candidate.entity_type", "candidate.entity_id")+` as effective_access,
+       `+companyExplorerPermissionRulesSelect("candidate.entity_type", "candidate.entity_id")+` as has_permission_rules,
        `+companyExplorerFinalNativeContext("candidate.entity_type", "candidate.entity_id", "coalesce(candidate.resource_id, candidate.entity_id)")+` as native_context,
        candidate.created_timestamp,
        candidate.updated_timestamp
@@ -385,6 +409,7 @@ select all_rows.company_id::text,
        all_rows.position,
        `+companyExplorerFinalHasChildrenExpr("all_rows.entity_type", "all_rows.entity_id")+` as has_children,
        `+companyExplorerRootEffectiveAccessSelect("all_rows.entity_type", "all_rows.entity_id")+` as effective_access,
+       `+companyExplorerPermissionRulesSelect("all_rows.entity_type", "all_rows.entity_id")+` as has_permission_rules,
        `+companyExplorerFinalNativeContext("all_rows.entity_type", "all_rows.entity_id", "coalesce(all_rows.resource_id, all_rows.entity_id)")+` as native_context,
        all_rows.created_timestamp,
        all_rows.updated_timestamp
@@ -457,6 +482,7 @@ select all_rows.company_id::text,
        all_rows.position,
        `+companyExplorerFinalHasChildrenExpr("all_rows.entity_type", "all_rows.entity_id")+` as has_children,
        `+companyExplorerFinalEffectiveAccessSelect("all_rows.entity_type", "all_rows.entity_id")+` as effective_access,
+       `+companyExplorerPermissionRulesSelect("all_rows.entity_type", "all_rows.entity_id")+` as has_permission_rules,
        `+companyExplorerFinalNativeContext("all_rows.entity_type", "all_rows.entity_id", "coalesce(all_rows.resource_id, all_rows.entity_id)")+` as native_context,
        all_rows.created_timestamp,
        all_rows.updated_timestamp

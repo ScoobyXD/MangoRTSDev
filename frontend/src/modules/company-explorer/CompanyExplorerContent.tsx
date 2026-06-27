@@ -10,7 +10,7 @@ import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../
 import { removeCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderInNodeRelationshipGraph, upsertCompanyExplorerFolderItemInNodeRelationshipGraph } from "../node-map/NodeRelationshipGraph";
 import { removeCompanyExplorerFolderInLogicGateRelationshipGraph, removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderInLogicGateRelationshipGraph, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { type ExplorerSelectionState } from "./explorerSync";
-import { type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerFolderScopeType, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
+import { hasCompanyExplorerFolderPermissionRules, type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerFolderScopeType, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
 import { invalidateKanbanBoardListCache, listKanbanBoards, type GVICMatrixProjectionRow } from "../kanban/kanbanApi";
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
@@ -904,6 +904,7 @@ function buildGVICCompanyExplorerRows(input: {
           parentFolderID: folder.parent_folder_id ?? "",
           folderKind: folder.folder_kind as CompanyExplorerFolderKind,
           ...GVICFolderScopeForFolder(folder),
+          hasPermissionRules: hasCompanyExplorerFolderPermissionRules(folder),
           scopeLevel: rowDepth(depth),
           position: folder.position || TREE_ROW_POSITION_STEP,
           createdTimestamp: folder.created_timestamp,
@@ -962,6 +963,7 @@ function buildGVICCompanyExplorerRows(input: {
         parentFolderID: "",
         folderKind: folder.folder_kind as CompanyExplorerFolderKind,
         ...folderScopeForFolder(folder),
+        hasPermissionRules: hasCompanyExplorerFolderPermissionRules(folder),
         folderLabel: folder.name,
         scopeLevel: rowDepth(0),
         position: folder.position || TREE_ROW_POSITION_STEP,

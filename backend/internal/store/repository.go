@@ -465,19 +465,20 @@ type CompanyExplorerSearchResults struct {
 	Results []CompanyExplorerSearchResult `json:"results"`
 }
 type CompanyExplorerV2Row struct {
-	CompanyID        string            `json:"company_id"`
-	EntityID         string            `json:"entity_id"`
-	EntityType       string            `json:"entity_type"`
-	ResourceID       string            `json:"resource_id,omitempty"`
-	Name             string            `json:"name"`
-	ParentEntityID   string            `json:"parent_entity_id,omitempty"`
-	EdgeID           string            `json:"edge_id,omitempty"`
-	Position         int               `json:"position"`
-	HasChildren      bool              `json:"has_children"`
-	EffectiveAccess  string            `json:"effective_access,omitempty"`
-	NativeContext    map[string]string `json:"native_context,omitempty"`
-	CreatedTimestamp time.Time         `json:"created_timestamp"`
-	UpdatedTimestamp time.Time         `json:"updated_timestamp"`
+	CompanyID          string            `json:"company_id"`
+	EntityID           string            `json:"entity_id"`
+	EntityType         string            `json:"entity_type"`
+	ResourceID         string            `json:"resource_id,omitempty"`
+	Name               string            `json:"name"`
+	ParentEntityID     string            `json:"parent_entity_id,omitempty"`
+	EdgeID             string            `json:"edge_id,omitempty"`
+	Position           int               `json:"position"`
+	HasChildren        bool              `json:"has_children"`
+	EffectiveAccess    string            `json:"effective_access,omitempty"`
+	HasPermissionRules bool              `json:"has_permission_rules,omitempty"`
+	NativeContext      map[string]string `json:"native_context,omitempty"`
+	CreatedTimestamp   time.Time         `json:"created_timestamp"`
+	UpdatedTimestamp   time.Time         `json:"updated_timestamp"`
 }
 
 type CompanyExplorerV2FolderInput struct {

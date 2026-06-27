@@ -16,6 +16,7 @@ export type CompanyExplorerV2Row = {
   position: number;
   has_children?: boolean;
   effective_access?: string;
+  has_permission_rules?: boolean;
   native_context?: Record<string, string>;
   created_timestamp: string;
   updated_timestamp: string;

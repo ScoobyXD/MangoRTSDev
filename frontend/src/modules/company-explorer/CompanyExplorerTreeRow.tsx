@@ -96,6 +96,20 @@ function getTriageMessageDropTarget(row: ExplorerTreeNode, treeRows: ExplorerTre
   return null;
 }
 
+function ExplorerPermissionLockIcon({ color }: { color: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+      style={{ width: 12, height: 12, display: "block", flexShrink: 0, color }}
+    >
+      <rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M8 10V8a4 4 0 0 1 8 0v2" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   row,
   treeRows,
@@ -149,6 +163,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   const isExpandable = (isFolder || row.hasChildren) && !isSearchActive;
   const isOpen = expanded.has(row.id);
   const isSelected = selectedTreeID === row.id || selectedTreeIDs.has(row.id);
+  const showPermissionMarker = isFolder && Boolean(row.hasPermissionRules);
   const suppressModifiedClickRef = React.useRef(false);
   const rowDragPayload = isSearchActive ? null : getExplorerDragPayloadForSelection(row, selectedTreeIDs, treeRows);
   const isDragging = draggingTreeID === row.id;
@@ -450,9 +465,24 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
               event.stopPropagation();
               onStartRenamingRow(row);
             }}
-            style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "default", userSelect: "none" }}
+            style={{
+              minWidth: 0,
+              flex: "1 1 auto",
+              display: showPermissionMarker ? "grid" : "block",
+              gridTemplateColumns: showPermissionMarker ? "minmax(0, 1fr) auto" : undefined,
+              alignItems: "center",
+              gap: showPermissionMarker ? 5 : undefined,
+              overflow: "hidden",
+              cursor: "default",
+              userSelect: "none",
+            }}
           >
-            {row.label}
+            <span style={{ minWidth: 0, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.label}</span>
+            {showPermissionMarker && (
+              <span title="Permissions set" aria-label="Permissions set">
+                <ExplorerPermissionLockIcon color={isDarkTheme ? "rgba(226, 232, 240, 0.74)" : "rgba(71, 85, 105, 0.78)"} />
+              </span>
+            )}
           </span>
         )}
       </div>

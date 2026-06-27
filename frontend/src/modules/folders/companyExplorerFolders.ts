@@ -13,12 +13,21 @@ export type CompanyExplorerFolder = {
   folder_kind: CompanyExplorerFolderKind;
   system_key?: CompanyExplorerSystemFolderKey;
   name: string;
+  default_access?: "edit" | "no_access" | string;
+  has_permission_rules?: boolean;
+  access_grants?: Array<{ user_id?: string; access_level?: string }>;
   scope_type?: CompanyExplorerFolderScopeType;
   scope_id?: string | null;
   position: number;
   created_timestamp: string;
   updated_timestamp: string;
 };
+
+export function hasCompanyExplorerFolderPermissionRules(folder: CompanyExplorerFolder): boolean {
+  return Boolean(folder.has_permission_rules)
+    || folder.default_access === "no_access"
+    || (folder.access_grants ?? []).length > 0;
+}
 
 export type CompanyExplorerFolderItem = {
   company_id: string;
