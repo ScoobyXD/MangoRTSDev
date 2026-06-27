@@ -5,6 +5,7 @@ import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload } from ".
 import { TRIAGE_MESSAGE_DRAG_MIME } from "../../../frontend/src/pages/home/homeConstants.js";
 import {
   readSidebarPinnedResourceDropAction,
+  sidebarPinAcceptsPinnedResourceDrag,
   sidebarPinAcceptsPinnedResourceDrop,
   sidebarPinsFromDrop,
 } from "../../../frontend/src/app/sidebarPinDrops.js";
@@ -94,6 +95,23 @@ describe("sidebar pin drops", () => {
     });
     assert.equal(readSidebarPinnedResourceDropAction(pin("node", "node-target"), transfer), null);
     assert.equal(readSidebarPinnedResourceDropAction(pin("project", "project-1"), transfer), null);
+  });
+
+  it("accepts pinned resource drags from MIME types before drop data is readable", () => {
+    const triageTransfer = dataTransfer();
+    triageTransfer.setData(TRIAGE_MESSAGE_DRAG_MIME, "");
+
+    assert.equal(sidebarPinAcceptsPinnedResourceDrag(pin("logic_gate", "gate-1"), triageTransfer), true);
+    assert.equal(sidebarPinAcceptsPinnedResourceDrag(pin("node", "node-1"), triageTransfer), true);
+    assert.equal(sidebarPinAcceptsPinnedResourceDrag(pin("project", "project-1"), triageTransfer), false);
+    assert.equal(readSidebarPinnedResourceDropAction(pin("logic_gate", "gate-1"), triageTransfer), null);
+
+    const nodeTransfer = dataTransfer();
+    nodeTransfer.setData(EXPLORER_ENTITY_DRAG_MIME, "");
+    assert.equal(sidebarPinAcceptsPinnedResourceDrag(pin("logic_gate", "gate-1"), nodeTransfer), true);
+    assert.equal(sidebarPinAcceptsPinnedResourceDrag(pin("node", "node-1"), nodeTransfer), false);
+    assert.equal(sidebarPinAcceptsPinnedResourceDrag(pin("project", "project-1"), nodeTransfer), false);
+    assert.equal(readSidebarPinnedResourceDropAction(pin("logic_gate", "gate-1"), nodeTransfer), null);
   });
 
   it("keeps ordinary resource drops available for creating sidebar pins", () => {
