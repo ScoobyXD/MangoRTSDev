@@ -26,7 +26,7 @@ import {
   type EmailProvider,
 } from "../modules/communications/communicationsApi";
 import { assignNodeToLogicGateStatus } from "../modules/kanban/kanbanApi";
-import { INBOX_PRIORITIES } from "../pages/home/homeConstants";
+import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, INBOX_PRIORITIES, type HomeTriageConversionAppliedDetail } from "../pages/home/homeConstants";
 import { convertMessagesToExplorerTargetCommand } from "../pages/home/homeCommands";
 import {
   buildSharedInboxRows,
@@ -68,6 +68,11 @@ const SIDEBAR_SECTION_OPEN_KEY_PREFIX = "mangorts.app-sidebar-section-open.v2";
 const APP_SIDEBAR_PIN_DRAG_MIME = "application/x-mangorts-sidebar-pin";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
 const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
+
+function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<HomeTriageConversionAppliedDetail>(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, { detail }));
+}
 const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIDEBAR_BUFFER = 14;
@@ -273,6 +278,7 @@ export function AppSidebar({
   const [pinTriagePriorityMenu, setPinTriagePriorityMenu] = useState<SidebarPinTriagePriorityMenuState | null>(null);
   const [explorerTriageBusy, setExplorerTriageBusy] = useState(false);
   const [pinnedResourceDropBusy, setPinnedResourceDropBusy] = useState(false);
+  const [pinDropSuccess, setPinDropSuccess] = useState("");
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
@@ -310,6 +316,13 @@ export function AppSidebar({
     window.addEventListener("mangorts:home-unread-counts-updated", onHomeUnreadCountsUpdated);
     return () => window.removeEventListener("mangorts:home-unread-counts-updated", onHomeUnreadCountsUpdated);
   }, [companyID]);
+  useEffect(() => {
+    if (!pinDropSuccess) return undefined;
+    const timerID = window.setTimeout(() => {
+      setPinDropSuccess((current) => current === pinDropSuccess ? "" : current);
+    }, 3_000);
+    return () => window.clearTimeout(timerID);
+  }, [pinDropSuccess]);
 
   const openMailBadgeView = useCallback((view: HomeSidebarView) => {
     onPageSelect("home");
@@ -362,6 +375,7 @@ export function AppSidebar({
     if (pinnedResourceDropBusy || !cleanCompanyID || action.nodeIDs.length === 0) return;
     setPinnedResourceDropBusy(true);
     setSharedError("");
+    setPinDropSuccess("");
     try {
       await Promise.all(action.nodeIDs.map((nodeID) => assignNodeToLogicGateStatus({
         apiBase: readAuthConfig().apiBase,
@@ -372,8 +386,10 @@ export function AppSidebar({
         priority: null,
         position: 0,
       })));
+      setPinDropSuccess(action.nodeIDs.length === 1 ? `Node added to ${action.pin.name}.` : `${action.nodeIDs.length} nodes added to ${action.pin.name}.`);
     } catch (error) {
       console.error("Failed to add pinned drop nodes to Logic Gate", error);
+      setPinDropSuccess("");
       setSharedError(error instanceof Error ? error.message : "Failed to add node to pinned Logic Gate.");
     } finally {
       setPinnedResourceDropBusy(false);
@@ -387,19 +403,33 @@ export function AppSidebar({
     setPinTriagePriorityMenu(null);
     setPinnedResourceDropBusy(true);
     setSharedError("");
+    setPinDropSuccess("");
     try {
       const target: CommunicationsTriageConversionTarget = menu.action.kind === "triage_to_logic_gate"
         ? { mode: "existing_logic_gate", logicGateID: menu.action.logicGateID }
         : { mode: "existing_node", nodeID: menu.action.nodeID };
-      await convertMessagesToExplorerTargetCommand({
+      dispatchHomeTriageConversionApplied({
+        companyID: cleanCompanyID,
+        messageIDs: menu.action.messageIDs,
+      });
+      const conversion = await convertMessagesToExplorerTargetCommand({
         apiBase: readAuthConfig().apiBase,
         companyID: cleanCompanyID,
         target,
         messageIDs: menu.action.messageIDs,
         priority,
+        invalidateCommunications: () => undefined,
       });
+      const convertedMessageIDs = conversion?.convertedMessageIDs.length ? conversion.convertedMessageIDs : menu.action.messageIDs;
+      dispatchHomeTriageConversionApplied({
+        companyID: cleanCompanyID,
+        messageIDs: convertedMessageIDs,
+        logicGateID: menu.action.kind === "triage_to_logic_gate" ? menu.action.logicGateID : undefined,
+      });
+      setPinDropSuccess(convertedMessageIDs.length === 1 ? `Email added to ${menu.action.pin.name}.` : `${convertedMessageIDs.length} emails added to ${menu.action.pin.name}.`);
     } catch (error) {
       console.error("Failed to assign triage email from sidebar pin", error);
+      setPinDropSuccess("");
       setSharedError(error instanceof Error ? error.message : "Failed to assign email.");
     } finally {
       setPinnedResourceDropBusy(false);
@@ -1141,6 +1171,11 @@ export function AppSidebar({
         }}
       >
         <AppSidebarSectionHeader label="Pinned" />
+        {pinDropSuccess && (
+          <div role="status" style={appSidebarPinSuccessStyle}>
+            {pinDropSuccess}
+          </div>
+        )}
         <div style={appSidebarPinListStyle}>
           {pins.length === 0 ? (
             <div style={appSidebarEmptyStyle}>No pins</div>
@@ -2484,6 +2519,19 @@ const appSidebarSharedErrorStyle: React.CSSProperties = {
   fontSize: 10,
   fontWeight: 700,
   lineHeight: 1.25,
+};
+
+const appSidebarPinSuccessStyle: React.CSSProperties = {
+  margin: "0 2px 5px",
+  padding: "5px 7px",
+  border: "1px solid rgba(34, 197, 94, 0.36)",
+  borderRadius: 7,
+  background: "linear-gradient(135deg, rgba(220, 252, 231, 0.96), rgba(187, 247, 208, 0.9))",
+  color: "#166534",
+  fontSize: 10,
+  fontWeight: 800,
+  lineHeight: 1.25,
+  boxShadow: "0 5px 12px rgba(22, 101, 52, 0.12)",
 };
 
 function appSidebarSharedFolderRowStyle(depth: number, active: boolean, dropPlacement: SharedInboxDropPlacement | null, hovered = false): React.CSSProperties {

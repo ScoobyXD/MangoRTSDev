@@ -29,6 +29,8 @@ PIN18 - Dropping triage or shared-triage email on a pinned logic gate uses the e
 PIN19 - Dropping triage or shared-triage email on a pinned node attaches the email to that existing node through the existing node conversion path and must not create a duplicate node.
 PIN20 - Dropping a node on a pinned logic gate assigns the existing node to that logic gate through the normal logic-gate node assignment path and must not duplicate the node.
 PIN21 - Valid pinned email/node drop targets are recognized during dragover from drag MIME types alone; full payload parsing happens only on drop so browser dragover data restrictions do not show a stop cursor over valid pinned nodes or logic gates.
+PIN22 - Successful pinned email/node drops show a short green confirmation banner in the pin section and then clear automatically.
+PIN23 - Successful pinned email conversion is applied locally to the visible Home triage list and suppresses the matching immediate triage realtime reload so My Triage does not refresh repeatedly for the same drop.
 
 ## Scenarios
 
@@ -146,6 +148,8 @@ Business logic covered:
 - PIN19
 - PIN20
 - PIN21
+- PIN22
+- PIN23
 
 Given:
 - A user has pinned a node, a logic gate, and a project.
@@ -159,4 +163,6 @@ Expected:
 - Dropping email on the pinned logic gate opens the normal priority selection, then creates node(s) in that logic gate through the communications conversion path.
 - Dropping email on the pinned node opens the normal priority selection, then attaches the email to that existing node without creating a duplicate node.
 - Dropping a node on the pinned logic gate assigns the existing node to the logic gate through the normal assignment endpoint without creating a duplicate node.
+- Successful drops show a short green confirmation banner in the pin section.
+- The visible Home triage list handles the local pinned conversion without repeatedly reloading the page for the matching triage realtime event.
 - Permission, GVIC assignment, cache invalidation, and event behavior come from the existing conversion and assignment paths rather than a pin-specific backend shortcut.

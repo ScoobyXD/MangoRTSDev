@@ -14,6 +14,12 @@ export const ARCHIVE_QUEUE_MAX_EMAILS = 140;
 export const MESSAGE_EVENT_REFRESH_DELAY_MS = 1_200;
 export const SELF_SEND_DELIVERY_REFRESH_DELAY_MS = 4_000;
 export const TRIAGE_MESSAGE_DRAG_MIME = "application/x-mangorts-communications-triage-messages";
+export const EVENT_HOME_TRIAGE_CONVERSION_APPLIED = "mangorts:home-triage-conversion-applied";
+export type HomeTriageConversionAppliedDetail = {
+  companyID?: string;
+  messageIDs?: string[];
+  logicGateID?: string;
+};
 export const HOME_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.communications.columnWidths.v1";
 export const HOME_COLUMN_RESIZER_WIDTH = 10;
 export const HOME_ROW_RESIZER_HEIGHT = 10;

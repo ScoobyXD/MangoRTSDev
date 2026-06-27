@@ -81,9 +81,9 @@ import { myWorkDebugLog, recordMyWorkDebugCause } from "./myWorkPerformanceDebug
 import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
-import { ARCHIVE_QUEUE_MAX_EMAILS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants";
+import { ARCHIVE_QUEUE_MAX_EMAILS, EVENT_HOME_TRIAGE_CONVERSION_APPLIED, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME, type HomeTriageConversionAppliedDetail } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, triageMessageIDsFromStreamMessageID, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -436,6 +436,7 @@ export function HomePage({
   const loadingMoreMessagesRef = useRef(false);
   const activeDeleteSelectionKindRef = useRef<"message" | HomeEntityDeleteKind | "">("");
   const messageListFilterKeyRef = useRef("");
+  const locallyAppliedTriageConversionIDsRef = useRef<Map<string, number>>(new Map());
   const noticeResourceTextRef = useRef("");
   const workspaceRef = useRef<HTMLElement | null>(null);
   const columnWidthsRef = useRef<HomeColumnWidths>(columnWidths);
@@ -1358,6 +1359,26 @@ export function HomePage({
       void loadMessagesRef.current?.({ refresh });
     }, delayMs);
   }, [canLoadMailForView]);
+  const rememberLocallyAppliedTriageConversion = useCallback((messageIDs: string[]) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    const expiresAt = Date.now() + 6_000;
+    for (const messageID of ids) locallyAppliedTriageConversionIDsRef.current.set(messageID, expiresAt);
+  }, []);
+  const triageConversionWasAppliedLocally = useCallback((streamMessageID: string): boolean => {
+    const ids = triageMessageIDsFromStreamMessageID(streamMessageID);
+    if (ids.length === 0) return false;
+    const now = Date.now();
+    let allHandled = true;
+    for (const messageID of ids) {
+      const expiresAt = locallyAppliedTriageConversionIDsRef.current.get(messageID) ?? 0;
+      if (expiresAt <= now) {
+        locallyAppliedTriageConversionIDsRef.current.delete(messageID);
+        allHandled = false;
+      }
+    }
+    return allHandled;
+  }, []);
   const archiveQueueBatchKey = useCallback((nextCompanyID: string, sharedInboxID?: string) => (
     `${nextCompanyID.trim()}\x1f${sharedInboxID?.trim() ?? ""}`
   ), []);
@@ -1569,6 +1590,21 @@ export function HomePage({
     if (!isWorkspacePanelHomeViewID(activeViewID)) return;
     void loadLogicGatePanel();
   }, [activeViewID, loadLogicGatePanel]);
+  useEffect(() => {
+    const onTriageConversionApplied = (event: Event) => {
+      const detail = (event as CustomEvent<HomeTriageConversionAppliedDetail>).detail ?? {};
+      if (detail.companyID && detail.companyID !== companyID) return;
+      const messageIDs = cleanIDList(detail.messageIDs ?? []);
+      if (messageIDs.length === 0) return;
+      rememberLocallyAppliedTriageConversion(messageIDs);
+      const logicGateID = detail.logicGateID?.trim() ?? "";
+      if (!logicGateID) return;
+      setMessages((previous) => previous.map((message) => messageIDs.includes(message.id) ? markMessageSentToLogicGate(message, logicGateID) : message));
+      setSelectedMessage((current) => current && messageIDs.includes(current.id) ? markMessageSentToLogicGate(current, logicGateID) : current);
+    };
+    window.addEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
+    return () => window.removeEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
+  }, [companyID, rememberLocallyAppliedTriageConversion]);
   useEffect(() => { void loadMessages({ refresh: true }); }, [loadMessages]);
   useEffect(() => {
     setNodeEditorOverlay(null);
@@ -1632,7 +1668,8 @@ export function HomePage({
         const trigger = envelope.trigger?.trim().toLowerCase() ?? "";
         const messageID = envelope.message_id?.trim() ?? "";
         if (trigger.startsWith("triage.")) {
-          if (activeViewIDRef.current === "my-triage") void loadMessages({ refresh: true });
+          if (trigger.startsWith("triage.converted") && triageConversionWasAppliedLocally(messageID)) return;
+          if (activeViewIDRef.current === "my-triage") scheduleMessageListRefresh(MESSAGE_EVENT_REFRESH_DELAY_MS, { refresh: true });
           return;
         }
         if (trigger.startsWith("folder.")) {
@@ -1720,7 +1757,7 @@ export function HomePage({
         folderReloadTimerRef.current = null;
       }
     };
-  }, [activeMailAccountEmail, activeMailViewHasEmailConnection, apiBase, canLoadMailForView, companyID, handleEmailAccessExpired, loadFolders, loadMessages, scheduleMessageListRefresh]);
+  }, [activeMailAccountEmail, activeMailViewHasEmailConnection, apiBase, canLoadMailForView, companyID, handleEmailAccessExpired, loadFolders, scheduleMessageListRefresh, triageConversionWasAppliedLocally]);
   useEffect(() => {
     if (!activeMailViewHasEmailConnection) return undefined;
     const refreshVisibleMailbox = () => {

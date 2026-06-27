@@ -28,6 +28,7 @@ import {
   resizeHomeInboxMatrixColumnsWithoutSidebar,
   setNodeDragData,
   sharedInboxCanLoadMail,
+  triageMessageIDsFromStreamMessageID,
   workspaceEventTouchesHomePanel,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
 import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
@@ -112,6 +113,11 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
   assert.equal(isWorkspacePanelHomeViewID("shared:shared-a"), true);
   assert.equal(isWorkspacePanelHomeViewID("a-inbox"), true);
   assert.equal(isWorkspacePanelHomeViewID("o-inbox"), true);
+});
+
+test("communications triage stream message ids are cleaned and deduped", () => {
+  assert.deepEqual(triageMessageIDsFromStreamMessageID(" message-1,message-2, message-1 ,,message-3 "), ["message-1", "message-2", "message-3"]);
+  assert.deepEqual(triageMessageIDsFromStreamMessageID(" , "), []);
 });
 
 test("mailbox count helper keeps visible Inbox and Starred counts", () => {
