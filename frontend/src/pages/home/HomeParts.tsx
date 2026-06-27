@@ -1198,7 +1198,7 @@ export function HomeSidebar({
   const openSharedContextMenu = useCallback((event: React.MouseEvent, folder: CommunicationsSharedInbox | null) => {
     event.preventDefault();
     event.stopPropagation();
-    if (!folder && !canManageSharedTriage) {
+    if (!canManageSharedTriage) {
       setSharedContextMenu(null);
       return;
     }
@@ -1485,6 +1485,7 @@ export function HomeSidebar({
         <HomeNavButton label="Updates" active={activeViewID === "updates"} onClick={() => onSelectView("updates", "all")} />
       </nav>
       {sharedContextMenu && (() => {
+        if (!canManageSharedTriage) return null;
         const contextFolder = sharedContextMenu.folder;
         const contextFolderAcceptsChildren = !contextFolder || contextFolder.entry_type !== "shared_inbox";
         const showSharedCreateActions = canManageSharedTriage && contextFolderAcceptsChildren;
