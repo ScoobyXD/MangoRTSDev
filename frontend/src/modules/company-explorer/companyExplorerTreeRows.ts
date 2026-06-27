@@ -1,6 +1,6 @@
 import { getNodeTitle, type NodeRecord } from "../node-map/shared.js";
 import { getNodeTitle as getLogicGateTitle, type NodeRecord as LogicGateRecord } from "../logic-gate-map/shared.js";
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind } from "../folders/companyExplorerFolders.js";
+import { hasCompanyExplorerFolderPermissionRules, type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders.js";
 import type { KanbanBoard } from "../kanban/shared.js";
 import type { ProjectRecord } from "../project-management/projectManagementApi.js";
 import type { CompanyExplorerSearchResult, CompanyExplorerV2EntityType, CompanyExplorerV2Row } from "./companyExplorerLazyApi.js";
@@ -319,6 +319,7 @@ export function buildCompanyExplorerTreeRows({
         folderKind: childFolderKind,
         ...folderScopeForFolder(folder),
         systemKey: isExplorerSystemFolderKey(folder.system_key) ? folder.system_key : undefined,
+        hasPermissionRules: hasCompanyExplorerFolderPermissionRules(folder),
         folderLabel: getFolderPathLabel(folder.folder_id),
         scopeLevel: depth,
         position: parentFolderID === "" ? getRootAwarePosition(childFolderKind, rowID, folder.position || TREE_ROW_POSITION_STEP) : folder.position || TREE_ROW_POSITION_STEP,
@@ -572,6 +573,7 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
       parentFolderID: row.parent_entity_id ?? "",
       folderKind,
       protectedDefaultFolder: row.entity_type === "folder" && isProtectedDefaultFolderContext(row.native_context),
+      hasPermissionRules: kind === "folder" && Boolean(row.has_permission_rules),
       folderLabel: row.parent_entity_id ? rowByEntityID.get(row.parent_entity_id)?.name : undefined,
       scopeLevel: depth,
       position: row.position || TREE_ROW_POSITION_STEP,

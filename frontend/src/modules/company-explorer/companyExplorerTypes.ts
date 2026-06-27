@@ -32,6 +32,7 @@ export type ExplorerTreeNode = {
   folderScopeID?: string;
   systemKey?: CompanyExplorerSystemFolderKey;
   protectedDefaultFolder?: boolean;
+  hasPermissionRules?: boolean;
   folderLabel?: string;
   scopeLevel: number;
   position: number;

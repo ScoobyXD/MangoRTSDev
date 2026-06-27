@@ -66,8 +66,18 @@ function isValidSharedInboxEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim().toLowerCase());
 }
 
+type SharedInboxPermissionMarkerShape = CommunicationsSharedInbox & {
+  default_access_level?: string;
+  defaultAccess?: string;
+  has_permission_rules?: boolean;
+  permissions?: CommunicationsSharedInbox["access_grants"];
+};
+
 function sharedInboxHasPermissionMarker(folder: CommunicationsSharedInbox): boolean {
-  return folder.default_access === "no_access" || (folder.access_grants ?? []).length > 0;
+  const markerShape = folder as SharedInboxPermissionMarkerShape;
+  const defaultAccess = String(folder.default_access ?? markerShape.default_access_level ?? markerShape.defaultAccess ?? "").trim().toLowerCase();
+  const accessGrants = folder.access_grants ?? markerShape.permissions ?? [];
+  return Boolean(markerShape.has_permission_rules) || defaultAccess === "no_access" || accessGrants.length > 0;
 }
 
 function SharedInboxPermissionLockIcon() {
@@ -1421,7 +1431,15 @@ export function HomeSidebar({
               boxShadow: dropTarget?.folderID === "" ? `inset 0 0 0 2px ${homeColorWithAlpha(HOME_CYAN, 0.35)}` : undefined,
               cursor: "pointer",
             }}
-            onContextMenu={(event) => openSharedContextMenu(event, null)}
+            onContextMenu={(event) => {
+              if (!canManageSharedTriage) {
+                event.preventDefault();
+                event.stopPropagation();
+                setSharedContextMenu(null);
+                return;
+              }
+              openSharedContextMenu(event, null);
+            }}
             onClick={() => {
               setSharedRootOpen((open) => !open);
             }}
@@ -1469,9 +1487,11 @@ export function HomeSidebar({
       {sharedContextMenu && (() => {
         const contextFolder = sharedContextMenu.folder;
         const contextFolderAcceptsChildren = !contextFolder || contextFolder.entry_type !== "shared_inbox";
+        const showSharedCreateActions = canManageSharedTriage && contextFolderAcceptsChildren;
+        if (!contextFolder && !showSharedCreateActions) return null;
         return (
           <FrameRightClickMenu x={sharedContextMenu.x} y={sharedContextMenu.y} onClose={() => setSharedContextMenu(null)} width={HOME_COMPACT_CONTEXT_MENU_WIDTH}>
-            {canManageSharedTriage && contextFolderAcceptsChildren && (
+            {showSharedCreateActions && (
               <>
                 <button
                   type="button"
