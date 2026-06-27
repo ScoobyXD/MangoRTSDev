@@ -73,6 +73,15 @@ export function sidebarPinAcceptsPinnedResourceDrop(pin: SidebarPin, dataTransfe
   return readSidebarPinnedResourceDropAction(pin, dataTransfer) !== null;
 }
 
+export function sidebarPinAcceptsPinnedResourceDrag(pin: SidebarPin, dataTransfer: DataTransfer): boolean {
+  const pinID = pin.id.trim();
+  if (!pinID || pin.kind === "project") return false;
+
+  const types = Array.from(dataTransfer.types);
+  if (types.includes(TRIAGE_MESSAGE_DRAG_MIME)) return pin.kind === "logic_gate" || pin.kind === "node";
+  return pin.kind === "logic_gate" && types.includes(EXPLORER_ENTITY_DRAG_MIME);
+}
+
 export function hasSidebarPinSectionDrop(dataTransfer: DataTransfer): boolean {
   return sidebarPinsFromDrop(dataTransfer).length > 0;
 }

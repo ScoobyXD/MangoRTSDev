@@ -41,7 +41,7 @@ import {
 import {
   hasSidebarPinSectionDrop,
   readSidebarPinnedResourceDropAction,
-  sidebarPinAcceptsPinnedResourceDrop,
+  sidebarPinAcceptsPinnedResourceDrag,
   type SidebarPinDropPlacement,
   type SidebarPinnedResourceDropAction,
 } from "./sidebarPinDrops";
@@ -349,13 +349,13 @@ export function AppSidebar({
     }
   }, [companyID, explorerTriageBusy, explorerTriagePriorityMenu]);
 
-  const pinAcceptsResourceDrop = useCallback((pin: SidebarPin, dataTransfer: DataTransfer): boolean => (
-    !pinnedResourceDropBusy && sidebarPinAcceptsPinnedResourceDrop(pin, dataTransfer)
+  const pinAcceptsResourceDrag = useCallback((pin: SidebarPin, dataTransfer: DataTransfer): boolean => (
+    !pinnedResourceDropBusy && sidebarPinAcceptsPinnedResourceDrag(pin, dataTransfer)
   ), [pinnedResourceDropBusy]);
 
   const pinSectionHasValidDrag = useCallback((dataTransfer: DataTransfer): boolean => (
-    hasSidebarPinSectionDrop(dataTransfer) || pins.some((pin) => pinAcceptsResourceDrop(pin, dataTransfer))
-  ), [pinAcceptsResourceDrop, pins]);
+    hasSidebarPinSectionDrop(dataTransfer) || pins.some((pin) => pinAcceptsResourceDrag(pin, dataTransfer))
+  ), [pinAcceptsResourceDrag, pins]);
 
   const assignNodesToPinnedLogicGate = useCallback(async (action: Extract<SidebarPinnedResourceDropAction, { kind: "nodes_to_logic_gate" }>) => {
     const cleanCompanyID = companyID.trim();
@@ -1172,7 +1172,7 @@ export function AppSidebar({
                     setPinDropTarget({ key: pinKey, placement: getPinDropPlacement(event) });
                     return;
                   }
-                  if (!pinAcceptsResourceDrop(pin, event.dataTransfer)) return;
+                  if (!pinAcceptsResourceDrag(pin, event.dataTransfer)) return;
                   event.preventDefault();
                   event.stopPropagation();
                   event.dataTransfer.dropEffect = "copy";
