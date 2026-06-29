@@ -147,7 +147,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   rowIconColor,
   dropRowBackground,
   selectedRowBackground,
-  rowRuleColor,
+  rowRuleColor: _rowRuleColor,
   folderToggleColor,
   isDarkTheme,
   isSearchActive,
@@ -196,7 +196,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
     ? `inset 0 0 0 1px rgba(14, 165, 233, 0.38), inset 3px 0 0 ${accent}, 0 0 16px rgba(14, 165, 233, 0.16)`
     : isExplorerDropTarget && dragOverPlacement
     ? (dragOverPlacement === "before" ? `inset 0 2px 0 ${accent}` : `inset 0 -2px 0 ${accent}`)
-    : `inset 0 -1px 0 ${rowRuleColor}`;
+    : "none";
   const hierarchyGuideColor = isDarkTheme ? "rgba(148, 163, 184, 0.26)" : "rgba(100, 116, 139, 0.22)";
   const hierarchyGuideDepth = Math.max(0, Math.floor(row.depth));
   const hierarchyConnectors = React.useMemo(() => Array.from({ length: hierarchyGuideDepth }, (_, level) => {
@@ -443,7 +443,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
             const guideLeft = TREE_BASE_LEFT_PX + level * TREE_INDENT_PX + TREE_GUIDE_OFFSET_PX;
             if (isTerminal) {
               const connectorEndLeft = TREE_BASE_LEFT_PX + hierarchyGuideDepth * TREE_INDENT_PX + TREE_GUIDE_CONNECTOR_END_OFFSET_PX;
-              const connectorWidth = Math.max(8, connectorEndLeft - guideLeft);
+              const connectorWidth = Math.max(4, (connectorEndLeft - guideLeft) / 2);
               return (
                 <span
                   key={level}
