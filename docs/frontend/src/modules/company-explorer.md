@@ -170,7 +170,8 @@ Folder runtime update (2026-05-02):
 - The old virtual `Nodes`, `Logic Gates`, `All Nodes`, `All Logic Gates`, Knowledge, and Knowledge Nodes rows are removed from the Explorer tree.
 - Folder rows use fixed yellow icons, node rows use fixed black-and-white document icons, and logic-gate rows use fixed green circuitry AND-gate icons. These icon colors do not follow frame colorways.
 - Explorer row labels do not include live item counts. Count queries belong in bounded API/read models, not in every tree row render.
-- Explorer renders faint vertical hierarchy guide lines for ancestor depth rails. The lines are a human scanning aid only; placement, ownership, permissions, map scope, drag/drop behavior, and API writes still come from the existing folder/item/assignment data model.
+- Explorer renders faint vertical hierarchy guide lines for ancestor depth rails. The rails align with each ancestor row's fixed icon column rather than the expand/collapse arrow column. The lines are a human scanning aid only; placement, ownership, permissions, map scope, drag/drop behavior, and API writes still come from the existing folder/item/assignment data model.
+- Explorer rows show a small lock marker when the row has explicit permission rules. This marker applies to folders, logic gates, and projects from the same `has_permission_rules` read-model flag; it is not rendered for nodes or Kanban boards.
 - Folder creation is now a Company Explorer context-menu action, not an inline plus button. Right-clicking the tree body opens Explorer actions, while frame-level actions remain scoped to the frame/module title plate.
 - When the right-click context has no folder type, the menu order is `Create node folder`, `Create node`, `Create logic gate folder`, `Create logic gate`. Typed folder creation keeps empty folders aligned with the backend item-type invariant. Right-clicking typed rows uses the compatible single `Create folder` action.
 - Right-clicking a concrete folder, node, or logic gate exposes `Rename` and `Delete`, backed by folder/node/logic-gate APIs.
@@ -214,8 +215,13 @@ Explorer move/search update (2026-06-24):
 
 Visual hierarchy update (2026-06-29):
 - Company Explorer row indentation may allocate extra horizontal room so nested rows read clearly at sidebar widths.
-- Vertical depth guide lines are derived from the rendered tree row depth and collapse/filter with the visible rows. They must not introduce new hierarchy, parentage, or scope semantics.
+- Vertical depth guide lines are derived from the rendered tree row depth and collapse/filter with the visible rows. They must line up under the fixed entity icon column for each ancestor level and must not introduce new hierarchy, parentage, or scope semantics.
 - Search/path rows may use the same depth guide rendering as normal tree rows because the guide is presentational and follows the existing `ExplorerTreeNode.depth` value.
+
+Permission marker update (2026-06-29):
+- Company Explorer preserves the V2 `has_permission_rules` flag for folders, logic gates, and projects.
+- Folder, logic-gate, and project rows render the same lock marker when that flag is true, so resource-specific permission rules are visible directly in the tree.
+- The lock is a status indicator only. It does not open permissions, grant access, deny access, or change the context-menu rules by itself.
 
 Kanban Explorer update (2026-05-04):
 - Kanban boards are durable Explorer items with `item_type=kanban` and a fixed three-column board icon.
