@@ -45,6 +45,8 @@ MT34 - Folder metadata refresh after archive or unarchive is only a count/metada
 MT35 - If folder metadata reconciliation is slow or fails after archive or unarchive, the triage list remains usable and counts can reconcile later.
 MT36 - Backend or provider events caused by archive work must be identifiable as archive confirmations instead of generic mailbox updates.
 MT37 - Archive confirmations for the frozen previous page must not trigger a full message-list reload or blank the currently visible prefetched page.
+MT38 - Star and unstar actions in My Triage must optimistically update the visible message state and Starred count before backend or provider confirmation returns.
+MT39 - Backend or provider confirmations caused by local My Triage star and unstar actions must reconcile caches/counts without triggering a full message-list reload or blanking the active Inbox or Starred tab.
 
 ## Scenarios
 
@@ -158,6 +160,8 @@ Business logic covered:
 - MT35
 - MT36
 - MT37
+- MT38
+- MT39
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
@@ -175,5 +179,6 @@ Expected:
 - The hidden archive queue accepts at most 140 pending emails; if adding the current page would exceed that limit, the advance action is disabled until enough background archive work completes.
 - Folder metadata refresh runs after the primary archive-and-next work as reconciliation only; it does not fetch the next email page.
 - Archive confirmation events from the app backend or provider webhook reconcile caches/counts without blanking or fully reloading the prefetched page.
+- Starring or unstarring a message updates the row and Starred count locally, and the matching backend/provider confirmation does not blank or fully reload the active Inbox or Starred tab.
 - If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
 - If there is no next page, clicking the advance action archives the visible page and leaves the list empty until more messages arrive or a refresh reloads the inbox.

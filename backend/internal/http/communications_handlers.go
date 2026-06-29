@@ -524,7 +524,8 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 		cacheScope := communicationsConnectionCacheScope(connection)
 		s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
 		s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, req.Folders != nil)
-		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", message.ID)
+		eventTrigger, eventMeta := communicationsMessageUpdateEvent(req.Starred, sharedInboxID)
+		s.publishCommunicationsEventWithMeta(connection.UserID, "mailbox_changed", eventTrigger, message.ID, eventMeta)
 		writeJSON(w, http.StatusOK, map[string]any{"message": message})
 	case http.MethodDelete:
 		if err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
@@ -596,6 +597,19 @@ func (s *Server) downloadCommunicationsAttachment(w http.ResponseWriter, r *http
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
+}
+
+func communicationsMessageUpdateEvent(starred *bool, sharedInboxID string) (string, communicationsEventMetadata) {
+	meta := communicationsEventMetadata{SharedInboxID: strings.TrimSpace(sharedInboxID)}
+	if starred == nil {
+		return "message.updated", meta
+	}
+	if *starred {
+		meta.Action = "star"
+		return "message.starred", meta
+	}
+	meta.Action = "unstar"
+	return "message.unstarred", meta
 }
 
 func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, messageID, sharedInboxID string) {
