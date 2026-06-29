@@ -262,6 +262,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/notifications/unread-count", s.handleNotificationUnreadCount)
 	mux.HandleFunc("/v1/notifications/read-all", s.handleNotificationReadAll)
 	mux.HandleFunc("/v1/notifications/", s.handleNotificationByID)
+	mux.HandleFunc("/v1/saved-view-preferences", s.handleSavedViewPreferences)
 	mux.HandleFunc("/v1/saved-views", s.handleSavedViews)
 	mux.HandleFunc("/v1/saved-views/", s.handleSavedViewByID)
 	mux.HandleFunc("/v1/user-pins/order", s.handleUserPinsOrder)

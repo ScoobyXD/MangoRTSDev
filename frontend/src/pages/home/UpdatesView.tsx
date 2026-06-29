@@ -13,7 +13,7 @@ import {
 } from "../../modules/notifications/notificationsApi";
 import { formatNotificationTimestamp } from "../../modules/notifications/notificationTime";
 import { createSavedViewID, deleteSavedView as deleteSavedViewRequest, fetchSavedViews, saveSavedView, type SavedView, type SavedViewPrincipal } from "./savedViewsApi";
-import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNestedGroup } from "./universalGrouping";
+import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNestedGroup } from "../../modules/grouping/universalGrouping";
 
 type UpdatesViewProps = {
   apiBase: string;

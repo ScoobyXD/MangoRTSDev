@@ -55,6 +55,7 @@ func (r *MemoryRepo) upsertNodeLogicGateAssignmentFromCardLocked(card domain.Kan
 		CompatibilityBoardID: card.BoardID,
 		CompatibilityCardID:  card.CardID,
 		RequestedByUserID:    card.RequestedByUserID,
+		PlacedByUserID:       card.PlacedByUserID,
 		CreatedTimestamp:     card.CreatedTimestamp,
 		UpdatedTimestamp:     card.UpdatedTimestamp,
 	})
@@ -71,6 +72,7 @@ type nodeLogicGateAssignmentMutation struct {
 	CompatibilityBoardID string
 	CompatibilityCardID  string
 	RequestedByUserID    string
+	PlacedByUserID       string
 	CreatedTimestamp     time.Time
 	UpdatedTimestamp     time.Time
 }
@@ -106,6 +108,9 @@ func (r *MemoryRepo) upsertNodeLogicGateAssignmentLocked(input nodeLogicGateAssi
 	assignment.Position = input.Position
 	assignment.CompatibilityBoardID = input.CompatibilityBoardID
 	assignment.CompatibilityCardID = input.CompatibilityCardID
+	if placedBy := strings.TrimSpace(input.PlacedByUserID); placedBy != "" {
+		assignment.PlacedByUserID = placedBy
+	}
 	if logicGateWorkStatusKeyOrDefault(input.StatusKey, input.ColumnID) == LogicGateWorkStatusRequested {
 		if requestedBy := strings.TrimSpace(input.RequestedByUserID); requestedBy != "" {
 			assignment.RequestedByUserID = requestedBy

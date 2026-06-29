@@ -23,6 +23,13 @@ var savedViewGroupingFieldsBySurface = map[string]map[string]bool{
 		"project":    true,
 		"logic_gate": true,
 	},
+	SavedViewSurfaceLogicGateKanban: {
+		"account":  true,
+		"due_date": true,
+		"person":   true,
+		"priority": true,
+		"status":   true,
+	},
 }
 
 func NormalizeSavedViewSurface(surface string) (string, bool) {
@@ -31,6 +38,8 @@ func NormalizeSavedViewSurface(surface string) (string, bool) {
 		return SavedViewSurfaceMyWork, true
 	case SavedViewSurfaceUpdates:
 		return SavedViewSurfaceUpdates, true
+	case SavedViewSurfaceLogicGateKanban:
+		return SavedViewSurfaceLogicGateKanban, true
 	default:
 		return "", false
 	}
@@ -45,6 +54,21 @@ func NormalizeSavedViewPrincipal(principal string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func savedViewSurfaceAllowsPrincipal(surface, principal string) bool {
+	surface, ok := NormalizeSavedViewSurface(surface)
+	if !ok {
+		return false
+	}
+	principal, ok = NormalizeSavedViewPrincipal(principal)
+	if !ok {
+		return false
+	}
+	if surface == SavedViewSurfaceLogicGateKanban {
+		return principal == SavedViewPrincipalUser
+	}
+	return principal == SavedViewPrincipalUser || principal == SavedViewPrincipalGroup
 }
 
 func NormalizeSavedViewGroupings(surface string, groupings []domain.SavedViewGrouping) ([]domain.SavedViewGrouping, bool) {
@@ -98,6 +122,9 @@ func normalizeSavedViewInput(input SavedViewInput) (SavedViewInput, bool) {
 	if !ok {
 		return SavedViewInput{}, false
 	}
+	if !savedViewSurfaceAllowsPrincipal(surface, principal) {
+		return SavedViewInput{}, false
+	}
 	principalID := cleanUUIDText(input.PrincipalID)
 	if principalID == "" {
 		return SavedViewInput{}, false
@@ -117,6 +144,21 @@ func normalizeSavedViewInput(input SavedViewInput) (SavedViewInput, bool) {
 	input.PrincipalID = principalID
 	input.Name = name
 	input.Groupings = groupings
+	return input, true
+}
+
+func normalizeSavedViewPreferenceInput(input SavedViewPreferenceInput) (SavedViewPreferenceInput, bool) {
+	companyID := cleanUUIDText(input.CompanyID)
+	userID := cleanUUIDText(input.UserID)
+	surface, ok := NormalizeSavedViewSurface(input.Surface)
+	if companyID == "" || userID == "" || !ok {
+		return SavedViewPreferenceInput{}, false
+	}
+	selectedSavedViewID := cleanUUIDText(input.SelectedSavedViewID)
+	input.CompanyID = companyID
+	input.UserID = userID
+	input.Surface = surface
+	input.SelectedSavedViewID = selectedSavedViewID
 	return input, true
 }
 

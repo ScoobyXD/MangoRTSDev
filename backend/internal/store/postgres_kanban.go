@@ -58,6 +58,7 @@ func scanKanbanCard(row interface {
 		&item.NodeID,
 		&item.LogicGateID,
 		&item.RequestedByUserID,
+		&item.PlacedByUserID,
 		&item.NodeTitle,
 		&item.DescriptionSnapshot,
 		&item.IsIssue,
@@ -466,6 +467,10 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		issueValue = previousAssignment.IsIssue
 	}
 	snapshotGVICFromLogicGate := !hadPreviousAssignment || previousAssignment.LogicGateID != input.LogicGateID
+	placedByUserID := strings.TrimSpace(previousAssignment.PlacedByUserID)
+	if !hadPreviousAssignment || previousAssignment.LogicGateID != input.LogicGateID {
+		placedByUserID = strings.TrimSpace(input.ActorUserID)
+	}
 
 	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.assignment_writes")
 	assignment, err := upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
@@ -479,6 +484,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		CompatibilityBoardID: boardID,
 		CompatibilityCardID:  cardID,
 		RequestedByUserID:    input.ActorUserID,
+		PlacedByUserID:       placedByUserID,
 	})
 	stop()
 	if err != nil {
@@ -623,6 +629,10 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	if cardID == "" {
 		cardID = newUUIDv7String()
 	}
+	placedByUserID := strings.TrimSpace(assignment.PlacedByUserID)
+	if crossLogicGateMove {
+		placedByUserID = strings.TrimSpace(input.ActorUserID)
+	}
 
 	assignment, err = upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
 		AssignmentID:         assignment.AssignmentID,
@@ -636,6 +646,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		CompatibilityBoardID: targetBoardID,
 		CompatibilityCardID:  cardID,
 		RequestedByUserID:    input.ActorUserID,
+		PlacedByUserID:       placedByUserID,
 	})
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
@@ -781,6 +792,7 @@ func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssign
 		CompatibilityBoardID: assignment.CompatibilityBoardID,
 		CompatibilityCardID:  assignment.CompatibilityCardID,
 		RequestedByUserID:    assignment.RequestedByUserID,
+		PlacedByUserID:       assignment.PlacedByUserID,
 	})
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err

@@ -114,7 +114,7 @@ create table if not exists saved_views (
   position integer not null default 0,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint saved_views_surface_chk check (surface in ('my_work', 'updates')),
+  constraint saved_views_surface_chk check (surface in ('my_work', 'updates', 'logic_gate_kanban')),
   constraint saved_views_principal_chk check (principal in ('user', 'group')),
   constraint saved_views_name_nonblank_chk check (btrim(name) <> ''),
   constraint saved_views_groupings_array_chk check (jsonb_typeof(groupings) = 'array'),
@@ -128,6 +128,19 @@ create index if not exists idx_saved_views_surface_principal_position
 create index if not exists idx_saved_views_group_principal
   on saved_views(company_id, principal_id)
   where principal = 'group';
+
+create table if not exists saved_view_preferences (
+  company_id uuid not null,
+  surface text not null,
+  user_id uuid not null,
+  selected_saved_view_id uuid,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint saved_view_preferences_surface_chk check (surface in ('my_work', 'updates', 'logic_gate_kanban')),
+  primary key (company_id, surface, user_id),
+  foreign key (company_id) references companies(company_id) on delete cascade,
+  foreign key (company_id, user_id) references company_memberships(company_id, user_id) on delete cascade
+);
 
 create table if not exists pins (
   pin_id uuid not null,
@@ -1029,6 +1042,7 @@ create table if not exists node_logic_gate_assignments (
   compatibility_board_id text not null,
   compatibility_card_id uuid not null,
   requested_by_user_id uuid,
+  placed_by_user_id uuid,
   version bigint not null default 1,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
@@ -1037,7 +1051,8 @@ create table if not exists node_logic_gate_assignments (
   primary key (company_id, assignment_id),
   foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade,
-  foreign key (company_id, requested_by_user_id) references company_memberships (company_id, user_id) on delete set null
+  foreign key (company_id, requested_by_user_id) references company_memberships (company_id, user_id) on delete set null,
+  foreign key (company_id, placed_by_user_id) references company_memberships (company_id, user_id) on delete set null
 );
 
 create unique index if not exists idx_node_logic_gate_assignments_one_active_node
@@ -1095,6 +1110,7 @@ create table if not exists kanban_board_projection (
   compatibility_board_id text not null,
   compatibility_card_id uuid not null,
   requested_by_user_id uuid,
+  placed_by_user_id uuid,
   accounts jsonb not null default '[]'::jsonb,
   projection_updated_timestamp timestamptz not null default now(),
   constraint kanban_board_projection_status_nonblank_chk check (btrim(status) <> ''),
@@ -1125,6 +1141,7 @@ insert into kanban_board_projection (
   compatibility_board_id,
   compatibility_card_id,
   requested_by_user_id,
+  placed_by_user_id,
   accounts,
   projection_updated_timestamp
 )
@@ -1147,6 +1164,7 @@ select
   assignment.compatibility_board_id,
   assignment.compatibility_card_id,
   assignment.requested_by_user_id,
+  assignment.placed_by_user_id,
   coalesce(account_snapshot.accounts_json, '[]'::jsonb),
   now()
 from node_logic_gate_assignments assignment
@@ -1190,6 +1208,7 @@ do update set
   compatibility_board_id = excluded.compatibility_board_id,
   compatibility_card_id = excluded.compatibility_card_id,
   requested_by_user_id = excluded.requested_by_user_id,
+  placed_by_user_id = excluded.placed_by_user_id,
   accounts = excluded.accounts,
   projection_updated_timestamp = now();
 

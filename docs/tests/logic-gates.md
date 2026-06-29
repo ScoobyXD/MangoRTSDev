@@ -1,6 +1,8 @@
-Last updated: 2026-06-22
+Last updated: 2026-06-29
 
 # Logic Gates Tests
+
+Detailed Logic Gate Kanban board behavior, including subgrouping, request card footers, and card placement provenance, is covered in `docs/tests/kanbanboard.md`.
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, buildKanbanGroupedBoardLayout, clampColumnHeight, clampColumnWidth, createClientUUIDv7, getDefaultKanbanYAxisSortDirection, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getOrderedKanbanCardIDs, groupCardsByColumn, hydrateKanbanCardsFromNodes, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, resolveKanbanGroupDropAssignment, sanitizeExplorerEntityDragPayload, shouldRefreshKanbanBoardForNodeStatusChange, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, clampColumnHeight, clampColumnWidth, createClientUUIDv7, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getKanbanGroupValues, getOrderedKanbanCardIDs, groupCardsByColumn, hydrateKanbanCardsFromNodes, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, shouldRefreshKanbanBoardForNodeStatusChange, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn, type KanbanGroupField } from "../../../../frontend/src/modules/kanban/shared.js";
+import { buildUniversalNestedGroups } from "../../../../frontend/src/modules/grouping/universalGrouping.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
   return {
@@ -175,105 +176,56 @@ test("node status reconciliation handles Issue status without guessing columns",
   }), false);
 });
 
-test("grouped board layout keeps person grouping unassigned without node assignees", () => {
-  const columns = [
-    column({ column_id: "todo", title: "Todo", position: 1000 }),
-    column({ column_id: "done", title: "Done", position: 2000 }),
-    column({ column_id: "empty", title: "Empty", position: 3000 }),
-  ];
-  const cards = [
-    card({ card_id: "todo-jonathan", column_id: "todo", node_id: "node-jonathan", position: 1000 }),
-    card({ card_id: "todo-joe", column_id: "todo", node_id: "node-joe", position: 2000 }),
-    card({ card_id: "done-pam", column_id: "done", node_id: "node-pam", position: 1000 }),
-  ];
-  const layout = buildKanbanGroupedBoardLayout({
-    columns,
-    cards,
-    xGroupBy: "status",
-    yGroupBy: "person",
-    nodeByID: new Map([
-      ["node-jonathan", { node_id: "node-jonathan" }],
-      ["node-joe", { node_id: "node-joe" }],
-      ["node-pam", { node_id: "node-pam" }],
-    ]),
-    userByID: new Map(),
-  });
+test("kanban grouping values use placed-by users for by-person grouping", () => {
+  const userByID = new Map([["user-1", { user_id: "user-1", display_name: "Pat Lee", email: "pat@example.com" }]]);
 
-  assert.deepEqual(layout.rows.map((row) => row.label), ["Unassigned"]);
-  assert.deepEqual(layout.columns.map((groupColumn) => groupColumn.label), ["Todo", "Done", "Empty"]);
-  assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["todo-jonathan", "todo-joe"]]);
-  assert.deepEqual(layout.columns[1].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["done-pam"]]);
-  assert.deepEqual(layout.columns[2].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[]]);
+  assert.deepEqual(getKanbanGroupValues(
+    card({ placed_by_user_id: "user-1" }),
+    "person",
+    new Map(),
+    new Map(),
+    userByID,
+  ), [{ key: "person:user-1", label: "Pat Lee", sortValue: "pat lee" }]);
+
+  assert.deepEqual(getKanbanGroupValues(
+    card({ placed_by_user_id: "" }),
+    "person",
+    new Map(),
+    new Map(),
+    userByID,
+  ), [{ key: "person:none", label: "No person", sortValue: "", sortLast: true }]);
 });
 
-test("grouped board layout sorts group axes and uses deadline priority labels", () => {
-  const columns = [
-    column({ column_id: "todo", title: "Todo", position: 1000 }),
-    column({ column_id: "done", title: "Done", position: 2000 }),
-  ];
-  const cards = [
-    card({ card_id: "low", column_id: "todo", node_id: "node-low", position: 1000 }),
-    card({ card_id: "urgent", column_id: "done", node_id: "node-urgent", position: 1000 }),
-    card({ card_id: "unassigned", column_id: "todo", node_id: "node-unassigned", position: 2000 }),
-  ];
-  const layout = buildKanbanGroupedBoardLayout({
-    columns,
-    cards,
-    xGroupBy: "status",
-    yGroupBy: "priority",
-    xSortDirection: "desc",
-    ySortDirection: "asc",
-    nodeByID: new Map([
-      ["node-low", { node_id: "node-low", priority: 5 }],
-      ["node-urgent", { node_id: "node-urgent", priority: 1 }],
-      ["node-unassigned", { node_id: "node-unassigned" }],
-    ]),
-    userByID: new Map(),
-  });
+test("kanban grouping values resolve status priority and due date buckets", () => {
+  const columns = new Map([
+    ["todo", column({ column_id: "todo", title: "Todo", position: 1000 })],
+    ["done", column({ column_id: "done", title: "Done", position: 2000 })],
+  ]);
+  const nodeByID = new Map([
+    ["node-urgent", { node_id: "node-urgent", priority: 1, due_date: "2026-05-09" }],
+    ["node-none", { node_id: "node-none" }],
+  ]);
 
-  assert.deepEqual(layout.columns.map((groupColumn) => groupColumn.label), ["Done", "Todo"]);
-  assert.deepEqual(layout.rows.map((row) => row.label), ["1\u00A0\u00A0URGENT(<1hr)", "5\u00A0\u00A0Later (low priority)", "No priority"]);
-  assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["urgent"], [], []]);
-  assert.deepEqual(layout.columns[1].cells.map((cell) => cell.cards.map((item) => item.card_id)), [[], ["low"], ["unassigned"]]);
+  assert.deepEqual(getKanbanGroupValues(card({ card_id: "task", column_id: "done" }), "status", columns, nodeByID, new Map()), [
+    { key: "status:done", label: "Done", sortValue: 2000 },
+  ]);
+  assert.deepEqual(getKanbanGroupValues(card({ card_id: "issue", is_issue: true }), "status", columns, nodeByID, new Map()), [
+    { key: "issue", label: "Issue", sortValue: Number.MAX_SAFE_INTEGER },
+  ]);
+  assert.deepEqual(getKanbanGroupValues(card({ card_id: "urgent", node_id: "node-urgent" }), "priority", columns, nodeByID, new Map()), [
+    { key: "priority:1", label: "1\u00A0\u00A0URGENT(<1hr)", sortValue: 1, sortLast: false },
+  ]);
+  assert.deepEqual(getKanbanGroupValues(card({ card_id: "none", node_id: "node-none" }), "due_date", columns, nodeByID, new Map()), [
+    { key: "due:none", label: "No due date", sortValue: "", sortLast: true },
+  ]);
 });
 
-test("default Y-axis grouping sort puts urgent priority first and due dates earliest first", () => {
-  assert.equal(getDefaultKanbanYAxisSortDirection("priority"), "asc");
-  assert.equal(getDefaultKanbanYAxisSortDirection("due_date"), "asc");
-  assert.equal(getDefaultKanbanYAxisSortDirection("status"), "asc");
-  assert.equal(getDefaultKanbanYAxisSortDirection("person"), "asc");
-  assert.equal(getDefaultKanbanYAxisSortDirection("account"), "asc");
-});
-
-test("grouped board layout keeps no due date after real due dates", () => {
-  const columns = [column({ column_id: "todo", title: "Todo", position: 1000 })];
-  const cards = [
-    card({ card_id: "none", column_id: "todo", node_id: "node-none", position: 1000 }),
-    card({ card_id: "soon", column_id: "todo", node_id: "node-soon", position: 2000 }),
-    card({ card_id: "later", column_id: "todo", node_id: "node-later", position: 3000 }),
-  ];
-  const layout = buildKanbanGroupedBoardLayout({
-    columns,
-    cards,
-    xGroupBy: "status",
-    yGroupBy: "due_date",
-    nodeByID: new Map([
-      ["node-none", { node_id: "node-none" }],
-      ["node-soon", { node_id: "node-soon", due_date: "2026-05-09" }],
-      ["node-later", { node_id: "node-later", due_date: "2026-06-01" }],
-    ]),
-    userByID: new Map(),
-  });
-
-  assert.deepEqual(layout.rows.map((row) => row.label), ["2026-05-09", "2026-06-01", "No due date"]);
-});
-
-test("grouped board layout duplicates cards across account buckets", () => {
-  const columns = [column({ column_id: "todo", title: "Todo", position: 1000 })];
+test("universal nested grouping keeps kanban account duplication and no-account trailing", () => {
   const cards = [
     card({
       card_id: "shared",
       node_id: "node-shared",
+      position: 1000,
       accounts: [
         { company_id: "c", account_id: "costco", name: "Costco", created_timestamp: "2026-06-01T00:00:00.000Z" },
         { company_id: "c", account_id: "tj-maxx", name: "TJ Maxx", created_timestamp: "2026-06-01T00:00:00.000Z" },
@@ -281,69 +233,15 @@ test("grouped board layout duplicates cards across account buckets", () => {
     }),
     card({ card_id: "none", node_id: "node-none", position: 2000 }),
   ];
-  const layout = buildKanbanGroupedBoardLayout({
-    columns,
-    cards,
-    xGroupBy: "status",
-    yGroupBy: "account",
-    nodeByID: new Map(),
-    userByID: new Map(),
+  const groups = buildUniversalNestedGroups<KanbanCard, KanbanGroupField>(cards, [{ field: "account", direction: "asc" }], {
+    rootID: "kanban:test",
+    rowKey: (item) => item.card_id,
+    getValues: (item, field) => getKanbanGroupValues(item, field, new Map(), new Map(), new Map()),
+    sortRows: (items) => [...items].sort((left, right) => left.position - right.position),
   });
 
-  assert.deepEqual(layout.rows.map((row) => row.label), ["Costco", "TJ Maxx", "No account"]);
-  assert.deepEqual(layout.columns[0].cells.map((cell) => cell.cards.map((item) => item.card_id)), [["shared"], ["shared"], ["none"]]);
-});
-
-test("grouped board drop assignment resolves status without assigning people", () => {
-  const columns = [
-    column({ column_id: "todo", title: "Todo", position: 1000 }),
-    column({ column_id: "done", title: "Done", position: 2000 }),
-  ];
-
-  assert.deepEqual(resolveKanbanGroupDropAssignment({
-    columns,
-    xGroupBy: "status",
-    xGroupKey: "status:done",
-    yGroupBy: "person",
-    yGroupKey: "person:user-jonathan",
-  }), {
-    columnID: "done",
-    isIssue: false,
-  });
-
-  assert.deepEqual(resolveKanbanGroupDropAssignment({
-    columns,
-    xGroupBy: "status",
-    xGroupKey: "issue",
-    yGroupBy: "person",
-    yGroupKey: "person:unassigned",
-  }), {
-    isIssue: true,
-  });
-});
-
-test("grouped board drop assignment resolves priority and due date cell properties", () => {
-  assert.deepEqual(resolveKanbanGroupDropAssignment({
-    columns: [column({ column_id: "todo", title: "Todo", position: 1000 })],
-    xGroupBy: "priority",
-    xGroupKey: "priority:3",
-    yGroupBy: "due_date",
-    yGroupKey: "due:2026-06-01",
-  }), {
-    priority: 3,
-    dueDate: "2026-06-01",
-  });
-
-  assert.deepEqual(resolveKanbanGroupDropAssignment({
-    columns: [column({ column_id: "todo", title: "Todo", position: 1000 })],
-    xGroupBy: "priority",
-    xGroupKey: "priority:0",
-    yGroupBy: "due_date",
-    yGroupKey: "due:none",
-  }), {
-    priority: null,
-    dueDate: null,
-  });
+  assert.deepEqual(groups.map((group) => group.label), ["Costco", "TJ Maxx", "No account"]);
+  assert.deepEqual(groups.map((group) => group.rows.map((item) => item.card_id)), [["shared"], ["shared"], ["none"]]);
 });
 
 test("card selection helper supports ranges and additive toggles across columns", () => {

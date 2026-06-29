@@ -20,6 +20,7 @@ position,
 compatibility_board_id,
 compatibility_card_id::text,
 coalesce(requested_by_user_id::text, ''),
+coalesce(placed_by_user_id::text, ''),
 version,
 created_timestamp,
 updated_timestamp`
@@ -38,6 +39,7 @@ func scanNodeLogicGateAssignment(row interface{ Scan(dest ...any) error }) (doma
 		&item.CompatibilityBoardID,
 		&item.CompatibilityCardID,
 		&item.RequestedByUserID,
+		&item.PlacedByUserID,
 		&item.Version,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
@@ -82,6 +84,7 @@ type nodeLogicGateAssignmentSQLInput struct {
 	CompatibilityBoardID string
 	CompatibilityCardID  string
 	RequestedByUserID    string
+	PlacedByUserID       string
 }
 
 type nodeLogicGateAssignmentQueryRower interface {
@@ -114,6 +117,7 @@ insert into node_logic_gate_assignments (
   compatibility_board_id,
   compatibility_card_id,
   requested_by_user_id,
+  placed_by_user_id,
   created_timestamp,
   updated_timestamp
 ) values (
@@ -128,6 +132,7 @@ insert into node_logic_gate_assignments (
   $9,
   $10::uuid,
   case when $5 = 'requested' then nullif($11, '')::uuid else null end,
+  nullif($12, '')::uuid,
   now(),
   now()
 )
@@ -144,6 +149,7 @@ do update set
     when excluded.status_key = 'requested' then coalesce(excluded.requested_by_user_id, node_logic_gate_assignments.requested_by_user_id)
     else null
   end,
+  placed_by_user_id=coalesce(excluded.placed_by_user_id, node_logic_gate_assignments.placed_by_user_id),
   version=node_logic_gate_assignments.version + 1,
   updated_timestamp=now()
 returning `+nodeLogicGateAssignmentSelectColumns,
@@ -158,6 +164,7 @@ returning `+nodeLogicGateAssignmentSelectColumns,
 		input.CompatibilityBoardID,
 		input.CompatibilityCardID,
 		strings.TrimSpace(input.RequestedByUserID),
+		strings.TrimSpace(input.PlacedByUserID),
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.NodeLogicGateAssignment{}, ErrNotFound
@@ -198,6 +205,7 @@ where projection.company_id=$1::uuid
 			ColumnID:         logicGateWorkStatusKeyOrDefault(assignment.StatusKey, LogicGateWorkStatusPending),
 			NodeID:           assignment.NodeID,
 			LogicGateID:      &logicGateID,
+			PlacedByUserID:   assignment.PlacedByUserID,
 			IsIssue:          assignment.IsIssue,
 			Position:         assignment.Position,
 			CreatedTimestamp: assignment.CreatedTimestamp,
@@ -223,6 +231,7 @@ func syncNodeLogicGateAssignmentFromCardSQL(ctx context.Context, queryer nodeLog
 		CompatibilityBoardID: card.BoardID,
 		CompatibilityCardID:  card.CardID,
 		RequestedByUserID:    card.RequestedByUserID,
+		PlacedByUserID:       card.PlacedByUserID,
 	})
 }
 
