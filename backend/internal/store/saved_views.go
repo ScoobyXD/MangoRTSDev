@@ -24,11 +24,11 @@ var savedViewGroupingFieldsBySurface = map[string]map[string]bool{
 		"logic_gate": true,
 	},
 	SavedViewSurfaceLogicGateKanban: {
-		"account":  true,
-		"due_date": true,
-		"person":   true,
-		"priority": true,
-		"status":   true,
+		"account":    true,
+		"date_added": true,
+		"due_date":   true,
+		"person":     true,
+		"priority":   true,
 	},
 }
 

@@ -248,7 +248,7 @@ export type KanbanCardSelectionUpdate = {
 
 export type KanbanColumnDropPlacement = "before" | "after" | "swap";
 export type KanbanCardDropPlacement = "before" | "after";
-export type KanbanGroupField = "status" | "person" | "priority" | "due_date" | "account";
+export type KanbanGroupField = "person" | "priority" | "due_date" | "date_added" | "account";
 
 export type KanbanGroupNode = {
   node_id: string;
@@ -276,10 +276,10 @@ export type KanbanGroupedBoardRow = {
 };
 
 export const KANBAN_GROUP_FIELDS: Array<{ value: KanbanGroupField; label: string }> = [
-  { value: "status", label: "Status" },
   { value: "person", label: "By person" },
   { value: "priority", label: "Priority" },
   { value: "due_date", label: "Due Date" },
+  { value: "date_added", label: "Date Added" },
   { value: "account", label: "Account" },
 ];
 
@@ -767,11 +767,6 @@ export function shouldRefreshKanbanBoardForNodeStatusChange(args: {
   return visibleCards.some((card) => card.column_id !== targetColumn.column_id || card.is_issue);
 }
 
-function kanbanStatusGroupFromColumn(column: Pick<KanbanColumn, "title" | "position">): KanbanGroupedBoardRow {
-  const label = column.title.trim() || "No status";
-  return { key: `status:${label.toLowerCase()}`, label, sortValue: column.position };
-}
-
 function getKanbanPriorityGroupLabel(priority: number): string {
   if (priority === 1) return "1\u00A0\u00A0URGENT(<1hr)";
   if (priority === 2) return "2\u00A0\u00A0By end of day";
@@ -779,6 +774,23 @@ function getKanbanPriorityGroupLabel(priority: number): string {
   if (priority === 4) return "4\u00A0\u00A0Sprint (1 week)";
   if (priority === 5) return "5\u00A0\u00A0Later (low priority)";
   return "No priority";
+}
+
+function kanbanDateAddedLabel(timestamp: string): string {
+  const trimmed = timestamp.trim();
+  const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/);
+  return match ? `${match[1]} ${match[2]}` : trimmed;
+}
+
+function kanbanDateAddedGroup(timestamp: string): KanbanGroupedBoardRow {
+  const cleanTimestamp = timestamp.trim();
+  if (!cleanTimestamp) return { key: "date-added:none", label: "No date added", sortValue: "", sortLast: true };
+  const millis = Date.parse(cleanTimestamp);
+  return {
+    key: `date-added:${cleanTimestamp}`,
+    label: kanbanDateAddedLabel(cleanTimestamp),
+    sortValue: Number.isFinite(millis) ? millis : cleanTimestamp,
+  };
 }
 
 function kanbanAccountGroups(accounts: Account[] | undefined): KanbanGroupedBoardRow[] {
@@ -812,16 +824,11 @@ export function getKanbanGroupValue(
 export function getKanbanGroupValues(
   card: KanbanCard,
   field: KanbanGroupField,
-  columnByID: ReadonlyMap<string, Pick<KanbanColumn, "title" | "position">>,
+  _columnByID: ReadonlyMap<string, Pick<KanbanColumn, "title" | "position">>,
   nodeByID: ReadonlyMap<string, KanbanGroupNode>,
   userByID: ReadonlyMap<string, KanbanGroupUser>,
 ): KanbanGroupedBoardRow[] {
   const node = nodeByID.get(card.node_id);
-  if (field === "status") {
-    if (card.is_issue) return [{ key: "issue", label: "Issue", sortValue: Number.MAX_SAFE_INTEGER }];
-    const column = columnByID.get(card.column_id);
-    return [column ? kanbanStatusGroupFromColumn(column) : { key: "status:no-status", label: "No status", sortValue: Number.MAX_SAFE_INTEGER - 1 }];
-  }
   if (field === "person") {
     const placedByUserID = (card.placed_by_user_id ?? "").trim();
     if (!placedByUserID) return [{ key: "person:none", label: "No person", sortValue: "", sortLast: true }];
@@ -834,6 +841,7 @@ export function getKanbanGroupValues(
     const normalized = priority > 0 ? Math.max(1, Math.min(5, Math.round(priority))) : 0;
     return [{ key: `priority:${normalized}`, label: getKanbanPriorityGroupLabel(normalized), sortValue: normalized, sortLast: normalized === 0 }];
   }
+  if (field === "date_added") return [kanbanDateAddedGroup(card.created_timestamp)];
   if (field === "account") return kanbanAccountGroups(card.accounts ?? node?.accounts);
   const dueDate = (card.due_date ?? node?.due_date ?? "").trim();
   return [dueDate ? { key: `due:${dueDate}`, label: dueDate, sortValue: dueDate } : { key: "due:none", label: "No due date", sortValue: "", sortLast: true }];

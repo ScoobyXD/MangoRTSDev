@@ -1,13 +1,10 @@
-import type React from "react";
-import type { SavedView, SavedViewGrouping } from "../../pages/home/savedViewsApi";
+import React, { useEffect, useState } from "react";
+import type { SavedViewGrouping } from "../../pages/home/savedViewsApi";
 import { KANBAN_GROUP_FIELDS } from "./shared";
 
 type KanbanGroupingControlsProps = {
   controlsRef: React.RefObject<HTMLDivElement>;
   open: boolean;
-  savedViews: SavedView[];
-  selectedSavedViewID: string;
-  viewName: string;
   groupings: SavedViewGrouping[];
   loading: boolean;
   saving: boolean;
@@ -19,12 +16,7 @@ type KanbanGroupingControlsProps = {
   subtext: string;
   accent: string;
   onToggleOpen: () => void;
-  onSelectSavedView: (savedViewID: string) => void;
-  onSetViewName: (name: string) => void;
-  onNewSavedView: () => void;
-  onSaveSavedView: () => void;
-  onDeleteSavedView: () => void;
-  onAddGrouping: () => void;
+  onAddGrouping: (field: string) => void;
   onUpdateGrouping: (index: number, grouping: SavedViewGrouping) => void;
   onRemoveGrouping: (index: number) => void;
 };
@@ -32,9 +24,6 @@ type KanbanGroupingControlsProps = {
 export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
   controlsRef,
   open,
-  savedViews,
-  selectedSavedViewID,
-  viewName,
   groupings,
   loading,
   saving,
@@ -46,18 +35,22 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
   subtext,
   accent,
   onToggleOpen,
-  onSelectSavedView,
-  onSetViewName,
-  onNewSavedView,
-  onSaveSavedView,
-  onDeleteSavedView,
   onAddGrouping,
   onUpdateGrouping,
   onRemoveGrouping,
 }) => {
+  const [addGroupingOpen, setAddGroupingOpen] = useState(false);
+  const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
   const usedFields = new Set(groupings.map((grouping) => grouping.field));
-  const addDisabled = KANBAN_GROUP_FIELDS.every((field) => usedFields.has(field.value));
+  const addableFields = KANBAN_GROUP_FIELDS.filter((field) => !usedFields.has(field.value));
   const buttonSurface = isDark ? "rgba(15,23,42,0.86)" : "rgba(255,255,255,0.92)";
+
+  useEffect(() => {
+    if (!open) {
+      setAddGroupingOpen(false);
+      setGroupingFieldMenuIndex(null);
+    }
+  }, [open]);
 
   return (
     <div ref={controlsRef} style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -89,85 +82,109 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
             position: "absolute",
             left: 0,
             top: 38,
-            width: 360,
-            maxWidth: "min(360px, calc(100vw - 32px))",
+            width: 306,
+            maxWidth: "min(306px, calc(100vw - 32px))",
             border: `1px solid ${line}`,
-            borderRadius: 8,
-            background: cardBackground,
+            borderRadius: 12,
+            background: isDark
+              ? cardBackground
+              : "linear-gradient(145deg, rgba(248,252,255,0.98), rgba(240,247,250,0.92) 48%, rgba(236,253,245,0.84))",
             color: text,
-            boxShadow: "0 18px 42px rgba(15,23,42,0.20)",
+            boxShadow: "12px 12px 28px rgba(148,163,184,0.22), -8px -8px 22px rgba(255,255,255,0.80), inset 1px 1px 0 rgba(255,255,255,0.86)",
             padding: 10,
             zIndex: 35,
           }}
         >
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 7, alignItems: "center" }}>
-            <select
-              value={selectedSavedViewID}
-              disabled={loading || saving}
-              onChange={(event) => onSelectSavedView(event.currentTarget.value)}
-              style={selectStyle(text, line, buttonSurface)}
-            >
-              <option value="">Unsaved view</option>
-              {savedViews.map((view) => (
-                <option key={view.saved_view_id} value={view.saved_view_id}>{view.name}</option>
-              ))}
-            </select>
-            <button type="button" disabled={saving} style={smallButtonStyle(text, line, buttonSurface)} onClick={onNewSavedView}>New</button>
-            <button type="button" disabled={saving || !selectedSavedViewID} style={smallButtonStyle(text, line, buttonSurface)} onClick={onDeleteSavedView}>Delete</button>
-          </div>
-          <input
-            value={viewName}
-            disabled={saving}
-            onChange={(event) => onSetViewName(event.currentTarget.value)}
-            style={{ ...selectStyle(text, line, buttonSurface), width: "100%", marginTop: 8 }}
-          />
-          <div style={{ display: "grid", gap: 7, marginTop: 10 }}>
+          <div style={groupingStackStyle}>
             {groupings.map((grouping, index) => (
-              <div key={`${grouping.field}:${index}`} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 72px 28px", gap: 7, alignItems: "center" }}>
-                <select
-                  value={grouping.field}
-                  disabled={saving}
-                  onChange={(event) => onUpdateGrouping(index, { ...grouping, field: event.currentTarget.value })}
-                  style={selectStyle(text, line, buttonSurface)}
+              <div key={`${grouping.field}:${index}`} style={groupingRowStyle(index)}>
+                <button
+                  type="button"
+                  disabled={loading || saving}
+                  onClick={() => {
+                    setAddGroupingOpen(false);
+                    setGroupingFieldMenuIndex(groupingFieldMenuIndex === index ? null : index);
+                  }}
+                  style={groupingFieldButtonStyle(text)}
                 >
                   {KANBAN_GROUP_FIELDS
                     .filter((field) => field.value === grouping.field || !groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
-                    .map((field) => (
-                      <option key={field.value} value={field.value}>{field.label}</option>
-                    ))}
-                </select>
+                    .find((field) => field.value === grouping.field)?.label ?? grouping.field}
+                </button>
+                {groupingFieldMenuIndex === index && (
+                  <div style={groupingFieldMenuStyle(buttonSurface, line)}>
+                    {KANBAN_GROUP_FIELDS
+                      .filter((field) => field.value === grouping.field || !groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
+                      .map((field) => (
+                        <button
+                          key={field.value}
+                          type="button"
+                          disabled={saving}
+                          style={menuOptionStyle(text, field.value === grouping.field)}
+                          onClick={() => {
+                            onUpdateGrouping(index, { ...grouping, field: field.value });
+                            setGroupingFieldMenuIndex(null);
+                          }}
+                        >
+                          {field.label}
+                        </button>
+                      ))}
+                  </div>
+                )}
                 <button
                   type="button"
-                  disabled={saving}
+                  disabled={loading || saving}
                   onClick={() => onUpdateGrouping(index, { ...grouping, direction: grouping.direction === "asc" ? "desc" : "asc" })}
-                  style={smallButtonStyle(text, line, buttonSurface)}
+                  style={groupingDirectionButtonStyle(text, line, buttonSurface)}
                 >
                   {grouping.direction === "asc" ? "Asc" : "Desc"}
                 </button>
                 <button
                   type="button"
                   title="Remove grouping"
-                  disabled={saving}
+                  disabled={loading || saving}
                   onClick={() => onRemoveGrouping(index)}
-                  style={{ ...smallButtonStyle(text, line, buttonSurface), padding: 0, width: 28 }}
+                  style={groupingRemoveButtonStyle(subtext)}
                 >
                   x
                 </button>
               </div>
             ))}
-            {groupings.length === 0 && (
-              <div style={{ color: subtext, fontSize: 11, fontWeight: 700, lineHeight: 1.35 }}>No subgrouping</div>
-            )}
+            <div style={{ position: "relative" }}>
+              <button
+                type="button"
+                disabled={loading || saving || addableFields.length === 0}
+                style={addGroupingButtonStyle}
+                onClick={() => {
+                  setGroupingFieldMenuIndex(null);
+                  setAddGroupingOpen((value) => !value);
+                }}
+              >
+                + Add Grouping
+              </button>
+              {addGroupingOpen && (
+                <div style={addGroupingMenuStyle(buttonSurface, line)}>
+                  {addableFields.map((field) => (
+                    <button
+                      key={field.value}
+                      type="button"
+                      disabled={saving}
+                      style={menuOptionStyle(text, false)}
+                      onClick={() => {
+                        onAddGrouping(field.value);
+                        setAddGroupingOpen(false);
+                      }}
+                    >
+                      {field.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 10 }}>
-            <button type="button" disabled={saving || addDisabled} style={smallButtonStyle(text, line, buttonSurface)} onClick={onAddGrouping}>Add grouping</button>
-            <button type="button" disabled={saving} style={{ ...smallButtonStyle(text, line, buttonSurface), borderColor: accent }} onClick={onSaveSavedView}>
-              {saving ? "Saving" : "Save"}
-            </button>
-          </div>
-          {(loading || error) && (
+          {(loading || saving || error) && (
             <div style={{ marginTop: 8, color: error ? "#b91c1c" : subtext, fontSize: 10.5, fontWeight: 760, lineHeight: 1.25 }}>
-              {error || "Loading"}
+              {error || (saving ? "Saving" : "Loading")}
             </div>
           )}
         </div>
@@ -176,34 +193,147 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
   );
 };
 
-function selectStyle(text: string, line: string, background: string): React.CSSProperties {
+function groupingAccent(index: number): string {
+  return ["#0891b2", "#d97706", "#7c3aed", "#059669", "#be123c"][index % 5] ?? "#475569";
+}
+
+const groupingStackStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 7,
+};
+
+function groupingRowStyle(index: number): React.CSSProperties {
+  const rowAccent = groupingAccent(index);
   return {
+    position: "relative",
+    width: "min(100%, 282px)",
     minWidth: 0,
-    height: 30,
-    border: `1px solid ${line}`,
+    minHeight: 30,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 46px 22px",
+    alignItems: "center",
+    gap: 5,
+    marginLeft: Math.min(index * 12, 30),
+    border: `1px solid ${rgba(rowAccent, 0.18)}`,
     borderRadius: 7,
-    background,
-    color: text,
-    font: "inherit",
-    fontSize: 11,
-    fontWeight: 760,
-    padding: "0 8px",
-    outline: "none",
+    background: `linear-gradient(145deg, rgba(255,255,255,0.92), ${rgba(rowAccent, 0.12)})`,
+    boxShadow: "4px 4px 12px rgba(148,163,184,0.13), -3px -3px 10px rgba(255,255,255,0.72), inset 1px 1px 0 rgba(255,255,255,0.82)",
+    padding: "0 4px 0 7px",
   };
 }
 
-function smallButtonStyle(text: string, line: string, background: string): React.CSSProperties {
+function groupingFieldButtonStyle(text: string): React.CSSProperties {
   return {
-    height: 30,
+    minWidth: 0,
+    height: 24,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    border: "none",
+    borderRadius: 4,
+    background: "transparent",
+    color: text,
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: 800,
+    textAlign: "left",
+    cursor: "pointer",
+    padding: "0 4px",
+  };
+}
+
+function groupingDirectionButtonStyle(text: string, line: string, background: string): React.CSSProperties {
+  return {
+    height: 22,
     border: `1px solid ${line}`,
-    borderRadius: 7,
+    borderRadius: 5,
     background,
     color: text,
     cursor: "pointer",
-    padding: "0 9px",
     font: "inherit",
-    fontSize: 11,
-    fontWeight: 850,
+    fontSize: 10,
+    fontWeight: 820,
+    padding: 0,
+  };
+}
+
+function groupingRemoveButtonStyle(subtext: string): React.CSSProperties {
+  return {
+    height: 22,
+    border: "none",
+    background: "transparent",
+    color: subtext,
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: 900,
+    padding: 0,
+  };
+}
+
+const addGroupingButtonStyle: React.CSSProperties = {
+  minHeight: 28,
+  border: "1px dashed rgba(14,165,233,0.38)",
+  borderRadius: 6,
+  background: "linear-gradient(135deg, rgba(255,255,255,0.90), rgba(224,242,254,0.56))",
+  color: "#0369a1",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 820,
+  cursor: "pointer",
+  padding: "0 8px",
+};
+
+function addGroupingMenuStyle(background: string, line: string): React.CSSProperties {
+  return {
+    position: "absolute",
+    zIndex: 22,
+    top: "calc(100% + 4px)",
+    left: 0,
+    width: 180,
+    display: "grid",
+    gap: 2,
+    padding: 5,
+    border: `1px solid ${line}`,
+    borderRadius: 6,
+    background,
+    boxShadow: "0 12px 30px rgba(15,23,42,0.16)",
+  };
+}
+
+function groupingFieldMenuStyle(background: string, line: string): React.CSSProperties {
+  return {
+    position: "absolute",
+    zIndex: 24,
+    top: "calc(100% + 4px)",
+    left: 0,
+    width: 190,
+    display: "grid",
+    gap: 2,
+    padding: 5,
+    border: `1px solid ${line}`,
+    borderRadius: 6,
+    background,
+    boxShadow: "0 12px 30px rgba(15,23,42,0.16)",
+  };
+}
+
+function menuOptionStyle(text: string, active: boolean): React.CSSProperties {
+  return {
+    minHeight: 27,
+    border: "none",
+    borderRadius: 5,
+    background: active ? "rgba(71,85,105,0.12)" : "transparent",
+    color: text,
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: active ? 800 : 700,
+    textAlign: "left",
+    cursor: "pointer",
+    padding: "0 7px",
   };
 }
 

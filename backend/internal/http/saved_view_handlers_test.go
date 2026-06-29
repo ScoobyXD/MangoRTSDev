@@ -213,7 +213,7 @@ func TestSavedViewsLogicGateKanbanPreference(t *testing.T) {
 			{"field":"priority","direction":"asc"},
 			{"field":"person","direction":"desc"},
 			{"field":"due_date","direction":"asc"},
-			{"field":"status","direction":"asc"},
+			{"field":"date_added","direction":"desc"},
 			{"field":"account","direction":"asc"}
 		]
 	}`
@@ -227,7 +227,7 @@ func TestSavedViewsLogicGateKanbanPreference(t *testing.T) {
 	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
 		t.Fatalf("decode created: %v", err)
 	}
-	if created.Surface != store.SavedViewSurfaceLogicGateKanban || created.Principal != store.SavedViewPrincipalUser || len(created.Groupings) != 5 {
+	if created.Surface != store.SavedViewSurfaceLogicGateKanban || created.Principal != store.SavedViewPrincipalUser || len(created.Groupings) != 5 || created.Groupings[3].Field != "date_added" {
 		t.Fatalf("created logic gate kanban view = %+v", created)
 	}
 
@@ -296,7 +296,7 @@ func TestSavedViewsLogicGateKanbanPreference(t *testing.T) {
 		"principal":"user",
 		"principal_id":"` + user.UserID + `",
 		"name":"Bad Kanban",
-		"groupings":[{"field":"project","direction":"asc"}]
+		"groupings":[{"field":"status","direction":"asc"}]
 	}`
 	invalidGroupingRec := httptest.NewRecorder()
 	invalidGroupingReq := httptest.NewRequest(http.MethodPost, "/v1/saved-views", bytes.NewBufferString(invalidGroupingBody))
