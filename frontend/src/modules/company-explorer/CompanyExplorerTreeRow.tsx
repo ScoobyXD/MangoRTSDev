@@ -82,6 +82,11 @@ type CompanyExplorerTreeRowProps = {
   assignExplorerPayloadItemsToFolder: (targetFolderID: string, payload: ExplorerDragPayload) => Promise<void>;
 };
 
+const TREE_ROW_PILL_LEFT_PADDING_PX = 3;
+const TREE_ROW_PILL_GAP_PX = 6;
+const TREE_ROW_ICON_SIZE_PX = 15;
+const TREE_ICON_GUIDE_OFFSET_PX = TREE_ROW_PILL_LEFT_PADDING_PX + TREE_TOGGLE_SLOT_PX + TREE_ROW_PILL_GAP_PX + TREE_ROW_ICON_SIZE_PX / 2;
+
 function getTriageMessageDropTarget(row: ExplorerTreeNode, treeRows: ExplorerTreeNode[]): CompanyExplorerTriageMessageDropTarget | null {
   void treeRows;
   const parentEntityID = row.entityID?.trim() ?? "";
@@ -163,7 +168,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   const isExpandable = (isFolder || row.hasChildren) && !isSearchActive;
   const isOpen = expanded.has(row.id);
   const isSelected = selectedTreeID === row.id || selectedTreeIDs.has(row.id);
-  const showPermissionMarker = isFolder && Boolean(row.hasPermissionRules);
+  const showPermissionMarker = Boolean(row.hasPermissionRules) && (row.kind === "folder" || row.kind === "logic_gate" || row.kind === "project");
   const suppressModifiedClickRef = React.useRef(false);
   const rowDragPayload = isSearchActive ? null : getExplorerDragPayloadForSelection(row, selectedTreeIDs, treeRows);
   const isDragging = draggingTreeID === row.id;
@@ -419,7 +424,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
               style={{
                 position: "absolute",
                 display: "block",
-                left: TREE_BASE_LEFT_PX + level * TREE_INDENT_PX + TREE_TOGGLE_SLOT_PX / 2,
+                left: TREE_BASE_LEFT_PX + level * TREE_INDENT_PX + TREE_ICON_GUIDE_OFFSET_PX,
                 top: -1,
                 bottom: -1,
                 width: 1,

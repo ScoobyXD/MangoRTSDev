@@ -459,7 +459,7 @@ export function buildCompanyExplorerV2TreeRows({
       parentFolderID: row.parent_entity_id ?? "",
       folderKind,
       protectedDefaultFolder: row.entity_type === "folder" && isProtectedDefaultFolderContext(row.native_context),
-      hasPermissionRules: kind === "folder" && Boolean(row.has_permission_rules),
+      hasPermissionRules: Boolean(row.has_permission_rules),
       folderLabel: row.parent_entity_id ? rowByEntityID.get(row.parent_entity_id)?.name : undefined,
       scopeLevel: depth,
       position: row.position || TREE_ROW_POSITION_STEP,
