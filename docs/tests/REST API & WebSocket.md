@@ -1,0 +1,101 @@
+Last updated: 2026-06-29
+
+# REST API & WebSocket Tests
+
+Coverage Status:
+- Business Logic Covered By Scenarios: 100%
+- Business Logic Covered By Automated Tests: 0% (rule IDs are not mapped to automated tests yet)
+
+## Business Logic
+
+RW1 - Durable editor saves for nodes and logic gates use HTTP API write routes, not WebSocket messages.
+RW2 - WebSocket messages may notify clients that editor data changed, but WebSocket messages are not the source of truth for persisted editor content.
+RW3 - A successful editor save requires the HTTP write route to commit the durable backend state before the editor treats the save as confirmed.
+RW4 - Editor collaboration updates are opportunistic realtime updates and must not replace the durable HTTP autosave path.
+RW5 - A frontend API timeout means the browser stopped waiting for an HTTP response; it does not by itself prove whether the backend committed or failed the write.
+RW6 - Timed-out, failed, pending, and confirmed editor saves must be distinguishable in the user-visible editor state.
+RW7 - A timed-out editor save must leave enough information to retry or reconcile the latest local document value.
+RW8 - Timeout investigations must identify the exact HTTP method, route, request duration, and backend log line for the affected request.
+RW9 - Backend request logs must make it possible to distinguish slow durable writes from slow background reads or refetches.
+RW10 - Realtime events may invalidate caches or trigger refetches, but they must not silently mutate durable editor content without a committed backend event.
+RW11 - Realtime invalidation should use the narrowest semantic scope available instead of forcing broad workspace refetches.
+RW12 - WebSocket reconnects or subscription failures must not be reported as successful durable saves.
+RW13 - Browser-side API request timing should make status=error timeout cases visible with the route that timed out.
+RW14 - Dev or production timeout triage must consider backend, database, and cache-refetch load before changing the client timeout threshold.
+
+## Scenarios
+
+### Scenario RW-S1: Editor Save Uses HTTP As The Durable Source Of Truth
+
+Business logic covered:
+- RW1
+- RW2
+- RW3
+- RW4
+- RW10
+
+Given:
+- A user edits a node or logic gate editor document.
+- The frontend has an open WebSocket connection.
+- The frontend has access to the normal HTTP API.
+
+Expected:
+- The editor sends the durable document update through the node or logic gate HTTP information route.
+- The backend commits the editor document to durable state before the save is treated as confirmed.
+- WebSocket messages may notify other clients or local caches after the committed change.
+- Collaboration WebSocket updates do not replace the durable HTTP save.
+
+### Scenario RW-S2: API Timeout Does Not Automatically Prove Save Failure
+
+Business logic covered:
+- RW5
+- RW6
+- RW7
+- RW13
+- RW14
+
+Given:
+- A user edits a node or logic gate editor document.
+- The HTTP save request takes longer than the frontend API timeout.
+- The backend may still be processing the request after the browser stops waiting.
+
+Expected:
+- The editor shows a state that is clearly different from a confirmed save.
+- The editor preserves the latest local document value for retry or reconciliation.
+- The UI does not imply that a WebSocket failure caused the durable save result.
+- Browser request timing identifies the route and timeout status for the failed wait.
+
+### Scenario RW-S3: Timeout Investigation Identifies The Exact Slow Route
+
+Business logic covered:
+- RW8
+- RW9
+- RW13
+- RW14
+
+Given:
+- A user reports an API request timeout on the dev site.
+- Browser request timing or the Network tab records the failed request.
+- Backend logs are available for the same approximate timestamp.
+
+Expected:
+- The investigation records the HTTP method and route that reached the timeout.
+- Backend logs show whether the matching request completed, failed, or never reached the backend.
+- The investigation distinguishes editor save routes from background reads such as workspace snapshots, node views, logic gate views, company explorer loads, or kanban loads.
+- The investigation focuses on the route, backend work, database behavior, and request fanout before changing the generic client timeout.
+
+### Scenario RW-S4: Realtime Invalidations Stay Narrow
+
+Business logic covered:
+- RW10
+- RW11
+- RW12
+
+Given:
+- A committed backend event is published to realtime subscribers.
+- The event includes enough data to identify an affected resource, branch, board, or user scope.
+
+Expected:
+- Realtime subscribers invalidate or refetch only the affected semantic scope when possible.
+- A WebSocket reconnect or subscription rejection does not mark unrelated data as saved.
+- Broad workspace refetches are reserved for missing sequence, missing scope, permission, or compatibility cases where the narrower path cannot be trusted.
