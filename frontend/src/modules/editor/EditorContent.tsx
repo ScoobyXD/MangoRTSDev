@@ -277,6 +277,25 @@ function isNodeWorkspaceHeaderInformationType(type: string): boolean {
   return type === EDITOR_TEXT_BLOCK_TYPE || type === EDITOR_TEXT_BLOCK_CHAT_TYPE || type === EDITOR_ATTACHED_EMAIL_TYPE;
 }
 
+const LINKED_NODE_ACCESS_DENIED_MESSAGE = "You do not have permission to see this.";
+
+function linkedEntityLoadErrorMessage(cause: unknown, entityKind: "" | "node" | "logic_gate"): string {
+  const message = cause instanceof Error ? cause.message : String(cause ?? "");
+  const normalized = message.trim().toLowerCase();
+  if (
+    normalized.includes("access_denied") ||
+    normalized.includes("node_not_found") ||
+    normalized.includes("logic_gate_not_found") ||
+    normalized.includes("company_access_denied") ||
+    normalized.includes("forbidden") ||
+    normalized.includes("403") ||
+    normalized.includes("404")
+  ) {
+    return entityKind === "logic_gate" ? "You do not have permission to see this." : LINKED_NODE_ACCESS_DENIED_MESSAGE;
+  }
+  return message || "Failed to load linked information";
+}
+
 const ProjectRelationshipsSurface: React.FC<{
   companyID: string;
   resourceType: "node" | "logic_gate";
@@ -415,6 +434,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [collaborators, setCollaborators] = useState<EditorCollaboratorPresence[]>([]);
   const [collaborationStatus, setCollaborationStatus] = useState("");
   const [error, setError] = useState("");
+  const [linkedEntityAccessDeniedMessage, setLinkedEntityAccessDeniedMessage] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(outlineStyleStorageKey);
   const [documentFontSize, setDocumentFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
@@ -466,7 +486,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const editorSnapshotRefreshTokenRef = useRef(0);
   const nodeContentChangesRefreshTokenRef = useRef(0);
   const linkedEditorTargetRef = useRef<{ kind: "" | "node" | "logic_gate"; id: string }>({ kind: "", id: "" });
-  const hasLinkedDocument = linkedNodeID.trim().length > 0;
+  const linkedEntityAccessDenied = linkedEntityAccessDeniedMessage.trim().length > 0;
+  const hasLinkedDocument = linkedNodeID.trim().length > 0 && !linkedEntityAccessDenied;
   const { accounts: companyAccounts } = useCompanyAccounts(companyID, linkedEntityKind === "node" && hasLinkedDocument);
   const nodeAccountOptions = useMemo(() => mergeAccountLists(companyAccounts, nodeAccounts), [companyAccounts, nodeAccounts]);
 
@@ -927,6 +948,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, []);
 
   const clearVisibleDocumentForSelection = useCallback(() => {
+    setLinkedEntityAccessDeniedMessage("");
     setLinkedEntityCanEdit(true);
     setLinkedEntityCanAdmin(true);
     setLinkedNodeInfoPreview([]);
@@ -2048,6 +2070,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     nodeContentChangesRefreshTokenRef.current += 1;
     const isCurrentLinkedLoad = () => !cancelled && editorSnapshotRefreshTokenRef.current === loadRefreshToken;
     if (!linkedNodeID) {
+      setLinkedEntityAccessDeniedMessage("");
       setLinkedEntityCanEdit(true);
       setLinkedEntityCanAdmin(true);
       setLinkedNodeTitle("");
@@ -2092,6 +2115,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setNodeContentChangesLoadedNodeID("");
     setNodeLogicGateIDs([]);
     setNodeAccounts([]);
+    setLinkedEntityAccessDeniedMessage("");
     (async () => {
       try {
         setError("");
@@ -2144,6 +2168,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           applyLoadedDocument("logic_gate", linkedNodeID, currentTextBox?.information_id ?? "", initialDocument);
           return;
         }
+        invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
         const [details, projections, contentChanges, editorSequence, gvicPayload] = await Promise.all([
           getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
@@ -2196,11 +2221,22 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         ];
         setLinkedNodeHistoryRows(historyRows);
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load linked information");
+        if (!cancelled) {
+          const message = linkedEntityLoadErrorMessage(cause, linkedEntityKind);
+          if (message === LINKED_NODE_ACCESS_DENIED_MESSAGE) {
+            clearVisibleDocumentForSelection();
+            setLinkedEntityCanEdit(false);
+            setLinkedEntityCanAdmin(false);
+            setLinkedEntityAccessDeniedMessage(message);
+            setError("");
+            return;
+          }
+          setError(message);
+        }
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, companyID, focusInformationID, focusRequestID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, preserveNodeTitle, rememberEditorProjectionSequence, requestJSON, scheduleIndentGuideUpdate]);
+  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, clearVisibleDocumentForSelection, companyID, focusInformationID, focusRequestID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, preserveNodeTitle, rememberEditorProjectionSequence, requestJSON, scheduleIndentGuideUpdate]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : EDITOR_NEU_PANEL_BACKGROUND;
@@ -2517,6 +2553,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         {emptyMessage && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 28, textAlign: "center", fontSize: 13, fontWeight: 700, color: surfaceText, opacity: 0.72 }}>
             {emptyMessage}
+          </div>
+        )}
+        {linkedEntityAccessDeniedMessage && (
+          <div role="alert" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 28, textAlign: "center", fontSize: 14, fontWeight: 800, color: surfaceText, background: surfaceBackground, zIndex: 4 }}>
+            {linkedEntityAccessDeniedMessage}
           </div>
         )}
         {error && <div style={{ position: "absolute", bottom: 8, left: 10, fontSize: 10, color: "#b00020", zIndex: 3 }}>{error}</div>}
