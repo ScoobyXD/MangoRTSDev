@@ -53,7 +53,6 @@ insert into company_explorer_folders (
 on conflict (company_id, folder_id) do update set
   parent_folder_id=excluded.parent_folder_id,
   name=excluded.name,
-  default_access='edit',
   position=excluded.position,
   updated_timestamp=now()`, companyID, folderID, parentFolderID, name, position, actorUserID)
 		return err
@@ -70,7 +69,7 @@ on conflict (company_id, folder_id) do update set
 	return folders, nil
 }
 
-func placeCompanyExplorerItemInDefaultFolderTx(ctx context.Context, tx *sql.Tx, companyID, targetType, targetID, actorUserID string) (domain.CompanyExplorerFolderItem, bool, error) {
+func placeCompanyExplorerItemInDefaultFolderTx(ctx context.Context, tx *sql.Tx, companyID, targetType, targetID, actorUserID string, snapshotPolicy bool) (domain.CompanyExplorerFolderItem, bool, error) {
 	companyID = cleanUUIDText(companyID)
 	targetID = cleanUUIDText(targetID)
 	actorUserID = cleanUUIDText(actorUserID)
@@ -113,6 +112,11 @@ returning company_id::text, coalesce(parent_folder_id::text, '') as folder_id, t
 	}
 	if err != nil {
 		return domain.CompanyExplorerFolderItem{}, false, err
+	}
+	if snapshotPolicy {
+		if _, err := snapshotPostgresResourceAccessPolicyTx(ctx, tx, companyID, EntityTypeCompanyExplorerFolder, folderID, targetType, targetID); err != nil {
+			return domain.CompanyExplorerFolderItem{}, false, err
+		}
 	}
 	return item, true, nil
 }
@@ -185,7 +189,7 @@ func backfillBareCompanyExplorerItemsForTypeTx(ctx context.Context, tx *sql.Tx, 
 		return err
 	}
 	for _, targetID := range targetIDs {
-		if _, _, err := placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, companyID, targetType, targetID, ""); err != nil && !errors.Is(err, ErrInvalid) {
+		if _, _, err := placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, companyID, targetType, targetID, "", false); err != nil && !errors.Is(err, ErrInvalid) {
 			return err
 		}
 	}

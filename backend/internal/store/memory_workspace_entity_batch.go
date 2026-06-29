@@ -190,7 +190,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
 		r.ensureCompanyExplorerDefaultFoldersLocked(input.CompanyID)
 		for _, mapping := range result.EntityMappings {
-			if !r.placeCompanyExplorerItemInDefaultFolderLocked(input.CompanyID, input.EntityKind, mapping.EntityID) {
+			if !r.placeCompanyExplorerItemInDefaultFolderLocked(input.CompanyID, input.EntityKind, mapping.EntityID, true) {
 				continue
 			}
 			if item, ok := r.folderItems[folderItemKey(input.CompanyID, input.EntityKind, mapping.EntityID)]; ok {

@@ -41,7 +41,7 @@ func (r *MemoryRepo) CreateProject(input ProjectInput) (ProjectMutationResult, e
 	if input.CompanyExplorerDefaultPlacement {
 		r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
 		r.ensureCompanyExplorerDefaultFoldersLocked(input.CompanyID)
-		if r.placeCompanyExplorerItemInDefaultFolderLocked(input.CompanyID, EntityTypeProject, project.ProjectID) {
+		if r.placeCompanyExplorerItemInDefaultFolderLocked(input.CompanyID, EntityTypeProject, project.ProjectID, true) {
 			if item, ok := r.folderItems[folderItemKey(input.CompanyID, EntityTypeProject, project.ProjectID)]; ok {
 				folderItem = &item
 			}

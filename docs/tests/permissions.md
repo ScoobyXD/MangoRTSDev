@@ -1,10 +1,10 @@
-Last updated: 2026-06-26
+Last updated: 2026-06-29
 
 # Permissions Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: 0% (rule IDs are not mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: partial backend coverage for default/override semantics, manager-preservation rules, Logic Gate-to-node permission snapshots, folder-to-child permission snapshots, same-parent preservation, and cross-parent overwrite behavior. Rule ID mapping is partial.
 
 ## Business Logic
 
@@ -37,6 +37,14 @@ P26 - Default access has only two states, edit and no access; `resource_permissi
 P27 - When a company manager changes a resource default, manager effective access is preserved while regular company users follow the new default and exceptions.
 P28 - Legacy `resource_access_grants` rows are migrated into `resource_permissions` exception rows before the legacy table is dropped.
 P29 - Runtime permission reads and writes use `resource_permissions` only; `resource_access_grants` and `entity_access_permissions` are not active permission sources.
+P30 - Parent permission policies are templates copied as snapshots; they are not live inherited after the child is created or transferred.
+P31 - Creating a subfolder under a folder copies the parent folder's current permission policy to the new subfolder.
+P32 - Creating, placing, or moving a project or Logic Gate into a folder copies the target parent folder's current permission policy to that project or Logic Gate.
+P33 - Creating, assigning, or moving a node into a Logic Gate copies the target Logic Gate's current permission policy to that node.
+P34 - Editing a child resource's permissions changes only that child; later parent permission edits do not fan out to existing children.
+P35 - Reordering or re-saving a project, Logic Gate, or node under the same parent preserves that resource's current permissions.
+P36 - Detaching a resource from a parent or moving it to a non-template/root location preserves its current permission policy.
+P37 - Project permissions do not template Logic Gates or nodes through project relationships; folder templates apply to Explorer placement, and Logic Gate templates apply to node assignment.
 
 ## Scenarios
 
@@ -125,3 +133,30 @@ Expected:
 - Malformed resource IDs are ignored or handled without crashing.
 - Effective access is recomputed after permission changes.
 - Affected projections and clients receive refresh data.
+
+### Scenario P-S4: Parent Template Permission Snapshots
+
+Business logic covered:
+- P30
+- P31
+- P32
+- P33
+- P34
+- P35
+- P36
+- P37
+
+Given:
+- A folder has a default access value and exception users.
+- A Logic Gate has a default access value and exception users.
+- Existing child folders, projects, Logic Gates, and nodes have their own permission policies.
+
+Expected:
+- A new subfolder, project, or Logic Gate created or moved into the folder receives a snapshot of the folder's current policy.
+- A node created, assigned, or moved into the Logic Gate receives a snapshot of the Logic Gate's current policy.
+- Editing the parent after the copy does not mutate existing children.
+- Editing the child after the copy affects only that child.
+- Reordering or saving an item under the same parent does not re-copy the parent template.
+- Moving to a different folder or Logic Gate replaces the child policy with the new parent's current template.
+- Detaching from a parent or moving to a root/non-template location preserves the child's current policy.
+- Project permission changes do not cascade into related Logic Gates or nodes.

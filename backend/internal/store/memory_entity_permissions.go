@@ -539,32 +539,9 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 		}
 	}
 	if defaultAccessChanged {
-		switch entityType {
-		case EntityTypeNode:
-			node := r.nodes[key(companyID, entityID)]
-			node.DefaultAccess = defaultAccess
-			r.nodes[key(companyID, entityID)] = node
-		case EntityTypeLogicGate:
-			gate := r.logicGates[key(companyID, entityID)]
-			gate.DefaultAccess = defaultAccess
-			r.logicGates[key(companyID, entityID)] = gate
-		case EntityTypeProject:
-			project := r.projects[key(companyID, entityID)]
-			project.DefaultAccess = defaultAccess
-			r.projects[key(companyID, entityID)] = project
-		case EntityTypeCompanyExplorerFolder:
-			if entity, ok := r.companyExplorerV2Entities[key(companyID, entityID)]; ok && entity.EntityType == CompanyExplorerV2EntityFolder {
-				entity.DefaultAccess = defaultAccess
-				r.companyExplorerV2Entities[key(companyID, entityID)] = entity
-			}
-			if folder, ok := r.folders[key(companyID, entityID)]; ok {
-				folder.DefaultAccess = defaultAccess
-				r.folders[key(companyID, entityID)] = folder
-			}
-		case EntityTypeSharedInboxFolder, EntityTypeSharedInbox:
-			folder := r.folders[key(companyID, entityID)]
-			folder.DefaultAccess = defaultAccess
-			r.folders[key(companyID, entityID)] = folder
+		if err := r.setResourceDefaultAccessLocked(companyID, entityType, entityID, defaultAccess); err != nil {
+			restore()
+			return nil, err
 		}
 	}
 
@@ -1098,44 +1075,137 @@ func (r *MemoryRepo) withEntityPermissionSubjectLocked(permission domain.EntityP
 	return permission
 }
 
-func (r *MemoryRepo) copyLogicGateAccessPolicyToNodeLocked(companyID, logicGateID, nodeID string) error {
-	gate, ok := r.logicGates[key(companyID, logicGateID)]
-	if !ok {
-		return ErrNotFound
+func (r *MemoryRepo) setResourceDefaultAccessLocked(companyID, entityType, entityID, defaultAccess string) error {
+	companyID = strings.TrimSpace(companyID)
+	entityID = strings.TrimSpace(entityID)
+	var ok bool
+	entityType, ok = NormalizeEntityType(entityType)
+	defaultAccess, accessOK := NormalizeResourceDefaultAccess(defaultAccess)
+	if companyID == "" || entityID == "" || !ok || !accessOK || !usesDefaultResourceAccessPolicy(entityType) {
+		return ErrInvalid
 	}
-	node, ok := r.nodes[key(companyID, nodeID)]
-	if !ok {
-		return ErrNotFound
+	switch entityType {
+	case EntityTypeNode:
+		node, ok := r.nodes[key(companyID, entityID)]
+		if !ok {
+			return ErrNotFound
+		}
+		node.DefaultAccess = defaultAccess
+		r.nodes[key(companyID, entityID)] = node
+	case EntityTypeLogicGate:
+		gate, ok := r.logicGates[key(companyID, entityID)]
+		if !ok {
+			return ErrNotFound
+		}
+		gate.DefaultAccess = defaultAccess
+		r.logicGates[key(companyID, entityID)] = gate
+	case EntityTypeProject:
+		project, ok := r.projects[key(companyID, entityID)]
+		if !ok {
+			return ErrNotFound
+		}
+		project.DefaultAccess = defaultAccess
+		r.projects[key(companyID, entityID)] = project
+	case EntityTypeCompanyExplorerFolder:
+		found := false
+		if entity, ok := r.companyExplorerV2Entities[key(companyID, entityID)]; ok && entity.EntityType == CompanyExplorerV2EntityFolder {
+			entity.DefaultAccess = defaultAccess
+			r.companyExplorerV2Entities[key(companyID, entityID)] = entity
+			found = true
+		}
+		if folder, ok := r.folders[key(companyID, entityID)]; ok {
+			folder.DefaultAccess = defaultAccess
+			r.folders[key(companyID, entityID)] = folder
+			found = true
+		}
+		if !found {
+			return ErrNotFound
+		}
+	case EntityTypeSharedInboxFolder, EntityTypeSharedInbox:
+		folder, ok := r.folders[key(companyID, entityID)]
+		if !ok {
+			return ErrNotFound
+		}
+		folder.DefaultAccess = defaultAccess
+		r.folders[key(companyID, entityID)] = folder
+	default:
+		return ErrInvalid
 	}
-	defaultAccess := defaultResourceAccessOrEdit(gate.DefaultAccess)
-	node.DefaultAccess = defaultAccess
-	r.nodes[key(companyID, nodeID)] = node
+	return nil
+}
+
+func (r *MemoryRepo) resourceAccessOverrideUserIDsLocked(companyID, resourceType, resourceID string) []string {
+	userIDs := make([]string, 0)
+	for _, permission := range r.entityPermissions {
+		if permission.CompanyID == companyID &&
+			permission.EntityType == resourceType &&
+			permission.EntityID == resourceID &&
+			permission.SubjectType == EntityPermissionSubjectUser &&
+			strings.TrimSpace(permission.SubjectID) != "" {
+			userIDs = append(userIDs, permission.SubjectID)
+		}
+	}
+	sort.Strings(userIDs)
+	return userIDs
+}
+
+func (r *MemoryRepo) snapshotResourceAccessPolicyLocked(companyID, sourceType, sourceID, targetType, targetID string) (bool, error) {
+	companyID = strings.TrimSpace(companyID)
+	sourceID = strings.TrimSpace(sourceID)
+	targetID = strings.TrimSpace(targetID)
+	var ok bool
+	sourceType, ok = NormalizeEntityType(sourceType)
+	if !ok {
+		return false, ErrInvalid
+	}
+	targetType, ok = NormalizeEntityType(targetType)
+	if companyID == "" || sourceID == "" || targetID == "" || !ok ||
+		!usesDefaultResourceAccessPolicy(sourceType) || !usesDefaultResourceAccessPolicy(targetType) {
+		return false, ErrInvalid
+	}
+	sourceDefaultAccess, ok := r.defaultAccessForResourceLocked(companyID, sourceType, sourceID)
+	if !ok {
+		return false, ErrNotFound
+	}
+	targetDefaultAccess, ok := r.defaultAccessForResourceLocked(companyID, targetType, targetID)
+	if !ok {
+		return false, ErrNotFound
+	}
+	sourceOverrideUserIDs := r.resourceAccessOverrideUserIDsLocked(companyID, sourceType, sourceID)
+	targetOverrideUserIDs := r.resourceAccessOverrideUserIDsLocked(companyID, targetType, targetID)
+	if sourceDefaultAccess == targetDefaultAccess && orderedStringSlicesEqual(sourceOverrideUserIDs, targetOverrideUserIDs) {
+		return false, nil
+	}
+	if err := r.setResourceDefaultAccessLocked(companyID, targetType, targetID, sourceDefaultAccess); err != nil {
+		return false, err
+	}
 	for permissionKey, permission := range r.entityPermissions {
-		if permission.CompanyID == companyID && permission.EntityType == EntityTypeNode && permission.EntityID == nodeID {
+		if permission.CompanyID == companyID && permission.EntityType == targetType && permission.EntityID == targetID {
 			delete(r.entityPermissions, permissionKey)
 		}
 	}
 	now := time.Now().UTC()
-	overrideAccess := OppositeResourceDefaultAccess(defaultAccess)
-	for _, permission := range r.entityPermissions {
-		if permission.CompanyID != companyID ||
-			permission.EntityType != EntityTypeLogicGate ||
-			permission.EntityID != logicGateID ||
-			permission.SubjectType != EntityPermissionSubjectUser ||
-			strings.TrimSpace(permission.SubjectID) == "" {
-			continue
-		}
-		nodePermission := domain.EntityPermission{
+	overrideAccess := OppositeResourceDefaultAccess(sourceDefaultAccess)
+	for _, userID := range sourceOverrideUserIDs {
+		permission := domain.EntityPermission{
 			CompanyID:        companyID,
-			EntityType:       EntityTypeNode,
-			EntityID:         nodeID,
+			EntityType:       targetType,
+			EntityID:         targetID,
 			SubjectType:      EntityPermissionSubjectUser,
-			SubjectID:        permission.SubjectID,
+			SubjectID:        userID,
 			Permission:       overrideAccess,
 			AccessLevel:      overrideAccess,
 			CreatedTimestamp: now,
 		}
-		r.entityPermissions[entityPermissionKey(companyID, EntityTypeNode, nodeID, EntityPermissionSubjectUser, permission.SubjectID, "")] = nodePermission
+		r.entityPermissions[entityPermissionKey(companyID, targetType, targetID, EntityPermissionSubjectUser, userID, "")] = permission
 	}
-	return r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, EntityTypeNode, nodeID)
+	if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, targetType, targetID); err != nil {
+		return false, err
+	}
+	if targetType == EntityTypeLogicGate {
+		if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{targetID}, nil); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }

@@ -138,6 +138,16 @@ func TestMemoryResourceAccessPolicyAssignmentMovementRules(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set node default: %v", err)
 	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       EntityTypeLogicGate,
+		EntityID:         firstGate.LogicGateID,
+		DefaultAccess:    ResourceDefaultAccessEdit,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{other.UserID},
+	}); err != nil {
+		t.Fatalf("set first gate policy: %v", err)
+	}
 	if _, err := repo.SetLogicGateGVICAssignments(LogicGateGVICAssignmentUpdateInput{
 		CompanyID:   companyID,
 		LogicGateID: firstGate.LogicGateID,
@@ -157,11 +167,25 @@ func TestMemoryResourceAccessPolicyAssignmentMovementRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetNode after assignment: %v", err)
 	}
-	if loaded.DefaultAccess != ResourceDefaultAccessNoAccess {
-		t.Fatalf("assignment mutated node default_access = %q, want no_access", loaded.DefaultAccess)
+	if loaded.DefaultAccess != ResourceDefaultAccessEdit {
+		t.Fatalf("assignment copied node default_access = %q, want edit", loaded.DefaultAccess)
 	}
-	if permissions, err := repo.ListEntityPermissions(companyID, EntityTypeNode, node.NodeID); err != nil || len(permissions) != 0 {
-		t.Fatalf("assignment permissions = %v err = %v, want unchanged empty overrides", permissions, err)
+	permissions, err := repo.ListEntityPermissions(companyID, EntityTypeNode, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListEntityPermissions after assignment: %v", err)
+	}
+	if len(permissions) != 1 || permissions[0].SubjectID != other.UserID || permissions[0].AccessLevel != EntityPermissionNoAccess {
+		t.Fatalf("assignment copied permissions = %+v, want first gate denied override", permissions)
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		OverrideUserIDs:  []string{allowed.UserID},
+	}); err != nil {
+		t.Fatalf("set manual node policy: %v", err)
 	}
 	if _, err := repo.MoveLogicGateNodeAssignment(LogicGateNodeAssignmentMoveInput{
 		CompanyID:   companyID,
@@ -171,9 +195,7 @@ func TestMemoryResourceAccessPolicyAssignmentMovementRules(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("same-gate move: %v", err)
 	}
-	if permissions, err := repo.ListEntityPermissions(companyID, EntityTypeNode, node.NodeID); err != nil || len(permissions) != 0 {
-		t.Fatalf("same-gate move permissions = %v err = %v, want unchanged empty overrides", permissions, err)
-	}
+	assertMemoryNodeResourcePolicyForTest(t, repo, companyID, node.NodeID, ResourceDefaultAccessNoAccess, map[string]string{allowed.UserID: EntityPermissionEdit})
 
 	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
 		CompanyID:        companyID,
@@ -201,7 +223,7 @@ func TestMemoryResourceAccessPolicyAssignmentMovementRules(t *testing.T) {
 	if loaded.DefaultAccess != ResourceDefaultAccessNoAccess {
 		t.Fatalf("cross-gate copy node default_access = %q, want no_access", loaded.DefaultAccess)
 	}
-	permissions, err := repo.ListEntityPermissions(companyID, EntityTypeNode, node.NodeID)
+	permissions, err = repo.ListEntityPermissions(companyID, EntityTypeNode, node.NodeID)
 	if err != nil {
 		t.Fatalf("ListEntityPermissions after cross move: %v", err)
 	}
@@ -312,6 +334,96 @@ func TestMemoryResourceAccessPolicyCrossGateMoveOverwritesNodePolicy(t *testing.
 			assertMemoryNodeResourcePolicyForTest(t, repo, companyID, node.NodeID, tc.wantDefault, resourcePolicyExpectedRowsForTest(tc.wantRows, userIDs))
 		})
 	}
+}
+
+func TestMemoryResourceAccessPolicyFolderTemplateSnapshots(t *testing.T) {
+	repo, companyID, _, allowed, other := setupResourceAccessPolicyTest(t)
+	parentFolder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
+		CompanyID:      companyID,
+		ParentEntityID: companyID,
+		Name:           "Template folder",
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder parent: %v", err)
+	}
+	setMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeCompanyExplorerFolder, parentFolder.EntityID, ResourceDefaultAccessNoAccess, []string{allowed.UserID})
+
+	childFolder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
+		CompanyID:      companyID,
+		ParentEntityID: parentFolder.EntityID,
+		Name:           "Child folder",
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder child: %v", err)
+	}
+	assertMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeCompanyExplorerFolder, childFolder.EntityID, ResourceDefaultAccessNoAccess, map[string]string{allowed.UserID: EntityPermissionEdit})
+
+	projectResult, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Placed project", Status: "Active"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if projectResult.Project == nil {
+		t.Fatalf("CreateProject returned nil project")
+	}
+	projectRow, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:       companyID,
+		ParentEntityID:  parentFolder.EntityID,
+		ChildEntityType: EntityTypeProject,
+		ChildResourceID: projectResult.Project.ProjectID,
+	})
+	if err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge project: %v", err)
+	}
+	assertMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeProject, projectResult.Project.ProjectID, ResourceDefaultAccessNoAccess, map[string]string{allowed.UserID: EntityPermissionEdit})
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Placed gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:       companyID,
+		ParentEntityID:  parentFolder.EntityID,
+		ChildEntityType: EntityTypeLogicGate,
+		ChildResourceID: logicGate.LogicGateID,
+	}); err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge logic gate: %v", err)
+	}
+	assertMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, ResourceDefaultAccessNoAccess, map[string]string{allowed.UserID: EntityPermissionEdit})
+
+	setMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeCompanyExplorerFolder, parentFolder.EntityID, ResourceDefaultAccessEdit, []string{other.UserID})
+	assertMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeCompanyExplorerFolder, childFolder.EntityID, ResourceDefaultAccessNoAccess, map[string]string{allowed.UserID: EntityPermissionEdit})
+	assertMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeProject, projectResult.Project.ProjectID, ResourceDefaultAccessNoAccess, map[string]string{allowed.UserID: EntityPermissionEdit})
+	assertMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, ResourceDefaultAccessNoAccess, map[string]string{allowed.UserID: EntityPermissionEdit})
+
+	setMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeProject, projectResult.Project.ProjectID, ResourceDefaultAccessEdit, nil)
+	if _, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:       companyID,
+		ParentEntityID:  parentFolder.EntityID,
+		ChildEntityType: EntityTypeProject,
+		ChildResourceID: projectResult.Project.ProjectID,
+		Position:        5000,
+	}); err != nil {
+		t.Fatalf("same-folder project upsert: %v", err)
+	}
+	assertMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeProject, projectResult.Project.ProjectID, ResourceDefaultAccessEdit, map[string]string{})
+
+	targetFolder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
+		CompanyID:      companyID,
+		ParentEntityID: companyID,
+		Name:           "Target folder",
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder target: %v", err)
+	}
+	setMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeCompanyExplorerFolder, targetFolder.EntityID, ResourceDefaultAccessEdit, []string{other.UserID})
+	if _, err := repo.MoveCompanyExplorerV2Edge(CompanyExplorerV2MoveEdgeInput{
+		CompanyID:      companyID,
+		EdgeID:         projectRow.EdgeID,
+		ParentEntityID: targetFolder.EntityID,
+	}); err != nil {
+		t.Fatalf("MoveCompanyExplorerV2Edge project: %v", err)
+	}
+	assertMemoryResourcePolicyForTest(t, repo, companyID, EntityTypeProject, projectResult.Project.ProjectID, ResourceDefaultAccessEdit, map[string]string{other.UserID: EntityPermissionNoAccess})
 }
 
 func TestMemoryResourceAccessPolicyNewCompanyUserFollowsDefault(t *testing.T) {
@@ -460,6 +572,63 @@ func setMemoryResourcePolicyForTest(t *testing.T, repo *MemoryRepo, companyID, e
 		OverrideUserIDs:  overrideUserIDs,
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions %s/%s: %v", entityType, entityID, err)
+	}
+}
+
+func assertMemoryResourcePolicyForTest(t *testing.T, repo *MemoryRepo, companyID, entityType, entityID, wantDefault string, wantRows map[string]string) {
+	t.Helper()
+	gotDefault := memoryResourceDefaultAccessForTest(t, repo, companyID, entityType, entityID)
+	if gotDefault != wantDefault {
+		t.Fatalf("%s default_access = %q, want %q", entityType, gotDefault, wantDefault)
+	}
+	permissions, err := repo.ListEntityPermissions(companyID, entityType, entityID)
+	if err != nil {
+		t.Fatalf("ListEntityPermissions %s/%s: %v", entityType, entityID, err)
+	}
+	got := make(map[string]string, len(permissions))
+	for _, permission := range permissions {
+		got[permission.SubjectID] = permission.AccessLevel
+	}
+	if len(got) != len(wantRows) {
+		t.Fatalf("%s permissions = %+v, want %+v", entityType, permissions, wantRows)
+	}
+	for userID, accessLevel := range wantRows {
+		if got[userID] != accessLevel {
+			t.Fatalf("%s permission for user %s = %q, want %q; all permissions = %+v", entityType, userID, got[userID], accessLevel, permissions)
+		}
+	}
+}
+
+func memoryResourceDefaultAccessForTest(t *testing.T, repo *MemoryRepo, companyID, entityType, entityID string) string {
+	t.Helper()
+	switch entityType {
+	case EntityTypeNode:
+		node, err := repo.GetNode(companyID, entityID)
+		if err != nil {
+			t.Fatalf("GetNode: %v", err)
+		}
+		return node.DefaultAccess
+	case EntityTypeLogicGate:
+		logicGate, err := repo.GetLogicGate(companyID, entityID)
+		if err != nil {
+			t.Fatalf("GetLogicGate: %v", err)
+		}
+		return logicGate.DefaultAccess
+	case EntityTypeProject:
+		project, err := repo.GetProject(companyID, entityID)
+		if err != nil {
+			t.Fatalf("GetProject: %v", err)
+		}
+		return project.DefaultAccess
+	case EntityTypeCompanyExplorerFolder:
+		defaultAccess, err := repo.GetCompanyExplorerV2FolderDefaultAccess(companyID, entityID)
+		if err != nil {
+			t.Fatalf("GetCompanyExplorerV2FolderDefaultAccess: %v", err)
+		}
+		return defaultAccess
+	default:
+		t.Fatalf("unsupported resource type %q", entityType)
+		return ""
 	}
 }
 

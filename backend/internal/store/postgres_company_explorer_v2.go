@@ -531,6 +531,10 @@ func (r *PostgresRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2Fold
 		parentFolderID = input.ParentEntityID
 		parentEntityID = input.ParentEntityID
 	}
+	defaultAccess := input.DefaultAccess
+	if defaultAccess == "" {
+		defaultAccess = ResourceDefaultAccessEdit
+	}
 	position := input.Position
 	if position <= 0 {
 		position, err = nextCompanyExplorerFinalPositionSQL(ctx, tx, input.CompanyID, parentFolderID)
@@ -551,8 +555,13 @@ insert into company_explorer_folders (
   created_timestamp,
   updated_timestamp
 ) values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, nullif($7, '')::uuid, now(), now())`,
-		input.CompanyID, folderID, parentFolderID, input.Name, input.DefaultAccess, position, input.ActorUserID); err != nil {
+		input.CompanyID, folderID, parentFolderID, input.Name, defaultAccess, position, input.ActorUserID); err != nil {
 		return CompanyExplorerV2Row{}, err
+	}
+	if input.ParentEntityID != input.CompanyID {
+		if _, err := snapshotPostgresResourceAccessPolicyTx(ctx, tx, input.CompanyID, EntityTypeCompanyExplorerFolder, input.ParentEntityID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return CompanyExplorerV2Row{}, err
@@ -624,6 +633,19 @@ func (r *PostgresRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeIn
 			return CompanyExplorerV2Row{}, err
 		}
 	}
+	previousParentFolderID := ""
+	hadPreviousEdge := true
+	err = tx.QueryRowContext(ctx, `
+select coalesce(parent_folder_id::text, '')
+from company_explorer_items
+where company_id=$1::uuid
+  and target_type=$2
+  and target_id=$3::uuid`, input.CompanyID, targetType, targetID).Scan(&previousParentFolderID)
+	if errors.Is(err, sql.ErrNoRows) {
+		hadPreviousEdge = false
+	} else if err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
 	var itemID string
 	var createdTimestamp, updatedTimestamp sql.NullTime
 	err = tx.QueryRowContext(ctx, `
@@ -647,6 +669,11 @@ returning item_id::text, created_timestamp, updated_timestamp`,
 	).Scan(&itemID, &createdTimestamp, &updatedTimestamp)
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
+	}
+	if input.ParentEntityID != input.CompanyID && (!hadPreviousEdge || previousParentFolderID != input.ParentEntityID) {
+		if _, err := snapshotPostgresResourceAccessPolicyTx(ctx, tx, input.CompanyID, EntityTypeCompanyExplorerFolder, input.ParentEntityID, targetType, targetID); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return CompanyExplorerV2Row{}, err
@@ -678,7 +705,18 @@ func (r *PostgresRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdge
 			return CompanyExplorerV2Row{}, err
 		}
 	}
-	var targetType, targetID string
+	var targetType, targetID, previousParentFolderID string
+	err = tx.QueryRowContext(ctx, `
+select target_type, target_id::text, coalesce(parent_folder_id::text, '')
+from company_explorer_items
+where company_id=$1::uuid
+  and item_id=$2::uuid`, input.CompanyID, input.EdgeID).Scan(&targetType, &targetID, &previousParentFolderID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CompanyExplorerV2Row{}, ErrNotFound
+	}
+	if err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
 	err = tx.QueryRowContext(ctx, `
 update company_explorer_items
 set parent_folder_id=$3::uuid,
@@ -692,6 +730,11 @@ returning target_type, target_id::text`, input.CompanyID, input.EdgeID, parentFo
 	}
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
+	}
+	if input.ParentEntityID != input.CompanyID && previousParentFolderID != input.ParentEntityID {
+		if _, err := snapshotPostgresResourceAccessPolicyTx(ctx, tx, input.CompanyID, EntityTypeCompanyExplorerFolder, input.ParentEntityID, targetType, targetID); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return CompanyExplorerV2Row{}, err

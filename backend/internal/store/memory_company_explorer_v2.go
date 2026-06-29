@@ -248,13 +248,17 @@ func (r *MemoryRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2Folder
 	if input.PermissionUserID != "" && !r.companyExplorerV2EntityCanEditLocked(input.CompanyID, input.PermissionUserID, parent) {
 		return CompanyExplorerV2Row{}, ErrNotFound
 	}
+	defaultAccess := input.DefaultAccess
+	if defaultAccess == "" {
+		defaultAccess = ResourceDefaultAccessEdit
+	}
 	now := time.Now().UTC()
 	entity := memoryCompanyExplorerV2Entity{
 		CompanyID:        input.CompanyID,
 		EntityID:         newUUIDv7String(),
 		EntityType:       CompanyExplorerV2EntityFolder,
 		Name:             input.Name,
-		DefaultAccess:    input.DefaultAccess,
+		DefaultAccess:    defaultAccess,
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
@@ -275,6 +279,12 @@ func (r *MemoryRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2Folder
 	r.companyExplorerV2Edges[key(edge.CompanyID, edge.EdgeID)] = edge
 
 	r.shadowCompanyExplorerV2FolderToLegacyLocked(parent, entity, edge)
+	if parent.EntityType == CompanyExplorerV2EntityFolder {
+		if _, err := r.snapshotResourceAccessPolicyLocked(input.CompanyID, EntityTypeCompanyExplorerFolder, parent.EntityID, EntityTypeCompanyExplorerFolder, entity.EntityID); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+		entity = r.companyExplorerV2Entities[key(entity.CompanyID, entity.EntityID)]
+	}
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, entity, &edge), nil
 }
 
@@ -362,10 +372,14 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
+	previousParentEntityID := ""
+	hadPreviousEdge := false
 	for edgeKey, existing := range r.companyExplorerV2Edges {
 		if existing.CompanyID != input.CompanyID || existing.ChildEntityID != child.EntityID {
 			continue
 		}
+		previousParentEntityID = existing.ParentEntityID
+		hadPreviousEdge = true
 		if edge.CreatedTimestamp.Equal(now) {
 			edge.CreatedTimestamp = existing.CreatedTimestamp
 		}
@@ -373,6 +387,15 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 	}
 	r.companyExplorerV2Edges[key(edge.CompanyID, edge.EdgeID)] = edge
 	r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
+	if parent.EntityType == CompanyExplorerV2EntityFolder && (!hadPreviousEdge || previousParentEntityID != parent.EntityID) {
+		childResourceID := child.ResourceID
+		if childResourceID == "" {
+			childResourceID = child.EntityID
+		}
+		if _, err := r.snapshotResourceAccessPolicyLocked(input.CompanyID, EntityTypeCompanyExplorerFolder, parent.EntityID, child.EntityType, childResourceID); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child, &edge), nil
 }
 
@@ -406,6 +429,7 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 	if input.Position > 0 {
 		edge.Position = input.Position
 	}
+	previousParentEntityID := edge.ParentEntityID
 	oldEdgeKey := key(input.CompanyID, edge.EdgeID)
 	edge.ParentEntityID = input.ParentEntityID
 	edge.EdgeID = companyExplorerV2EdgeID(input.CompanyID, input.ParentEntityID, child.EntityID)
@@ -413,6 +437,15 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 	delete(r.companyExplorerV2Edges, oldEdgeKey)
 	r.companyExplorerV2Edges[key(input.CompanyID, edge.EdgeID)] = edge
 	r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
+	if parent.EntityType == CompanyExplorerV2EntityFolder && previousParentEntityID != parent.EntityID {
+		childResourceID := child.ResourceID
+		if childResourceID == "" {
+			childResourceID = child.EntityID
+		}
+		if _, err := r.snapshotResourceAccessPolicyLocked(input.CompanyID, EntityTypeCompanyExplorerFolder, parent.EntityID, child.EntityType, childResourceID); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child, &edge), nil
 }
 

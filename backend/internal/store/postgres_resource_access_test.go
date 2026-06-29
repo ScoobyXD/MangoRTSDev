@@ -6,53 +6,47 @@ import (
 	"testing"
 )
 
-func TestPostgresCopyLogicGateAccessPolicyClosesPermissionRowsBeforeInsert(t *testing.T) {
+func TestPostgresResourceOverrideUserIDsClosesPermissionRowsBeforeReturn(t *testing.T) {
 	raw, err := os.ReadFile("postgres_resource_access.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_resource_access.go: %v", err)
 	}
-	body := postgresResourceAccessFunctionBodyForTest(t, string(raw), "func copyPostgresLogicGateAccessPolicyToNodeTx")
+	body := postgresResourceAccessFunctionBodyForTest(t, string(raw), "func postgresResourceOverrideUserIDsTx")
 	if strings.Contains(body, "defer rows.Close()") {
-		t.Fatal("copying logic gate access policy should close permission rows before inserting node overrides")
+		t.Fatal("resource override reads should close permission rows before returning buffered users")
 	}
 	appendIndex := strings.Index(body, "userIDs = append(userIDs, userID)")
 	rowsErrIndex := strings.Index(body, "if err := rows.Err(); err != nil")
 	closeIndex := strings.Index(body, "if err := rows.Close(); err != nil")
-	insertIndex := strings.Index(body, "insertPostgresResourceOverrideTx")
-	if appendIndex < 0 || rowsErrIndex < 0 || closeIndex < 0 || insertIndex < 0 {
-		t.Fatal("copying logic gate access policy should buffer permission users, check rows, close rows, then insert overrides")
+	returnIndex := strings.Index(body, "return userIDs, nil")
+	if appendIndex < 0 || rowsErrIndex < 0 || closeIndex < 0 || returnIndex < 0 {
+		t.Fatal("resource override reads should buffer permission users, check rows, close rows, then return users")
 	}
-	if !(appendIndex < rowsErrIndex && rowsErrIndex < closeIndex && closeIndex < insertIndex) {
-		t.Fatal("copying logic gate access policy inserts node overrides before closing permission rows")
+	if !(appendIndex < rowsErrIndex && rowsErrIndex < closeIndex && closeIndex < returnIndex) {
+		t.Fatal("resource override reads return before closing permission rows")
 	}
 }
 
-func TestPostgresLogicGateAccessPolicyMatchComparesExactPermissionRows(t *testing.T) {
+func TestPostgresResourceAccessPolicySnapshotComparesExactPolicy(t *testing.T) {
 	raw, err := os.ReadFile("postgres_resource_access.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_resource_access.go: %v", err)
 	}
-	body := postgresResourceAccessFunctionBodyForTest(t, string(raw), "func postgresLogicGateAccessPolicyMatchesNodeTx")
-	if !strings.Contains(body, "(select default_access from gate_default) = (select default_access from node_default)") {
-		t.Fatal("policy match guard must compare Logic Gate and node default_access")
+	body := postgresResourceAccessFunctionBodyForTest(t, string(raw), "func snapshotPostgresResourceAccessPolicyTx")
+	if !strings.Contains(body, "sourceDefaultAccess == targetDefaultAccess") {
+		t.Fatal("policy snapshot must compare source and target default_access before rewriting")
 	}
-	if !strings.Contains(body, "case when (select default_access from gate_default) = $4 then $5 else $4 end as access_level") {
-		t.Fatal("Logic Gate explicit permission rows must include their access level in the match comparison")
+	if !strings.Contains(body, "orderedStringSlicesEqual(sourceOverrideUserIDs, targetOverrideUserIDs)") {
+		t.Fatal("policy snapshot must compare exact override users before rewriting")
 	}
-	if !strings.Contains(body, "case when (select default_access from node_default) = $4 then $5 else $4 end as access_level") {
-		t.Fatal("node explicit permission rows must include their access level in the match comparison")
+	if !strings.Contains(body, "setPostgresResourceDefaultAccessTx(ctx, tx, companyID, targetType, targetID, sourceDefaultAccess)") {
+		t.Fatal("policy snapshot must set the target default_access from the source")
 	}
-	if !strings.Contains(body, "(select user_id, access_level from gate_policy except select user_id, access_level from node_policy)") {
-		t.Fatal("policy match guard must detect missing or changed node permission rows")
+	if !strings.Contains(body, "deletePostgresResourceOverridesTx(ctx, tx, companyID, targetType, targetID)") {
+		t.Fatal("policy snapshot must replace target override rows atomically")
 	}
-	if !strings.Contains(body, "(select user_id, access_level from node_policy except select user_id, access_level from gate_policy)") {
-		t.Fatal("policy match guard must detect extra or changed node permission rows")
-	}
-	if strings.Contains(body, "different_users") {
-		t.Fatal("policy match guard must not compare only the set of explicit permission users")
-	}
-	if !strings.Contains(body, "ResourceDefaultAccessEdit, ResourceDefaultAccessNoAccess") {
-		t.Fatal("policy match guard must bind both explicit access values used by default resource policies")
+	if !strings.Contains(body, "insertPostgresResourceOverrideTx(ctx, tx, companyID, targetType, targetID, userID)") {
+		t.Fatal("policy snapshot must copy source override users onto the target resource type")
 	}
 }
 
