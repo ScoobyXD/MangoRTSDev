@@ -196,7 +196,7 @@ test("kanban grouping values use placed-by users for by-person grouping", () => 
   ), [{ key: "person:none", label: "No person", sortValue: "", sortLast: true }]);
 });
 
-test("kanban grouping values resolve status priority and due date buckets", () => {
+test("kanban grouping values resolve priority due date and date-added buckets", () => {
   const columns = new Map([
     ["todo", column({ column_id: "todo", title: "Todo", position: 1000 })],
     ["done", column({ column_id: "done", title: "Done", position: 2000 })],
@@ -206,17 +206,14 @@ test("kanban grouping values resolve status priority and due date buckets", () =
     ["node-none", { node_id: "node-none" }],
   ]);
 
-  assert.deepEqual(getKanbanGroupValues(card({ card_id: "task", column_id: "done" }), "status", columns, nodeByID, new Map()), [
-    { key: "status:done", label: "Done", sortValue: 2000 },
-  ]);
-  assert.deepEqual(getKanbanGroupValues(card({ card_id: "issue", is_issue: true }), "status", columns, nodeByID, new Map()), [
-    { key: "issue", label: "Issue", sortValue: Number.MAX_SAFE_INTEGER },
-  ]);
   assert.deepEqual(getKanbanGroupValues(card({ card_id: "urgent", node_id: "node-urgent" }), "priority", columns, nodeByID, new Map()), [
     { key: "priority:1", label: "1\u00A0\u00A0URGENT(<1hr)", sortValue: 1, sortLast: false },
   ]);
   assert.deepEqual(getKanbanGroupValues(card({ card_id: "none", node_id: "node-none" }), "due_date", columns, nodeByID, new Map()), [
     { key: "due:none", label: "No due date", sortValue: "", sortLast: true },
+  ]);
+  assert.deepEqual(getKanbanGroupValues(card({ card_id: "added", created_timestamp: "2026-05-01T14:35:12.000Z" }), "date_added", columns, nodeByID, new Map()), [
+    { key: "date-added:2026-05-01T14:35:12.000Z", label: "2026-05-01 14:35", sortValue: Date.parse("2026-05-01T14:35:12.000Z") },
   ]);
 });
 
@@ -401,5 +398,5 @@ test("column layout helpers keep reorder and resize writes bounded", () => {
 test("kanban visual contract preserves column title casing and frame-header clearance", () => {
   assert.equal(KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, "none");
   assert.ok(KANBAN_MODULE_TOP_CLEARANCE_PX >= 34);
-  assert.deepEqual(KANBAN_GROUP_FIELDS.map((field) => field.value), ["status", "person", "priority", "due_date", "account"]);
+  assert.deepEqual(KANBAN_GROUP_FIELDS.map((field) => field.value), ["person", "priority", "due_date", "date_added", "account"]);
 });

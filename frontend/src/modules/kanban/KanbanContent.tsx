@@ -113,7 +113,8 @@ const KANBAN_ARENA_TOP_CONTROL_HEIGHT_PX = 48;
 const KANBAN_REQUESTED_ACCEPT_COLUMN_ID = "pending";
 const KANBAN_REQUESTED_DECLINE_COLUMN_ID = "backlog";
 const LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE = "logic_gate_kanban";
-const KANBAN_GROUP_FIELD_SET = new Set<KanbanGroupField>(["status", "person", "priority", "due_date", "account"]);
+const LOGIC_GATE_KANBAN_DEFAULT_SAVED_VIEW_NAME = "Kanban grouping";
+const KANBAN_GROUP_FIELD_SET = new Set<KanbanGroupField>(["person", "priority", "due_date", "date_added", "account"]);
 
 function normalizeKanbanSavedGroupings(value: unknown): SavedViewGrouping[] {
   if (!Array.isArray(value)) return [];
@@ -148,8 +149,8 @@ function sortSavedViewsForKanban(savedViews: SavedView[]): SavedView[] {
   ));
 }
 
-function cleanKanbanSavedViewName(value: string): string {
-  return value.trim() || "Logic Gate grouping";
+function kanbanGroupingSignature(groupings: SavedViewGrouping[]): string {
+  return JSON.stringify(normalizeKanbanSavedGroupings(groupings));
 }
 
 function kanbanNestedGroupItemCount(group: UniversalNestedGroup<KanbanCard, KanbanGroupField>): number {
@@ -223,7 +224,6 @@ import { humanLabelOrFallback } from "../entityLabels.js";
 import { buildUniversalNestedGroups, type UniversalNestedGroup } from "../grouping/universalGrouping";
 import {
   createSavedViewID,
-  deleteSavedView as deleteSavedViewRequest,
   fetchSavedViewPreference,
   fetchSavedViews,
   saveSavedView,
@@ -368,10 +368,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [contentSearchQuery, setContentSearchQuery] = useState("");
   const [kanbanAccountFilterIDs, setKanbanAccountFilterIDs] = useState<string[]>([]);
   const [kanbanGroupingOpen, setKanbanGroupingOpen] = useState(false);
-  const [kanbanGroupingViews, setKanbanGroupingViews] = useState<SavedView[]>([]);
-  const [selectedKanbanGroupingViewID, setSelectedKanbanGroupingViewID] = useState("");
-  const [kanbanGroupingNameDraft, setKanbanGroupingNameDraft] = useState("Logic Gate grouping");
+  const [kanbanGroupingView, setKanbanGroupingView] = useState<SavedView | null>(null);
   const [kanbanGroupingDraft, setKanbanGroupingDraft] = useState<SavedViewGrouping[]>([]);
+  const [kanbanGroupingLoaded, setKanbanGroupingLoaded] = useState(false);
   const [kanbanGroupingLoading, setKanbanGroupingLoading] = useState(false);
   const [kanbanGroupingSaving, setKanbanGroupingSaving] = useState(false);
   const [kanbanGroupingError, setKanbanGroupingError] = useState("");
@@ -431,6 +430,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const kanbanProjectionVersionsRef = useRef(new Map<string, number>());
   const kanbanProjectionSequenceRef = useRef<number | undefined>(undefined);
   const kanbanProjectionFallbackBoardsInFlightRef = useRef(new Set<string>());
+  const kanbanGroupingPersistedSignatureRef = useRef("");
+  const kanbanGroupingSaveSeqRef = useRef(0);
   const lastLocalBoardSelectionChangedAtRef = useRef(0);
   const arenaViewLoadKeyRef = useRef("");
 
@@ -836,16 +837,17 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   useEffect(() => {
     if (!activeBoardIsLogicGate || !companyID) {
-      setKanbanGroupingViews([]);
-      setSelectedKanbanGroupingViewID("");
-      setKanbanGroupingNameDraft("Logic Gate grouping");
+      setKanbanGroupingView(null);
       setKanbanGroupingDraft([]);
+      setKanbanGroupingLoaded(false);
       setKanbanGroupingError("");
       setKanbanGroupingLoading(false);
+      kanbanGroupingPersistedSignatureRef.current = "";
       return undefined;
     }
     let cancelled = false;
     setKanbanGroupingLoading(true);
+    setKanbanGroupingLoaded(false);
     setKanbanGroupingError("");
     void Promise.all([
       fetchSavedViews({ apiBase, companyID, surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE }),
@@ -854,11 +856,22 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       if (cancelled) return;
       const sortedViews = sortSavedViewsForKanban(views);
       const selectedViewID = preference.selected_saved_view_id.trim();
-      const selectedView = selectedViewID ? sortedViews.find((view) => view.saved_view_id === selectedViewID) ?? null : null;
-      setKanbanGroupingViews(sortedViews);
-      setSelectedKanbanGroupingViewID(selectedView?.saved_view_id ?? "");
-      setKanbanGroupingNameDraft(selectedView?.name ?? "Logic Gate grouping");
-      setKanbanGroupingDraft(normalizeKanbanSavedGroupings(selectedView?.groupings ?? []));
+      const selectedView = selectedViewID
+        ? sortedViews.find((view) => view.saved_view_id === selectedViewID) ?? null
+        : sortedViews[0] ?? null;
+      const groupings = normalizeKanbanSavedGroupings(selectedView?.groupings ?? []);
+      setKanbanGroupingView(selectedView);
+      setKanbanGroupingDraft(groupings);
+      setKanbanGroupingLoaded(true);
+      kanbanGroupingPersistedSignatureRef.current = kanbanGroupingSignature(groupings);
+      if (!selectedViewID && selectedView) {
+        void saveSavedViewPreference({
+          apiBase,
+          companyID,
+          surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE,
+          selectedSavedViewID: selectedView.saved_view_id,
+        }).catch(() => undefined);
+      }
     }).catch((nextError) => {
       if (!cancelled) setKanbanGroupingError(nextError instanceof Error ? nextError.message : "Failed to load grouping");
     }).finally(() => {
@@ -867,108 +880,67 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     return () => { cancelled = true; };
   }, [activeBoardIsLogicGate, apiBase, companyID]);
 
-  const selectKanbanGroupingView = useCallback((savedViewID: string) => {
-    const cleanSavedViewID = savedViewID.trim();
-    const selectedView = cleanSavedViewID ? kanbanGroupingViews.find((view) => view.saved_view_id === cleanSavedViewID) ?? null : null;
-    setSelectedKanbanGroupingViewID(selectedView?.saved_view_id ?? "");
-    setKanbanGroupingNameDraft(selectedView?.name ?? "Logic Gate grouping");
-    setKanbanGroupingDraft(normalizeKanbanSavedGroupings(selectedView?.groupings ?? []));
-    setKanbanGroupingError("");
-    if (!activeBoardIsLogicGate || !companyID) return;
-    void saveSavedViewPreference({
-      apiBase,
-      companyID,
-      surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE,
-      selectedSavedViewID: selectedView?.saved_view_id ?? "",
-    }).catch((nextError) => {
-      setKanbanGroupingError(nextError instanceof Error ? nextError.message : "Failed to save grouping preference");
-    });
-  }, [activeBoardIsLogicGate, apiBase, companyID, kanbanGroupingViews]);
-
-  const createNewKanbanGroupingView = useCallback(() => {
-    setSelectedKanbanGroupingViewID("");
-    setKanbanGroupingNameDraft("Logic Gate grouping");
-    setKanbanGroupingDraft([]);
-    setKanbanGroupingError("");
-  }, []);
-
-  const saveKanbanGroupingView = useCallback(async () => {
-    if (!activeBoardIsLogicGate || !companyID) return;
+  useEffect(() => {
+    if (!activeBoardIsLogicGate || !companyID || !kanbanGroupingLoaded || kanbanGroupingLoading) return undefined;
     const userID = (currentUserID ?? "").trim();
     if (!userID) {
-      setKanbanGroupingError("Current user is required");
-      return;
+      if (currentUserID !== null && normalizeKanbanSavedGroupings(kanbanGroupingDraft).length > 0) {
+        setKanbanGroupingError("Current user is required");
+      }
+      return undefined;
     }
-    const existingView = selectedKanbanGroupingViewID
-      ? kanbanGroupingViews.find((view) => view.saved_view_id === selectedKanbanGroupingViewID) ?? null
-      : null;
     const groupings = normalizeKanbanSavedGroupings(kanbanGroupingDraft);
-    setKanbanGroupingSaving(true);
-    setKanbanGroupingError("");
-    try {
-      const savedView = await saveSavedView({
-        apiBase,
-        savedView: {
-          company_id: companyID,
-          saved_view_id: existingView?.saved_view_id ?? createSavedViewID(),
+    const signature = kanbanGroupingSignature(groupings);
+    if (signature === kanbanGroupingPersistedSignatureRef.current) return undefined;
+    if (!kanbanGroupingView && groupings.length === 0) {
+      kanbanGroupingPersistedSignatureRef.current = signature;
+      return undefined;
+    }
+    const timeout = window.setTimeout(() => {
+      const saveSeq = kanbanGroupingSaveSeqRef.current + 1;
+      kanbanGroupingSaveSeqRef.current = saveSeq;
+      setKanbanGroupingSaving(true);
+      setKanbanGroupingError("");
+      const savedViewID = kanbanGroupingView?.saved_view_id ?? createSavedViewID();
+      void (async () => {
+        const savedView = await saveSavedView({
+          apiBase,
+          savedView: {
+            company_id: companyID,
+            saved_view_id: savedViewID,
+            surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE,
+            principal: "user",
+            principal_id: userID,
+            name: kanbanGroupingView?.name.trim() || LOGIC_GATE_KANBAN_DEFAULT_SAVED_VIEW_NAME,
+            groupings,
+            position: kanbanGroupingView?.position ?? nextKanbanSavedViewPosition([]),
+          },
+        });
+        await saveSavedViewPreference({
+          apiBase,
+          companyID,
           surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE,
-          principal: "user",
-          principal_id: userID,
-          name: cleanKanbanSavedViewName(kanbanGroupingNameDraft),
-          groupings,
-          position: existingView?.position ?? nextKanbanSavedViewPosition(kanbanGroupingViews),
-        },
+          selectedSavedViewID: savedView.saved_view_id,
+        });
+        if (kanbanGroupingSaveSeqRef.current !== saveSeq) return;
+        setKanbanGroupingView(savedView);
+        kanbanGroupingPersistedSignatureRef.current = signature;
+      })().catch((nextError) => {
+        if (kanbanGroupingSaveSeqRef.current === saveSeq) {
+          setKanbanGroupingError(nextError instanceof Error ? nextError.message : "Failed to save grouping");
+        }
+      }).finally(() => {
+        if (kanbanGroupingSaveSeqRef.current === saveSeq) setKanbanGroupingSaving(false);
       });
-      const nextViews = sortSavedViewsForKanban([
-        ...kanbanGroupingViews.filter((view) => view.saved_view_id !== savedView.saved_view_id),
-        savedView,
-      ]);
-      setKanbanGroupingViews(nextViews);
-      setSelectedKanbanGroupingViewID(savedView.saved_view_id);
-      setKanbanGroupingNameDraft(savedView.name);
-      setKanbanGroupingDraft(normalizeKanbanSavedGroupings(savedView.groupings));
-      await saveSavedViewPreference({
-        apiBase,
-        companyID,
-        surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE,
-        selectedSavedViewID: savedView.saved_view_id,
-      });
-    } catch (nextError) {
-      setKanbanGroupingError(nextError instanceof Error ? nextError.message : "Failed to save grouping");
-    } finally {
-      setKanbanGroupingSaving(false);
-    }
-  }, [activeBoardIsLogicGate, apiBase, companyID, currentUserID, kanbanGroupingDraft, kanbanGroupingNameDraft, kanbanGroupingViews, selectedKanbanGroupingViewID]);
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [activeBoardIsLogicGate, apiBase, companyID, currentUserID, kanbanGroupingDraft, kanbanGroupingLoaded, kanbanGroupingLoading, kanbanGroupingView]);
 
-  const deleteKanbanGroupingView = useCallback(async () => {
-    const savedViewID = selectedKanbanGroupingViewID.trim();
-    if (!activeBoardIsLogicGate || !companyID || !savedViewID) return;
-    setKanbanGroupingSaving(true);
-    setKanbanGroupingError("");
-    try {
-      await deleteSavedViewRequest({ apiBase, companyID, savedViewID });
-      const nextViews = kanbanGroupingViews.filter((view) => view.saved_view_id !== savedViewID);
-      setKanbanGroupingViews(nextViews);
-      setSelectedKanbanGroupingViewID("");
-      setKanbanGroupingNameDraft("Logic Gate grouping");
-      setKanbanGroupingDraft([]);
-      await saveSavedViewPreference({
-        apiBase,
-        companyID,
-        surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE,
-        selectedSavedViewID: "",
-      });
-    } catch (nextError) {
-      setKanbanGroupingError(nextError instanceof Error ? nextError.message : "Failed to delete grouping");
-    } finally {
-      setKanbanGroupingSaving(false);
-    }
-  }, [activeBoardIsLogicGate, apiBase, companyID, kanbanGroupingViews, selectedKanbanGroupingViewID]);
-
-  const addKanbanGrouping = useCallback(() => {
+  const addKanbanGrouping = useCallback((field: string) => {
     setKanbanGroupingDraft((current) => {
-      const field = firstAvailableKanbanGroupingField(current);
-      return field ? [...current, { field, direction: "asc" }] : current;
+      const normalizedField = KANBAN_GROUP_FIELD_SET.has(field as KanbanGroupField) ? field : firstAvailableKanbanGroupingField(current);
+      if (!normalizedField || current.some((grouping) => grouping.field === normalizedField)) return current;
+      return [...current, { field: normalizedField, direction: "asc" }];
     });
   }, []);
 
@@ -2227,7 +2199,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         : "Request pending"
       : undefined;
     const placedByUserID = (card.placed_by_user_id ?? "").trim();
-    const bylineText = placedByUserID ? `by: ${companyUserDisplayName(arenaUserByID.get(placedByUserID), placedByUserID)}` : undefined;
+    const bylineText = placedByUserID ? `from: ${companyUserDisplayName(arenaUserByID.get(placedByUserID), placedByUserID)}` : undefined;
     return (
       <KanbanCardView
         key={card.card_id}
@@ -2518,9 +2490,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     <KanbanGroupingControls
       controlsRef={kanbanGroupControlsRef}
       open={kanbanGroupingOpen}
-      savedViews={kanbanGroupingViews}
-      selectedSavedViewID={selectedKanbanGroupingViewID}
-      viewName={kanbanGroupingNameDraft}
       groupings={kanbanGroupingDraft}
       loading={kanbanGroupingLoading}
       saving={kanbanGroupingSaving}
@@ -2532,11 +2501,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       subtext={subtext}
       accent={accent}
       onToggleOpen={() => setKanbanGroupingOpen((open) => !open)}
-      onSelectSavedView={selectKanbanGroupingView}
-      onSetViewName={setKanbanGroupingNameDraft}
-      onNewSavedView={createNewKanbanGroupingView}
-      onSaveSavedView={() => void saveKanbanGroupingView()}
-      onDeleteSavedView={() => void deleteKanbanGroupingView()}
       onAddGrouping={addKanbanGrouping}
       onUpdateGrouping={updateKanbanGrouping}
       onRemoveGrouping={removeKanbanGrouping}
