@@ -84,8 +84,9 @@ type CompanyExplorerTreeRowProps = {
 
 const TREE_ROW_PILL_LEFT_PADDING_PX = 3;
 const TREE_ROW_PILL_GAP_PX = 6;
-const TREE_ROW_ICON_SIZE_PX = 15;
-const TREE_ICON_GUIDE_OFFSET_PX = TREE_ROW_PILL_LEFT_PADDING_PX + TREE_TOGGLE_SLOT_PX + TREE_ROW_PILL_GAP_PX + TREE_ROW_ICON_SIZE_PX / 2;
+const TREE_GUIDE_OFFSET_PX = TREE_TOGGLE_SLOT_PX / 2;
+const TREE_GUIDE_ICON_CONNECTOR_GAP_PX = 2;
+const TREE_GUIDE_CONNECTOR_END_OFFSET_PX = TREE_ROW_PILL_LEFT_PADDING_PX + TREE_TOGGLE_SLOT_PX + TREE_ROW_PILL_GAP_PX - TREE_GUIDE_ICON_CONNECTOR_GAP_PX;
 
 function getTriageMessageDropTarget(row: ExplorerTreeNode, treeRows: ExplorerTreeNode[]): CompanyExplorerTriageMessageDropTarget | null {
   void treeRows;
@@ -113,6 +114,17 @@ function ExplorerPermissionLockIcon({ color }: { color: string }) {
       <path d="M8 10V8a4 4 0 0 1 8 0v2" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
+}
+
+function hasLaterVisibleSiblingAtDepth(rows: ExplorerTreeNode[], currentRowID: string, depth: number): boolean {
+  const currentIndex = rows.findIndex((candidate) => candidate.id === currentRowID);
+  if (currentIndex < 0) return true;
+  for (let index = currentIndex + 1; index < rows.length; index += 1) {
+    const nextDepth = Math.max(0, Math.floor(rows[index].depth));
+    if (nextDepth < depth) return false;
+    if (nextDepth === depth) return true;
+  }
+  return false;
 }
 
 export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
@@ -187,6 +199,15 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
     : `inset 0 -1px 0 ${rowRuleColor}`;
   const hierarchyGuideColor = isDarkTheme ? "rgba(148, 163, 184, 0.26)" : "rgba(100, 116, 139, 0.22)";
   const hierarchyGuideDepth = Math.max(0, Math.floor(row.depth));
+  const hierarchyConnectors = React.useMemo(() => Array.from({ length: hierarchyGuideDepth }, (_, level) => {
+    const connectorDepth = level + 1;
+    const hasLaterSibling = hasLaterVisibleSiblingAtDepth(treeRows, row.id, connectorDepth);
+    if (connectorDepth < hierarchyGuideDepth && !hasLaterSibling) return null;
+    return {
+      isTerminal: connectorDepth === hierarchyGuideDepth && !hasLaterSibling,
+      level,
+    };
+  }).filter((connector): connector is { isTerminal: boolean; level: number } => Boolean(connector)), [hierarchyGuideDepth, row.id, treeRows]);
   const rowPillStyle: React.CSSProperties = {
     position: "relative",
     zIndex: 1,
@@ -408,7 +429,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         transition: "background 120ms ease, box-shadow 140ms ease",
       }}
     >
-      {hierarchyGuideDepth > 0 && (
+      {hierarchyConnectors.length > 0 && (
         <span
           aria-hidden="true"
           style={{
@@ -418,21 +439,64 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
             pointerEvents: "none",
           }}
         >
-          {Array.from({ length: hierarchyGuideDepth }, (_, level) => (
-            <span
-              key={level}
-              style={{
-                position: "absolute",
-                display: "block",
-                left: TREE_BASE_LEFT_PX + level * TREE_INDENT_PX + TREE_ICON_GUIDE_OFFSET_PX,
-                top: -1,
-                bottom: -1,
-                width: 1,
-                borderRadius: 999,
-                background: hierarchyGuideColor,
-              }}
-            />
-          ))}
+          {hierarchyConnectors.map(({ isTerminal, level }) => {
+            const guideLeft = TREE_BASE_LEFT_PX + level * TREE_INDENT_PX + TREE_GUIDE_OFFSET_PX;
+            if (isTerminal) {
+              const connectorEndLeft = TREE_BASE_LEFT_PX + hierarchyGuideDepth * TREE_INDENT_PX + TREE_GUIDE_CONNECTOR_END_OFFSET_PX;
+              const connectorWidth = Math.max(8, connectorEndLeft - guideLeft);
+              return (
+                <span
+                  key={level}
+                  style={{
+                    position: "absolute",
+                    display: "block",
+                    left: guideLeft,
+                    top: -1,
+                    bottom: -1,
+                    width: connectorWidth,
+                  }}
+                >
+                  <span
+                    style={{
+                      position: "absolute",
+                      display: "block",
+                      left: 0,
+                      top: 0,
+                      height: "calc(50% + 1px)",
+                      width: 1,
+                      background: hierarchyGuideColor,
+                    }}
+                  />
+                  <span
+                    style={{
+                      position: "absolute",
+                      display: "block",
+                      left: 0,
+                      top: "50%",
+                      width: connectorWidth,
+                      height: 1,
+                      background: hierarchyGuideColor,
+                    }}
+                  />
+                </span>
+              );
+            }
+            return (
+              <span
+                key={level}
+                style={{
+                  position: "absolute",
+                  display: "block",
+                  left: guideLeft,
+                  top: -1,
+                  bottom: -1,
+                  width: 1,
+                  borderRadius: 999,
+                  background: hierarchyGuideColor,
+                }}
+              />
+            );
+          })}
         </span>
       )}
       <div className="company-explorer-row-hit" data-selected={isSelected ? "true" : undefined} style={rowPillStyle}>
