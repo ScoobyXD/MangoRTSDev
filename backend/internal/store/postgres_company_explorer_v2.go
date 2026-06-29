@@ -119,6 +119,44 @@ func companyExplorerPermissionRulesSelect(entityTypeExpr, entityIDExpr string) s
           and permission_marker.resource_id=` + entityIDExpr + `
       )
     )
+    or (
+      ` + entityTypeExpr + `='` + EntityTypeLogicGate + `'
+      and (
+        exists (
+          select 1
+          from logic_gates permission_logic_gate
+          where permission_logic_gate.company_id=$1::uuid
+            and permission_logic_gate.logic_gate_id=` + entityIDExpr + `
+            and coalesce(permission_logic_gate.default_access, '` + ResourceDefaultAccessEdit + `')='` + ResourceDefaultAccessNoAccess + `'
+        )
+        or exists (
+          select 1
+          from resource_permissions permission_marker
+          where permission_marker.company_id=$1::uuid
+            and permission_marker.resource_type='` + EntityTypeLogicGate + `'
+            and permission_marker.resource_id=` + entityIDExpr + `
+        )
+      )
+    )
+    or (
+      ` + entityTypeExpr + `='` + EntityTypeProject + `'
+      and (
+        exists (
+          select 1
+          from projects permission_project
+          where permission_project.company_id=$1::uuid
+            and permission_project.project_id=` + entityIDExpr + `
+            and coalesce(permission_project.default_access, '` + ResourceDefaultAccessEdit + `')='` + ResourceDefaultAccessNoAccess + `'
+        )
+        or exists (
+          select 1
+          from resource_permissions permission_marker
+          where permission_marker.company_id=$1::uuid
+            and permission_marker.resource_type='` + EntityTypeProject + `'
+            and permission_marker.resource_id=` + entityIDExpr + `
+        )
+      )
+    )
   )`
 }
 

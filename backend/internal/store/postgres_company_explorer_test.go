@@ -103,6 +103,30 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLeafItems(t *testing.T) 
 	}
 }
 
+func TestPostgresCompanyExplorerV2PermissionRuleMarkersCoverLeafResources(t *testing.T) {
+	markerSQL := strings.ToLower(strings.Join(strings.Fields(companyExplorerPermissionRulesSelect("all_rows.entity_type", "all_rows.entity_id")), " "))
+	for _, want := range []string{
+		"all_rows.entity_type='folder'",
+		"from company_explorer_folders permission_folder",
+		"permission_marker.resource_type='company_explorer_folder'",
+		"all_rows.entity_type='logic_gate'",
+		"from logic_gates permission_logic_gate",
+		"permission_logic_gate.logic_gate_id=all_rows.entity_id",
+		"permission_marker.resource_type='logic_gate'",
+		"all_rows.entity_type='project'",
+		"from projects permission_project",
+		"permission_project.project_id=all_rows.entity_id",
+		"permission_marker.resource_type='project'",
+	} {
+		if !strings.Contains(markerSQL, want) {
+			t.Fatalf("companyExplorerPermissionRulesSelect missing %q in %s", want, markerSQL)
+		}
+	}
+	if strings.Contains(markerSQL, "all_rows.entity_type='node'") {
+		t.Fatalf("Company Explorer permission markers must not add node row locks")
+	}
+}
+
 func TestPostgresCompanyExplorerSearchUsesVisibleExplorerLocations(t *testing.T) {
 	raw, err := os.ReadFile("postgres_company_explorer_search.go")
 	if err != nil {
