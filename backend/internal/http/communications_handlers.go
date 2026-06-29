@@ -352,8 +352,10 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 			s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
 		}
 		s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, result.ArchivedIDs, true)
+		s.rememberRecentCommunicationsArchiveMutation(cacheScope, result.ArchivedIDs, now)
+		eventMeta := communicationsEventMetadata{Action: "archive", SharedInboxID: sharedInboxID}
 		for _, messageID := range result.ArchivedIDs {
-			s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", messageID)
+			s.publishCommunicationsEventWithMeta(connection.UserID, "mailbox_changed", "message.archived", messageID, eventMeta)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -458,7 +460,7 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
 		}
-		s.archiveCommunicationsMessage(w, r, connection, messageID)
+		s.archiveCommunicationsMessage(w, r, connection, messageID, sharedInboxID)
 		return
 	}
 	if action == "unarchive" {
@@ -596,7 +598,7 @@ func (s *Server) downloadCommunicationsAttachment(w http.ResponseWriter, r *http
 	_, _ = w.Write(content)
 }
 
-func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, messageID string) {
+func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, messageID, sharedInboxID string) {
 	archiveFolderID := ""
 	if connection.Provider != "google" {
 		emailFolders, err := s.communicationsFolders(r.Context(), connection)
@@ -621,7 +623,11 @@ func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Req
 	s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, []string{messageID}, "primary", now)
 	s.commCache.patchMessagePages(connection.UserID, cacheScope, archived, now)
 	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, true)
-	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", archived.ID)
+	s.rememberRecentCommunicationsArchiveMutation(cacheScope, []string{messageID}, now)
+	s.publishCommunicationsEventWithMeta(connection.UserID, "mailbox_changed", "message.archived", archived.ID, communicationsEventMetadata{
+		Action:        "archive",
+		SharedInboxID: sharedInboxID,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"message": archived})
 }
 
