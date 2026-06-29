@@ -21,6 +21,12 @@ type savedViewRequest struct {
 	Position    int                        `json:"position"`
 }
 
+type savedViewPreferenceRequest struct {
+	CompanyID           string `json:"company_id"`
+	Surface             string `json:"surface"`
+	SelectedSavedViewID string `json:"selected_saved_view_id"`
+}
+
 func (s *Server) handleSavedViews(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/v1/saved-views" {
 		writeError(w, http.StatusNotFound, "not_found")
@@ -31,6 +37,21 @@ func (s *Server) handleSavedViews(w http.ResponseWriter, r *http.Request) {
 		s.handleSavedViewsList(w, r)
 	case http.MethodPost:
 		s.handleSavedViewsCreate(w, r)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+	}
+}
+
+func (s *Server) handleSavedViewPreferences(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/v1/saved-view-preferences" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		s.handleSavedViewPreferenceGet(w, r)
+	case http.MethodPut:
+		s.handleSavedViewPreferencePut(w, r)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
@@ -69,6 +90,48 @@ func (s *Server) handleSavedViewsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"saved_views": items})
+}
+
+func (s *Server) handleSavedViewPreferenceGet(w http.ResponseWriter, r *http.Request) {
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	surface := strings.TrimSpace(r.URL.Query().Get("surface"))
+	actor, ok := s.requireSavedViewCompanyAccess(w, r, companyID)
+	if !ok {
+		return
+	}
+	item, err := s.repo.GetSavedViewPreference(store.SavedViewPreferenceInput{
+		CompanyID: companyID,
+		Surface:   surface,
+		UserID:    actor.User.UserID,
+	})
+	if err != nil {
+		writeSavedViewStoreError(w, err, "failed_to_read_saved_view_preference")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, item)
+}
+
+func (s *Server) handleSavedViewPreferencePut(w http.ResponseWriter, r *http.Request) {
+	var req savedViewPreferenceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	actor, ok := s.requireSavedViewCompanyAccess(w, r, req.CompanyID)
+	if !ok {
+		return
+	}
+	item, err := s.repo.UpsertSavedViewPreference(store.SavedViewPreferenceInput{
+		CompanyID:           req.CompanyID,
+		Surface:             req.Surface,
+		UserID:              actor.User.UserID,
+		SelectedSavedViewID: req.SelectedSavedViewID,
+	})
+	if err != nil {
+		writeSavedViewStoreError(w, err, "failed_to_save_saved_view_preference")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }
 
 func (s *Server) handleSavedViewsCreate(w http.ResponseWriter, r *http.Request) {

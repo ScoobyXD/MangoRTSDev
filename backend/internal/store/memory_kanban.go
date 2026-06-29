@@ -143,6 +143,7 @@ func (r *MemoryRepo) kanbanProjectionRowFromCardLocked(card domain.KanbanCard) K
 		ResourceID:                 card.NodeID,
 		LogicGateID:                cloneStringPointer(card.LogicGateID),
 		RequestedByUserID:          strings.TrimSpace(card.RequestedByUserID),
+		PlacedByUserID:             strings.TrimSpace(card.PlacedByUserID),
 		DisplayTitle:               card.NodeTitle,
 		Status:                     &status,
 		DueDate:                    cloneStringPointer(card.DueDate),
@@ -171,6 +172,7 @@ func (r *MemoryRepo) kanbanProjectionRowFromCardLocked(card domain.KanbanCard) K
 	if assignment, ok := r.nodeLogicGateAssignmentLocked(card.CompanyID, card.NodeID, logicGateID); ok {
 		row.AssignmentID = assignment.AssignmentID
 		row.RequestedByUserID = strings.TrimSpace(assignment.RequestedByUserID)
+		row.PlacedByUserID = strings.TrimSpace(assignment.PlacedByUserID)
 		row.AssignmentCreatedTimestamp = assignment.CreatedTimestamp
 		row.AssignmentUpdatedTimestamp = assignment.UpdatedTimestamp
 	}
@@ -640,6 +642,9 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		if input.IsIssueSet {
 			card.IsIssue = input.IsIssue
 		}
+		if placedBy := strings.TrimSpace(input.PlacedByUserID); placedBy != "" {
+			card.PlacedByUserID = placedBy
+		}
 		card.UpdatedTimestamp = now
 		r.kanbanCards[k][index] = card
 		if card.LogicGateID != nil {
@@ -674,6 +679,7 @@ func (r *MemoryRepo) upsertKanbanCardLocked(input KanbanCardMutationInput) (doma
 		UpdatedTimestamp:    now,
 	}
 	card.RequestedByUserID = requestedByUserIDForLogicGateStatus(card.ColumnID, input.RequestedByUserID, "")
+	card.PlacedByUserID = strings.TrimSpace(input.PlacedByUserID)
 	if board.LogicGateID != nil {
 		value := *board.LogicGateID
 		card.LogicGateID = &value
@@ -731,6 +737,10 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 	}
 	previousAssignment, hadPreviousAssignment := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, "")
 	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
+	placedByUserID := strings.TrimSpace(previousAssignment.PlacedByUserID)
+	if !hadPreviousAssignment || previousAssignment.LogicGateID != input.LogicGateID {
+		placedByUserID = strings.TrimSpace(input.ActorUserID)
+	}
 
 	if input.PrioritySet {
 		priority, ok := logicGateAssignmentInputPriority(input)
@@ -754,6 +764,7 @@ func (r *MemoryRepo) AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentIn
 		IsIssue:             input.IsIssue,
 		IsIssueSet:          input.IsIssueSet,
 		RequestedByUserID:   input.ActorUserID,
+		PlacedByUserID:      placedByUserID,
 	})
 	if err != nil {
 		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
@@ -970,6 +981,10 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	resultCard.BoardID = targetBoardID
 	resultCard.LogicGateID = &value
 	resultCard.RequestedByUserID = requestedByUserIDForLogicGateStatus(columnID, input.ActorUserID, assignment.RequestedByUserID)
+	resultCard.PlacedByUserID = strings.TrimSpace(assignment.PlacedByUserID)
+	if crossLogicGateMove {
+		resultCard.PlacedByUserID = strings.TrimSpace(input.ActorUserID)
+	}
 	resultCard.IsIssue = assignment.IsIssue
 	resultCard.Position = position
 	if strings.TrimSpace(node.Title) != "" {
@@ -991,6 +1006,7 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 		CompatibilityBoardID: targetBoardID,
 		CompatibilityCardID:  resultCard.CardID,
 		RequestedByUserID:    resultCard.RequestedByUserID,
+		PlacedByUserID:       resultCard.PlacedByUserID,
 		UpdatedTimestamp:     resultCard.UpdatedTimestamp,
 	})
 	if crossLogicGateMove {
@@ -1136,6 +1152,7 @@ func (r *MemoryRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignme
 		CompatibilityBoardID: assignment.CompatibilityBoardID,
 		CompatibilityCardID:  assignment.CompatibilityCardID,
 		RequestedByUserID:    assignment.RequestedByUserID,
+		PlacedByUserID:       assignment.PlacedByUserID,
 		UpdatedTimestamp:     card.UpdatedTimestamp,
 	})
 	r.kanbanCards[location.mapKey][location.index] = card

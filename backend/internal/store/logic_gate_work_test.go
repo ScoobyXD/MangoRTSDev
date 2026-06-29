@@ -153,6 +153,80 @@ func TestMemoryLogicGateRequestedAssignmentsTrackRequester(t *testing.T) {
 	}
 }
 
+func TestMemoryLogicGateAssignmentsTrackPlacedByUser(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "55555555-5555-4555-8555-555555555403"
+	repo.EnsureCompany(companyID, "Logic Gate Placement Store Co")
+
+	creator := mustCreateGVICMembershipUser(t, repo, "logic-gate-placement-creator", companyID)
+	transferActor := mustCreateGVICMembershipUser(t, repo, "logic-gate-placement-transfer", companyID)
+	sourceGate, err := repo.CreateLogicGate(companyID, "Placement Source")
+	if err != nil {
+		t.Fatalf("CreateLogicGate source: %v", err)
+	}
+	targetGate, err := repo.CreateLogicGate(companyID, "Placement Target")
+	if err != nil {
+		t.Fatalf("CreateLogicGate target: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Placed work")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 2
+	assigned, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: sourceGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      LogicGateWorkStatusPending,
+		Priority:    &priority,
+		PrioritySet: true,
+		ActorUserID: creator.UserID,
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if assigned.Card.PlacedByUserID != creator.UserID || assigned.Assignment.PlacedByUserID != creator.UserID {
+		t.Fatalf("assigned placed_by card=%q assignment=%q, want %q", assigned.Card.PlacedByUserID, assigned.Assignment.PlacedByUserID, creator.UserID)
+	}
+
+	sameGateMove, err := repo.MoveLogicGateNodeAssignment(LogicGateNodeAssignmentMoveInput{
+		CompanyID:   companyID,
+		LogicGateID: sourceGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      LogicGateWorkStatusInProgress,
+		ActorUserID: transferActor.UserID,
+	})
+	if err != nil {
+		t.Fatalf("MoveLogicGateNodeAssignment same gate: %v", err)
+	}
+	if sameGateMove.Card.PlacedByUserID != creator.UserID || sameGateMove.Assignment.PlacedByUserID != creator.UserID {
+		t.Fatalf("same-gate placed_by card=%q assignment=%q, want original %q", sameGateMove.Card.PlacedByUserID, sameGateMove.Assignment.PlacedByUserID, creator.UserID)
+	}
+
+	crossGateMove, err := repo.MoveLogicGateNodeAssignment(LogicGateNodeAssignmentMoveInput{
+		CompanyID:       companyID,
+		LogicGateID:     targetGate.LogicGateID,
+		FromLogicGateID: sourceGate.LogicGateID,
+		NodeID:          node.NodeID,
+		Status:          LogicGateWorkStatusPending,
+		ActorUserID:     transferActor.UserID,
+	})
+	if err != nil {
+		t.Fatalf("MoveLogicGateNodeAssignment cross gate: %v", err)
+	}
+	if crossGateMove.Card.PlacedByUserID != transferActor.UserID || crossGateMove.Assignment.PlacedByUserID != transferActor.UserID {
+		t.Fatalf("cross-gate placed_by card=%q assignment=%q, want transfer actor %q", crossGateMove.Card.PlacedByUserID, crossGateMove.Assignment.PlacedByUserID, transferActor.UserID)
+	}
+
+	work, err := repo.GetLogicGateWork(companyID, targetGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("GetLogicGateWork: %v", err)
+	}
+	if len(work.Cards) != 1 || work.Cards[0].PlacedByUserID != transferActor.UserID {
+		t.Fatalf("target work cards = %+v, want placed_by transfer actor", work.Cards)
+	}
+}
+
 func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
 	postgresSource := readPhase4SourceForTest(t, "postgres_logic_gate_work.go")
 	normalizedPostgres := strings.ToLower(postgresSource)

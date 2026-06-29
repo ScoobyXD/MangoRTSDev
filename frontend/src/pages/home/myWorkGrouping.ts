@@ -1,6 +1,6 @@
 import type { Account } from "../../modules/accounts/accountsApi.js";
 import type { LogicGateGVICRole } from "../../modules/logic-gate-map/shared.js";
-import { buildUniversalNestedGroups, computeUniversalDefaultExpandedGroupIDs, type UniversalGroupValue, type UniversalNestedGroup } from "./universalGrouping.js";
+import { buildUniversalNestedGroups, computeUniversalDefaultExpandedGroupIDs, type UniversalGroupValue, type UniversalNestedGroup } from "../../modules/grouping/universalGrouping.js";
 
 export type MyWorkScopeLevel = "me" | "team" | "all";
 export type MyWorkScopeSubjectType = "user" | "group" | "company";

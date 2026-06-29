@@ -108,7 +108,69 @@ func (r *MemoryRepo) DeleteSavedView(input SavedViewDeleteInput) error {
 		return ErrNotFound
 	}
 	delete(r.savedViews, k)
+	for preferenceKey, preference := range r.savedViewPreferences {
+		if preference.CompanyID == input.CompanyID && preference.SelectedSavedViewID == input.SavedViewID {
+			preference.SelectedSavedViewID = ""
+			preference.UpdatedTimestamp = time.Now().UTC()
+			r.savedViewPreferences[preferenceKey] = preference
+		}
+	}
 	return nil
+}
+
+func (r *MemoryRepo) GetSavedViewPreference(input SavedViewPreferenceInput) (domain.SavedViewPreference, error) {
+	input, ok := normalizeSavedViewPreferenceInput(input)
+	if !ok {
+		return domain.SavedViewPreference{}, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if item, ok := r.savedViewPreferences[savedViewPreferenceKey(input.CompanyID, input.Surface, input.UserID)]; ok {
+		return item, nil
+	}
+	now := time.Now().UTC()
+	return domain.SavedViewPreference{
+		CompanyID:        input.CompanyID,
+		Surface:          input.Surface,
+		UserID:           input.UserID,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}, nil
+}
+
+func (r *MemoryRepo) UpsertSavedViewPreference(input SavedViewPreferenceInput) (domain.SavedViewPreference, error) {
+	input, ok := normalizeSavedViewPreferenceInput(input)
+	if !ok {
+		return domain.SavedViewPreference{}, ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.memberships[membershipKey(input.CompanyID, input.UserID)]; !ok {
+		return domain.SavedViewPreference{}, ErrInvalid
+	}
+	if input.SelectedSavedViewID != "" {
+		view, ok := r.savedViews[savedViewKey(input.CompanyID, input.SelectedSavedViewID)]
+		if !ok || view.Surface != input.Surface || view.Principal != SavedViewPrincipalUser || view.PrincipalID != input.UserID {
+			return domain.SavedViewPreference{}, ErrInvalid
+		}
+	}
+	now := time.Now().UTC()
+	k := savedViewPreferenceKey(input.CompanyID, input.Surface, input.UserID)
+	item, exists := r.savedViewPreferences[k]
+	if !exists {
+		item = domain.SavedViewPreference{
+			CompanyID:        input.CompanyID,
+			Surface:          input.Surface,
+			UserID:           input.UserID,
+			CreatedTimestamp: now,
+		}
+	}
+	item.SelectedSavedViewID = input.SelectedSavedViewID
+	item.UpdatedTimestamp = now
+	r.savedViewPreferences[k] = item
+	return item, nil
 }
 
 func (r *MemoryRepo) savedViewVisibleToUserLocked(item domain.SavedView, userID string) bool {
@@ -123,6 +185,10 @@ func (r *MemoryRepo) savedViewVisibleToUserLocked(item domain.SavedView, userID 
 	}
 	_, ok := r.userGroupMembers[userGroupMemberKey(item.CompanyID, item.PrincipalID, userID)]
 	return ok
+}
+
+func savedViewPreferenceKey(companyID, surface, userID string) string {
+	return companyID + "\x00" + surface + "\x00" + userID
 }
 
 func (r *MemoryRepo) nextSavedViewPositionLocked(companyID, surface, principal, principalID string) int {

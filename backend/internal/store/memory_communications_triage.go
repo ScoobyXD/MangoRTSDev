@@ -283,6 +283,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			UpdatedTimestamp:    now,
 		}
 		card.RequestedByUserID = requestedByUserIDForLogicGateStatus(card.ColumnID, input.ActorUserID, "")
+		card.PlacedByUserID = strings.TrimSpace(input.ActorUserID)
 		r.kanbanCards[boardKey(input.CompanyID, board.BoardID)] = append(r.kanbanCards[boardKey(input.CompanyID, board.BoardID)], card)
 		assignment := r.upsertNodeLogicGateAssignmentLocked(nodeLogicGateAssignmentMutation{
 			CompanyID:            input.CompanyID,
@@ -295,6 +296,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			CompatibilityBoardID: board.BoardID,
 			CompatibilityCardID:  card.CardID,
 			RequestedByUserID:    card.RequestedByUserID,
+			PlacedByUserID:       card.PlacedByUserID,
 			CreatedTimestamp:     now,
 			UpdatedTimestamp:     now,
 		})

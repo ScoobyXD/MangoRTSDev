@@ -220,6 +220,7 @@ func synthesizeLogicGateWorkCard(boardID string, assignment domain.NodeLogicGate
 		NodeID:            assignment.NodeID,
 		LogicGateID:       &logicGateID,
 		RequestedByUserID: strings.TrimSpace(assignment.RequestedByUserID),
+		PlacedByUserID:    strings.TrimSpace(assignment.PlacedByUserID),
 		NodeTitle:         node.Title,
 		IsIssue:           assignment.IsIssue,
 		Position:          assignment.Position,

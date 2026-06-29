@@ -227,11 +227,14 @@ type SavedViewRepository interface {
 	GetSavedView(companyID, savedViewID string) (domain.SavedView, error)
 	UpsertSavedView(input SavedViewInput) (domain.SavedView, error)
 	DeleteSavedView(input SavedViewDeleteInput) error
+	GetSavedViewPreference(input SavedViewPreferenceInput) (domain.SavedViewPreference, error)
+	UpsertSavedViewPreference(input SavedViewPreferenceInput) (domain.SavedViewPreference, error)
 }
 
 const (
-	SavedViewSurfaceMyWork  = "my_work"
-	SavedViewSurfaceUpdates = "updates"
+	SavedViewSurfaceMyWork          = "my_work"
+	SavedViewSurfaceUpdates         = "updates"
+	SavedViewSurfaceLogicGateKanban = "logic_gate_kanban"
 
 	SavedViewPrincipalUser  = "user"
 	SavedViewPrincipalGroup = "group"
@@ -257,6 +260,13 @@ type SavedViewInput struct {
 type SavedViewDeleteInput struct {
 	CompanyID   string
 	SavedViewID string
+}
+
+type SavedViewPreferenceInput struct {
+	CompanyID           string
+	Surface             string
+	UserID              string
+	SelectedSavedViewID string
 }
 
 type UserPinRepository interface {
@@ -713,6 +723,7 @@ type ProjectionRow struct {
 	InheritanceType              string           `json:"inheritance_type,omitempty"`
 	LogicGateID                  *string          `json:"logic_gate_id,omitempty"`
 	RequestedByUserID            string           `json:"requested_by_user_id,omitempty"`
+	PlacedByUserID               string           `json:"placed_by_user_id,omitempty"`
 	LogicGateName                string           `json:"logic_gate_name,omitempty"`
 	DisplayTitle                 string           `json:"display_title,omitempty"`
 	Status                       *string          `json:"status,omitempty"`
@@ -1551,6 +1562,7 @@ type KanbanCardMutationInput struct {
 	IsIssue             bool
 	IsIssueSet          bool
 	RequestedByUserID   string
+	PlacedByUserID      string
 	CardID              string
 }
 

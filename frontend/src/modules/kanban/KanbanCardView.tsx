@@ -51,6 +51,7 @@ type KanbanCardViewProps = {
     busy: boolean;
     onClick: () => void;
   };
+  bylineText?: string;
 };
 
 export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
@@ -82,12 +83,14 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   requestedActions,
   requestedStatusText,
   requestedStatusAction,
+  bylineText,
 }) => {
   const description = (card.description_snapshot ?? "").trim();
   const isIssue = card.is_issue === true;
   const cardFrame = `linear-gradient(135deg, ${hexToRgba(color, selected || highlighted ? 0.88 : 0.62)}, rgba(255,255,255,0.84) 72%)`;
   const accounts = (card.accounts ?? []).filter((account) => account.account_id.trim()).slice(0, 4);
   const showRequestedActions = Boolean(requestedActions);
+  const hasFooter = Boolean(requestedStatusText || bylineText);
   const requestedActionButtonBase: React.CSSProperties = {
     width: 24,
     height: 24,
@@ -232,41 +235,6 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
           </>
         )}
       </div>
-      {requestedStatusText && (
-        <div style={{ marginTop: 7, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", color: isIssue ? "#334155" : subtext, fontSize: 10.5, fontWeight: 760, lineHeight: 1.25, overflowWrap: "anywhere" }}>
-          <span>{requestedStatusText}</span>
-          {requestedStatusAction && (
-            <button
-              type="button"
-              title={requestedStatusAction.title}
-              disabled={requestedStatusAction.busy}
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                requestedStatusAction.onClick();
-              }}
-              style={{
-                minHeight: 21,
-                border: `1px solid ${hexToRgba(color, 0.30)}`,
-                borderRadius: 7,
-                background: requestedStatusAction.busy ? "rgba(241,245,249,0.78)" : "rgba(255,255,255,0.86)",
-                color: isIssue ? "#334155" : text,
-                cursor: requestedStatusAction.busy ? "wait" : "pointer",
-                padding: "2px 7px",
-                font: "inherit",
-                fontSize: 10,
-                fontWeight: 850,
-                lineHeight: 1,
-                boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.76)",
-                opacity: requestedStatusAction.busy ? 0.64 : 1,
-              }}
-            >
-              {requestedStatusAction.label}
-            </button>
-          )}
-        </div>
-      )}
       {description && (
         <div style={{ marginTop: 7, color: isIssue ? "#334155" : subtext, fontSize: 11, lineHeight: 1.35, overflowWrap: "anywhere" }}>
           {description}
@@ -292,6 +260,48 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
               {account.name || account.account_id}
             </span>
           ))}
+        </div>
+      )}
+      {hasFooter && (
+        <div style={{ marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, color: isIssue ? "#334155" : subtext, fontSize: 10.5, fontWeight: 760, lineHeight: 1.25, overflowWrap: "anywhere" }}>
+          <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            {requestedStatusText && <span>{requestedStatusText}</span>}
+            {requestedStatusAction && (
+              <button
+                type="button"
+                title={requestedStatusAction.title}
+                disabled={requestedStatusAction.busy}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  requestedStatusAction.onClick();
+                }}
+                style={{
+                  minHeight: 21,
+                  border: `1px solid ${hexToRgba(color, 0.30)}`,
+                  borderRadius: 7,
+                  background: requestedStatusAction.busy ? "rgba(241,245,249,0.78)" : "rgba(255,255,255,0.86)",
+                  color: isIssue ? "#334155" : text,
+                  cursor: requestedStatusAction.busy ? "wait" : "pointer",
+                  padding: "2px 7px",
+                  font: "inherit",
+                  fontSize: 10,
+                  fontWeight: 850,
+                  lineHeight: 1,
+                  boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.76)",
+                  opacity: requestedStatusAction.busy ? 0.64 : 1,
+                }}
+              >
+                {requestedStatusAction.label}
+              </button>
+            )}
+          </div>
+          {bylineText && (
+            <div title={bylineText} style={{ minWidth: 0, maxWidth: "52%", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {bylineText}
+            </div>
+          )}
         </div>
       )}
     </article>
