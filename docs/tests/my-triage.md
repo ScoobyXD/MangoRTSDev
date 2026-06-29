@@ -27,7 +27,7 @@ MT16 - Explicit conversion priority must be between 1 and 5.
 MT17 - Successful conversion removes the converted messages from My Triage and returns the deleted message IDs.
 MT18 - Successful conversion emits the triage/workspace/projection events needed for other views to refresh.
 MT19 - Reverting a converted email restores the triage item from the email-node placement and removes the workspace record that was created from that conversion.
-MT20 - My Triage and Shared Triage must continue to live-update when mailbox messages are created, updated, or deleted.
+MT20 - My Triage and Shared Triage must continue to live-reconcile mailbox messages when they are created, updated, or deleted without replacing the whole visible message list.
 MT21 - My Triage and Shared Triage primary inboxes must show a fixed, predictable message batch size of 20 messages per page.
 MT22 - My Triage and Shared Triage primary inboxes must immediately prefetch the next message page after the first visible page loads, without waiting for scrolling or the archive/advance action.
 MT23 - Scrolling a My Triage or Shared Triage primary inbox must not archive messages and must not load the next primary-inbox page.
@@ -50,6 +50,13 @@ MT39 - Star and unstar actions in My Triage must optimistically update the visib
 MT40 - Backend or provider confirmations caused by local My Triage star and unstar actions must reconcile caches/counts without triggering a full message-list reload or blanking the active Inbox or Starred tab.
 MT41 - My Triage mail activation must not launch background workspace repair GET storms for inaccessible or stale logic gate IDs referenced by node rows.
 MT42 - If an accepted background archive mutation fails or never confirms, the source email must not be deleted and may remain or reappear in the inbox after refresh/reconciliation.
+MT43 - Selecting another email, focusing the email body/detail pane, or returning focus from the detail pane to the list must not reload, blank, or replace the visible message list.
+MT44 - Browser focus and visibility-change events must not force a My Triage or Shared Triage message-list refresh.
+MT45 - The normal full-list replacement path for My Triage is initial page/list load, browser refresh, or an explicit list identity change such as mailbox, search, unread filter, account, company, or selected Shared Triage mailbox.
+MT46 - A communications realtime message.created event with a message ID must fetch that one message and insert it into the current date-sorted list when it matches the active filters; it must not reload the whole list.
+MT47 - Communications realtime message.updated, message.opened, and message.deleted events with a message ID must update, reconcile, or remove only the affected visible or selected message; they must not reload the whole list when the affected message is not visible.
+MT48 - Communications realtime message events without a message ID must not trigger a full message-list reload; the next explicit page/list load reconciles anything that could not be handled as a single-message update.
+MT49 - Triage conversion realtime events must remove matching visible My Triage rows when the converted message IDs are present and must not use a full message-list reload as the default reconciliation path.
 
 ## Scenarios
 
@@ -168,6 +175,13 @@ Business logic covered:
 - MT40
 - MT41
 - MT42
+- MT43
+- MT44
+- MT45
+- MT46
+- MT47
+- MT48
+- MT49
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
@@ -177,7 +191,12 @@ Given:
 Expected:
 - The visible page contains no more than 20 messages.
 - The next page is prefetched after the visible page loads.
-- Created, updated, and deleted message events still refresh the triage list live.
+- Created, updated, and deleted message events reconcile the affected message live without replacing the whole triage list.
+- Clicking an email row, focusing the email body, and clicking back into the list do not reload, blank, or replace the message list.
+- Browser focus and visibility changes do not force a message-list refresh.
+- New-email realtime events with a message ID fetch that single message and insert it into the current date-sorted list when it matches the active filters.
+- Updated, opened, deleted, or converted-message realtime events touch only the affected visible or selected row when the event carries enough IDs.
+- Realtime message events that do not carry a message ID do not trigger a whole-list reload; the next explicit page/list load reconciles provider state.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
 - Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.
 - The frozen previous-page IDs are accepted by one page-level backend archive request, and provider archive mutations continue in the background.
