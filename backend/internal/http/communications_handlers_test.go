@@ -1636,6 +1636,25 @@ func TestCommunicationsStarMessagePreservesGmailInboxLabel(t *testing.T) {
 	}
 }
 
+func TestCommunicationsMessageUpdateEventClassifiesStarMutations(t *testing.T) {
+	t.Parallel()
+
+	trigger, meta := communicationsMessageUpdateEvent(nil, " shared-1 ")
+	if trigger != "message.updated" || meta.Action != "" || meta.SharedInboxID != "shared-1" {
+		t.Fatalf("generic update event = %q %+v, want message.updated with shared inbox metadata", trigger, meta)
+	}
+	starred := true
+	trigger, meta = communicationsMessageUpdateEvent(&starred, "shared-1")
+	if trigger != "message.starred" || meta.Action != "star" || meta.SharedInboxID != "shared-1" {
+		t.Fatalf("star update event = %q %+v, want message.starred star metadata", trigger, meta)
+	}
+	starred = false
+	trigger, meta = communicationsMessageUpdateEvent(&starred, "shared-1")
+	if trigger != "message.unstarred" || meta.Action != "unstar" || meta.SharedInboxID != "shared-1" {
+		t.Fatalf("unstar update event = %q %+v, want message.unstarred unstar metadata", trigger, meta)
+	}
+}
+
 func TestCommunicationsCacheIncludesStarredMessagesInSourceMailboxes(t *testing.T) {
 	t.Parallel()
 

@@ -240,6 +240,12 @@ export function communicationStreamEventIsArchiveConfirmation(event: { trigger?:
   return action === "archive" || trigger.startsWith("message.archived");
 }
 
+export function communicationStreamEventIsStarConfirmation(event: { trigger?: string; action?: string }): boolean {
+  const trigger = event.trigger?.trim().toLowerCase() ?? "";
+  const action = event.action?.trim().toLowerCase() ?? "";
+  return action === "star" || action === "unstar" || trigger.startsWith("message.starred") || trigger.startsWith("message.unstarred");
+}
+
 export function logicGateTreeID(logicGateID: string): string {
   return `logic-gate-${logicGateID.trim()}`;
 }

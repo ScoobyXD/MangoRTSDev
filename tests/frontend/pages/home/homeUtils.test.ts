@@ -10,6 +10,7 @@ import {
   buildGVICRoleInboxGroupsByCell,
   buildSharedInboxRows,
   communicationStreamEventIsArchiveConfirmation,
+  communicationStreamEventIsStarConfirmation,
   fitHomeColumnWidthsToAvailableWidth,
   getHomeColumnMinimumTrackWidth,
   getHomeGridTemplateColumns,
@@ -126,6 +127,15 @@ test("communications archive stream events are identified without treating gener
   assert.equal(communicationStreamEventIsArchiveConfirmation({ trigger: "message.updated", action: " archive " }), true);
   assert.equal(communicationStreamEventIsArchiveConfirmation({ trigger: "message.updated" }), false);
   assert.equal(communicationStreamEventIsArchiveConfirmation({ trigger: "message.created", action: "reply" }), false);
+});
+
+test("communications star stream events are identified without treating generic updates as star confirmations", () => {
+  assert.equal(communicationStreamEventIsStarConfirmation({ trigger: "message.starred" }), true);
+  assert.equal(communicationStreamEventIsStarConfirmation({ trigger: "message.unstarred" }), true);
+  assert.equal(communicationStreamEventIsStarConfirmation({ trigger: "message.updated", action: " star " }), true);
+  assert.equal(communicationStreamEventIsStarConfirmation({ trigger: "message.updated", action: "unstar" }), true);
+  assert.equal(communicationStreamEventIsStarConfirmation({ trigger: "message.updated" }), false);
+  assert.equal(communicationStreamEventIsStarConfirmation({ trigger: "message.archived", action: "archive" }), false);
 });
 
 test("mailbox count helper keeps visible Inbox and Starred counts", () => {
