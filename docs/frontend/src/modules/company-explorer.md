@@ -48,7 +48,7 @@ Golden rule:
 ### 2.3 Tree UX rules
 
 - Expand/collapse per row with caret semantics.
-- Hierarchy is shown through indentation and fixed entity icons; guide-lines are intentionally not rendered in the tree.
+- Hierarchy is shown through indentation, faint vertical guide lines, and fixed entity icons.
 - Multi-select behavior mirrors existing platform expectations (`Shift`/`Ctrl`).
 - Context menu available per item and per empty area.
 - Keyboard navigation (up/down/left/right/enter) should be supported.
@@ -170,7 +170,7 @@ Folder runtime update (2026-05-02):
 - The old virtual `Nodes`, `Logic Gates`, `All Nodes`, `All Logic Gates`, Knowledge, and Knowledge Nodes rows are removed from the Explorer tree.
 - Folder rows use fixed yellow icons, node rows use fixed black-and-white document icons, and logic-gate rows use fixed green circuitry AND-gate icons. These icon colors do not follow frame colorways.
 - Explorer row labels do not include live item counts. Count queries belong in bounded API/read models, not in every tree row render.
-- Explorer no longer renders vertical or horizontal hierarchy guide lines; indentation and icons carry the tree structure.
+- Explorer renders faint vertical hierarchy guide lines for ancestor depth rails. The lines are a human scanning aid only; placement, ownership, permissions, map scope, drag/drop behavior, and API writes still come from the existing folder/item/assignment data model.
 - Folder creation is now a Company Explorer context-menu action, not an inline plus button. Right-clicking the tree body opens Explorer actions, while frame-level actions remain scoped to the frame/module title plate.
 - When the right-click context has no folder type, the menu order is `Create node folder`, `Create node`, `Create logic gate folder`, `Create logic gate`. Typed folder creation keeps empty folders aligned with the backend item-type invariant. Right-clicking typed rows uses the compatible single `Create folder` action.
 - Right-clicking a concrete folder, node, or logic gate exposes `Rename` and `Delete`, backed by folder/node/logic-gate APIs.
@@ -211,6 +211,11 @@ Explorer move/search update (2026-06-24):
 - Dragging a node onto a logic gate in Company Explorer uses logic-gate assignment semantics, not the work-state change endpoint used by My Work/GVIC cell moves.
 - When a folder-placement node is assigned to a logic gate from Company Explorer, the old Explorer placement is removed so the node keeps one visible Explorer instance.
 - Company Explorer search is limited to resources reachable through visible Explorer paths; hidden folder ancestry must hide the search result even when the underlying resource has direct view access.
+
+Visual hierarchy update (2026-06-29):
+- Company Explorer row indentation may allocate extra horizontal room so nested rows read clearly at sidebar widths.
+- Vertical depth guide lines are derived from the rendered tree row depth and collapse/filter with the visible rows. They must not introduce new hierarchy, parentage, or scope semantics.
+- Search/path rows may use the same depth guide rendering as normal tree rows because the guide is presentational and follows the existing `ExplorerTreeNode.depth` value.
 
 Kanban Explorer update (2026-05-04):
 - Kanban boards are durable Explorer items with `item_type=kanban` and a fixed three-column board icon.

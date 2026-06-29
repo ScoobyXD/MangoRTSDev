@@ -180,7 +180,11 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
     : isExplorerDropTarget && dragOverPlacement
     ? (dragOverPlacement === "before" ? `inset 0 2px 0 ${accent}` : `inset 0 -2px 0 ${accent}`)
     : `inset 0 -1px 0 ${rowRuleColor}`;
+  const hierarchyGuideColor = isDarkTheme ? "rgba(148, 163, 184, 0.26)" : "rgba(100, 116, 139, 0.22)";
+  const hierarchyGuideDepth = Math.max(0, Math.floor(row.depth));
   const rowPillStyle: React.CSSProperties = {
+    position: "relative",
+    zIndex: 1,
     minWidth: 0,
     maxWidth: "100%",
     width: renaming?.treeID === row.id ? "100%" : "fit-content",
@@ -399,6 +403,33 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         transition: "background 120ms ease, box-shadow 140ms ease",
       }}
     >
+      {hierarchyGuideDepth > 0 && (
+        <span
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 0,
+            pointerEvents: "none",
+          }}
+        >
+          {Array.from({ length: hierarchyGuideDepth }, (_, level) => (
+            <span
+              key={level}
+              style={{
+                position: "absolute",
+                display: "block",
+                left: TREE_BASE_LEFT_PX + level * TREE_INDENT_PX + TREE_TOGGLE_SLOT_PX / 2,
+                top: -1,
+                bottom: -1,
+                width: 1,
+                borderRadius: 999,
+                background: hierarchyGuideColor,
+              }}
+            />
+          ))}
+        </span>
+      )}
       <div className="company-explorer-row-hit" data-selected={isSelected ? "true" : undefined} style={rowPillStyle}>
         {isExpandable ? (
           <button
