@@ -443,7 +443,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
             const guideLeft = TREE_BASE_LEFT_PX + level * TREE_INDENT_PX + TREE_GUIDE_OFFSET_PX;
             if (isTerminal) {
               const connectorEndLeft = TREE_BASE_LEFT_PX + hierarchyGuideDepth * TREE_INDENT_PX + TREE_GUIDE_CONNECTOR_END_OFFSET_PX;
-              const connectorWidth = Math.max(4, (connectorEndLeft - guideLeft) / 2);
+              const connectorWidth = Math.max(4, (connectorEndLeft - guideLeft) / 3);
               return (
                 <span
                   key={level}
