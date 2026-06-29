@@ -36,17 +36,20 @@ MT25 - Advancing must display the prefetched next page before archiving the prev
 MT26 - Advancing must freeze the previous page's message IDs at click time so live updates cannot change what gets archived.
 MT27 - The advance/archive action must remain immediately reusable after a page advances unless accepting the visible page would exceed the hidden archive queue limit.
 MT28 - If no next page is available, advancing archives the current visible page and leaves the primary inbox empty until live updates or a refresh provide more messages.
-MT29 - Advancing must enqueue the frozen visible message IDs for background archive work instead of waiting for those provider mutations before allowing the user to continue.
+MT29 - Advancing must enqueue the frozen visible message IDs through one page-level background archive request instead of waiting for those provider mutations before allowing the user to continue.
 MT30 - The hidden archive queue may contain no more than 140 pending emails across queued and in-flight archive work.
 MT31 - If accepting the current visible page would exceed 140 pending archive emails, the advance/archive action is disabled until enough queued archive work completes.
-MT32 - Background archive work must send archive requests in two-message client batches and run those batches in parallel so the provider gate, not the UI, controls final throughput.
+MT32 - Background archive work must be accepted by the backend in one request per advanced page; provider mutations run behind the backend provider gate instead of occupying multiple browser request lanes.
 MT33 - Advancing must prioritize showing the prefetched next page, enqueueing the previous page, and making the action usable again before any folder metadata reconciliation.
-MT34 - Folder metadata refresh after archive or unarchive is only a count/metadata reconciliation step and must not fetch the next message page or block the prefetched page from being shown.
-MT35 - If folder metadata reconciliation is slow or fails after archive or unarchive, the triage list remains usable and counts can reconcile later.
-MT36 - Backend or provider events caused by archive work must be identifiable as archive confirmations instead of generic mailbox updates.
-MT37 - Archive confirmations for the frozen previous page must not trigger a full message-list reload or blank the currently visible prefetched page.
-MT38 - Star and unstar actions in My Triage must optimistically update the visible message state and Starred count before backend or provider confirmation returns.
-MT39 - Backend or provider confirmations caused by local My Triage star and unstar actions must reconcile caches/counts without triggering a full message-list reload or blanking the active Inbox or Starred tab.
+MT34 - Folder metadata refresh after archive or unarchive is only a count/metadata reconciliation step, must be coalesced across archive confirmations, and must not clear or duplicate an in-flight folder metadata request.
+MT35 - Folder metadata reconciliation must not fetch the next message page or block the prefetched page from being shown.
+MT36 - If folder metadata reconciliation is slow or fails after archive or unarchive, the triage list remains usable and counts can reconcile later.
+MT37 - Backend or provider events caused by archive work must be identifiable as archive confirmations instead of generic mailbox updates.
+MT38 - Archive confirmations for the frozen previous page must not trigger a full message-list reload or blank the currently visible prefetched page.
+MT39 - Star and unstar actions in My Triage must optimistically update the visible message state and Starred count before backend or provider confirmation returns.
+MT40 - Backend or provider confirmations caused by local My Triage star and unstar actions must reconcile caches/counts without triggering a full message-list reload or blanking the active Inbox or Starred tab.
+MT41 - My Triage mail activation must not launch background workspace repair GET storms for inaccessible or stale logic gate IDs referenced by node rows.
+MT42 - If an accepted background archive mutation fails or never confirms, the source email must not be deleted and may remain or reappear in the inbox after refresh/reconciliation.
 
 ## Scenarios
 
@@ -162,6 +165,9 @@ Business logic covered:
 - MT37
 - MT38
 - MT39
+- MT40
+- MT41
+- MT42
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
@@ -174,11 +180,13 @@ Expected:
 - Created, updated, and deleted message events still refresh the triage list live.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
 - Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.
-- The frozen previous-page IDs are sent in two-message client batch requests that run in parallel in the background.
+- The frozen previous-page IDs are accepted by one page-level backend archive request, and provider archive mutations continue in the background.
 - The advance action becomes usable again immediately after the next page is shown and the previous page is queued.
 - The hidden archive queue accepts at most 140 pending emails; if adding the current page would exceed that limit, the advance action is disabled until enough background archive work completes.
-- Folder metadata refresh runs after the primary archive-and-next work as reconciliation only; it does not fetch the next email page.
+- Folder metadata refresh runs after the primary archive-and-next work as reconciliation only; it is coalesced, does not duplicate an in-flight folder request, and does not fetch the next email page.
 - Archive confirmation events from the app backend or provider webhook reconcile caches/counts without blanking or fully reloading the prefetched page.
 - Starring or unstarring a message updates the row and Starred count locally, and the matching backend/provider confirmation does not blank or fully reload the active Inbox or Starred tab.
+- Opening or returning to My Triage does not fire background logic-gate view repair requests for missing, inaccessible, or stale node-linked logic gate IDs.
+- If the backend accepts the archive page but a later provider mutation fails or never confirms, the source email is not deleted and can remain or reappear after refresh.
 - If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
 - If there is no next page, clicking the advance action archives the visible page and leaves the list empty until more messages arrive or a refresh reloads the inbox.

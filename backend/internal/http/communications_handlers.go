@@ -289,7 +289,7 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 		return
 	}
 	for key := range r.URL.Query() {
-		if key != "company_id" && key != "shared_inbox_id" {
+		if key != "company_id" && key != "shared_inbox_id" && key != "background" {
 			writeError(w, http.StatusBadRequest, "unsupported_email_query_param")
 			return
 		}
@@ -325,6 +325,16 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, "email_message_ids_required")
 		return
 	}
+	if isTruthyQueryValue(r.URL.Query().Get("background")) {
+		acceptedIDs := append([]string(nil), messageIDs...)
+		go s.archiveCommunicationsMessagesBatchInBackground(connection, acceptedIDs, sharedInboxID)
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"accepted_ids": acceptedIDs,
+			"archived_ids": []string{},
+			"failed":       []communicationsArchiveBatchFailure{},
+		})
+		return
+	}
 
 	archiveFolderID := ""
 	if connection.Provider != "google" {
@@ -344,24 +354,55 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 	if result.retryAfter != "" {
 		w.Header().Set("Retry-After", result.retryAfter)
 	}
-	if len(result.ArchivedIDs) > 0 {
-		now := time.Now().UTC()
-		cacheScope := communicationsConnectionCacheScope(connection)
-		s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, result.ArchivedIDs, "primary", now)
-		for _, message := range result.Messages {
-			s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
-		}
-		s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, result.ArchivedIDs, true)
-		s.rememberRecentCommunicationsArchiveMutation(cacheScope, result.ArchivedIDs, now)
-		eventMeta := communicationsEventMetadata{Action: "archive", SharedInboxID: sharedInboxID}
-		for _, messageID := range result.ArchivedIDs {
-			s.publishCommunicationsEventWithMeta(connection.UserID, "mailbox_changed", "message.archived", messageID, eventMeta)
-		}
-	}
+	s.applyCommunicationsArchiveBatchResult(connection, sharedInboxID, result)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"archived_ids": result.ArchivedIDs,
 		"failed":       result.Failed,
 	})
+}
+
+func (s *Server) archiveCommunicationsMessagesBatchInBackground(connection domain.UserEmailConnection, messageIDs []string, sharedInboxID string) {
+	if len(messageIDs) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	archiveFolderID := ""
+	if connection.Provider != "google" {
+		emailFolders, err := s.communicationsFolders(ctx, connection)
+		if err != nil {
+			log.Printf("failed to load archive folders for background archive user_id=%s account_email=%s shared_inbox_id=%s: %v", connection.UserID, connection.AccountEmail, sharedInboxID, err)
+			return
+		}
+		archiveFolderID = findNylasArchiveFolderID(emailFolders)
+		if archiveFolderID == "" {
+			log.Printf("archive folder unavailable for background archive user_id=%s account_email=%s shared_inbox_id=%s", connection.UserID, connection.AccountEmail, sharedInboxID)
+			return
+		}
+	}
+	result := s.archiveCommunicationsMessagesBatch(ctx, connection, messageIDs, archiveFolderID)
+	if len(result.Failed) > 0 {
+		log.Printf("background archive completed with failures user_id=%s account_email=%s shared_inbox_id=%s archived=%d failed=%d", connection.UserID, connection.AccountEmail, sharedInboxID, len(result.ArchivedIDs), len(result.Failed))
+	}
+	s.applyCommunicationsArchiveBatchResult(connection, sharedInboxID, result)
+}
+
+func (s *Server) applyCommunicationsArchiveBatchResult(connection domain.UserEmailConnection, sharedInboxID string, result communicationsArchiveBatchResult) {
+	if len(result.ArchivedIDs) == 0 {
+		return
+	}
+	now := time.Now().UTC()
+	cacheScope := communicationsConnectionCacheScope(connection)
+	s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, result.ArchivedIDs, "primary", now)
+	for _, message := range result.Messages {
+		s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
+	}
+	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, result.ArchivedIDs, true)
+	s.rememberRecentCommunicationsArchiveMutation(cacheScope, result.ArchivedIDs, now)
+	eventMeta := communicationsEventMetadata{Action: "archive", SharedInboxID: sharedInboxID}
+	for _, messageID := range result.ArchivedIDs {
+		s.publishCommunicationsEventWithMeta(connection.UserID, "mailbox_changed", "message.archived", messageID, eventMeta)
+	}
 }
 
 func (s *Server) handleCommunicationsThreadByID(w http.ResponseWriter, r *http.Request) {

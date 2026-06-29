@@ -40,7 +40,6 @@ import {
   invalidateLogicGateArenaViewCache as defaultInvalidateLogicGateArenaViewCache,
   moveLogicGateAssignment as defaultMoveLogicGateAssignment,
 } from "../../modules/kanban/kanbanApi.js";
-import { ARCHIVE_QUEUE_BATCH_SIZE } from "./homeConstants.js";
 import type { LogicGateAssignmentCommandResult, GVICMatrixProjectionRow } from "../../modules/kanban/kanbanApi.js";
 import {
   EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
@@ -119,6 +118,7 @@ export type HomeExplorerTriageConversionCommandResult = {
 
 export type HomeMailMessagesCommandResult = {
   messageIDs: string[];
+  accepted?: boolean;
   failed?: ArchiveEmailMessagesBatchResult["failed"];
 };
 
@@ -252,28 +252,24 @@ export async function archiveHomeMailMessagesCommand(args: {
     return { messageIDs };
   }
   const archiveEmailMessagesBatch = args.archiveEmailMessagesBatch ?? defaultArchiveEmailMessagesBatch;
-  const chunks: string[][] = [];
-  for (let index = 0; index < messageIDs.length; index += ARCHIVE_QUEUE_BATCH_SIZE) {
-    chunks.push(messageIDs.slice(index, index + ARCHIVE_QUEUE_BATCH_SIZE));
+  let result: ArchiveEmailMessagesBatchResult;
+  try {
+    result = await archiveEmailMessagesBatch(messageIDs, sharedInboxID, args.companyID, { background: true });
+  } catch (archiveError) {
+    const error = archiveError instanceof Error ? archiveError.message : "archive_failed";
+    throw new Error(error);
   }
-  const settled = await Promise.allSettled(chunks.map((chunk) => archiveEmailMessagesBatch(chunk, sharedInboxID, args.companyID)));
-  const archivedIDs: string[] = [];
-  const failed: ArchiveEmailMessagesBatchResult["failed"] = [];
-  settled.forEach((item, index) => {
-    if (item.status === "fulfilled") {
-      archivedIDs.push(...cleanIDList(item.value.archived_ids));
-      failed.push(...(item.value.failed ?? []));
-    } else {
-      const error = item.reason instanceof Error ? item.reason.message : "archive_failed";
-      for (const messageID of chunks[index] ?? []) {
-        failed.push({ message_id: messageID, error });
-      }
-    }
-  });
+  const acceptedIDs = cleanIDList(result.accepted_ids ?? []);
+  const archivedIDs = cleanIDList(result.archived_ids ?? []);
+  const failed = result.failed ?? [];
   if (archivedIDs.length === 0 && failed.length > 0) {
     throw new Error(failed[0]?.error || "archive_failed");
   }
-  return { messageIDs: archivedIDs.length > 0 ? archivedIDs : messageIDs, failed: failed.length ? failed : undefined };
+  return {
+    messageIDs: archivedIDs.length > 0 ? archivedIDs : acceptedIDs.length > 0 ? acceptedIDs : messageIDs,
+    accepted: acceptedIDs.length > 0 && archivedIDs.length === 0 && failed.length === 0,
+    failed: failed.length ? failed : undefined,
+  };
 }
 
 export async function unarchiveHomeMailMessagesCommand(args: {
