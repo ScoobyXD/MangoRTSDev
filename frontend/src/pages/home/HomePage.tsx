@@ -84,7 +84,7 @@ import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "
 import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_QUEUE_MAX_EMAILS, EVENT_HOME_TRIAGE_CONVERSION_APPLIED, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME, type HomeTriageConversionAppliedDetail } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, communicationStreamEventIsArchiveConfirmation, communicationStreamEventIsStarConfirmation, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageHasRecipient, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, triageMessageIDsFromStreamMessageID, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, communicationStreamEventIsArchiveConfirmation, communicationStreamEventIsStarConfirmation, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, markMessageSentToLogicGate, mergeLogicGateShortcuts, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, triageMessageIDsFromStreamMessageID, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -1701,7 +1701,6 @@ export function HomePage({
   }, [activeViewID, companyID, loadMoreMessages, loadedMessageListKey, loadingMessages, loadingMoreMessages, mailbox, messageListWithinPrefetchDistance, messages.length, nextPageToken, prefetchNextMessagePage, searchQuery, unreadOnly]);
   useEffect(() => {
     if (!activeMailViewHasEmailConnection) return undefined;
-    const connectedAccountEmail = activeMailAccountEmail;
     const currentMessageListParams = () => ({
       limit: MESSAGE_BATCH_SIZE,
       mailbox: mailboxRef.current,
@@ -1751,7 +1750,10 @@ export function HomePage({
         const starConfirmation = communicationStreamEventIsStarConfirmation({ trigger, action: eventAction });
         if (trigger.startsWith("triage.")) {
           if (trigger.startsWith("triage.converted") && triageConversionWasAppliedLocally(messageID)) return;
-          if (activeViewIDRef.current === "my-triage") scheduleMessageListRefresh(MESSAGE_EVENT_REFRESH_DELAY_MS, { refresh: true });
+          if (trigger.startsWith("triage.converted") && activeViewIDRef.current === "my-triage") {
+            const converted = triageMessageIDsFromStreamMessageID(messageID);
+            if (converted.length > 0) removeMessagesFromVisibleMailList(converted, { preserveScrollAnchor: true });
+          }
           return;
         }
         if (trigger.startsWith("folder.")) {
@@ -1759,15 +1761,7 @@ export function HomePage({
           return;
         }
         if (!trigger.startsWith("message.")) return;
-        if (archiveConfirmation || starConfirmation || trigger.startsWith("message.created") || trigger.startsWith("message.updated") || trigger.startsWith("message.deleted") || trigger.startsWith("message.opened")) {
-          invalidateCommunicationsCache({ messagePages: true, messages: true });
-        }
-        if (!messageID) {
-          if (!archiveConfirmation && !starConfirmation && (trigger.startsWith("message.created") || trigger.startsWith("message.updated") || trigger.startsWith("message.deleted"))) {
-            scheduleMessageListRefresh(MESSAGE_EVENT_REFRESH_DELAY_MS, { refresh: true });
-          }
-          return;
-        }
+        if (!messageID) return;
         const activeSharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
         const archiveTargetsCurrentMailbox = eventSharedInboxID ? eventSharedInboxID === activeSharedInboxID : activeSharedInboxID === "";
         if (archiveConfirmation || (trigger.startsWith("message.updated") && archiveUpdateWasAppliedLocally(messageID, eventSharedInboxID || undefined))) {
@@ -1810,7 +1804,17 @@ export function HomePage({
           const localStarConfirmation = localGenericStarUpdate || starUpdateWasAppliedLocally(messageID, localStarSharedInboxID, { consume: false });
           if (!visible && !selected && !selectedLocalReply) {
             if (!localStarConfirmation && trigger.startsWith("message.starred") && mailboxRef.current === "starred") {
-              scheduleMessageListRefresh(MESSAGE_EVENT_REFRESH_DELAY_MS, { refresh: true });
+              void getEmailMessage(messageID, companyID, activeSharedInboxID)
+                .then((message) => {
+                  primeEmailMessageCache(message);
+                  reconcileLocalEmailReply(message);
+                  applyMessageToCurrentView(message, true);
+                })
+                .catch((messageError) => {
+                  if (isEmailAccessExpiredError(messageError)) {
+                    void handleEmailAccessExpired(messageError);
+                  }
+                });
             }
             return;
           }
@@ -1854,30 +1858,13 @@ export function HomePage({
           unread: true,
           starred: false,
         }, params);
-        if (!visible && !selected && !selectedLocalReply && !shouldFetchCreated) {
-          if (trigger.startsWith("message.created") || trigger.startsWith("message.updated")) {
-            scheduleMessageListRefresh(MESSAGE_EVENT_REFRESH_DELAY_MS, { refresh: true });
-          }
-          return;
-        }
+        if (!visible && !selected && !selectedLocalReply && !shouldFetchCreated) return;
         void getEmailMessage(messageID, companyID, sharedInboxIDForHomeView(activeViewIDRef.current))
           .then((message) => {
             primeEmailMessageCache(message);
             reconcileLocalEmailReply(message);
             setSelectedMessage((current) => current ? reconcileEmailMessageLocalReply(current, message) : current);
-            const matchesCurrentView = emailMessageMatchesListFilters(message, params);
             applyMessageToCurrentView(message, trigger.startsWith("message.created"));
-            if (
-              trigger.startsWith("message.created") &&
-              mailboxRef.current === "primary" &&
-              !matchesCurrentView &&
-              messageHasRecipient(message, connectedAccountEmail)
-            ) {
-              scheduleMessageListRefresh(SELF_SEND_DELIVERY_REFRESH_DELAY_MS);
-            }
-            if (trigger.startsWith("message.created")) {
-              scheduleMessageListRefresh(MESSAGE_EVENT_REFRESH_DELAY_MS, { refresh: true });
-            }
           })
           .catch((messageError) => {
             if (isEmailAccessExpiredError(messageError)) {
@@ -1885,7 +1872,6 @@ export function HomePage({
               return;
             }
             if (trigger.startsWith("message.deleted")) removeEmailMessageFromCache(messageID);
-            if (trigger.startsWith("message.created") || trigger.startsWith("message.updated")) scheduleMessageListRefresh(MESSAGE_EVENT_REFRESH_DELAY_MS, { refresh: true });
           });
       },
       onError() {
@@ -1899,21 +1885,7 @@ export function HomePage({
         folderReloadTimerRef.current = null;
       }
     };
-  }, [activeMailAccountEmail, activeMailViewHasEmailConnection, apiBase, archiveUpdateWasAppliedLocally, canLoadMailForView, companyID, forgetPendingArchiveMessages, handleEmailAccessExpired, loadFolders, removeMessagesFromVisibleMailList, scheduleMessageListRefresh, starUpdateWasAppliedLocally, triageConversionWasAppliedLocally]);
-  useEffect(() => {
-    if (!activeMailViewHasEmailConnection) return undefined;
-    const refreshVisibleMailbox = () => {
-      if (document.visibilityState === "hidden") return;
-      if (!canLoadMailForView(activeViewIDRef.current)) return;
-      scheduleMessageListRefresh(0, { refresh: true });
-    };
-    window.addEventListener("focus", refreshVisibleMailbox);
-    document.addEventListener("visibilitychange", refreshVisibleMailbox);
-    return () => {
-      window.removeEventListener("focus", refreshVisibleMailbox);
-      document.removeEventListener("visibilitychange", refreshVisibleMailbox);
-    };
-  }, [activeMailViewHasEmailConnection, canLoadMailForView, scheduleMessageListRefresh]);
+  }, [activeMailViewHasEmailConnection, apiBase, archiveUpdateWasAppliedLocally, canLoadMailForView, companyID, forgetPendingArchiveMessages, handleEmailAccessExpired, loadFolders, removeMessagesFromVisibleMailList, starUpdateWasAppliedLocally, triageConversionWasAppliedLocally]);
   useEffect(() => {
     if (!companyID || !currentUserID) return undefined;
     const unsubscribe = subscribeWorkspaceRealtime(apiBase, companyID, workspaceRealtimeScope(currentUserID), {

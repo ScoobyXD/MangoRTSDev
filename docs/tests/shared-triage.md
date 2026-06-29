@@ -47,9 +47,9 @@ ST36 - Shared inbox permissions remain stored on resource_permissions with resou
 ST37 - Shared inbox GVIC assignments remain stored on resource_gvic_assignments with resource_type = shared_inbox and resource_id = shared_inboxes.shared_inbox_id.
 ST38 - Email connection records do not receive Shared Triage permissions or GVIC assignments; permissions and GVIC are assigned to the shared inbox work surface.
 ST39 - Plain Shared Triage folders are organizational containers only; selecting one clears mail state and must not call email folder, message list, message detail, prefetch, or load-more endpoints.
-ST40 - Shared Triage mail refresh is driven by Nylas webhooks through backend communications realtime, with browser focus/visibility refresh as a safety refresh; the browser must not poll the message list every 30 seconds.
-ST41 - Communications realtime events refresh the active mail-capable mailbox view only; active Shared Triage root, plain Shared Triage folders, My Work, Updates, and GVIC matrix views must not issue mail refresh GETs from those events.
-ST42 - Shared Triage mailbox inboxes must continue to live-update when mailbox messages are created, updated, or deleted.
+ST40 - Shared Triage mail reconciliation is driven by Nylas webhooks through backend communications realtime; browser focus and visibility-change events must not refresh the message list, and the browser must not poll the message list every 30 seconds.
+ST41 - Communications realtime events reconcile the active mail-capable mailbox view only; active Shared Triage root, plain Shared Triage folders, My Work, Updates, and GVIC matrix views must not issue mail refresh GETs from those events.
+ST42 - Shared Triage mailbox inboxes must continue to live-reconcile mailbox messages when they are created, updated, or deleted without replacing the whole visible message list.
 ST43 - Shared Triage mailbox inboxes must show a fixed, predictable message batch size of 20 messages per page.
 ST44 - Shared Triage mailbox inboxes must immediately prefetch the next message page after the first visible page loads, without waiting for scrolling or the archive/advance action.
 ST45 - Scrolling a Shared Triage mailbox inbox must not archive messages and must not load the next primary-inbox page.
@@ -72,6 +72,11 @@ ST61 - Star and unstar actions in Shared Triage must optimistically update the v
 ST62 - Backend or provider confirmations caused by local Shared Triage star and unstar actions must reconcile caches/counts without triggering a full message-list reload or blanking the active Inbox or Starred tab.
 ST63 - Shared Triage mailbox activation must not launch background workspace repair GET storms for inaccessible or stale logic gate IDs referenced by node rows.
 ST64 - If an accepted background archive mutation fails or never confirms, the source email must not be deleted and may remain or reappear in the shared inbox after refresh/reconciliation.
+ST65 - Selecting another shared-inbox email, focusing the email body/detail pane, or returning focus from the detail pane to the list must not reload, blank, or replace the visible message list.
+ST66 - The normal full-list replacement path for a Shared Triage mailbox is initial page/list load, browser refresh, or an explicit list identity change such as mailbox, search, unread filter, account, company, or selected Shared Triage mailbox.
+ST67 - A communications realtime message.created event with a message ID must fetch that one message and insert it into the current date-sorted shared-inbox list when it matches the active filters; it must not reload the whole list.
+ST68 - Communications realtime message.updated, message.opened, and message.deleted events with a message ID must update, reconcile, or remove only the affected visible or selected message; they must not reload the whole list when the affected message is not visible.
+ST69 - Communications realtime message events without a message ID must not trigger a full Shared Triage message-list reload; the next explicit page/list load reconciles anything that could not be handled as a single-message update.
 
 ## Scenarios
 
@@ -250,6 +255,11 @@ Business logic covered:
 - ST39
 - ST40
 - ST41
+- ST65
+- ST66
+- ST67
+- ST68
+- ST69
 
 Given:
 - Shared Triage contains a plain parent folder and a mailbox-capable shared inbox entry under that folder.
@@ -261,9 +271,11 @@ Expected:
 - Selecting the plain parent folder does not call email folders, message list, message detail, prefetch, or load-more endpoints.
 - Selecting the plain parent folder does not retry mail GETs when the row has no mailbox connection because folders are not mailbox resources.
 - Selecting the mailbox-capable shared inbox may load mail using the company-owned shared grant.
-- Nylas message.created, message.updated, message.deleted, and message.opened events may refresh the active mailbox-capable shared inbox.
+- Nylas message.created, message.updated, message.deleted, and message.opened events may reconcile individual messages in the active mailbox-capable shared inbox when they carry message IDs.
 - Those realtime events do not trigger mail GETs while Shared Triage root, a plain Shared Triage folder, My Work, Updates, or a GVIC matrix view is active.
-- Focus or visibility return may refresh the active mailbox-capable mail view, but there is no browser-side 30-second message polling loop.
+- Clicking an email row, focusing the email body, and clicking back into the list do not reload, blank, or replace the message list.
+- Focus or visibility return does not refresh the active mailbox-capable mail view, and there is no browser-side 30-second message polling loop.
+- Realtime message events that do not carry a message ID do not trigger a whole-list reload; the next explicit page/list load reconciles provider state.
 
 ### Scenario ST-S9: Shared Mailbox Paging And Explicit Archive Advance
 
@@ -291,6 +303,11 @@ Business logic covered:
 - ST62
 - ST63
 - ST64
+- ST65
+- ST66
+- ST67
+- ST68
+- ST69
 
 Given:
 - A user opens a mailbox-capable Shared Triage inbox with view access to the shared mailbox.
@@ -300,7 +317,10 @@ Given:
 Expected:
 - The visible page contains no more than 20 messages.
 - The next page is prefetched after the visible page loads.
-- Created, updated, and deleted message events still refresh the active mailbox view live.
+- Created, updated, and deleted message events reconcile the affected message live without replacing the whole shared-inbox list.
+- New-email realtime events with a message ID fetch that single message and insert it into the current date-sorted list when it matches the active filters.
+- Updated, opened, or deleted-message realtime events touch only the affected visible or selected row when the event carries enough IDs.
+- Realtime message events that do not carry a message ID do not trigger a whole-list reload; the next explicit page/list load reconciles provider state.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
 - Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.
 - The frozen previous-page IDs are accepted by one page-level backend archive request, and provider archive mutations continue in the background.
