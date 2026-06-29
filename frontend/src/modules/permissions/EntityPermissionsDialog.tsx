@@ -86,6 +86,8 @@ const EXPLICIT_ACCESS_OPTIONS: ReadonlyArray<{ value: ResourceAccessLevel; label
   { value: "admin", label: "Admin" },
 ];
 const CUSTOM_GROUP_ACCESS = "__custom__";
+const PERMISSIONS_VIEW_DENIED_MESSAGE = "You do not have permission to view permissions. Only managers and admins can.";
+const PERMISSIONS_EDIT_DENIED_MESSAGE = "You do not have permission to edit permissions. Only managers and admins can.";
 
 function DefaultAccessToggle({
   defaultAccess,
@@ -221,7 +223,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
       } catch (loadError) {
         if (!cancelled) {
           console.error("Failed to load permissions", loadError);
-          setError("Failed to load permissions");
+          setError(permissionRequestErrorMessage(loadError, "view"));
         }
       } finally {
         if (!cancelled) setBusy(false);
@@ -361,7 +363,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
       onClose?.();
     } catch (saveError) {
       console.error("Failed to save permissions", saveError);
-      setError("Failed to save permissions");
+      setError(permissionRequestErrorMessage(saveError, "edit"));
     } finally {
       setBusy(false);
     }
@@ -595,6 +597,21 @@ function permissionsPathFor(entityType: PermissionEntityType, entityID: string):
     case "shared_inbox":
       return `/v1/communications/shared-inboxes/${encodeURIComponent(entityID)}/access`;
   }
+}
+
+function permissionRequestErrorMessage(error: unknown, action: "view" | "edit"): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const normalized = message.trim().toLowerCase();
+  if (
+    normalized.includes("company_manager_required") ||
+    normalized.includes("company_admin_required") ||
+    normalized.includes("access_denied") ||
+    normalized.includes("forbidden") ||
+    normalized.includes("403")
+  ) {
+    return action === "view" ? PERMISSIONS_VIEW_DENIED_MESSAGE : PERMISSIONS_EDIT_DENIED_MESSAGE;
+  }
+  return action === "view" ? "Failed to load permissions" : "Failed to save permissions";
 }
 
 function accessLevelLabel(accessLevel: ResourceAccessLevel): string {

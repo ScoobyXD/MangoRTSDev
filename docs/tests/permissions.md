@@ -4,7 +4,7 @@ Last updated: 2026-06-29
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: partial backend coverage for default/override semantics, manager-preservation rules, Logic Gate-to-node permission snapshots, folder-to-child permission snapshots, same-parent preservation, and cross-parent overwrite behavior. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: partial backend coverage for default/override semantics, manager-preservation rules, Logic Gate-to-node permission snapshots, folder-to-child permission snapshots, same-parent preservation, cross-parent overwrite behavior, and direct node view denial. Rule ID mapping is partial.
 
 ## Business Logic
 
@@ -24,7 +24,7 @@ P13 - Invalid requested access levels return a bad request error.
 P14 - Reading entity permission settings requires manager/admin authority and view access to the entity.
 P15 - Updating entity permission settings requires dev admin, company admin, or company manager authority with edit access to the entity.
 P16 - Permission setting responses include default access, explicit grants, override user IDs, effective access, can-edit-permissions, and can-edit-manager-permissions.
-P17 - Visible node, logic gate, project, Explorer, and Kanban reads are filtered by effective view access.
+P17 - Visible node, logic gate, project, and Explorer reads are filtered by effective view access.
 P18 - Map positions and relationship rows are filtered by the viewer's access to the related resources.
 P19 - Kanban board and card access derives from the access level of the owning logic gate.
 P20 - Regular users cannot load or update permission settings, even when they have resource edit/admin access.
@@ -45,6 +45,8 @@ P34 - Editing a child resource's permissions changes only that child; later pare
 P35 - Reordering or re-saving a project, Logic Gate, or node under the same parent preserves that resource's current permissions.
 P36 - Detaching a resource from a parent or moving it to a non-template/root location preserves its current permission policy.
 P37 - Project permissions do not template Logic Gates or nodes through project relationships; folder templates apply to Explorer placement, and Logic Gate templates apply to node assignment.
+P38 - Kanban board/card visibility follows the owning Logic Gate access, but opening a Kanban node detail/editor must perform a fresh node-level access check.
+P39 - Permission settings denial copy explains that only managers and admins can view or edit permissions.
 
 ## Scenarios
 
@@ -92,6 +94,7 @@ Business logic covered:
 - P20
 - P25
 - P27
+- P39
 
 Given:
 - One user cannot view a resource.
@@ -108,6 +111,7 @@ Expected:
 - Permission settings can be updated by managers/admins with edit access to the resource.
 - Responses include default access, explicit grants, override user IDs, effective access, can-edit-permissions, and can-edit-manager-permissions.
 - Regular resource admin access does not allow loading or updating permission settings.
+- A non-manager/non-admin opening the permissions tab sees a manager/admin permission message instead of a generic permissions failure.
 - Company managers can change company user exceptions but cannot change other manager exceptions.
 - When a manager flips the default, manager effective access is preserved and regular company user access follows the new default plus exceptions.
 
@@ -120,16 +124,19 @@ Business logic covered:
 - P21
 - P22
 - P23
+- P38
 
 Given:
 - A viewer can access some nodes, logic gates, projects, Explorer rows, and Kanban boards, but not others.
+- A viewer can access a Logic Gate board while a node card on that board is not directly viewable by that viewer.
 - Some stored relationship or notification rows contain malformed resource IDs.
 - A permission update changes access for a user or group.
 
 Expected:
-- Node, logic gate, project, Explorer, and Kanban reads hide inaccessible resources.
+- Node, logic gate, project, and Explorer reads hide inaccessible resources.
 - Map positions and relationship rows hide inaccessible related resources.
-- Kanban access follows the owning logic gate access.
+- Kanban board/card visibility follows the owning Logic Gate access.
+- Opening a node from a Kanban card checks node-level access and shows "You do not have permission to see this." when the node itself is inaccessible.
 - Malformed resource IDs are ignored or handled without crashing.
 - Effective access is recomputed after permission changes.
 - Affected projections and clients receive refresh data.
