@@ -57,18 +57,21 @@ ST46 - Advancing a Shared Triage mailbox inbox page is an explicit user action t
 ST47 - Advancing must display the prefetched next page before archiving the previous page whenever a prefetched page is available.
 ST48 - Advancing must freeze the previous page's message IDs at click time so live updates cannot change what gets archived.
 ST49 - The advance/archive action must remain immediately reusable after a page advances unless accepting the visible page would exceed the hidden archive queue limit.
-ST50 - Advancing must enqueue the frozen visible message IDs for background archive work instead of waiting for those provider mutations before allowing the user to continue.
+ST50 - Advancing must enqueue the frozen visible message IDs through one page-level background archive request instead of waiting for those provider mutations before allowing the user to continue.
 ST51 - The hidden archive queue may contain no more than 140 pending emails across queued and in-flight archive work.
 ST52 - If accepting the current visible page would exceed 140 pending archive emails, the advance/archive action is disabled until enough queued archive work completes.
-ST53 - Background archive work must send archive requests in two-message client batches and run those batches in parallel so the provider gate, not the UI, controls final throughput.
+ST53 - Background archive work must be accepted by the backend in one request per advanced page; provider mutations run behind the backend provider gate instead of occupying multiple browser request lanes.
 ST54 - Advancing must prioritize showing the prefetched next page, enqueueing the previous page, and making the action usable again before any folder metadata reconciliation.
-ST55 - Folder metadata refresh after archive or unarchive is only a count/metadata reconciliation step and must not fetch the next message page or block the prefetched page from being shown.
-ST56 - If folder metadata reconciliation is slow or fails after archive or unarchive, the Shared Triage mailbox list remains usable and counts can reconcile later.
-ST57 - If no next page is available, advancing archives the current visible page and leaves the mailbox inbox empty until live updates or a refresh provide more messages.
-ST58 - Backend or provider events caused by Shared Triage archive work must be identifiable as archive confirmations instead of generic mailbox updates.
-ST59 - Archive confirmations for the frozen previous Shared Triage page must not trigger a full message-list reload or blank the currently visible prefetched page.
-ST60 - Star and unstar actions in Shared Triage must optimistically update the visible message state and Starred count before backend or provider confirmation returns.
-ST61 - Backend or provider confirmations caused by local Shared Triage star and unstar actions must reconcile caches/counts without triggering a full message-list reload or blanking the active Inbox or Starred tab.
+ST55 - Folder metadata refresh after archive or unarchive is only a count/metadata reconciliation step, must be coalesced across archive confirmations, and must not clear or duplicate an in-flight folder metadata request.
+ST56 - Folder metadata reconciliation must not fetch the next message page or block the prefetched page from being shown.
+ST57 - If folder metadata reconciliation is slow or fails after archive or unarchive, the Shared Triage mailbox list remains usable and counts can reconcile later.
+ST58 - If no next page is available, advancing archives the current visible page and leaves the mailbox inbox empty until live updates or a refresh provide more messages.
+ST59 - Backend or provider events caused by Shared Triage archive work must be identifiable as archive confirmations instead of generic mailbox updates.
+ST60 - Archive confirmations for the frozen previous Shared Triage page must not trigger a full message-list reload or blank the currently visible prefetched page.
+ST61 - Star and unstar actions in Shared Triage must optimistically update the visible message state and Starred count before backend or provider confirmation returns.
+ST62 - Backend or provider confirmations caused by local Shared Triage star and unstar actions must reconcile caches/counts without triggering a full message-list reload or blanking the active Inbox or Starred tab.
+ST63 - Shared Triage mailbox activation must not launch background workspace repair GET storms for inaccessible or stale logic gate IDs referenced by node rows.
+ST64 - If an accepted background archive mutation fails or never confirms, the source email must not be deleted and may remain or reappear in the shared inbox after refresh/reconciliation.
 
 ## Scenarios
 
@@ -285,6 +288,9 @@ Business logic covered:
 - ST59
 - ST60
 - ST61
+- ST62
+- ST63
+- ST64
 
 Given:
 - A user opens a mailbox-capable Shared Triage inbox with view access to the shared mailbox.
@@ -297,11 +303,13 @@ Expected:
 - Created, updated, and deleted message events still refresh the active mailbox view live.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
 - Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.
-- The frozen previous-page IDs are sent in two-message client batch requests that run in parallel in the background.
+- The frozen previous-page IDs are accepted by one page-level backend archive request, and provider archive mutations continue in the background.
 - The advance action becomes usable again immediately after the next page is shown and the previous page is queued.
 - The hidden archive queue accepts at most 140 pending emails; if adding the current page would exceed that limit, the advance action is disabled until enough background archive work completes.
-- Folder metadata refresh runs after the primary archive-and-next work as reconciliation only; it does not fetch the next email page.
+- Folder metadata refresh runs after the primary archive-and-next work as reconciliation only; it is coalesced, does not duplicate an in-flight folder request, and does not fetch the next email page.
 - Shared Triage archive confirmation events from the app backend or provider webhook reconcile caches/counts without blanking or fully reloading the prefetched page.
 - Starring or unstarring a message updates the row and Starred count locally, and the matching backend/provider confirmation does not blank or fully reload the active Inbox or Starred tab.
+- Opening or returning to a Shared Triage mailbox does not fire background logic-gate view repair requests for missing, inaccessible, or stale node-linked logic gate IDs.
+- If the backend accepts the archive page but a later provider mutation fails or never confirms, the source email is not deleted and can remain or reappear after refresh.
 - If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
 - If there is no next page, clicking the advance action archives the visible page and leaves the list empty until more messages arrive or a refresh reloads the inbox.

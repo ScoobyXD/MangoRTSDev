@@ -252,8 +252,13 @@ export type MessagePage = {
 };
 
 export type ArchiveEmailMessagesBatchResult = {
+  accepted_ids?: string[];
   archived_ids: string[];
   failed: Array<{ message_id: string; error: string }>;
+};
+
+export type ArchiveEmailMessagesBatchOptions = {
+  background?: boolean;
 };
 
 export type MergeEmailMessageOptions = {
@@ -530,19 +535,28 @@ export async function archiveEmailMessage(messageID: string, sharedInboxID?: str
   return message;
 }
 
-export async function archiveEmailMessagesBatch(messageIDs: string[], sharedInboxID?: string, companyID?: string): Promise<ArchiveEmailMessagesBatchResult> {
+export async function archiveEmailMessagesBatch(messageIDs: string[], sharedInboxID?: string, companyID?: string, options: ArchiveEmailMessagesBatchOptions = {}): Promise<ArchiveEmailMessagesBatchResult> {
   const ids = cleanIDs(messageIDs);
   if (ids.length === 0) return { archived_ids: [], failed: [] };
-  const query = createSharedInboxMessageMutationQuery(sharedInboxID, companyID);
+  const queryParams = new URLSearchParams();
+  const cleanCompanyID = companyID?.trim() ?? "";
+  const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
+  if (cleanCompanyID) queryParams.set("company_id", cleanCompanyID);
+  if (cleanSharedInboxID) queryParams.set("shared_inbox_id", cleanSharedInboxID);
+  if (options.background) queryParams.set("background", "true");
+  const rawQuery = queryParams.toString();
+  const query = rawQuery ? `?${rawQuery}` : "";
   const payload = await apiFetchJSON<Partial<ArchiveEmailMessagesBatchResult>>(`/v1/communications/messages/archive-batch${query}`, {
     method: "POST",
     body: JSON.stringify({ message_ids: ids }),
   });
+  const acceptedIDs = cleanIDs(payload.accepted_ids ?? []);
   const archivedIDs = cleanIDs(payload.archived_ids ?? []);
-  for (const messageID of archivedIDs) {
+  for (const messageID of archivedIDs.length > 0 ? archivedIDs : acceptedIDs) {
     markCachedMessageArchived(messageID);
   }
   return {
+    accepted_ids: acceptedIDs,
     archived_ids: archivedIDs,
     failed: (payload.failed ?? [])
       .map((item) => ({ message_id: item.message_id?.trim() ?? "", error: item.error?.trim() ?? "archive_failed" }))
@@ -1041,6 +1055,10 @@ export function invalidateCommunicationsCache(scope?: { status?: boolean; folder
 
 export function invalidateCommunicationsFolderCache(): void {
   clearEmailFolderCache();
+}
+
+export function markCommunicationsFolderCacheStale(): void {
+  foldersCache.clear();
 }
 
 export function invalidateEmailMessageCache(messageID: string): void {

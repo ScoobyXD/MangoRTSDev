@@ -1830,6 +1830,83 @@ func TestCommunicationsArchiveBatchUsesCachedListFoldersAndReturnsCompactResult(
 	}
 }
 
+func TestCommunicationsArchiveBatchBackgroundReturnsAcceptedAndArchivesAsync(t *testing.T) {
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		messages: []NylasMessage{
+			{ID: "message-1", Subject: "One", Folders: []string{"INBOX", "CATEGORY_PERSONAL", "Label_123"}},
+			{ID: "message-2", Subject: "Two", Folders: []string{"INBOX", "Label_456"}},
+		},
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
+
+	body := `{"message_ids":["message-1","message-2"]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/communications/messages/archive-batch?background=true", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		AcceptedIDs []string `json:"accepted_ids"`
+		ArchivedIDs []string `json:"archived_ids"`
+		Failed      []struct {
+			MessageID string `json:"message_id"`
+			Error     string `json:"error"`
+		} `json:"failed"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(payload.AcceptedIDs, ",") != "message-1,message-2" {
+		t.Fatalf("accepted ids = %+v, want both messages", payload.AcceptedIDs)
+	}
+	if len(payload.ArchivedIDs) != 0 || len(payload.Failed) != 0 {
+		t.Fatalf("background response = archived %+v failed %+v, want compact accepted response", payload.ArchivedIDs, payload.Failed)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		nylas.mu.Lock()
+		updateCalls := append([]fakeNylasUpdateCall(nil), nylas.updateCalls...)
+		nylas.mu.Unlock()
+		if len(updateCalls) == 2 {
+			if updateCalls[0].MessageID == "" || updateCalls[1].MessageID == "" {
+				t.Fatalf("update calls = %+v, want message IDs", updateCalls)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("update calls = %+v, want 2 background archive updates", updateCalls)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func TestCommunicationsArchiveMutationTrackerClassifiesRecentArchiveEchoOnce(t *testing.T) {
 	t.Parallel()
 

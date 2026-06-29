@@ -29,6 +29,7 @@ import {
   listEmailFolders,
   listEmailMessages,
   listCommunicationsSharedInboxes,
+  markCommunicationsFolderCacheStale,
   mergeEmailMessageIntoMessageList,
   primeEmailMessageCache,
   reconcileEmailMessageLocalReply,
@@ -102,6 +103,10 @@ function homeViewUsesSharedEmailConnection(viewID: HomeViewID): boolean {
 function isTriageMailViewID(viewID: HomeViewID): boolean {
   return viewID === "my-triage" || viewID === "shared-root" || viewID.startsWith("shared:");
 }
+
+const MISSING_LOGIC_GATE_REPAIR_CONCURRENCY = 4;
+const MISSING_LOGIC_GATE_REPAIR_FAILURE_TTL_MS = 5 * 60_000;
+const ARCHIVE_BACKGROUND_CONFIRMATION_TIMEOUT_MS = 3 * 60_000;
 
 function hasSemanticWorkspaceScopes(scopes: WorkspaceReconciliationScope[]): boolean {
   return scopes.some((scope) => Boolean(scope.semanticScope));
@@ -411,6 +416,7 @@ export function HomePage({
   const queuedArchiveBatchesRef = useRef<Map<string, QueuedArchiveBatch>>(new Map());
   const pendingArchiveMessageKeysRef = useRef<Set<string>>(new Set());
   const archiveQueueFlushTimerRef = useRef<number | null>(null);
+  const archivePendingReleaseTimerIDsRef = useRef<Set<number>>(new Set());
   const pendingStarredMessageIDsRef = useRef<Set<string>>(new Set());
   const folderReloadTimerRef = useRef<number | null>(null);
   const workspacePanelReloadTimerRef = useRef<number | null>(null);
@@ -439,6 +445,7 @@ export function HomePage({
   const locallyAppliedTriageConversionIDsRef = useRef<Map<string, number>>(new Map());
   const locallyArchivedMessageKeysRef = useRef<Map<string, number>>(new Map());
   const locallyStarMutatedMessageKeysRef = useRef<Map<string, number>>(new Map());
+  const missingLogicGateRepairFailureIDsRef = useRef<Map<string, number>>(new Map());
   const noticeResourceTextRef = useRef("");
   const workspaceRef = useRef<HTMLElement | null>(null);
   const columnWidthsRef = useRef<HomeColumnWidths>(columnWidths);
@@ -644,6 +651,8 @@ export function HomePage({
         window.clearTimeout(archiveQueueFlushTimerRef.current);
         archiveQueueFlushTimerRef.current = null;
       }
+      for (const timerID of archivePendingReleaseTimerIDsRef.current) window.clearTimeout(timerID);
+      archivePendingReleaseTimerIDsRef.current.clear();
       queuedArchiveBatchesRef.current.clear();
       pendingArchiveMessageKeysRef.current.clear();
       pendingStarredMessageIDsRef.current.clear();
@@ -859,6 +868,8 @@ export function HomePage({
           window.clearTimeout(archiveQueueFlushTimerRef.current);
           archiveQueueFlushTimerRef.current = null;
         }
+        for (const timerID of archivePendingReleaseTimerIDsRef.current) window.clearTimeout(timerID);
+        archivePendingReleaseTimerIDsRef.current.clear();
         queuedArchiveBatchesRef.current.clear();
         pendingArchiveMessageKeysRef.current.clear();
         setQueuedArchiveEmailCount(0);
@@ -886,6 +897,8 @@ export function HomePage({
       window.clearTimeout(archiveQueueFlushTimerRef.current);
       archiveQueueFlushTimerRef.current = null;
     }
+    for (const timerID of archivePendingReleaseTimerIDsRef.current) window.clearTimeout(timerID);
+    archivePendingReleaseTimerIDsRef.current.clear();
     queuedArchiveBatchesRef.current.clear();
     pendingArchiveMessageKeysRef.current.clear();
     setQueuedArchiveEmailCount(0);
@@ -942,7 +955,7 @@ export function HomePage({
     }
   }, [canRepairSharedInboxConnection, companyID, handleEmailAccessExpired, sharedInboxes]);
   const scheduleFolderMetadataRefresh = useCallback(() => {
-    invalidateCommunicationsFolderCache();
+    markCommunicationsFolderCacheStale();
     if (folderReloadTimerRef.current !== null) window.clearTimeout(folderReloadTimerRef.current);
     folderReloadTimerRef.current = window.setTimeout(() => {
       folderReloadTimerRef.current = null;
@@ -1436,6 +1449,21 @@ export function HomePage({
   const syncQueuedArchiveEmailCount = useCallback(() => {
     setQueuedArchiveEmailCount(pendingArchiveMessageKeysRef.current.size);
   }, []);
+  const forgetPendingArchiveMessages = useCallback((args: { companyID: string; sharedInboxID?: string; messageIDs: string[] }) => {
+    const sharedInboxID = args.sharedInboxID?.trim() || undefined;
+    let changed = false;
+    for (const messageID of cleanIDList(args.messageIDs)) {
+      changed = pendingArchiveMessageKeysRef.current.delete(archiveQueueMessageKey(args.companyID, sharedInboxID, messageID)) || changed;
+    }
+    if (changed) syncQueuedArchiveEmailCount();
+  }, [archiveQueueMessageKey, syncQueuedArchiveEmailCount]);
+  const releasePendingArchiveMessagesLater = useCallback((batch: QueuedArchiveBatch) => {
+    const timerID = window.setTimeout(() => {
+      archivePendingReleaseTimerIDsRef.current.delete(timerID);
+      forgetPendingArchiveMessages(batch);
+    }, ARCHIVE_BACKGROUND_CONFIRMATION_TIMEOUT_MS);
+    archivePendingReleaseTimerIDsRef.current.add(timerID);
+  }, [forgetPendingArchiveMessages]);
   const archiveQueueCanAccept = useCallback((messageIDs: string[], nextCompanyID: string, sharedInboxID?: string) => {
     const pending = pendingArchiveMessageKeysRef.current;
     let newCount = 0;
@@ -1455,12 +1483,15 @@ export function HomePage({
     queuedArchiveBatchesRef.current.clear();
     if (batches.length === 0) return;
     for (const batch of batches) {
+      let keepPendingUntilConfirmation = false;
       void archiveHomeMailMessagesCommand({
         companyID: batch.companyID,
         sharedInboxID: batch.sharedInboxID,
         messageIDs: batch.messageIDs,
       })
         .then((result) => {
+          keepPendingUntilConfirmation = result?.accepted === true;
+          if (keepPendingUntilConfirmation) releasePendingArchiveMessagesLater(batch);
           const failed = result?.failed ?? [];
           if (failed.length > 0) {
             setError(failed.length === 1 ? "Failed to archive 1 message." : `Failed to archive ${failed.length} messages.`);
@@ -1476,14 +1507,11 @@ export function HomePage({
           scheduleMessageListRefresh(0);
         })
         .finally(() => {
-          for (const messageID of batch.messageIDs) {
-            pendingArchiveMessageKeysRef.current.delete(archiveQueueMessageKey(batch.companyID, batch.sharedInboxID, messageID));
-          }
-          syncQueuedArchiveEmailCount();
+          if (!keepPendingUntilConfirmation) forgetPendingArchiveMessages(batch);
           scheduleFolderMetadataRefresh();
         });
     }
-  }, [archiveQueueMessageKey, handleEmailAccessExpired, scheduleFolderMetadataRefresh, scheduleMessageListRefresh, syncQueuedArchiveEmailCount]);
+  }, [forgetPendingArchiveMessages, handleEmailAccessExpired, releasePendingArchiveMessagesLater, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
   const queueArchiveMessages = useCallback((args: { companyID: string; sharedInboxID?: string; messageIDs: string[] }): string[] => {
     const messageIDs = cleanIDList(args.messageIDs);
     if (messageIDs.length === 0) return [];
@@ -1682,8 +1710,9 @@ export function HomePage({
       q: searchQueryRef.current,
       unread: unreadOnlyRef.current ? true : undefined,
     });
-    const scheduleFolderRefresh = () => {
-      invalidateCommunicationsFolderCache();
+    const scheduleFolderRefresh = (options?: { preserveInflight?: boolean }) => {
+      if (options?.preserveInflight) markCommunicationsFolderCacheStale();
+      else invalidateCommunicationsFolderCache();
       if (folderReloadTimerRef.current !== null) window.clearTimeout(folderReloadTimerRef.current);
       folderReloadTimerRef.current = window.setTimeout(() => {
         folderReloadTimerRef.current = null;
@@ -1742,7 +1771,8 @@ export function HomePage({
         const activeSharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
         const archiveTargetsCurrentMailbox = eventSharedInboxID ? eventSharedInboxID === activeSharedInboxID : activeSharedInboxID === "";
         if (archiveConfirmation || (trigger.startsWith("message.updated") && archiveUpdateWasAppliedLocally(messageID, eventSharedInboxID || undefined))) {
-          scheduleFolderRefresh();
+          forgetPendingArchiveMessages({ companyID, sharedInboxID: eventSharedInboxID || undefined, messageIDs: [messageID] });
+          scheduleFolderRefresh({ preserveInflight: true });
           invalidateEmailMessageCache(messageID);
           if (!archiveTargetsCurrentMailbox) return;
           const visible = messagesRef.current.some((message) => message.id === messageID);
@@ -1770,7 +1800,7 @@ export function HomePage({
         const localStarSharedInboxID = eventSharedInboxID || activeSharedInboxID || undefined;
         const localGenericStarUpdate = trigger.startsWith("message.updated") && starUpdateWasAppliedLocally(messageID, localStarSharedInboxID);
         if (starConfirmation || localGenericStarUpdate) {
-          scheduleFolderRefresh();
+          scheduleFolderRefresh({ preserveInflight: true });
           invalidateEmailMessageCache(messageID);
           const starTargetsCurrentMailbox = eventSharedInboxID ? eventSharedInboxID === activeSharedInboxID : true;
           if (!starTargetsCurrentMailbox) return;
@@ -1869,7 +1899,7 @@ export function HomePage({
         folderReloadTimerRef.current = null;
       }
     };
-  }, [activeMailAccountEmail, activeMailViewHasEmailConnection, apiBase, archiveUpdateWasAppliedLocally, canLoadMailForView, companyID, handleEmailAccessExpired, loadFolders, removeMessagesFromVisibleMailList, scheduleMessageListRefresh, starUpdateWasAppliedLocally, triageConversionWasAppliedLocally]);
+  }, [activeMailAccountEmail, activeMailViewHasEmailConnection, apiBase, archiveUpdateWasAppliedLocally, canLoadMailForView, companyID, forgetPendingArchiveMessages, handleEmailAccessExpired, loadFolders, removeMessagesFromVisibleMailList, scheduleMessageListRefresh, starUpdateWasAppliedLocally, triageConversionWasAppliedLocally]);
   useEffect(() => {
     if (!activeMailViewHasEmailConnection) return undefined;
     const refreshVisibleMailbox = () => {
@@ -2723,19 +2753,38 @@ export function HomePage({
   const workspacePanelUserID = isInboxMatrixView ? activeGVICMatrixUserID : currentUserID;
   useEffect(() => {
     if (!companyID || nodes.length === 0) return undefined;
-    const missingIDs = missingLogicGateRecordIDs(nodes, logicGateByID);
+    if (isArchivableHomeViewID(activeViewID)) return undefined;
+    const now = Date.now();
+    const failedRepairIDs = missingLogicGateRepairFailureIDsRef.current;
+    for (const [logicGateID, retryAfter] of failedRepairIDs.entries()) {
+      if (retryAfter <= now) failedRepairIDs.delete(logicGateID);
+    }
+    const missingIDs = missingLogicGateRecordIDs(nodes, logicGateByID)
+      .filter((logicGateID) => (failedRepairIDs.get(logicGateID) ?? 0) <= now);
     if (missingIDs.length === 0) return undefined;
     let cancelled = false;
-    void Promise.all(missingIDs.map(async (logicGateID) => {
-      try {
-        const details = await getLogicGateRecordSingleFlight(apiBase, companyID, logicGateID);
-        return details.logic_gate;
-      } catch {
-        return null;
+    const fetched: LogicGateRecord[] = [];
+    let nextIndex = 0;
+    const runRepairWorker = async () => {
+      while (!cancelled) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const logicGateID = missingIDs[index];
+        if (!logicGateID) return;
+        try {
+          const details = await getLogicGateRecordSingleFlight(apiBase, companyID, logicGateID);
+          if (details.logic_gate) {
+            failedRepairIDs.delete(logicGateID);
+            fetched.push(details.logic_gate);
+          }
+        } catch {
+          failedRepairIDs.set(logicGateID, Date.now() + MISSING_LOGIC_GATE_REPAIR_FAILURE_TTL_MS);
+        }
       }
-    })).then((records) => {
+    };
+    const workerCount = Math.min(MISSING_LOGIC_GATE_REPAIR_CONCURRENCY, missingIDs.length);
+    void Promise.all(Array.from({ length: workerCount }, runRepairWorker)).then(() => {
       if (cancelled) return;
-      const fetched = records.filter((record): record is LogicGateRecord => Boolean(record));
       if (fetched.length === 0) return;
       setLogicGates((previous) => {
         const byID = new Map(previous.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
@@ -2750,7 +2799,7 @@ export function HomePage({
       });
     });
     return () => { cancelled = true; };
-  }, [apiBase, companyID, logicGateByID, nodes]);
+  }, [activeViewID, apiBase, companyID, logicGateByID, nodes]);
   const myNodes = useMemo(() => {
     if (!workspacePanelUserID) return [];
     return nodes.filter((node) => cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateHasAnyGVICRole(logicGateByID.get(logicGateID), workspacePanelUserID)));
