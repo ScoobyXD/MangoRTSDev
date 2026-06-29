@@ -234,6 +234,12 @@ export function triageMessageIDsFromStreamMessageID(value: string): string[] {
   return cleanIDList(value.split(","));
 }
 
+export function communicationStreamEventIsArchiveConfirmation(event: { trigger?: string; action?: string }): boolean {
+  const trigger = event.trigger?.trim().toLowerCase() ?? "";
+  const action = event.action?.trim().toLowerCase() ?? "";
+  return action === "archive" || trigger.startsWith("message.archived");
+}
+
 export function logicGateTreeID(logicGateID: string): string {
   return `logic-gate-${logicGateID.trim()}`;
 }

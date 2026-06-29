@@ -64,7 +64,9 @@ export type MessageSelectionModifiers = {
 export type CommunicationsStreamEnvelope = {
   type?: string;
   trigger?: string;
+  action?: string;
   message_id?: string;
+  shared_inbox_id?: string;
 };
 
 export type WorkspaceStreamEnvelope = {

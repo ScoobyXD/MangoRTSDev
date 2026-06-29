@@ -61,6 +61,7 @@ type Server struct {
 	eventWorkerDisabled             bool
 	metrics                         MetricsRecorder
 	commCache                       *communicationsCache
+	commArchiveMutations            *communicationsArchiveMutationTracker
 	nylasGate                       *nylasRequestGate
 	nylasWebhooks                   *nylasWebhookReceiptCache
 	authValidator                   AuthTokenValidator
@@ -188,6 +189,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		eventWorkerDisabled:             options.DisableEventWorker,
 		metrics:                         metrics,
 		commCache:                       newCommunicationsCache(),
+		commArchiveMutations:            newCommunicationsArchiveMutationTracker(),
 		nylasGate:                       newNylasRequestGate(communicationsNylasMinRequestInterval),
 		nylasWebhooks:                   newNylasWebhookReceiptCache(),
 		authValidator:                   options.AuthValidator,

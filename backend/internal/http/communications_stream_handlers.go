@@ -18,11 +18,23 @@ import (
 )
 
 type communicationsEventEnvelope struct {
-	UserID    string    `json:"user_id"`
-	Type      string    `json:"type"`
-	Trigger   string    `json:"trigger,omitempty"`
-	MessageID string    `json:"message_id,omitempty"`
-	TS        time.Time `json:"ts"`
+	UserID        string    `json:"user_id"`
+	Type          string    `json:"type"`
+	Trigger       string    `json:"trigger,omitempty"`
+	Action        string    `json:"action,omitempty"`
+	MessageID     string    `json:"message_id,omitempty"`
+	SharedInboxID string    `json:"shared_inbox_id,omitempty"`
+	TS            time.Time `json:"ts"`
+}
+
+type communicationsEventMetadata struct {
+	Action        string
+	SharedInboxID string
+}
+
+type communicationsWebhookGrantContext struct {
+	userID     string
+	cacheScope string
 }
 
 type nylasWebhookChange struct {
@@ -87,7 +99,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
-	grantUserIDs := map[string]string{}
+	grantContexts := map[string]communicationsWebhookGrantContext{}
 	missingGrants := map[string]struct{}{}
 	processedChanges := map[string]struct{}{}
 	for _, change := range changes {
@@ -104,7 +116,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 		if _, missing := missingGrants[grantID]; missing {
 			continue
 		}
-		userID, ok := grantUserIDs[grantID]
+		grantContext, ok := grantContexts[grantID]
 		if !ok {
 			connection, err := s.repo.GetUserEmailConnectionByGrantID(grantID)
 			if errors.Is(err, store.ErrNotFound) {
@@ -116,8 +128,11 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 				writeError(w, http.StatusInternalServerError, "failed_to_load_email_connection")
 				return
 			}
-			userID = connection.UserID
-			grantUserIDs[grantID] = userID
+			grantContext = communicationsWebhookGrantContext{
+				userID:     connection.UserID,
+				cacheScope: communicationsConnectionCacheScope(connection),
+			}
+			grantContexts[grantID] = grantContext
 		}
 		if normalizedTrigger == "message.opened" && strings.TrimSpace(change.MessageID) == "" {
 			log.Printf("nylas message.opened webhook missing message_id grant_id=%s", grantID)
@@ -128,7 +143,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 				signalAt = time.Now().UTC()
 			}
 			status, err := s.repo.UpsertCommunicationsMessageReadStatus(store.CommunicationsMessageReadStatusInput{
-				UserID:          userID,
+				UserID:          grantContext.userID,
 				MessageID:       change.MessageID,
 				ThreadID:        change.ThreadID,
 				Status:          "likely_read",
@@ -136,15 +151,21 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 				SignalCount:     change.SignalCount,
 			})
 			if err != nil {
-				log.Printf("failed to store nylas message.opened read status user_id=%s grant_id=%s message_id=%s: %v", userID, grantID, change.MessageID, err)
+				log.Printf("failed to store nylas message.opened read status user_id=%s grant_id=%s message_id=%s: %v", grantContext.userID, grantID, change.MessageID, err)
 				s.nylasWebhooks.forget(receiptKey)
 				writeError(w, http.StatusInternalServerError, "failed_to_store_message_read_status")
 				return
 			}
-			log.Printf("stored nylas message.opened read status user_id=%s grant_id=%s message_id=%s status=%s signal_count=%d last_signal=%s", userID, grantID, status.MessageID, status.Status, status.SignalCount, status.LastSignalTimestamp.Format(time.RFC3339))
+			log.Printf("stored nylas message.opened read status user_id=%s grant_id=%s message_id=%s status=%s signal_count=%d last_signal=%s", grantContext.userID, grantID, status.MessageID, status.Status, status.SignalCount, status.LastSignalTimestamp.Format(time.RFC3339))
 		}
-		s.applyNylasWebhookCacheInvalidation(userID, change)
-		s.publishCommunicationsEvent(userID, "mailbox_changed", change.Trigger, change.MessageID)
+		s.applyNylasWebhookCacheInvalidation(grantContext.userID, change)
+		trigger := change.Trigger
+		meta := communicationsEventMetadata{}
+		if normalizedTrigger == "message.updated" && s.consumeRecentCommunicationsArchiveMutation(grantContext.cacheScope, change.MessageID, time.Now().UTC()) {
+			trigger = "message.archived"
+			meta.Action = "archive"
+		}
+		s.publishCommunicationsEventWithMeta(grantContext.userID, "mailbox_changed", trigger, change.MessageID, meta)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -263,6 +284,10 @@ func (s *Server) applyNylasWebhookCacheInvalidation(userID string, change nylasW
 }
 
 func (s *Server) publishCommunicationsEvent(userID, eventType, trigger, messageID string) {
+	s.publishCommunicationsEventWithMeta(userID, eventType, trigger, messageID, communicationsEventMetadata{})
+}
+
+func (s *Server) publishCommunicationsEventWithMeta(userID, eventType, trigger, messageID string, meta communicationsEventMetadata) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" || s == nil || s.realtimeRegistry == nil {
 		return
@@ -272,11 +297,13 @@ func (s *Server) publishCommunicationsEvent(userID, eventType, trigger, messageI
 		return
 	}
 	envelope := communicationsEventEnvelope{
-		UserID:    userID,
-		Type:      strings.TrimSpace(eventType),
-		Trigger:   strings.TrimSpace(trigger),
-		MessageID: strings.TrimSpace(messageID),
-		TS:        time.Now().UTC(),
+		UserID:        userID,
+		Type:          strings.TrimSpace(eventType),
+		Trigger:       strings.TrimSpace(trigger),
+		Action:        strings.TrimSpace(meta.Action),
+		MessageID:     strings.TrimSpace(messageID),
+		SharedInboxID: strings.TrimSpace(meta.SharedInboxID),
+		TS:            time.Now().UTC(),
 	}
 	memberships, err := s.repo.ListUserMemberships(userID)
 	if err != nil {

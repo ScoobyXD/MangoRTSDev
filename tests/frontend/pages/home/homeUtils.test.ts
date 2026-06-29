@@ -9,6 +9,7 @@ import {
   buildMyNodeGroups,
   buildGVICRoleInboxGroupsByCell,
   buildSharedInboxRows,
+  communicationStreamEventIsArchiveConfirmation,
   fitHomeColumnWidthsToAvailableWidth,
   getHomeColumnMinimumTrackWidth,
   getHomeGridTemplateColumns,
@@ -118,6 +119,13 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
 test("communications triage stream message ids are cleaned and deduped", () => {
   assert.deepEqual(triageMessageIDsFromStreamMessageID(" message-1,message-2, message-1 ,,message-3 "), ["message-1", "message-2", "message-3"]);
   assert.deepEqual(triageMessageIDsFromStreamMessageID(" , "), []);
+});
+
+test("communications archive stream events are identified without treating generic updates as archive confirmations", () => {
+  assert.equal(communicationStreamEventIsArchiveConfirmation({ trigger: "message.archived" }), true);
+  assert.equal(communicationStreamEventIsArchiveConfirmation({ trigger: "message.updated", action: " archive " }), true);
+  assert.equal(communicationStreamEventIsArchiveConfirmation({ trigger: "message.updated" }), false);
+  assert.equal(communicationStreamEventIsArchiveConfirmation({ trigger: "message.created", action: "reply" }), false);
 });
 
 test("mailbox count helper keeps visible Inbox and Starred counts", () => {

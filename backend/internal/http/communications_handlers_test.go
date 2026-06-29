@@ -1811,6 +1811,27 @@ func TestCommunicationsArchiveBatchUsesCachedListFoldersAndReturnsCompactResult(
 	}
 }
 
+func TestCommunicationsArchiveMutationTrackerClassifiesRecentArchiveEchoOnce(t *testing.T) {
+	t.Parallel()
+
+	tracker := newCommunicationsArchiveMutationTracker()
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	tracker.remember("grant:grant-1", []string{" message-1 ", "message-2", "message-1"}, now)
+
+	if !tracker.consume("grant:grant-1", "message-1", now.Add(time.Second)) {
+		t.Fatal("first recent archive echo was not classified")
+	}
+	if tracker.consume("grant:grant-1", "message-1", now.Add(2*time.Second)) {
+		t.Fatal("archive echo was classified more than once")
+	}
+	if tracker.consume("grant:other", "message-2", now.Add(time.Second)) {
+		t.Fatal("archive echo matched a different cache scope")
+	}
+	if tracker.consume("grant:grant-1", "message-2", now.Add(communicationsArchiveMutationTTL+time.Second)) {
+		t.Fatal("expired archive echo was classified")
+	}
+}
+
 func TestCommunicationsUnarchiveMessageAddsGmailInboxLabel(t *testing.T) {
 	t.Parallel()
 

@@ -1,4 +1,4 @@
-Last updated: 2026-06-26
+Last updated: 2026-06-29
 
 # Shared Triage Tests
 
@@ -65,6 +65,8 @@ ST54 - Advancing must prioritize showing the prefetched next page, enqueueing th
 ST55 - Folder metadata refresh after archive or unarchive is only a count/metadata reconciliation step and must not fetch the next message page or block the prefetched page from being shown.
 ST56 - If folder metadata reconciliation is slow or fails after archive or unarchive, the Shared Triage mailbox list remains usable and counts can reconcile later.
 ST57 - If no next page is available, advancing archives the current visible page and leaves the mailbox inbox empty until live updates or a refresh provide more messages.
+ST58 - Backend or provider events caused by Shared Triage archive work must be identifiable as archive confirmations instead of generic mailbox updates.
+ST59 - Archive confirmations for the frozen previous Shared Triage page must not trigger a full message-list reload or blank the currently visible prefetched page.
 
 ## Scenarios
 
@@ -277,6 +279,8 @@ Business logic covered:
 - ST55
 - ST56
 - ST57
+- ST58
+- ST59
 
 Given:
 - A user opens a mailbox-capable Shared Triage inbox with view access to the shared mailbox.
@@ -291,7 +295,8 @@ Expected:
 - Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.
 - The frozen previous-page IDs are sent in two-message client batch requests that run in parallel in the background.
 - The advance action becomes usable again immediately after the next page is shown and the previous page is queued.
-- The hidden archive queue accepts at most 100 pending emails; if adding the current page would exceed that limit, the advance action is disabled until enough background archive work completes.
+- The hidden archive queue accepts at most 140 pending emails; if adding the current page would exceed that limit, the advance action is disabled until enough background archive work completes.
 - Folder metadata refresh runs after the primary archive-and-next work as reconciliation only; it does not fetch the next email page.
+- Shared Triage archive confirmation events from the app backend or provider webhook reconcile caches/counts without blanking or fully reloading the prefetched page.
 - If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
 - If there is no next page, clicking the advance action archives the visible page and leaves the list empty until more messages arrive or a refresh reloads the inbox.
