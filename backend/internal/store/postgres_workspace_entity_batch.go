@@ -272,7 +272,7 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 	if syncDefaultFolderItems {
 		for _, mapping := range result.EntityMappings {
 			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.default_folder_item_writes")
-			item, inserted, err := placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, input.CompanyID, input.EntityKind, mapping.EntityID, input.CreatorUserID)
+			item, inserted, err := placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, input.CompanyID, input.EntityKind, mapping.EntityID, input.CreatorUserID, true)
 			stop()
 			if err != nil {
 				return WorkspaceEntityBatchResult{}, err

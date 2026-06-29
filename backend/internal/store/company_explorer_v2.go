@@ -55,13 +55,10 @@ func normalizeCompanyExplorerV2FolderInput(input CompanyExplorerV2FolderInput) (
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
 	input.DefaultAccess = strings.TrimSpace(input.DefaultAccess)
-	if input.DefaultAccess == "" {
-		input.DefaultAccess = ResourceDefaultAccessEdit
-	}
 	if input.CompanyID == "" || input.ParentEntityID == "" || input.Name == "" {
 		return CompanyExplorerV2FolderInput{}, ErrInvalid
 	}
-	if input.DefaultAccess != ResourceDefaultAccessEdit && input.DefaultAccess != ResourceDefaultAccessNoAccess {
+	if input.DefaultAccess != "" && input.DefaultAccess != ResourceDefaultAccessEdit && input.DefaultAccess != ResourceDefaultAccessNoAccess {
 		return CompanyExplorerV2FolderInput{}, ErrInvalid
 	}
 	return input, nil

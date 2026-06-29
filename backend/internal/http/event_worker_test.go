@@ -92,6 +92,16 @@ func TestEventWorkerKanbanDeltaRoutesByBoardAndFiltersPerUser(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions logic gate: %v", err)
 	}
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      store.LogicGateWorkStatusPending,
+		Priority:    testPriority(2),
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus setup: %v", err)
+	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
 		CompanyID:        companyID,
 		EntityType:       store.EntityTypeNode,
@@ -129,16 +139,14 @@ func TestEventWorkerKanbanDeltaRoutesByBoardAndFiltersPerUser(t *testing.T) {
 	clientVisible.readJSON(t)
 	clientBlocked.readJSON(t)
 
-	assigned, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+	assigned, err := repo.MoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentMoveInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		NodeID:      node.NodeID,
-		Status:      "pending",
-		Priority:    testPriority(2),
-		PrioritySet: true,
+		Status:      store.LogicGateWorkStatusInProgress,
 	})
 	if err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
 	}
 	if processed, err := server.processAvailableEventRows(context.Background(), 10); err != nil || processed == 0 {
 		t.Fatalf("processAvailableEventRows processed=%d err=%v", processed, err)

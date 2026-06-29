@@ -25,15 +25,20 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 	}
 	upsertFolder := func(folderID, parentEntityID, name, folderKind string, position int) {
 		created := now
+		defaultAccess := ResourceDefaultAccessEdit
 		if previous, ok := r.companyExplorerV2Entities[key(companyID, folderID)]; ok && !previous.CreatedTimestamp.IsZero() {
 			created = previous.CreatedTimestamp
+			defaultAccess = defaultResourceAccessOrEdit(previous.DefaultAccess)
+		}
+		if previous, ok := r.folders[key(companyID, folderID)]; ok {
+			defaultAccess = defaultResourceAccessOrEdit(previous.DefaultAccess)
 		}
 		entity := memoryCompanyExplorerV2Entity{
 			CompanyID:        companyID,
 			EntityID:         folderID,
 			EntityType:       CompanyExplorerV2EntityFolder,
 			Name:             name,
-			DefaultAccess:    ResourceDefaultAccessEdit,
+			DefaultAccess:    defaultAccess,
 			CreatedTimestamp: created,
 			UpdatedTimestamp: now,
 		}
@@ -59,7 +64,7 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 			ParentFolderID:   parentFolderID,
 			FolderKind:       folderKind,
 			Name:             name,
-			DefaultAccess:    ResourceDefaultAccessEdit,
+			DefaultAccess:    defaultAccess,
 			ScopeType:        CompanyExplorerFolderScopeCompany,
 			Position:         position,
 			CreatedTimestamp: created,
@@ -77,17 +82,17 @@ func (r *MemoryRepo) backfillBareCompanyExplorerItemsLocked(companyID string) {
 		if project.CompanyID != companyID || r.companyExplorerV2HasManualEdgeLocked(companyID, CompanyExplorerV2EntityProject, project.ProjectID) {
 			continue
 		}
-		r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeProject, project.ProjectID)
+		r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeProject, project.ProjectID, false)
 	}
 	for _, logicGate := range r.logicGates {
 		if logicGate.CompanyID != companyID || r.companyExplorerV2HasManualEdgeLocked(companyID, CompanyExplorerV2EntityLogicGate, logicGate.LogicGateID) || r.companyExplorerLogicGateHasProjectParentLocked(companyID, logicGate.LogicGateID) {
 			continue
 		}
-		r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeLogicGate, logicGate.LogicGateID)
+		r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeLogicGate, logicGate.LogicGateID, false)
 	}
 }
 
-func (r *MemoryRepo) placeCompanyExplorerItemInDefaultFolderLocked(companyID, targetType, targetID string) bool {
+func (r *MemoryRepo) placeCompanyExplorerItemInDefaultFolderLocked(companyID, targetType, targetID string, snapshotPolicy bool) bool {
 	folderID, ok := companyExplorerDefaultFolderIDForTargetType(companyID, targetType)
 	if !ok || r.companyExplorerV2HasManualEdgeLocked(companyID, targetType, targetID) {
 		return false
@@ -110,6 +115,15 @@ func (r *MemoryRepo) placeCompanyExplorerItemInDefaultFolderLocked(companyID, ta
 	r.companyExplorerV2Edges[key(companyID, edge.EdgeID)] = edge
 	if parent, ok := r.companyExplorerV2Entities[key(companyID, folderID)]; ok {
 		r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
+	}
+	if snapshotPolicy {
+		childResourceID := child.ResourceID
+		if childResourceID == "" {
+			childResourceID = child.EntityID
+		}
+		if _, err := r.snapshotResourceAccessPolicyLocked(companyID, EntityTypeCompanyExplorerFolder, folderID, targetType, childResourceID); err != nil {
+			return false
+		}
 	}
 	return true
 }

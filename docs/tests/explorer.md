@@ -1,10 +1,10 @@
-Last updated: 2026-06-26
+Last updated: 2026-06-29
 
 # Explorer Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: 0% (rule IDs are not mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: partial backend coverage for V2 tree reads, placement/delete behavior, protected default folders, and folder permission template snapshots. Rule ID mapping is partial.
 
 ## Business Logic
 
@@ -20,7 +20,7 @@ E9 - The final Company Explorer tree contains folders, subfolders, Logic Gates, 
 E10 - Project rows are standalone leaf rows; project relationships do not render nested Explorer child rows.
 E11 - Logic Gate rows are standalone leaf rows; node assignments do not render as nested Explorer child rows.
 E12 - Creating an Explorer folder requires company, actor, permission user, parent entity, and nonblank folder name.
-E13 - New Explorer folders default to edit access unless a no-access default is explicitly requested.
+E13 - New root Explorer folders default to edit access unless a no-access default is explicitly requested; new subfolders copy the parent folder's current permission policy as a snapshot.
 E14 - Explorer folders can be created only under the company root or another folder.
 E15 - Creating a folder under a non-folder resource is rejected.
 E16 - Renaming an Explorer folder requires edit access to that folder.
@@ -50,6 +50,10 @@ E39 - While the Explorer search box contains text, the left sidebar hides non-Ex
 E40 - Once a resource is visible anywhere in Company Explorer, no project relationship branch may create a second visible instance of that resource.
 E41 - Company Explorer live refresh ignores node events and node relationship events; folder, project, and Logic Gate Explorer events still refresh affected loaded branches.
 E42 - Node-map folder-scoped queries through Company Explorer return no nodes for non-root folders because nodes no longer have Company Explorer folder placement.
+E43 - Placing or moving a project or Logic Gate into an Explorer folder copies that folder's current permission policy to the project or Logic Gate.
+E44 - Reordering or re-saving a project or Logic Gate under the same Explorer folder preserves the resource's own permissions.
+E45 - Moving a project or Logic Gate out of a folder to the company root preserves the resource's own permissions.
+E46 - Editing an Explorer folder's permissions after placement does not fan out to existing subfolders, projects, or Logic Gates.
 
 ## Scenarios
 
@@ -99,6 +103,10 @@ Business logic covered:
 - E21
 - E29
 - E30
+- E43
+- E44
+- E45
+- E46
 
 Given:
 - A user can edit one Explorer folder and only view another.
@@ -108,10 +116,15 @@ Given:
 
 Expected:
 - Creating a folder requires the required company, actor, permission user, parent, and name fields.
-- New folders default to edit access unless no-access is requested.
+- Root folders default to edit access unless no-access is requested.
+- Subfolders copy the parent folder's current permission policy at creation time.
 - Folders can be created under the company root or another folder, but not under arbitrary non-folder resources.
 - Rename requires edit access.
 - Moving resolves the parent and target and changes placement without duplicating the target.
+- Placing or moving a project or Logic Gate into a folder copies that folder's current permission policy to the resource.
+- Reordering or re-saving a project or Logic Gate under the same folder preserves the resource's own permissions.
+- Moving a project or Logic Gate to the company root preserves the resource's own permissions.
+- Later folder permission edits do not mutate existing subfolders, projects, or Logic Gates.
 - Deleting a placement edge does not delete the target resource.
 - Protected/default folders cannot be renamed or deleted.
 - Target deletion happens only through the explicit target deletion path.

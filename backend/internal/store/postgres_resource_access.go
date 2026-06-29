@@ -400,108 +400,107 @@ order by membership.user_id::text`, companyID, entityType, entityID)
 	return out, rows.Err()
 }
 
-func copyPostgresLogicGateAccessPolicyToNodeTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID, nodeID string) error {
+func postgresResourceOverrideUserIDsTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID string) ([]string, error) {
 	companyID = cleanUUIDText(companyID)
-	logicGateID = cleanUUIDText(logicGateID)
-	nodeID = cleanUUIDText(nodeID)
-	if ctx == nil || tx == nil || companyID == "" || logicGateID == "" || nodeID == "" {
-		return ErrInvalid
-	}
-	matches, err := postgresLogicGateAccessPolicyMatchesNodeTx(ctx, tx, companyID, logicGateID, nodeID)
-	if err != nil {
-		return err
-	}
-	if matches {
-		return nil
-	}
-	defaultAccess, err := postgresResourceDefaultAccess(ctx, tx, companyID, EntityTypeLogicGate, logicGateID)
-	if err != nil {
-		return err
-	}
-	if err := setPostgresResourceDefaultAccessTx(ctx, tx, companyID, EntityTypeNode, nodeID, defaultAccess); err != nil {
-		return err
-	}
-	if err := deletePostgresResourceOverridesTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
-		return err
+	resourceID = cleanUUIDText(resourceID)
+	resourceType, ok := NormalizeEntityType(resourceType)
+	if ctx == nil || tx == nil || companyID == "" || resourceID == "" || !ok || !usesDefaultResourceAccessPolicy(resourceType) {
+		return nil, ErrInvalid
 	}
 	rows, err := tx.QueryContext(ctx, `
 select user_id::text
 from resource_permissions
 where company_id=$1::uuid
-  and resource_type='logic_gate'
-  and resource_id=$2::uuid
-order by user_id::text`, companyID, logicGateID)
+  and resource_type=$2
+  and resource_id=$3::uuid
+order by user_id::text`, companyID, resourceType, resourceID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	userIDs := []string{}
 	for rows.Next() {
 		var userID string
 		if err := rows.Scan(&userID); err != nil {
 			rows.Close()
-			return err
+			return nil, err
 		}
 		userIDs = append(userIDs, userID)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return err
+		return nil, err
 	}
 	if err := rows.Close(); err != nil {
-		return err
+		return nil, err
 	}
-	for _, userID := range userIDs {
-		if err := insertPostgresResourceOverrideTx(ctx, tx, companyID, EntityTypeNode, nodeID, userID); err != nil {
-			return err
-		}
-	}
-	return nil
+	return userIDs, nil
 }
 
-func postgresLogicGateAccessPolicyMatchesNodeTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID, nodeID string) (bool, error) {
-	var matches bool
-	err := tx.QueryRowContext(ctx, `
-with gate_default as (
-  select coalesce(default_access, $4) as default_access
-  from logic_gates
-  where company_id=$1::uuid and logic_gate_id=$2::uuid
-),
-node_default as (
-  select coalesce(default_access, $4) as default_access
-  from nodes
-  where company_id=$1::uuid and node_id=$3::uuid
-),
-gate_policy as (
-  select user_id,
-         case when (select default_access from gate_default) = $4 then $5 else $4 end as access_level
-  from resource_permissions
-  where company_id=$1::uuid
-    and resource_type='logic_gate'
-    and resource_id=$2::uuid
-),
-node_policy as (
-  select user_id,
-         case when (select default_access from node_default) = $4 then $5 else $4 end as access_level
-  from resource_permissions
-  where company_id=$1::uuid
-    and resource_type='node'
-    and resource_id=$3::uuid
-),
-different_permission_rows as (
-  (select user_id, access_level from gate_policy except select user_id, access_level from node_policy)
-  union
-  (select user_id, access_level from node_policy except select user_id, access_level from gate_policy)
-)
-select exists(select 1 from gate_default)
-   and exists(select 1 from node_default)
-   and (select default_access from gate_default) = (select default_access from node_default)
-   and not exists(select 1 from different_permission_rows)`,
-		companyID, logicGateID, nodeID, ResourceDefaultAccessEdit, ResourceDefaultAccessNoAccess,
-	).Scan(&matches)
+func snapshotPostgresResourceAccessPolicyTx(ctx context.Context, tx *sql.Tx, companyID, sourceType, sourceID, targetType, targetID string) (bool, error) {
+	companyID = cleanUUIDText(companyID)
+	sourceID = cleanUUIDText(sourceID)
+	targetID = cleanUUIDText(targetID)
+	var ok bool
+	sourceType, ok = NormalizeEntityType(sourceType)
+	if !ok {
+		return false, ErrInvalid
+	}
+	targetType, ok = NormalizeEntityType(targetType)
+	if ctx == nil || tx == nil || companyID == "" || sourceID == "" || targetID == "" || !ok ||
+		!usesDefaultResourceAccessPolicy(sourceType) || !usesDefaultResourceAccessPolicy(targetType) {
+		return false, ErrInvalid
+	}
+	sourceDefaultAccess, err := postgresResourceDefaultAccess(ctx, tx, companyID, sourceType, sourceID)
 	if err != nil {
 		return false, err
 	}
-	return matches, nil
+	targetDefaultAccess, err := postgresResourceDefaultAccess(ctx, tx, companyID, targetType, targetID)
+	if err != nil {
+		return false, err
+	}
+	sourceOverrideUserIDs, err := postgresResourceOverrideUserIDsTx(ctx, tx, companyID, sourceType, sourceID)
+	if err != nil {
+		return false, err
+	}
+	targetOverrideUserIDs, err := postgresResourceOverrideUserIDsTx(ctx, tx, companyID, targetType, targetID)
+	if err != nil {
+		return false, err
+	}
+	if sourceDefaultAccess == targetDefaultAccess && orderedStringSlicesEqual(sourceOverrideUserIDs, targetOverrideUserIDs) {
+		return false, nil
+	}
+	if err := setPostgresResourceDefaultAccessTx(ctx, tx, companyID, targetType, targetID, sourceDefaultAccess); err != nil {
+		return false, err
+	}
+	if err := deletePostgresResourceOverridesTx(ctx, tx, companyID, targetType, targetID); err != nil {
+		return false, err
+	}
+	for _, userID := range sourceOverrideUserIDs {
+		if err := insertPostgresResourceOverrideTx(ctx, tx, companyID, targetType, targetID, userID); err != nil {
+			return false, err
+		}
+	}
+	if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, companyID, targetType, targetID); err != nil {
+		return false, err
+	}
+	if targetType == EntityTypeLogicGate {
+		if err := recomputeLogicGateAssignedNodeVisibilityTx(ctx, tx, companyID, []string{targetID}, nil); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func orderedStringSlicesEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *PostgresRepo) effectiveAccessLevelForUserTx(ctx context.Context, tx *sql.Tx, companyID, userID, resourceType, resourceID string) (string, error) {
