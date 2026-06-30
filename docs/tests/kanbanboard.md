@@ -18,7 +18,7 @@ KB1 - A Logic Gate Kanban board displays node work assigned to one Logic Gate.
 KB2 - A Logic Gate Kanban board uses the Logic Gate as the owning resource for access and persistence.
 KB3 - Logic Gate Kanban board contents are not independent per-user board copies; every authorized user sees the same underlying cards, columns, statuses, and card order.
 KB4 - User-specific grouping and Date Added sort settings do not belong to the Kanban board record and do not belong to a specific Logic Gate.
-KB5 - User-specific grouping and Date Added sort settings are saved as user preferences so the same user's selected Logic Gate Kanban view applies across all Logic Gate Kanban boards.
+KB5 - User-specific grouping and Date Added sort settings are saved in one user-owned `saved_views` row so the same user's Logic Gate Kanban view applies across all Logic Gate Kanban boards.
 KB6 - Generic Kanban board card APIs remain node-card APIs. Logic Gate work state should continue to use Logic Gate assignment/work-item commands where those command paths exist.
 KB7 - Deleting a node removes its Kanban card placements and Logic Gate Kanban projection rows.
 KB8 - Deleting a Logic Gate removes the Logic Gate Kanban board/work placements owned by that Logic Gate.
@@ -64,13 +64,13 @@ KB41 - Saved Logic Gate Kanban groupings must use `principal = user`.
 KB42 - Saved Logic Gate Kanban groupings must reject group/team principals.
 KB43 - Saved Logic Gate Kanban groupings must reject fields that belong to My Work, Updates, or Kanban status-only behavior, such as project, logic gate, team, type, or status.
 KB44 - Saved Logic Gate Kanban extra groupings use `saved_views.surface = logic_gate_kanban`.
-KB45 - The active Logic Gate Kanban saved grouping is selected through a per-user saved-view preference row.
-KB46 - The preference is keyed by company, surface, and user, not by board ID and not by Logic Gate ID.
+KB45 - Each user has at most one active Logic Gate Kanban saved view row per company, keyed by `surface = logic_gate_kanban`, `principal = user`, and that user's `principal_id`.
+KB46 - Logic Gate Kanban must not use `saved_view_preferences`; loading a Logic Gate Kanban board applies the user's `logic_gate_kanban` row directly.
 KB47 - Changing optional grouping rows or Date Added sort direction immediately saves the current user settings without an explicit Save action.
 KB48 - Saved Logic Gate Kanban views persist the user's optional grouping stack plus `settings.date_added_sort_direction`; Date Added must not be written as a grouping row.
 KB49 - The saved optional grouping stack from one Logic Gate must apply when the same user opens another Logic Gate Kanban board.
-KB50 - Another user in the same company can choose different optional Logic Gate Kanban groupings and Date Added sort direction without changing the first user's preference.
-KB51 - If a user has no selected Logic Gate Kanban saved view, the board renders ungrouped until the user adds grouping rows.
+KB50 - Another user in the same company can choose different optional Logic Gate Kanban groupings and Date Added sort direction without changing the first user's saved Logic Gate Kanban view row.
+KB51 - If a user has no Logic Gate Kanban saved view row, the board renders ungrouped with Date Added ascending until the user changes grouping or Date Added sort settings.
 
 ### Card Provenance Footer
 
@@ -147,10 +147,11 @@ Expected:
 - User A's optional grouping stack is saved without pressing a Save button.
 - Date Added remains a separate sort control and is saved as `settings.date_added_sort_direction`, not as a grouping row.
 - The visible Group popover does not show saved-view selection, New, Delete, Save, or saved-view name controls.
-- User A's selected grouping is stored through a user preference for `logic_gate_kanban`.
+- User A's selected grouping is stored directly in User A's single `saved_views` row for `logic_gate_kanban`.
 - User B does not inherit User A's selected grouping.
 - User B does not inherit User A's Date Added sort direction.
 - No Logic Gate board row stores the selected grouping.
+- No `saved_view_preferences` row is read or written for Logic Gate Kanban grouping.
 
 ### Scenario KB-S2: Grouping Renders Inside Columns
 

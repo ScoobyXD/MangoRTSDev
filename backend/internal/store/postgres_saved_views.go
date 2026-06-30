@@ -89,11 +89,15 @@ func (r *PostgresRepo) UpsertSavedView(input SavedViewInput) (domain.SavedView, 
 	}
 	position := input.Position
 	if position <= 0 {
-		nextPosition, err := r.nextSavedViewPosition(input)
-		if err != nil {
-			return domain.SavedView{}, err
+		if savedViewIsSingleLogicGateKanbanUserView(input) {
+			position = 1000
+		} else {
+			nextPosition, err := r.nextSavedViewPosition(input)
+			if err != nil {
+				return domain.SavedView{}, err
+			}
+			position = nextPosition
 		}
-		position = nextPosition
 	}
 	groupingsJSON, err := json.Marshal(input.Groupings)
 	if err != nil {
@@ -102,6 +106,9 @@ func (r *PostgresRepo) UpsertSavedView(input SavedViewInput) (domain.SavedView, 
 	settingsJSON, err := json.Marshal(input.Settings)
 	if err != nil {
 		return domain.SavedView{}, err
+	}
+	if savedViewIsSingleLogicGateKanbanUserView(input) {
+		return r.upsertSingleLogicGateKanbanSavedView(input, groupingsJSON, settingsJSON, position)
 	}
 	item, err := scanSavedView(r.db.QueryRowContext(context.Background(), `
 insert into saved_views (
@@ -125,6 +132,46 @@ set surface=excluded.surface,
     groupings=excluded.groupings,
     settings=excluded.settings,
     position=case when $9 > 0 then excluded.position else saved_views.position end,
+    updated_timestamp=now()
+returning company_id::text, saved_view_id::text, surface, principal, principal_id::text, name, groupings::text, settings::text, position, created_timestamp, updated_timestamp`,
+		input.CompanyID,
+		input.SavedViewID,
+		input.Surface,
+		input.Principal,
+		input.PrincipalID,
+		input.Name,
+		string(groupingsJSON),
+		string(settingsJSON),
+		position,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.SavedView{}, ErrNotFound
+	}
+	return item, err
+}
+
+func (r *PostgresRepo) upsertSingleLogicGateKanbanSavedView(input SavedViewInput, groupingsJSON, settingsJSON []byte, position int) (domain.SavedView, error) {
+	item, err := scanSavedView(r.db.QueryRowContext(context.Background(), `
+insert into saved_views (
+  company_id,
+  saved_view_id,
+  surface,
+  principal,
+  principal_id,
+  name,
+  groupings,
+  settings,
+  position,
+  created_timestamp,
+  updated_timestamp
+) values ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7::jsonb, $8::jsonb, $9, now(), now())
+on conflict (company_id, surface, principal, principal_id)
+where surface='logic_gate_kanban' and principal='user'
+do update
+set name=excluded.name,
+    groupings=excluded.groupings,
+    settings=excluded.settings,
+    position=excluded.position,
     updated_timestamp=now()
 returning company_id::text, saved_view_id::text, surface, principal, principal_id::text, name, groupings::text, settings::text, position, created_timestamp, updated_timestamp`,
 		input.CompanyID,

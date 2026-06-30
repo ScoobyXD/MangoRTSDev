@@ -1,6 +1,7 @@
 import { requestJSON } from "../../modules/api/requestJSON.js";
 
 export type SavedViewSurface = "my_work" | "updates" | "logic_gate_kanban";
+export type SavedViewPreferenceSurface = Exclude<SavedViewSurface, "logic_gate_kanban">;
 export type SavedViewPrincipal = "user" | "group";
 export type SavedViewGroupingDirection = "asc" | "desc";
 
@@ -29,7 +30,7 @@ export type SavedView = {
 
 export type SavedViewPreference = {
   company_id: string;
-  surface: SavedViewSurface;
+  surface: SavedViewPreferenceSurface;
   user_id: string;
   selected_saved_view_id: string;
   created_timestamp: string;
@@ -93,7 +94,7 @@ export async function deleteSavedView(input: {
 export async function fetchSavedViewPreference(input: {
   apiBase: string;
   companyID: string;
-  surface: SavedViewSurface;
+  surface: SavedViewPreferenceSurface;
 }): Promise<SavedViewPreference> {
   const query = new URLSearchParams({
     company_id: input.companyID.trim(),
@@ -105,7 +106,7 @@ export async function fetchSavedViewPreference(input: {
 export async function saveSavedViewPreference(input: {
   apiBase: string;
   companyID: string;
-  surface: SavedViewSurface;
+  surface: SavedViewPreferenceSurface;
   selectedSavedViewID: string;
 }): Promise<SavedViewPreference> {
   return normalizeSavedViewPreference(await requestJSON<SavedViewPreference>(input.apiBase, "/v1/saved-view-preferences", {
@@ -168,7 +169,7 @@ function normalizeSavedViewPreference(value: SavedViewPreference): SavedViewPref
   }
   return {
     company_id: value.company_id?.trim() ?? "",
-    surface: normalizeSavedViewSurface(value.surface) || "my_work",
+    surface: normalizeSavedViewPreferenceSurface(value.surface) || "my_work",
     user_id: value.user_id?.trim() ?? "",
     selected_saved_view_id: value.selected_saved_view_id?.trim() ?? "",
     created_timestamp: typeof value.created_timestamp === "string" ? value.created_timestamp : "",
@@ -180,6 +181,12 @@ function normalizeSavedViewSurface(value: unknown): SavedViewSurface | "" {
   if (value === "updates") return "updates";
   if (value === "my_work") return "my_work";
   if (value === "logic_gate_kanban") return "logic_gate_kanban";
+  return "";
+}
+
+function normalizeSavedViewPreferenceSurface(value: unknown): SavedViewPreferenceSurface | "" {
+  if (value === "updates") return "updates";
+  if (value === "my_work") return "my_work";
   return "";
 }
 

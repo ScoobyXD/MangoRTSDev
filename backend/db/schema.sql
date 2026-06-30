@@ -127,6 +127,10 @@ create table if not exists saved_views (
 create index if not exists idx_saved_views_surface_principal_position
   on saved_views(company_id, surface, principal, principal_id, position, saved_view_id);
 
+create unique index if not exists idx_saved_views_logic_gate_kanban_user_single
+  on saved_views(company_id, surface, principal, principal_id)
+  where surface = 'logic_gate_kanban' and principal = 'user';
+
 create index if not exists idx_saved_views_group_principal
   on saved_views(company_id, principal_id)
   where principal = 'group';
@@ -138,7 +142,7 @@ create table if not exists saved_view_preferences (
   selected_saved_view_id uuid,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
-  constraint saved_view_preferences_surface_chk check (surface in ('my_work', 'updates', 'logic_gate_kanban')),
+  constraint saved_view_preferences_surface_chk check (surface in ('my_work', 'updates')),
   primary key (company_id, surface, user_id),
   foreign key (company_id) references companies(company_id) on delete cascade,
   foreign key (company_id, user_id) references company_memberships(company_id, user_id) on delete cascade

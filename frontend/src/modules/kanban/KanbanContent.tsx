@@ -251,10 +251,8 @@ import { humanLabelOrFallback } from "../entityLabels.js";
 import { buildUniversalNestedGroups, type UniversalNestedGroup } from "../grouping/universalGrouping";
 import {
   createSavedViewID,
-  fetchSavedViewPreference,
   fetchSavedViews,
   saveSavedView,
-  saveSavedViewPreference,
   type SavedView,
   type SavedViewGrouping,
 } from "../../pages/home/savedViewsApi";
@@ -901,16 +899,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setKanbanGroupingError("");
     setKanbanGroupingDraft([]);
     setKanbanDateAddedSortDirection("asc");
-    void Promise.all([
-      fetchSavedViews({ apiBase, companyID, surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE }),
-      fetchSavedViewPreference({ apiBase, companyID, surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE }),
-    ]).then(([views, preference]) => {
+    void fetchSavedViews({ apiBase, companyID, surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE }).then((views) => {
       if (cancelled) return;
-      const sortedViews = sortSavedViewsForKanban(views);
-      const selectedViewID = preference.selected_saved_view_id.trim();
-      const selectedView = selectedViewID
-        ? sortedViews.find((view) => view.saved_view_id === selectedViewID) ?? null
-        : sortedViews[0] ?? null;
+      const sortedViews = sortSavedViewsForKanban(views).filter((view) => (
+        view.surface === LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE
+        && view.principal === "user"
+      ));
+      const selectedView = sortedViews[0] ?? null;
       const savedGroupings = normalizeKanbanSavedGroupings(selectedView?.groupings ?? []);
       const groupings = savedGroupings;
       const dateAddedSortDirection = normalizeKanbanDateAddedSortDirection(selectedView?.settings?.date_added_sort_direction);
@@ -919,14 +914,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       setKanbanDateAddedSortDirection(dateAddedSortDirection);
       setKanbanGroupingLoaded(true);
       kanbanGroupingPersistedSignatureRef.current = kanbanSavedViewSignature(savedGroupings, dateAddedSortDirection);
-      if (!selectedViewID && selectedView) {
-        void saveSavedViewPreference({
-          apiBase,
-          companyID,
-          surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE,
-          selectedSavedViewID: selectedView.saved_view_id,
-        }).catch(() => undefined);
-      }
     }).catch((nextError) => {
       if (!cancelled) setKanbanGroupingError(nextError instanceof Error ? nextError.message : "Failed to load grouping");
     }).finally(() => {
@@ -971,12 +958,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             settings: { date_added_sort_direction: kanbanDateAddedSortDirection },
             position: kanbanGroupingView?.position ?? nextKanbanSavedViewPosition([]),
           },
-        });
-        await saveSavedViewPreference({
-          apiBase,
-          companyID,
-          surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE,
-          selectedSavedViewID: savedView.saved_view_id,
         });
         if (kanbanGroupingSaveSeqRef.current !== saveSeq) return;
         setKanbanGroupingView(savedView);
