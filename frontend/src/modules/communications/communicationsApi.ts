@@ -951,6 +951,7 @@ export type CommunicationsTriageConversionResult = {
   explorer_v2_rows?: CompanyExplorerV2Row[];
   project_relationships?: ProjectRelationshipProjection[];
   deleted_message_ids: string[];
+  unstarred_message_ids?: string[];
 };
 
 function communicationsTriageConversionTargetPayload(target: CommunicationsTriageConversionTarget): Record<string, unknown> {

@@ -1768,6 +1768,27 @@ export function HomePage({
     }
     if (options?.fillAfterRemoval !== false) fillMessageListAfterRemoval();
   }, [fillMessageListAfterRemoval, suppressLocalTriageConversionMailNetwork]);
+  const reconcileConvertedMessageUnstars = useCallback((messageIDs: string[], sharedInboxID: string, options?: { updateVisibleList?: boolean }) => {
+    const ids = cleanIDList(messageIDs);
+    if (ids.length === 0) return;
+    rememberLocallyStarMutatedMessages(companyID, sharedInboxID.trim() || undefined, ids);
+    if (options?.updateVisibleList === false) return;
+    const idSet = new Set(ids);
+    const visibleStarredCount = messagesRef.current.reduce((count, message) => count + (idSet.has(message.id) && message.starred ? 1 : 0), 0);
+    if (visibleStarredCount > 0) adjustStarredMailboxCount(mailCountKey(companyID, activeViewIDRef.current), -visibleStarredCount);
+    setMessages((previous) => {
+      let changed = false;
+      const next = previous.map((message) => {
+        if (!idSet.has(message.id) || !message.starred) return message;
+        changed = true;
+        return { ...message, starred: false };
+      });
+      return changed ? next : previous;
+    });
+    if (selectedMessageRef.current?.starred && idSet.has(selectedMessageRef.current.id)) {
+      setSelectedMessage((current) => current && idSet.has(current.id) && current.starred ? { ...current, starred: false } : current);
+    }
+  }, [adjustStarredMailboxCount, companyID, rememberLocallyStarMutatedMessages]);
   useEffect(() => {
     return () => {
       if (messageListRefreshTimerRef.current !== null) {
@@ -1814,13 +1835,17 @@ export function HomePage({
         || (detail.cardIDs ?? []).some((id) => id.trim())
       );
       if (!conversionSucceeded) return;
+      const unstarredMessageIDs = cleanIDList(detail.unstarredMessageIDs ?? []);
+      reconcileConvertedMessageUnstars(unstarredMessageIDs, sharedInboxID, {
+        updateVisibleList: sharedInboxID === sharedInboxIDForHomeView(activeViewIDRef.current),
+      });
       for (const messageID of messageIDs) removeEmailMessageFromCache(messageID);
       if (sharedInboxID !== sharedInboxIDForHomeView(activeViewIDRef.current)) return;
       removeMessagesFromVisibleMailList(messageIDs, { preserveScrollAnchor: true, fillAfterRemoval: false, suppressAutoNetwork: true });
     };
     window.addEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
     return () => window.removeEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
-  }, [companyID, rememberLocallyAppliedTriageConversion, removeMessagesFromVisibleMailList]);
+  }, [companyID, reconcileConvertedMessageUnstars, rememberLocallyAppliedTriageConversion, removeMessagesFromVisibleMailList]);
   useEffect(() => { void loadMessages({ refresh: true }); }, [loadMessages]);
   useEffect(() => {
     setNodeEditorOverlay(null);
@@ -3270,6 +3295,7 @@ export function HomePage({
         logicGateIDs: [conversion.logicGateID, logicGateID],
       });
       for (const messageID of converted) removeEmailMessageFromCache(messageID);
+      reconcileConvertedMessageUnstars(conversion.unstarredMessageIDs, sharedInboxID);
       removeMessagesFromVisibleMailList(converted, { preserveScrollAnchor: true, fillAfterRemoval: false, suppressAutoNetwork: true });
       const title = logicGateByID.get(logicGateID)?.header || "Logic Gate";
       showNoticeWithResourceAction(converted.length === 1 ? `Sent to ${title}.` : `${converted.length} messages sent to ${title}.`, { kind: "logic_gate", logicGateID });
@@ -3278,7 +3304,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, logicGateByID, rememberLocallyAppliedTriageConversion, removeMessagesFromVisibleMailList, showNoticeWithResourceAction]);
+  }, [apiBase, companyID, logicGateByID, reconcileConvertedMessageUnstars, rememberLocallyAppliedTriageConversion, removeMessagesFromVisibleMailList, showNoticeWithResourceAction]);
   const selectLogicGateTreeID = useCallback((treeID: string, orderedIDs: string[], event: React.MouseEvent) => {
     activeDeleteSelectionKindRef.current = "logic_gate";
     const next = resolveExplorerClickSelection({

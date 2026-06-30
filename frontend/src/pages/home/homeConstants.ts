@@ -23,6 +23,7 @@ export type HomeTriageConversionAppliedDetail = {
   nodeIDs?: string[];
   boardIDs?: string[];
   cardIDs?: string[];
+  unstarredMessageIDs?: string[];
 };
 export const HOME_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.communications.columnWidths.v1";
 export const HOME_COLUMN_RESIZER_WIDTH = 10;
