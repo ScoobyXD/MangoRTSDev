@@ -146,6 +146,7 @@ type SidebarExplorerTriagePriorityMenuState = {
   y: number;
   target: Parameters<CompanyExplorerTriageMessageDropHandler>[0];
   messageIDs: string[];
+  sharedInboxID?: string;
 };
 
 type SidebarPinTriageDropAction = Extract<SidebarPinnedResourceDropAction, { kind: "triage_to_logic_gate" | "triage_to_node" }>;
@@ -332,10 +333,10 @@ export function AppSidebar({
     onHomeViewSelect(view);
   }, [onHomeViewSelect, onPageSelect]);
 
-  const requestExplorerTriageMessageDrop = useCallback<CompanyExplorerTriageMessageDropHandler>((target, messageIDs, point) => {
+  const requestExplorerTriageMessageDrop = useCallback<CompanyExplorerTriageMessageDropHandler>((target, messageIDs, point, source) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
-    setExplorerTriagePriorityMenu({ target, messageIDs: ids, x: point.x, y: point.y });
+    setExplorerTriagePriorityMenu({ target, messageIDs: ids, sharedInboxID: source?.sharedInboxID?.trim() || undefined, x: point.x, y: point.y });
   }, []);
 
   const pickExplorerTriagePriority = useCallback(async (priority: number) => {
@@ -350,12 +351,31 @@ export function AppSidebar({
         setSharedError("This Explorer location cannot receive email.");
         return;
       }
-      await convertMessagesToExplorerTargetCommand({
+      dispatchHomeTriageConversionApplied({
+        companyID: cleanCompanyID,
+        messageIDs: menu.messageIDs,
+        sharedInboxID: menu.sharedInboxID,
+      });
+      const conversion = await convertMessagesToExplorerTargetCommand({
         apiBase: readAuthConfig().apiBase,
         companyID: cleanCompanyID,
+        sharedInboxID: menu.sharedInboxID,
         target,
         messageIDs: menu.messageIDs,
         priority,
+      });
+      const convertedMessageIDs = conversion?.convertedMessageIDs.length ? conversion.convertedMessageIDs : menu.messageIDs;
+      dispatchHomeTriageConversionApplied({
+        companyID: cleanCompanyID,
+        messageIDs: convertedMessageIDs,
+        sharedInboxID: menu.sharedInboxID,
+        logicGateID: target.mode === "existing_logic_gate" ? target.logicGateID : undefined,
+        nodeIDs: conversion?.result.nodes?.map((node) => node.node_id) ?? [],
+        boardIDs: [
+          conversion?.boardID ?? "",
+          ...(conversion?.result.cards ?? []).map((card) => card.board_id),
+        ],
+        cardIDs: (conversion?.result.cards ?? []).map((card) => card.card_id),
       });
     } catch (error) {
       console.error("Failed to assign triage email from sidebar Explorer", error);
@@ -414,10 +434,12 @@ export function AppSidebar({
       dispatchHomeTriageConversionApplied({
         companyID: cleanCompanyID,
         messageIDs: menu.action.messageIDs,
+        sharedInboxID: menu.action.sharedInboxID,
       });
       const conversion = await convertMessagesToExplorerTargetCommand({
         apiBase: readAuthConfig().apiBase,
         companyID: cleanCompanyID,
+        sharedInboxID: menu.action.sharedInboxID,
         target,
         messageIDs: menu.action.messageIDs,
         priority,
@@ -427,7 +449,14 @@ export function AppSidebar({
       dispatchHomeTriageConversionApplied({
         companyID: cleanCompanyID,
         messageIDs: convertedMessageIDs,
+        sharedInboxID: menu.action.sharedInboxID,
         logicGateID: menu.action.kind === "triage_to_logic_gate" ? menu.action.logicGateID : undefined,
+        nodeIDs: conversion?.result.nodes?.map((node) => node.node_id) ?? [],
+        boardIDs: [
+          conversion?.boardID ?? "",
+          ...(conversion?.result.cards ?? []).map((card) => card.board_id),
+        ],
+        cardIDs: (conversion?.result.cards ?? []).map((card) => card.card_id),
       });
       setPinDropSuccess(convertedMessageIDs.length === 1 ? `Email added to ${menu.action.pin.name}.` : `${convertedMessageIDs.length} emails added to ${menu.action.pin.name}.`);
     } catch (error) {

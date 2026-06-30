@@ -7,7 +7,7 @@ import {
   type ExplorerEntityDragItem,
 } from "../kanban/shared";
 import type { SelectionIntent } from "../selectionCoordinator";
-import { hasTriageMessageDrag, readTriageMessageIDs } from "../../pages/home/homeUtils";
+import { hasTriageMessageDrag, readTriageMessageDrag } from "../../pages/home/homeUtils";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "./CompanyExplorerIcons";
 import {
   EXPLORER_DRAG_MIME,
@@ -365,12 +365,15 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
       }}
       onDrop={(event) => {
         if (triageDropTarget) {
-          const messageIDs = readTriageMessageIDs(event.dataTransfer);
-          if (messageIDs.length > 0) {
+          const triageMessageDrag = readTriageMessageDrag(event.dataTransfer);
+          if (triageMessageDrag.messageIDs.length > 0) {
             event.preventDefault();
             event.stopPropagation();
             onSetTriageDropTreeID("");
-            onTriageMessagesDrop?.(triageDropTarget, messageIDs, { x: event.clientX, y: event.clientY });
+            onTriageMessagesDrop?.(triageDropTarget, triageMessageDrag.messageIDs, { x: event.clientX, y: event.clientY }, {
+              companyID: triageMessageDrag.companyID,
+              sharedInboxID: triageMessageDrag.sharedInboxID,
+            });
             return;
           }
         }

@@ -626,7 +626,7 @@ func (r *MemoryRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNo
 
 	sourceKey := emailNodeLinkKey(input.CompanyID, input.SourceBoardID, input.SourceCardID)
 	sourceLink, ok := r.emailNodeLinks[sourceKey]
-	if !ok || sourceLink.UserID != input.UserID {
+	if !ok || (input.UserID != "" && sourceLink.UserID != input.UserID) {
 		return CommunicationsEmailNodeTransferResult{}, ErrNotFound
 	}
 	targetCard, ok := r.kanbanCardLocked(input.CompanyID, input.TargetBoardID, input.TargetCardID)
@@ -649,10 +649,11 @@ func (r *MemoryRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNo
 	attachmentLink.LogicGateID = targetLogicGateID
 	attachmentLink.CreatedTimestamp = now
 	attachmentLink.UpdatedTimestamp = now
-	if existing, ok := r.emailNodeLinks[emailNodeAttachmentLinkKey(input.CompanyID, input.UserID, sourceLink.MessageID, targetCard.NodeID)]; ok {
+	attachmentKey := emailNodeAttachmentLinkKey(input.CompanyID, sourceLink.UserID, sourceLink.MessageID, targetCard.NodeID)
+	if existing, ok := r.emailNodeLinks[attachmentKey]; ok {
 		attachmentLink.CreatedTimestamp = existing.CreatedTimestamp
 	}
-	r.emailNodeLinks[emailNodeAttachmentLinkKey(input.CompanyID, input.UserID, sourceLink.MessageID, targetCard.NodeID)] = attachmentLink
+	r.emailNodeLinks[attachmentKey] = attachmentLink
 	r.addEmailProjectionLocked(input.CompanyID, targetCard.NodeID, sourceLink.Message, now)
 	r.deleteCommunicationsEmailSourceNodeLocked(input.CompanyID, sourceKey, sourceLink)
 

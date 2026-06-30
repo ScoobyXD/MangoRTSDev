@@ -975,14 +975,17 @@ function communicationsTriageConversionTargetPayload(target: CommunicationsTriag
 
 export async function convertTriageMessagesToExplorerTarget(input: {
   companyID: string;
+  sharedInboxID?: string;
   target: CommunicationsTriageConversionTarget;
   messageIDs: string[];
   priority: number;
 }): Promise<CommunicationsTriageConversionResult> {
+  const cleanSharedInboxID = input.sharedInboxID?.trim() ?? "";
   const result = await apiFetchJSON<CommunicationsTriageConversionResult>("/v1/communications/triage/convert", {
     method: "POST",
     body: JSON.stringify({
       company_id: input.companyID,
+      shared_inbox_id: cleanSharedInboxID || undefined,
       target: communicationsTriageConversionTargetPayload(input.target),
       message_ids: cleanIDs(input.messageIDs),
       priority: input.priority,
@@ -999,6 +1002,7 @@ export async function convertTriageMessagesToExplorerTarget(input: {
 
 export async function convertTriageMessagesToLogicGate(input: {
   companyID: string;
+  sharedInboxID?: string;
   logicGateID: string;
   nodeID?: string;
   messageIDs: string[];
@@ -1007,6 +1011,7 @@ export async function convertTriageMessagesToLogicGate(input: {
   const cleanNodeID = input.nodeID?.trim() ?? "";
   return convertTriageMessagesToExplorerTarget({
     companyID: input.companyID,
+    sharedInboxID: input.sharedInboxID,
     target: cleanNodeID
       ? { mode: "existing_node", logicGateID: input.logicGateID, nodeID: cleanNodeID }
       : { mode: "existing_logic_gate", logicGateID: input.logicGateID },

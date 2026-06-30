@@ -127,6 +127,9 @@ KB92 - Dropping a direct email-created card onto a different target node card tr
 KB93 - After a successful email-card transfer, the source email-created Kanban card and its temporary source node are deleted.
 KB94 - Email-card transfer does not restore the email to My Triage and does not delete the target node or target card.
 KB95 - Multi-card drags, non-email-created source cards, same-card drops, and same-node drops must not run email-card transfer semantics.
+KB96 - Direct email-created Kanban cards can originate from My Triage or from a mailbox-capable Shared Triage inbox; the visible email-origin marker and transfer behavior are the same after creation.
+KB97 - Email-card transfer uses the stored direct email-node provenance and board/card IDs; it must not require the actor to have a connected personal mailbox at transfer time.
+KB98 - When a local email-to-Logic-Gate conversion has already updated the board from the POST response, matching immediate workspace events must not force repeated Home workspace panel reloads.
 
 ## Scenarios
 
@@ -357,9 +360,12 @@ Business logic covered:
 - KB93
 - KB94
 - KB95
+- KB96
+- KB97
+- KB98
 
 Given:
-- A user drags an email into a Logic Gate so the system creates a Pending node card from that email.
+- A user drags an email from My Triage or from a mailbox-capable Shared Triage inbox into a Logic Gate so the system creates a Pending node card from that email.
 - The source email-created card shows the email icon.
 - Another normal node card is visible on the same Logic Gate Kanban board.
 
@@ -371,3 +377,5 @@ Expected:
 - The temporary source node created from the email is deleted.
 - The target card remains on the board and does not become a direct-email-created card solely because an email was attached to it.
 - The transferred email does not return to My Triage.
+- The transfer works from the stored email-node provenance even if the actor's personal mailbox is not connected.
+- Matching workspace events from the original local conversion do not repeatedly reload the Home workspace panel after the board has already been updated from the conversion response.

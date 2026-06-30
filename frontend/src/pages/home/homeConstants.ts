@@ -18,7 +18,11 @@ export const EVENT_HOME_TRIAGE_CONVERSION_APPLIED = "mangorts:home-triage-conver
 export type HomeTriageConversionAppliedDetail = {
   companyID?: string;
   messageIDs?: string[];
+  sharedInboxID?: string;
   logicGateID?: string;
+  nodeIDs?: string[];
+  boardIDs?: string[];
+  cardIDs?: string[];
 };
 export const HOME_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.communications.columnWidths.v1";
 export const HOME_COLUMN_RESIZER_WIDTH = 10;

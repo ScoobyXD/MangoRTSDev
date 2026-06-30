@@ -944,8 +944,8 @@ func (r *PostgresRepo) TransferCommunicationsEmailNode(input CommunicationsEmail
 select company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text,
        message, created_timestamp, updated_timestamp
 from communications_email_nodes
-where company_id=$1 and user_id=$2 and board_id=$3 and card_id=$4
-for update`, input.CompanyID, input.UserID, input.SourceBoardID, input.SourceCardID).Scan(
+where company_id=$1 and board_id=$2 and card_id=$3 and ($4 = '' or user_id::text=$4)
+for update`, input.CompanyID, input.SourceBoardID, input.SourceCardID, input.UserID).Scan(
 		&link.CompanyID,
 		&link.UserID,
 		&link.MessageID,
@@ -1004,7 +1004,7 @@ do update set
   message=excluded.message,
   updated_timestamp=now()
 returning company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text, created_timestamp, updated_timestamp`,
-		input.CompanyID, input.UserID, link.MessageID, targetCard.NodeID, targetCard.BoardID, targetCard.CardID, targetLogicGateID, string(rawMessage)))
+		input.CompanyID, link.UserID, link.MessageID, targetCard.NodeID, targetCard.BoardID, targetCard.CardID, targetLogicGateID, string(rawMessage)))
 	if err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}

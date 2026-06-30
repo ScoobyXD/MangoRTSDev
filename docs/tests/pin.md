@@ -1,4 +1,4 @@
-Last updated: 2026-06-27
+Last updated: 2026-06-30
 
 # Pin Tests
 
@@ -31,6 +31,8 @@ PIN20 - Dropping a node on a pinned logic gate assigns the existing node to that
 PIN21 - Valid pinned email/node drop targets are recognized during dragover from drag MIME types alone; full payload parsing happens only on drop so browser dragover data restrictions do not show a stop cursor over valid pinned nodes or logic gates.
 PIN22 - Successful pinned email/node drops show a short green confirmation banner in the pin section and then clear automatically.
 PIN23 - Successful pinned email conversion is applied locally to the visible Home triage list and suppresses the matching immediate triage realtime reload so My Triage does not refresh repeatedly for the same drop.
+PIN24 - Pinned email conversion from Shared Triage preserves the drag payload `shared_inbox_id` and sends it through the communications conversion request.
+PIN25 - Successful pinned email conversion suppresses the matching immediate workspace event burst for the locally-created email node/card so the Home workspace panel does not repeatedly reload after the POST response already updated local state.
 
 ## Scenarios
 
@@ -150,6 +152,8 @@ Business logic covered:
 - PIN21
 - PIN22
 - PIN23
+- PIN24
+- PIN25
 
 Given:
 - A user has pinned a node, a logic gate, and a project.
@@ -162,7 +166,8 @@ Expected:
 - Dragover acceptance uses the triage-email and node drag MIME types without requiring message or node IDs to be readable until drop.
 - Dropping email on the pinned logic gate opens the normal priority selection, then creates node(s) in that logic gate through the communications conversion path.
 - Dropping email on the pinned node opens the normal priority selection, then attaches the email to that existing node without creating a duplicate node.
+- If the email was dragged from Shared Triage, the conversion request includes the source shared inbox ID and uses the shared mailbox conversion path.
 - Dropping a node on the pinned logic gate assigns the existing node to the logic gate through the normal assignment endpoint without creating a duplicate node.
 - Successful drops show a short green confirmation banner in the pin section.
-- The visible Home triage list handles the local pinned conversion without repeatedly reloading the page for the matching triage realtime event.
+- The visible Home triage list and workspace panel handle the local pinned conversion without repeatedly reloading for the matching communications or workspace realtime events.
 - Permission, GVIC assignment, cache invalidation, and event behavior come from the existing conversion and assignment paths rather than a pin-specific backend shortcut.
