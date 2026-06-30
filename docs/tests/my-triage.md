@@ -39,7 +39,7 @@ MT28 - If no next page is available, advancing archives the current visible page
 MT29 - Advancing must enqueue the frozen visible message IDs through one page-level background archive request instead of waiting for those provider mutations before allowing the user to continue.
 MT30 - The hidden archive queue may contain no more than 140 pending emails across queued and in-flight archive work.
 MT31 - If accepting the current visible page would exceed 140 pending archive emails, the advance/archive action is disabled until enough queued archive work completes.
-MT32 - Background archive work must be accepted by the backend in one request per advanced page; provider mutations run behind the backend provider gate instead of occupying multiple browser request lanes.
+MT32 - Background archive work must be accepted by the backend in one request per advanced page; provider mutations run from a backend archive job worker behind the backend provider gate instead of occupying multiple browser request lanes.
 MT33 - Advancing must prioritize showing the prefetched next page, enqueueing the previous page, and making the action usable again before any folder metadata reconciliation.
 MT34 - Folder metadata refresh after archive or unarchive is only a count/metadata reconciliation step, must be coalesced across archive confirmations, and must not clear or duplicate an in-flight folder metadata request.
 MT35 - Folder metadata reconciliation must not fetch the next message page or block the prefetched page from being shown.
@@ -57,6 +57,13 @@ MT46 - A communications realtime message.created event with a message ID must fe
 MT47 - Communications realtime message.updated, message.opened, and message.deleted events with a message ID must update, reconcile, or remove only the affected visible or selected message; they must not reload the whole list when the affected message is not visible.
 MT48 - Communications realtime message events without a message ID must not trigger a full message-list reload; the next explicit page/list load reconciles anything that could not be handled as a single-message update.
 MT49 - Triage conversion realtime events must remove matching visible My Triage rows when the converted message IDs are present and must not use a full message-list reload as the default reconciliation path.
+MT50 - A background archive response may return Accepted only after the backend has written a durable archive job and job-item rows for the accepted message IDs.
+MT51 - Accepted archive job items must survive API process restart and be claimable by a backend worker until each item reaches archived or failed.
+MT52 - The backend archive worker must claim pending or retryable job items with a processing lease so concurrent workers do not mutate the same active item at the same time.
+MT53 - Retryable archive failures such as provider rate limits or transient provider errors must be recorded with attempt count, last error, and next available time instead of being dropped from memory.
+MT54 - Final archive failures must be recorded on the job item and emit an archive-failed communications event; successful items must emit archive confirmation events.
+MT55 - Duplicate active archive submissions for the same actor, mailbox scope, account, and message must not create duplicate active job items or duplicate provider archive attempts.
+MT56 - My Triage archive jobs must use the actor's personal email connection, while Shared Triage archive jobs must preserve company/shared-inbox scope and use the shared mailbox connection that was authorized at acceptance time.
 
 ## Scenarios
 
@@ -182,6 +189,13 @@ Business logic covered:
 - MT47
 - MT48
 - MT49
+- MT50
+- MT51
+- MT52
+- MT53
+- MT54
+- MT55
+- MT56
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
@@ -199,9 +213,13 @@ Expected:
 - Realtime message events that do not carry a message ID do not trigger a whole-list reload; the next explicit page/list load reconciles provider state.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
 - Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.
-- The frozen previous-page IDs are accepted by one page-level backend archive request, and provider archive mutations continue in the background.
+- The frozen previous-page IDs are accepted by one page-level backend archive request only after durable archive job rows are written, and provider archive mutations continue from the backend worker.
 - The advance action becomes usable again immediately after the next page is shown and the previous page is queued.
 - The hidden archive queue accepts at most 140 pending emails; if adding the current page would exceed that limit, the advance action is disabled until enough background archive work completes.
+- Accepted archive job items survive API restart and are retried by the backend worker until each item is archived or records a final failure.
+- Duplicate active archive submissions for the same message and mailbox scope do not create duplicate active job items.
+- Retryable provider failures remain recorded with attempt count, last error, and next retry time.
+- Successful archive job items emit archive confirmations; final failed items emit archive-failed communications events.
 - Folder metadata refresh runs after the primary archive-and-next work as reconciliation only; it is coalesced, does not duplicate an in-flight folder request, and does not fetch the next email page.
 - Archive confirmation events from the app backend or provider webhook reconcile caches/counts without blanking or fully reloading the prefetched page.
 - Starring or unstarring a message updates the row and Starred count locally, and the matching backend/provider confirmation does not blank or fully reload the active Inbox or Starred tab.

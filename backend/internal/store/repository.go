@@ -108,6 +108,11 @@ type CommunicationsRepository interface {
 	DeleteCommunicationsTriageItem(userID, messageID string) error
 	UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error)
 	ListCommunicationsMessageReadStatuses(userID string, messageIDs []string) ([]domain.CommunicationsMessageReadStatus, error)
+	CreateCommunicationsArchiveJob(input CommunicationsArchiveJobInput) (CommunicationsArchiveJob, error)
+	ClaimCommunicationsArchiveJobItems(limit int, processingLeaseTimeout time.Duration) ([]CommunicationsArchiveJobItem, error)
+	MarkCommunicationsArchiveJobItemArchived(jobItemID string) error
+	MarkCommunicationsArchiveJobItemFailed(jobItemID, lastError string, availableAt time.Time, final bool) error
+	ListCommunicationsArchiveJobItems(jobID string) ([]CommunicationsArchiveJobItem, error)
 	ConvertCommunicationsTriageItems(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error)
 	RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error)
 	ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)

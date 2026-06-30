@@ -441,6 +441,7 @@ test("archive helpers call mailbox action endpoints", async () => {
       accepted_ids: [],
       archived_ids: ["msg 2", "msg 3"],
       failed: [{ message_id: "msg 4", error: "nylas_rate_limited" }],
+      job_id: undefined,
     });
     assert.deepEqual(calls, [
       { path: "/v1/communications/messages/msg%201/archive", method: "POST", body: undefined },
