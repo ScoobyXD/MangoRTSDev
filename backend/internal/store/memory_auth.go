@@ -10,16 +10,11 @@ import (
 func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
-	displayName = strings.TrimSpace(displayName)
 	if cognitoSubject == "" {
 		return domain.User{}, ErrInvalid
 	}
-	if displayName == "" {
-		displayName = email
-	}
-	if displayName == "" {
-		displayName = cognitoSubject
-	}
+	insertDisplayName := authInsertDisplayName(cognitoSubject, email, displayName)
+	updateDisplayName := authoritativeAuthDisplayName(displayName, email)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -31,7 +26,7 @@ func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (
 			UserID:           newUUIDv7String(),
 			CognitoSubject:   cognitoSubject,
 			Email:            email,
-			DisplayName:      displayName,
+			DisplayName:      insertDisplayName,
 			CreatedTimestamp: now,
 			UpdatedTimestamp: now,
 		}
@@ -39,8 +34,8 @@ func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (
 		if email != "" {
 			user.Email = email
 		}
-		if displayName != "" {
-			user.DisplayName = displayName
+		if updateDisplayName != "" {
+			user.DisplayName = updateDisplayName
 		}
 		user.UpdatedTimestamp = now
 	}

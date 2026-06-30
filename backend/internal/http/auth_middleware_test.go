@@ -639,6 +639,51 @@ func TestAuthMembershipCacheMissesOnChangedIdentityClaims(t *testing.T) {
 	}
 }
 
+func TestHandleMePreservesStoredDisplayNameWhenClaimsNameBlank(t *testing.T) {
+	t.Parallel()
+
+	baseRepo := store.NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	const subject = "blank-name-refresh-subject"
+	const email = "jonathan@example.com"
+	baseRepo.EnsureCompany(companyID, "Display Name Company")
+	if _, err := baseRepo.UpsertAuthUser(subject, email, "Jonathan Kim"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := baseRepo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	repo := &countingAuthRepo{Repository: baseRepo}
+	validator := &tokenClaimsValidator{claims: map[string]auth.Claims{
+		"blank-name-token": {Subject: subject, Email: email},
+	}}
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: validator}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer blank-name-token")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusOK, strings.TrimSpace(res.Body.String()))
+	}
+	var payload struct {
+		User domain.User `json:"user"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.User.DisplayName != "Jonathan Kim" {
+		t.Fatalf("response display name = %q, want Jonathan Kim", payload.User.DisplayName)
+	}
+	stored, err := baseRepo.GetAuthUser(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.DisplayName != "Jonathan Kim" {
+		t.Fatalf("stored display name = %q, want Jonathan Kim", stored.DisplayName)
+	}
+}
+
 func TestInvitationAcceptInvalidatesCachedMissingMembership(t *testing.T) {
 	t.Parallel()
 

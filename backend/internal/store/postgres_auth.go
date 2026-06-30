@@ -13,16 +13,11 @@ import (
 func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
-	displayName = strings.TrimSpace(displayName)
 	if cognitoSubject == "" {
 		return domain.User{}, ErrInvalid
 	}
-	if displayName == "" {
-		displayName = email
-	}
-	if displayName == "" {
-		displayName = cognitoSubject
-	}
+	insertDisplayName := authInsertDisplayName(cognitoSubject, email, displayName)
+	updateDisplayName := authoritativeAuthDisplayName(displayName, email)
 
 	var user domain.User
 	err := r.db.QueryRow(
@@ -34,10 +29,10 @@ func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email, displayName string)
 		   from input
 		   on conflict (cognito_subject) do update set
 		     email = case when excluded.email <> '' then excluded.email else users.email end,
-		     display_name = case when excluded.display_name <> '' then excluded.display_name else users.display_name end,
+		     display_name = case when $5::text <> '' then $5::text else users.display_name end,
 		     updated_timestamp = now()
 		   where users.email is distinct from case when excluded.email <> '' then excluded.email else users.email end
-		      or users.display_name is distinct from case when excluded.display_name <> '' then excluded.display_name else users.display_name end
+		      or users.display_name is distinct from case when $5::text <> '' then $5::text else users.display_name end
 		   returning user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp
 		 )
 		 select user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp
@@ -50,7 +45,8 @@ func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email, displayName string)
 		newUUIDv7String(),
 		cognitoSubject,
 		email,
-		displayName,
+		insertDisplayName,
+		updateDisplayName,
 	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.CreatedTimestamp, &user.UpdatedTimestamp)
 	if err != nil {
 		return domain.User{}, err
