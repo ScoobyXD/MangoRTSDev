@@ -544,6 +544,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
 	entityPermissionsSnapshot := cloneMemoryMap(r.entityPermissions)
 	nodesSnapshot := cloneMemoryMap(r.nodes)
+	nodeLogicGateAssignmentsSnapshot := cloneMemoryMap(r.nodeLogicGateAssignments)
 	logicGateGVICSnapshot := cloneMemorySliceMap(r.logicGateGVIC)
 	sharedInboxGVICSnapshot := cloneMemorySliceMap(r.sharedInboxGVIC)
 	usersSnapshot := cloneMemoryMap(r.users)
@@ -556,6 +557,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		r.userGroupMembers = userGroupMembersSnapshot
 		r.entityPermissions = entityPermissionsSnapshot
 		r.nodes = nodesSnapshot
+		r.nodeLogicGateAssignments = nodeLogicGateAssignmentsSnapshot
 		r.logicGateGVIC = logicGateGVICSnapshot
 		r.sharedInboxGVIC = sharedInboxGVICSnapshot
 		r.users = usersSnapshot
@@ -575,6 +577,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		UpdatedTimestamp: membership.UpdatedTimestamp,
 	}
 
+	r.clearLogicGateAssignmentMemberReferencesLocked(companyID, userID)
 	delete(r.memberships, membershipKey(companyID, userID))
 	for memberKey, member := range r.userGroupMembers {
 		if member.CompanyID == companyID && member.UserID == userID {
@@ -649,6 +652,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	}
 
 	email := normalizeEmail(user.Email)
+	r.clearLogicGateAssignmentMemberReferencesLocked("", userID)
 	for membershipKeyValue, membership := range r.memberships {
 		if membership.UserID == userID {
 			delete(r.memberships, membershipKeyValue)

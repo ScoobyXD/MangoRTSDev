@@ -1052,8 +1052,8 @@ create table if not exists node_logic_gate_assignments (
   primary key (company_id, assignment_id),
   foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade,
-  foreign key (company_id, requested_by_user_id) references company_memberships (company_id, user_id) on delete set null,
-  foreign key (company_id, placed_by_user_id) references company_memberships (company_id, user_id) on delete set null
+  foreign key (company_id, requested_by_user_id) references company_memberships (company_id, user_id) on delete set null (requested_by_user_id),
+  foreign key (company_id, placed_by_user_id) references company_memberships (company_id, user_id) on delete set null (placed_by_user_id)
 );
 
 create unique index if not exists idx_node_logic_gate_assignments_one_active_node
