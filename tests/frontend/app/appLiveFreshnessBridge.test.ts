@@ -16,7 +16,7 @@ describe("AppLiveFreshnessBridge local triage conversion echo", () => {
     assert.equal(localTriageConversionWasApplied(cache, "message-3", "shared-1"), false);
   });
 
-  it("keeps My Triage echoes separate from Shared Triage echoes", () => {
+  it("keeps My Triage echoes separate while tolerating unscoped Shared Triage echoes", () => {
     const cache = new Map<string, number>();
 
     rememberLocalTriageConversionIDs(cache, ["message-1"]);
@@ -25,6 +25,6 @@ describe("AppLiveFreshnessBridge local triage conversion echo", () => {
     assert.equal(localTriageConversionWasApplied(cache, "message-1"), true);
     assert.equal(localTriageConversionWasApplied(cache, "message-1", "shared-1"), false);
     assert.equal(localTriageConversionWasApplied(cache, "message-2", "shared-1"), true);
-    assert.equal(localTriageConversionWasApplied(cache, "message-2"), false);
+    assert.equal(localTriageConversionWasApplied(cache, "message-2"), true);
   });
 });

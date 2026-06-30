@@ -1104,12 +1104,6 @@ export function AppSidebar({
           </svg>
         </div>
       </div>
-      {explorerDropSuccess && (
-        <div role="status" style={appSidebarExplorerSuccessStyle}>
-          {explorerDropSuccess}
-        </div>
-      )}
-
       {!explorerSearchActive && (
         <>
       <section style={appSidebarNavSectionStyle} aria-label="Live Feed">
@@ -1359,6 +1353,7 @@ export function AppSidebar({
         explorerSearchActive={explorerSearchActive}
         onExplorerSearchQueryChange={setExplorerSearchQuery}
         onTriageMessagesDrop={requestExplorerTriageMessageDrop}
+        dropSuccess={explorerDropSuccess}
       />
       {!explorerSearchActive && WORKTREE_VERSION && (
         <div aria-label={`Worktree version ${WORKTREE_VERSION}`} style={appSidebarVersionStyle}>
@@ -1577,16 +1572,23 @@ function AppSidebarCompanyExplorerSection({
   explorerSearchActive,
   onExplorerSearchQueryChange,
   onTriageMessagesDrop,
+  dropSuccess,
 }: {
   selectionTargetFrameIDs: string[];
   explorerSearchQuery: string;
   explorerSearchActive: boolean;
   onExplorerSearchQueryChange: React.Dispatch<React.SetStateAction<string>>;
   onTriageMessagesDrop: CompanyExplorerTriageMessageDropHandler;
+  dropSuccess: string;
 }): React.ReactElement {
   return (
     <section style={appSidebarCompanyExplorerSectionStyle(explorerSearchActive)} aria-label="Company Explorer">
       {!explorerSearchActive && <AppSidebarSectionHeader label="Explorer" icon={<HeaderExplorerIcon color="#f97316" />} />}
+      {dropSuccess && (
+        <div role="status" style={appSidebarExplorerSuccessStyle}>
+          {dropSuccess}
+        </div>
+      )}
       <React.Suspense fallback={<div aria-busy="true" style={appSidebarExplorerFallbackStyle} />}>
         <SidebarCompanyExplorerContent
           accent={SIDEBAR_ACTIVE_TEXT}
@@ -2354,6 +2356,7 @@ function appSidebarCompanyExplorerSectionStyle(searchActive: boolean): React.CSS
     minHeight: searchActive ? 0 : undefined,
     minWidth: 0,
     display: "grid",
+    position: "relative",
     alignContent: searchActive ? "stretch" : undefined,
     gap: searchActive ? 0 : 6,
     padding: searchActive ? "0" : "0 0 10px",
@@ -2605,7 +2608,10 @@ const appSidebarSharedErrorStyle: React.CSSProperties = {
 };
 
 const appSidebarExplorerSuccessStyle: React.CSSProperties = {
-  margin: "0 5px 8px",
+  position: "sticky",
+  top: 4,
+  zIndex: 6,
+  margin: "0 5px 6px",
   padding: "6px 8px",
   border: "1px solid rgba(34, 197, 94, 0.36)",
   borderRadius: 7,

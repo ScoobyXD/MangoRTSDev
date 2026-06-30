@@ -129,7 +129,7 @@ KB94 - Email-card transfer does not restore the email to My Triage and does not 
 KB95 - Multi-card drags, non-email-created source cards, same-card drops, and same-node drops must not run email-card transfer semantics.
 KB96 - Direct email-created Kanban cards can originate from My Triage or from a mailbox-capable Shared Triage inbox; the visible email-origin marker and transfer behavior are the same after creation.
 KB97 - Email-card transfer uses the stored direct email-node provenance and board/card IDs; it must not require the actor to have a connected personal mailbox at transfer time.
-KB98 - When a local email-to-Logic-Gate conversion has already updated the board from the POST response, matching immediate communications/workspace events must not force repeated Home workspace panel reloads, and the source mail list must not be refreshed by broad communications cache invalidation.
+KB98 - When a local email-to-Logic-Gate conversion has already updated the board from the POST response, matching immediate communications/workspace events must not force repeated Home workspace panel reloads, and the source mail list must not be refreshed, refilled from stale prefetched pages, or message-length-prefetched by broad communications cache invalidation.
 
 ## Scenarios
 
@@ -378,4 +378,4 @@ Expected:
 - The target card remains on the board and does not become a direct-email-created card solely because an email was attached to it.
 - The transferred email does not return to My Triage.
 - The transfer works from the stored email-node provenance even if the actor's personal mailbox is not connected.
-- Matching workspace events from the original local conversion do not repeatedly reload the Home workspace panel or source mail list after the board has already been updated from the conversion response.
+- Matching workspace events from the original local conversion do not repeatedly reload the Home workspace panel or source mail list, and do not refill the source list from stale prefetched pages, after the board has already been updated from the conversion response.

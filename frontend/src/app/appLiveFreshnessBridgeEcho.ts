@@ -15,7 +15,11 @@ export function rememberLocalTriageConversionIDs(cache: Map<string, number>, mes
   const ids = Array.from(new Set(messageIDs.map((id) => id.trim()).filter(Boolean)));
   if (ids.length === 0) return;
   const expiresAt = Date.now() + LOCAL_TRIAGE_CONVERSION_ECHO_TTL_MS;
-  for (const messageID of ids) cache.set(localTriageConversionMessageKey(sharedInboxID, messageID), expiresAt);
+  const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
+  for (const messageID of ids) {
+    cache.set(localTriageConversionMessageKey(cleanSharedInboxID, messageID), expiresAt);
+    if (cleanSharedInboxID) cache.set(localTriageConversionMessageKey("", messageID), expiresAt);
+  }
 }
 
 export function localTriageConversionWasApplied(cache: Map<string, number>, streamMessageID: string, sharedInboxID?: string): boolean {
