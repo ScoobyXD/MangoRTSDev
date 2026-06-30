@@ -108,6 +108,7 @@ const MISSING_LOGIC_GATE_REPAIR_CONCURRENCY = 4;
 const MISSING_LOGIC_GATE_REPAIR_FAILURE_TTL_MS = 5 * 60_000;
 const ARCHIVE_BACKGROUND_CONFIRMATION_TIMEOUT_MS = 3 * 60_000;
 const LOCAL_TRIAGE_CONVERSION_ECHO_TTL_MS = 8_000;
+const LOCAL_TRIAGE_CONVERSION_MAIL_NETWORK_SUPPRESSION_MS = 8_000;
 const LOCAL_TRIAGE_CONVERSION_WORKSPACE_EVENT_TYPES = new Set([
   "work_item.email_converted",
   "node_created",
@@ -445,6 +446,7 @@ export function HomePage({
   const prefetchMessageTokenRef = useRef("");
   const prefetchMessageFilterKeyRef = useRef("");
   const prefetchMessagePromiseRef = useRef<Promise<void> | null>(null);
+  const prefetchMessageGenerationRef = useRef(0);
   const selectedMessageIDRef = useRef("");
   const selectedMessageRef = useRef<EmailMessage | null>(null);
   const activeViewIDRef = useRef<HomeViewID>(initialViewID);
@@ -480,6 +482,7 @@ export function HomePage({
   const messageListFilterKeyRef = useRef("");
   const locallyAppliedTriageConversionIDsRef = useRef<Map<string, number>>(new Map());
   const locallyAppliedTriageConversionWorkspaceEchoesRef = useRef<LocalTriageConversionWorkspaceEcho[]>([]);
+  const localTriageConversionMailNetworkSuppressionRef = useRef<{ filterKey: string; expiresAt: number } | null>(null);
   const locallyArchivedMessageKeysRef = useRef<Map<string, number>>(new Map());
   const locallyStarMutatedMessageKeysRef = useRef<Map<string, number>>(new Map());
   const missingLogicGateRepairFailureIDsRef = useRef<Map<string, number>>(new Map());
@@ -1116,6 +1119,7 @@ export function HomePage({
     return undefined;
   }, [companyID, isInboxMatrixView, refreshNodeRelationshipsForMatrix]);
   const clearPrefetchedMessagePage = useCallback(() => {
+    prefetchMessageGenerationRef.current += 1;
     prefetchedMessagePageRef.current = null;
     prefetchMessageTokenRef.current = "";
     prefetchMessageFilterKeyRef.current = "";
@@ -1124,6 +1128,28 @@ export function HomePage({
   const currentMessageFilterKey = useCallback(() => (
     messageListFilterKey(companyID, activeViewIDRef.current, mailboxRef.current, searchQueryRef.current, unreadOnlyRef.current)
   ), [companyID]);
+  const localTriageConversionMailNetworkIsSuppressed = useCallback((filterKey: string): boolean => {
+    const suppression = localTriageConversionMailNetworkSuppressionRef.current;
+    if (!suppression) return false;
+    if (suppression.expiresAt <= Date.now()) {
+      localTriageConversionMailNetworkSuppressionRef.current = null;
+      return false;
+    }
+    return suppression.filterKey === filterKey;
+  }, []);
+  const suppressLocalTriageConversionMailNetwork = useCallback(() => {
+    const filterKey = currentMessageFilterKey();
+    if (!filterKey) return;
+    localTriageConversionMailNetworkSuppressionRef.current = {
+      filterKey,
+      expiresAt: Date.now() + LOCAL_TRIAGE_CONVERSION_MAIL_NETWORK_SUPPRESSION_MS,
+    };
+    if (messageListRefreshTimerRef.current !== null) {
+      window.clearTimeout(messageListRefreshTimerRef.current);
+      messageListRefreshTimerRef.current = null;
+    }
+    clearPrefetchedMessagePage();
+  }, [clearPrefetchedMessagePage, currentMessageFilterKey]);
   const messageListWithinPrefetchDistance = useCallback(() => {
     const list = messageListRef.current;
     if (!list) return false;
@@ -1174,6 +1200,7 @@ export function HomePage({
       clearMailListState();
       return;
     }
+    if (localTriageConversionMailNetworkIsSuppressed(requestKey)) return;
     if (messageRequestKeyRef.current === requestKey) {
       pendingMessageReloadRef.current = true;
       pendingMessageRefreshRef.current = pendingMessageRefreshRef.current || options.refresh === true;
@@ -1241,7 +1268,7 @@ export function HomePage({
         }
       }
     }
-  }, [activeSharedInbox, activeSharedInboxBlocksEmail, activeSharedInboxFolderID, activeSharedInboxNeedsEmail, activeViewID, canLoadMailForView, canRepairSharedInboxConnection, clearMailListState, clearPrefetchedMessagePage, companyID, draftMessages, handleEmailAccessExpired, mailbox, searchQuery, unreadOnly]);
+  }, [activeSharedInbox, activeSharedInboxBlocksEmail, activeSharedInboxFolderID, activeSharedInboxNeedsEmail, activeViewID, canLoadMailForView, canRepairSharedInboxConnection, clearMailListState, clearPrefetchedMessagePage, companyID, draftMessages, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed, mailbox, searchQuery, unreadOnly]);
   useEffect(() => {
     const sharedInboxID = pendingSharedInboxMessageRefreshID.trim();
     if (!sharedInboxID) return;
@@ -1283,9 +1310,11 @@ export function HomePage({
     const pageToken = (explicitPageToken ?? nextPageTokenRef.current).trim();
     if (!pageToken) return;
     const filterKey = currentMessageFilterKey();
+    if (localTriageConversionMailNetworkIsSuppressed(filterKey)) return;
     const prefetched = prefetchedMessagePageRef.current;
     if (prefetched?.filterKey === filterKey && prefetched.pageToken === pageToken) return;
     if (prefetchMessagePromiseRef.current && prefetchMessageFilterKeyRef.current === filterKey && prefetchMessageTokenRef.current === pageToken) return;
+    const requestGeneration = prefetchMessageGenerationRef.current;
     prefetchMessageFilterKeyRef.current = filterKey;
     prefetchMessageTokenRef.current = pageToken;
     const request = listEmailMessages({
@@ -1298,6 +1327,8 @@ export function HomePage({
       unread: unreadOnlyRef.current ? true : undefined,
     })
       .then((page) => {
+        if (prefetchMessageGenerationRef.current !== requestGeneration) return;
+        if (localTriageConversionMailNetworkIsSuppressed(filterKey)) return;
         if (messageListFilterKeyRef.current !== filterKey || nextPageTokenRef.current !== pageToken) return;
         prefetchedMessagePageRef.current = { filterKey, pageToken, page };
       })
@@ -1315,13 +1346,14 @@ export function HomePage({
       });
     prefetchMessagePromiseRef.current = request;
     await request;
-  }, [canLoadMailForView, companyID, currentMessageFilterKey, handleEmailAccessExpired]);
+  }, [canLoadMailForView, companyID, currentMessageFilterKey, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed]);
   const loadMoreMessages = useCallback(async () => {
     if (!canLoadMailForView(activeViewIDRef.current) || mailboxRef.current === "drafts" || isInboxMatrixViewID(activeViewIDRef.current) || activeViewIDRef.current === "my-work" || activeViewIDRef.current === "updates" || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     if (isPrimaryTriageMailbox(activeViewIDRef.current, mailboxRef.current)) return;
     const pageToken = nextPageTokenRef.current.trim();
     if (!pageToken) return;
     const filterKey = currentMessageFilterKey();
+    if (localTriageConversionMailNetworkIsSuppressed(filterKey)) return;
     const appendedNextPageToken = appendPrefetchedMessagePage(filterKey, pageToken);
     if (appendedNextPageToken !== null) {
       window.setTimeout(() => {
@@ -1380,7 +1412,7 @@ export function HomePage({
     } finally {
       setLoadingMoreMessages(false);
     }
-  }, [activeSharedInbox, activeSharedInboxFolderID, appendPrefetchedMessagePage, canLoadMailForView, canRepairSharedInboxConnection, companyID, currentMessageFilterKey, handleEmailAccessExpired, messageListWithinPrefetchDistance, prefetchNextMessagePage]);
+  }, [activeSharedInbox, activeSharedInboxFolderID, appendPrefetchedMessagePage, canLoadMailForView, canRepairSharedInboxConnection, companyID, currentMessageFilterKey, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed, messageListWithinPrefetchDistance, prefetchNextMessagePage]);
   const replaceVisibleMessagesForAdvance = useCallback((page: MessagePage) => {
     const pageMessages = page.messages ?? [];
     const firstMessage = pageMessages[0] ?? null;
@@ -1408,9 +1440,10 @@ export function HomePage({
     messageListRefreshTimerRef.current = window.setTimeout(() => {
       messageListRefreshTimerRef.current = null;
       if (!canLoadMailForView(activeViewIDRef.current) || isInboxMatrixViewID(activeViewIDRef.current) || activeViewIDRef.current === "my-work" || activeViewIDRef.current === "updates") return;
+      if (localTriageConversionMailNetworkIsSuppressed(currentMessageFilterKey())) return;
       void loadMessagesRef.current?.({ refresh });
     }, delayMs);
-  }, [canLoadMailForView]);
+  }, [canLoadMailForView, currentMessageFilterKey, localTriageConversionMailNetworkIsSuppressed]);
   const localTriageConversionMessageKey = useCallback((sharedInboxID: string | undefined, messageID: string) => (
     `${sharedInboxID?.trim() ?? ""}\x1f${messageID.trim()}`
   ), []);
@@ -1425,7 +1458,10 @@ export function HomePage({
     if (ids.length === 0) return;
     const sharedInboxID = options.sharedInboxID?.trim() ?? "";
     const expiresAt = Date.now() + LOCAL_TRIAGE_CONVERSION_ECHO_TTL_MS;
-    for (const messageID of ids) locallyAppliedTriageConversionIDsRef.current.set(localTriageConversionMessageKey(sharedInboxID, messageID), expiresAt);
+    for (const messageID of ids) {
+      locallyAppliedTriageConversionIDsRef.current.set(localTriageConversionMessageKey(sharedInboxID, messageID), expiresAt);
+      if (sharedInboxID) locallyAppliedTriageConversionIDsRef.current.set(localTriageConversionMessageKey("", messageID), expiresAt);
+    }
     const nodeIDs = cleanIDList(options.nodeIDs ?? []);
     const boardIDs = cleanIDList(options.boardIDs ?? []);
     const cardIDs = cleanIDList(options.cardIDs ?? []);
@@ -1697,6 +1733,7 @@ export function HomePage({
       const list = messageListRef.current;
       if (!list || !nextPageTokenRef.current) return;
       if (!canLoadMailForView(activeViewIDRef.current)) return;
+      if (localTriageConversionMailNetworkIsSuppressed(currentMessageFilterKey())) return;
       if (isPrimaryTriageMailbox(activeViewIDRef.current, mailboxRef.current)) {
         void prefetchNextMessagePage();
         return;
@@ -1704,10 +1741,11 @@ export function HomePage({
       if (messageListWithinPrefetchDistance()) void prefetchNextMessagePage();
       if (messageListContentScrollHeight(list) <= list.clientHeight + 160) void loadMoreMessages();
     }, 0);
-  }, [canLoadMailForView, loadMoreMessages, messageListWithinPrefetchDistance, prefetchNextMessagePage]);
-  const removeMessagesFromVisibleMailList = useCallback((messageIDs: string[], options?: { fillAfterRemoval?: boolean; preserveScrollAnchor?: boolean }) => {
+  }, [canLoadMailForView, currentMessageFilterKey, loadMoreMessages, localTriageConversionMailNetworkIsSuppressed, messageListWithinPrefetchDistance, prefetchNextMessagePage]);
+  const removeMessagesFromVisibleMailList = useCallback((messageIDs: string[], options?: { fillAfterRemoval?: boolean; preserveScrollAnchor?: boolean; suppressAutoNetwork?: boolean }) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
+    if (options?.suppressAutoNetwork) suppressLocalTriageConversionMailNetwork();
     const removedIDSet = new Set(ids);
     const list = options?.preserveScrollAnchor ? messageListRef.current : null;
     const scrollAnchor = list ? captureMessageListScrollAnchor(list, removedIDSet) : null;
@@ -1729,7 +1767,7 @@ export function HomePage({
       });
     }
     if (options?.fillAfterRemoval !== false) fillMessageListAfterRemoval();
-  }, [fillMessageListAfterRemoval]);
+  }, [fillMessageListAfterRemoval, suppressLocalTriageConversionMailNetwork]);
   useEffect(() => {
     return () => {
       if (messageListRefreshTimerRef.current !== null) {
@@ -1778,7 +1816,7 @@ export function HomePage({
       if (!conversionSucceeded) return;
       for (const messageID of messageIDs) removeEmailMessageFromCache(messageID);
       if (sharedInboxID !== sharedInboxIDForHomeView(activeViewIDRef.current)) return;
-      removeMessagesFromVisibleMailList(messageIDs, { preserveScrollAnchor: true, fillAfterRemoval: false });
+      removeMessagesFromVisibleMailList(messageIDs, { preserveScrollAnchor: true, fillAfterRemoval: false, suppressAutoNetwork: true });
     };
     window.addEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
     return () => window.removeEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
@@ -1791,6 +1829,7 @@ export function HomePage({
     const loadedListKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
     if (loadedMessageListKey !== loadedListKey) return;
     if (!nextPageToken || loadingMessages || loadingMoreMessages) return;
+    if (localTriageConversionMailNetworkIsSuppressed(loadedListKey)) return;
     if (isPrimaryTriageMailbox(activeViewID, mailbox)) {
       void prefetchNextMessagePage(nextPageToken);
       return;
@@ -1799,7 +1838,7 @@ export function HomePage({
     if (!list) return;
     if (messageListWithinPrefetchDistance()) void prefetchNextMessagePage();
     if (messageListContentScrollHeight(list) <= list.clientHeight + 120) void loadMoreMessages();
-  }, [activeViewID, companyID, loadMoreMessages, loadedMessageListKey, loadingMessages, loadingMoreMessages, mailbox, messageListWithinPrefetchDistance, messages.length, nextPageToken, prefetchNextMessagePage, searchQuery, unreadOnly]);
+  }, [activeViewID, companyID, loadMoreMessages, loadedMessageListKey, loadingMessages, loadingMoreMessages, localTriageConversionMailNetworkIsSuppressed, mailbox, messageListWithinPrefetchDistance, messages.length, nextPageToken, prefetchNextMessagePage, searchQuery, unreadOnly]);
   useEffect(() => {
     if (!activeMailViewHasEmailConnection) return undefined;
     const currentMessageListParams = () => ({
@@ -3231,7 +3270,7 @@ export function HomePage({
         logicGateIDs: [conversion.logicGateID, logicGateID],
       });
       for (const messageID of converted) removeEmailMessageFromCache(messageID);
-      removeMessagesFromVisibleMailList(converted, { preserveScrollAnchor: true, fillAfterRemoval: false });
+      removeMessagesFromVisibleMailList(converted, { preserveScrollAnchor: true, fillAfterRemoval: false, suppressAutoNetwork: true });
       const title = logicGateByID.get(logicGateID)?.header || "Logic Gate";
       showNoticeWithResourceAction(converted.length === 1 ? `Sent to ${title}.` : `${converted.length} messages sent to ${title}.`, { kind: "logic_gate", logicGateID });
     } catch (convertError) {

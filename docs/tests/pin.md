@@ -30,10 +30,10 @@ PIN19 - Dropping triage or shared-triage email on a pinned node attaches the ema
 PIN20 - Dropping a node on a pinned logic gate assigns the existing node to that logic gate through the normal logic-gate node assignment path and must not duplicate the node.
 PIN21 - Valid pinned email/node drop targets are recognized during dragover from drag MIME types alone; full payload parsing happens only on drop so browser dragover data restrictions do not show a stop cursor over valid pinned nodes or logic gates.
 PIN22 - Successful pinned email/node drops show a short green confirmation banner in the pin section and then clear automatically.
-PIN23 - Successful pinned email conversion is applied locally to the visible Home triage list and local message caches, and matching local `triage.converted` echoes are suppressed in the app-level communications live-freshness bridge without invalidating all communications message page/detail caches, so My Triage does not refresh repeatedly for the same drop.
+PIN23 - Successful pinned email conversion is applied locally to the visible Home triage list and local message caches, and matching local `triage.converted` echoes are suppressed in the app-level communications live-freshness bridge without invalidating all communications message page/detail caches, so My Triage and Shared Triage do not refresh repeatedly for the same drop.
 PIN24 - Pinned email conversion from Shared Triage preserves the drag payload `shared_inbox_id` and sends it through the communications conversion request.
 PIN25 - Successful pinned email conversion suppresses the matching immediate workspace event burst for the locally-created email node/card so the Home workspace panel does not repeatedly reload after the POST response already updated local state.
-PIN26 - Successful pinned or Explorer email conversion must not trigger post-removal mail prefetch for the converted rows.
+PIN26 - Successful pinned or Explorer email conversion must not trigger post-removal fill, message-length prefetch, or stale prefetched-page top-up for the converted rows.
 
 ## Scenarios
 
@@ -171,5 +171,5 @@ Expected:
 - If the email was dragged from Shared Triage, the conversion request includes the source shared inbox ID and uses the shared mailbox conversion path.
 - Dropping a node on the pinned logic gate assigns the existing node to the logic gate through the normal assignment endpoint without creating a duplicate node.
 - Successful drops show a short green confirmation banner in the pin section.
-- The visible Home triage list, app-level communications live-freshness bridge, and workspace panel handle the local pinned conversion without communications message cache invalidation, post-removal mail prefetch, or repeated reloads for the matching communications or workspace realtime events.
+- The visible Home triage list, app-level communications live-freshness bridge, and workspace panel handle the local pinned conversion without communications message cache invalidation, stale prefetched-page top-up, post-removal fill, message-length prefetch, or repeated reloads for the matching communications or workspace realtime events.
 - Permission, GVIC assignment, local cache patching, and event behavior come from the existing conversion and assignment paths rather than a pin-specific backend shortcut.

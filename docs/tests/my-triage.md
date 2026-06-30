@@ -69,8 +69,8 @@ MT58 - Transferring a direct email-created Kanban card into another node is not 
 MT59 - A successful email-card transfer deletes the source email-created workspace node/card and creates or updates an email attachment on the target node.
 MT60 - My Triage revert is only for restoring the original direct email-created card back to triage; once that email is transferred into another node, the transferred email is represented as a target-node attachment instead of a triage row.
 MT61 - Drag payloads from My Triage and Shared Triage must carry message IDs plus source mailbox scope; Shared Triage drags include `shared_inbox_id`, while My Triage drags leave that scope empty.
-MT62 - Successful local email conversion into a Logic Gate or Company Explorer Logic Gate must remove converted rows from visible state and local message caches from the conversion response; Home and the global communications live-freshness bridge must suppress the matching local `triage.converted` echo and must not invalidate all communications message page/detail caches, trigger post-removal mail prefetch, blank the email list, or repeatedly issue mail GETs.
-MT63 - Successful local email conversion into a Logic Gate must show a temporary green success banner or notice.
+MT62 - Successful local email conversion into a Logic Gate or Company Explorer Logic Gate must remove converted rows from visible state and local message caches from the conversion response; Home and the global communications live-freshness bridge must suppress the matching local `triage.converted` echo and must not invalidate all communications message page/detail caches, reuse stale prefetched pages, trigger post-removal fill or message-length prefetch, blank the email list, or repeatedly issue mail GETs.
+MT63 - Successful local email conversion into a Company Explorer Logic Gate must show a temporary green success banner over the Company Explorer section; other Logic Gate conversion surfaces must show a temporary success banner or notice.
 
 ## Scenarios
 
