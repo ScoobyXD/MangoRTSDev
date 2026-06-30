@@ -370,6 +370,26 @@ function appendSanitizedEditorList(source: HTMLElement, target: Node, ownerDocum
   target.appendChild(list);
 }
 
+function wrapRootEditorListItems(fragment: DocumentFragment, ownerDocument: Document) {
+  let activeList: HTMLUListElement | null = null;
+  let activeKind: EditorListKind | null = null;
+  Array.from(fragment.childNodes).forEach((child) => {
+    const kind = child instanceof HTMLLIElement ? readEditorListKind(child.getAttribute(EDITOR_LIST_ITEM_ATTRIBUTE)) : null;
+    if (!kind) {
+      activeList = null;
+      activeKind = null;
+      return;
+    }
+    if (!activeList || activeKind !== kind) {
+      activeList = ownerDocument.createElement("ul");
+      activeList.setAttribute(EDITOR_LIST_ATTRIBUTE, kind);
+      fragment.insertBefore(activeList, child);
+      activeKind = kind;
+    }
+    activeList.appendChild(child);
+  });
+}
+
 function appendSanitizedChildren(source: Node, target: Node, ownerDocument: Document) {
   source.childNodes.forEach((child) => appendSanitizedNode(child, target, ownerDocument));
 }
@@ -551,6 +571,7 @@ export function sanitizeEditorDocumentHTML(html: string): string {
   if (typeof document === "undefined") return collapseRedundantFontSizeSpanHTML(html);
   const template = document.createElement("template");
   template.innerHTML = html;
+  wrapRootEditorListItems(template.content, document);
   const clean = document.createElement("div");
   appendSanitizedChildren(template.content, clean, document);
   collapseRedundantFontSizeSpans(clean);
