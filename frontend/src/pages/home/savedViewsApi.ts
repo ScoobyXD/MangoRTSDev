@@ -11,6 +11,7 @@ export type SavedViewGrouping = {
 
 export type SavedViewSettings = {
   date_added_sort_direction?: SavedViewGroupingDirection;
+  date_added_sort_enabled?: boolean;
 };
 
 export type SavedView = {
@@ -147,8 +148,16 @@ function normalizeSavedViewGroupings(value: unknown): SavedViewGrouping[] {
 
 function normalizeSavedViewSettings(value: unknown): SavedViewSettings {
   if (!value || typeof value !== "object") return {};
-  const candidate = value as { date_added_sort_direction?: unknown };
+  const candidate = value as { date_added_sort_direction?: unknown; date_added_sort_enabled?: unknown };
   const direction = candidate.date_added_sort_direction === "desc" ? "desc" : candidate.date_added_sort_direction === "asc" ? "asc" : undefined;
-  return direction ? { date_added_sort_direction: direction } : {};
+  const enabled = typeof candidate.date_added_sort_enabled === "boolean"
+    ? candidate.date_added_sort_enabled
+    : direction !== undefined
+      ? true
+      : undefined;
+  return {
+    ...(direction ? { date_added_sort_direction: direction } : {}),
+    ...(enabled !== undefined ? { date_added_sort_enabled: enabled } : {}),
+  };
 }
 

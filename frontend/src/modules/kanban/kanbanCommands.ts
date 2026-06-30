@@ -184,6 +184,80 @@ export async function reorderKanbanCardsCommand(args: {
   return { cards: plan.cards, updates: plan.updates, persistedCards };
 }
 
+export async function moveKanbanCardsToPriorityGroupCommand(args: {
+  context: KanbanCommandContext;
+  cards: KanbanCard[];
+  cardIDs: string[];
+  columnID: string;
+  priority: number;
+  targetCardID?: string | null;
+  placement?: KanbanCardDropPlacement;
+  manualReorderEnabled?: boolean;
+  onOptimisticCards?: (cards: KanbanCard[]) => void;
+  client?: KanbanCommandClient;
+}): Promise<{
+  cards: KanbanCard[];
+  updates: KanbanCardPositionUpdate[];
+  persistedCards: KanbanCard[];
+}> {
+  const {
+    context,
+    cards,
+    cardIDs,
+    columnID,
+    priority,
+    targetCardID = null,
+    placement = "before",
+    manualReorderEnabled = true,
+    onOptimisticCards,
+    client = defaultKanbanCommandClient,
+  } = args;
+  if (!Number.isFinite(priority) || priority < 1 || priority > 5) return { cards, updates: [], persistedCards: [] };
+  const normalizedPriority = Math.round(priority);
+  if (normalizedPriority !== priority) return { cards, updates: [], persistedCards: [] };
+
+  const orderedCardIDs = Array.from(new Set(cardIDs.map((cardID) => cardID.trim()).filter(Boolean)));
+  if (orderedCardIDs.length === 0) return { cards, updates: [], persistedCards: [] };
+  const cardByID = new Map(cards.map((card) => [card.card_id, card]));
+  const movedCards = orderedCardIDs.map((cardID) => cardByID.get(cardID)).filter((card): card is KanbanCard => Boolean(card));
+  if (movedCards.length === 0) return { cards, updates: [], persistedCards: [] };
+
+  const movedIDSet = new Set(movedCards.map((card) => card.card_id));
+  const baseCards = cards.map((card) => (
+    movedIDSet.has(card.card_id)
+      ? { ...card, column_id: columnID, priority: normalizedPriority }
+      : card
+  ));
+  const plan = manualReorderEnabled
+    ? buildCardBatchReorderPlan(baseCards, orderedCardIDs, columnID, targetCardID, placement)
+    : { cards: baseCards, updates: [] as KanbanCardPositionUpdate[] };
+  const positionByCardID = new Map(plan.updates.map((update) => [update.cardID, update.position]));
+  const cardsToPersist = movedCards.filter((card) => (
+    card.column_id !== columnID
+    || card.priority !== normalizedPriority
+    || positionByCardID.has(card.card_id)
+  ));
+  if (cardsToPersist.length === 0) return { cards: plan.cards, updates: plan.updates, persistedCards: [] };
+  onOptimisticCards?.(plan.cards);
+
+  const persistedCards = await Promise.all(cardsToPersist.map(async (card) => {
+    const logicGateID = logicGateIDForCard(context, card);
+    if (!logicGateID) throw new Error("Priority group moves require a Logic Gate card");
+    const result = await client.moveLogicGateAssignment({
+      apiBase: context.apiBase,
+      companyID: context.companyID,
+      logicGateID,
+      nodeID: card.node_id,
+      columnID,
+      mutationOrigin: "kanban",
+      priority: normalizedPriority,
+      position: positionByCardID.get(card.card_id),
+    });
+    return result.card;
+  }));
+  return { cards: plan.cards, updates: plan.updates, persistedCards };
+}
+
 function dedupeExplorerItems(items: ExplorerEntityDragItem[]): ExplorerEntityDragItem[] {
   const dedupedItems: ExplorerEntityDragItem[] = [];
   const seenNodeIDs = new Set<string>();

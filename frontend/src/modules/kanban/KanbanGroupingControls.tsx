@@ -15,11 +15,13 @@ type KanbanGroupingControlsProps = {
   text: string;
   subtext: string;
   accent: string;
+  dateAddedSortEnabled: boolean;
   dateAddedSortDirection: "asc" | "desc";
   onToggleOpen: () => void;
   onAddGrouping: (field: string) => void;
   onUpdateGrouping: (index: number, grouping: SavedViewGrouping) => void;
   onRemoveGrouping: (index: number) => void;
+  onToggleDateAddedSortEnabled: () => void;
   onToggleDateAddedSortDirection: () => void;
 };
 
@@ -36,11 +38,13 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
   text,
   subtext,
   accent,
+  dateAddedSortEnabled,
   dateAddedSortDirection,
   onToggleOpen,
   onAddGrouping,
   onUpdateGrouping,
   onRemoveGrouping,
+  onToggleDateAddedSortEnabled,
   onToggleDateAddedSortDirection,
 }) => {
   const [addGroupingOpen, setAddGroupingOpen] = useState(false);
@@ -188,18 +192,27 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
                   </div>
                 )}
               </div>
-              <button
-                type="button"
-                title="Sort cards by date added"
-                disabled={loading || saving}
-                onClick={onToggleDateAddedSortDirection}
-                style={dateAddedSortButtonStyle(text, line, buttonSurface)}
-              >
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Date Added</span>
-                <span style={dateAddedSortDirectionBadgeStyle(line)}>
+              <div style={dateAddedSortControlStyle(text, line, buttonSurface, dateAddedSortEnabled)}>
+                <label style={dateAddedSortToggleLabelStyle(text, loading || saving)}>
+                  <input
+                    type="checkbox"
+                    checked={dateAddedSortEnabled}
+                    disabled={loading || saving}
+                    onChange={onToggleDateAddedSortEnabled}
+                    style={dateAddedSortCheckboxStyle(accent)}
+                  />
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Date Added</span>
+                </label>
+                <button
+                  type="button"
+                  title="Sort cards by date added"
+                  disabled={loading || saving || !dateAddedSortEnabled}
+                  onClick={onToggleDateAddedSortDirection}
+                  style={dateAddedSortDirectionButtonStyle(line, buttonSurface, dateAddedSortEnabled)}
+                >
                   {dateAddedSortDirection === "asc" ? "Asc" : "Desc"}
-                </span>
-              </button>
+                </button>
+              </div>
             </div>
           </div>
           {(loading || saving || error) && (
@@ -317,10 +330,10 @@ const groupingFooterStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-function dateAddedSortButtonStyle(text: string, line: string, background: string): React.CSSProperties {
+function dateAddedSortControlStyle(text: string, line: string, background: string, enabled: boolean): React.CSSProperties {
   return {
-    minWidth: 122,
-    maxWidth: 142,
+    minWidth: 146,
+    maxWidth: 162,
     height: 28,
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) 38px",
@@ -329,27 +342,53 @@ function dateAddedSortButtonStyle(text: string, line: string, background: string
     border: `1px solid ${line}`,
     borderRadius: 6,
     background,
-    color: text,
-    cursor: "pointer",
+    color: enabled ? text : "rgba(100,116,139,0.92)",
     font: "inherit",
     fontSize: 11,
     fontWeight: 820,
-    padding: "0 4px 0 8px",
+    padding: "0 4px 0 6px",
+    opacity: enabled ? 1 : 0.78,
   };
 }
 
-function dateAddedSortDirectionBadgeStyle(line: string): React.CSSProperties {
+function dateAddedSortToggleLabelStyle(text: string, disabled: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    height: "100%",
+    display: "grid",
+    gridTemplateColumns: "14px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: 5,
+    color: text,
+    cursor: disabled ? "default" : "pointer",
+  };
+}
+
+function dateAddedSortCheckboxStyle(accent: string): React.CSSProperties {
+  return {
+    width: 13,
+    height: 13,
+    margin: 0,
+    accentColor: accent,
+    cursor: "pointer",
+  };
+}
+
+function dateAddedSortDirectionButtonStyle(line: string, background: string, enabled: boolean): React.CSSProperties {
   return {
     height: 20,
     display: "grid",
     placeItems: "center",
     border: `1px solid ${line}`,
     borderRadius: 5,
-    background: "rgba(255,255,255,0.84)",
-    color: "#0f172a",
+    background,
+    color: enabled ? "#0f172a" : "#94a3b8",
+    cursor: enabled ? "pointer" : "default",
+    font: "inherit",
     fontSize: 10,
     fontWeight: 840,
     lineHeight: 1,
+    padding: 0,
   };
 }
 

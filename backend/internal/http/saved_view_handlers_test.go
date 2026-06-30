@@ -227,7 +227,7 @@ func TestSavedViewsLogicGateKanbanSingleUserView(t *testing.T) {
 	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
 		t.Fatalf("decode created: %v", err)
 	}
-	if created.Surface != store.SavedViewSurfaceLogicGateKanban || created.Principal != store.SavedViewPrincipalUser || len(created.Groupings) != 4 || created.Groupings[3].Field != "account" || created.Settings.DateAddedSortDirection != "desc" {
+	if created.Surface != store.SavedViewSurfaceLogicGateKanban || created.Principal != store.SavedViewPrincipalUser || len(created.Groupings) != 4 || created.Groupings[3].Field != "account" || created.Settings.DateAddedSortDirection != "desc" || created.Settings.DateAddedSortEnabled == nil || !*created.Settings.DateAddedSortEnabled {
 		t.Fatalf("created logic gate kanban view = %+v", created)
 	}
 
@@ -238,7 +238,7 @@ func TestSavedViewsLogicGateKanbanSingleUserView(t *testing.T) {
 		"principal_id":"` + user.UserID + `",
 		"name":"Account Only",
 		"groupings":[{"field":"account","direction":"desc"}],
-		"settings":{"date_added_sort_direction":"asc"}
+		"settings":{"date_added_sort_direction":"asc","date_added_sort_enabled":false}
 	}`
 	updateRec := httptest.NewRecorder()
 	updateReq := httptest.NewRequest(http.MethodPost, "/v1/saved-views", bytes.NewBufferString(updateBody))
@@ -250,7 +250,7 @@ func TestSavedViewsLogicGateKanbanSingleUserView(t *testing.T) {
 	if err := json.NewDecoder(updateRec.Body).Decode(&updated); err != nil {
 		t.Fatalf("decode updated: %v", err)
 	}
-	if updated.SavedViewID != created.SavedViewID || updated.Name != "Account Only" || len(updated.Groupings) != 1 || updated.Groupings[0].Field != "account" || updated.Groupings[0].Direction != "desc" || updated.Settings.DateAddedSortDirection != "asc" {
+	if updated.SavedViewID != created.SavedViewID || updated.Name != "Account Only" || len(updated.Groupings) != 1 || updated.Groupings[0].Field != "account" || updated.Groupings[0].Direction != "desc" || updated.Settings.DateAddedSortDirection != "asc" || updated.Settings.DateAddedSortEnabled == nil || *updated.Settings.DateAddedSortEnabled {
 		t.Fatalf("updated singleton logic gate kanban view = %+v, want same row with updated settings", updated)
 	}
 

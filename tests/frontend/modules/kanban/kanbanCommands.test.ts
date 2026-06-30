@@ -4,6 +4,7 @@ import {
   addExplorerNodesToKanbanColumnCommand,
   createKanbanColumnCommand,
   deleteKanbanCardsCommand,
+  moveKanbanCardsToPriorityGroupCommand,
   reorderKanbanCardsCommand,
   reorderKanbanColumnsCommand,
   toggleKanbanCardIssueCommand,
@@ -160,6 +161,7 @@ function createClient(): {
           column_id: args.columnID ?? "todo",
           node_id: args.nodeID,
           logic_gate_id: args.logicGateID,
+          priority: args.priority,
           position: args.position ?? 1000,
         }),
         node: {
@@ -270,6 +272,61 @@ test("reorderKanbanCardsCommand shares selected-card move semantics with headles
   ]);
   assert.equal(calls.moveCard.length, 2);
   assert.deepEqual(result.persistedCards.map((item) => item.card_id), ["todo-a", "todo-b"]);
+});
+
+test("moveKanbanCardsToPriorityGroupCommand updates priority and manual order", async () => {
+  const { client, calls } = createClient();
+  const optimistic: KanbanCard[][] = [];
+  const result = await moveKanbanCardsToPriorityGroupCommand({
+    context: { ...context, boardID: logicGateKanbanBoardID("gate-1") },
+    cards: [
+      card({ card_id: "p1-a", node_id: "node-a", column_id: "doing", logic_gate_id: "gate-1", priority: 1, position: 1000 }),
+      card({ card_id: "p2-a", node_id: "node-b", column_id: "doing", logic_gate_id: "gate-1", priority: 2, position: 2000 }),
+      card({ card_id: "p1-b", node_id: "node-c", column_id: "doing", logic_gate_id: "gate-1", priority: 1, position: 3000 }),
+    ],
+    cardIDs: ["p2-a"],
+    columnID: "doing",
+    priority: 1,
+    targetCardID: "p1-a",
+    placement: "before",
+    onOptimisticCards: (cards) => optimistic.push(cards),
+    client,
+  });
+
+  assert.deepEqual(result.updates, [{ cardID: "p2-a", columnID: "doing", position: 1 }]);
+  assert.equal(optimistic[0].find((item) => item.card_id === "p2-a")?.priority, 1);
+  assert.equal(calls.moveLogicGateAssignment.length, 1);
+  assert.deepEqual(calls.moveLogicGateAssignment[0], {
+    apiBase: context.apiBase,
+    companyID: context.companyID,
+    logicGateID: "gate-1",
+    nodeID: "node-b",
+    columnID: "doing",
+    mutationOrigin: "kanban",
+    priority: 1,
+    position: 1,
+  });
+});
+
+test("moveKanbanCardsToPriorityGroupCommand can skip manual position writes", async () => {
+  const { client, calls } = createClient();
+  const result = await moveKanbanCardsToPriorityGroupCommand({
+    context: { ...context, boardID: logicGateKanbanBoardID("gate-1") },
+    cards: [
+      card({ card_id: "p1-a", node_id: "node-a", column_id: "doing", logic_gate_id: "gate-1", priority: 1, position: 1000 }),
+      card({ card_id: "p2-a", node_id: "node-b", column_id: "doing", logic_gate_id: "gate-1", priority: 2, position: 2000 }),
+    ],
+    cardIDs: ["p2-a"],
+    columnID: "doing",
+    priority: 1,
+    targetCardID: "p1-a",
+    manualReorderEnabled: false,
+    client,
+  });
+
+  assert.deepEqual(result.updates, []);
+  assert.equal((calls.moveLogicGateAssignment[0] as { priority?: number; position?: number }).priority, 1);
+  assert.equal((calls.moveLogicGateAssignment[0] as { priority?: number; position?: number }).position, undefined);
 });
 
 test("addExplorerNodesToKanbanColumnCommand dedupes drag rows before API upserts", async () => {

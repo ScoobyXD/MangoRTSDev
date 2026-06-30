@@ -775,6 +775,12 @@ function getKanbanPriorityGroupLabel(priority: number): string {
   return "No priority";
 }
 
+export function getKanbanPriorityFromGroupKey(key: string): number | null {
+  const match = /^priority:([1-5])$/.exec(key.trim());
+  if (!match) return null;
+  return Number.parseInt(match[1], 10);
+}
+
 function kanbanAccountGroups(accounts: Account[] | undefined): KanbanGroupedBoardRow[] {
   const cleanAccounts = (accounts ?? [])
     .filter((account) => account.account_id.trim())

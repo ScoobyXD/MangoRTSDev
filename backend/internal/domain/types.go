@@ -158,6 +158,7 @@ type SavedViewGrouping struct {
 
 type SavedViewSettings struct {
 	DateAddedSortDirection string `json:"date_added_sort_direction,omitempty"`
+	DateAddedSortEnabled   *bool  `json:"date_added_sort_enabled,omitempty"`
 }
 
 type SavedView struct {

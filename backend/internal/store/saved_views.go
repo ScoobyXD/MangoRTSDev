@@ -100,7 +100,7 @@ func NormalizeSavedViewSettings(surface string, settings domain.SavedViewSetting
 	}
 	dateAddedDirection := strings.TrimSpace(settings.DateAddedSortDirection)
 	if surface != SavedViewSurfaceLogicGateKanban {
-		return domain.SavedViewSettings{}, dateAddedDirection == ""
+		return domain.SavedViewSettings{}, dateAddedDirection == "" && settings.DateAddedSortEnabled == nil
 	}
 	if dateAddedDirection == "" {
 		dateAddedDirection = "asc"
@@ -108,7 +108,11 @@ func NormalizeSavedViewSettings(surface string, settings domain.SavedViewSetting
 	if dateAddedDirection != "asc" && dateAddedDirection != "desc" {
 		return domain.SavedViewSettings{}, false
 	}
-	return domain.SavedViewSettings{DateAddedSortDirection: dateAddedDirection}, true
+	dateAddedEnabled := true
+	if settings.DateAddedSortEnabled != nil {
+		dateAddedEnabled = *settings.DateAddedSortEnabled
+	}
+	return domain.SavedViewSettings{DateAddedSortDirection: dateAddedDirection, DateAddedSortEnabled: &dateAddedEnabled}, true
 }
 
 func normalizeSavedViewGroupingDirection(direction string) (string, bool) {

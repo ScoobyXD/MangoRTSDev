@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, clampColumnHeight, clampColumnWidth, createClientUUIDv7, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getKanbanGroupValues, getOrderedKanbanCardIDs, groupCardsByColumn, hydrateKanbanCardsFromNodes, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, shouldRefreshKanbanBoardForNodeStatusChange, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn, type KanbanGroupField } from "../../../../frontend/src/modules/kanban/shared.js";
+import { KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, KANBAN_DEFAULT_BOARD_TITLE, KANBAN_DEFAULT_COLUMN_HEIGHT_PX, KANBAN_DEFAULT_COLUMN_ITEM_COLOR, KANBAN_DEFAULT_COLUMN_WIDTH_PX, KANBAN_GROUP_FIELDS, KANBAN_ISSUE_CARD_COLOR, KANBAN_MODULE_TOP_CLEARANCE_PX, buildCardBatchReorderPlan, buildCardReorderPlan, buildColumnReorderPlan, buildKanbanCardSelectionUpdate, clampColumnHeight, clampColumnWidth, createClientUUIDv7, getKanbanBoardDisplayTitle, getKanbanCardColorRailStyle, getKanbanConditionalColor, getKanbanGroupValues, getKanbanPriorityFromGroupKey, getOrderedKanbanCardIDs, groupCardsByColumn, hydrateKanbanCardsFromNodes, isKanbanBoardDropItemType, logicGateKanbanBoardID, nextCardPosition, nextColumnPosition, normalizeKanbanColumnItemColor, parseExplorerEntityDragItems, parseExplorerEntityDragPayload, parseKanbanCardDragPayload, sanitizeExplorerEntityDragPayload, shouldRefreshKanbanBoardForNodeStatusChange, sortKanbanBoards, type KanbanBoard, type KanbanCard, type KanbanColumn, type KanbanGroupField } from "../../../../frontend/src/modules/kanban/shared.js";
 import { buildUniversalNestedGroups } from "../../../../frontend/src/modules/grouping/universalGrouping.js";
 
 function card(overrides: Partial<KanbanCard>): KanbanCard {
@@ -212,6 +212,13 @@ test("kanban grouping values resolve priority and due date buckets", () => {
   assert.deepEqual(getKanbanGroupValues(card({ card_id: "none", node_id: "node-none" }), "due_date", columns, nodeByID, new Map()), [
     { key: "due:none", label: "No due date", sortValue: "", sortLast: true },
   ]);
+});
+
+test("kanban priority group keys only resolve real priority buckets", () => {
+  assert.equal(getKanbanPriorityFromGroupKey("priority:1"), 1);
+  assert.equal(getKanbanPriorityFromGroupKey(" priority:5 "), 5);
+  assert.equal(getKanbanPriorityFromGroupKey("priority:0"), null);
+  assert.equal(getKanbanPriorityFromGroupKey("account:priority:1"), null);
 });
 
 test("universal nested grouping keeps kanban account duplication and no-account trailing", () => {

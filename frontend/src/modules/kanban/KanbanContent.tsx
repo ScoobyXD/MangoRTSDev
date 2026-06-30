@@ -32,6 +32,7 @@ import {
   addExplorerNodesToKanbanColumnCommand,
   createKanbanColumnCommand,
   deleteKanbanCardsCommand,
+  moveKanbanCardsToPriorityGroupCommand,
   persistKanbanColumnLayoutCommand,
   reorderKanbanCardsCommand,
   reorderKanbanColumnsCommand,
@@ -72,6 +73,7 @@ import {
   getKanbanConditionalColor,
   getColumnWidth,
   getKanbanGroupValues,
+  getKanbanPriorityFromGroupKey,
   getOrderedKanbanCardIDs,
   groupCardsByColumn,
   hydrateKanbanCardsFromNodes,
@@ -117,6 +119,11 @@ const LOGIC_GATE_KANBAN_DEFAULT_SAVED_VIEW_NAME = "Kanban grouping";
 const KANBAN_GROUP_FIELD_SET = new Set<KanbanGroupField>(["person", "priority", "due_date", "account"]);
 
 type KanbanDateAddedSortDirection = "asc" | "desc";
+type KanbanGroupDropTarget = {
+  field: KanbanGroupField;
+  key: string;
+  label: string;
+};
 
 function normalizeKanbanSavedGroupings(value: unknown): SavedViewGrouping[] {
   if (!Array.isArray(value)) return [];
@@ -155,11 +162,26 @@ function normalizeKanbanDateAddedSortDirection(value: unknown): KanbanDateAddedS
   return value === "desc" ? "desc" : "asc";
 }
 
-function kanbanSavedViewSignature(groupings: SavedViewGrouping[], dateAddedSortDirection: KanbanDateAddedSortDirection): string {
+function normalizeKanbanDateAddedSortEnabled(value: unknown): boolean {
+  return typeof value === "boolean" ? value : true;
+}
+
+function kanbanSavedViewSignature(groupings: SavedViewGrouping[], dateAddedSortEnabled: boolean, dateAddedSortDirection: KanbanDateAddedSortDirection): string {
   return JSON.stringify({
     groupings: normalizeKanbanSavedGroupings(groupings),
+    date_added_sort_enabled: dateAddedSortEnabled,
     date_added_sort_direction: dateAddedSortDirection,
   });
+}
+
+function kanbanPriorityFromGroupTargets(targets: KanbanGroupDropTarget[]): number | null {
+  for (let index = targets.length - 1; index >= 0; index -= 1) {
+    const target = targets[index];
+    if (target.field !== "priority") continue;
+    const priority = getKanbanPriorityFromGroupKey(target.key);
+    if (priority !== null) return priority;
+  }
+  return null;
 }
 
 function kanbanNestedGroupItemCount(group: UniversalNestedGroup<KanbanCard, KanbanGroupField>): number {
@@ -408,6 +430,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [kanbanGroupingOpen, setKanbanGroupingOpen] = useState(false);
   const [kanbanGroupingView, setKanbanGroupingView] = useState<SavedView | null>(null);
   const [kanbanGroupingDraft, setKanbanGroupingDraft] = useState<SavedViewGrouping[]>([]);
+  const [kanbanDateAddedSortEnabled, setKanbanDateAddedSortEnabled] = useState(true);
   const [kanbanDateAddedSortDirection, setKanbanDateAddedSortDirection] = useState<KanbanDateAddedSortDirection>("asc");
   const [kanbanGroupingLoaded, setKanbanGroupingLoaded] = useState(false);
   const [kanbanGroupingLoading, setKanbanGroupingLoading] = useState(false);
@@ -851,13 +874,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const activeBoardIsLogicGate = !!(activeLogicGateID || logicGateIDFromKanbanBoardID(boardID));
   const cardsByColumn = useMemo(() => {
     const grouped = groupCardsByColumn(searchedCards);
-    if (!activeBoardIsLogicGate) return grouped;
+    if (!activeBoardIsLogicGate || !kanbanDateAddedSortEnabled) return grouped;
     const sorted = new Map<string, KanbanCard[]>();
     for (const [columnID, columnCards] of grouped.entries()) {
       sorted.set(columnID, sortKanbanCardsByDateAdded(columnCards, kanbanDateAddedSortDirection));
     }
     return sorted;
-  }, [activeBoardIsLogicGate, kanbanDateAddedSortDirection, searchedCards]);
+  }, [activeBoardIsLogicGate, kanbanDateAddedSortDirection, kanbanDateAddedSortEnabled, searchedCards]);
   const activeKanbanGroupings = useMemo<Array<{ field: KanbanGroupField; direction: "asc" | "desc" }>>(() => {
     if (!activeBoardIsLogicGate) return [];
     return normalizeKanbanSavedGroupings(kanbanGroupingDraft).map((grouping) => ({
@@ -886,6 +909,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (!activeBoardIsLogicGate || !companyID) {
       setKanbanGroupingView(null);
       setKanbanGroupingDraft([]);
+      setKanbanDateAddedSortEnabled(true);
       setKanbanDateAddedSortDirection("asc");
       setKanbanGroupingLoaded(false);
       setKanbanGroupingError("");
@@ -898,6 +922,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setKanbanGroupingLoaded(false);
     setKanbanGroupingError("");
     setKanbanGroupingDraft([]);
+    setKanbanDateAddedSortEnabled(true);
     setKanbanDateAddedSortDirection("asc");
     void fetchSavedViews({ apiBase, companyID, surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE }).then((views) => {
       if (cancelled) return;
@@ -908,12 +933,14 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       const selectedView = sortedViews[0] ?? null;
       const savedGroupings = normalizeKanbanSavedGroupings(selectedView?.groupings ?? []);
       const groupings = savedGroupings;
+      const dateAddedSortEnabled = normalizeKanbanDateAddedSortEnabled(selectedView?.settings?.date_added_sort_enabled);
       const dateAddedSortDirection = normalizeKanbanDateAddedSortDirection(selectedView?.settings?.date_added_sort_direction);
       setKanbanGroupingView(selectedView);
       setKanbanGroupingDraft(groupings);
+      setKanbanDateAddedSortEnabled(dateAddedSortEnabled);
       setKanbanDateAddedSortDirection(dateAddedSortDirection);
       setKanbanGroupingLoaded(true);
-      kanbanGroupingPersistedSignatureRef.current = kanbanSavedViewSignature(savedGroupings, dateAddedSortDirection);
+      kanbanGroupingPersistedSignatureRef.current = kanbanSavedViewSignature(savedGroupings, dateAddedSortEnabled, dateAddedSortDirection);
     }).catch((nextError) => {
       if (!cancelled) setKanbanGroupingError(nextError instanceof Error ? nextError.message : "Failed to load grouping");
     }).finally(() => {
@@ -932,9 +959,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       return undefined;
     }
     const groupings = normalizeKanbanSavedGroupings(kanbanGroupingDraft);
-    const signature = kanbanSavedViewSignature(groupings, kanbanDateAddedSortDirection);
+    const signature = kanbanSavedViewSignature(groupings, kanbanDateAddedSortEnabled, kanbanDateAddedSortDirection);
     if (signature === kanbanGroupingPersistedSignatureRef.current) return undefined;
-    if (!kanbanGroupingView && groupings.length === 0 && kanbanDateAddedSortDirection === "asc") {
+    if (!kanbanGroupingView && groupings.length === 0 && kanbanDateAddedSortEnabled && kanbanDateAddedSortDirection === "asc") {
       kanbanGroupingPersistedSignatureRef.current = signature;
       return undefined;
     }
@@ -955,7 +982,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             principal_id: userID,
             name: kanbanGroupingView?.name.trim() || LOGIC_GATE_KANBAN_DEFAULT_SAVED_VIEW_NAME,
             groupings,
-            settings: { date_added_sort_direction: kanbanDateAddedSortDirection },
+            settings: { date_added_sort_enabled: kanbanDateAddedSortEnabled, date_added_sort_direction: kanbanDateAddedSortDirection },
             position: kanbanGroupingView?.position ?? nextKanbanSavedViewPosition([]),
           },
         });
@@ -971,7 +998,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       });
     }, 250);
     return () => window.clearTimeout(timeout);
-  }, [activeBoardIsLogicGate, apiBase, companyID, currentUserID, kanbanDateAddedSortDirection, kanbanGroupingDraft, kanbanGroupingLoaded, kanbanGroupingLoading, kanbanGroupingView]);
+  }, [activeBoardIsLogicGate, apiBase, companyID, currentUserID, kanbanDateAddedSortDirection, kanbanDateAddedSortEnabled, kanbanGroupingDraft, kanbanGroupingLoaded, kanbanGroupingLoading, kanbanGroupingView]);
 
   const addKanbanGrouping = useCallback((field: string) => {
     setKanbanGroupingDraft((current) => {
@@ -1007,6 +1034,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   const toggleKanbanDateAddedSortDirection = useCallback(() => {
     setKanbanDateAddedSortDirection((current) => current === "asc" ? "desc" : "asc");
+  }, []);
+
+  const toggleKanbanDateAddedSortEnabled = useCallback(() => {
+    setKanbanDateAddedSortEnabled((current) => !current);
   }, []);
 
   const bottomLaneColumns = useMemo(() => (activeBoardIsLogicGate ? orderedColumns.filter(isKanbanBottomLaneColumn) : []), [activeBoardIsLogicGate, orderedColumns]);
@@ -1877,6 +1908,67 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (shouldRefresh) void refreshBoard(mutationBoardID);
   }, [applyCards, beginLocalBoardMutation, boardID, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
 
+  const draggedCardsNeedColumnMove = useCallback((cardIDs: string[], columnID: string): boolean => {
+    const targetColumnID = columnID.trim();
+    if (!targetColumnID) return false;
+    const cardByID = new Map(cardsRef.current.map((card) => [card.card_id, card]));
+    return cardIDs.some((cardID) => {
+      const card = cardByID.get(cardID);
+      return Boolean(card && card.column_id !== targetColumnID);
+    });
+  }, []);
+
+  const draggedCardsNeedPriorityMove = useCallback((cardIDs: string[], priority: number): boolean => {
+    const cardByID = new Map(cardsRef.current.map((card) => [card.card_id, card]));
+    return cardIDs.some((cardID) => {
+      const card = cardByID.get(cardID);
+      if (!card) return false;
+      const currentPriority = card.priority ?? arenaNodeByID.get(card.node_id)?.priority ?? 0;
+      const normalizedPriority = currentPriority > 0 ? Math.max(1, Math.min(5, Math.round(currentPriority))) : 0;
+      return normalizedPriority !== priority;
+    });
+  }, [arenaNodeByID]);
+
+  const moveCardsToPriorityGroup = useCallback(async (
+    cardIDs: string[],
+    columnID: string,
+    priority: number,
+    targetCardID: string | null = null,
+    placement: KanbanCardDropPlacement = "before",
+  ) => {
+    setDragOverCard(null);
+    setError("");
+    const mutationBoardID = boardID;
+    const endMutation = beginLocalBoardMutation(mutationBoardID, logicGateIDFromKanbanBoardID(mutationBoardID));
+    let shouldRefresh = false;
+    try {
+      const result = await moveKanbanCardsToPriorityGroupCommand({
+        context: kanbanCommandContext,
+        cards: cardsRef.current,
+        cardIDs,
+        columnID,
+        priority,
+        targetCardID,
+        placement,
+        manualReorderEnabled: !kanbanDateAddedSortEnabled,
+        onOptimisticCards: (optimisticCards) => {
+          applyCards(optimisticCards);
+          const movedIDs = new Set(cardIDs);
+          syncNodeStatusesFromCards(optimisticCards.filter((card) => movedIDs.has(card.card_id)));
+        },
+      });
+      const byID = new Map(result.persistedCards.map((card) => [card.card_id, card]));
+      applyCards((previous) => previous.map((card) => byID.get(card.card_id) ?? card));
+      syncNodeStatusesFromCards(result.persistedCards);
+    } catch {
+      setError("Priority move failed");
+      shouldRefresh = true;
+    } finally {
+      endMutation();
+    }
+    if (shouldRefresh) void refreshBoard(mutationBoardID);
+  }, [applyCards, beginLocalBoardMutation, boardID, kanbanCommandContext, kanbanDateAddedSortEnabled, refreshBoard, syncNodeStatusesFromCards]);
+
   const resolveRequestedCard = useCallback(async (card: KanbanCard, accept: boolean) => {
     setRequestedCardActionID(card.card_id);
     try {
@@ -2171,14 +2263,18 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
     const cardPayload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
     if (cardPayload) {
-      void reorderCards(cardPayload.cardIDs, columnID, null);
+      if (!kanbanDateAddedSortEnabled || draggedCardsNeedColumnMove(cardPayload.cardIDs, columnID)) {
+        void reorderCards(cardPayload.cardIDs, columnID, null, "after");
+      } else {
+        setDragOverCard(null);
+      }
       return;
     }
     const explorerItems = parseExplorerEntityDragItems(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
     if (explorerItems.length > 0) {
       requestAddEntitiesToColumn(columnID, explorerItems, { x: event.clientX, y: event.clientY });
     }
-  }, [reorderCards, reorderColumn, requestAddEntitiesToColumn]);
+  }, [draggedCardsNeedColumnMove, kanbanDateAddedSortEnabled, reorderCards, reorderColumn, requestAddEntitiesToColumn]);
 
   const onDropAtEnd = useCallback((event: React.DragEvent) => {
     const columnPayload = parseKanbanColumnDragPayload(event.dataTransfer.getData(KANBAN_COLUMN_DRAG_MIME));
@@ -2231,7 +2327,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     dataTransfer.setData("text/plain", items.length === 1 ? items[0].label : `${items.length} nodes`);
   }, []);
 
-  const renderCard = (card: KanbanCard): React.ReactNode => {
+  const renderCard = (card: KanbanCard, groupTargets: KanbanGroupDropTarget[] = []): React.ReactNode => {
     const highlighted = highlightedEntity?.nodeID === card.node_id;
     const selected = selectedCardIDs.has(card.card_id);
     const dragBefore = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "before";
@@ -2341,6 +2437,25 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           if (cardPayload) {
             event.preventDefault();
             event.stopPropagation();
+            const priority = kanbanPriorityFromGroupTargets(groupTargets);
+            if (priority !== null && draggedCardsNeedPriorityMove(cardPayload.cardIDs, priority)) {
+              void moveCardsToPriorityGroup(
+                cardPayload.cardIDs,
+                card.column_id,
+                priority,
+                kanbanDateAddedSortEnabled ? null : card.card_id,
+                kanbanDateAddedSortEnabled ? "after" : cardDropPlacement(event),
+              );
+              return;
+            }
+            if (kanbanDateAddedSortEnabled) {
+              if (draggedCardsNeedColumnMove(cardPayload.cardIDs, card.column_id)) {
+                void reorderCards(cardPayload.cardIDs, card.column_id, null, "after");
+              } else {
+                setDragOverCard(null);
+              }
+              return;
+            }
             void reorderCards(cardPayload.cardIDs, card.column_id, card.card_id, cardDropPlacement(event));
             return;
           }
@@ -2371,12 +2486,29 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const renderKanbanGroups = (
     groups: Array<UniversalNestedGroup<KanbanCard, KanbanGroupField>>,
     layout: "column" | "backlog",
+    columnID: string,
+    parentTargets: KanbanGroupDropTarget[] = [],
   ): React.ReactNode[] => {
     return groups.flatMap((group) => {
       const count = kanbanNestedGroupItemCount(group);
+      const groupTargets = [...parentTargets, { field: group.field, key: group.key, label: group.label }];
+      const groupPriority = kanbanPriorityFromGroupTargets(groupTargets);
       const header = (
         <div
           key={`group-header:${group.id}`}
+          onDragOver={(event) => {
+            if (groupPriority === null || !dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setDragOverCard(null);
+          }}
+          onDrop={(event) => {
+            const cardPayload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
+            if (!cardPayload || groupPriority === null) return;
+            event.preventDefault();
+            event.stopPropagation();
+            void moveCardsToPriorityGroup(cardPayload.cardIDs, columnID, groupPriority, null, "after");
+          }}
           style={{
             gridColumn: layout === "backlog" ? "1 / -1" : undefined,
             marginLeft: layout === "column" ? group.depth * 8 : 0,
@@ -2401,8 +2533,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         </div>
       );
       const children = group.groups.length > 0
-        ? renderKanbanGroups(group.groups, layout)
-        : group.rows.map((card) => renderCard(card));
+        ? renderKanbanGroups(group.groups, layout, columnID, groupTargets)
+        : group.rows.map((card) => renderCard(card, groupTargets));
       return [header, ...children];
     });
   };
@@ -2411,7 +2543,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const columnCards = cardsByColumn.get(column.column_id) ?? [];
     const groupedCards = groupedCardsByColumn.get(column.column_id) ?? [];
     const renderedColumnCards = activeBoardIsLogicGate && activeKanbanGroupings.length > 0
-      ? renderKanbanGroups(groupedCards, layout)
+      ? renderKanbanGroups(groupedCards, layout, column.column_id)
       : columnCards.map((card) => renderCard(card));
     return (
       <KanbanColumnView
@@ -2441,7 +2573,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
                 event.preventDefault();
                 event.stopPropagation();
                 setDragOverCard(null);
-                void reorderCards(cardPayload.cardIDs, column.column_id, null, "after");
+                if (!kanbanDateAddedSortEnabled || draggedCardsNeedColumnMove(cardPayload.cardIDs, column.column_id)) {
+                  void reorderCards(cardPayload.cardIDs, column.column_id, null, "after");
+                }
                 return;
               }
               const explorerItems = parseExplorerEntityDragItems(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
@@ -2561,11 +2695,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       text={text}
       subtext={subtext}
       accent={accent}
+      dateAddedSortEnabled={kanbanDateAddedSortEnabled}
       dateAddedSortDirection={kanbanDateAddedSortDirection}
       onToggleOpen={() => setKanbanGroupingOpen((open) => !open)}
       onAddGrouping={addKanbanGrouping}
       onUpdateGrouping={updateKanbanGrouping}
       onRemoveGrouping={removeKanbanGrouping}
+      onToggleDateAddedSortEnabled={toggleKanbanDateAddedSortEnabled}
       onToggleDateAddedSortDirection={toggleKanbanDateAddedSortDirection}
     />
   ) : null;
