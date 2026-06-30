@@ -24,8 +24,10 @@ export const EDITOR_TABLE_OFFSET_ATTRIBUTE = "data-mango-editor-table-offset";
 export const EDITOR_LIST_ATTRIBUTE = "data-mango-editor-list";
 export const EDITOR_LIST_ITEM_ATTRIBUTE = "data-mango-editor-list-item";
 export const EDITOR_CHECKLIST_CHECKED_ATTRIBUTE = "data-mango-editor-checklist-checked";
+export const EDITOR_LIST_MARKER_ATTRIBUTE = "data-mango-editor-list-marker";
 
 export type EditorListKind = "bullet" | "checklist";
+export type EditorListMarkerStyle = "solid-circle" | "hollow-circle" | "solid-square" | "hollow-square";
 
 export const EDITOR_TABLE_DEFAULT_ROWS = 3;
 export const EDITOR_TABLE_DEFAULT_COLUMNS = 3;
@@ -390,6 +392,38 @@ function wrapRootEditorListItems(fragment: DocumentFragment, ownerDocument: Docu
   });
 }
 
+function editorListMarkerStyleForDepth(depth: number): EditorListMarkerStyle {
+  const normalizedDepth = Math.max(1, Math.round(depth));
+  const cycleIndex = (normalizedDepth - 1) % 4;
+  if (cycleIndex === 1) return "hollow-circle";
+  if (cycleIndex === 2) return "solid-square";
+  if (cycleIndex === 3) return "hollow-square";
+  return "solid-circle";
+}
+
+function editorListDepthForItem(item: HTMLElement): number {
+  let depth = 0;
+  let current = item.parentElement;
+  while (current) {
+    if (current instanceof HTMLUListElement && readEditorListKind(current.getAttribute(EDITOR_LIST_ATTRIBUTE))) {
+      depth += 1;
+    }
+    current = current.parentElement;
+  }
+  return Math.max(1, depth);
+}
+
+export function applyEditorListMarkerStyles(root: ParentNode) {
+  root.querySelectorAll(`li[${EDITOR_LIST_ITEM_ATTRIBUTE}]`).forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    if (node.getAttribute(EDITOR_LIST_ITEM_ATTRIBUTE) !== "bullet") {
+      node.removeAttribute(EDITOR_LIST_MARKER_ATTRIBUTE);
+      return;
+    }
+    node.setAttribute(EDITOR_LIST_MARKER_ATTRIBUTE, editorListMarkerStyleForDepth(editorListDepthForItem(node)));
+  });
+}
+
 function appendSanitizedChildren(source: Node, target: Node, ownerDocument: Document) {
   source.childNodes.forEach((child) => appendSanitizedNode(child, target, ownerDocument));
 }
@@ -575,6 +609,7 @@ export function sanitizeEditorDocumentHTML(html: string): string {
   const clean = document.createElement("div");
   appendSanitizedChildren(template.content, clean, document);
   collapseRedundantFontSizeSpans(clean);
+  applyEditorListMarkerStyles(clean);
   return collapseRedundantFontSizeSpanHTML(clean.innerHTML);
 }
 

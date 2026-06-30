@@ -19,6 +19,7 @@ import {
   EDITOR_TABLE_HEADER_ATTRIBUTE,
   EDITOR_TABLE_MAX_COLUMNS,
   EDITOR_TABLE_MAX_ROWS,
+  applyEditorListMarkerStyles,
   applyEditorTableColumnWidths,
   applyEditorTableLayout,
   EDITOR_TERMINAL_BREAK_ATTRIBUTE,
@@ -1489,6 +1490,7 @@ function scrollEditorToLineStart(root: HTMLElement) {
 }
 
 function commitEditorDocument(root: HTMLElement, scheduleDocumentSave: (nextText: string, immediate?: boolean) => void, scheduleIndentGuideUpdate: (text: string) => void, immediate = false) {
+  applyEditorListMarkerStyles(root);
   const plainText = readEditorDocumentText(root);
   scheduleDocumentSave(serializeEditorDocumentHTML(root), immediate);
   scheduleIndentGuideUpdate(plainText);
@@ -1777,13 +1779,51 @@ function copySelectedEditorImage(root: HTMLElement, clipboardData: DataTransfer)
   return true;
 }
 
+function selectedHTMLPreservesEditorList(html: string): boolean {
+  return html.includes(EDITOR_LIST_ATTRIBUTE) || html.includes(EDITOR_LIST_ITEM_ATTRIBUTE);
+}
+
+function createSingleSelectedEditorListItemHTML(root: HTMLElement, range: Range, selectedHTML: string): string | null {
+  const startItem = getClosestEditorListItem(root, range.startContainer);
+  const endItem = getClosestEditorListItem(root, range.endContainer);
+  if (!startItem || startItem !== endItem) return null;
+  const kind = getEditorListKindForItem(startItem);
+  if (!kind) return null;
+
+  const item = root.ownerDocument.createElement("li");
+  item.setAttribute(EDITOR_LIST_ITEM_ATTRIBUTE, kind);
+  if (kind === "checklist") {
+    item.setAttribute(
+      EDITOR_CHECKLIST_CHECKED_ATTRIBUTE,
+      startItem.getAttribute(EDITOR_CHECKLIST_CHECKED_ATTRIBUTE) === "true" ? "true" : "false",
+    );
+  }
+
+  if (selectedHTML.trim()) {
+    const template = root.ownerDocument.createElement("template");
+    template.innerHTML = selectedHTML;
+    item.appendChild(template.content);
+  } else {
+    item.appendChild(root.ownerDocument.createTextNode(range.toString()));
+  }
+  if (!(item.textContent ?? "").trim() && item.querySelectorAll("*").length === 0) return null;
+
+  const list = root.ownerDocument.createElement("ul");
+  list.setAttribute(EDITOR_LIST_ATTRIBUTE, kind);
+  list.appendChild(item);
+  return sanitizeEditorDocumentHTML(list.outerHTML);
+}
+
 function copySelectedEditorDocumentFragment(root: HTMLElement, clipboardData: DataTransfer): boolean {
   const range = getEditorSelectionRange(root);
   if (!range || range.collapsed) return false;
   const container = root.ownerDocument.createElement("div");
   container.appendChild(range.cloneContents());
-  const html = sanitizeEditorDocumentHTML(container.innerHTML);
+  let html = sanitizeEditorDocumentHTML(container.innerHTML);
   const text = range.toString();
+  if (!selectedHTMLPreservesEditorList(html)) {
+    html = createSingleSelectedEditorListItemHTML(root, range, html) ?? html;
+  }
   if (!html.trim() && !text.trim()) return false;
   clipboardData.setData("text/html", html);
   clipboardData.setData("text/plain", text);
