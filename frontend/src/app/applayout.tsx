@@ -1331,6 +1331,18 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     selectPrimaryPage("map");
   }, [selectPrimaryPage, upsertDockTab]);
 
+  const handleLogicGateArenaTitleChange = useCallback((update: { logicGateID: string; label: string }) => {
+    const logicGateID = update.logicGateID.trim();
+    const label = update.label.trim();
+    if (!logicGateID || !label) return;
+    setLogicGateArenaTarget((current) => (
+      current?.logicGateID === logicGateID && current.label !== label ? { ...current, label } : current
+    ));
+    setDockTabs((current) => current.map((tab) => (
+      tab.kind === "logic_gate_arena" && tab.entityID === logicGateID && tab.label !== label ? { ...tab, label } : tab
+    )));
+  }, [setDockTabs]);
+
   const openLogicGateArenaNodeRoute = useCallback((selection: { logicGateID: string; nodeID: string }) => {
     if (!onNavigate) return;
     onNavigate(buildLogicGateRoute(selection.logicGateID, selection.nodeID));
@@ -1829,6 +1841,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               onCollapseToTab={collapseLogicGateArenaToTab}
               onNodeOpen={openLogicGateArenaNodeRoute}
               onNodeClose={closeLogicGateArenaNodeRoute}
+              onLogicGateTitleChange={handleLogicGateArenaTitleChange}
             />
           </React.Suspense>
         ) : isHomeView ? (

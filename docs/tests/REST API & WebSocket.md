@@ -1,4 +1,4 @@
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 # REST API & WebSocket Tests
 
@@ -22,6 +22,7 @@ RW11 - Realtime invalidation should use the narrowest semantic scope available i
 RW12 - WebSocket reconnects or subscription failures must not be reported as successful durable saves.
 RW13 - Browser-side API request timing should make status=error timeout cases visible with the route that timed out.
 RW14 - Dev or production timeout triage must consider backend, database, and cache-refetch load before changing the client timeout threshold.
+RW15 - Logic gate header renames are committed through `PUT /v1/logic-gates/{logic_gate_id}` and must reconcile the active Logic Gate Arena title, arena app target, and Company Explorer label from the committed response or `logic_gate_updated` workspace event without requiring a full page refresh.
 
 ## Scenarios
 
@@ -99,3 +100,26 @@ Expected:
 - Realtime subscribers invalidate or refetch only the affected semantic scope when possible.
 - A WebSocket reconnect or subscription rejection does not mark unrelated data as saved.
 - Broad workspace refetches are reserved for missing sequence, missing scope, permission, or compatibility cases where the narrower path cannot be trusted.
+
+### Scenario RW-S5: Logic Gate Rename Reconciles Arena And Explorer Titles
+
+Business logic covered:
+- RW1
+- RW2
+- RW3
+- RW10
+- RW15
+
+Given:
+- A logic gate is open in Logic Gate Arena.
+- The same logic gate is visible in Company Explorer.
+- The frontend has an open workspace WebSocket connection.
+
+Expected:
+- Renaming the logic gate from the arena title sends `PUT /v1/logic-gates/{logic_gate_id}` with the new `header`.
+- After the PUT succeeds, the arena title keeps the committed header and does not fall back to the stale arena selection label.
+- The backend publishes `logic_gate_updated` with `logic_gate_id` and `logic_gate.header`.
+- Company Explorer applies the `logic_gate_updated` event to the matching visible row label.
+- Renaming the same logic gate from Company Explorer updates the active Logic Gate Arena title from the `logic_gate_updated` workspace event.
+- The app-level arena target and any collapsed Logic Gate Arena dock tab for that logic gate keep the committed label so later route changes do not reapply the old title.
+- A full browser refresh is not required to see the committed logic gate header in either surface.
