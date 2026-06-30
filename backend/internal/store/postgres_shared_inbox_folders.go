@@ -658,6 +658,14 @@ where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID, na
 }
 
 func (r *PostgresRepo) DeleteCommunicationsSharedInboxFolder(companyID, folderID string) error {
+	return r.deleteCommunicationsSharedInboxFolder(companyID, folderID, true)
+}
+
+func (r *PostgresRepo) RemoveCommunicationsSharedInboxFolder(companyID, folderID string) error {
+	return r.deleteCommunicationsSharedInboxFolder(companyID, folderID, false)
+}
+
+func (r *PostgresRepo) deleteCommunicationsSharedInboxFolder(companyID, folderID string, deleteCompanyConnections bool) error {
 	companyID = cleanUUIDText(companyID)
 	folderID = cleanUUIDText(folderID)
 	if companyID == "" || folderID == "" {
@@ -716,6 +724,56 @@ select folder_id::text from subtree`, companyID, folderID)
 			return ErrNotFound
 		}
 		idList := strings.Join(ids, ",")
+		sharedInboxIDs := make([]string, 0)
+		companyEmailConnectionIDs := make([]string, 0)
+		if deleteCompanyConnections {
+			rows, err := tx.QueryContext(ctx, `
+with target_connections as (
+  select distinct company_email_connection_id
+  from shared_inboxes
+  where company_id=$1::uuid
+    and parent_folder_id = any(string_to_array($2, ',')::uuid[])
+    and company_email_connection_id is not null
+),
+target_inboxes as (
+  select shared_inbox_id, company_email_connection_id
+  from shared_inboxes
+  where company_id=$1::uuid
+    and (
+      parent_folder_id = any(string_to_array($2, ',')::uuid[])
+      or (
+        company_email_connection_id is not null
+        and company_email_connection_id in (select company_email_connection_id from target_connections)
+      )
+    )
+)
+select shared_inbox_id::text, coalesce(company_email_connection_id::text, '')
+from target_inboxes`, companyID, idList)
+			if err != nil {
+				return err
+			}
+			connectionSeen := map[string]bool{}
+			for rows.Next() {
+				var inboxID string
+				var connectionID string
+				if err := rows.Scan(&inboxID, &connectionID); err != nil {
+					rows.Close()
+					return err
+				}
+				sharedInboxIDs = append(sharedInboxIDs, inboxID)
+				if connectionID != "" && !connectionSeen[connectionID] {
+					connectionSeen[connectionID] = true
+					companyEmailConnectionIDs = append(companyEmailConnectionIDs, connectionID)
+				}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return err
+			}
+			if err := rows.Close(); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.ExecContext(ctx, `
 delete from resource_permissions
 where company_id=$1::uuid
@@ -730,7 +788,31 @@ where company_id=$1::uuid
   and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedInboxFolder, idList); err != nil && !isPostgresUndefinedTable(err, "resource_gvic_assignments") {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `
+		if deleteCompanyConnections {
+			if len(sharedInboxIDs) > 0 {
+				sharedInboxIDList := strings.Join(sharedInboxIDs, ",")
+				if _, err := tx.ExecContext(ctx, `
+delete from resource_permissions
+where company_id=$1::uuid
+  and resource_type=$2
+  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedInbox, sharedInboxIDList); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, `
+delete from resource_gvic_assignments
+where company_id=$1::uuid
+  and resource_type=$2
+  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedInbox, sharedInboxIDList); err != nil && !isPostgresUndefinedTable(err, "resource_gvic_assignments") {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, `
+delete from shared_inboxes
+where company_id=$1::uuid
+  and shared_inbox_id = any(string_to_array($2, ',')::uuid[])`, companyID, sharedInboxIDList); err != nil {
+					return err
+				}
+			}
+		} else if _, err := tx.ExecContext(ctx, `
 update shared_inboxes
 set parent_folder_id=null,
     updated_timestamp=now()
@@ -743,31 +825,87 @@ delete from shared_inbox_folders
 where company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, idList); err != nil {
 			return err
 		}
+		if deleteCompanyConnections && len(companyEmailConnectionIDs) > 0 {
+			connectionIDList := strings.Join(companyEmailConnectionIDs, ",")
+			if _, err := tx.ExecContext(ctx, `
+delete from company_email_connections
+where company_id=$1::uuid
+  and company_email_connection_id = any(string_to_array($2, ',')::uuid[])`, companyID, connectionIDList); err != nil && !isPostgresUndefinedTable(err, "company_email_connections") {
+				return err
+			}
+		}
 		return tx.Commit()
 	}
 
-	if exists, err := postgresTxExists(ctx, tx, `select exists(select 1 from shared_inboxes where company_id=$1::uuid and shared_inbox_id=$2::uuid)`, companyID, folderID); err != nil {
-		return err
-	} else if !exists {
+	var companyEmailConnectionID sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+select company_email_connection_id::text
+from shared_inboxes
+where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID).Scan(&companyEmailConnectionID); errors.Is(err, sql.ErrNoRows) {
 		if folderExists, err := postgresTxExists(ctx, tx, `select exists(select 1 from shared_inbox_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, folderID); err != nil {
 			return err
 		} else if folderExists {
 			return ErrInvalid
 		}
 		return ErrNotFound
+	} else if err != nil {
+		return err
 	}
+	sharedInboxIDs := []string{folderID}
+	if deleteCompanyConnections && companyEmailConnectionID.Valid {
+		rows, err := tx.QueryContext(ctx, `
+select shared_inbox_id::text
+from shared_inboxes
+where company_id=$1::uuid
+  and company_email_connection_id=$2::uuid`, companyID, companyEmailConnectionID.String)
+		if err != nil {
+			return err
+		}
+		sharedInboxIDs = sharedInboxIDs[:0]
+		for rows.Next() {
+			var inboxID string
+			if err := rows.Scan(&inboxID); err != nil {
+				rows.Close()
+				return err
+			}
+			sharedInboxIDs = append(sharedInboxIDs, inboxID)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+	}
+	sharedInboxIDList := strings.Join(sharedInboxIDs, ",")
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_permissions
-where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, EntityTypeSharedInbox, folderID); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+where company_id=$1::uuid
+  and resource_type=$2
+  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedInbox, sharedInboxIDList); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_gvic_assignments
-where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, EntityTypeSharedInbox, folderID); err != nil && !isPostgresUndefinedTable(err, "resource_gvic_assignments") {
+where company_id=$1::uuid
+  and resource_type=$2
+  and resource_id = any(string_to_array($3, ',')::uuid[])`, companyID, EntityTypeSharedInbox, sharedInboxIDList); err != nil && !isPostgresUndefinedTable(err, "resource_gvic_assignments") {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `delete from shared_inboxes where company_id=$1::uuid and shared_inbox_id=$2::uuid`, companyID, folderID); err != nil {
+	if _, err := tx.ExecContext(ctx, `
+delete from shared_inboxes
+where company_id=$1::uuid
+  and shared_inbox_id = any(string_to_array($2, ',')::uuid[])`, companyID, sharedInboxIDList); err != nil {
 		return err
+	}
+	if deleteCompanyConnections && companyEmailConnectionID.Valid {
+		if _, err := tx.ExecContext(ctx, `
+delete from company_email_connections
+where company_id=$1::uuid
+  and company_email_connection_id=$2::uuid`, companyID, companyEmailConnectionID.String); err != nil && !isPostgresUndefinedTable(err, "company_email_connections") {
+			return err
+		}
 	}
 	return tx.Commit()
 }

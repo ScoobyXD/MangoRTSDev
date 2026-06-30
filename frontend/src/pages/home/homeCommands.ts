@@ -8,6 +8,7 @@ import {
   deleteCommunicationsSharedInbox as defaultDeleteCommunicationsSharedInbox,
   deleteEmailMessage as defaultDeleteEmailMessage,
   invalidateCommunicationsCache as defaultInvalidateCommunicationsCache,
+  removeCommunicationsSharedInbox as defaultRemoveCommunicationsSharedInbox,
   removeMyLogicGateShortcut as defaultRemoveMyLogicGateShortcut,
   parseEmailAddressList,
   sendEmail as defaultSendEmail,
@@ -89,6 +90,7 @@ export type HomeConvertTriageMessagesToLogicGate = typeof defaultConvertTriageMe
 export type HomeCreateSharedInbox = typeof defaultCreateCommunicationsSharedInbox;
 export type HomeUpdateSharedInbox = typeof defaultUpdateCommunicationsSharedInbox;
 export type HomeDeleteSharedInbox = typeof defaultDeleteCommunicationsSharedInbox;
+export type HomeRemoveSharedInbox = typeof defaultRemoveCommunicationsSharedInbox;
 export type HomeUpdateSharedInboxGVICAssignments = typeof defaultUpdateCommunicationsSharedInboxGVICAssignments;
 
 export type HomeBulkNodePatch = Partial<Pick<NodeRecord, "priority" | "status" | "due_date">>;
@@ -746,6 +748,21 @@ export async function deleteSharedInboxCommand(args: {
   if (deletedIDs.size === 0) deletedIDs.add(folderID);
   const deleteSharedInbox = args.deleteSharedInbox ?? defaultDeleteCommunicationsSharedInbox;
   await deleteSharedInbox(args.companyID, folderID);
+  return { deletedFolderIDs: Array.from(deletedIDs) };
+}
+
+export async function removeSharedInboxCommand(args: {
+  companyID: string;
+  folderID: string;
+  sharedInboxes: CommunicationsSharedInbox[];
+  removeSharedInbox?: HomeRemoveSharedInbox;
+}): Promise<HomeSharedInboxDeleteCommandResult | null> {
+  const folderID = args.folderID.trim();
+  if (!folderID) return null;
+  const deletedIDs = collectSharedInboxSubtreeIDs(args.sharedInboxes, folderID);
+  if (deletedIDs.size === 0) deletedIDs.add(folderID);
+  const removeSharedInbox = args.removeSharedInbox ?? defaultRemoveCommunicationsSharedInbox;
+  await removeSharedInbox(args.companyID, folderID);
   return { deletedFolderIDs: Array.from(deletedIDs) };
 }
 

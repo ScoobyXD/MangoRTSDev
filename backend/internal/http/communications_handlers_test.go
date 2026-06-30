@@ -704,6 +704,86 @@ func TestNylasCallbackCreatesSharedInboxFromOAuthIntent(t *testing.T) {
 	}
 }
 
+func TestNylasCallbackLinksExistingSharedInboxFromOAuthIntent(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	const companyID = "company-shared-oauth-link-existing"
+	repo.EnsureCompany(companyID, "Shared OAuth Link Existing")
+	user, err := repo.UpsertAuthUser("subject-shared-oauth-link-existing", "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyManager); err != nil {
+		t.Fatal(err)
+	}
+	oldConnection, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID:         companyID,
+		Provider:          "google",
+		AccountEmail:      "old-support@example.com",
+		GrantID:           "old-support-grant",
+		Status:            "connected",
+		ConnectedByUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", oldConnection.AccountEmail)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config := testNylasConfig()
+	state, err := signNylasOAuthState(config.StateSecret, nylasOAuthStatePayload{
+		UserID:               user.UserID,
+		Email:                "support@example.com",
+		UserEmail:            user.Email,
+		Provider:             "google",
+		StrictEmail:          true,
+		SharedInboxCompanyID: companyID,
+		SharedInboxID:        folder.FolderID,
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "shared-link-grant", Email: "support@example.com", Provider: "google"}}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		NylasClient: nylas,
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/nylas/oauth/callback?code=abc&state="+url.QueryEscape(state), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("callback status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	redirect, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if redirect.Query().Get("nylas_scope") != "shared" || redirect.Query().Get("nylas_shared_inbox_id") != folder.FolderID {
+		t.Fatalf("callback redirect = %s, want shared scope and existing shared inbox id", redirect.String())
+	}
+	updated, err := repo.GetCommunicationsSharedInboxFolder(companyID, folder.FolderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AccountEmail == nil || *updated.AccountEmail != "support@example.com" {
+		t.Fatalf("updated shared inbox account email = %+v, want support@example.com", updated.AccountEmail)
+	}
+	if updated.CompanyEmailConnectionID == "" || updated.CompanyEmailConnectionID == oldConnection.CompanyEmailConnectionID {
+		t.Fatalf("updated shared inbox company connection = %q, want new connection", updated.CompanyEmailConnectionID)
+	}
+	shared, err := repo.GetCompanyEmailConnectionByAccountEmail(companyID, "support@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shared.CompanyEmailConnectionID != updated.CompanyEmailConnectionID || shared.GrantID != "shared-link-grant" {
+		t.Fatalf("shared company connection = %+v, want linked grant %s", shared, updated.CompanyEmailConnectionID)
+	}
+}
+
 func TestNylasCallbackRejectsSharedInboxOAuthIntentForCompanyUser(t *testing.T) {
 	t.Parallel()
 

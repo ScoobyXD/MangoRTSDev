@@ -20,8 +20,10 @@ import {
   fetchCommunicationsAuthURL,
   fetchCommunicationsStatus,
   listCommunicationsSharedInboxes,
+  removeCommunicationsSharedInbox,
   updateCommunicationsSharedInbox,
   type CommunicationsSharedInbox,
+  type CommunicationsSharedInboxCreateIntent,
   type CommunicationsTriageConversionTarget,
   type EmailProvider,
 } from "../modules/communications/communicationsApi";
@@ -165,6 +167,7 @@ type SidebarSharedInboxCreateDialogState = {
 
 type SidebarSharedInboxDeleteDialogState = {
   folder: CommunicationsSharedInbox;
+  action: "delete" | "remove";
   title: string;
   detail: string;
   label: string;
@@ -271,7 +274,7 @@ export function AppSidebar({
   const [sharedCreateDialog, setSharedCreateDialog] = useState<SidebarSharedInboxCreateDialogState | null>(null);
   const [sharedEmailDialog, setSharedEmailDialog] = useState<{ folder: CommunicationsSharedInbox; draft: string; error: string } | null>(null);
   const [sharedDeleteDialog, setSharedDeleteDialog] = useState<SidebarSharedInboxDeleteDialogState | null>(null);
-  const [sharedEmailConnectionDialog, setSharedEmailConnectionDialog] = useState<{ accountEmail: string } | null>(null);
+  const [sharedEmailConnectionDialog, setSharedEmailConnectionDialog] = useState<{ accountEmail: string; createIntent?: CommunicationsSharedInboxCreateIntent } | null>(null);
   const [pinContextMenu, setPinContextMenu] = useState<{ x: number; y: number; pin: SidebarPin } | null>(null);
   const [pinDropTarget, setPinDropTarget] = useState<{ key: string; placement: SidebarPinDropPlacement } | null>(null);
   const [explorerTriagePriorityMenu, setExplorerTriagePriorityMenu] = useState<SidebarExplorerTriagePriorityMenuState | null>(null);
@@ -624,10 +627,10 @@ export function AppSidebar({
     setSharedInboxes((previous) => previous.map((folder) => folder.folder_id === updated.folder_id ? updated : folder));
   }, []);
 
-  const requestSharedInboxEmailConnection = useCallback((connectionError: unknown, accountEmail: string): boolean => {
+  const requestSharedInboxEmailConnection = useCallback((connectionError: unknown, accountEmail: string, createIntent?: CommunicationsSharedInboxCreateIntent): boolean => {
     const cleanAccountEmail = accountEmail.trim().toLowerCase();
     if (!cleanAccountEmail || !isSharedInboxEmailConnectionError(connectionError)) return false;
-    setSharedEmailConnectionDialog({ accountEmail: cleanAccountEmail });
+    setSharedEmailConnectionDialog({ accountEmail: cleanAccountEmail, createIntent });
     return true;
   }, []);
 
@@ -637,28 +640,28 @@ export function AppSidebar({
     setSharedBusy(true);
     setSharedError("");
     try {
-      const authURL = await fetchCommunicationsAuthURL(provider, accountEmail);
+      const authURL = await fetchCommunicationsAuthURL(provider, accountEmail, sharedEmailConnectionDialog?.createIntent);
       window.location.assign(authURL);
     } catch (error) {
       setSharedError(formatSidebarSharedInboxError(error, "Failed to start shared inbox email connection"));
       setSharedBusy(false);
     }
-  }, [sharedBusy, sharedEmailConnectionDialog?.accountEmail]);
+  }, [sharedBusy, sharedEmailConnectionDialog]);
 
   const createSharedFolder = useCallback(async (parentFolderID: string, accountEmail = "", rawName = "") => {
     if (!companyID || sharedBusy) return;
     setSharedContextMenu(null);
     setSharedBusy(true);
     setSharedError("");
+    const name = rawName.trim() || accountEmail.trim() || "New Folder";
     try {
-      const name = rawName.trim() || accountEmail.trim() || "New Folder";
       const folder = await createCommunicationsSharedInbox({ companyID, parentFolderID, name, accountEmail });
       setSharedInboxes((previous) => [...previous.filter((item) => item.folder_id !== folder.folder_id), folder]);
       if (parentFolderID) setExpandedSharedFolderIDs((previous) => new Set(previous).add(parentFolderID));
       setSharedTriageOpen(true);
       onHomeViewSelect(`shared:${folder.folder_id}`);
     } catch (error) {
-      if (requestSharedInboxEmailConnection(error, accountEmail)) return;
+      if (requestSharedInboxEmailConnection(error, accountEmail, { companyID, parentFolderID, name })) return;
       setSharedError(formatSidebarSharedInboxError(error, "Failed to create Shared Triage folder"));
       console.error("Failed to create shared triage folder", error);
     } finally {
@@ -709,7 +712,7 @@ export function AppSidebar({
       const updated = await updateCommunicationsSharedInbox({ companyID, folderID, accountEmail });
       replaceSharedFolder(updated);
     } catch (error) {
-      if (requestSharedInboxEmailConnection(error, accountEmail)) return;
+      if (requestSharedInboxEmailConnection(error, accountEmail, { companyID, folderID })) return;
       setSharedError(formatSidebarSharedInboxError(error, "Failed to update Shared Triage email"));
       console.error("Failed to update shared triage email account", error);
     } finally {
@@ -800,6 +803,26 @@ export function AppSidebar({
     }
   }, [canDropSharedFolder, companyID, replaceSharedFolder, sharedBusy, sharedInboxes]);
 
+  const requestRemoveSharedFolder = useCallback(async (folder: CommunicationsSharedInbox, position?: ConfirmActionMenuPosition) => {
+    if (!companyID || sharedBusy) return;
+    const subtreeIDs = collectSharedInboxSubtreeIDs(sharedInboxes, folder.folder_id);
+    const label = folder.name.trim() || "this folder";
+    if (folder.entry_type === "shared_inbox") {
+      if (subtreeIDs.size === 0) subtreeIDs.add(folder.folder_id);
+      setSharedDeleteDialog({
+        folder,
+        action: "remove",
+        title: "Remove from Shared Triage",
+        detail: "this Shared Triage inbox while keeping the company email connection",
+        label,
+        confirmLabel: "Remove",
+        subtreeIDs,
+        position: position ?? null,
+      });
+      return;
+    }
+  }, [companyID, sharedBusy, sharedInboxes]);
+
   const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox, position?: ConfirmActionMenuPosition) => {
     if (!companyID || sharedBusy) return;
     const subtreeIDs = collectSharedInboxSubtreeIDs(sharedInboxes, folder.folder_id);
@@ -808,8 +831,9 @@ export function AppSidebar({
       if (subtreeIDs.size === 0) subtreeIDs.add(folder.folder_id);
       setSharedDeleteDialog({
         folder,
-        title: "Delete email from Shared Triage",
-        detail: "this email from Shared Triage",
+        action: "delete",
+        title: "Delete email connection",
+        detail: "this Shared Triage inbox and its company email connection",
         label,
         confirmLabel: "Delete email",
         subtreeIDs,
@@ -818,8 +842,8 @@ export function AppSidebar({
       return;
     }
     const count = subtreeIDs.size || 1;
-    const detail = count === 1 ? "this folder" : `this folder and ${count - 1} child folder${count === 2 ? "" : "s"}`;
-    setSharedDeleteDialog({ folder, title: "Delete folder", detail, label, confirmLabel: "Delete", subtreeIDs, position: position ?? null });
+    const detail = count === 1 ? "this folder" : `this folder and ${count - 1} child item${count === 2 ? "" : "s"}`;
+    setSharedDeleteDialog({ folder, action: "delete", title: "Delete folder", detail, label, confirmLabel: "Delete", subtreeIDs, position: position ?? null });
   }, [companyID, sharedBusy, sharedInboxes]);
 
   const confirmDeleteSharedFolder = useCallback(async () => {
@@ -829,12 +853,16 @@ export function AppSidebar({
     setSharedBusy(true);
     setSharedError("");
     try {
-      await deleteCommunicationsSharedInbox(companyID, dialog.folder.folder_id);
+      if (dialog.action === "remove") {
+        await removeCommunicationsSharedInbox(companyID, dialog.folder.folder_id);
+      } else {
+        await deleteCommunicationsSharedInbox(companyID, dialog.folder.folder_id);
+      }
       setSharedInboxes((previous) => previous.filter((item) => !dialog.subtreeIDs.has(item.folder_id)));
       const activeFolderID = activeHomeView.startsWith("shared:") ? activeHomeView.slice("shared:".length) : "";
       if (activeFolderID && dialog.subtreeIDs.has(activeFolderID)) onHomeViewSelect("shared-root");
     } catch (error) {
-      setSharedError(formatSidebarSharedInboxError(error, "Failed to delete Shared Triage folder"));
+      setSharedError(formatSidebarSharedInboxError(error, dialog.action === "remove" ? "Failed to remove Shared Triage inbox" : "Failed to delete Shared Triage folder"));
       console.error("Failed to delete shared triage folder", error);
     } finally {
       setSharedBusy(false);
@@ -1372,14 +1400,24 @@ export function AppSidebar({
             {contextFolder && (
               <>
                 {contextFolder.entry_type === "shared_inbox" && (
-                  <button
-                    type="button"
-                    style={appSidebarContextMenuButtonStyle}
-                    disabled={sharedBusy}
-                    onClick={() => openSharedEmailDialog(contextFolder)}
-                  >
-                    Change inbox email
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      style={appSidebarContextMenuButtonStyle}
+                      disabled={sharedBusy}
+                      onClick={() => openSharedEmailDialog(contextFolder)}
+                    >
+                      Change inbox email
+                    </button>
+                    <button
+                      type="button"
+                      style={appSidebarContextMenuButtonStyle}
+                      disabled={sharedBusy}
+                      onClick={(event) => void requestRemoveSharedFolder(contextFolder, confirmMenuPositionFromElement(event.currentTarget))}
+                    >
+                      Remove from Shared Triage
+                    </button>
+                  </>
                 )}
                 <button
                   type="button"

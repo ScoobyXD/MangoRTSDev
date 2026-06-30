@@ -223,6 +223,14 @@ func (r *MemoryRepo) RenameCommunicationsSharedInboxFolder(companyID, folderID, 
 }
 
 func (r *MemoryRepo) DeleteCommunicationsSharedInboxFolder(companyID, folderID string) error {
+	return r.deleteCommunicationsSharedInboxFolder(companyID, folderID, true)
+}
+
+func (r *MemoryRepo) RemoveCommunicationsSharedInboxFolder(companyID, folderID string) error {
+	return r.deleteCommunicationsSharedInboxFolder(companyID, folderID, false)
+}
+
+func (r *MemoryRepo) deleteCommunicationsSharedInboxFolder(companyID, folderID string, deleteCompanyConnections bool) error {
 	companyID = strings.TrimSpace(companyID)
 	folderID = strings.TrimSpace(folderID)
 	if companyID == "" || folderID == "" {
@@ -237,15 +245,29 @@ func (r *MemoryRepo) DeleteCommunicationsSharedInboxFolder(companyID, folderID s
 	}
 	root = normalizeMemorySharedInboxFolder(root)
 	if root.EntryType == CommunicationsSharedInboxEntryTypeSharedInbox {
-		delete(r.folders, key(companyID, folderID))
-		delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, folderID))
-		if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeSharedInbox, folderID); err != nil {
-			return err
+		toDelete := map[string]bool{folderID: true}
+		connectionID := strings.TrimSpace(root.CompanyEmailConnectionID)
+		if deleteCompanyConnections && connectionID != "" {
+			for _, folder := range r.folders {
+				if folder.CompanyID == companyID && normalizeMemorySharedInboxFolder(folder).EntryType == CommunicationsSharedInboxEntryTypeSharedInbox && strings.TrimSpace(folder.CompanyEmailConnectionID) == connectionID {
+					toDelete[folder.FolderID] = true
+				}
+			}
+		}
+		for id := range toDelete {
+			delete(r.folders, key(companyID, id))
+			delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, id))
+			if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeSharedInbox, id); err != nil {
+				return err
+			}
 		}
 		for permissionKey, permission := range r.entityPermissions {
-			if permission.CompanyID == companyID && permission.EntityType == EntityTypeSharedInbox && permission.EntityID == folderID {
+			if permission.CompanyID == companyID && permission.EntityType == EntityTypeSharedInbox && toDelete[permission.EntityID] {
 				delete(r.entityPermissions, permissionKey)
 			}
+		}
+		if deleteCompanyConnections && connectionID != "" {
+			delete(r.companyEmailConnections, companyEmailConnectionKey(companyID, connectionID))
 		}
 		return nil
 	}
@@ -267,6 +289,8 @@ func (r *MemoryRepo) DeleteCommunicationsSharedInboxFolder(companyID, folderID s
 			changed = true
 		}
 	}
+	sharedInboxesToDelete := map[string]bool{}
+	companyEmailConnectionIDs := map[string]bool{}
 	now := time.Now().UTC()
 	for itemKey, folder := range r.folders {
 		if folder.CompanyID != companyID || folder.FolderKind != "communications" || folder.ParentFolderID == nil {
@@ -278,9 +302,26 @@ func (r *MemoryRepo) DeleteCommunicationsSharedInboxFolder(companyID, folderID s
 		if normalizeCommunicationsSharedInboxEntryType(folder.EntryType, folder.AccountEmail != nil) != CommunicationsSharedInboxEntryTypeSharedInbox {
 			continue
 		}
-		folder.ParentFolderID = nil
-		folder.UpdatedTimestamp = now
-		r.folders[itemKey] = folder
+		if deleteCompanyConnections {
+			sharedInboxesToDelete[folder.FolderID] = true
+			if connectionID := strings.TrimSpace(folder.CompanyEmailConnectionID); connectionID != "" {
+				companyEmailConnectionIDs[connectionID] = true
+			}
+		} else {
+			folder.ParentFolderID = nil
+			folder.UpdatedTimestamp = now
+			r.folders[itemKey] = folder
+		}
+	}
+	if deleteCompanyConnections {
+		for _, folder := range r.folders {
+			if folder.CompanyID != companyID || normalizeMemorySharedInboxFolder(folder).EntryType != CommunicationsSharedInboxEntryTypeSharedInbox {
+				continue
+			}
+			if companyEmailConnectionIDs[strings.TrimSpace(folder.CompanyEmailConnectionID)] {
+				sharedInboxesToDelete[folder.FolderID] = true
+			}
+		}
 	}
 	for id := range toDelete {
 		delete(r.folders, key(companyID, id))
@@ -289,8 +330,26 @@ func (r *MemoryRepo) DeleteCommunicationsSharedInboxFolder(companyID, folderID s
 			return err
 		}
 	}
+	for id := range sharedInboxesToDelete {
+		delete(r.folders, key(companyID, id))
+		delete(r.sharedInboxGVIC, sharedInboxGVICKey(companyID, id))
+		if err := r.deleteEffectiveFactsForResourceLocked(companyID, EntityTypeSharedInbox, id); err != nil {
+			return err
+		}
+	}
+	if deleteCompanyConnections {
+		for connectionID := range companyEmailConnectionIDs {
+			delete(r.companyEmailConnections, companyEmailConnectionKey(companyID, connectionID))
+		}
+	}
 	for permissionKey, permission := range r.entityPermissions {
-		if permission.CompanyID == companyID && permission.EntityType == EntityTypeSharedInboxFolder && toDelete[permission.EntityID] {
+		if permission.CompanyID != companyID {
+			continue
+		}
+		if permission.EntityType == EntityTypeSharedInboxFolder && toDelete[permission.EntityID] {
+			delete(r.entityPermissions, permissionKey)
+		}
+		if permission.EntityType == EntityTypeSharedInbox && sharedInboxesToDelete[permission.EntityID] {
 			delete(r.entityPermissions, permissionKey)
 		}
 	}

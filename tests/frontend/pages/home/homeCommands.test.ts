@@ -6,7 +6,7 @@ import type { LogicGateAssignmentCommandResult, GVICMatrixProjectionRow } from "
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "../../../../frontend/src/pages/home/homeConstants.js";
-import { addMyLogicGateShortcutsCommand, addSharedInboxGVICPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxGVICPrincipalCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateGVICMatrixNode, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeMoveMyWorkNodeToCell, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxGVICAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { addMyLogicGateShortcutsCommand, addSharedInboxGVICPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxCommand, removeSharedInboxGVICPrincipalCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateGVICMatrixNode, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeMoveMyWorkNodeToCell, type HomeRemoveMyLogicGateShortcut, type HomeRemoveSharedInbox, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxGVICAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 
 const timestamp = "2026-01-01T00:00:00Z";
 
@@ -771,6 +771,7 @@ test("Home compose command validates and normalizes send payloads", async () => 
 test("Home shared inbox commands normalize folder operations", async () => {
   const updatedCalls: Array<Parameters<HomeUpdateSharedInbox>[0]> = [];
   const deletedCalls: Array<{ companyID: string; folderID: string }> = [];
+  const removedCalls: Array<{ companyID: string; folderID: string }> = [];
   const createSharedInbox: HomeCreateSharedInbox = async (input) => sharedInbox("child-1", {
     name: input.name,
     parent_folder_id: input.parentFolderID,
@@ -788,6 +789,9 @@ test("Home shared inbox commands normalize folder operations", async () => {
   const deleteSharedInbox: HomeDeleteSharedInbox = async (companyID, folderID) => {
     deletedCalls.push({ companyID, folderID });
   };
+  const removeSharedInbox: HomeRemoveSharedInbox = async (companyID, folderID) => {
+    removedCalls.push({ companyID, folderID });
+  };
 
   const created = await createSharedInboxCommand({ companyID: "company-1", parentFolderID: "parent-1", rawName: " Team ", accountEmail: "team@example.test", createSharedInbox });
   const attached = await updateSharedInboxAccountEmailCommand({ companyID: "company-1", folderID: " child-1 ", accountEmail: "team@example.test", updateSharedInbox });
@@ -799,6 +803,12 @@ test("Home shared inbox commands normalize folder operations", async () => {
     sharedInboxes: [sharedInbox("parent-1"), sharedInbox("child-1", { parent_folder_id: "parent-1" })],
     deleteSharedInbox,
   });
+  const removed = await removeSharedInboxCommand({
+    companyID: "company-1",
+    folderID: " child-1 ",
+    sharedInboxes: [sharedInbox("parent-1"), sharedInbox("child-1", { parent_folder_id: "parent-1" })],
+    removeSharedInbox,
+  });
 
   assert.equal(created?.viewID, "shared:child-1");
   assert.equal(created?.folder.name, "Team");
@@ -809,7 +819,9 @@ test("Home shared inbox commands normalize folder operations", async () => {
     { folderID: "child-1", name: undefined, parentFolderID: "parent-2", position: 2000, accountEmail: undefined },
   ]);
   assert.deepEqual(deletedCalls, [{ companyID: "company-1", folderID: "parent-1" }]);
+  assert.deepEqual(removedCalls, [{ companyID: "company-1", folderID: "child-1" }]);
   assert.deepEqual(deleted?.deletedFolderIDs.sort(), ["child-1", "parent-1"]);
+  assert.deepEqual(removed?.deletedFolderIDs, ["child-1"]);
 });
 
 test("Home shared inbox GVIC commands build direct replacement payloads", async () => {

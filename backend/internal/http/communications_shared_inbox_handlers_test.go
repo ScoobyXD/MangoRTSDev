@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -121,6 +122,68 @@ func TestCommunicationsSharedInboxRoutesManageFoldersAndAccess(t *testing.T) {
 	}
 	if len(listPayload.SharedInboxes) != 1 || listPayload.SharedInboxes[0].FolderID != created.FolderID || listPayload.SharedInboxes[0].AccountEmail != "shared@example.com" {
 		t.Fatalf("shared inbox list = %+v", listPayload.SharedInboxes)
+	}
+}
+
+func TestCommunicationsSharedInboxDeleteRemovesConnectionAndRemoveKeepsConnection(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	companyID := "company-shared-inbox-delete-connection"
+	repo.EnsureCompany(companyID, "Shared Inbox Delete Connection")
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
+
+	user, err := repo.UpsertAuthUser("subject-shared-delete-connection", "shared-delete@example.com", "Shared Delete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: "shared-delete@example.com",
+		Scope:        "shared",
+		GrantID:      "grant-shared-delete",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Remove Only", "shared-delete@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	removeReq := httptest.NewRequest(http.MethodDelete, "/v1/communications/shared-inboxes/"+removed.FolderID+"?company_id="+companyID+"&remove_only=true", nil)
+	removeRec := httptest.NewRecorder()
+	handler.ServeHTTP(removeRec, removeReq)
+	if removeRec.Code != http.StatusOK {
+		t.Fatalf("remove-only status = %d, want 200 body=%s", removeRec.Code, removeRec.Body.String())
+	}
+	if _, err := repo.GetCommunicationsSharedInboxFolder(companyID, removed.FolderID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("removed shared inbox error = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.GetCompanyEmailConnectionByAccountEmail(companyID, "shared-delete@example.com"); err != nil {
+		t.Fatalf("company connection after remove-only = %v, want kept", err)
+	}
+
+	deleted, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Delete Everywhere", "shared-delete@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/communications/shared-inboxes/"+deleted.FolderID+"?company_id="+companyID, nil)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want 200 body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	if _, err := repo.GetCommunicationsSharedInboxFolder(companyID, deleted.FolderID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted shared inbox error = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.GetCompanyEmailConnectionByAccountEmail(companyID, "shared-delete@example.com"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("company connection after delete = %v, want ErrNotFound", err)
 	}
 }
 

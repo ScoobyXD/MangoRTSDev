@@ -21,6 +21,7 @@ import {
   markCommunicationsWorkspacePanelStale,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
+  removeCommunicationsSharedInbox,
   removeLogicGateGVICAssignments,
   sendEmail,
   unarchiveEmailMessage,
@@ -89,6 +90,7 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
     const updated = await updateCommunicationsSharedInbox({ companyID: "company-1", folderID: " shared-1 ", name: " Client Facing " });
     const access = await updateCommunicationsSharedInboxGVICAssignments("company-1", "shared-1", [{ role: "generated", principal_type: "user", principal_id: "user-1", user_id: "user-1" }]);
     await deleteCommunicationsSharedInbox("company-1", "shared-1");
+    await removeCommunicationsSharedInbox("company-1", "shared-1");
 
     assert.equal(listed[0]?.name, "Business");
     assert.equal(created.folder_id, "shared-2");
@@ -117,6 +119,11 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
       },
       {
         path: "/v1/communications/shared-inboxes/shared-1?company_id=company-1",
+        method: "DELETE",
+        body: undefined,
+      },
+      {
+        path: "/v1/communications/shared-inboxes/shared-1?company_id=company-1&remove_only=true",
         method: "DELETE",
         body: undefined,
       },
