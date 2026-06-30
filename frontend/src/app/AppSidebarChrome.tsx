@@ -282,6 +282,7 @@ export function AppSidebar({
   const [pinTriagePriorityMenu, setPinTriagePriorityMenu] = useState<SidebarPinTriagePriorityMenuState | null>(null);
   const [explorerTriageBusy, setExplorerTriageBusy] = useState(false);
   const [pinnedResourceDropBusy, setPinnedResourceDropBusy] = useState(false);
+  const [explorerDropSuccess, setExplorerDropSuccess] = useState("");
   const [pinDropSuccess, setPinDropSuccess] = useState("");
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
@@ -327,6 +328,13 @@ export function AppSidebar({
     }, 3_000);
     return () => window.clearTimeout(timerID);
   }, [pinDropSuccess]);
+  useEffect(() => {
+    if (!explorerDropSuccess) return undefined;
+    const timerID = window.setTimeout(() => {
+      setExplorerDropSuccess((current) => current === explorerDropSuccess ? "" : current);
+    }, 3_000);
+    return () => window.clearTimeout(timerID);
+  }, [explorerDropSuccess]);
 
   const openMailBadgeView = useCallback((view: HomeSidebarView) => {
     onPageSelect("home");
@@ -345,6 +353,8 @@ export function AppSidebar({
     if (!menu || explorerTriageBusy || !cleanCompanyID) return;
     setExplorerTriagePriorityMenu(null);
     setExplorerTriageBusy(true);
+    setSharedError("");
+    setExplorerDropSuccess("");
     try {
       const target = sidebarExplorerTriageConversionTarget(menu.target);
       if (!target) {
@@ -377,8 +387,10 @@ export function AppSidebar({
         ],
         cardIDs: (conversion?.result.cards ?? []).map((card) => card.card_id),
       });
+      setExplorerDropSuccess(convertedMessageIDs.length === 1 ? "Email added to Logic Gate." : `${convertedMessageIDs.length} emails added to Logic Gate.`);
     } catch (error) {
       console.error("Failed to assign triage email from sidebar Explorer", error);
+      setExplorerDropSuccess("");
       setSharedError(error instanceof Error ? error.message : "Failed to assign email.");
     } finally {
       setExplorerTriageBusy(false);
@@ -443,7 +455,6 @@ export function AppSidebar({
         target,
         messageIDs: menu.action.messageIDs,
         priority,
-        invalidateCommunications: () => undefined,
       });
       const convertedMessageIDs = conversion?.convertedMessageIDs.length ? conversion.convertedMessageIDs : menu.action.messageIDs;
       dispatchHomeTriageConversionApplied({
@@ -1093,6 +1104,11 @@ export function AppSidebar({
           </svg>
         </div>
       </div>
+      {explorerDropSuccess && (
+        <div role="status" style={appSidebarExplorerSuccessStyle}>
+          {explorerDropSuccess}
+        </div>
+      )}
 
       {!explorerSearchActive && (
         <>
@@ -2586,6 +2602,19 @@ const appSidebarSharedErrorStyle: React.CSSProperties = {
   fontSize: 10,
   fontWeight: 700,
   lineHeight: 1.25,
+};
+
+const appSidebarExplorerSuccessStyle: React.CSSProperties = {
+  margin: "0 5px 8px",
+  padding: "6px 8px",
+  border: "1px solid rgba(34, 197, 94, 0.36)",
+  borderRadius: 7,
+  background: "linear-gradient(135deg, rgba(220, 252, 231, 0.96), rgba(187, 247, 208, 0.9))",
+  color: "#166534",
+  fontSize: 10,
+  fontWeight: 800,
+  lineHeight: 1.25,
+  boxShadow: "0 5px 12px rgba(22, 101, 52, 0.12)",
 };
 
 const appSidebarPinSuccessStyle: React.CSSProperties = {

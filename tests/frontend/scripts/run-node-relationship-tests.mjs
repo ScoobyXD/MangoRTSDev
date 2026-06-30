@@ -22,6 +22,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/hooks/keyboardShortcutRouting.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/frameLinking.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/framePointerRouting.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/app/appLiveFreshnessBridge.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/deepLinkRoutes.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinDrops.test.js"),

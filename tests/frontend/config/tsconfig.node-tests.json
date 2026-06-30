@@ -50,6 +50,8 @@
     "../app/frameLinking.test.ts",
     "../../../frontend/src/app/framePointerRouting.ts",
     "../app/framePointerRouting.test.ts",
+    "../../../frontend/src/app/appLiveFreshnessBridgeEcho.ts",
+    "../app/appLiveFreshnessBridge.test.ts",
     "../../../frontend/src/pages/home/homeTypes.ts",
     "../../../frontend/src/pages/home/homeConstants.ts",
     "../../../frontend/src/app/deepLinkRoutes.ts",

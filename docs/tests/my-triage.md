@@ -69,7 +69,8 @@ MT58 - Transferring a direct email-created Kanban card into another node is not 
 MT59 - A successful email-card transfer deletes the source email-created workspace node/card and creates or updates an email attachment on the target node.
 MT60 - My Triage revert is only for restoring the original direct email-created card back to triage; once that email is transferred into another node, the transferred email is represented as a target-node attachment instead of a triage row.
 MT61 - Drag payloads from My Triage and Shared Triage must carry message IDs plus source mailbox scope; Shared Triage drags include `shared_inbox_id`, while My Triage drags leave that scope empty.
-MT62 - Successful local email conversion into a Logic Gate must use the conversion response to update visible state and suppress matching immediate communications/workspace realtime echoes; it must not blank the email list or repeatedly reload the Home workspace panel.
+MT62 - Successful local email conversion into a Logic Gate or Company Explorer Logic Gate must remove converted rows from visible state and local message caches from the conversion response; Home and the global communications live-freshness bridge must suppress the matching local `triage.converted` echo and must not invalidate all communications message page/detail caches, trigger post-removal mail prefetch, blank the email list, or repeatedly issue mail GETs.
+MT63 - Successful local email conversion into a Logic Gate must show a temporary green success banner or notice.
 
 ## Scenarios
 
@@ -204,6 +205,7 @@ Business logic covered:
 - MT56
 - MT57
 - MT62
+- MT63
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
@@ -218,7 +220,8 @@ Expected:
 - Browser focus and visibility changes do not force a message-list refresh.
 - New-email realtime events with a message ID fetch that single message and insert it into the current date-sorted list when it matches the active filters.
 - Updated, opened, deleted, or converted-message realtime events touch only the affected visible or selected row when the event carries enough IDs.
-- Local conversion echoes from the user's own email-to-Logic-Gate drop do not trigger repeated mail GETs, workspace panel GET bursts, or visible list blanking.
+- Local conversion from the user's own email-to-Logic-Gate drop removes converted rows from local state/cache and suppresses matching local `triage.converted` echoes without clearing all message caches, post-removal prefetching, repeated mail GETs, workspace panel GET bursts, or visible list blanking.
+- A successful local conversion shows a short green success notice.
 - Realtime message events that do not carry a message ID do not trigger a whole-list reload; the next explicit page/list load reconciles provider state.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
 - Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.

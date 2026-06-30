@@ -54,6 +54,7 @@ import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { createRequestJSON } from "../api/requestJSON";
 import { convertTriageMessagesToExplorerTarget, listCompanyUserGroups, listCompanyUsers, type CommunicationsTriageConversionTarget, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
+import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, type HomeTriageConversionAppliedDetail } from "../../pages/home/homeConstants";
 import { createProject, type ProjectRecord } from "../project-management/projectManagementApi";
 import { listMyLogicGates, listGVICMatrixProjectionRows, type WorkItemLogicGateInboxItem } from "../work-items/workItemReadApi";
 import {
@@ -97,6 +98,18 @@ const companyExplorerTriageDropMenuButtonStyle: React.CSSProperties = {
   fontWeight: 600,
   textAlign: "left",
   padding: "0 12px",
+};
+const companyExplorerTriageDropSuccessStyle: React.CSSProperties = {
+  margin: "8px 10px 0",
+  padding: "7px 9px",
+  border: "1px solid rgba(34, 197, 94, 0.36)",
+  borderRadius: 7,
+  background: "linear-gradient(135deg, rgba(220, 252, 231, 0.96), rgba(187, 247, 208, 0.9))",
+  color: "#166534",
+  fontSize: 11,
+  fontWeight: 800,
+  lineHeight: 1.25,
+  boxShadow: "0 5px 12px rgba(22, 101, 52, 0.12)",
 };
 const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_LABELS = ["logic gates by function", "logic gates by person"] as const;
 const HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_NAMES = new Set<string>(HIDDEN_MAIN_EXPLORER_ROOT_FOLDER_LABELS);
@@ -249,6 +262,11 @@ function companyExplorerTriageConversionTarget(target: CompanyExplorerTriageMess
     default:
       return null;
   }
+}
+
+function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<HomeTriageConversionAppliedDetail>(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, { detail }));
 }
 
 function companyExplorerEnvelopeParentEntityID(data: Record<string, unknown>): string | null {
@@ -1308,6 +1326,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const [error, setError] = useState("");
   const [internalTriageDropMenu, setInternalTriageDropMenu] = useState<CompanyExplorerInternalTriageDropMenu | null>(null);
   const [internalTriageDropBusy, setInternalTriageDropBusy] = useState(false);
+  const [internalTriageDropSuccess, setInternalTriageDropSuccess] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(createInitialCompanyExplorerExpandedRows);
   const selectedTreeIDRef = useRef(selectedTreeID);
   const expandedRef = useRef(expanded);
@@ -1365,6 +1384,13 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   useEffect(() => {
     companyExplorerV2RowsRef.current = companyExplorerV2Rows;
   }, [companyExplorerV2Rows]);
+  useEffect(() => {
+    if (!internalTriageDropSuccess) return undefined;
+    const timerID = window.setTimeout(() => {
+      setInternalTriageDropSuccess((current) => current === internalTriageDropSuccess ? "" : current);
+    }, 3_000);
+    return () => window.clearTimeout(timerID);
+  }, [internalTriageDropSuccess]);
   const scopedRootName = scopedRootFolderName.trim();
   const scopedKind = scopedRootName ? (scopedRootFolderKind ?? "logic_gate") : undefined;
   const scopedExplorerActive = Boolean(scopedKind && scopedRootName);
@@ -3569,27 +3595,51 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   }, [onTriageMessagesDrop]);
 
   const pickCompanyExplorerTriageDropPriority = useCallback(async (priority: number) => {
-    if (!internalTriageDropMenu) return;
-    const target = companyExplorerTriageConversionTarget(internalTriageDropMenu.target);
+    const menu = internalTriageDropMenu;
+    if (!menu) return;
+    const target = companyExplorerTriageConversionTarget(menu.target);
     if (!target) {
       setError("invalid_triage_drop_target");
       setInternalTriageDropMenu(null);
       return;
     }
     setInternalTriageDropBusy(true);
+    setInternalTriageDropSuccess("");
     setError("");
+    dispatchHomeTriageConversionApplied({
+      companyID,
+      messageIDs: menu.messageIDs,
+      sharedInboxID: menu.sharedInboxID,
+    });
     try {
       const result = await convertTriageMessagesToExplorerTarget({
         companyID,
-        sharedInboxID: internalTriageDropMenu.sharedInboxID,
+        sharedInboxID: menu.sharedInboxID,
         target,
-        messageIDs: internalTriageDropMenu.messageIDs,
+        messageIDs: menu.messageIDs,
         priority,
       });
       if (result.folder_items && result.folder_items.length > 0) dispatchExplorerStore({ type: "upsertFolderItems", folderItems: result.folder_items });
       if (result.explorer_v2_rows && result.explorer_v2_rows.length > 0) dispatchExplorerStore({ type: "upsertV2Rows", rows: result.explorer_v2_rows });
+      const convertedMessageIDs = result.deleted_message_ids.length > 0 ? result.deleted_message_ids : menu.messageIDs;
+      const boardIDs = Array.from(new Set([
+        result.board?.board_id ?? "",
+        ...(result.cards ?? []).map((card) => card.board_id),
+      ].map((id) => id.trim()).filter(Boolean)));
+      dispatchHomeTriageConversionApplied({
+        companyID,
+        messageIDs: convertedMessageIDs,
+        sharedInboxID: menu.sharedInboxID,
+        logicGateID: target.mode === "existing_logic_gate" ? target.logicGateID : undefined,
+        nodeIDs: result.nodes.map((node) => node.node_id),
+        boardIDs,
+        cardIDs: (result.cards ?? []).map((card) => card.card_id),
+      });
+      const targetLabel = target.mode === "existing_logic_gate" ? "Logic Gate" : "Explorer";
+      setInternalTriageDropSuccess(convertedMessageIDs.length === 1 ? `Email added to ${targetLabel}.` : `${convertedMessageIDs.length} emails added to ${targetLabel}.`);
       setInternalTriageDropMenu(null);
     } catch (err) {
+      setInternalTriageDropSuccess("");
       setError(err instanceof Error ? err.message : "failed_to_convert_triage_messages");
     } finally {
       setInternalTriageDropBusy(false);
@@ -3630,6 +3680,12 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         minWidth: 0,
       }}
     >
+      {internalTriageDropSuccess && (
+        <div role="status" style={companyExplorerTriageDropSuccessStyle}>
+          {internalTriageDropSuccess}
+        </div>
+      )}
+
       <CompanyExplorerTree
         error={error}
         accent={accent}
