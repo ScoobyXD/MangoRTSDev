@@ -21,6 +21,7 @@ import {
   markCommunicationsWorkspacePanelStale,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
+  patchEmailMessagesLogicGatePlacement,
   removeCommunicationsSharedInbox,
   removeLogicGateGVICAssignments,
   sendEmail,
@@ -344,6 +345,35 @@ test("primary mailbox filter matches real inbox labels, not archived Gmail categ
 test("starred mailbox filter only matches starred messages", () => {
   assert.equal(emailMessageMatchesListFilters(message("starred", { starred: true }), { mailbox: "starred" }), true);
   assert.equal(emailMessageMatchesListFilters(message("plain", { starred: false }), { mailbox: "starred" }), false);
+});
+
+test("logic gate placement patch keeps cached email rows visible", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  let primaryFetches = 0;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const path = input.toString();
+    if (path.includes("mailbox=primary")) {
+      primaryFetches += 1;
+      return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"] })] });
+    }
+    if (path.includes("mailbox=all")) return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"] })] });
+    return jsonResponse({ messages: [] });
+  };
+  try {
+    await listEmailMessages({ mailbox: "primary", limit: 25 });
+    await listEmailMessages({ mailbox: "all", limit: 25 });
+    patchEmailMessagesLogicGatePlacement(["msg-1"], "gate-1");
+
+    const primary = await listEmailMessages({ mailbox: "primary", limit: 25 });
+    const all = await listEmailMessages({ mailbox: "all", limit: 25 });
+    assert.equal(primaryFetches, 1);
+    assert.deepEqual(primary.messages.map((item) => [item.id, item.logic_gate_count, item.logic_gate_ids]), [["msg-1", 1, ["gate-1"]]]);
+    assert.deepEqual(all.messages.map((item) => [item.id, item.logic_gate_count, item.logic_gate_ids]), [["msg-1", 1, ["gate-1"]]]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
 });
 
 test("star updates keep inbox messages visible and add them to cached starred and all buckets", async () => {

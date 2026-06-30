@@ -3630,7 +3630,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         companyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID: menu.sharedInboxID,
-        logicGateID: target.mode === "existing_logic_gate" ? target.logicGateID : undefined,
+        logicGateID: result.board?.logic_gate_id?.trim() || (target.mode === "existing_logic_gate" ? target.logicGateID : undefined),
         nodeIDs: result.nodes.map((node) => node.node_id),
         boardIDs,
         cardIDs: (result.cards ?? []).map((card) => card.card_id),

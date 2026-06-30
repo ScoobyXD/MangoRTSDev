@@ -14,6 +14,7 @@ import {
   addLogicGateGVICAssignments,
   addLocalReplyToEmailMessage,
   disconnectCommunications,
+  emailMessageWithLogicGatePlacement,
   emailMessageMatchesListFilters,
   EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED,
   fetchCommunicationsAuthURL,
@@ -31,6 +32,7 @@ import {
   listCommunicationsSharedInboxes,
   markCommunicationsFolderCacheStale,
   mergeEmailMessageIntoMessageList,
+  patchEmailMessagesLogicGatePlacement,
   primeEmailMessageCache,
   reconcileEmailMessageLocalReply,
   reconcileLocalEmailReply,
@@ -1789,6 +1791,28 @@ export function HomePage({
       setSelectedMessage((current) => current && idSet.has(current.id) && current.starred ? { ...current, starred: false } : current);
     }
   }, [adjustStarredMailboxCount, companyID, rememberLocallyStarMutatedMessages]);
+  const patchConvertedMessageLogicGatePlacement = useCallback((messageIDs: string[], logicGateID: string, options?: { updateVisibleList?: boolean }) => {
+    const ids = cleanIDList(messageIDs);
+    const cleanLogicGateID = logicGateID.trim();
+    if (ids.length === 0 || !cleanLogicGateID) return;
+    suppressLocalTriageConversionMailNetwork();
+    patchEmailMessagesLogicGatePlacement(ids, cleanLogicGateID);
+    if (options?.updateVisibleList === false) return;
+    const idSet = new Set(ids);
+    setMessages((previous) => {
+      let changed = false;
+      const next = previous.map((message) => {
+        if (!idSet.has(message.id)) return message;
+        const patched = emailMessageWithLogicGatePlacement(message, cleanLogicGateID);
+        if (patched !== message) changed = true;
+        return patched;
+      });
+      return changed ? next : previous;
+    });
+    if (selectedMessageRef.current && idSet.has(selectedMessageRef.current.id)) {
+      setSelectedMessage((current) => current && idSet.has(current.id) ? emailMessageWithLogicGatePlacement(current, cleanLogicGateID) : current);
+    }
+  }, [suppressLocalTriageConversionMailNetwork]);
   useEffect(() => {
     return () => {
       if (messageListRefreshTimerRef.current !== null) {
@@ -1839,13 +1863,13 @@ export function HomePage({
       reconcileConvertedMessageUnstars(unstarredMessageIDs, sharedInboxID, {
         updateVisibleList: sharedInboxID === sharedInboxIDForHomeView(activeViewIDRef.current),
       });
-      for (const messageID of messageIDs) removeEmailMessageFromCache(messageID);
-      if (sharedInboxID !== sharedInboxIDForHomeView(activeViewIDRef.current)) return;
-      removeMessagesFromVisibleMailList(messageIDs, { preserveScrollAnchor: true, fillAfterRemoval: false, suppressAutoNetwork: true });
+      patchConvertedMessageLogicGatePlacement(messageIDs, detail.logicGateID ?? "", {
+        updateVisibleList: sharedInboxID === sharedInboxIDForHomeView(activeViewIDRef.current),
+      });
     };
     window.addEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
     return () => window.removeEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
-  }, [companyID, reconcileConvertedMessageUnstars, rememberLocallyAppliedTriageConversion, removeMessagesFromVisibleMailList]);
+  }, [companyID, patchConvertedMessageLogicGatePlacement, reconcileConvertedMessageUnstars, rememberLocallyAppliedTriageConversion]);
   useEffect(() => { void loadMessages({ refresh: true }); }, [loadMessages]);
   useEffect(() => {
     setNodeEditorOverlay(null);
@@ -1914,13 +1938,7 @@ export function HomePage({
         const archiveConfirmation = communicationStreamEventIsArchiveConfirmation({ trigger, action: eventAction });
         const starConfirmation = communicationStreamEventIsStarConfirmation({ trigger, action: eventAction });
         if (trigger.startsWith("triage.")) {
-          const activeSharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
-          const conversionTargetsCurrentMailbox = eventSharedInboxID ? eventSharedInboxID === activeSharedInboxID : activeSharedInboxID === "";
           if (trigger.startsWith("triage.converted") && triageConversionWasAppliedLocally(messageID, eventSharedInboxID || undefined)) return;
-          if (trigger.startsWith("triage.converted") && conversionTargetsCurrentMailbox && isTriageMailViewID(activeViewIDRef.current)) {
-            const converted = triageMessageIDsFromStreamMessageID(messageID);
-            if (converted.length > 0) removeMessagesFromVisibleMailList(converted, { preserveScrollAnchor: true });
-          }
           return;
         }
         if (trigger.startsWith("folder.")) {
@@ -3294,9 +3312,8 @@ export function HomePage({
         cardIDs: (conversion.result.cards ?? []).map((card) => card.card_id),
         logicGateIDs: [conversion.logicGateID, logicGateID],
       });
-      for (const messageID of converted) removeEmailMessageFromCache(messageID);
       reconcileConvertedMessageUnstars(conversion.unstarredMessageIDs, sharedInboxID);
-      removeMessagesFromVisibleMailList(converted, { preserveScrollAnchor: true, fillAfterRemoval: false, suppressAutoNetwork: true });
+      patchConvertedMessageLogicGatePlacement(converted, conversion.logicGateID || logicGateID);
       const title = logicGateByID.get(logicGateID)?.header || "Logic Gate";
       showNoticeWithResourceAction(converted.length === 1 ? `Sent to ${title}.` : `${converted.length} messages sent to ${title}.`, { kind: "logic_gate", logicGateID });
     } catch (convertError) {
@@ -3304,7 +3321,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, logicGateByID, reconcileConvertedMessageUnstars, rememberLocallyAppliedTriageConversion, removeMessagesFromVisibleMailList, showNoticeWithResourceAction]);
+  }, [apiBase, companyID, logicGateByID, patchConvertedMessageLogicGatePlacement, reconcileConvertedMessageUnstars, rememberLocallyAppliedTriageConversion, showNoticeWithResourceAction]);
   const selectLogicGateTreeID = useCallback((treeID: string, orderedIDs: string[], event: React.MouseEvent) => {
     activeDeleteSelectionKindRef.current = "logic_gate";
     const next = resolveExplorerClickSelection({

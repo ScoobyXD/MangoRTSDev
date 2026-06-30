@@ -24,7 +24,7 @@ MT13 - Converting into a legacy folder requires edit access to that folder, and 
 MT14 - Converting into a project requires project edit access and creates the project relationship/projection records needed for the new work item.
 MT15 - Conversion defaults the status to Pending and priority to 3 when those values are not provided.
 MT16 - Explicit conversion priority must be between 1 and 5.
-MT17 - Successful conversion removes the converted messages from My Triage and returns the deleted message IDs.
+MT17 - Successful conversion returns converted/deleted triage message IDs for backend reconciliation and realtime echo matching, but the source mailbox email row remains visible locally and shows its updated Logic Gate placement icon.
 MT18 - Successful conversion emits the triage/workspace/projection events needed for other views to refresh.
 MT19 - Reverting a converted email restores the triage item from the email-node placement and removes the workspace record that was created from that conversion.
 MT20 - My Triage and Shared Triage must continue to live-reconcile mailbox messages when they are created, updated, or deleted without replacing the whole visible message list.
@@ -69,7 +69,7 @@ MT58 - Transferring a direct email-created Kanban card into another node is not 
 MT59 - A successful email-card transfer deletes the source email-created workspace node/card and creates or updates an email attachment on the target node.
 MT60 - My Triage revert is only for restoring the original direct email-created card back to triage; once that email is transferred into another node, the transferred email is represented as a target-node attachment instead of a triage row.
 MT61 - Drag payloads from My Triage and Shared Triage must carry message IDs plus source mailbox scope; Shared Triage drags include `shared_inbox_id`, while My Triage drags leave that scope empty.
-MT62 - Successful local email conversion into a Logic Gate or Company Explorer Logic Gate must remove converted rows from visible state and local message caches from the conversion response; Home and the global communications live-freshness bridge must suppress the matching local `triage.converted` echo and must not invalidate all communications message page/detail caches, reuse stale prefetched pages, trigger post-removal fill or message-length prefetch, blank the email list, or repeatedly issue mail GETs. This is a regression-prone path: any change to conversion, communications cache invalidation, realtime echo handling, pagination prefetch/refill, or star/unstar mutation must preserve this no-blank/no-refill/no-repeat-GET behavior.
+MT62 - Successful local email conversion into a Logic Gate or Company Explorer Logic Gate must keep the source email row visible in Inbox, All, My Triage, and Shared Triage mailbox lists, patch the row/detail/cache with the returned Logic Gate placement so the Logic Gate icon changes immediately, and suppress the matching local `triage.converted` echo. It must not remove the row from visible state, invalidate all communications message page/detail caches, reuse stale prefetched pages, trigger post-removal fill or message-length prefetch, blank the email list, or repeatedly issue mail GETs. This is a regression-prone path: any change to conversion, communications cache invalidation, realtime echo handling, pagination prefetch/refill, row-removal logic, or star/unstar mutation must preserve this keep-row/no-blank/no-refill/no-repeat-GET behavior.
 MT63 - Successful local email conversion into a Company Explorer Logic Gate must show a temporary green success banner over the Company Explorer section; other Logic Gate conversion surfaces must show a temporary success banner or notice.
 MT64 - When a dragged email is converted into a Logic Gate, Company Explorer Logic Gate, pinned Logic Gate, or eligible node target, the source email is set to unstarred through the same source mailbox scope after the workspace conversion succeeds. The conversion response returns `unstarred_message_ids`, and Home applies those IDs as a local star mutation so Inbox, All, Starred, My Triage, and Shared Triage views do not refill, blink, or reload.
 
@@ -123,7 +123,7 @@ Expected:
 - Conversion into an existing node succeeds only with edit access to the node and optional logic gate context.
 - Missing status defaults to Pending.
 - Missing priority defaults to 3, and priority outside 1 through 5 is rejected.
-- Successful conversion removes the triage messages and emits the refresh events.
+- Successful conversion returns converted/deleted triage IDs for backend reconciliation, emits refresh events, and keeps the source mailbox email row visible with updated Logic Gate placement state.
 
 ### Scenario MT-S3: Convert To New Gate, Folder, Or Project
 
@@ -148,7 +148,7 @@ Expected:
 - A new logic gate conversion requires a title/header and creates the gate plus related work records together.
 - A folder conversion places the new work item under the selected folder or V2 parent only when the user can edit that parent.
 - A project conversion requires project edit access and creates the project relationship/projection records.
-- Successful conversion removes the source triage messages and emits refresh events.
+- Successful conversion returns converted/deleted source triage IDs, emits refresh events, and keeps source mailbox email rows visible with updated Logic Gate placement state.
 
 ### Scenario MT-S4: Revert Converted Email
 
@@ -222,7 +222,7 @@ Expected:
 - Browser focus and visibility changes do not force a message-list refresh.
 - New-email realtime events with a message ID fetch that single message and insert it into the current date-sorted list when it matches the active filters.
 - Updated, opened, deleted, or converted-message realtime events touch only the affected visible or selected row when the event carries enough IDs.
-- Local conversion from the user's own email-to-Logic-Gate drop removes converted rows from local state/cache and suppresses matching local `triage.converted` echoes without clearing all message caches, reusing stale prefetched pages, post-removal prefetching, repeated mail GETs, workspace panel GET bursts, or visible list blanking.
+- Local conversion from the user's own email-to-Logic-Gate drop keeps converted source email rows in place, patches their Logic Gate icon state from the conversion result, and suppresses matching local `triage.converted` echoes without clearing all message caches, reusing stale prefetched pages, post-removal prefetching, repeated mail GETs, workspace panel GET bursts, or visible list blanking.
 - The backend sets converted source emails to unstarred after successful conversion, the response includes successfully updated IDs in `unstarred_message_ids`, and the visible Home list/Starred count reconciles locally without loading replacement Starred rows.
 - A successful local conversion shows a short green success notice.
 - Realtime message events that do not carry a message ID do not trigger a whole-list reload; the next explicit page/list load reconciles provider state.
