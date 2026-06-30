@@ -1,10 +1,10 @@
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 # Kanban Board Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: 0% (rule IDs are not mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (frontend Kanban command/helper coverage and saved-view backend coverage exist; rule IDs are not fully mapped to automated tests yet)
 
 ## Scope
 
@@ -45,7 +45,7 @@ KB22 - Clicking the Logic Gate Kanban `Group` button opens grouping settings ins
 KB23 - Grouping renders subgroup headers inside each existing Kanban column.
 KB24 - Grouping must not remove, duplicate, or hide cards beyond the user's active search and account filters.
 KB25 - Grouping must not replace normal Kanban columns.
-KB26 - Grouping must not create matrix cells that can mutate status, priority, due date, or account by dropping into a cell.
+KB26 - Grouping must not recreate the old matrix cells; only explicitly supported grouped drops may mutate a grouped field.
 KB27 - Card-to-card and card-to-column drag/drop continues to use normal Kanban movement semantics while grouping is active.
 KB28 - Grouping supports these fields only: priority, due date, by person, and account.
 KB29 - Grouping supports ascending and descending direction for each grouping level.
@@ -54,7 +54,7 @@ KB31 - A saved grouping must not contain the same field more than once.
 KB32 - A grouping stack may contain multiple grouping levels.
 KB33 - Logic Gate Kanban does not inject mandatory grouping rows; every grouping row is optional and user-controlled.
 KB34 - Due date grouping uses the card/node due date and places missing dates under `No due date`.
-KB35 - Date Added is not a grouping field; it is a separate Asc/Desc sort control that orders visible cards by the card-added datetime.
+KB35 - Date Added is not a grouping field; it is a separate checkable sort control that can be enabled or disabled, with Asc/Desc direction available while enabled.
 KB36 - By-person grouping uses the person who originally created or transferred the card into the current Logic Gate, not department, HR group, team, or GVIC role name.
 KB37 - Missing by-person provenance is grouped under `No person`.
 KB38 - Account grouping uses assigned accounts. A card with multiple accounts can appear in each matching account subgroup.
@@ -66,11 +66,11 @@ KB43 - Saved Logic Gate Kanban groupings must reject fields that belong to My Wo
 KB44 - Saved Logic Gate Kanban extra groupings use `saved_views.surface = logic_gate_kanban`.
 KB45 - Each user has at most one active Logic Gate Kanban saved view row per company, keyed by `surface = logic_gate_kanban`, `principal = user`, and that user's `principal_id`.
 KB46 - Logic Gate Kanban must not use or require a `saved_view_preferences` table; loading a Logic Gate Kanban board applies the user's `logic_gate_kanban` row directly.
-KB47 - Changing optional grouping rows or Date Added sort direction immediately saves the current user settings without an explicit Save action.
-KB48 - Saved Logic Gate Kanban views persist the user's optional grouping stack plus `settings.date_added_sort_direction`; Date Added must not be written as a grouping row.
+KB47 - Changing optional grouping rows, Date Added enabled state, or Date Added sort direction immediately saves the current user settings without an explicit Save action.
+KB48 - Saved Logic Gate Kanban views persist the user's optional grouping stack plus `settings.date_added_sort_enabled` and `settings.date_added_sort_direction`; Date Added must not be written as a grouping row.
 KB49 - The saved optional grouping stack from one Logic Gate must apply when the same user opens another Logic Gate Kanban board.
-KB50 - Another user in the same company can choose different optional Logic Gate Kanban groupings and Date Added sort direction without changing the first user's saved Logic Gate Kanban view row.
-KB51 - If a user has no Logic Gate Kanban saved view row, the board renders ungrouped with Date Added ascending until the user changes grouping or Date Added sort settings.
+KB50 - Another user in the same company can choose different optional Logic Gate Kanban groupings, Date Added enabled state, and Date Added sort direction without changing the first user's saved Logic Gate Kanban view row.
+KB51 - If a user has no Logic Gate Kanban saved view row, the board renders ungrouped with Date Added enabled ascending until the user changes grouping or Date Added sort settings.
 
 ### Card Provenance Footer
 
@@ -108,6 +108,19 @@ KB76 - Kanban projection live deltas must include placed-by metadata when it cha
 KB77 - A projection delta that changes card placement, title, priority, due date, issue state, accounts, requested-by, placed-by, or creation timestamp must update the rendered card without requiring a full page refresh.
 KB78 - Sequence gaps, invalid deltas, or permission uncertainty may trigger a targeted Kanban board refresh.
 
+### Date Added, Manual Order, And Grouped Drops
+
+KB79 - When Date Added sorting is enabled, visible card order is driven by card-added datetime and card-to-card drops must not write manual vertical position changes.
+KB80 - When Date Added sorting is disabled, card-to-card drops within a column can manually reorder visible cards by writing sparse card position values.
+KB81 - Dragging a card to another status column must remain available whether Date Added sorting is enabled or disabled.
+KB82 - A grouped Logic Gate Kanban board can update priority by dropping a card onto a supported priority group header or onto a card in a different visible priority group.
+KB83 - Priority grouped drops update real priority values 1 through 5 only.
+KB84 - Dropping onto `No priority` does not clear priority until clear-priority drop semantics are deliberately designed.
+KB85 - Priority grouped drops can also move the card to the target status column when the target priority group is in a different column.
+KB86 - When Date Added sorting is enabled, priority grouped drops update priority and status but do not write a manual position.
+KB87 - When Date Added sorting is disabled, priority grouped drops may also write a manual sparse position so the moved card lands at the visible drop point.
+KB88 - Person, due date, and account grouping headers remain display group headers and must not silently mutate those fields by card drop until explicit field-specific semantics are designed.
+
 ## Scenarios
 
 ### Scenario KB-S1: User Changes Logic Gate Kanban Grouping
@@ -137,18 +150,21 @@ Given:
 - User A opens the Group popover.
 - User A sees no mandatory grouping rows.
 - User A adds priority ascending and by person descending as optional grouping rows.
+- User A disables or enables the Date Added checkbox.
 - User A toggles the Date Added sort control to the desired direction.
 - User A then opens Logic Gate B's Kanban board.
 - User B opens either Logic Gate Kanban board.
 
 Expected:
 - User A sees the same optional priority and by-person grouping rows on Logic Gate B.
+- User A sees the same saved Date Added enabled state on Logic Gate B.
 - User A sees the same saved Date Added sort direction on Logic Gate B.
 - User A's optional grouping stack is saved without pressing a Save button.
-- Date Added remains a separate sort control and is saved as `settings.date_added_sort_direction`, not as a grouping row.
+- Date Added remains a separate sort control and is saved as `settings.date_added_sort_enabled` and `settings.date_added_sort_direction`, not as a grouping row.
 - The visible Group popover does not show saved-view selection, New, Delete, Save, or saved-view name controls.
 - User A's selected grouping is stored directly in User A's single `saved_views` row for `logic_gate_kanban`.
 - User B does not inherit User A's selected grouping.
+- User B does not inherit User A's Date Added enabled state.
 - User B does not inherit User A's Date Added sort direction.
 - No Logic Gate board row stores the selected grouping.
 - No `saved_view_preferences` table or row is used for Logic Gate Kanban grouping.
@@ -174,6 +190,16 @@ Business logic covered:
 - KB73
 - KB74
 - KB75
+- KB79
+- KB80
+- KB81
+- KB82
+- KB83
+- KB84
+- KB85
+- KB86
+- KB87
+- KB88
 
 Given:
 - A Logic Gate Kanban board has cards in pending, in progress, review, done, requested, and backlog columns.
@@ -185,7 +211,13 @@ Expected:
 - Each existing column still renders as a Kanban column.
 - Subgroup headers appear inside each column for the currently visible cards.
 - Cards inside each visible list follow the active Date Added sort direction.
-- Dropping a card on another card or into a column keeps normal Kanban movement behavior.
+- Dropping a card into another status column updates status even while Date Added sorting is active.
+- Dropping a card onto another card in the same column does not manually reorder while Date Added sorting is active.
+- Disabling Date Added sorting restores manual card-to-card vertical reorder inside the visible column/group order.
+- Dropping a card into a supported priority group updates the card's priority to that group value.
+- Dropping a card into a supported priority group in another column updates both priority and status.
+- Priority grouped drops write manual position only when Date Added sorting is disabled.
+- Dropping onto `No priority`, by-person, due-date, or account group headers does not silently mutate those fields.
 - No matrix cells are shown.
 - Hidden cards do not contribute to subgroup headers or counts.
 
@@ -270,4 +302,40 @@ Expected:
 - Group/team principals are rejected.
 - User principals are accepted.
 - Changing valid optional grouping rows or Date Added sort direction writes the user's current Logic Gate Kanban saved view without an explicit Save button.
+- Changing Date Added enabled state writes the user's current Logic Gate Kanban saved view without an explicit Save button.
 - Date Added is not written as a saved-view grouping.
+
+### Scenario KB-S6: Date Added Toggle And Drag Ordering
+
+Business logic covered:
+- KB17
+- KB18
+- KB35
+- KB47
+- KB48
+- KB79
+- KB80
+- KB81
+- KB82
+- KB83
+- KB85
+- KB86
+- KB87
+
+Given:
+- A Logic Gate Kanban board has multiple cards in the in-progress column.
+- Date Added sorting is enabled.
+- The board is optionally grouped by priority.
+- The user drags the second visible card above the first visible card in the same status column.
+- The user then drags that same card to the review column.
+- The user drags a Priority 2 card onto a Priority 1 group header or card.
+- The user disables Date Added sorting.
+- The user drags a lower visible card above a higher visible card.
+
+Expected:
+- The same-column card-to-card drop while Date Added is enabled does not write a manual position change.
+- The status-column drop while Date Added is enabled moves the card to review.
+- The priority-group drop updates the card priority from 2 to 1.
+- If the priority-group drop target is in another status column, the card status updates to that column too.
+- With Date Added disabled, the manual vertical drop writes sparse card position and the moved card appears at the requested visible location.
+- The saved view stores the Date Added enabled state and direction separately from grouping rows.
