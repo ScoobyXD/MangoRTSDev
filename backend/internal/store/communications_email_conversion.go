@@ -121,6 +121,24 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 	return input, nil
 }
 
+func NormalizeCommunicationsEmailNodeTransferInput(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferInput, error) {
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.SourceBoardID = strings.TrimSpace(input.SourceBoardID)
+	input.SourceCardID = strings.TrimSpace(input.SourceCardID)
+	input.TargetBoardID = strings.TrimSpace(input.TargetBoardID)
+	input.TargetCardID = strings.TrimSpace(input.TargetCardID)
+	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
+	if input.UserID == "" || input.CompanyID == "" || input.SourceBoardID == "" || input.SourceCardID == "" || input.TargetBoardID == "" || input.TargetCardID == "" {
+		return CommunicationsEmailNodeTransferInput{}, ErrInvalid
+	}
+	if input.SourceBoardID == input.TargetBoardID && input.SourceCardID == input.TargetCardID {
+		return CommunicationsEmailNodeTransferInput{}, ErrInvalid
+	}
+	return input, nil
+}
+
 func normalizeCommunicationsEmailConversionTargetMode(mode string) string {
 	clean := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(mode), "-", "_"))
 	switch clean {

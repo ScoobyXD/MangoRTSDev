@@ -281,6 +281,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/communications/threads/", s.handleCommunicationsThreadByID)
 	mux.HandleFunc("/v1/communications/shared-inboxes", s.handleCommunicationsSharedInboxes)
 	mux.HandleFunc("/v1/communications/shared-inboxes/", s.handleCommunicationsSharedInboxByID)
+	mux.HandleFunc("/v1/communications/email-nodes/transfer", s.handleCommunicationsEmailNodeTransfer)
 	mux.HandleFunc("/v1/communications/triage/convert", s.handleCommunicationsTriageConvert)
 	mux.HandleFunc("/v1/communications/triage/revert-card", s.handleCommunicationsTriageRevert)
 	mux.HandleFunc("/v1/communications/triage", s.handleCommunicationsTriage)

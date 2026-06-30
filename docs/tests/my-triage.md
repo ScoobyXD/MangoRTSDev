@@ -1,10 +1,10 @@
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 # My Triage Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: 0% (rule IDs are not mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (store-level conversion and transfer coverage exists; rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -65,6 +65,9 @@ MT54 - Final archive failures must be recorded on the job item and emit an archi
 MT55 - Duplicate active archive submissions for the same actor, mailbox scope, account, and message must not create duplicate active job items or duplicate provider archive attempts.
 MT56 - My Triage archive jobs must use the actor's personal email connection, while Shared Triage archive jobs must preserve company/shared-inbox scope and use the shared mailbox connection that was authorized at acceptance time.
 MT57 - Accepted background archive job IDs are pending work, not confirmed archive mutations; they must not be applied to the current visible message-list cache until an explicit user action or later full reload reconciles provider state.
+MT58 - Transferring a direct email-created Kanban card into another node is not a revert; the email remains out of My Triage.
+MT59 - A successful email-card transfer deletes the source email-created workspace node/card and creates or updates an email attachment on the target node.
+MT60 - My Triage revert is only for restoring the original direct email-created card back to triage; once that email is transferred into another node, the transferred email is represented as a target-node attachment instead of a triage row.
 
 ## Scenarios
 
@@ -230,3 +233,23 @@ Expected:
 - If the backend accepts the archive page but a later provider mutation fails or never confirms, the source email is not deleted and can remain or reappear after refresh.
 - If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
 - If there is no next page, clicking the advance action archives the visible page and leaves the list empty until more messages arrive or a refresh reloads the inbox.
+
+### Scenario MT-S6: Transfer Converted Email Card Into Existing Node
+
+Business logic covered:
+- MT17
+- MT19
+- MT58
+- MT59
+- MT60
+
+Given:
+- A user converts a My Triage email into a Logic Gate Kanban node card.
+- The converted email card is later dropped onto a different node card on the Kanban board.
+
+Expected:
+- The converted email is not restored to My Triage.
+- The temporary source node/card created by the original conversion is deleted.
+- The target node receives the email attachment and attached-email projection.
+- Future placement lookup for the message points at the target node/card.
+- The revert behavior still applies only when reverting the original direct email-created card before it is transferred.

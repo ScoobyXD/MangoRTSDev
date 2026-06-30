@@ -458,6 +458,7 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 		} else {
 			return CommunicationsTriageConversionResult{}, err
 		}
+		card.CreatedFromEmail = true
 		node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
 from nodes n
@@ -879,6 +880,154 @@ do update set
 	return nil
 }
 
+func deletePostgresCommunicationsEmailSourceNodeTx(ctx context.Context, tx *sql.Tx, companyID string, link communicationsEmailNodeLink) error {
+	if _, err := tx.ExecContext(ctx, `
+delete from communications_email_nodes
+where company_id=$1 and board_id=$2 and card_id=$3`, companyID, link.BoardID, link.CardID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from node_logic_gate_assignments
+where company_id=$1
+  and node_id=$2
+  and compatibility_board_id=$3
+  and compatibility_card_id=$4`, companyID, link.NodeID, link.BoardID, link.CardID); err != nil {
+		return err
+	}
+	if err := deleteKanbanBoardProjectionForNodeTx(ctx, tx, companyID, link.NodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from node_relationships
+where company_id=$1 and (node_id_a=$2 or node_id_b=$2)`, companyID, link.NodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from node_information
+where company_id=$1 and node_id=$2`, companyID, link.NodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from node_projection_table
+where company_id=$1 and node_id=$2`, companyID, link.NodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from node_map_positions
+where company_id=$1 and node_id=$2`, companyID, link.NodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+delete from nodes
+where company_id=$1 and node_id=$2`, companyID, link.NodeID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *PostgresRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferResult, error) {
+	input, err := NormalizeCommunicationsEmailNodeTransferInput(input)
+	if err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+	defer tx.Rollback()
+
+	var link communicationsEmailNodeLink
+	var rawMessage []byte
+	if err := tx.QueryRowContext(ctx, `
+select company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text,
+       message, created_timestamp, updated_timestamp
+from communications_email_nodes
+where company_id=$1 and user_id=$2 and board_id=$3 and card_id=$4
+for update`, input.CompanyID, input.UserID, input.SourceBoardID, input.SourceCardID).Scan(
+		&link.CompanyID,
+		&link.UserID,
+		&link.MessageID,
+		&link.NodeID,
+		&link.BoardID,
+		&link.CardID,
+		&link.LogicGateID,
+		&rawMessage,
+		&link.CreatedTimestamp,
+		&link.UpdatedTimestamp,
+	); errors.Is(err, sql.ErrNoRows) {
+		return CommunicationsEmailNodeTransferResult{}, ErrNotFound
+	} else if err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+	if err := json.Unmarshal(rawMessage, &link.Message); err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+	link.Message = normalizeEmailMessageSnapshot(link.Message)
+	rawMessage, err = json.Marshal(link.Message)
+	if err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+
+	targetCard, err := scanKanbanCard(tx.QueryRowContext(ctx, `
+select `+kanbanBoardProjectionCardSelectColumns+`
+from kanban_board_projection projection
+where projection.company_id=$1::uuid
+  and projection.compatibility_board_id=$2
+  and projection.compatibility_card_id=$3::uuid
+for update`, input.CompanyID, input.TargetBoardID, input.TargetCardID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return CommunicationsEmailNodeTransferResult{}, ErrNotFound
+	}
+	if err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+	targetLogicGateID := ""
+	if targetCard.LogicGateID != nil {
+		targetLogicGateID = strings.TrimSpace(*targetCard.LogicGateID)
+	}
+	if targetLogicGateID == "" || targetCard.NodeID == link.NodeID {
+		return CommunicationsEmailNodeTransferResult{}, ErrInvalid
+	}
+
+	placement, err := scanCommunicationsEmailPlacement(tx.QueryRowContext(ctx, `
+insert into communications_email_node_attachments (
+  company_id, user_id, message_id, node_id, board_id, card_id, logic_gate_id,
+  message, created_timestamp, updated_timestamp
+) values ($1, $2, $3, $4, $5, $6::uuid, $7::uuid, $8::jsonb, now(), now())
+on conflict (company_id, user_id, message_id, node_id)
+do update set
+  board_id=excluded.board_id,
+  card_id=excluded.card_id,
+  logic_gate_id=excluded.logic_gate_id,
+  message=excluded.message,
+  updated_timestamp=now()
+returning company_id::text, user_id::text, message_id, node_id::text, board_id, card_id::text, logic_gate_id::text, created_timestamp, updated_timestamp`,
+		input.CompanyID, input.UserID, link.MessageID, targetCard.NodeID, targetCard.BoardID, targetCard.CardID, targetLogicGateID, string(rawMessage)))
+	if err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+	if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, targetCard.NodeID, link.Message, time.Now().UTC()); err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+	if err := deletePostgresCommunicationsEmailSourceNodeTx(ctx, tx, input.CompanyID, link); err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+	return CommunicationsEmailNodeTransferResult{
+		EmailPlacement: placement,
+		DeletedNodeID:  link.NodeID,
+		DeletedCardID:  link.CardID,
+		SourceBoardID:  link.BoardID,
+		TargetNodeID:   targetCard.NodeID,
+		TargetBoardID:  targetCard.BoardID,
+		TargetCardID:   targetCard.CardID,
+	}, nil
+}
+
 func (r *PostgresRepo) RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error) {
 	input.UserID = strings.TrimSpace(input.UserID)
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
@@ -938,45 +1087,7 @@ returning user_id::text, message_id, message, created_timestamp, updated_timesta
 	if err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `
-delete from communications_email_nodes
-where company_id=$1 and board_id=$2 and card_id=$3`, input.CompanyID, input.BoardID, input.CardID); err != nil {
-		return CommunicationsTriageRevertResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from node_logic_gate_assignments
-where company_id=$1
-  and node_id=$2
-  and compatibility_board_id=$3
-  and compatibility_card_id=$4`, input.CompanyID, link.NodeID, input.BoardID, input.CardID); err != nil {
-		return CommunicationsTriageRevertResult{}, err
-	}
-	if err := deleteKanbanBoardProjectionForNodeTx(ctx, tx, input.CompanyID, link.NodeID); err != nil {
-		return CommunicationsTriageRevertResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from node_relationships
-where company_id=$1 and (node_id_a=$2 or node_id_b=$2)`, input.CompanyID, link.NodeID); err != nil {
-		return CommunicationsTriageRevertResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from node_information
-where company_id=$1 and node_id=$2`, input.CompanyID, link.NodeID); err != nil {
-		return CommunicationsTriageRevertResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from node_projection_table
-where company_id=$1 and node_id=$2`, input.CompanyID, link.NodeID); err != nil {
-		return CommunicationsTriageRevertResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from node_map_positions
-where company_id=$1 and node_id=$2`, input.CompanyID, link.NodeID); err != nil {
-		return CommunicationsTriageRevertResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from nodes
-where company_id=$1 and node_id=$2`, input.CompanyID, link.NodeID); err != nil {
+	if err := deletePostgresCommunicationsEmailSourceNodeTx(ctx, tx, input.CompanyID, link); err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
 

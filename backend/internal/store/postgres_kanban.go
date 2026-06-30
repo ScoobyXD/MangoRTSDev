@@ -69,6 +69,7 @@ func scanKanbanCard(row interface {
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
 		&accountsJSON,
+		&item.CreatedFromEmail,
 	)
 	if dueDate.Valid {
 		item.DueDate = &dueDate.String

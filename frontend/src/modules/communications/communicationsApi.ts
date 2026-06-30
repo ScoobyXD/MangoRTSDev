@@ -1044,6 +1044,62 @@ export async function revertKanbanCardToMyTriage(input: {
   return result;
 }
 
+export async function transferEmailNodeCardToNode(input: {
+  companyID: string;
+  sourceBoardID: string;
+  sourceCardID: string;
+  targetBoardID: string;
+  targetCardID: string;
+}): Promise<{
+  email_placement: {
+    company_id: string;
+    user_id: string;
+    message_id: string;
+    node_id: string;
+    board_id: string;
+    card_id: string;
+    logic_gate_id: string;
+  };
+  deleted_node_id: string;
+  deleted_card_id: string;
+  source_board_id: string;
+  target_node_id: string;
+  target_board_id: string;
+  target_card_id: string;
+}> {
+  const result = await apiFetchJSON<{
+    email_placement: {
+      company_id: string;
+      user_id: string;
+      message_id: string;
+      node_id: string;
+      board_id: string;
+      card_id: string;
+      logic_gate_id: string;
+    };
+    deleted_node_id: string;
+    deleted_card_id: string;
+    source_board_id: string;
+    target_node_id: string;
+    target_board_id: string;
+    target_card_id: string;
+  }>("/v1/communications/email-nodes/transfer", {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      source_board_id: input.sourceBoardID,
+      source_card_id: input.sourceCardID,
+      target_board_id: input.targetBoardID,
+      target_card_id: input.targetCardID,
+    }),
+  });
+  invalidateWorkspacePanelCache(input.companyID);
+  markNodeWorkspaceSnapshotScopesStale(input.companyID);
+  markKanbanWorkspaceSnapshotScopeStale(input.companyID, result.source_board_id?.trim() || input.sourceBoardID);
+  markKanbanWorkspaceSnapshotScopeStale(input.companyID, result.target_board_id?.trim() || input.targetBoardID);
+  return result;
+}
+
 export function invalidateCommunicationsCache(scope?: { status?: boolean; folders?: boolean; messagePages?: boolean; messages?: boolean }): void {
   const full = !scope;
   if (full || scope?.status) {

@@ -127,6 +127,9 @@ func (r *MemoryRepo) withKanbanCardProjectionFieldsLocked(card domain.KanbanCard
 	if card.ProjectionUpdatedTimestamp.IsZero() {
 		card.ProjectionUpdatedTimestamp = card.UpdatedTimestamp
 	}
+	if link, ok := r.emailNodeLinks[emailNodeLinkKey(card.CompanyID, card.BoardID, card.CardID)]; ok && link.NodeID == card.NodeID {
+		card.CreatedFromEmail = true
+	}
 	return card
 }
 

@@ -13,6 +13,13 @@ const NodeDocumentIcon: React.FC<{ color: string }> = ({ color }) => (
   </svg>
 );
 
+const EmailSourceIcon: React.FC<{ color: string; size?: number }> = ({ color, size = 14 }) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
+    <path d="M2.25 4.25h11.5v7.5H2.25z" fill="rgba(255,255,255,0.76)" stroke={color} strokeWidth="1.35" strokeLinejoin="round" />
+    <path d="M2.75 4.75 8 8.7l5.25-3.95" fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 type KanbanCardViewProps = {
   card: KanbanCard;
   color: string;
@@ -20,6 +27,7 @@ type KanbanCardViewProps = {
   selected: boolean;
   dragBefore: boolean;
   dragAfter: boolean;
+  emailTransferTarget: boolean;
   line: string;
   text: string;
   subtext: string;
@@ -61,6 +69,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   selected,
   dragBefore,
   dragAfter,
+  emailTransferTarget,
   line: _line,
   text,
   subtext,
@@ -90,6 +99,8 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   const cardFrame = `linear-gradient(135deg, ${hexToRgba(color, selected || highlighted ? 0.88 : 0.62)}, rgba(255,255,255,0.84) 72%)`;
   const accounts = (card.accounts ?? []).filter((account) => account.account_id.trim()).slice(0, 4);
   const showRequestedActions = Boolean(requestedActions);
+  const createdFromEmail = card.created_from_email === true;
+  const trailingGridColumns = [createdFromEmail ? "22px" : "", showRequestedActions ? "24px 24px" : ""].filter(Boolean).join(" ");
   const hasFooter = Boolean(requestedStatusText || requestedStatusAction || bylineText);
   const requestedActionButtonBase: React.CSSProperties = {
     width: 24,
@@ -144,13 +155,15 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
           highlighted && !selected ? `0 0 0 1px ${color} inset, 0 0 10px ${hexToRgba(color, 0.22)}` : "",
           dragBefore ? `0 -3px 0 ${accent}` : "",
           dragAfter ? `0 3px 0 ${accent}` : "",
+          emailTransferTarget ? `0 0 0 2px ${accent}, 0 0 0 5px ${hexToRgba(accent, 0.20)}, 0 12px 24px ${hexToRgba(accent, 0.18)}` : "",
         ].filter(Boolean).join(", ") || undefined,
+        transform: emailTransferTarget ? "translateY(-1px)" : undefined,
         transition: "box-shadow 150ms ease, transform 150ms ease, background 150ms ease",
       }}
       >
       {/* The color rail is a separate layer so selection border changes cannot erase it. */}
       <span aria-hidden="true" style={getKanbanCardColorRailStyle(color)} />
-      <div style={{ display: "grid", gridTemplateColumns: showRequestedActions ? "20px minmax(0, 1fr) 24px 24px" : "20px minmax(0, 1fr)", gap: 7, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: `20px minmax(0, 1fr)${trailingGridColumns ? ` ${trailingGridColumns}` : ""}`, gap: 7, alignItems: "start" }}>
         <span title="Node" style={{ width: 20, height: 20, marginTop: 0, display: "grid", placeItems: "center" }}>
           <NodeDocumentIcon color={color} />
         </span>
@@ -199,6 +212,26 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
           />
         ) : (
           <div style={{ fontSize: 12, fontWeight: 760, lineHeight: 1.25, overflowWrap: "anywhere" }}>{card.node_title}</div>
+        )}
+        {createdFromEmail && (
+          <span
+            title="Created from email"
+            aria-label="Created from email"
+            style={{
+              width: 22,
+              height: 22,
+              border: `1px solid ${hexToRgba(color, 0.34)}`,
+              borderRadius: 7,
+              background: `linear-gradient(135deg, rgba(255,255,255,0.94), ${hexToRgba(color, 0.13)})`,
+              color,
+              display: "grid",
+              placeItems: "center",
+              boxSizing: "border-box",
+              boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.76)",
+            }}
+          >
+            <EmailSourceIcon color={color} />
+          </span>
         )}
         {requestedActions && (
           <>
@@ -301,6 +334,44 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
             {requestedStatusText && <span>{requestedStatusText}</span>}
             {bylineText && <span>{bylineText}</span>}
           </div>
+        </div>
+      )}
+      {emailTransferTarget && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 4,
+            border: `1px solid ${hexToRgba(accent, 0.70)}`,
+            borderRadius: 8,
+            pointerEvents: "none",
+            background: `linear-gradient(135deg, ${hexToRgba(accent, 0.10)}, rgba(255,255,255,0.08))`,
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "flex-end",
+            padding: 6,
+            boxSizing: "border-box",
+          }}
+        >
+          <span style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            minHeight: 22,
+            maxWidth: "100%",
+            border: `1px solid ${hexToRgba(accent, 0.48)}`,
+            borderRadius: 7,
+            background: "rgba(255,255,255,0.94)",
+            color: text,
+            fontSize: 10,
+            fontWeight: 880,
+            lineHeight: 1,
+            padding: "4px 7px",
+            boxShadow: "0 6px 14px rgba(15,23,42,0.14)",
+          }}>
+            <EmailSourceIcon color={accent} size={13} />
+            <span>Attach email</span>
+          </span>
         </div>
       )}
     </article>
