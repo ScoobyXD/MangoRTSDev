@@ -173,8 +173,9 @@ export type CommunicationsSharedInbox = {
 
 export type CommunicationsSharedInboxCreateIntent = {
   companyID: string;
+  folderID?: string;
   parentFolderID?: string;
-  name: string;
+  name?: string;
 };
 
 export type CommunicationsTriageItem = {
@@ -336,11 +337,13 @@ export async function fetchCommunicationsAuthURL(provider: EmailProvider, accoun
   const cleanAccountEmail = accountEmail?.trim().toLowerCase() ?? "";
   if (cleanAccountEmail) query.set("account_email", cleanAccountEmail);
   const cleanCompanyID = sharedInboxCreate?.companyID.trim() ?? "";
-  const cleanName = sharedInboxCreate?.name.trim() ?? "";
-  if (cleanCompanyID || cleanName || sharedInboxCreate?.parentFolderID?.trim()) {
-    if (!cleanCompanyID || !cleanName) throw new Error("shared_inbox_create_intent_required");
+  const cleanFolderID = sharedInboxCreate?.folderID?.trim() ?? "";
+  const cleanName = sharedInboxCreate?.name?.trim() ?? "";
+  if (cleanCompanyID || cleanFolderID || cleanName || sharedInboxCreate?.parentFolderID?.trim()) {
+    if (!cleanCompanyID || (!cleanFolderID && !cleanName)) throw new Error("shared_inbox_create_intent_required");
     query.set("shared_inbox_company_id", cleanCompanyID);
-    query.set("shared_inbox_name", cleanName);
+    if (cleanFolderID) query.set("shared_inbox_id", cleanFolderID);
+    if (cleanName) query.set("shared_inbox_name", cleanName);
     const cleanParentFolderID = sharedInboxCreate?.parentFolderID?.trim() ?? "";
     if (cleanParentFolderID) query.set("shared_inbox_parent_folder_id", cleanParentFolderID);
   }
@@ -667,6 +670,17 @@ export async function deleteCommunicationsSharedInbox(companyID: string, folderI
   const cleanCompanyID = companyID.trim();
   const cleanFolderID = folderID.trim();
   await apiFetchJSON<{ status?: string }>(`/v1/communications/shared-inboxes/${encodeURIComponent(cleanFolderID)}?company_id=${encodeURIComponent(cleanCompanyID)}`, {
+    method: "DELETE",
+  });
+  invalidateCommunicationsCache({ folders: true, messagePages: true, messages: true });
+  invalidateCacheKey(`shared-inboxes:${cleanCompanyID}`);
+  dispatchCommunicationsSharedInboxesUpdated(cleanCompanyID);
+}
+
+export async function removeCommunicationsSharedInbox(companyID: string, folderID: string): Promise<void> {
+  const cleanCompanyID = companyID.trim();
+  const cleanFolderID = folderID.trim();
+  await apiFetchJSON<{ status?: string }>(`/v1/communications/shared-inboxes/${encodeURIComponent(cleanFolderID)}?company_id=${encodeURIComponent(cleanCompanyID)}&remove_only=true`, {
     method: "DELETE",
   });
   invalidateCommunicationsCache({ folders: true, messagePages: true, messages: true });

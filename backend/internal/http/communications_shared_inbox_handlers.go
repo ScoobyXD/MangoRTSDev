@@ -248,7 +248,12 @@ func (s *Server) deleteCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "failed_to_load_shared_inbox")
 		return
 	}
-	err = s.repo.DeleteCommunicationsSharedInboxFolder(companyID, folderID)
+	removeOnly := isTruthyQueryValue(r.URL.Query().Get("remove_only")) || isTruthyQueryValue(r.URL.Query().Get("keep_connection"))
+	if removeOnly {
+		err = s.repo.RemoveCommunicationsSharedInboxFolder(companyID, folderID)
+	} else {
+		err = s.repo.DeleteCommunicationsSharedInboxFolder(companyID, folderID)
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "shared_inbox_not_found")
 		return
@@ -263,7 +268,11 @@ func (s *Server) deleteCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 	}
 	resourceType := store.CommunicationsSharedInboxResourceType(item)
 	s.publishWorkspaceEvent(companyID, "company_explorer_folder_deleted", map[string]any{"folder_id": folderID, "shared_inbox_id": item.SharedInboxID, "folder_kind": "communications", "resource_type": resourceType})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	status := "deleted"
+	if removeOnly {
+		status = "removed"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
 }
 
 func (s *Server) handleCommunicationsSharedInboxAccess(w http.ResponseWriter, r *http.Request, folderID string) {

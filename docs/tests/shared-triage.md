@@ -1,10 +1,10 @@
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 # Shared Triage Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (frontend helper coverage exists for mailbox-capable Shared Triage rows; rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (backend coverage exists for destructive delete vs remove-only and OAuth linkage; frontend helper coverage exists for mailbox-capable Shared Triage rows; rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -17,7 +17,7 @@ ST6 - Shared inbox folders and mailbox entries use the same tree model, with mai
 ST7 - Renaming or moving a Shared Triage folder requires edit access; creating or changing mailbox linkage also requires manager/admin authority.
 ST8 - Deleting a shared inbox folder requires edit access.
 ST9 - Protected shared inbox folders cannot be renamed or deleted.
-ST10 - Deleting a mailbox-capable shared inbox removes the Shared Triage work surface and its shared inbox permissions/GVIC rows, but does not automatically revoke the reusable company-owned mailbox credential.
+ST10 - Deleting a mailbox-capable shared inbox is destructive: it removes the Shared Triage work surface, any Shared Triage mailbox rows sharing the same company email connection, shared inbox permissions/GVIC rows, and the linked company_email_connections credential.
 ST11 - Reading shared inbox folders and messages uses the company-owned shared mailbox grant instead of the viewer's personal mailbox grant.
 ST12 - Shared mailbox caches are scoped by shared account/grant so one shared mailbox does not leak into another.
 ST13 - Sending mail from a shared inbox requires edit access to that shared inbox.
@@ -85,6 +85,7 @@ ST74 - Final Shared Triage archive failures must be recorded on the job item and
 ST75 - Duplicate active Shared Triage archive submissions for the same actor, shared inbox, account, and message must not create duplicate active job items or duplicate provider archive attempts.
 ST76 - Shared Triage archive jobs must preserve company/shared-inbox scope and use the company-owned shared mailbox grant, not the actor's personal mailbox grant.
 ST77 - Accepted background Shared Triage archive job IDs are pending work, not confirmed archive mutations; they must not be applied to the current visible shared-inbox message-list cache until an explicit user action or later full reload reconciles provider state.
+ST78 - Removing a mailbox-capable shared inbox from Shared Triage without deleting the email connection is a separate remove action: it removes the Shared Triage work surface and shared inbox permissions/GVIC rows while preserving the company_email_connections credential.
 
 ## Scenarios
 
@@ -124,6 +125,7 @@ Business logic covered:
 - ST26
 - ST27
 - ST30
+- ST78
 
 Given:
 - A company manager can edit one shared inbox parent folder and only view another parent folder.
@@ -137,7 +139,8 @@ Expected:
 - Creating under the view-only parent fails for the manager.
 - Rename and move require edit access; mailbox linkage changes require manager/admin authority and edit access.
 - Protected shared inbox folders cannot be renamed or deleted.
-- Deleting a mailbox-capable shared inbox removes the Shared Triage work surface without treating the company email connection as a user permission record.
+- Deleting a mailbox-capable shared inbox removes the Shared Triage work surface and linked company email connection everywhere.
+- Removing a mailbox-capable shared inbox from Shared Triage removes the work surface but keeps the company email connection available for reuse.
 - Successful changes publish workspace refresh events.
 
 ### Scenario ST-S3: Shared Mailbox Read And Send
@@ -229,6 +232,7 @@ Given:
 Expected:
 - The OAuth callback writes or updates company_email_connections for Company A and support@example.com.
 - The shared inbox stores company_email_connection_id and keeps account_email only as display/search metadata.
+- When OAuth is started to repair or reassign an existing Shared Triage mailbox entry, the callback updates that existing shared_inboxes row instead of only creating or updating company_email_connections.
 - The shared inbox does not require support@example.com to exist as a Mango user.
 - Personal My Triage credentials in user_email_connections remain separate from the company-owned shared connection.
 - Legacy shared-scope rows are backfilled into company_email_connections, linked to matching shared inboxes, removed from user_email_connections, and followed by dropping the legacy connection_scope column.

@@ -979,6 +979,7 @@ export function HomeSidebar({
   onSetSharedInboxAccountEmail,
   onMoveSharedInbox,
   onDeleteSharedInbox,
+  onRemoveSharedInbox,
 }: {
   activeViewID: HomeViewID;
   connectedAccountEmail?: string;
@@ -992,6 +993,7 @@ export function HomeSidebar({
   onSetSharedInboxAccountEmail: (folderID: string, accountEmail: string) => Promise<void>;
   onMoveSharedInbox: (folderID: string, parentFolderID: string, position: number) => Promise<void>;
   onDeleteSharedInbox: (folderID: string) => Promise<void>;
+  onRemoveSharedInbox: (folderID: string) => Promise<void>;
 }) {
   const [sharedRootOpen, setSharedRootOpen] = useState(true);
   const [expandedSharedFolderIDs, setExpandedSharedFolderIDs] = useState<Set<string>>(new Set());
@@ -1005,7 +1007,7 @@ export function HomeSidebar({
   const [sharedContextMenu, setSharedContextMenu] = useState<{ x: number; y: number; folder: CommunicationsSharedInbox | null } | null>(null);
   const [sharedCreateDialog, setSharedCreateDialog] = useState<{ mode: "folder" | "shared_inbox"; parentFolderID: string; parentName: string; name: string; accountEmail: string; error: string } | null>(null);
   const [sharedEmailDialog, setSharedEmailDialog] = useState<{ folder: CommunicationsSharedInbox; draft: string; error: string } | null>(null);
-  const [sharedDeleteDialog, setSharedDeleteDialog] = useState<{ folder: CommunicationsSharedInbox; title: string; detail: string; label: string; confirmLabel: string; position?: ConfirmActionMenuPosition | null } | null>(null);
+  const [sharedDeleteDialog, setSharedDeleteDialog] = useState<{ folder: CommunicationsSharedInbox; action: "delete" | "remove"; title: string; detail: string; label: string; confirmLabel: string; position?: ConfirmActionMenuPosition | null } | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
@@ -1177,13 +1179,30 @@ export function HomeSidebar({
     void setSharedFolderAccountEmail(folderID, accountEmail);
   }, [setSharedFolderAccountEmail, sharedBusy, sharedEmailDialog]);
 
+  const requestRemoveSharedFolder = useCallback(async (folder: CommunicationsSharedInbox, position?: ConfirmActionMenuPosition) => {
+    const label = folder.name.trim() || "this folder";
+    if (folder.entry_type === "shared_inbox") {
+      setSharedDeleteDialog({
+        folder,
+        action: "remove",
+        title: "Remove from Shared Triage",
+        detail: "this Shared Triage inbox while keeping the company email connection",
+        label,
+        confirmLabel: "Remove",
+        position: position ?? null,
+      });
+      return;
+    }
+  }, []);
+
   const requestDeleteSharedFolder = useCallback(async (folder: CommunicationsSharedInbox, position?: ConfirmActionMenuPosition) => {
     const label = folder.name.trim() || "this folder";
     if (folder.entry_type === "shared_inbox") {
       setSharedDeleteDialog({
         folder,
-        title: "Delete email from Shared Triage",
-        detail: "this email from Shared Triage",
+        action: "delete",
+        title: "Delete email connection",
+        detail: "this Shared Triage inbox and its company email connection",
         label,
         confirmLabel: "Delete email",
         position: position ?? null,
@@ -1191,8 +1210,8 @@ export function HomeSidebar({
       return;
     }
     const count = collectSharedInboxSubtreeIDs(sharedInboxes, folder.folder_id).size || 1;
-    const detail = count === 1 ? "this folder" : `this folder and ${count - 1} child folder${count === 2 ? "" : "s"}`;
-    setSharedDeleteDialog({ folder, title: "Delete folder", detail, label, confirmLabel: "Delete", position: position ?? null });
+    const detail = count === 1 ? "this folder" : `this folder and ${count - 1} child item${count === 2 ? "" : "s"}`;
+    setSharedDeleteDialog({ folder, action: "delete", title: "Delete folder", detail, label, confirmLabel: "Delete", position: position ?? null });
   }, [sharedInboxes]);
 
   const openSharedContextMenu = useCallback((event: React.MouseEvent, folder: CommunicationsSharedInbox | null) => {
@@ -1515,14 +1534,24 @@ export function HomeSidebar({
             {contextFolder && (
               <>
                 {canManageSharedTriage && contextFolder.entry_type === "shared_inbox" && (
-                  <button
-                    type="button"
-                    style={sharedInboxContextMenuButtonStyle}
-                    disabled={sharedBusy}
-                    onClick={() => openSharedEmailDialog(contextFolder)}
-                  >
-                    Change inbox email
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      style={sharedInboxContextMenuButtonStyle}
+                      disabled={sharedBusy}
+                      onClick={() => openSharedEmailDialog(contextFolder)}
+                    >
+                      Change inbox email
+                    </button>
+                    <button
+                      type="button"
+                      style={sharedInboxContextMenuButtonStyle}
+                      disabled={sharedBusy}
+                      onClick={(event) => void requestRemoveSharedFolder(contextFolder, confirmMenuPositionFromElement(event.currentTarget))}
+                    >
+                      Remove from Shared Triage
+                    </button>
+                  </>
                 )}
                 <button
                   type="button"
@@ -1582,8 +1611,10 @@ export function HomeSidebar({
           onCancel={() => setSharedDeleteDialog(null)}
           onConfirm={() => {
             const folderID = sharedDeleteDialog.folder.folder_id;
+            const action = sharedDeleteDialog.action;
             setSharedDeleteDialog(null);
-            void onDeleteSharedInbox(folderID);
+            if (action === "remove") void onRemoveSharedInbox(folderID);
+            else void onDeleteSharedInbox(folderID);
           }}
         />
       )}

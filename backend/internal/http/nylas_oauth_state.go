@@ -25,6 +25,7 @@ type nylasOAuthStatePayload struct {
 	Provider                  string `json:"provider"`
 	StrictEmail               bool   `json:"strict_email,omitempty"`
 	SharedInboxCompanyID      string `json:"shared_inbox_company_id,omitempty"`
+	SharedInboxID             string `json:"shared_inbox_id,omitempty"`
 	SharedInboxParentFolderID string `json:"shared_inbox_parent_folder_id,omitempty"`
 	SharedInboxName           string `json:"shared_inbox_name,omitempty"`
 	IssuedAt                  int64  `json:"issued_at"`
@@ -37,12 +38,13 @@ func signNylasOAuthState(secret string, payload nylasOAuthStatePayload, now time
 	payload.UserEmail = strings.TrimSpace(strings.ToLower(payload.UserEmail))
 	payload.Provider = normalizeCommunicationsProvider(payload.Provider)
 	payload.SharedInboxCompanyID = strings.TrimSpace(payload.SharedInboxCompanyID)
+	payload.SharedInboxID = strings.TrimSpace(payload.SharedInboxID)
 	payload.SharedInboxParentFolderID = strings.TrimSpace(payload.SharedInboxParentFolderID)
 	payload.SharedInboxName = strings.TrimSpace(payload.SharedInboxName)
 	if secret == "" || payload.UserID == "" || payload.Email == "" || payload.Provider == "" {
 		return "", errInvalidNylasState
 	}
-	if payload.SharedInboxCompanyID != "" && payload.SharedInboxName == "" {
+	if payload.SharedInboxCompanyID != "" && payload.SharedInboxID == "" && payload.SharedInboxName == "" {
 		return "", errInvalidNylasState
 	}
 	payload.IssuedAt = now.UTC().Unix()
@@ -82,12 +84,13 @@ func parseNylasOAuthState(secret, rawState string, now time.Time) (nylasOAuthSta
 	payload.UserEmail = strings.TrimSpace(strings.ToLower(payload.UserEmail))
 	payload.Provider = normalizeCommunicationsProvider(payload.Provider)
 	payload.SharedInboxCompanyID = strings.TrimSpace(payload.SharedInboxCompanyID)
+	payload.SharedInboxID = strings.TrimSpace(payload.SharedInboxID)
 	payload.SharedInboxParentFolderID = strings.TrimSpace(payload.SharedInboxParentFolderID)
 	payload.SharedInboxName = strings.TrimSpace(payload.SharedInboxName)
 	if payload.UserID == "" || payload.Email == "" || payload.Provider == "" || payload.IssuedAt <= 0 {
 		return nylasOAuthStatePayload{}, errInvalidNylasState
 	}
-	if payload.SharedInboxCompanyID != "" && payload.SharedInboxName == "" {
+	if payload.SharedInboxCompanyID != "" && payload.SharedInboxID == "" && payload.SharedInboxName == "" {
 		return nylasOAuthStatePayload{}, errInvalidNylasState
 	}
 	issued := time.Unix(payload.IssuedAt, 0).UTC()
