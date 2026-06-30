@@ -655,9 +655,28 @@ button, input, textarea, select {
   box-shadow: none;
 }
 
-.editor-document-scroll ul[data-mango-editor-list] ul[data-mango-editor-list] > li[data-mango-editor-list-item="bullet"]::before {
+.editor-document-scroll li[data-mango-editor-list-item="bullet"][data-mango-editor-list-marker="hollow-circle"]::before {
   background: transparent;
   border: 1px solid #000000;
+  border-radius: 999px;
+}
+
+.editor-document-scroll li[data-mango-editor-list-item="bullet"][data-mango-editor-list-marker="solid-square"]::before {
+  background: #000000;
+  border: 0;
+  border-radius: 1px;
+}
+
+.editor-document-scroll li[data-mango-editor-list-item="bullet"][data-mango-editor-list-marker="hollow-square"]::before {
+  background: transparent;
+  border: 1px solid #000000;
+  border-radius: 1px;
+}
+
+.editor-document-scroll li[data-mango-editor-list-item="bullet"][data-mango-editor-list-marker="solid-circle"]::before {
+  background: #000000;
+  border: 0;
+  border-radius: 999px;
 }
 
 .editor-document-scroll li[data-mango-editor-list-item="checklist"]::before {
