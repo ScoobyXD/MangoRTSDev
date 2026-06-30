@@ -21,6 +21,7 @@ SL12 - Login is not product access by itself; the current-user lookup must resol
 SL13 - Google connection is a post-signup mailbox/OAuth integration and must not create Mango account membership.
 SL14 - Password reset eligibility is based on an existing Mango user, not merely an external Cognito or Google account.
 SL15 - Company Explorer folder access must be granted only to existing Mango users who already belong to the company, through the permissions model rather than signup side effects.
+SL16 - Invite acceptance must store a nonblank Mango display name, and later login or page-refresh auth resolution must not overwrite that Mango-owned display name with blank or email fallback token data.
 
 ## Scenarios
 
@@ -55,6 +56,7 @@ Business logic covered:
 - SL10
 - SL11
 - SL12
+- SL16
 
 Given:
 - A user opens an invite link and submits name, invited email, and password.
@@ -66,14 +68,17 @@ Expected:
 - Email mismatch is rejected before Cognito password setup.
 - Cognito password setup must succeed before Mango creates or updates the user and membership.
 - Mango invite acceptance writes identity, membership, acceptance status, and access recomputation only.
+- The accepted display name is stored as Mango-owned profile data.
 - Invite acceptance does not read or write Company Explorer folder-share tables.
 - After login, current-user loading must resolve the Mango user and memberships.
+- Later page refreshes and `/v1/me` calls preserve the accepted display name instead of rewriting it from token fallback data.
 
 ### Scenario SL-S3: Login And Google Connection Boundaries
 
 Business logic covered:
 - SL12
 - SL13
+- SL16
 
 Given:
 - A user can authenticate with Cognito.
@@ -83,6 +88,7 @@ Given:
 Expected:
 - Cognito authentication alone is not enough to enter product surfaces.
 - Mango access requires a Mango user row and company membership.
+- Current-user loading may resolve the user and memberships, but it must not treat page refresh as a display-name profile edit.
 - Google OAuth connection happens after signup and does not backfill account membership.
 
 ### Scenario SL-S4: Password Reset Eligibility

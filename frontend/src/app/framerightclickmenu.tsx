@@ -1,5 +1,25 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+
+export type FrameRightClickMenuClampInput = {
+  x: number;
+  y: number;
+  menuWidth: number;
+  menuHeight: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  margin?: number;
+};
+
+export function clampFrameRightClickMenuPosition(input: FrameRightClickMenuClampInput): { x: number; y: number } {
+  const margin = Math.max(0, input.margin ?? 8);
+  const maxX = Math.max(margin, input.viewportWidth - input.menuWidth - margin);
+  const maxY = Math.max(margin, input.viewportHeight - input.menuHeight - margin);
+  return {
+    x: Math.max(margin, Math.min(input.x, maxX)),
+    y: Math.max(margin, Math.min(input.y, maxY)),
+  };
+}
 
 export interface FrameRightClickMenuProps {
   children: React.ReactNode;
@@ -11,23 +31,50 @@ export interface FrameRightClickMenuProps {
   width?: React.CSSProperties["width"];
   minWidth?: React.CSSProperties["minWidth"];
   maxWidth?: React.CSSProperties["maxWidth"];
+  maxHeight?: React.CSSProperties["maxHeight"];
   overflow?: React.CSSProperties["overflow"];
 }
 
 // Floating context-menu shell used by header/canvas/frame menus throughout the dashboard.
-const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, y, onClose, closeOnOutside = true, isConfirmActionMenu = false, width, minWidth = 190, maxWidth, overflow = "hidden" }) => {
+const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, y, onClose, closeOnOutside = true, isConfirmActionMenu = false, width, minWidth = 190, maxWidth, maxHeight = "calc(100vh - 16px)", overflow = "hidden" }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
-
-  // Keep menu inside viewport bounds so right-click actions are always reachable.
-  useEffect(() => {
-    if (!menuRef.current) return;
-    const rect = menuRef.current.getBoundingClientRect();
-    setPos({
-      x: Math.min(x, window.innerWidth - rect.width - 8),
-      y: Math.min(y, window.innerHeight - rect.height - 8),
+  const updatePosition = useCallback(() => {
+    const menu = menuRef.current;
+    if (!menu) return;
+    const rect = menu.getBoundingClientRect();
+    const next = clampFrameRightClickMenuPosition({
+      x,
+      y,
+      menuWidth: rect.width,
+      menuHeight: rect.height,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
     });
+    setPos((current) => current.x === next.x && current.y === next.y ? current : next);
   }, [x, y]);
+
+  useLayoutEffect(() => {
+    updatePosition();
+    const menu = menuRef.current;
+    if (!menu) return undefined;
+    let frameID = 0;
+    const scheduleUpdate = () => {
+      window.cancelAnimationFrame(frameID);
+      frameID = window.requestAnimationFrame(updatePosition);
+    };
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleUpdate);
+    resizeObserver?.observe(menu);
+    window.addEventListener("resize", scheduleUpdate);
+    window.addEventListener("scroll", scheduleUpdate, true);
+    scheduleUpdate();
+    return () => {
+      window.cancelAnimationFrame(frameID);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", scheduleUpdate);
+      window.removeEventListener("scroll", scheduleUpdate, true);
+    };
+  }, [updatePosition]);
 
   // Use capture so nested modules that stop propagation still let menus close on outside clicks.
   useEffect(() => {
@@ -71,6 +118,7 @@ const FrameRightClickMenu: React.FC<FrameRightClickMenuProps> = ({ children, x, 
         width,
         minWidth,
         maxWidth,
+        maxHeight,
         overflow,
       }}
     >
