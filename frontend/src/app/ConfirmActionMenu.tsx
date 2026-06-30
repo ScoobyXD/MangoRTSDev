@@ -15,6 +15,11 @@ export function confirmMenuPositionFromElement(element: Element): ConfirmActionM
   };
 }
 
+export function confirmationDisplayNameMatches(input: string, expected: string): boolean {
+  const expectedText = expected.trim();
+  return expectedText !== "" && input.trim().toLocaleLowerCase() === expectedText.toLocaleLowerCase();
+}
+
 type ConfirmActionMenuProps = {
   title: React.ReactNode;
   detail?: React.ReactNode;
@@ -55,7 +60,7 @@ export const ConfirmActionMenu: React.FC<ConfirmActionMenuProps> = ({
   const [confirmationInput, setConfirmationInput] = React.useState("");
   const expectedConfirmationText = (requiredConfirmationText ?? currentUserDisplayName).trim();
   const confirmationRequired = requireDisplayNameConfirmation && expectedConfirmationText !== "";
-  const confirmationMatches = !confirmationRequired || confirmationInput.trim() === expectedConfirmationText;
+  const confirmationMatches = !confirmationRequired || confirmationDisplayNameMatches(confirmationInput, expectedConfirmationText);
   const effectiveConfirmDisabled = confirmDisabled || !confirmationMatches;
 
   React.useEffect(() => {
@@ -83,6 +88,7 @@ export const ConfirmActionMenu: React.FC<ConfirmActionMenuProps> = ({
     <FrameRightClickMenu
       x={x} y={y} onClose={() => complete(onCancel)} closeOnOutside={false} isConfirmActionMenu
       width="min(340px, calc(100vw - 24px))" minWidth={260}
+      overflow="auto"
     >
       <div style={{ padding: "8px 10px 9px", display: "grid", gap: 8, color: panelText }}>
         <div style={{ fontSize: 12, fontWeight: 800, lineHeight: 1.35 }}>

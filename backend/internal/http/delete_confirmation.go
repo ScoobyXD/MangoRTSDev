@@ -25,7 +25,7 @@ func requireActorDisplayNameConfirmation(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusForbidden, "display_name_required")
 		return ActorContext{}, false
 	}
-	if strings.TrimSpace(submittedDisplayName) != expectedDisplayName {
+	if !strings.EqualFold(strings.TrimSpace(submittedDisplayName), expectedDisplayName) {
 		writeError(w, http.StatusForbidden, "display_name_confirmation_required")
 		return ActorContext{}, false
 	}
