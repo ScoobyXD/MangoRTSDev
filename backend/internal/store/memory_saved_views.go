@@ -68,6 +68,7 @@ func (r *MemoryRepo) UpsertSavedView(input SavedViewInput) (domain.SavedView, er
 		item.PrincipalID = input.PrincipalID
 		item.Name = input.Name
 		item.Groupings = cloneSavedViewGroupings(input.Groupings)
+		item.Settings = input.Settings
 		if input.Position > 0 {
 			item.Position = input.Position
 		}
@@ -87,6 +88,7 @@ func (r *MemoryRepo) UpsertSavedView(input SavedViewInput) (domain.SavedView, er
 		PrincipalID:      input.PrincipalID,
 		Name:             input.Name,
 		Groupings:        cloneSavedViewGroupings(input.Groupings),
+		Settings:         input.Settings,
 		Position:         position,
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,

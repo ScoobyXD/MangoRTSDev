@@ -24,11 +24,10 @@ var savedViewGroupingFieldsBySurface = map[string]map[string]bool{
 		"logic_gate": true,
 	},
 	SavedViewSurfaceLogicGateKanban: {
-		"account":    true,
-		"date_added": true,
-		"due_date":   true,
-		"person":     true,
-		"priority":   true,
+		"account":  true,
+		"due_date": true,
+		"person":   true,
+		"priority": true,
 	},
 }
 
@@ -94,6 +93,24 @@ func NormalizeSavedViewGroupings(surface string, groupings []domain.SavedViewGro
 	return out, true
 }
 
+func NormalizeSavedViewSettings(surface string, settings domain.SavedViewSettings) (domain.SavedViewSettings, bool) {
+	surface, ok := NormalizeSavedViewSurface(surface)
+	if !ok {
+		return domain.SavedViewSettings{}, false
+	}
+	dateAddedDirection := strings.TrimSpace(settings.DateAddedSortDirection)
+	if surface != SavedViewSurfaceLogicGateKanban {
+		return domain.SavedViewSettings{}, dateAddedDirection == ""
+	}
+	if dateAddedDirection == "" {
+		dateAddedDirection = "asc"
+	}
+	if dateAddedDirection != "asc" && dateAddedDirection != "desc" {
+		return domain.SavedViewSettings{}, false
+	}
+	return domain.SavedViewSettings{DateAddedSortDirection: dateAddedDirection}, true
+}
+
 func normalizeSavedViewGroupingDirection(direction string) (string, bool) {
 	switch strings.TrimSpace(direction) {
 	case "", "asc":
@@ -137,6 +154,10 @@ func normalizeSavedViewInput(input SavedViewInput) (SavedViewInput, bool) {
 	if !ok {
 		return SavedViewInput{}, false
 	}
+	settings, ok := NormalizeSavedViewSettings(surface, input.Settings)
+	if !ok {
+		return SavedViewInput{}, false
+	}
 	input.CompanyID = companyID
 	input.SavedViewID = savedViewID
 	input.Surface = surface
@@ -144,6 +165,7 @@ func normalizeSavedViewInput(input SavedViewInput) (SavedViewInput, bool) {
 	input.PrincipalID = principalID
 	input.Name = name
 	input.Groupings = groupings
+	input.Settings = settings
 	return input, true
 }
 

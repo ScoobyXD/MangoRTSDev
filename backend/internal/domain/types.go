@@ -156,6 +156,10 @@ type SavedViewGrouping struct {
 	Direction string `json:"direction"`
 }
 
+type SavedViewSettings struct {
+	DateAddedSortDirection string `json:"date_added_sort_direction,omitempty"`
+}
+
 type SavedView struct {
 	CompanyID        string              `json:"company_id"`
 	SavedViewID      string              `json:"saved_view_id"`
@@ -164,6 +168,7 @@ type SavedView struct {
 	PrincipalID      string              `json:"principal_id"`
 	Name             string              `json:"name"`
 	Groupings        []SavedViewGrouping `json:"groupings"`
+	Settings         SavedViewSettings   `json:"settings"`
 	Position         int                 `json:"position"`
 	CreatedTimestamp time.Time           `json:"created_timestamp"`
 	UpdatedTimestamp time.Time           `json:"updated_timestamp"`

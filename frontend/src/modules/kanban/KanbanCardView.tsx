@@ -204,6 +204,21 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
           <>
             <button
               type="button"
+              title="Accept request"
+              aria-label={`Accept ${card.node_title}`}
+              disabled={requestedActions.busy}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                requestedActions.onAccept();
+              }}
+              style={{ ...requestedActionButtonBase, background: "linear-gradient(135deg, rgba(220,252,231,0.96), rgba(255,255,255,0.84))", color: "#15803d" }}
+            >
+              {"\u2713"}
+            </button>
+            <button
+              type="button"
               title="Decline request"
               aria-label={`Decline ${card.node_title}`}
               disabled={requestedActions.busy}
@@ -216,21 +231,6 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
               style={{ ...requestedActionButtonBase, background: "linear-gradient(135deg, rgba(254,226,226,0.96), rgba(255,255,255,0.84))", color: "#b91c1c" }}
             >
               X
-            </button>
-            <button
-              type="button"
-              title="Accept request"
-              aria-label={`Accept ${card.node_title}`}
-              disabled={requestedActions.busy}
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                requestedActions.onAccept();
-              }}
-              style={{ ...requestedActionButtonBase, background: "linear-gradient(135deg, rgba(220,252,231,0.96), rgba(255,255,255,0.84))", color: "#15803d" }}
-            >
-              ✓
             </button>
           </>
         )}

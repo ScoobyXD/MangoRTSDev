@@ -196,7 +196,7 @@ test("kanban grouping values use placed-by users for by-person grouping", () => 
   ), [{ key: "person:none", label: "No person", sortValue: "", sortLast: true }]);
 });
 
-test("kanban grouping values resolve priority due date and date-added buckets", () => {
+test("kanban grouping values resolve priority and due date buckets", () => {
   const columns = new Map([
     ["todo", column({ column_id: "todo", title: "Todo", position: 1000 })],
     ["done", column({ column_id: "done", title: "Done", position: 2000 })],
@@ -211,9 +211,6 @@ test("kanban grouping values resolve priority due date and date-added buckets", 
   ]);
   assert.deepEqual(getKanbanGroupValues(card({ card_id: "none", node_id: "node-none" }), "due_date", columns, nodeByID, new Map()), [
     { key: "due:none", label: "No due date", sortValue: "", sortLast: true },
-  ]);
-  assert.deepEqual(getKanbanGroupValues(card({ card_id: "added", created_timestamp: "2026-05-01T14:35:12.000Z" }), "date_added", columns, nodeByID, new Map()), [
-    { key: "date-added:2026-05-01T14:35:12.000Z", label: "2026-05-01 14:35", sortValue: Date.parse("2026-05-01T14:35:12.000Z") },
   ]);
 });
 
@@ -398,5 +395,5 @@ test("column layout helpers keep reorder and resize writes bounded", () => {
 test("kanban visual contract preserves column title casing and frame-header clearance", () => {
   assert.equal(KANBAN_COLUMN_TITLE_TEXT_TRANSFORM, "none");
   assert.ok(KANBAN_MODULE_TOP_CLEARANCE_PX >= 34);
-  assert.deepEqual(KANBAN_GROUP_FIELDS.map((field) => field.value), ["person", "priority", "due_date", "date_added", "account"]);
+  assert.deepEqual(KANBAN_GROUP_FIELDS.map((field) => field.value), ["person", "priority", "due_date", "account"]);
 });

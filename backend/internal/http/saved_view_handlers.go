@@ -18,6 +18,7 @@ type savedViewRequest struct {
 	PrincipalID string                     `json:"principal_id"`
 	Name        string                     `json:"name"`
 	Groupings   []domain.SavedViewGrouping `json:"groupings"`
+	Settings    domain.SavedViewSettings   `json:"settings"`
 	Position    int                        `json:"position"`
 }
 
@@ -155,6 +156,7 @@ func (s *Server) handleSavedViewsCreate(w http.ResponseWriter, r *http.Request) 
 		PrincipalID: req.PrincipalID,
 		Name:        req.Name,
 		Groupings:   req.Groupings,
+		Settings:    req.Settings,
 		Position:    req.Position,
 	})
 	if err != nil {
@@ -193,6 +195,7 @@ func (s *Server) handleSavedViewUpsert(w http.ResponseWriter, r *http.Request, s
 		PrincipalID: req.PrincipalID,
 		Name:        req.Name,
 		Groupings:   req.Groupings,
+		Settings:    req.Settings,
 		Position:    req.Position,
 	})
 	if err != nil {
