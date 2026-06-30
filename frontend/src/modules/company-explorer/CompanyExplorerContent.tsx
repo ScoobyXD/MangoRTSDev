@@ -106,7 +106,7 @@ type CompanyExplorerGVICFolderRole = LogicGateGVICRole | "other";
 type GVICProjectionCacheEntry = { rows: GVICMatrixProjectionRow[]; logicGates: ExplorerLogicGateRecord[]; loaded: boolean };
 type ExplorerUserSummary = { userID: string; label: string; email?: string };
 type ExplorerGroupSummary = { groupID: string; label: string; users: ExplorerUserSummary[]; children: ExplorerGroupSummary[] };
-type CompanyExplorerInternalTriageDropMenu = { target: CompanyExplorerTriageMessageDropTarget; messageIDs: string[]; x: number; y: number };
+type CompanyExplorerInternalTriageDropMenu = { target: CompanyExplorerTriageMessageDropTarget; messageIDs: string[]; sharedInboxID?: string; x: number; y: number };
 
 function getOpenInNewTabTargetForExplorerRow(row?: ExplorerTreeNode | null): CompanyExplorerOpenInNewTabTarget | null {
   if (!row) return null;
@@ -3558,14 +3558,14 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     applyExplorerFindSelection,
   });
 
-  const requestCompanyExplorerTriageMessagesDrop = useCallback<CompanyExplorerTriageMessageDropHandler>((target, messageIDs, point) => {
+  const requestCompanyExplorerTriageMessagesDrop = useCallback<CompanyExplorerTriageMessageDropHandler>((target, messageIDs, point, source) => {
     if (onTriageMessagesDrop) {
-      onTriageMessagesDrop(target, messageIDs, point);
+      onTriageMessagesDrop(target, messageIDs, point, source);
       return;
     }
     const cleanMessageIDs = cleanExplorerIDs(messageIDs);
     if (cleanMessageIDs.length === 0) return;
-    setInternalTriageDropMenu({ target, messageIDs: cleanMessageIDs, x: point.x, y: point.y });
+    setInternalTriageDropMenu({ target, messageIDs: cleanMessageIDs, sharedInboxID: source?.sharedInboxID?.trim() || undefined, x: point.x, y: point.y });
   }, [onTriageMessagesDrop]);
 
   const pickCompanyExplorerTriageDropPriority = useCallback(async (priority: number) => {
@@ -3581,6 +3581,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     try {
       const result = await convertTriageMessagesToExplorerTarget({
         companyID,
+        sharedInboxID: internalTriageDropMenu.sharedInboxID,
         target,
         messageIDs: internalTriageDropMenu.messageIDs,
         priority,

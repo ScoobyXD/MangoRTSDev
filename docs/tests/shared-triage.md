@@ -86,6 +86,10 @@ ST75 - Duplicate active Shared Triage archive submissions for the same actor, sh
 ST76 - Shared Triage archive jobs must preserve company/shared-inbox scope and use the company-owned shared mailbox grant, not the actor's personal mailbox grant.
 ST77 - Accepted background Shared Triage archive job IDs are pending work, not confirmed archive mutations; they must not be applied to the current visible shared-inbox message-list cache until an explicit user action or later full reload reconciles provider state.
 ST78 - Removing a mailbox-capable shared inbox from Shared Triage without deleting the email connection is a separate remove action: it removes the Shared Triage work surface and shared inbox permissions/GVIC rows while preserving the company_email_connections credential.
+ST79 - Dragging a Shared Triage mailbox email into a Logic Gate or eligible Explorer target must preserve `shared_inbox_id` through the drag payload and conversion API request.
+ST80 - Shared Triage email conversion uses the company-owned shared mailbox grant for message detail reads; it must not require or fall back to the actor's personal mailbox connection.
+ST81 - A successful Shared Triage email conversion creates the same direct email-created Kanban node/card semantics as My Triage, including the visible email-origin marker and later email-transfer behavior.
+ST82 - Local Shared Triage conversion echoes from communications realtime and workspace realtime must be reconciled from the conversion response; they must not blank, fully reload, or repeatedly refetch the shared mailbox message list or Home workspace panel.
 
 ## Scenarios
 
@@ -358,3 +362,22 @@ Expected:
 - If the backend accepts the archive page but a later provider mutation fails or never confirms, the source email is not deleted and can remain or reappear after refresh.
 - If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
 - If there is no next page, clicking the advance action archives the visible page and leaves the list empty until more messages arrive or a refresh reloads the inbox.
+
+### Scenario ST-S10: Shared Email Conversion To Logic Gate
+
+Business logic covered:
+- ST79
+- ST80
+- ST81
+- ST82
+
+Given:
+- A user has edit access to a mailbox-capable Shared Triage inbox.
+- That shared inbox has a connected company-owned mailbox grant.
+- The user drags an email from that Shared Triage mailbox into a Logic Gate or eligible Explorer Logic Gate target.
+
+Expected:
+- The drag payload and conversion request include the selected `shared_inbox_id`.
+- The backend reads the message through the shared mailbox grant and authorizes the mutation as the actor.
+- The resulting Kanban card is marked as directly email-created and can later transfer its email attachment into another node card.
+- The visible Shared Triage email list handles the local conversion without blanking, full-list replacement, or repeated workspace/mail GET bursts from the matching realtime echo.

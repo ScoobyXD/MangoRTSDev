@@ -284,7 +284,6 @@ func TestMemoryEmailNodeTransferAttachesEmailAndDeletesSourceNode(t *testing.T) 
 	}
 
 	transfer, err := repo.TransferCommunicationsEmailNode(CommunicationsEmailNodeTransferInput{
-		UserID:        user.UserID,
 		CompanyID:     companyID,
 		SourceBoardID: sourceCard.BoardID,
 		SourceCardID:  sourceCard.CardID,
@@ -299,6 +298,9 @@ func TestMemoryEmailNodeTransferAttachesEmailAndDeletesSourceNode(t *testing.T) 
 	}
 	if transfer.EmailPlacement.NodeID != targetNode.NodeID || transfer.EmailPlacement.CardID != targetAssignment.Card.CardID || transfer.EmailPlacement.LogicGateID != logicGate.LogicGateID {
 		t.Fatalf("transfer placement = %+v, want target node/card/gate", transfer.EmailPlacement)
+	}
+	if transfer.EmailPlacement.UserID != user.UserID {
+		t.Fatalf("transfer placement user_id = %q, want original email owner %q", transfer.EmailPlacement.UserID, user.UserID)
 	}
 	if _, err := repo.GetKanbanCard(companyID, sourceCard.BoardID, sourceCard.CardID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("source card after transfer err=%v, want ErrNotFound", err)

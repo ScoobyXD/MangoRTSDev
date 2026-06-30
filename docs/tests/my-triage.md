@@ -68,6 +68,8 @@ MT57 - Accepted background archive job IDs are pending work, not confirmed archi
 MT58 - Transferring a direct email-created Kanban card into another node is not a revert; the email remains out of My Triage.
 MT59 - A successful email-card transfer deletes the source email-created workspace node/card and creates or updates an email attachment on the target node.
 MT60 - My Triage revert is only for restoring the original direct email-created card back to triage; once that email is transferred into another node, the transferred email is represented as a target-node attachment instead of a triage row.
+MT61 - Drag payloads from My Triage and Shared Triage must carry message IDs plus source mailbox scope; Shared Triage drags include `shared_inbox_id`, while My Triage drags leave that scope empty.
+MT62 - Successful local email conversion into a Logic Gate must use the conversion response to update visible state and suppress matching immediate communications/workspace realtime echoes; it must not blank the email list or repeatedly reload the Home workspace panel.
 
 ## Scenarios
 
@@ -201,6 +203,7 @@ Business logic covered:
 - MT55
 - MT56
 - MT57
+- MT62
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
@@ -215,6 +218,7 @@ Expected:
 - Browser focus and visibility changes do not force a message-list refresh.
 - New-email realtime events with a message ID fetch that single message and insert it into the current date-sorted list when it matches the active filters.
 - Updated, opened, deleted, or converted-message realtime events touch only the affected visible or selected row when the event carries enough IDs.
+- Local conversion echoes from the user's own email-to-Logic-Gate drop do not trigger repeated mail GETs, workspace panel GET bursts, or visible list blanking.
 - Realtime message events that do not carry a message ID do not trigger a whole-list reload; the next explicit page/list load reconciles provider state.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
 - Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.
@@ -242,6 +246,7 @@ Business logic covered:
 - MT58
 - MT59
 - MT60
+- MT61
 
 Given:
 - A user converts a My Triage email into a Logic Gate Kanban node card.
@@ -252,4 +257,5 @@ Expected:
 - The temporary source node/card created by the original conversion is deleted.
 - The target node receives the email attachment and attached-email projection.
 - Future placement lookup for the message points at the target node/card.
+- The original conversion path keeps source mailbox scope on the drag payload, so the same card/transfer semantics apply when the source email came from Shared Triage.
 - The revert behavior still applies only when reverting the original direct email-created card before it is transferred.

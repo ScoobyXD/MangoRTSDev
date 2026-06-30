@@ -130,7 +130,7 @@ func NormalizeCommunicationsEmailNodeTransferInput(input CommunicationsEmailNode
 	input.TargetCardID = strings.TrimSpace(input.TargetCardID)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
-	if input.UserID == "" || input.CompanyID == "" || input.SourceBoardID == "" || input.SourceCardID == "" || input.TargetBoardID == "" || input.TargetCardID == "" {
+	if input.CompanyID == "" || input.SourceBoardID == "" || input.SourceCardID == "" || input.TargetBoardID == "" || input.TargetCardID == "" {
 		return CommunicationsEmailNodeTransferInput{}, ErrInvalid
 	}
 	if input.SourceBoardID == input.TargetBoardID && input.SourceCardID == input.TargetCardID {

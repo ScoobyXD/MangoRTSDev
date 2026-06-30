@@ -115,6 +115,8 @@ export type HomeTriageConversionCommandResult = {
 
 export type HomeExplorerTriageConversionCommandResult = {
   result: Awaited<ReturnType<HomeConvertTriageMessagesToExplorerTarget>>;
+  boardID: string;
+  logicGateID: string;
   convertedMessageIDs: string[];
 };
 
@@ -919,6 +921,7 @@ function explorerConversionTargetIsValid(target: CommunicationsTriageConversionT
 export async function convertMessagesToExplorerTargetCommand(args: {
   apiBase: string;
   companyID: string;
+  sharedInboxID?: string;
   target: CommunicationsTriageConversionTarget;
   messageIDs: string[];
   priority: number;
@@ -940,12 +943,15 @@ export async function convertMessagesToExplorerTargetCommand(args: {
 
   const priority = Number.isInteger(args.priority) && args.priority >= 1 && args.priority <= 5 ? args.priority : 3;
   const convertTriageMessagesToExplorerTarget = args.convertTriageMessagesToExplorerTarget ?? defaultConvertTriageMessagesToExplorerTarget;
-  const result = await convertTriageMessagesToExplorerTarget({
+  const sharedInboxID = args.sharedInboxID?.trim() || undefined;
+  const conversionInput: Parameters<HomeConvertTriageMessagesToExplorerTarget>[0] = {
     companyID,
     target: args.target,
     messageIDs,
     priority,
-  });
+  };
+  if (sharedInboxID) conversionInput.sharedInboxID = sharedInboxID;
+  const result = await convertTriageMessagesToExplorerTarget(conversionInput);
 
   const targetLogicGateID = explorerTargetLogicGateID(args.target);
   const boardID = result.board?.board_id?.trim() || (targetLogicGateID ? logicGateKanbanBoardID(targetLogicGateID) : "");
@@ -979,11 +985,12 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   invalidateCommunications({ messagePages: true, messages: true });
 
   const convertedMessageIDs = result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs;
-  return { result, convertedMessageIDs };
+  return { result, boardID, logicGateID: boardLogicGateID, convertedMessageIDs };
 }
 export async function convertMessagesToLogicGateCommand(args: {
   apiBase: string;
   companyID: string;
+  sharedInboxID?: string;
   logicGateID: string;
   nodeID?: string;
   messageIDs: string[];
@@ -1013,6 +1020,8 @@ export async function convertMessagesToLogicGateCommand(args: {
     messageIDs,
     priority,
   };
+  const sharedInboxID = args.sharedInboxID?.trim() || undefined;
+  if (sharedInboxID) conversionInput.sharedInboxID = sharedInboxID;
   if (nodeID) conversionInput.nodeID = nodeID;
   const result = await convertTriageMessagesToLogicGate(conversionInput);
   const boardID = result.board?.board_id?.trim() || logicGateKanbanBoardID(logicGateID);

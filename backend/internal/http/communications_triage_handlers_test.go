@@ -92,3 +92,82 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 		t.Fatalf("durable events = %+v, want committed conversion events", durable)
 	}
 }
+
+func TestCommunicationsTriageConvertUsesSharedInboxConnection(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "22222222-2222-4222-8222-222222222202"
+	repo.EnsureCompany(companyID, "HTTP Shared Email Conversion Company")
+	user, err := repo.UpsertAuthUser("http-shared-email-converter", "shared-converter@example.com", "Shared Converter")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	if _, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID:         companyID,
+		Provider:          "google",
+		AccountEmail:      "support@example.com",
+		GrantID:           "grant-shared-convert",
+		Status:            "connected",
+		ConnectedByUserID: user.UserID,
+	}); err != nil {
+		t.Fatalf("UpsertCompanyEmailConnection: %v", err)
+	}
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
+	if err != nil {
+		t.Fatalf("CreateCommunicationsSharedInboxFolder: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeSharedInbox,
+		EntityID:   folder.FolderID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Shared Support Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	nylas := &fakeNylasClient{message: NylasMessage{
+		ID:       "shared-message-1",
+		ThreadID: "shared-thread-1",
+		Subject:  "Shared conversion email",
+		Snippet:  "Convert from shared",
+		From:     []NylasEmailAddress{{Name: "Customer", Email: "customer@example.com"}},
+	}}
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: testNylasConfig(),
+		NylasClient: nylas,
+	})
+
+	body, _ := json.Marshal(map[string]any{
+		"company_id":      companyID,
+		"shared_inbox_id": folder.FolderID,
+		"logic_gate_id":   logicGate.LogicGateID,
+		"message_ids":     []string{"shared-message-1"},
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/communications/triage/convert", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = requestWithActorForTest(req, user, companyID)
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST shared convert status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if nylas.lastDetailGrantID != "grant-shared-convert" {
+		t.Fatalf("Nylas detail grant = %q, want shared grant", nylas.lastDetailGrantID)
+	}
+	placements, err := repo.ListCommunicationsEmailPlacements(user.UserID, companyID, []string{"shared-message-1"})
+	if err != nil {
+		t.Fatalf("ListCommunicationsEmailPlacements: %v", err)
+	}
+	if len(placements) != 1 || placements[0].LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("shared conversion placements = %+v, want shared email attached to gate %s", placements, logicGate.LogicGateID)
+	}
+}

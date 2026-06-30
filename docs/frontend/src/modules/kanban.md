@@ -156,7 +156,7 @@ Endpoints:
 `POST /v1/kanban/cards` is idempotent per board and node. If the same node is dropped again, the existing card moves instead of duplicating.
 `PUT /v1/kanban/cards/:card_id` is also used for vertical card reordering and selected-card batch moves by writing new sparse `position` values.
 The card write API has no item-type field; Kanban board cards are node-only.
-Direct email-created cards expose `created_from_email = true` in Kanban card reads. The email transfer endpoint only accepts a source card backed by `communications_email_nodes`; it writes the destination attachment into `communications_email_node_attachments`, adds an `Attached email` projection to the target node, and deletes the source email node/card. It does not restore the email to My Triage.
+Direct email-created cards expose `created_from_email = true` in Kanban card reads whether the source email came from My Triage or a mailbox-capable Shared Triage inbox. The email transfer endpoint accepts a source card backed by `communications_email_nodes`; it writes the destination attachment into `communications_email_node_attachments`, adds an `Attached email` projection to the target node, and deletes the source email node/card. Transfer uses stored email-node provenance and does not require the actor to have a connected personal mailbox. It does not restore the email to My Triage.
 Saved board rows are metadata only. Columns/cards remain the source of board contents, column order, dimensions, colors, and card positions.
 Kanban boards can be placed in Company Explorer through `company_explorer_folder_items` with `item_type=kanban`. This makes board organization API-first for agents while keeping board display out of maps and editors.
 

@@ -642,6 +642,33 @@ test("Home triage conversion command owns cache, event, and graph side effects",
   assert.deepEqual(nodeFolderItems, ["node-1"]);
   assert.deepEqual(logicGateFolderItems, ["node-1"]);
   assert.deepEqual(communicationScopes, [{ messagePages: true, messages: true }]);
+
+  await convertMessagesToLogicGateCommand({
+    apiBase: "https://api.example.test",
+    companyID: "company-1",
+    sharedInboxID: " shared-1 ",
+    logicGateID: "gate-1",
+    messageIDs: ["message-3"],
+    priority: 4,
+    convertTriageMessagesToLogicGate,
+    invalidateKanbanBoardList: (_apiBase, companyID) => invalidatedBoardLists.push(companyID),
+    invalidateKanbanBoardContents: (_apiBase, _companyID, boardID) => invalidatedBoardContents.push(boardID),
+    invalidateLogicGateArenaView: (_apiBase, _companyID, logicGateID) => invalidatedArenaViews.push(logicGateID ?? ""),
+    dispatchKanbanBoardsUpdated: (detail) => boardEvents.push(detail),
+    dispatchKanbanBoardContentsUpdated: (detail) => boardContentEvents.push(detail),
+    invalidateNodeRecord: (_apiBase, _companyID, nodeID) => invalidatedNodes.push(nodeID),
+    upsertNodeRelationshipGraphNode: (_apiBase, _companyID, node) => upsertedNodes.push(node.node_id),
+    upsertNodeFolderItemInRelationshipGraph: (_apiBase, _companyID, item) => nodeFolderItems.push(item.item_id),
+    upsertLogicGateFolderItemInRelationshipGraph: (_apiBase, _companyID, item) => logicGateFolderItems.push(item.item_id),
+    invalidateCommunications: (scope) => communicationScopes.push(scope),
+  });
+  assert.deepEqual(convertCalls[1], {
+    companyID: "company-1",
+    sharedInboxID: "shared-1",
+    logicGateID: "gate-1",
+    messageIDs: ["message-3"],
+    priority: 4,
+  });
 });
 
 test("Home mail message commands normalize ids and pass shared inbox context", async () => {

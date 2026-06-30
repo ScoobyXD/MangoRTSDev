@@ -108,12 +108,14 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	connection, ok := s.requireConnectedEmail(w, r)
+	actor, ok := authenticatedActor(r)
 	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	var req struct {
 		CompanyID          string                                     `json:"company_id"`
+		SharedInboxID      string                                     `json:"shared_inbox_id"`
 		LogicGateID        string                                     `json:"logic_gate_id"`
 		NodeID             string                                     `json:"node_id"`
 		NewLogicGateHeader string                                     `json:"new_logic_gate_header"`
@@ -125,6 +127,11 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	sharedInboxID := strings.TrimSpace(req.SharedInboxID)
+	connection, ok := s.requireCommunicationsConnection(w, r, actor, req.CompanyID, sharedInboxID, store.EntityPermissionEdit)
+	if !ok {
 		return
 	}
 	actorUserID, idempotencyKey := workItemAssignmentRequestEventMetadata(r)
@@ -207,7 +214,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		return
 	}
 	s.publishCommittedWorkspaceEvents(result.Events)
-	s.publishCommunicationsEvent(connection.UserID, "triage_changed", "triage.converted", strings.Join(result.DeletedMessageIDs, ","))
+	s.publishCommunicationsEventWithMeta(connection.UserID, "triage_changed", "triage.converted", strings.Join(result.DeletedMessageIDs, ","), communicationsEventMetadata{SharedInboxID: sharedInboxID})
 	writeJSON(w, http.StatusCreated, result)
 }
 func (s *Server) handleCommunicationsTriageRevert(w http.ResponseWriter, r *http.Request) {
@@ -270,8 +277,8 @@ func (s *Server) handleCommunicationsEmailNodeTransfer(w http.ResponseWriter, r 
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	connection, ok := s.requireConnectedEmail(w, r)
-	if !ok {
+	if _, ok := authenticatedActor(r); !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	var req struct {
@@ -287,7 +294,6 @@ func (s *Server) handleCommunicationsEmailNodeTransfer(w http.ResponseWriter, r 
 	}
 	actorUserID, idempotencyKey := workItemAssignmentRequestEventMetadata(r)
 	input, err := store.NormalizeCommunicationsEmailNodeTransferInput(store.CommunicationsEmailNodeTransferInput{
-		UserID:         connection.UserID,
 		CompanyID:      req.CompanyID,
 		SourceBoardID:  req.SourceBoardID,
 		SourceCardID:   req.SourceCardID,

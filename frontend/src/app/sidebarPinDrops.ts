@@ -2,11 +2,12 @@ import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../modules/company-
 import { getExplorerDropPayloadItems, type ExplorerDropPayload } from "../modules/company-explorer/treePresentation.js";
 import { EXPLORER_ENTITY_DRAG_MIME, KANBAN_CARD_DRAG_MIME, KANBAN_COLUMN_DRAG_MIME, parseExplorerEntityDragItems } from "../modules/kanban/shared.js";
 import { TRIAGE_MESSAGE_DRAG_MIME } from "../pages/home/homeConstants.js";
+import { readTriageMessageDrag } from "../pages/home/homeUtils.js";
 import { sidebarPinFallbackName, type SidebarPin, type SidebarPinDraft, type SidebarPinKind } from "./sidebarPins.js";
 
 export type SidebarPinnedResourceDropAction =
-  | { kind: "triage_to_logic_gate"; pin: SidebarPin; logicGateID: string; messageIDs: string[] }
-  | { kind: "triage_to_node"; pin: SidebarPin; nodeID: string; messageIDs: string[] }
+  | { kind: "triage_to_logic_gate"; pin: SidebarPin; logicGateID: string; messageIDs: string[]; sharedInboxID?: string }
+  | { kind: "triage_to_node"; pin: SidebarPin; nodeID: string; messageIDs: string[]; sharedInboxID?: string }
   | { kind: "nodes_to_logic_gate"; pin: SidebarPin; logicGateID: string; nodeIDs: string[] };
 
 export type SidebarPinDropPlacement = "before" | "after" | "inside";
@@ -53,12 +54,12 @@ export function readSidebarPinnedResourceDropAction(pin: SidebarPin, dataTransfe
   const pinID = pin.id.trim();
   if (!pinID || pin.kind === "project") return null;
 
-  const messageIDs = readSidebarTriageMessageIDs(dataTransfer);
-  if (messageIDs.length > 0) {
+  const triageMessageDrag = readTriageMessageDrag(dataTransfer);
+  if (triageMessageDrag.messageIDs.length > 0) {
     if (pin.kind === "logic_gate") {
-      return { kind: "triage_to_logic_gate", pin, logicGateID: pinID, messageIDs };
+      return { kind: "triage_to_logic_gate", pin, logicGateID: pinID, messageIDs: triageMessageDrag.messageIDs, sharedInboxID: triageMessageDrag.sharedInboxID };
     }
-    return { kind: "triage_to_node", pin, nodeID: pinID, messageIDs };
+    return { kind: "triage_to_node", pin, nodeID: pinID, messageIDs: triageMessageDrag.messageIDs, sharedInboxID: triageMessageDrag.sharedInboxID };
   }
 
   if (pin.kind === "logic_gate") {
@@ -92,18 +93,6 @@ export function hasMangoDragPayload(dataTransfer: DataTransfer): boolean {
     || types.includes(EXPLORER_ENTITY_DRAG_MIME)
     || types.includes(KANBAN_CARD_DRAG_MIME)
     || types.includes(KANBAN_COLUMN_DRAG_MIME);
-}
-
-function readSidebarTriageMessageIDs(dataTransfer: DataTransfer): string[] {
-  try {
-    const raw = dataTransfer.getData(TRIAGE_MESSAGE_DRAG_MIME);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as { kind?: unknown; message_ids?: unknown };
-    if (parsed.kind !== "triage_messages" || !Array.isArray(parsed.message_ids)) return [];
-    return cleanIDs(parsed.message_ids.filter((value): value is string => typeof value === "string"));
-  } catch {
-    return [];
-  }
 }
 
 function readSidebarNodeIDs(dataTransfer: DataTransfer): string[] {

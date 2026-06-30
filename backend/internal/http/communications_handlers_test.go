@@ -39,6 +39,7 @@ type fakeNylasClient struct {
 	rawMIMEErr               error
 	lastQuery                NylasMessageQuery
 	lastMessageGrantID       string
+	lastDetailGrantID        string
 	lastRawMIMEGrantID       string
 	lastRawMIMEMessageID     string
 	lastDownloadGrantID      string
@@ -110,10 +111,11 @@ func (f *fakeNylasClient) GetThread(_ context.Context, _, threadID string) (Nyla
 	return thread, nil
 }
 
-func (f *fakeNylasClient) GetMessage(_ context.Context, _, messageID string) (NylasMessage, error) {
+func (f *fakeNylasClient) GetMessage(_ context.Context, grantID, messageID string) (NylasMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.detailCalls++
+	f.lastDetailGrantID = grantID
 	if f.messagesByID != nil {
 		if message, ok := f.messagesByID[messageID]; ok {
 			return message, nil

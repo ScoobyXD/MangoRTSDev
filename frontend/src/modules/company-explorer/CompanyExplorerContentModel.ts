@@ -108,6 +108,7 @@ export type CompanyExplorerTriageMessageDropHandler = (
   target: CompanyExplorerTriageMessageDropTarget,
   messageIDs: string[],
   point: { x: number; y: number },
+  source?: { sharedInboxID?: string; companyID?: string },
 ) => void;
 
 export type CompanyExplorerContentProps = {

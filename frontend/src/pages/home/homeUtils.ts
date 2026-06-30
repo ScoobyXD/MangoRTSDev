@@ -198,16 +198,30 @@ export function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
-export function readTriageMessageIDs(dataTransfer: DataTransfer): string[] {
+export type TriageMessageDragPayload = {
+  messageIDs: string[];
+  sharedInboxID?: string;
+  companyID?: string;
+};
+
+export function readTriageMessageDrag(dataTransfer: DataTransfer): TriageMessageDragPayload {
   try {
     const raw = dataTransfer.getData(TRIAGE_MESSAGE_DRAG_MIME);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as { kind?: string; message_ids?: unknown };
-    if (parsed.kind !== "triage_messages" || !Array.isArray(parsed.message_ids)) return [];
-    return cleanIDList(parsed.message_ids.filter((value): value is string => typeof value === "string"));
+    if (!raw) return { messageIDs: [] };
+    const parsed = JSON.parse(raw) as { kind?: string; message_ids?: unknown; shared_inbox_id?: unknown; company_id?: unknown };
+    if (parsed.kind !== "triage_messages" || !Array.isArray(parsed.message_ids)) return { messageIDs: [] };
+    return {
+      messageIDs: cleanIDList(parsed.message_ids.filter((value): value is string => typeof value === "string")),
+      sharedInboxID: typeof parsed.shared_inbox_id === "string" ? parsed.shared_inbox_id.trim() || undefined : undefined,
+      companyID: typeof parsed.company_id === "string" ? parsed.company_id.trim() || undefined : undefined,
+    };
   } catch {
-    return [];
+    return { messageIDs: [] };
   }
+}
+
+export function readTriageMessageIDs(dataTransfer: DataTransfer): string[] {
+  return readTriageMessageDrag(dataTransfer).messageIDs;
 }
 
 export function hasTriageMessageDrag(dataTransfer: DataTransfer): boolean {

@@ -107,6 +107,42 @@ function isTriageMailViewID(viewID: HomeViewID): boolean {
 const MISSING_LOGIC_GATE_REPAIR_CONCURRENCY = 4;
 const MISSING_LOGIC_GATE_REPAIR_FAILURE_TTL_MS = 5 * 60_000;
 const ARCHIVE_BACKGROUND_CONFIRMATION_TIMEOUT_MS = 3 * 60_000;
+const LOCAL_TRIAGE_CONVERSION_ECHO_TTL_MS = 8_000;
+const LOCAL_TRIAGE_CONVERSION_WORKSPACE_EVENT_TYPES = new Set([
+  "work_item.email_converted",
+  "node_created",
+  "node_updated",
+  "work_item.logic_gate_assignment_saved",
+  "kanban_card_upserted",
+  "company_explorer_folder_item_assigned",
+  "company_explorer_item_placed",
+]);
+
+type LocalTriageConversionWorkspaceEcho = {
+  expiresAt: number;
+  sharedInboxID: string;
+  messageIDs: Set<string>;
+  nodeIDs: Set<string>;
+  boardIDs: Set<string>;
+  cardIDs: Set<string>;
+  logicGateIDs: Set<string>;
+};
+
+function recordStringValue(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function nestedRecordValue(record: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = record[key];
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function workspaceEventValue(record: Record<string, unknown>, key: string, nestedKey?: string): string {
+  const direct = recordStringValue(record, key);
+  if (direct || !nestedKey) return direct;
+  return recordStringValue(nestedRecordValue(record, nestedKey), key);
+}
 
 function hasSemanticWorkspaceScopes(scopes: WorkspaceReconciliationScope[]): boolean {
   return scopes.some((scope) => Boolean(scope.semanticScope));
@@ -443,6 +479,7 @@ export function HomePage({
   const activeDeleteSelectionKindRef = useRef<"message" | HomeEntityDeleteKind | "">("");
   const messageListFilterKeyRef = useRef("");
   const locallyAppliedTriageConversionIDsRef = useRef<Map<string, number>>(new Map());
+  const locallyAppliedTriageConversionWorkspaceEchoesRef = useRef<LocalTriageConversionWorkspaceEcho[]>([]);
   const locallyArchivedMessageKeysRef = useRef<Map<string, number>>(new Map());
   const locallyStarMutatedMessageKeysRef = useRef<Map<string, number>>(new Map());
   const missingLogicGateRepairFailureIDsRef = useRef<Map<string, number>>(new Map());
@@ -1374,25 +1411,76 @@ export function HomePage({
       void loadMessagesRef.current?.({ refresh });
     }, delayMs);
   }, [canLoadMailForView]);
-  const rememberLocallyAppliedTriageConversion = useCallback((messageIDs: string[]) => {
+  const localTriageConversionMessageKey = useCallback((sharedInboxID: string | undefined, messageID: string) => (
+    `${sharedInboxID?.trim() ?? ""}\x1f${messageID.trim()}`
+  ), []);
+  const rememberLocallyAppliedTriageConversion = useCallback((messageIDs: string[], options: {
+    sharedInboxID?: string;
+    nodeIDs?: string[];
+    boardIDs?: string[];
+    cardIDs?: string[];
+    logicGateIDs?: string[];
+  } = {}) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
-    const expiresAt = Date.now() + 6_000;
-    for (const messageID of ids) locallyAppliedTriageConversionIDsRef.current.set(messageID, expiresAt);
-  }, []);
-  const triageConversionWasAppliedLocally = useCallback((streamMessageID: string): boolean => {
+    const sharedInboxID = options.sharedInboxID?.trim() ?? "";
+    const expiresAt = Date.now() + LOCAL_TRIAGE_CONVERSION_ECHO_TTL_MS;
+    for (const messageID of ids) locallyAppliedTriageConversionIDsRef.current.set(localTriageConversionMessageKey(sharedInboxID, messageID), expiresAt);
+    const nodeIDs = cleanIDList(options.nodeIDs ?? []);
+    const boardIDs = cleanIDList(options.boardIDs ?? []);
+    const cardIDs = cleanIDList(options.cardIDs ?? []);
+    const logicGateIDs = cleanIDList(options.logicGateIDs ?? []);
+    if (nodeIDs.length === 0 && boardIDs.length === 0 && cardIDs.length === 0 && logicGateIDs.length === 0) return;
+    locallyAppliedTriageConversionWorkspaceEchoesRef.current = [
+      ...locallyAppliedTriageConversionWorkspaceEchoesRef.current.filter((echo) => echo.expiresAt > Date.now()),
+      {
+        expiresAt,
+        sharedInboxID,
+        messageIDs: new Set(ids),
+        nodeIDs: new Set(nodeIDs),
+        boardIDs: new Set(boardIDs),
+        cardIDs: new Set(cardIDs),
+        logicGateIDs: new Set(logicGateIDs),
+      },
+    ];
+  }, [localTriageConversionMessageKey]);
+  const triageConversionWasAppliedLocally = useCallback((streamMessageID: string, sharedInboxID?: string): boolean => {
     const ids = triageMessageIDsFromStreamMessageID(streamMessageID);
     if (ids.length === 0) return false;
     const now = Date.now();
+    const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
     let allHandled = true;
     for (const messageID of ids) {
-      const expiresAt = locallyAppliedTriageConversionIDsRef.current.get(messageID) ?? 0;
+      const key = localTriageConversionMessageKey(cleanSharedInboxID, messageID);
+      const expiresAt = locallyAppliedTriageConversionIDsRef.current.get(key) ?? 0;
       if (expiresAt <= now) {
-        locallyAppliedTriageConversionIDsRef.current.delete(messageID);
+        locallyAppliedTriageConversionIDsRef.current.delete(key);
         allHandled = false;
       }
     }
     return allHandled;
+  }, [localTriageConversionMessageKey]);
+  const triageConversionWorkspaceEventWasAppliedLocally = useCallback((type: string, data: Record<string, unknown>): boolean => {
+    if (!LOCAL_TRIAGE_CONVERSION_WORKSPACE_EVENT_TYPES.has(type)) return false;
+    const now = Date.now();
+    locallyAppliedTriageConversionWorkspaceEchoesRef.current = locallyAppliedTriageConversionWorkspaceEchoesRef.current.filter((echo) => echo.expiresAt > now);
+    if (locallyAppliedTriageConversionWorkspaceEchoesRef.current.length === 0) return false;
+    const messageID = workspaceEventValue(data, "message_id");
+    const nodeID = workspaceEventValue(data, "node_id", "node");
+    const boardID = workspaceEventValue(data, "board_id", "card") || workspaceEventValue(data, "compatibility_board_id");
+    const cardID = workspaceEventValue(data, "card_id", "card") || workspaceEventValue(data, "compatibility_card_id");
+    const logicGateID = workspaceEventValue(data, "logic_gate_id", "card") || workspaceEventValue(data, "logic_gate_id", "logic_gate");
+    const itemID = workspaceEventValue(data, "item_id", "folder_item");
+    const targetID = workspaceEventValue(data, "target_id", "entity");
+    return locallyAppliedTriageConversionWorkspaceEchoesRef.current.some((echo) => (
+      (!!messageID && echo.messageIDs.has(messageID)) ||
+      (!!nodeID && echo.nodeIDs.has(nodeID)) ||
+      (!!itemID && echo.nodeIDs.has(itemID)) ||
+      (!!targetID && echo.nodeIDs.has(targetID)) ||
+      (!!boardID && echo.boardIDs.has(boardID)) ||
+      (!!cardID && echo.cardIDs.has(cardID)) ||
+      (!!logicGateID && echo.logicGateIDs.has(logicGateID))
+    ));
   }, []);
   const locallyArchivedMessageKey = useCallback((nextCompanyID: string, sharedInboxID: string | undefined, messageID: string) => (
     `${nextCompanyID.trim()}\x1f${sharedInboxID?.trim() ?? ""}\x1f${messageID.trim()}`
@@ -1673,7 +1761,15 @@ export function HomePage({
       if (detail.companyID && detail.companyID !== companyID) return;
       const messageIDs = cleanIDList(detail.messageIDs ?? []);
       if (messageIDs.length === 0) return;
-      rememberLocallyAppliedTriageConversion(messageIDs);
+      const sharedInboxID = detail.sharedInboxID?.trim() ?? "";
+      rememberLocallyAppliedTriageConversion(messageIDs, {
+        sharedInboxID,
+        nodeIDs: detail.nodeIDs,
+        boardIDs: detail.boardIDs,
+        cardIDs: detail.cardIDs,
+        logicGateIDs: detail.logicGateID ? [detail.logicGateID] : undefined,
+      });
+      if (sharedInboxID !== sharedInboxIDForHomeView(activeViewIDRef.current)) return;
       const logicGateID = detail.logicGateID?.trim() ?? "";
       if (!logicGateID) return;
       setMessages((previous) => previous.map((message) => messageIDs.includes(message.id) ? markMessageSentToLogicGate(message, logicGateID) : message));
@@ -1749,8 +1845,10 @@ export function HomePage({
         const archiveConfirmation = communicationStreamEventIsArchiveConfirmation({ trigger, action: eventAction });
         const starConfirmation = communicationStreamEventIsStarConfirmation({ trigger, action: eventAction });
         if (trigger.startsWith("triage.")) {
-          if (trigger.startsWith("triage.converted") && triageConversionWasAppliedLocally(messageID)) return;
-          if (trigger.startsWith("triage.converted") && activeViewIDRef.current === "my-triage") {
+          const activeSharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
+          const conversionTargetsCurrentMailbox = eventSharedInboxID ? eventSharedInboxID === activeSharedInboxID : activeSharedInboxID === "";
+          if (trigger.startsWith("triage.converted") && triageConversionWasAppliedLocally(messageID, eventSharedInboxID || undefined)) return;
+          if (trigger.startsWith("triage.converted") && conversionTargetsCurrentMailbox && isTriageMailViewID(activeViewIDRef.current)) {
             const converted = triageMessageIDsFromStreamMessageID(messageID);
             if (converted.length > 0) removeMessagesFromVisibleMailList(converted, { preserveScrollAnchor: true });
           }
@@ -1914,6 +2012,7 @@ export function HomePage({
         const type = envelope.type?.trim() ?? "";
         if (!type) return;
         const data: Record<string, unknown> = envelope.data && typeof envelope.data === "object" ? envelope.data : {};
+        const localTriageConversionEcho = triageConversionWorkspaceEventWasAppliedLocally(type, data);
         const scopes = context.scopes ?? [];
         const semanticScopesPresent = hasSemanticWorkspaceScopes(scopes);
         const touchesSharedInbox = scopes.some(workspaceScopeTouchesSharedInbox);
@@ -1926,7 +2025,7 @@ export function HomePage({
         if (touchesSharedInbox) {
           void loadSharedInboxes();
         }
-        if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
+        if (touchesWorkspacePanel && !localTriageConversionEcho) scheduleWorkspacePanelReload();
         if (touchesGVICMatrix) requestGVICMatrixProjectionRefreshRef.current?.();
         if (semanticScopesPresent && !touchesSharedInbox && !touchesWorkspacePanel && !touchesGVICMatrix) return;
         if (type === "node_created" || type === "node_updated" || type === "node_permissions_updated") {
@@ -2014,7 +2113,7 @@ export function HomePage({
             setLogicGateFolderItems((previous) => previous.filter((item) => item.folder_id !== folderID));
           }
         }
-        if (!touchesWorkspacePanel && scopes.some((scope) => scope.kind === "workspace") && workspaceEventTouchesHomePanel(type)) {
+        if (!localTriageConversionEcho && !touchesWorkspacePanel && scopes.some((scope) => scope.kind === "workspace") && workspaceEventTouchesHomePanel(type)) {
           scheduleWorkspacePanelReload();
         }
         if (type === "node_permissions_updated") {
@@ -2032,7 +2131,7 @@ export function HomePage({
         workspacePanelReloadTimerRef.current = null;
       }
     };
-  }, [apiBase, companyID, currentUserID, isInboxMatrixView, loadSharedInboxes, refreshNodeRelationshipsForMatrix, scheduleMyWorkLiveRefresh, scheduleWorkspacePanelReload]);
+  }, [apiBase, companyID, currentUserID, isInboxMatrixView, loadSharedInboxes, refreshNodeRelationshipsForMatrix, scheduleMyWorkLiveRefresh, scheduleWorkspacePanelReload, triageConversionWorkspaceEventWasAppliedLocally]);
   useEffect(() => {
     if (!selectedMessageID) return;
     if (!canLoadMailForView(activeViewID)) {
@@ -2969,10 +3068,16 @@ export function HomePage({
     const triageView = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:");
     if (!triageView || !canDragTriageMessageFromMailbox(mailboxRef.current)) return;
     const messageIDs = selectedMessageIDs.has(message.id) ? Array.from(selectedMessageIDs) : [message.id];
+    const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData(TRIAGE_MESSAGE_DRAG_MIME, JSON.stringify({ kind: "triage_messages", message_ids: messageIDs }));
+    event.dataTransfer.setData(TRIAGE_MESSAGE_DRAG_MIME, JSON.stringify({
+      kind: "triage_messages",
+      company_id: companyID,
+      message_ids: messageIDs,
+      shared_inbox_id: sharedInboxID || undefined,
+    }));
     event.dataTransfer.setData("text/plain", messageIDs.join(","));
-  }, [activeViewID, selectedMessageIDs]);
+  }, [activeViewID, companyID, selectedMessageIDs]);
   const getSelectedMessageIDsForAction = useCallback((): string[] => {
     const visibleIDs = new Set(messages.map((message) => message.id));
     const ids = Array.from(selectedMessageIDs).filter((id) => visibleIDs.has(id));
@@ -3075,13 +3180,16 @@ export function HomePage({
   const convertMessagesToLogicGate = useCallback(async (logicGateID: string, messageIDs: string[], priority: number) => {
     const ids = cleanIDList(messageIDs);
     if (!logicGateID || ids.length === 0) return;
+    const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     setBusy("triage-convert");
     setError("");
+    rememberLocallyAppliedTriageConversion(ids, { sharedInboxID, logicGateIDs: [logicGateID] });
     try {
       const conversion = await convertMessagesToLogicGateCommand({
         apiBase,
         companyID,
         logicGateID,
+        sharedInboxID,
         messageIDs: ids,
         priority,
         invalidateKanbanBoardList: invalidateKanbanBoardListCache,
@@ -3107,6 +3215,16 @@ export function HomePage({
         });
       }
       const converted = conversion.convertedMessageIDs;
+      rememberLocallyAppliedTriageConversion(converted, {
+        sharedInboxID,
+        nodeIDs: conversion.result.nodes?.map((node) => node.node_id) ?? [],
+        boardIDs: [
+          conversion.boardID,
+          ...(conversion.result.cards ?? []).map((card) => card.board_id),
+        ],
+        cardIDs: (conversion.result.cards ?? []).map((card) => card.card_id),
+        logicGateIDs: [conversion.logicGateID, logicGateID],
+      });
       setMessages((previous) => previous.map((message) => converted.includes(message.id) ? markMessageSentToLogicGate(message, logicGateID) : message));
       setSelectedMessage((current) => current && converted.includes(current.id) ? markMessageSentToLogicGate(current, logicGateID) : current);
       const title = logicGateByID.get(logicGateID)?.header || "Logic Gate";
@@ -3116,7 +3234,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, logicGateByID, showNoticeWithResourceAction]);
+  }, [apiBase, companyID, logicGateByID, rememberLocallyAppliedTriageConversion, showNoticeWithResourceAction]);
   const selectLogicGateTreeID = useCallback((treeID: string, orderedIDs: string[], event: React.MouseEvent) => {
     activeDeleteSelectionKindRef.current = "logic_gate";
     const next = resolveExplorerClickSelection({
