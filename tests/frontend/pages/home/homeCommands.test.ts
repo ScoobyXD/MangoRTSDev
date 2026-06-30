@@ -596,6 +596,7 @@ test("Home triage conversion command owns cache, event, and graph side effects",
       nodes: [convertedNode],
       folder_items: [folderItem],
       deleted_message_ids: ["message-1"],
+      unstarred_message_ids: ["message-1"],
     };
   };
   const invalidatedBoardLists: string[] = [];
@@ -630,6 +631,7 @@ test("Home triage conversion command owns cache, event, and graph side effects",
   assert.equal(result?.boardID, "logic-gate:gate-1");
   assert.equal(result?.logicGateID, "gate-1");
   assert.deepEqual(result?.convertedMessageIDs, ["message-1"]);
+  assert.deepEqual(result?.unstarredMessageIDs, ["message-1"]);
   assert.deepEqual(invalidatedBoardLists, ["company-1"]);
   assert.deepEqual(invalidatedBoardContents, ["logic-gate:gate-1"]);
   assert.deepEqual(invalidatedArenaViews, ["gate-1"]);

@@ -386,6 +386,7 @@ export function AppSidebar({
           ...(conversion?.result.cards ?? []).map((card) => card.board_id),
         ],
         cardIDs: (conversion?.result.cards ?? []).map((card) => card.card_id),
+        unstarredMessageIDs: conversion?.unstarredMessageIDs ?? [],
       });
       setExplorerDropSuccess(convertedMessageIDs.length === 1 ? "Email added to Logic Gate." : `${convertedMessageIDs.length} emails added to Logic Gate.`);
     } catch (error) {
@@ -468,6 +469,7 @@ export function AppSidebar({
           ...(conversion?.result.cards ?? []).map((card) => card.board_id),
         ],
         cardIDs: (conversion?.result.cards ?? []).map((card) => card.card_id),
+        unstarredMessageIDs: conversion?.unstarredMessageIDs ?? [],
       });
       setPinDropSuccess(convertedMessageIDs.length === 1 ? `Email added to ${menu.action.pin.name}.` : `${convertedMessageIDs.length} emails added to ${menu.action.pin.name}.`);
     } catch (error) {

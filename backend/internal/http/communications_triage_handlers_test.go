@@ -29,15 +29,17 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
+	nylas := &fakeNylasClient{message: NylasMessage{
+		ID:       "http-message-1",
+		ThreadID: "http-thread-1",
+		Subject:  "HTTP conversion email",
+		Snippet:  "Convert me",
+		From:     []NylasEmailAddress{{Name: "Customer", Email: "customer@example.com"}},
+		Starred:  true,
+	}}
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: testNylasConfig(),
-		NylasClient: &fakeNylasClient{message: NylasMessage{
-			ID:       "http-message-1",
-			ThreadID: "http-thread-1",
-			Subject:  "HTTP conversion email",
-			Snippet:  "Convert me",
-			From:     []NylasEmailAddress{{Name: "Customer", Email: "customer@example.com"}},
-		}},
+		NylasClient: nylas,
 	})
 	stream := server.workspaceEvents.subscribe(companyID)
 	defer server.workspaceEvents.unsubscribe(companyID, stream)
@@ -61,10 +63,23 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	for _, field := range []string{"board", "cards", "nodes", "assignments", "email_provenance", "deleted_message_ids"} {
+	for _, field := range []string{"board", "cards", "nodes", "assignments", "email_provenance", "deleted_message_ids", "unstarred_message_ids"} {
 		if _, ok := response[field]; !ok {
 			t.Fatalf("response missing %s: %s", field, rec.Body.String())
 		}
+	}
+	var unstarredMessageIDs []string
+	if err := json.Unmarshal(response["unstarred_message_ids"], &unstarredMessageIDs); err != nil {
+		t.Fatalf("decode unstarred_message_ids: %v", err)
+	}
+	if len(unstarredMessageIDs) != 1 || unstarredMessageIDs[0] != "http-message-1" {
+		t.Fatalf("unstarred_message_ids = %+v, want http-message-1", unstarredMessageIDs)
+	}
+	if len(nylas.updateCalls) != 1 {
+		t.Fatalf("Nylas update calls = %+v, want one unstar", nylas.updateCalls)
+	}
+	if nylas.updateCalls[0].GrantID != "grant-http" || nylas.updateCalls[0].MessageID != "http-message-1" || nylas.updateCalls[0].Update.Starred == nil || *nylas.updateCalls[0].Update.Starred {
+		t.Fatalf("Nylas unstar update = %+v, want grant-http/http-message-1/starred=false", nylas.updateCalls[0])
 	}
 	if _, ok := response["events"]; ok {
 		t.Fatalf("response leaked hidden committed events: %s", rec.Body.String())
@@ -140,6 +155,7 @@ func TestCommunicationsTriageConvertUsesSharedInboxConnection(t *testing.T) {
 		Subject:  "Shared conversion email",
 		Snippet:  "Convert from shared",
 		From:     []NylasEmailAddress{{Name: "Customer", Email: "customer@example.com"}},
+		Starred:  true,
 	}}
 	server := NewServerWithOptions(repo, ServerOptions{
 		NylasConfig: testNylasConfig(),
@@ -162,6 +178,23 @@ func TestCommunicationsTriageConvertUsesSharedInboxConnection(t *testing.T) {
 	}
 	if nylas.lastDetailGrantID != "grant-shared-convert" {
 		t.Fatalf("Nylas detail grant = %q, want shared grant", nylas.lastDetailGrantID)
+	}
+	var response map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode shared response: %v", err)
+	}
+	var unstarredMessageIDs []string
+	if err := json.Unmarshal(response["unstarred_message_ids"], &unstarredMessageIDs); err != nil {
+		t.Fatalf("decode shared unstarred_message_ids: %v", err)
+	}
+	if len(unstarredMessageIDs) != 1 || unstarredMessageIDs[0] != "shared-message-1" {
+		t.Fatalf("shared unstarred_message_ids = %+v, want shared-message-1", unstarredMessageIDs)
+	}
+	if len(nylas.updateCalls) != 1 {
+		t.Fatalf("shared Nylas update calls = %+v, want one unstar", nylas.updateCalls)
+	}
+	if nylas.updateCalls[0].GrantID != "grant-shared-convert" || nylas.updateCalls[0].MessageID != "shared-message-1" || nylas.updateCalls[0].Update.Starred == nil || *nylas.updateCalls[0].Update.Starred {
+		t.Fatalf("shared Nylas unstar update = %+v, want shared grant/starred=false", nylas.updateCalls[0])
 	}
 	placements, err := repo.ListCommunicationsEmailPlacements(user.UserID, companyID, []string{"shared-message-1"})
 	if err != nil {

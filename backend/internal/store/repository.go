@@ -1496,6 +1496,7 @@ type CommunicationsTriageConversionResult struct {
 	ExplorerV2Rows       []CompanyExplorerV2Row                    `json:"explorer_v2_rows,omitempty"`
 	ProjectRelationships []domain.ProjectRelationshipProjection    `json:"project_relationships,omitempty"`
 	DeletedMessageIDs    []string                                  `json:"deleted_message_ids"`
+	UnstarredMessageIDs  []string                                  `json:"unstarred_message_ids,omitempty"`
 	Events               []domain.DomainEvent                      `json:"-"`
 	ProjectionDeltas     []ProjectionDelta                         `json:"-"`
 }

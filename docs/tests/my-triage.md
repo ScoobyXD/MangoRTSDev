@@ -69,8 +69,9 @@ MT58 - Transferring a direct email-created Kanban card into another node is not 
 MT59 - A successful email-card transfer deletes the source email-created workspace node/card and creates or updates an email attachment on the target node.
 MT60 - My Triage revert is only for restoring the original direct email-created card back to triage; once that email is transferred into another node, the transferred email is represented as a target-node attachment instead of a triage row.
 MT61 - Drag payloads from My Triage and Shared Triage must carry message IDs plus source mailbox scope; Shared Triage drags include `shared_inbox_id`, while My Triage drags leave that scope empty.
-MT62 - Successful local email conversion into a Logic Gate or Company Explorer Logic Gate must remove converted rows from visible state and local message caches from the conversion response; Home and the global communications live-freshness bridge must suppress the matching local `triage.converted` echo and must not invalidate all communications message page/detail caches, reuse stale prefetched pages, trigger post-removal fill or message-length prefetch, blank the email list, or repeatedly issue mail GETs.
+MT62 - Successful local email conversion into a Logic Gate or Company Explorer Logic Gate must remove converted rows from visible state and local message caches from the conversion response; Home and the global communications live-freshness bridge must suppress the matching local `triage.converted` echo and must not invalidate all communications message page/detail caches, reuse stale prefetched pages, trigger post-removal fill or message-length prefetch, blank the email list, or repeatedly issue mail GETs. This is a regression-prone path: any change to conversion, communications cache invalidation, realtime echo handling, pagination prefetch/refill, or star/unstar mutation must preserve this no-blank/no-refill/no-repeat-GET behavior.
 MT63 - Successful local email conversion into a Company Explorer Logic Gate must show a temporary green success banner over the Company Explorer section; other Logic Gate conversion surfaces must show a temporary success banner or notice.
+MT64 - When a dragged email is converted into a Logic Gate, Company Explorer Logic Gate, pinned Logic Gate, or eligible node target, the source email is set to unstarred through the same source mailbox scope after the workspace conversion succeeds. The conversion response returns `unstarred_message_ids`, and Home applies those IDs as a local star mutation so Inbox, All, Starred, My Triage, and Shared Triage views do not refill, blink, or reload.
 
 ## Scenarios
 
@@ -206,6 +207,7 @@ Business logic covered:
 - MT57
 - MT62
 - MT63
+- MT64
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
@@ -220,7 +222,8 @@ Expected:
 - Browser focus and visibility changes do not force a message-list refresh.
 - New-email realtime events with a message ID fetch that single message and insert it into the current date-sorted list when it matches the active filters.
 - Updated, opened, deleted, or converted-message realtime events touch only the affected visible or selected row when the event carries enough IDs.
-- Local conversion from the user's own email-to-Logic-Gate drop removes converted rows from local state/cache and suppresses matching local `triage.converted` echoes without clearing all message caches, post-removal prefetching, repeated mail GETs, workspace panel GET bursts, or visible list blanking.
+- Local conversion from the user's own email-to-Logic-Gate drop removes converted rows from local state/cache and suppresses matching local `triage.converted` echoes without clearing all message caches, reusing stale prefetched pages, post-removal prefetching, repeated mail GETs, workspace panel GET bursts, or visible list blanking.
+- The backend sets converted source emails to unstarred after successful conversion, the response includes successfully updated IDs in `unstarred_message_ids`, and the visible Home list/Starred count reconciles locally without loading replacement Starred rows.
 - A successful local conversion shows a short green success notice.
 - Realtime message events that do not carry a message ID do not trigger a whole-list reload; the next explicit page/list load reconciles provider state.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.

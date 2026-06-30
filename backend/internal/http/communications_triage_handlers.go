@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func (s *Server) handleCommunicationsTriage(w http.ResponseWriter, r *http.Request) {
@@ -181,12 +183,14 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		!s.requireEntityEdit(w, r, conversionInput.CompanyID, store.EntityTypeCompanyExplorerFolder, conversionInput.Target.FolderID, "company_explorer_folder_not_found") {
 		return
 	}
+	sourceMessagesByID := make(map[string]NylasMessage, len(conversionInput.MessageIDs))
 	for _, messageID := range conversionInput.MessageIDs {
 		message, err := s.communicationsMessage(r.Context(), connection, messageID)
 		if err != nil {
 			s.writeNylasError(w, r, connection, err)
 			return
 		}
+		sourceMessagesByID[messageID] = message
 		if _, err := s.repo.UpsertCommunicationsTriageItem(connection.UserID, emailMessageSnapshotFromNylas(message)); errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_triage_message")
 			return
@@ -213,10 +217,48 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, "failed_to_convert_triage_items")
 		return
 	}
+	result.UnstarredMessageIDs = s.unstarConvertedCommunicationsMessages(r.Context(), connection, sourceMessagesByID, conversionInput.MessageIDs)
 	s.publishCommittedWorkspaceEvents(result.Events)
 	s.publishCommunicationsEventWithMeta(connection.UserID, "triage_changed", "triage.converted", strings.Join(result.DeletedMessageIDs, ","), communicationsEventMetadata{SharedInboxID: sharedInboxID})
 	writeJSON(w, http.StatusCreated, result)
 }
+
+func (s *Server) unstarConvertedCommunicationsMessages(ctx context.Context, connection domain.UserEmailConnection, sourceMessagesByID map[string]NylasMessage, messageIDs []string) []string {
+	ids := cleanStringList(messageIDs)
+	if len(ids) == 0 {
+		return nil
+	}
+	unstarred := false
+	unstarredIDs := make([]string, 0, len(ids))
+	cacheScope := communicationsConnectionCacheScope(connection)
+	now := time.Now().UTC()
+	for _, messageID := range ids {
+		var updated NylasMessage
+		err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+			var updateErr error
+			updated, updateErr = s.nylasClient.UpdateMessage(ctx, connection.GrantID, messageID, NylasMessageUpdate{Starred: &unstarred})
+			return updateErr
+		})
+		if err != nil {
+			log.Printf("communications_triage_convert_unstar_failed user_id=%s scope=%s message_id=%s grant=%s error=%v", connection.UserID, connection.Scope, messageID, grantIDLogValue(connection.GrantID), err)
+			continue
+		}
+		if updated.ID == "" {
+			updated = sourceMessagesByID[messageID]
+			updated.ID = messageID
+		}
+		updated.Starred = false
+		if s.commCache != nil {
+			s.commCache.patchMessagePages(connection.UserID, cacheScope, updated, now)
+		}
+		unstarredIDs = append(unstarredIDs, messageID)
+	}
+	if len(unstarredIDs) > 0 {
+		s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, unstarredIDs, false)
+	}
+	return unstarredIDs
+}
+
 func (s *Server) handleCommunicationsTriageRevert(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

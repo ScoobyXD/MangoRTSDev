@@ -3634,6 +3634,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         nodeIDs: result.nodes.map((node) => node.node_id),
         boardIDs,
         cardIDs: (result.cards ?? []).map((card) => card.card_id),
+        unstarredMessageIDs: cleanExplorerIDs(result.unstarred_message_ids ?? []),
       });
       const targetLabel = target.mode === "existing_logic_gate" ? "Logic Gate" : "Explorer";
       setInternalTriageDropSuccess(convertedMessageIDs.length === 1 ? `Email added to ${targetLabel}.` : `${convertedMessageIDs.length} emails added to ${targetLabel}.`);

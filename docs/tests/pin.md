@@ -34,6 +34,7 @@ PIN23 - Successful pinned email conversion is applied locally to the visible Hom
 PIN24 - Pinned email conversion from Shared Triage preserves the drag payload `shared_inbox_id` and sends it through the communications conversion request.
 PIN25 - Successful pinned email conversion suppresses the matching immediate workspace event burst for the locally-created email node/card so the Home workspace panel does not repeatedly reload after the POST response already updated local state.
 PIN26 - Successful pinned or Explorer email conversion must not trigger post-removal fill, message-length prefetch, or stale prefetched-page top-up for the converted rows.
+PIN27 - Successful pinned email conversion must set source emails to unstarred through the source mailbox scope, return `unstarred_message_ids`, and reconcile Home locally without blanking, refilling, or repeatedly reloading My Triage or Shared Triage.
 
 ## Scenarios
 
@@ -156,6 +157,7 @@ Business logic covered:
 - PIN24
 - PIN25
 - PIN26
+- PIN27
 
 Given:
 - A user has pinned a node, a logic gate, and a project.
@@ -169,6 +171,7 @@ Expected:
 - Dropping email on the pinned logic gate opens the normal priority selection, then creates node(s) in that logic gate through the communications conversion path.
 - Dropping email on the pinned node opens the normal priority selection, then attaches the email to that existing node without creating a duplicate node.
 - If the email was dragged from Shared Triage, the conversion request includes the source shared inbox ID and uses the shared mailbox conversion path.
+- The conversion response includes successfully unstarred IDs in `unstarred_message_ids`, the backend sets those emails to unstarred through the personal or shared mailbox grant, and Home applies the unstar locally before removing the converted row.
 - Dropping a node on the pinned logic gate assigns the existing node to the logic gate through the normal assignment endpoint without creating a duplicate node.
 - Successful drops show a short green confirmation banner in the pin section.
 - The visible Home triage list, app-level communications live-freshness bridge, and workspace panel handle the local pinned conversion without communications message cache invalidation, stale prefetched-page top-up, post-removal fill, message-length prefetch, or repeated reloads for the matching communications or workspace realtime events.

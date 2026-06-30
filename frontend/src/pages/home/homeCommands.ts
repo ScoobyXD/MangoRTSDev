@@ -110,6 +110,7 @@ export type HomeTriageConversionCommandResult = {
   boardID: string;
   logicGateID: string;
   convertedMessageIDs: string[];
+  unstarredMessageIDs: string[];
 };
 
 export type HomeExplorerTriageConversionCommandResult = {
@@ -117,6 +118,7 @@ export type HomeExplorerTriageConversionCommandResult = {
   boardID: string;
   logicGateID: string;
   convertedMessageIDs: string[];
+  unstarredMessageIDs: string[];
 };
 
 export type HomeMailMessagesCommandResult = {
@@ -981,7 +983,8 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   }
 
   const convertedMessageIDs = result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs;
-  return { result, boardID, logicGateID: boardLogicGateID, convertedMessageIDs };
+  const unstarredMessageIDs = cleanIDList(result.unstarred_message_ids ?? []);
+  return { result, boardID, logicGateID: boardLogicGateID, convertedMessageIDs, unstarredMessageIDs };
 }
 export async function convertMessagesToLogicGateCommand(args: {
   apiBase: string;
@@ -1047,10 +1050,12 @@ export async function convertMessagesToLogicGateCommand(args: {
   }
 
   const convertedMessageIDs = result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs;
+  const unstarredMessageIDs = cleanIDList(result.unstarred_message_ids ?? []);
   return {
     result,
     boardID,
     logicGateID: boardLogicGateID,
     convertedMessageIDs,
+    unstarredMessageIDs,
   };
 }
