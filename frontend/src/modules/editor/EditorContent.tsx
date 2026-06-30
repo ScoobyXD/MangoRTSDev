@@ -183,6 +183,7 @@ type EditorContentProps = {
   focusInformationID?: string;
   focusRequestID?: number;
   suppressLegacyWorkspaceStream?: boolean;
+  onLogicGateTitleChange?: (update: { logicGateID: string; label: string }) => void;
 };
 
 type CompanyUser = {
@@ -398,7 +399,7 @@ const ProjectRelationshipsSurface: React.FC<{
 };
 
 // Editor module: linked document canvas for node or logic-gate context.
-export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID, suppressLegacyWorkspaceStream = false }) => {
+export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID, suppressLegacyWorkspaceStream = false, onLogicGateTitleChange }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -1048,6 +1049,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           body: JSON.stringify({ company_id: companyID, header: value }),
         });
         setLinkedNodeTitle(updated.header);
+        onLogicGateTitleChange?.({ logicGateID: updated.logic_gate_id, label: updated.header });
         invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
         upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(updated));
       } else {
@@ -1063,7 +1065,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_entity");
     }
-  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, requestJSON]);
+  }, [apiBase, companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, onLogicGateTitleChange, requestJSON]);
 
   const createRelatedNode = useCallback(async (kind: EditorRelatedNodeCreationKind) => {
     if (!linkedEntityCanEdit) return;

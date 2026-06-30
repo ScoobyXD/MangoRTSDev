@@ -6,6 +6,7 @@ import { logicGateIDFromKanbanBoardID } from "../../modules/kanban/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../../modules/selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { humanLabelOrFallback } from "../../modules/entityLabels.js";
+import { subscribeWorkspaceUserRealtime, workspaceRealtimeScope, type WorkspaceStreamEnvelope } from "../../modules/workspace/workspaceRealtime";
 import { consumePendingLogicGateArenaSelection, readPendingLogicGateArenaSelection, type PendingLogicGateArenaSelection } from "./logicGateArenaLaunch";
 
 type LogicGateArenaPageProps = {
@@ -22,6 +23,7 @@ type LogicGateArenaPageProps = {
   onCollapseToTab?: (selection: { logicGateID: string; label: string; nodeID?: string }) => void;
   onNodeOpen?: (selection: { logicGateID: string; label: string; nodeID: string }) => void;
   onNodeClose?: (selection: { logicGateID: string; label: string }) => void;
+  onLogicGateTitleChange?: (update: { logicGateID: string; label: string }) => void;
 };
 
 type ArenaResizeState = {
@@ -59,6 +61,7 @@ const LazyArenaEditorContent = React.lazy(() => import("../../modules/editor/Edi
     focusInformationID?: string;
     focusRequestID?: number;
     suppressLegacyWorkspaceStream?: boolean;
+    onLogicGateTitleChange?: (update: { logicGateID: string; label: string }) => void;
   }>,
 })));
 const arenaPanelFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -120,6 +123,24 @@ function sameArenaLogicGateSelection(current: ArenaLogicGateSelection, next: Are
     && (current.requestID ?? 0) === (next.requestID ?? 0);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function cleanString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function logicGateTitleUpdateFromEnvelope(envelope: WorkspaceStreamEnvelope | undefined): { logicGateID: string; label: string } | null {
+  if (envelope?.type !== "logic_gate_updated") return null;
+  const data = isRecord(envelope.data) ? envelope.data : {};
+  const logicGate = isRecord(data.logic_gate) ? data.logic_gate : {};
+  const logicGateID = cleanString(logicGate.logic_gate_id) || cleanString(data.logic_gate_id);
+  const label = cleanString(logicGate.header);
+  if (!logicGateID || !label) return null;
+  return { logicGateID, label };
+}
+
 function getArenaFrames(frames: FrameDataModel[]) {
   return {
     editor: frames.find((frame) => frame.kind === "editor") ?? null,
@@ -127,17 +148,20 @@ function getArenaFrames(frames: FrameDataModel[]) {
   };
 }
 
-export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, updateFrames, targetLogicGate, onCollapseToTab, onNodeOpen, onNodeClose }) => {
+export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, updateFrames, targetLogicGate, onCollapseToTab, onNodeOpen, onNodeClose, onLogicGateTitleChange }) => {
+  const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ArenaResizeState | null>(null);
   const linkedNodeEditorResizeRef = useRef<ArenaResizeState | null>(null);
   const resizeSessionIDRef = useRef(0);
   const lastArenaSelectionChangedAtRef = useRef(0);
+  const selectedLogicGateRef = useRef<ArenaLogicGateSelection>(emptyArenaLogicGateSelection());
   const [kanbanBoardLeftResizeRequest, setKanbanBoardLeftResizeRequest] = useState<ArenaBoardLeftResizeRequest | null>(null);
   const [selectedLogicGate, setSelectedLogicGate] = useState<ArenaLogicGateSelection>(() => {
     const initialSelection = readInitialArenaLogicGateSelection(companyID, targetLogicGate);
     if (initialSelection.id) lastArenaSelectionChangedAtRef.current = arenaSelectionChangedAt(initialSelection);
+    selectedLogicGateRef.current = initialSelection;
     return initialSelection;
   });
 
@@ -146,6 +170,24 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
   const kanbanFrame = arenaFrames.kanban;
   const editorUnits = Math.max(1, editorFrame?.w ?? 34);
   const kanbanUnits = Math.max(1, kanbanFrame?.w ?? 44);
+
+  useEffect(() => {
+    selectedLogicGateRef.current = selectedLogicGate;
+  }, [selectedLogicGate]);
+
+  const applyLogicGateTitle = useCallback((update: { logicGateID: string; label: string }) => {
+    const logicGateID = update.logicGateID.trim();
+    const label = humanLabelOrFallback(update.label, "");
+    if (!logicGateID || !label) return;
+    const currentSelection = selectedLogicGateRef.current;
+    if (currentSelection.id !== logicGateID) return;
+    lastArenaSelectionChangedAtRef.current = Math.max(lastArenaSelectionChangedAtRef.current, Date.now());
+    selectedLogicGateRef.current = { ...currentSelection, label };
+    setSelectedLogicGate((current) => (
+      current.id === logicGateID && current.label !== label ? { ...current, label } : current
+    ));
+    onLogicGateTitleChange?.({ logicGateID, label });
+  }, [onLogicGateTitleChange]);
 
   const createArenaResizeState = useCallback((startX: number): ArenaResizeState | null => {
     if (!containerRef.current || !editorFrame || !kanbanFrame) return null;
@@ -205,9 +247,18 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
   useEffect(() => {
     const nextSelection = selectionFromTargetLogicGate(targetLogicGate);
     if (!nextSelection) return;
-    lastArenaSelectionChangedAtRef.current = arenaSelectionChangedAt(nextSelection);
+    lastArenaSelectionChangedAtRef.current = Math.max(lastArenaSelectionChangedAtRef.current, arenaSelectionChangedAt(nextSelection));
     setSelectedLogicGate((current) => sameArenaLogicGateSelection(current, nextSelection) ? current : nextSelection);
   }, [targetLogicGate?.informationID, targetLogicGate?.logicGateID, targetLogicGate?.label, targetLogicGate?.nodeID, targetLogicGate?.requestID, targetLogicGate?.suppressLegacyWorkspaceStream]);
+
+  useEffect(() => {
+    return subscribeWorkspaceUserRealtime(apiBase, companyID, workspaceRealtimeScope, {
+      onEvent(_event, context) {
+        const update = logicGateTitleUpdateFromEnvelope(context.envelope);
+        if (update) applyLogicGateTitle(update);
+      },
+    });
+  }, [apiBase, applyLogicGateTitle, companyID]);
 
   const applySelection = useCallback((selection: LiveSelectionChange | null) => {
     if (!selection || selection.companyID !== companyID) return;
@@ -346,6 +397,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
             focusInformationID={selectedLogicGate.informationID}
             focusRequestID={selectedLogicGate.requestID}
             suppressLegacyWorkspaceStream={selectedLogicGate.suppressLegacyWorkspaceStream}
+            onLogicGateTitleChange={applyLogicGateTitle}
           />
         </React.Suspense>
       </section>
