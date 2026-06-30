@@ -135,19 +135,6 @@ create index if not exists idx_saved_views_group_principal
   on saved_views(company_id, principal_id)
   where principal = 'group';
 
-create table if not exists saved_view_preferences (
-  company_id uuid not null,
-  surface text not null,
-  user_id uuid not null,
-  selected_saved_view_id uuid,
-  created_timestamp timestamptz not null default now(),
-  updated_timestamp timestamptz not null default now(),
-  constraint saved_view_preferences_surface_chk check (surface in ('my_work', 'updates')),
-  primary key (company_id, surface, user_id),
-  foreign key (company_id) references companies(company_id) on delete cascade,
-  foreign key (company_id, user_id) references company_memberships(company_id, user_id) on delete cascade
-);
-
 create table if not exists pins (
   pin_id uuid not null,
   company_id uuid not null,

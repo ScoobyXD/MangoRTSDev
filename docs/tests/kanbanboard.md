@@ -65,7 +65,7 @@ KB42 - Saved Logic Gate Kanban groupings must reject group/team principals.
 KB43 - Saved Logic Gate Kanban groupings must reject fields that belong to My Work, Updates, or Kanban status-only behavior, such as project, logic gate, team, type, or status.
 KB44 - Saved Logic Gate Kanban extra groupings use `saved_views.surface = logic_gate_kanban`.
 KB45 - Each user has at most one active Logic Gate Kanban saved view row per company, keyed by `surface = logic_gate_kanban`, `principal = user`, and that user's `principal_id`.
-KB46 - Logic Gate Kanban must not use `saved_view_preferences`; loading a Logic Gate Kanban board applies the user's `logic_gate_kanban` row directly.
+KB46 - Logic Gate Kanban must not use or require a `saved_view_preferences` table; loading a Logic Gate Kanban board applies the user's `logic_gate_kanban` row directly.
 KB47 - Changing optional grouping rows or Date Added sort direction immediately saves the current user settings without an explicit Save action.
 KB48 - Saved Logic Gate Kanban views persist the user's optional grouping stack plus `settings.date_added_sort_direction`; Date Added must not be written as a grouping row.
 KB49 - The saved optional grouping stack from one Logic Gate must apply when the same user opens another Logic Gate Kanban board.
@@ -151,7 +151,7 @@ Expected:
 - User B does not inherit User A's selected grouping.
 - User B does not inherit User A's Date Added sort direction.
 - No Logic Gate board row stores the selected grouping.
-- No `saved_view_preferences` row is read or written for Logic Gate Kanban grouping.
+- No `saved_view_preferences` table or row is used for Logic Gate Kanban grouping.
 
 ### Scenario KB-S2: Grouping Renders Inside Columns
 

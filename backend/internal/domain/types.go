@@ -174,15 +174,6 @@ type SavedView struct {
 	UpdatedTimestamp time.Time           `json:"updated_timestamp"`
 }
 
-type SavedViewPreference struct {
-	CompanyID           string    `json:"company_id"`
-	Surface             string    `json:"surface"`
-	UserID              string    `json:"user_id"`
-	SelectedSavedViewID string    `json:"selected_saved_view_id,omitempty"`
-	CreatedTimestamp    time.Time `json:"created_timestamp"`
-	UpdatedTimestamp    time.Time `json:"updated_timestamp"`
-}
-
 type UserPin struct {
 	CompanyID        string    `json:"company_id"`
 	PinID            string    `json:"pin_id"`

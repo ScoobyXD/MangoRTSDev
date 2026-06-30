@@ -227,8 +227,6 @@ type SavedViewRepository interface {
 	GetSavedView(companyID, savedViewID string) (domain.SavedView, error)
 	UpsertSavedView(input SavedViewInput) (domain.SavedView, error)
 	DeleteSavedView(input SavedViewDeleteInput) error
-	GetSavedViewPreference(input SavedViewPreferenceInput) (domain.SavedViewPreference, error)
-	UpsertSavedViewPreference(input SavedViewPreferenceInput) (domain.SavedViewPreference, error)
 }
 
 const (
@@ -261,13 +259,6 @@ type SavedViewInput struct {
 type SavedViewDeleteInput struct {
 	CompanyID   string
 	SavedViewID string
-}
-
-type SavedViewPreferenceInput struct {
-	CompanyID           string
-	Surface             string
-	UserID              string
-	SelectedSavedViewID string
 }
 
 type UserPinRepository interface {
