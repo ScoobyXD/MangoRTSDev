@@ -111,6 +111,7 @@ create table if not exists saved_views (
   principal_id uuid not null,
   name text not null,
   groupings jsonb not null default '[]'::jsonb,
+  settings jsonb not null default '{}'::jsonb,
   position integer not null default 0,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
@@ -118,6 +119,7 @@ create table if not exists saved_views (
   constraint saved_views_principal_chk check (principal in ('user', 'group')),
   constraint saved_views_name_nonblank_chk check (btrim(name) <> ''),
   constraint saved_views_groupings_array_chk check (jsonb_typeof(groupings) = 'array'),
+  constraint saved_views_settings_object_chk check (jsonb_typeof(settings) = 'object'),
   primary key (company_id, saved_view_id),
   foreign key (company_id) references companies(company_id) on delete cascade
 );

@@ -22,6 +22,7 @@ select
   view.principal_id::text,
   view.name,
   view.groupings::text,
+  view.settings::text,
   view.position,
   view.created_timestamp,
   view.updated_timestamp
@@ -67,7 +68,7 @@ func (r *PostgresRepo) GetSavedView(companyID, savedViewID string) (domain.Saved
 		return domain.SavedView{}, ErrInvalid
 	}
 	item, err := scanSavedView(r.db.QueryRowContext(context.Background(), `
-select company_id::text, saved_view_id::text, surface, principal, principal_id::text, name, groupings::text, position, created_timestamp, updated_timestamp
+select company_id::text, saved_view_id::text, surface, principal, principal_id::text, name, groupings::text, settings::text, position, created_timestamp, updated_timestamp
 from saved_views
 where company_id=$1::uuid and saved_view_id=$2::uuid`, companyID, savedViewID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -98,6 +99,10 @@ func (r *PostgresRepo) UpsertSavedView(input SavedViewInput) (domain.SavedView, 
 	if err != nil {
 		return domain.SavedView{}, err
 	}
+	settingsJSON, err := json.Marshal(input.Settings)
+	if err != nil {
+		return domain.SavedView{}, err
+	}
 	item, err := scanSavedView(r.db.QueryRowContext(context.Background(), `
 insert into saved_views (
   company_id,
@@ -107,19 +112,21 @@ insert into saved_views (
   principal_id,
   name,
   groupings,
+  settings,
   position,
   created_timestamp,
   updated_timestamp
-) values ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7::jsonb, $8, now(), now())
+) values ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7::jsonb, $8::jsonb, $9, now(), now())
 on conflict (company_id, saved_view_id) do update
 set surface=excluded.surface,
     principal=excluded.principal,
     principal_id=excluded.principal_id,
     name=excluded.name,
     groupings=excluded.groupings,
-    position=case when $8 > 0 then excluded.position else saved_views.position end,
+    settings=excluded.settings,
+    position=case when $9 > 0 then excluded.position else saved_views.position end,
     updated_timestamp=now()
-returning company_id::text, saved_view_id::text, surface, principal, principal_id::text, name, groupings::text, position, created_timestamp, updated_timestamp`,
+returning company_id::text, saved_view_id::text, surface, principal, principal_id::text, name, groupings::text, settings::text, position, created_timestamp, updated_timestamp`,
 		input.CompanyID,
 		input.SavedViewID,
 		input.Surface,
@@ -127,6 +134,7 @@ returning company_id::text, saved_view_id::text, surface, principal, principal_i
 		input.PrincipalID,
 		input.Name,
 		string(groupingsJSON),
+		string(settingsJSON),
 		position,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -257,6 +265,7 @@ func scanSavedViews(rows *sql.Rows) ([]domain.SavedView, error) {
 func scanSavedView(row interface{ Scan(dest ...any) error }) (domain.SavedView, error) {
 	var item domain.SavedView
 	var groupingsJSON string
+	var settingsJSON string
 	err := row.Scan(
 		&item.CompanyID,
 		&item.SavedViewID,
@@ -265,6 +274,7 @@ func scanSavedView(row interface{ Scan(dest ...any) error }) (domain.SavedView, 
 		&item.PrincipalID,
 		&item.Name,
 		&groupingsJSON,
+		&settingsJSON,
 		&item.Position,
 		&item.CreatedTimestamp,
 		&item.UpdatedTimestamp,
@@ -278,6 +288,14 @@ func scanSavedView(row interface{ Scan(dest ...any) error }) (domain.SavedView, 
 	if item.Groupings == nil {
 		item.Groupings = []domain.SavedViewGrouping{}
 	}
+	if err := json.Unmarshal([]byte(settingsJSON), &item.Settings); err != nil {
+		return domain.SavedView{}, err
+	}
+	settings, ok := NormalizeSavedViewSettings(item.Surface, item.Settings)
+	if !ok {
+		return domain.SavedView{}, ErrInvalid
+	}
+	item.Settings = settings
 	return item, nil
 }
 

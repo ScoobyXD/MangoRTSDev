@@ -213,9 +213,9 @@ func TestSavedViewsLogicGateKanbanPreference(t *testing.T) {
 			{"field":"priority","direction":"asc"},
 			{"field":"person","direction":"desc"},
 			{"field":"due_date","direction":"asc"},
-			{"field":"date_added","direction":"desc"},
 			{"field":"account","direction":"asc"}
-		]
+		],
+		"settings":{"date_added_sort_direction":"desc"}
 	}`
 	createRec := httptest.NewRecorder()
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/saved-views", bytes.NewBufferString(createBody))
@@ -227,7 +227,7 @@ func TestSavedViewsLogicGateKanbanPreference(t *testing.T) {
 	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
 		t.Fatalf("decode created: %v", err)
 	}
-	if created.Surface != store.SavedViewSurfaceLogicGateKanban || created.Principal != store.SavedViewPrincipalUser || len(created.Groupings) != 5 || created.Groupings[3].Field != "date_added" {
+	if created.Surface != store.SavedViewSurfaceLogicGateKanban || created.Principal != store.SavedViewPrincipalUser || len(created.Groupings) != 4 || created.Groupings[3].Field != "account" || created.Settings.DateAddedSortDirection != "desc" {
 		t.Fatalf("created logic gate kanban view = %+v", created)
 	}
 
@@ -303,6 +303,37 @@ func TestSavedViewsLogicGateKanbanPreference(t *testing.T) {
 	handler.ServeHTTP(invalidGroupingRec, savedViewRequestWithActor(invalidGroupingReq, user, companyID, domain.RoleCompanyUser))
 	if invalidGroupingRec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid grouping status = %d body=%s", invalidGroupingRec.Code, invalidGroupingRec.Body.String())
+	}
+
+	invalidDateAddedGroupingBody := `{
+		"company_id":"` + companyID + `",
+		"surface":"logic_gate_kanban",
+		"principal":"user",
+		"principal_id":"` + user.UserID + `",
+		"name":"Bad Date Kanban",
+		"groupings":[{"field":"date_added","direction":"asc"}]
+	}`
+	invalidDateAddedGroupingRec := httptest.NewRecorder()
+	invalidDateAddedGroupingReq := httptest.NewRequest(http.MethodPost, "/v1/saved-views", bytes.NewBufferString(invalidDateAddedGroupingBody))
+	handler.ServeHTTP(invalidDateAddedGroupingRec, savedViewRequestWithActor(invalidDateAddedGroupingReq, user, companyID, domain.RoleCompanyUser))
+	if invalidDateAddedGroupingRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid date-added grouping status = %d body=%s", invalidDateAddedGroupingRec.Code, invalidDateAddedGroupingRec.Body.String())
+	}
+
+	invalidSettingsBody := `{
+		"company_id":"` + companyID + `",
+		"surface":"logic_gate_kanban",
+		"principal":"user",
+		"principal_id":"` + user.UserID + `",
+		"name":"Bad Date Sort Kanban",
+		"groupings":[],
+		"settings":{"date_added_sort_direction":"sideways"}
+	}`
+	invalidSettingsRec := httptest.NewRecorder()
+	invalidSettingsReq := httptest.NewRequest(http.MethodPost, "/v1/saved-views", bytes.NewBufferString(invalidSettingsBody))
+	handler.ServeHTTP(invalidSettingsRec, savedViewRequestWithActor(invalidSettingsReq, user, companyID, domain.RoleCompanyUser))
+	if invalidSettingsRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid settings status = %d body=%s", invalidSettingsRec.Code, invalidSettingsRec.Body.String())
 	}
 }
 

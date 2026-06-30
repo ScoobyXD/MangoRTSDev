@@ -15,11 +15,12 @@ type KanbanGroupingControlsProps = {
   text: string;
   subtext: string;
   accent: string;
-  lockedFields: string[];
+  dateAddedSortDirection: "asc" | "desc";
   onToggleOpen: () => void;
   onAddGrouping: (field: string) => void;
   onUpdateGrouping: (index: number, grouping: SavedViewGrouping) => void;
   onRemoveGrouping: (index: number) => void;
+  onToggleDateAddedSortDirection: () => void;
 };
 
 export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
@@ -35,16 +36,16 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
   text,
   subtext,
   accent,
-  lockedFields,
+  dateAddedSortDirection,
   onToggleOpen,
   onAddGrouping,
   onUpdateGrouping,
   onRemoveGrouping,
+  onToggleDateAddedSortDirection,
 }) => {
   const [addGroupingOpen, setAddGroupingOpen] = useState(false);
   const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
   const usedFields = new Set(groupings.map((grouping) => grouping.field));
-  const lockedFieldSet = new Set(lockedFields);
   const addableFields = KANBAN_GROUP_FIELDS.filter((field) => !usedFields.has(field.value));
   const buttonSurface = isDark ? "rgba(15,23,42,0.86)" : "rgba(255,255,255,0.92)";
 
@@ -100,24 +101,22 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
         >
           <div style={groupingStackStyle}>
             {groupings.map((grouping, index) => {
-              const locked = lockedFieldSet.has(grouping.field);
               return (
               <div key={`${grouping.field}:${index}`} style={groupingRowStyle(index)}>
                 <button
                   type="button"
-                  disabled={loading || saving || locked}
+                  disabled={loading || saving}
                   onClick={() => {
-                    if (locked) return;
                     setAddGroupingOpen(false);
                     setGroupingFieldMenuIndex(groupingFieldMenuIndex === index ? null : index);
                   }}
-                  style={groupingFieldButtonStyle(text, locked)}
+                  style={groupingFieldButtonStyle(text)}
                 >
                   {KANBAN_GROUP_FIELDS
                     .filter((field) => field.value === grouping.field || !groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
                     .find((field) => field.value === grouping.field)?.label ?? grouping.field}
                 </button>
-                {!locked && groupingFieldMenuIndex === index && (
+                {groupingFieldMenuIndex === index && (
                   <div style={groupingFieldMenuStyle(buttonSurface, line)}>
                     {KANBAN_GROUP_FIELDS
                       .filter((field) => field.value === grouping.field || !groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
@@ -147,46 +146,60 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
                 </button>
                 <button
                   type="button"
-                  title={locked ? "" : "Remove grouping"}
-                  disabled={loading || saving || locked}
+                  title="Remove grouping"
+                  disabled={loading || saving}
                   onClick={() => onRemoveGrouping(index)}
                   style={groupingRemoveButtonStyle(subtext)}
                 >
-                  {locked ? "" : "x"}
+                  x
                 </button>
               </div>
               );
             })}
-            <div style={{ position: "relative" }}>
+            <div style={groupingFooterStyle}>
+              <div style={{ position: "relative", minWidth: 0 }}>
+                <button
+                  type="button"
+                  disabled={loading || saving || addableFields.length === 0}
+                  style={addGroupingButtonStyle}
+                  onClick={() => {
+                    setGroupingFieldMenuIndex(null);
+                    setAddGroupingOpen((value) => !value);
+                  }}
+                >
+                  + Add Grouping
+                </button>
+                {addGroupingOpen && (
+                  <div style={addGroupingMenuStyle(buttonSurface, line)}>
+                    {addableFields.map((field) => (
+                      <button
+                        key={field.value}
+                        type="button"
+                        disabled={saving}
+                        style={menuOptionStyle(text, false)}
+                        onClick={() => {
+                          onAddGrouping(field.value);
+                          setAddGroupingOpen(false);
+                        }}
+                      >
+                        {field.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
-                disabled={loading || saving || addableFields.length === 0}
-                style={addGroupingButtonStyle}
-                onClick={() => {
-                  setGroupingFieldMenuIndex(null);
-                  setAddGroupingOpen((value) => !value);
-                }}
+                title="Sort cards by date added"
+                disabled={loading || saving}
+                onClick={onToggleDateAddedSortDirection}
+                style={dateAddedSortButtonStyle(text, line, buttonSurface)}
               >
-                + Add Grouping
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Date Added</span>
+                <span style={dateAddedSortDirectionBadgeStyle(line)}>
+                  {dateAddedSortDirection === "asc" ? "Asc" : "Desc"}
+                </span>
               </button>
-              {addGroupingOpen && (
-                <div style={addGroupingMenuStyle(buttonSurface, line)}>
-                  {addableFields.map((field) => (
-                    <button
-                      key={field.value}
-                      type="button"
-                      disabled={saving}
-                      style={menuOptionStyle(text, false)}
-                      onClick={() => {
-                        onAddGrouping(field.value);
-                        setAddGroupingOpen(false);
-                      }}
-                    >
-                      {field.label}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
           {(loading || saving || error) && (
@@ -234,7 +247,7 @@ function groupingRowStyle(index: number): React.CSSProperties {
   };
 }
 
-function groupingFieldButtonStyle(text: string, locked: boolean): React.CSSProperties {
+function groupingFieldButtonStyle(text: string): React.CSSProperties {
   return {
     minWidth: 0,
     height: 24,
@@ -249,7 +262,7 @@ function groupingFieldButtonStyle(text: string, locked: boolean): React.CSSPrope
     fontSize: 12,
     fontWeight: 800,
     textAlign: "left",
-    cursor: locked ? "default" : "pointer",
+    cursor: "pointer",
     padding: "0 4px",
   };
 }
@@ -295,6 +308,50 @@ const addGroupingButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   padding: "0 8px",
 };
+
+const groupingFooterStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  minWidth: 0,
+};
+
+function dateAddedSortButtonStyle(text: string, line: string, background: string): React.CSSProperties {
+  return {
+    minWidth: 122,
+    maxWidth: 142,
+    height: 28,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 38px",
+    alignItems: "center",
+    gap: 6,
+    border: `1px solid ${line}`,
+    borderRadius: 6,
+    background,
+    color: text,
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: 11,
+    fontWeight: 820,
+    padding: "0 4px 0 8px",
+  };
+}
+
+function dateAddedSortDirectionBadgeStyle(line: string): React.CSSProperties {
+  return {
+    height: 20,
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${line}`,
+    borderRadius: 5,
+    background: "rgba(255,255,255,0.84)",
+    color: "#0f172a",
+    fontSize: 10,
+    fontWeight: 840,
+    lineHeight: 1,
+  };
+}
 
 function addGroupingMenuStyle(background: string, line: string): React.CSSProperties {
   return {

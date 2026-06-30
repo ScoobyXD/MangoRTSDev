@@ -254,6 +254,7 @@ type SavedViewInput struct {
 	PrincipalID string
 	Name        string
 	Groupings   []domain.SavedViewGrouping
+	Settings    domain.SavedViewSettings
 	Position    int
 }
 

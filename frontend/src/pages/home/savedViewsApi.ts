@@ -9,6 +9,10 @@ export type SavedViewGrouping = {
   direction: SavedViewGroupingDirection;
 };
 
+export type SavedViewSettings = {
+  date_added_sort_direction?: SavedViewGroupingDirection;
+};
+
 export type SavedView = {
   company_id: string;
   saved_view_id: string;
@@ -17,6 +21,7 @@ export type SavedView = {
   principal_id: string;
   name: string;
   groupings: SavedViewGrouping[];
+  settings: SavedViewSettings;
   position: number;
   created_timestamp: string;
   updated_timestamp: string;
@@ -39,6 +44,7 @@ export type SavedViewInput = {
   principal_id: string;
   name: string;
   groupings: SavedViewGrouping[];
+  settings?: SavedViewSettings;
   position?: number;
 };
 
@@ -127,6 +133,7 @@ function normalizeSavedViewInput(input: SavedViewInput): SavedViewInput {
     principal_id: input.principal_id.trim(),
     name: input.name.trim(),
     groupings: normalizeSavedViewGroupings(input.groupings),
+    settings: normalizeSavedViewSettings(input.settings),
     position: input.position,
   };
 }
@@ -148,6 +155,7 @@ function normalizeSavedView(value: SavedView): SavedView | null {
     principal_id: principalID,
     name,
     groupings: normalizeSavedViewGroupings(value.groupings),
+    settings: normalizeSavedViewSettings(value.settings),
     position: Number.isFinite(value.position) ? value.position : 0,
     created_timestamp: typeof value.created_timestamp === "string" ? value.created_timestamp : "",
     updated_timestamp: typeof value.updated_timestamp === "string" ? value.updated_timestamp : "",
@@ -186,5 +194,12 @@ function normalizeSavedViewGroupings(value: unknown): SavedViewGrouping[] {
     out.push({ field, direction: candidate.direction === "desc" ? "desc" : "asc" });
   }
   return out;
+}
+
+function normalizeSavedViewSettings(value: unknown): SavedViewSettings {
+  if (!value || typeof value !== "object") return {};
+  const candidate = value as { date_added_sort_direction?: unknown };
+  const direction = candidate.date_added_sort_direction === "desc" ? "desc" : candidate.date_added_sort_direction === "asc" ? "asc" : undefined;
+  return direction ? { date_added_sort_direction: direction } : {};
 }
 

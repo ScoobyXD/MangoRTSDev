@@ -248,7 +248,7 @@ export type KanbanCardSelectionUpdate = {
 
 export type KanbanColumnDropPlacement = "before" | "after" | "swap";
 export type KanbanCardDropPlacement = "before" | "after";
-export type KanbanGroupField = "person" | "priority" | "due_date" | "date_added" | "account";
+export type KanbanGroupField = "person" | "priority" | "due_date" | "account";
 
 export type KanbanGroupNode = {
   node_id: string;
@@ -279,7 +279,6 @@ export const KANBAN_GROUP_FIELDS: Array<{ value: KanbanGroupField; label: string
   { value: "person", label: "By person" },
   { value: "priority", label: "Priority" },
   { value: "due_date", label: "Due Date" },
-  { value: "date_added", label: "Date Added" },
   { value: "account", label: "Account" },
 ];
 
@@ -776,23 +775,6 @@ function getKanbanPriorityGroupLabel(priority: number): string {
   return "No priority";
 }
 
-function kanbanDateAddedLabel(timestamp: string): string {
-  const trimmed = timestamp.trim();
-  const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/);
-  return match ? `${match[1]} ${match[2]}` : trimmed;
-}
-
-function kanbanDateAddedGroup(timestamp: string): KanbanGroupedBoardRow {
-  const cleanTimestamp = timestamp.trim();
-  if (!cleanTimestamp) return { key: "date-added:none", label: "No date added", sortValue: "", sortLast: true };
-  const millis = Date.parse(cleanTimestamp);
-  return {
-    key: `date-added:${cleanTimestamp}`,
-    label: kanbanDateAddedLabel(cleanTimestamp),
-    sortValue: Number.isFinite(millis) ? millis : cleanTimestamp,
-  };
-}
-
 function kanbanAccountGroups(accounts: Account[] | undefined): KanbanGroupedBoardRow[] {
   const cleanAccounts = (accounts ?? [])
     .filter((account) => account.account_id.trim())
@@ -841,7 +823,6 @@ export function getKanbanGroupValues(
     const normalized = priority > 0 ? Math.max(1, Math.min(5, Math.round(priority))) : 0;
     return [{ key: `priority:${normalized}`, label: getKanbanPriorityGroupLabel(normalized), sortValue: normalized, sortLast: normalized === 0 }];
   }
-  if (field === "date_added") return [kanbanDateAddedGroup(card.created_timestamp)];
   if (field === "account") return kanbanAccountGroups(card.accounts ?? node?.accounts);
   const dueDate = (card.due_date ?? node?.due_date ?? "").trim();
   return [dueDate ? { key: `due:${dueDate}`, label: dueDate, sortValue: dueDate } : { key: "due:none", label: "No due date", sortValue: "", sortLast: true }];

@@ -114,12 +114,9 @@ const KANBAN_REQUESTED_ACCEPT_COLUMN_ID = "pending";
 const KANBAN_REQUESTED_DECLINE_COLUMN_ID = "backlog";
 const LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE = "logic_gate_kanban";
 const LOGIC_GATE_KANBAN_DEFAULT_SAVED_VIEW_NAME = "Kanban grouping";
-const KANBAN_GROUP_FIELD_SET = new Set<KanbanGroupField>(["person", "priority", "due_date", "date_added", "account"]);
-const KANBAN_FIXED_GROUPINGS: SavedViewGrouping[] = [
-  { field: "priority", direction: "asc" },
-  { field: "date_added", direction: "asc" },
-];
-const KANBAN_FIXED_GROUPING_FIELD_SET = new Set(KANBAN_FIXED_GROUPINGS.map((grouping) => grouping.field));
+const KANBAN_GROUP_FIELD_SET = new Set<KanbanGroupField>(["person", "priority", "due_date", "account"]);
+
+type KanbanDateAddedSortDirection = "asc" | "desc";
 
 function normalizeKanbanSavedGroupings(value: unknown): SavedViewGrouping[] {
   if (!Array.isArray(value)) return [];
@@ -154,32 +151,38 @@ function sortSavedViewsForKanban(savedViews: SavedView[]): SavedView[] {
   ));
 }
 
-function kanbanGroupingSignature(groupings: SavedViewGrouping[]): string {
-  return JSON.stringify(normalizeKanbanSavedGroupings(groupings));
+function normalizeKanbanDateAddedSortDirection(value: unknown): KanbanDateAddedSortDirection {
+  return value === "desc" ? "desc" : "asc";
 }
 
-function kanbanSavedExtraGroupings(groupings: SavedViewGrouping[]): SavedViewGrouping[] {
-  return normalizeKanbanSavedGroupings(groupings).filter((grouping) => !KANBAN_FIXED_GROUPING_FIELD_SET.has(grouping.field));
-}
-
-function buildKanbanGroupingDraftFromSaved(groupings: unknown): SavedViewGrouping[] {
-  return [...KANBAN_FIXED_GROUPINGS, ...kanbanSavedExtraGroupings(normalizeKanbanSavedGroupings(groupings))];
-}
-
-function ensureKanbanFixedGroupings(groupings: SavedViewGrouping[]): SavedViewGrouping[] {
-  const normalized = normalizeKanbanSavedGroupings(groupings);
-  const byField = new Map(normalized.map((grouping) => [grouping.field, grouping]));
-  const fixed = KANBAN_FIXED_GROUPINGS.map((grouping) => ({
-    field: grouping.field,
-    direction: byField.get(grouping.field)?.direction ?? grouping.direction,
-  }));
-  const extras = normalized.filter((grouping) => !KANBAN_FIXED_GROUPING_FIELD_SET.has(grouping.field));
-  return [...fixed, ...extras];
+function kanbanSavedViewSignature(groupings: SavedViewGrouping[], dateAddedSortDirection: KanbanDateAddedSortDirection): string {
+  return JSON.stringify({
+    groupings: normalizeKanbanSavedGroupings(groupings),
+    date_added_sort_direction: dateAddedSortDirection,
+  });
 }
 
 function kanbanNestedGroupItemCount(group: UniversalNestedGroup<KanbanCard, KanbanGroupField>): number {
   if (group.rows.length > 0) return group.rows.length;
   return group.groups.reduce((total, child) => total + kanbanNestedGroupItemCount(child), 0);
+}
+
+function kanbanCardAddedMillis(card: Pick<KanbanCard, "created_timestamp">): number | null {
+  const millis = Date.parse(card.created_timestamp);
+  return Number.isFinite(millis) ? millis : null;
+}
+
+function sortKanbanCardsByDateAdded(cards: KanbanCard[], direction: KanbanDateAddedSortDirection): KanbanCard[] {
+  return [...cards].sort((left, right) => {
+    const leftMillis = kanbanCardAddedMillis(left);
+    const rightMillis = kanbanCardAddedMillis(right);
+    if (leftMillis === null && rightMillis !== null) return 1;
+    if (rightMillis === null && leftMillis !== null) return -1;
+    if (leftMillis !== null && rightMillis !== null && leftMillis !== rightMillis) {
+      return direction === "asc" ? leftMillis - rightMillis : rightMillis - leftMillis;
+    }
+    return left.position - right.position || left.created_timestamp.localeCompare(right.created_timestamp) || left.card_id.localeCompare(right.card_id);
+  });
 }
 
 function logicGateColumnLayoutStorageKey(companyID: string, boardID: string): string {
@@ -360,7 +363,7 @@ function companyUserDisplayName(user: CompanyUser | undefined, fallbackID: strin
   return name || email || fallbackID || "this person";
 }
 
-function formatKanbanLocalAddedTimestamp(timestamp: string): string {
+function formatKanbanLocalCreatedTimestamp(timestamp: string): string {
   const date = new Date(timestamp);
   const millis = date.getTime();
   if (!Number.isFinite(millis)) return "";
@@ -406,7 +409,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [kanbanAccountFilterIDs, setKanbanAccountFilterIDs] = useState<string[]>([]);
   const [kanbanGroupingOpen, setKanbanGroupingOpen] = useState(false);
   const [kanbanGroupingView, setKanbanGroupingView] = useState<SavedView | null>(null);
-  const [kanbanGroupingDraft, setKanbanGroupingDraft] = useState<SavedViewGrouping[]>(() => buildKanbanGroupingDraftFromSaved([]));
+  const [kanbanGroupingDraft, setKanbanGroupingDraft] = useState<SavedViewGrouping[]>([]);
+  const [kanbanDateAddedSortDirection, setKanbanDateAddedSortDirection] = useState<KanbanDateAddedSortDirection>("asc");
   const [kanbanGroupingLoaded, setKanbanGroupingLoaded] = useState(false);
   const [kanbanGroupingLoading, setKanbanGroupingLoading] = useState(false);
   const [kanbanGroupingSaving, setKanbanGroupingSaving] = useState(false);
@@ -844,13 +848,21 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       ? contentMatchedCards.filter((card) => entityMatchesAccountFilter(card.accounts?.length ? card : arenaNodeByID.get(card.node_id), kanbanAccountFilterIDs))
       : contentMatchedCards
   ), [arenaNodeByID, contentMatchedCards, kanbanAccountFilterIDs]);
-  const cardsByColumn = useMemo(() => groupCardsByColumn(searchedCards), [searchedCards]);
   const orderedBoards = useMemo(() => sortKanbanBoards(boards), [boards]);
   const activeBoard = useMemo(() => orderedBoards.find((board) => board.board_id === boardID) ?? null, [boardID, orderedBoards]);
   const activeBoardIsLogicGate = !!(activeLogicGateID || logicGateIDFromKanbanBoardID(boardID));
+  const cardsByColumn = useMemo(() => {
+    const grouped = groupCardsByColumn(searchedCards);
+    if (!activeBoardIsLogicGate) return grouped;
+    const sorted = new Map<string, KanbanCard[]>();
+    for (const [columnID, columnCards] of grouped.entries()) {
+      sorted.set(columnID, sortKanbanCardsByDateAdded(columnCards, kanbanDateAddedSortDirection));
+    }
+    return sorted;
+  }, [activeBoardIsLogicGate, kanbanDateAddedSortDirection, searchedCards]);
   const activeKanbanGroupings = useMemo<Array<{ field: KanbanGroupField; direction: "asc" | "desc" }>>(() => {
     if (!activeBoardIsLogicGate) return [];
-    return ensureKanbanFixedGroupings(kanbanGroupingDraft).map((grouping) => ({
+    return normalizeKanbanSavedGroupings(kanbanGroupingDraft).map((grouping) => ({
       field: grouping.field as KanbanGroupField,
       direction: grouping.direction,
     }));
@@ -876,6 +888,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (!activeBoardIsLogicGate || !companyID) {
       setKanbanGroupingView(null);
       setKanbanGroupingDraft([]);
+      setKanbanDateAddedSortDirection("asc");
       setKanbanGroupingLoaded(false);
       setKanbanGroupingError("");
       setKanbanGroupingLoading(false);
@@ -886,7 +899,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setKanbanGroupingLoading(true);
     setKanbanGroupingLoaded(false);
     setKanbanGroupingError("");
-    setKanbanGroupingDraft(buildKanbanGroupingDraftFromSaved([]));
+    setKanbanGroupingDraft([]);
+    setKanbanDateAddedSortDirection("asc");
     void Promise.all([
       fetchSavedViews({ apiBase, companyID, surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE }),
       fetchSavedViewPreference({ apiBase, companyID, surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE }),
@@ -898,11 +912,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         ? sortedViews.find((view) => view.saved_view_id === selectedViewID) ?? null
         : sortedViews[0] ?? null;
       const savedGroupings = normalizeKanbanSavedGroupings(selectedView?.groupings ?? []);
-      const groupings = buildKanbanGroupingDraftFromSaved(savedGroupings);
+      const groupings = savedGroupings;
+      const dateAddedSortDirection = normalizeKanbanDateAddedSortDirection(selectedView?.settings?.date_added_sort_direction);
       setKanbanGroupingView(selectedView);
       setKanbanGroupingDraft(groupings);
+      setKanbanDateAddedSortDirection(dateAddedSortDirection);
       setKanbanGroupingLoaded(true);
-      kanbanGroupingPersistedSignatureRef.current = kanbanGroupingSignature(savedGroupings);
+      kanbanGroupingPersistedSignatureRef.current = kanbanSavedViewSignature(savedGroupings, dateAddedSortDirection);
       if (!selectedViewID && selectedView) {
         void saveSavedViewPreference({
           apiBase,
@@ -928,10 +944,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       }
       return undefined;
     }
-    const groupings = kanbanSavedExtraGroupings(kanbanGroupingDraft);
-    const signature = kanbanGroupingSignature(groupings);
+    const groupings = normalizeKanbanSavedGroupings(kanbanGroupingDraft);
+    const signature = kanbanSavedViewSignature(groupings, kanbanDateAddedSortDirection);
     if (signature === kanbanGroupingPersistedSignatureRef.current) return undefined;
-    if (!kanbanGroupingView && groupings.length === 0) {
+    if (!kanbanGroupingView && groupings.length === 0 && kanbanDateAddedSortDirection === "asc") {
       kanbanGroupingPersistedSignatureRef.current = signature;
       return undefined;
     }
@@ -952,6 +968,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             principal_id: userID,
             name: kanbanGroupingView?.name.trim() || LOGIC_GATE_KANBAN_DEFAULT_SAVED_VIEW_NAME,
             groupings,
+            settings: { date_added_sort_direction: kanbanDateAddedSortDirection },
             position: kanbanGroupingView?.position ?? nextKanbanSavedViewPosition([]),
           },
         });
@@ -973,36 +990,42 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       });
     }, 250);
     return () => window.clearTimeout(timeout);
-  }, [activeBoardIsLogicGate, apiBase, companyID, currentUserID, kanbanGroupingDraft, kanbanGroupingLoaded, kanbanGroupingLoading, kanbanGroupingView]);
+  }, [activeBoardIsLogicGate, apiBase, companyID, currentUserID, kanbanDateAddedSortDirection, kanbanGroupingDraft, kanbanGroupingLoaded, kanbanGroupingLoading, kanbanGroupingView]);
 
   const addKanbanGrouping = useCallback((field: string) => {
     setKanbanGroupingDraft((current) => {
-      const currentWithFixed = ensureKanbanFixedGroupings(current);
-      const normalizedField = KANBAN_GROUP_FIELD_SET.has(field as KanbanGroupField) ? field : firstAvailableKanbanGroupingField(currentWithFixed);
-      if (!normalizedField || currentWithFixed.some((grouping) => grouping.field === normalizedField)) return currentWithFixed;
-      return ensureKanbanFixedGroupings([...currentWithFixed, { field: normalizedField, direction: "asc" }]);
+      const normalized = normalizeKanbanSavedGroupings(current);
+      const normalizedField = KANBAN_GROUP_FIELD_SET.has(field as KanbanGroupField) ? field : firstAvailableKanbanGroupingField(normalized);
+      if (!normalizedField || normalized.some((grouping) => grouping.field === normalizedField)) return normalized;
+      return normalizeKanbanSavedGroupings([...normalized, { field: normalizedField, direction: "asc" }]);
     });
   }, []);
 
   const updateKanbanGrouping = useCallback((index: number, grouping: SavedViewGrouping) => {
     setKanbanGroupingDraft((current) => {
-      const currentWithFixed = ensureKanbanFixedGroupings(current);
-      const existing = currentWithFixed[index];
-      if (!existing) return currentWithFixed;
-      const nextGrouping: SavedViewGrouping = KANBAN_FIXED_GROUPING_FIELD_SET.has(existing.field)
-        ? { ...existing, direction: grouping.direction === "desc" ? "desc" : "asc" }
-        : grouping;
-      return ensureKanbanFixedGroupings(currentWithFixed.map((item, itemIndex) => (itemIndex === index ? nextGrouping : item)));
+      const normalized = normalizeKanbanSavedGroupings(current);
+      const existing = normalized[index];
+      if (!existing) return normalized;
+      const requestedField = KANBAN_GROUP_FIELD_SET.has(grouping.field as KanbanGroupField) ? grouping.field : existing.field;
+      if (normalized.some((item, itemIndex) => itemIndex !== index && item.field === requestedField)) return normalized;
+      const nextGrouping: SavedViewGrouping = {
+        field: requestedField,
+        direction: grouping.direction === "desc" ? "desc" : "asc",
+      };
+      return normalizeKanbanSavedGroupings(normalized.map((item, itemIndex) => (itemIndex === index ? nextGrouping : item)));
     });
   }, []);
 
   const removeKanbanGrouping = useCallback((index: number) => {
     setKanbanGroupingDraft((current) => {
-      const currentWithFixed = ensureKanbanFixedGroupings(current);
-      const existing = currentWithFixed[index];
-      if (!existing || KANBAN_FIXED_GROUPING_FIELD_SET.has(existing.field)) return currentWithFixed;
-      return ensureKanbanFixedGroupings(currentWithFixed.filter((_, itemIndex) => itemIndex !== index));
+      const normalized = normalizeKanbanSavedGroupings(current);
+      if (!normalized[index]) return normalized;
+      return normalized.filter((_, itemIndex) => itemIndex !== index);
     });
+  }, []);
+
+  const toggleKanbanDateAddedSortDirection = useCallback(() => {
+    setKanbanDateAddedSortDirection((current) => current === "asc" ? "desc" : "asc");
   }, []);
 
   const bottomLaneColumns = useMemo(() => (activeBoardIsLogicGate ? orderedColumns.filter(isKanbanBottomLaneColumn) : []), [activeBoardIsLogicGate, orderedColumns]);
@@ -2252,9 +2275,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         : "Request pending"
       : undefined;
     const placedByUserID = (card.placed_by_user_id ?? "").trim();
-    const addedTimestamp = formatKanbanLocalAddedTimestamp(card.created_timestamp);
+    const createdTimestamp = formatKanbanLocalCreatedTimestamp(card.created_timestamp);
     const bylineText = placedByUserID
-      ? `from: ${companyUserDisplayName(arenaUserByID.get(placedByUserID), placedByUserID)}${addedTimestamp ? ` ${addedTimestamp}` : ""}`
+      ? `from: ${companyUserDisplayName(arenaUserByID.get(placedByUserID), placedByUserID)}${createdTimestamp ? ` ${createdTimestamp}` : ""}`
       : undefined;
     return (
       <KanbanCardView
@@ -2556,11 +2579,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       text={text}
       subtext={subtext}
       accent={accent}
-      lockedFields={KANBAN_FIXED_GROUPINGS.map((grouping) => grouping.field)}
+      dateAddedSortDirection={kanbanDateAddedSortDirection}
       onToggleOpen={() => setKanbanGroupingOpen((open) => !open)}
       onAddGrouping={addKanbanGrouping}
       onUpdateGrouping={updateKanbanGrouping}
       onRemoveGrouping={removeKanbanGrouping}
+      onToggleDateAddedSortDirection={toggleKanbanDateAddedSortDirection}
     />
   ) : null;
 
