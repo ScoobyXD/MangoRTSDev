@@ -553,7 +553,7 @@ export async function archiveEmailMessagesBatch(messageIDs: string[], sharedInbo
   });
   const acceptedIDs = cleanIDs(payload.accepted_ids ?? []);
   const archivedIDs = cleanIDs(payload.archived_ids ?? []);
-  for (const messageID of archivedIDs.length > 0 ? archivedIDs : acceptedIDs) {
+  for (const messageID of archivedIDs) {
     markCachedMessageArchived(messageID);
   }
   return {

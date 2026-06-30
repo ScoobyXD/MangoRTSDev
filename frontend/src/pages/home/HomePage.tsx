@@ -1508,7 +1508,7 @@ export function HomePage({
         })
         .finally(() => {
           if (!keepPendingUntilConfirmation) forgetPendingArchiveMessages(batch);
-          scheduleFolderMetadataRefresh();
+          if (!keepPendingUntilConfirmation) scheduleFolderMetadataRefresh();
         });
     }
   }, [forgetPendingArchiveMessages, handleEmailAccessExpired, releasePendingArchiveMessagesLater, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
@@ -1764,10 +1764,12 @@ export function HomePage({
         if (!messageID) return;
         const activeSharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
         const archiveTargetsCurrentMailbox = eventSharedInboxID ? eventSharedInboxID === activeSharedInboxID : activeSharedInboxID === "";
-        if (archiveConfirmation || (trigger.startsWith("message.updated") && archiveUpdateWasAppliedLocally(messageID, eventSharedInboxID || undefined))) {
+        const localArchiveConfirmation = archiveUpdateWasAppliedLocally(messageID, eventSharedInboxID || undefined);
+        if (archiveConfirmation || (trigger.startsWith("message.updated") && localArchiveConfirmation)) {
           forgetPendingArchiveMessages({ companyID, sharedInboxID: eventSharedInboxID || undefined, messageIDs: [messageID] });
-          scheduleFolderRefresh({ preserveInflight: true });
           invalidateEmailMessageCache(messageID);
+          if (localArchiveConfirmation) return;
+          scheduleFolderRefresh({ preserveInflight: true });
           if (!archiveTargetsCurrentMailbox) return;
           const visible = messagesRef.current.some((message) => message.id === messageID);
           const selected = selectedMessageIDRef.current === messageID;

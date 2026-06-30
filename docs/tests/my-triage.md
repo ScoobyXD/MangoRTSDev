@@ -64,6 +64,7 @@ MT53 - Retryable archive failures such as provider rate limits or transient prov
 MT54 - Final archive failures must be recorded on the job item and emit an archive-failed communications event; successful items must emit archive confirmation events.
 MT55 - Duplicate active archive submissions for the same actor, mailbox scope, account, and message must not create duplicate active job items or duplicate provider archive attempts.
 MT56 - My Triage archive jobs must use the actor's personal email connection, while Shared Triage archive jobs must preserve company/shared-inbox scope and use the shared mailbox connection that was authorized at acceptance time.
+MT57 - Accepted background archive job IDs are pending work, not confirmed archive mutations; they must not be applied to the current visible message-list cache until an explicit user action or later full reload reconciles provider state.
 
 ## Scenarios
 
@@ -196,6 +197,7 @@ Business logic covered:
 - MT54
 - MT55
 - MT56
+- MT57
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
@@ -221,7 +223,8 @@ Expected:
 - Retryable provider failures remain recorded with attempt count, last error, and next retry time.
 - Successful archive job items emit archive confirmations; final failed items emit archive-failed communications events.
 - Folder metadata refresh runs after the primary archive-and-next work as reconciliation only; it is coalesced, does not duplicate an in-flight folder request, and does not fetch the next email page.
-- Archive confirmation events from the app backend or provider webhook reconcile caches/counts without blanking or fully reloading the prefetched page.
+- Archive confirmation events from the app backend or provider webhook reconcile pending archive bookkeeping without blanking, fully reloading, or removing rows from the currently visible prefetched page.
+- Accepted background archive IDs are not treated as already archived in the frontend list cache; the current page remains stable while earlier page jobs drain in the backend.
 - Starring or unstarring a message updates the row and Starred count locally, and the matching backend/provider confirmation does not blank or fully reload the active Inbox or Starred tab.
 - Opening or returning to My Triage does not fire background logic-gate view repair requests for missing, inaccessible, or stale node-linked logic gate IDs.
 - If the backend accepts the archive page but a later provider mutation fails or never confirms, the source email is not deleted and can remain or reappear after refresh.
