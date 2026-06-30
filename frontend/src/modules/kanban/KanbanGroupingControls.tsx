@@ -15,6 +15,7 @@ type KanbanGroupingControlsProps = {
   text: string;
   subtext: string;
   accent: string;
+  lockedFields: string[];
   onToggleOpen: () => void;
   onAddGrouping: (field: string) => void;
   onUpdateGrouping: (index: number, grouping: SavedViewGrouping) => void;
@@ -34,6 +35,7 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
   text,
   subtext,
   accent,
+  lockedFields,
   onToggleOpen,
   onAddGrouping,
   onUpdateGrouping,
@@ -42,6 +44,7 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
   const [addGroupingOpen, setAddGroupingOpen] = useState(false);
   const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
   const usedFields = new Set(groupings.map((grouping) => grouping.field));
+  const lockedFieldSet = new Set(lockedFields);
   const addableFields = KANBAN_GROUP_FIELDS.filter((field) => !usedFields.has(field.value));
   const buttonSurface = isDark ? "rgba(15,23,42,0.86)" : "rgba(255,255,255,0.92)";
 
@@ -96,22 +99,25 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
           }}
         >
           <div style={groupingStackStyle}>
-            {groupings.map((grouping, index) => (
+            {groupings.map((grouping, index) => {
+              const locked = lockedFieldSet.has(grouping.field);
+              return (
               <div key={`${grouping.field}:${index}`} style={groupingRowStyle(index)}>
                 <button
                   type="button"
-                  disabled={loading || saving}
+                  disabled={loading || saving || locked}
                   onClick={() => {
+                    if (locked) return;
                     setAddGroupingOpen(false);
                     setGroupingFieldMenuIndex(groupingFieldMenuIndex === index ? null : index);
                   }}
-                  style={groupingFieldButtonStyle(text)}
+                  style={groupingFieldButtonStyle(text, locked)}
                 >
                   {KANBAN_GROUP_FIELDS
                     .filter((field) => field.value === grouping.field || !groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
                     .find((field) => field.value === grouping.field)?.label ?? grouping.field}
                 </button>
-                {groupingFieldMenuIndex === index && (
+                {!locked && groupingFieldMenuIndex === index && (
                   <div style={groupingFieldMenuStyle(buttonSurface, line)}>
                     {KANBAN_GROUP_FIELDS
                       .filter((field) => field.value === grouping.field || !groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
@@ -141,15 +147,16 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
                 </button>
                 <button
                   type="button"
-                  title="Remove grouping"
-                  disabled={loading || saving}
+                  title={locked ? "" : "Remove grouping"}
+                  disabled={loading || saving || locked}
                   onClick={() => onRemoveGrouping(index)}
                   style={groupingRemoveButtonStyle(subtext)}
                 >
-                  x
+                  {locked ? "" : "x"}
                 </button>
               </div>
-            ))}
+              );
+            })}
             <div style={{ position: "relative" }}>
               <button
                 type="button"
@@ -207,25 +214,27 @@ const groupingStackStyle: React.CSSProperties = {
 
 function groupingRowStyle(index: number): React.CSSProperties {
   const rowAccent = groupingAccent(index);
+  const indent = Math.min(index * 12, 30);
   return {
     position: "relative",
-    width: "min(100%, 282px)",
+    width: `calc(100% - ${indent}px)`,
     minWidth: 0,
     minHeight: 30,
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) 46px 22px",
     alignItems: "center",
     gap: 5,
-    marginLeft: Math.min(index * 12, 30),
+    marginLeft: indent,
     border: `1px solid ${rgba(rowAccent, 0.18)}`,
     borderRadius: 7,
     background: `linear-gradient(145deg, rgba(255,255,255,0.92), ${rgba(rowAccent, 0.12)})`,
     boxShadow: "4px 4px 12px rgba(148,163,184,0.13), -3px -3px 10px rgba(255,255,255,0.72), inset 1px 1px 0 rgba(255,255,255,0.82)",
     padding: "0 4px 0 7px",
+    boxSizing: "border-box",
   };
 }
 
-function groupingFieldButtonStyle(text: string): React.CSSProperties {
+function groupingFieldButtonStyle(text: string, locked: boolean): React.CSSProperties {
   return {
     minWidth: 0,
     height: 24,
@@ -240,7 +249,7 @@ function groupingFieldButtonStyle(text: string): React.CSSProperties {
     fontSize: 12,
     fontWeight: 800,
     textAlign: "left",
-    cursor: "pointer",
+    cursor: locked ? "default" : "pointer",
     padding: "0 4px",
   };
 }

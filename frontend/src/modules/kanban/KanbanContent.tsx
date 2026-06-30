@@ -115,6 +115,11 @@ const KANBAN_REQUESTED_DECLINE_COLUMN_ID = "backlog";
 const LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE = "logic_gate_kanban";
 const LOGIC_GATE_KANBAN_DEFAULT_SAVED_VIEW_NAME = "Kanban grouping";
 const KANBAN_GROUP_FIELD_SET = new Set<KanbanGroupField>(["person", "priority", "due_date", "date_added", "account"]);
+const KANBAN_FIXED_GROUPINGS: SavedViewGrouping[] = [
+  { field: "priority", direction: "asc" },
+  { field: "date_added", direction: "asc" },
+];
+const KANBAN_FIXED_GROUPING_FIELD_SET = new Set(KANBAN_FIXED_GROUPINGS.map((grouping) => grouping.field));
 
 function normalizeKanbanSavedGroupings(value: unknown): SavedViewGrouping[] {
   if (!Array.isArray(value)) return [];
@@ -151,6 +156,25 @@ function sortSavedViewsForKanban(savedViews: SavedView[]): SavedView[] {
 
 function kanbanGroupingSignature(groupings: SavedViewGrouping[]): string {
   return JSON.stringify(normalizeKanbanSavedGroupings(groupings));
+}
+
+function kanbanSavedExtraGroupings(groupings: SavedViewGrouping[]): SavedViewGrouping[] {
+  return normalizeKanbanSavedGroupings(groupings).filter((grouping) => !KANBAN_FIXED_GROUPING_FIELD_SET.has(grouping.field));
+}
+
+function buildKanbanGroupingDraftFromSaved(groupings: unknown): SavedViewGrouping[] {
+  return [...KANBAN_FIXED_GROUPINGS, ...kanbanSavedExtraGroupings(normalizeKanbanSavedGroupings(groupings))];
+}
+
+function ensureKanbanFixedGroupings(groupings: SavedViewGrouping[]): SavedViewGrouping[] {
+  const normalized = normalizeKanbanSavedGroupings(groupings);
+  const byField = new Map(normalized.map((grouping) => [grouping.field, grouping]));
+  const fixed = KANBAN_FIXED_GROUPINGS.map((grouping) => ({
+    field: grouping.field,
+    direction: byField.get(grouping.field)?.direction ?? grouping.direction,
+  }));
+  const extras = normalized.filter((grouping) => !KANBAN_FIXED_GROUPING_FIELD_SET.has(grouping.field));
+  return [...fixed, ...extras];
 }
 
 function kanbanNestedGroupItemCount(group: UniversalNestedGroup<KanbanCard, KanbanGroupField>): number {
@@ -336,6 +360,19 @@ function companyUserDisplayName(user: CompanyUser | undefined, fallbackID: strin
   return name || email || fallbackID || "this person";
 }
 
+function formatKanbanLocalAddedTimestamp(timestamp: string): string {
+  const date = new Date(timestamp);
+  const millis = date.getTime();
+  if (!Number.isFinite(millis)) return "";
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const hours = date.getHours();
+  const hour12 = hours % 12 || 12;
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const period = hours >= 12 ? "p.m." : "a.m.";
+  return `${month}/${day} ${hour12}:${minutes} ${period}`;
+}
+
 export const KanbanContent: React.FC<KanbanContentProps> = ({
   accent,
   widgetId,
@@ -369,7 +406,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [kanbanAccountFilterIDs, setKanbanAccountFilterIDs] = useState<string[]>([]);
   const [kanbanGroupingOpen, setKanbanGroupingOpen] = useState(false);
   const [kanbanGroupingView, setKanbanGroupingView] = useState<SavedView | null>(null);
-  const [kanbanGroupingDraft, setKanbanGroupingDraft] = useState<SavedViewGrouping[]>([]);
+  const [kanbanGroupingDraft, setKanbanGroupingDraft] = useState<SavedViewGrouping[]>(() => buildKanbanGroupingDraftFromSaved([]));
   const [kanbanGroupingLoaded, setKanbanGroupingLoaded] = useState(false);
   const [kanbanGroupingLoading, setKanbanGroupingLoading] = useState(false);
   const [kanbanGroupingSaving, setKanbanGroupingSaving] = useState(false);
@@ -813,7 +850,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const activeBoardIsLogicGate = !!(activeLogicGateID || logicGateIDFromKanbanBoardID(boardID));
   const activeKanbanGroupings = useMemo<Array<{ field: KanbanGroupField; direction: "asc" | "desc" }>>(() => {
     if (!activeBoardIsLogicGate) return [];
-    return normalizeKanbanSavedGroupings(kanbanGroupingDraft).map((grouping) => ({
+    return ensureKanbanFixedGroupings(kanbanGroupingDraft).map((grouping) => ({
       field: grouping.field as KanbanGroupField,
       direction: grouping.direction,
     }));
@@ -849,6 +886,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setKanbanGroupingLoading(true);
     setKanbanGroupingLoaded(false);
     setKanbanGroupingError("");
+    setKanbanGroupingDraft(buildKanbanGroupingDraftFromSaved([]));
     void Promise.all([
       fetchSavedViews({ apiBase, companyID, surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE }),
       fetchSavedViewPreference({ apiBase, companyID, surface: LOGIC_GATE_KANBAN_SAVED_VIEW_SURFACE }),
@@ -859,11 +897,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       const selectedView = selectedViewID
         ? sortedViews.find((view) => view.saved_view_id === selectedViewID) ?? null
         : sortedViews[0] ?? null;
-      const groupings = normalizeKanbanSavedGroupings(selectedView?.groupings ?? []);
+      const savedGroupings = normalizeKanbanSavedGroupings(selectedView?.groupings ?? []);
+      const groupings = buildKanbanGroupingDraftFromSaved(savedGroupings);
       setKanbanGroupingView(selectedView);
       setKanbanGroupingDraft(groupings);
       setKanbanGroupingLoaded(true);
-      kanbanGroupingPersistedSignatureRef.current = kanbanGroupingSignature(groupings);
+      kanbanGroupingPersistedSignatureRef.current = kanbanGroupingSignature(savedGroupings);
       if (!selectedViewID && selectedView) {
         void saveSavedViewPreference({
           apiBase,
@@ -889,7 +928,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       }
       return undefined;
     }
-    const groupings = normalizeKanbanSavedGroupings(kanbanGroupingDraft);
+    const groupings = kanbanSavedExtraGroupings(kanbanGroupingDraft);
     const signature = kanbanGroupingSignature(groupings);
     if (signature === kanbanGroupingPersistedSignatureRef.current) return undefined;
     if (!kanbanGroupingView && groupings.length === 0) {
@@ -938,18 +977,32 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
   const addKanbanGrouping = useCallback((field: string) => {
     setKanbanGroupingDraft((current) => {
-      const normalizedField = KANBAN_GROUP_FIELD_SET.has(field as KanbanGroupField) ? field : firstAvailableKanbanGroupingField(current);
-      if (!normalizedField || current.some((grouping) => grouping.field === normalizedField)) return current;
-      return [...current, { field: normalizedField, direction: "asc" }];
+      const currentWithFixed = ensureKanbanFixedGroupings(current);
+      const normalizedField = KANBAN_GROUP_FIELD_SET.has(field as KanbanGroupField) ? field : firstAvailableKanbanGroupingField(currentWithFixed);
+      if (!normalizedField || currentWithFixed.some((grouping) => grouping.field === normalizedField)) return currentWithFixed;
+      return ensureKanbanFixedGroupings([...currentWithFixed, { field: normalizedField, direction: "asc" }]);
     });
   }, []);
 
   const updateKanbanGrouping = useCallback((index: number, grouping: SavedViewGrouping) => {
-    setKanbanGroupingDraft((current) => normalizeKanbanSavedGroupings(current.map((item, itemIndex) => (itemIndex === index ? grouping : item))));
+    setKanbanGroupingDraft((current) => {
+      const currentWithFixed = ensureKanbanFixedGroupings(current);
+      const existing = currentWithFixed[index];
+      if (!existing) return currentWithFixed;
+      const nextGrouping: SavedViewGrouping = KANBAN_FIXED_GROUPING_FIELD_SET.has(existing.field)
+        ? { ...existing, direction: grouping.direction === "desc" ? "desc" : "asc" }
+        : grouping;
+      return ensureKanbanFixedGroupings(currentWithFixed.map((item, itemIndex) => (itemIndex === index ? nextGrouping : item)));
+    });
   }, []);
 
   const removeKanbanGrouping = useCallback((index: number) => {
-    setKanbanGroupingDraft((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    setKanbanGroupingDraft((current) => {
+      const currentWithFixed = ensureKanbanFixedGroupings(current);
+      const existing = currentWithFixed[index];
+      if (!existing || KANBAN_FIXED_GROUPING_FIELD_SET.has(existing.field)) return currentWithFixed;
+      return ensureKanbanFixedGroupings(currentWithFixed.filter((_, itemIndex) => itemIndex !== index));
+    });
   }, []);
 
   const bottomLaneColumns = useMemo(() => (activeBoardIsLogicGate ? orderedColumns.filter(isKanbanBottomLaneColumn) : []), [activeBoardIsLogicGate, orderedColumns]);
@@ -2200,7 +2253,10 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         : "Request pending"
       : undefined;
     const placedByUserID = (card.placed_by_user_id ?? "").trim();
-    const bylineText = placedByUserID ? `from: ${companyUserDisplayName(arenaUserByID.get(placedByUserID), placedByUserID)}` : undefined;
+    const addedTimestamp = formatKanbanLocalAddedTimestamp(card.created_timestamp);
+    const bylineText = placedByUserID
+      ? `from: ${companyUserDisplayName(arenaUserByID.get(placedByUserID), placedByUserID)}${addedTimestamp ? ` ${addedTimestamp}` : ""}`
+      : undefined;
     return (
       <KanbanCardView
         key={card.card_id}
@@ -2501,6 +2557,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       text={text}
       subtext={subtext}
       accent={accent}
+      lockedFields={KANBAN_FIXED_GROUPINGS.map((grouping) => grouping.field)}
       onToggleOpen={() => setKanbanGroupingOpen((open) => !open)}
       onAddGrouping={addKanbanGrouping}
       onUpdateGrouping={updateKanbanGrouping}
