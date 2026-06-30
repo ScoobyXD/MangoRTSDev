@@ -163,6 +163,36 @@ func buildLogicGateWorkView(logicGate domain.LogicGate, assignments []domain.Log
 	}
 }
 
+func logicGateWorkCardEmailOriginKey(boardID, cardID, nodeID string) string {
+	return strings.TrimSpace(boardID) + "\x00" + strings.TrimSpace(cardID) + "\x00" + strings.TrimSpace(nodeID)
+}
+
+func markLogicGateWorkEmailOriginCards(work *domain.LogicGateWorkView, emailOriginKeys map[string]bool) {
+	if len(emailOriginKeys) == 0 {
+		return
+	}
+	for index := range work.Cards {
+		card := &work.Cards[index]
+		if emailOriginKeys[logicGateWorkCardEmailOriginKey(card.BoardID, card.CardID, card.NodeID)] {
+			card.CreatedFromEmail = true
+		}
+	}
+	for index := range work.Assignments {
+		card := &work.Assignments[index].Card
+		if emailOriginKeys[logicGateWorkCardEmailOriginKey(card.BoardID, card.CardID, card.NodeID)] {
+			card.CreatedFromEmail = true
+		}
+	}
+	for statusIndex := range work.Statuses {
+		for assignmentIndex := range work.Statuses[statusIndex].Assignments {
+			card := &work.Statuses[statusIndex].Assignments[assignmentIndex].Card
+			if emailOriginKeys[logicGateWorkCardEmailOriginKey(card.BoardID, card.CardID, card.NodeID)] {
+				card.CreatedFromEmail = true
+			}
+		}
+	}
+}
+
 func logicGateWorkNodeWithAssignment(node domain.Node, assignment domain.NodeLogicGateAssignment) domain.Node {
 	statusKey := logicGateWorkStatusKeyOrDefault(assignment.StatusKey, LogicGateWorkStatusPending)
 	status := LogicGateWorkStatusTitle(statusKey)
@@ -226,6 +256,7 @@ func synthesizeLogicGateWorkCard(boardID string, assignment domain.NodeLogicGate
 		Position:          assignment.Position,
 		DueDate:           cloneStringPointer(node.DueDate),
 		Priority:          cloneIntPointer(node.Priority),
+		CreatedFromEmail:  false,
 		CreatedTimestamp:  assignment.CreatedTimestamp,
 		UpdatedTimestamp:  assignment.UpdatedTimestamp,
 	}

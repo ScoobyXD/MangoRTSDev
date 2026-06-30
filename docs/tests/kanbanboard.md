@@ -120,6 +120,13 @@ KB85 - Priority grouped drops can also move the card to the target status column
 KB86 - When Date Added sorting is enabled, priority grouped drops update priority and status but do not write a manual position.
 KB87 - When Date Added sorting is disabled, priority grouped drops may also write a manual sparse position so the moved card lands at the visible drop point.
 KB88 - Person, due date, and account grouping headers remain display group headers and must not silently mutate those fields by card drop until explicit field-specific semantics are designed.
+KB89 - A Kanban card created directly from an email-to-Logic-Gate conversion exposes `created_from_email = true` and shows a visible email icon on the card.
+KB90 - A normal node card that merely has an email attached must not show the direct-email-created icon unless that card itself was created as the email node.
+KB91 - Dragging a direct email-created card over another card shows a full-card email attachment target state, while normal card reordering continues to show the before/after insertion marker.
+KB92 - Dropping a direct email-created card onto a different target node card transfers the email to the target node, creates or updates the target email attachment placement, and adds the target node's attached-email projection.
+KB93 - After a successful email-card transfer, the source email-created Kanban card and its temporary source node are deleted.
+KB94 - Email-card transfer does not restore the email to My Triage and does not delete the target node or target card.
+KB95 - Multi-card drags, non-email-created source cards, same-card drops, and same-node drops must not run email-card transfer semantics.
 
 ## Scenarios
 
@@ -339,3 +346,28 @@ Expected:
 - If the priority-group drop target is in another status column, the card status updates to that column too.
 - With Date Added disabled, the manual vertical drop writes sparse card position and the moved card appears at the requested visible location.
 - The saved view stores the Date Added enabled state and direction separately from grouping rows.
+
+### Scenario KB-S7: Direct Email Card Transfer Onto Target Node
+
+Business logic covered:
+- KB89
+- KB90
+- KB91
+- KB92
+- KB93
+- KB94
+- KB95
+
+Given:
+- A user drags an email into a Logic Gate so the system creates a Pending node card from that email.
+- The source email-created card shows the email icon.
+- Another normal node card is visible on the same Logic Gate Kanban board.
+
+Expected:
+- Hovering the source email-created card over blank column space keeps normal card move/reorder semantics.
+- Hovering the source email-created card over the normal target card shows the full-card email attachment target state, not the before/after insertion marker.
+- Dropping on the target card attaches the email to the target node.
+- The source email-created card disappears from the board after the transfer.
+- The temporary source node created from the email is deleted.
+- The target card remains on the board and does not become a direct-email-created card solely because an email was attached to it.
+- The transferred email does not return to My Triage.

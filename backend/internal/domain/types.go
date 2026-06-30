@@ -808,6 +808,7 @@ type KanbanCard struct {
 	Position                   int       `json:"position"`
 	DueDate                    *string   `json:"due_date,omitempty"`
 	Priority                   *int      `json:"priority,omitempty"`
+	CreatedFromEmail           bool      `json:"created_from_email,omitempty"`
 	ProjectionUpdatedTimestamp time.Time `json:"projection_updated_timestamp,omitempty"`
 	CreatedTimestamp           time.Time `json:"created_timestamp"`
 	UpdatedTimestamp           time.Time `json:"updated_timestamp"`

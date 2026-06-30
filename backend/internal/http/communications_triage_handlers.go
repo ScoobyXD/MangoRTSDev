@@ -265,6 +265,116 @@ func (s *Server) handleCommunicationsTriageRevert(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) handleCommunicationsEmailNodeTransfer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	connection, ok := s.requireConnectedEmail(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		CompanyID     string `json:"company_id"`
+		SourceBoardID string `json:"source_board_id"`
+		SourceCardID  string `json:"source_card_id"`
+		TargetBoardID string `json:"target_board_id"`
+		TargetCardID  string `json:"target_card_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	actorUserID, idempotencyKey := workItemAssignmentRequestEventMetadata(r)
+	input, err := store.NormalizeCommunicationsEmailNodeTransferInput(store.CommunicationsEmailNodeTransferInput{
+		UserID:         connection.UserID,
+		CompanyID:      req.CompanyID,
+		SourceBoardID:  req.SourceBoardID,
+		SourceCardID:   req.SourceCardID,
+		TargetBoardID:  req.TargetBoardID,
+		TargetCardID:   req.TargetCardID,
+		ActorUserID:    actorUserID,
+		IdempotencyKey: idempotencyKey,
+	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "company_source_and_target_cards_required")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_email_node_transfer")
+		return
+	}
+	if !requireCompanyAccess(w, r, input.CompanyID) {
+		return
+	}
+	sourceCard, err := s.repo.GetKanbanCard(input.CompanyID, input.SourceBoardID, input.SourceCardID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_source_card")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "source_email_card_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_source_card")
+		return
+	}
+	targetCard, err := s.repo.GetKanbanCard(input.CompanyID, input.TargetBoardID, input.TargetCardID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_target_card")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "target_card_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_target_card")
+		return
+	}
+	if sourceCard.NodeID == targetCard.NodeID {
+		writeError(w, http.StatusBadRequest, "source_and_target_must_differ")
+		return
+	}
+	permissionUserID := s.entityPermissionActorUserID(r, input.CompanyID)
+	if sourceCard.LogicGateID != nil && strings.TrimSpace(*sourceCard.LogicGateID) != "" &&
+		!s.requireKanbanLogicGateEffectiveAccess(w, input.CompanyID, permissionUserID, strings.TrimSpace(*sourceCard.LogicGateID), store.EntityPermissionEdit) {
+		return
+	}
+	if targetCard.LogicGateID != nil && strings.TrimSpace(*targetCard.LogicGateID) != "" &&
+		!s.requireKanbanLogicGateEffectiveAccess(w, input.CompanyID, permissionUserID, strings.TrimSpace(*targetCard.LogicGateID), store.EntityPermissionEdit) {
+		return
+	}
+	if !s.requireEntityEdit(w, r, input.CompanyID, store.EntityTypeNode, sourceCard.NodeID, "source_node_not_found") {
+		return
+	}
+	if !s.requireEntityEdit(w, r, input.CompanyID, store.EntityTypeNode, targetCard.NodeID, "target_node_not_found") {
+		return
+	}
+
+	result, err := s.repo.TransferCommunicationsEmailNode(input)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_email_node_transfer")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "source_email_card_or_target_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_transfer_email_node")
+		return
+	}
+	s.publishWorkspaceEvent(input.CompanyID, "kanban_card_deleted", map[string]any{
+		"board_id": result.SourceBoardID,
+		"card_id":  result.DeletedCardID,
+	})
+	s.publishWorkspaceEvent(input.CompanyID, "node_deleted", map[string]any{"node_id": result.DeletedNodeID})
+	s.publishWorkspaceEvent(input.CompanyID, "node_updated", map[string]any{"node_id": result.TargetNodeID})
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleCommunicationsMyLogicGates(w http.ResponseWriter, r *http.Request) {
 	actor, ok := authenticatedActor(r)
 	if !ok {

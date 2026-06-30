@@ -16,6 +16,8 @@ Users can:
 - drag nodes from Company Explorer into a column,
 - drag a selected batch of Company Explorer node rows into a column,
 - drag cards between columns and vertically reorder cards inside a column,
+- see when a Kanban card was created directly from an email,
+- drag a direct email-created card onto another node card to transfer the email attachment and remove the source email node,
 - select one or more cards with click, Ctrl/Cmd-click, and continuous Shift-click range selection across columns,
 - request selected-card deletion with Delete, Backspace, or the card context menu.
 
@@ -37,6 +39,8 @@ Users can:
 - Clicking a card publishes that node selection to directly linked Company Explorer frames so the Explorer row highlights with the selected card. Multi-selected cards publish all selected node IDs so Explorer can mirror the selected rows.
 - Explorer-originated node selections replace the current Kanban card selection unless the Explorer selection itself is a Shift/Ctrl multi-selection payload.
 - Cards do not show a top-right expand/collapse control. Card titles and optional descriptions render directly.
+- Cards created directly from an email show a small envelope icon on the card. A normal node card with an attached email does not show this icon unless the card itself was the direct email-created node.
+- Dragging a direct email-created card over another card shows a whole-card email attachment target state. Normal card reordering continues to use the before/after insertion marker.
 - Drag previews for Explorer-to-Kanban node batches and Kanban card batches show the selected batch, not just the row under the cursor.
 - The module reserves top clearance for the frame title plate and linked-module hexagon so column headers do not bleed into frame chrome.
 - The top clearance owns the editable board name, search box, and `All Boards` list button. The list groups boards by Company Explorer folder label.
@@ -104,6 +108,8 @@ Payload:
 
 `cardID` is kept for old single-card payload compatibility. `cardIDs` is the selected-card batch and is moved together in visual order.
 
+When the dragged Kanban payload contains exactly one direct email-created card and the pointer is over a different target card, the card-to-card drop transfers the source email into the target node. The source email card and its temporary source node are deleted after the transfer. Multi-card drags, non-email-created cards, blank-column drops, same-card drops, and same-node drops keep normal Kanban movement semantics.
+
 ## Command Boundary
 Durable Kanban workflows that used to live directly in `KanbanContent.tsx` now route through `frontend/src/modules/kanban/kanbanCommands.ts`.
 
@@ -144,10 +150,13 @@ Endpoints:
 - `PUT /v1/kanban/cards/:card_id`
   - `{ company_id, board_id, column_id, position? }`
 - `DELETE /v1/kanban/cards/:card_id?company_id=...&board_id=...`
+- `POST /v1/communications/email-nodes/transfer`
+  - `{ company_id, source_board_id, source_card_id, target_board_id, target_card_id }`
 
 `POST /v1/kanban/cards` is idempotent per board and node. If the same node is dropped again, the existing card moves instead of duplicating.
 `PUT /v1/kanban/cards/:card_id` is also used for vertical card reordering and selected-card batch moves by writing new sparse `position` values.
 The card write API has no item-type field; Kanban board cards are node-only.
+Direct email-created cards expose `created_from_email = true` in Kanban card reads. The email transfer endpoint only accepts a source card backed by `communications_email_nodes`; it writes the destination attachment into `communications_email_node_attachments`, adds an `Attached email` projection to the target node, and deletes the source email node/card. It does not restore the email to My Triage.
 Saved board rows are metadata only. Columns/cards remain the source of board contents, column order, dimensions, colors, and card positions.
 Kanban boards can be placed in Company Explorer through `company_explorer_folder_items` with `item_type=kanban`. This makes board organization API-first for agents while keeping board display out of maps and editors.
 

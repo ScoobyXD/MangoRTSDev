@@ -239,6 +239,98 @@ func TestMemoryEmailConversionCommandAttachesEmailToExistingNode(t *testing.T) {
 	}
 }
 
+func TestMemoryEmailNodeTransferAttachesEmailAndDeletesSourceNode(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111110"
+	repo.EnsureCompany(companyID, "Email Conversion Company")
+	user, logicGate := setupEmailConversionUserAndGate(t, repo, companyID)
+	targetNode, err := repo.CreateNode(companyID, "Target customer node")
+	if err != nil {
+		t.Fatalf("CreateNode target: %v", err)
+	}
+	targetPriority := 2
+	targetAssignment, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      targetNode.NodeID,
+		Priority:    &targetPriority,
+		PrioritySet: true,
+		Status:      "pending",
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus target: %v", err)
+	}
+	message := domain.EmailMessageSnapshot{ID: "message-transfer-node", ThreadID: "thread-transfer-node", Subject: "Transfer this email"}
+	if _, err := repo.UpsertCommunicationsTriageItem(user.UserID, message); err != nil {
+		t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
+	}
+	sourceConversion, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+		UserID:      user.UserID,
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		MessageIDs:  []string{message.ID},
+	})
+	if err != nil {
+		t.Fatalf("ConvertCommunicationsTriageItems source: %v", err)
+	}
+	if len(sourceConversion.Cards) != 1 || !sourceConversion.Cards[0].CreatedFromEmail {
+		t.Fatalf("source conversion card = %+v, want created_from_email card", sourceConversion.Cards)
+	}
+	sourceCard := sourceConversion.Cards[0]
+	sourceNodeID := sourceConversion.Nodes[0].NodeID
+	listedSourceCard, err := repo.GetKanbanCard(companyID, sourceCard.BoardID, sourceCard.CardID)
+	if err != nil || !listedSourceCard.CreatedFromEmail {
+		t.Fatalf("GetKanbanCard source = %+v err=%v, want created_from_email", listedSourceCard, err)
+	}
+
+	transfer, err := repo.TransferCommunicationsEmailNode(CommunicationsEmailNodeTransferInput{
+		UserID:        user.UserID,
+		CompanyID:     companyID,
+		SourceBoardID: sourceCard.BoardID,
+		SourceCardID:  sourceCard.CardID,
+		TargetBoardID: targetAssignment.Card.BoardID,
+		TargetCardID:  targetAssignment.Card.CardID,
+	})
+	if err != nil {
+		t.Fatalf("TransferCommunicationsEmailNode: %v", err)
+	}
+	if transfer.DeletedNodeID != sourceNodeID || transfer.DeletedCardID != sourceCard.CardID || transfer.SourceBoardID != sourceCard.BoardID {
+		t.Fatalf("transfer deleted source = %+v, want node %s card %s board %s", transfer, sourceNodeID, sourceCard.CardID, sourceCard.BoardID)
+	}
+	if transfer.EmailPlacement.NodeID != targetNode.NodeID || transfer.EmailPlacement.CardID != targetAssignment.Card.CardID || transfer.EmailPlacement.LogicGateID != logicGate.LogicGateID {
+		t.Fatalf("transfer placement = %+v, want target node/card/gate", transfer.EmailPlacement)
+	}
+	if _, err := repo.GetKanbanCard(companyID, sourceCard.BoardID, sourceCard.CardID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("source card after transfer err=%v, want ErrNotFound", err)
+	}
+	if _, err := repo.GetNode(companyID, sourceNodeID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("source node after transfer err=%v, want ErrNotFound", err)
+	}
+	targetCard, err := repo.GetKanbanCard(companyID, targetAssignment.Card.BoardID, targetAssignment.Card.CardID)
+	if err != nil {
+		t.Fatalf("GetKanbanCard target: %v", err)
+	}
+	if targetCard.CreatedFromEmail {
+		t.Fatalf("target card created_from_email = true, want false for normal node with attached email")
+	}
+	placements, err := repo.ListCommunicationsEmailPlacements(user.UserID, companyID, []string{message.ID})
+	if err != nil || len(placements) != 1 || placements[0].NodeID != targetNode.NodeID || placements[0].CardID != targetAssignment.Card.CardID {
+		t.Fatalf("email placements after transfer = %+v err=%v, want target placement", placements, err)
+	}
+	projections, err := repo.ListNodeProjections(companyID, targetNode.NodeID)
+	if err != nil || len(projections) != 1 || projections[0].Type != "Attached email" {
+		t.Fatalf("target email projections = %+v err=%v, want attached email", projections, err)
+	}
+	nodes, err := repo.ListNodes(companyID)
+	if err != nil || len(nodes) != 1 || nodes[0].NodeID != targetNode.NodeID {
+		t.Fatalf("nodes after transfer = %+v err=%v, want only target node", nodes, err)
+	}
+	triageItems, err := repo.ListCommunicationsTriageItems(user.UserID)
+	if err != nil || len(triageItems) != 0 {
+		t.Fatalf("triage items after transfer = %+v err=%v, want none", triageItems, err)
+	}
+}
+
 func TestMemoryEmailConversionCommandRejectsExplorerFolderTarget(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-111111111107"

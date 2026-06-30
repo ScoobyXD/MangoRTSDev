@@ -6,7 +6,7 @@ import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFil
 import { entityMatchesAccountFilter, setNodeAccountAssignments } from "../accounts/accountsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
-import { listCompanyUsers } from "../communications/communicationsApi";
+import { listCompanyUsers, transferEmailNodeCardToNode } from "../communications/communicationsApi";
 import { getNodeTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
@@ -92,6 +92,7 @@ import {
   type KanbanBoardContentsUpdatedDetail,
   type KanbanBoardsUpdatedDetail,
   type KanbanCard,
+  type KanbanCardDragPayload,
   type KanbanCardDropPlacement,
   type KanbanColumn,
   type KanbanColumnDropPlacement,
@@ -123,6 +124,12 @@ type KanbanGroupDropTarget = {
   field: KanbanGroupField;
   key: string;
   label: string;
+};
+
+type KanbanCardDragOverState = {
+  cardID: string;
+  placement: KanbanCardDropPlacement;
+  mode?: "reorder" | "email-transfer";
 };
 
 function normalizeKanbanSavedGroupings(value: unknown): SavedViewGrouping[] {
@@ -456,7 +463,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [highlightedEntity, setHighlightedEntity] = useState<HighlightedEntity>(() => readLinkedExplorerSelection(companyID, frameID));
   const [draggingColumnID, setDraggingColumnID] = useState("");
   const [dragOverColumnID, setDragOverColumnID] = useState("");
-  const [dragOverCard, setDragOverCard] = useState<{ cardID: string; placement: KanbanCardDropPlacement } | null>(null);
+  const [dragOverCard, setDragOverCard] = useState<KanbanCardDragOverState | null>(null);
   const [selectedCardIDs, setSelectedCardIDs] = useState<Set<string>>(() => new Set());
   const [selectionAnchorCardID, setSelectionAnchorCardID] = useState("");
   const [addColumnHover, setAddColumnHover] = useState(false);
@@ -486,6 +493,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const boardsRef = useRef<KanbanBoard[]>([]);
   const columnsRef = useRef<KanbanColumn[]>([]);
   const cardsRef = useRef<KanbanCard[]>([]);
+  const draggingKanbanCardIDsRef = useRef<string[]>([]);
+  const draggingKanbanSourceColumnIDRef = useRef("");
   const boardRefreshRequestRef = useRef(0);
   const localBoardMutationSeqRef = useRef(0);
   const pendingBoardMutationsRef = useRef(new Map<string, number>());
@@ -2288,6 +2297,62 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     return getOrderedKanbanCardIDs(orderedColumns, cards).filter((candidateID) => selectedCardIDs.has(candidateID));
   }, [cards, orderedColumns, selectedCardIDs]);
 
+  const parseActiveKanbanCardDragPayload = useCallback((event: React.DragEvent<HTMLElement>): KanbanCardDragPayload | null => {
+    const payload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
+    if (payload) return payload;
+    const cardIDs = draggingKanbanCardIDsRef.current.map((cardID) => cardID.trim()).filter(Boolean);
+    const sourceColumnID = draggingKanbanSourceColumnIDRef.current.trim();
+    if (cardIDs.length === 0 || !sourceColumnID) return null;
+    return { cardID: cardIDs[0], cardIDs, sourceColumnID };
+  }, []);
+
+  const emailTransferCandidateForPayload = useCallback((payload: KanbanCardDragPayload, targetCard: KanbanCard): KanbanCard | null => {
+    if (payload.cardIDs.length !== 1) return null;
+    const sourceCard = cardsRef.current.find((candidate) => candidate.card_id === payload.cardIDs[0]);
+    if (!sourceCard || sourceCard.created_from_email !== true) return null;
+    if (sourceCard.card_id === targetCard.card_id || sourceCard.node_id === targetCard.node_id) return null;
+    if (!targetCard.logic_gate_id && !logicGateIDFromKanbanBoardID(targetCard.board_id)) return null;
+    return sourceCard;
+  }, []);
+
+  const transferEmailCardToNode = useCallback(async (sourceCard: KanbanCard, targetCard: KanbanCard) => {
+    setDragOverCard(null);
+    setError("");
+    const previousCards = cardsRef.current;
+    const sourceBoardID = sourceCard.board_id;
+    const targetBoardID = targetCard.board_id;
+    const endSourceMutation = beginLocalBoardMutation(sourceBoardID, logicGateIDFromKanbanBoardID(sourceBoardID));
+    const endTargetMutation = targetBoardID === sourceBoardID
+      ? () => undefined
+      : beginLocalBoardMutation(targetBoardID, logicGateIDFromKanbanBoardID(targetBoardID));
+    let shouldRefreshSource = false;
+    let shouldRefreshTarget = false;
+    try {
+      applyCards((current) => current.filter((card) => card.card_id !== sourceCard.card_id));
+      removeCardsFromLocalSelection([sourceCard.card_id]);
+      const result = await transferEmailNodeCardToNode({
+        companyID,
+        sourceBoardID,
+        sourceCardID: sourceCard.card_id,
+        targetBoardID,
+        targetCardID: targetCard.card_id,
+      });
+      invalidateNodeRecordStoreCaches(apiBase, companyID, result.target_node_id || targetCard.node_id);
+      removeNodeRelationshipGraphNode(apiBase, companyID, result.deleted_node_id || sourceCard.node_id);
+      setHighlightedEntity({ nodeID: result.target_node_id || targetCard.node_id });
+    } catch {
+      setError("Email transfer failed");
+      applyCards(previousCards);
+      shouldRefreshSource = true;
+      shouldRefreshTarget = targetBoardID !== sourceBoardID;
+    } finally {
+      endSourceMutation();
+      endTargetMutation();
+    }
+    if (shouldRefreshSource) void refreshBoard(sourceBoardID);
+    if (shouldRefreshTarget) void refreshBoard(targetBoardID);
+  }, [apiBase, applyCards, beginLocalBoardMutation, companyID, refreshBoard, removeCardsFromLocalSelection]);
+
   const getCardDragPreviewItems = useCallback((cardIDs: string[]) => {
     const byID = new Map(cards.map((item) => [item.card_id, item]));
     return cardIDs.map((cardID) => {
@@ -2330,8 +2395,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const renderCard = (card: KanbanCard, groupTargets: KanbanGroupDropTarget[] = []): React.ReactNode => {
     const highlighted = highlightedEntity?.nodeID === card.node_id;
     const selected = selectedCardIDs.has(card.card_id);
-    const dragBefore = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "before";
-    const dragAfter = dragOverCard?.cardID === card.card_id && dragOverCard.placement === "after";
+    const emailTransferTarget = dragOverCard?.cardID === card.card_id && dragOverCard.mode === "email-transfer";
+    const dragBefore = dragOverCard?.cardID === card.card_id && dragOverCard.mode !== "email-transfer" && dragOverCard.placement === "before";
+    const dragAfter = dragOverCard?.cardID === card.card_id && dragOverCard.mode !== "email-transfer" && dragOverCard.placement === "after";
     const color = getKanbanConditionalColor(card, columnColorByID);
     const isRequestedCard = activeBoardIsLogicGate && isKanbanRequestedColumn({ column_id: card.column_id, title: columnTitleByID.get(card.column_id) ?? "" });
     const viewerUserID = (currentUserID ?? "").trim();
@@ -2366,6 +2432,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         selected={selected}
         dragBefore={dragBefore}
         dragAfter={dragAfter}
+        emailTransferTarget={emailTransferTarget}
         line={line}
         text={text}
         subtext={subtext}
@@ -2417,26 +2484,47 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           setCardContextMenu(null);
           setColumnContextMenu(null);
           event.dataTransfer.effectAllowed = "copyMove";
+          draggingKanbanCardIDsRef.current = dragCardIDs;
+          draggingKanbanSourceColumnIDRef.current = card.column_id;
           event.dataTransfer.setData(KANBAN_CARD_DRAG_MIME, JSON.stringify({ cardID: dragCardIDs[0], cardIDs: dragCardIDs, sourceColumnID: card.column_id }));
           setCardNodeCopyDragData(event.dataTransfer, dragCardIDs);
           attachStackedDragPreview(event.dataTransfer, getCardDragPreviewItems(dragCardIDs), color, "Kanban cards");
         }}
-        onDragEnd={() => setDragOverCard(null)}
+        onDragEnd={() => {
+          draggingKanbanCardIDsRef.current = [];
+          draggingKanbanSourceColumnIDRef.current = "";
+          setDragOverCard(null);
+        }}
         onDragOver={(event) => {
-          if (!dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME) && !dataTransferIncludes(event, EXPLORER_ENTITY_DRAG_MIME)) return;
+          const hasCardPayload = dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME) || draggingKanbanCardIDsRef.current.length > 0;
+          const hasExplorerPayload = dataTransferIncludes(event, EXPLORER_ENTITY_DRAG_MIME);
+          if (!hasCardPayload && !hasExplorerPayload) return;
           event.preventDefault();
           event.stopPropagation();
+          if (hasCardPayload) {
+            const cardPayload = parseActiveKanbanCardDragPayload(event);
+            if (cardPayload && emailTransferCandidateForPayload(cardPayload, card)) {
+              setDragOverCard({ cardID: card.card_id, placement: "after", mode: "email-transfer" });
+              return;
+            }
+          }
           setDragOverCard({
             cardID: card.card_id,
-            placement: dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME) ? cardDropPlacement(event) : "after",
+            placement: hasCardPayload ? cardDropPlacement(event) : "after",
+            mode: "reorder",
           });
         }}
         onDragLeave={() => setDragOverCard((previous) => (previous?.cardID === card.card_id ? null : previous))}
         onDrop={(event) => {
-          const cardPayload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
+          const cardPayload = parseActiveKanbanCardDragPayload(event);
           if (cardPayload) {
             event.preventDefault();
             event.stopPropagation();
+            const emailSourceCard = emailTransferCandidateForPayload(cardPayload, card);
+            if (emailSourceCard) {
+              void transferEmailCardToNode(emailSourceCard, card);
+              return;
+            }
             const priority = kanbanPriorityFromGroupTargets(groupTargets);
             if (priority !== null && draggedCardsNeedPriorityMove(cardPayload.cardIDs, priority)) {
               void moveCardsToPriorityGroup(

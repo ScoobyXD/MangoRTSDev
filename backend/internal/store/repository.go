@@ -115,6 +115,7 @@ type CommunicationsRepository interface {
 	ListCommunicationsArchiveJobItems(jobID string) ([]CommunicationsArchiveJobItem, error)
 	ConvertCommunicationsTriageItems(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error)
 	RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error)
+	TransferCommunicationsEmailNode(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferResult, error)
 	ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
 	ListUserLogicGateShortcuts(userID, companyID string) ([]domain.UserLogicGateShortcut, error)
 	UpsertUserLogicGateShortcuts(userID, companyID string, logicGateIDs []string) ([]domain.UserLogicGateShortcut, error)
@@ -1511,6 +1512,27 @@ type CommunicationsTriageRevertResult struct {
 	DeletedNodeID string                          `json:"deleted_node_id"`
 	DeletedCardID string                          `json:"deleted_card_id"`
 	BoardID       string                          `json:"board_id"`
+}
+
+type CommunicationsEmailNodeTransferInput struct {
+	UserID         string
+	CompanyID      string
+	SourceBoardID  string
+	SourceCardID   string
+	TargetBoardID  string
+	TargetCardID   string
+	ActorUserID    string
+	IdempotencyKey string
+}
+
+type CommunicationsEmailNodeTransferResult struct {
+	EmailPlacement domain.CommunicationsEmailPlacement `json:"email_placement"`
+	DeletedNodeID  string                              `json:"deleted_node_id"`
+	DeletedCardID  string                              `json:"deleted_card_id"`
+	SourceBoardID  string                              `json:"source_board_id"`
+	TargetNodeID   string                              `json:"target_node_id"`
+	TargetBoardID  string                              `json:"target_board_id"`
+	TargetCardID   string                              `json:"target_card_id"`
 }
 
 const KanbanMaxCardsLimit = 500

@@ -35,7 +35,19 @@ func (r *MemoryRepo) GetLogicGateWork(companyID, logicGateID string) (domain.Log
 			Node:       r.logicGateWorkNodeSummaryLocked(node, assignment),
 		})
 	}
-	return buildLogicGateWorkView(logicGate, assignments), nil
+	work := buildLogicGateWorkView(logicGate, assignments)
+	emailOriginKeys := make(map[string]bool)
+	for linkKey, link := range r.emailNodeLinks {
+		if linkKey != emailNodeLinkKey(link.CompanyID, link.BoardID, link.CardID) {
+			continue
+		}
+		if link.CompanyID != companyID || link.LogicGateID != logicGateID {
+			continue
+		}
+		emailOriginKeys[logicGateWorkCardEmailOriginKey(link.BoardID, link.CardID, link.NodeID)] = true
+	}
+	markLogicGateWorkEmailOriginCards(&work, emailOriginKeys)
+	return work, nil
 }
 
 func (r *MemoryRepo) logicGateWorkNodeSummaryLocked(node domain.Node, assignment domain.NodeLogicGateAssignment) domain.Node {

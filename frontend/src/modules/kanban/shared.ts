@@ -161,6 +161,7 @@ export type KanbanCard = {
   position: number;
   due_date?: string | null;
   priority?: number | null;
+  created_from_email?: boolean;
   accounts?: Account[];
   projection_updated_timestamp?: string;
   created_timestamp: string;

@@ -102,7 +102,37 @@ order by
 	if err := rows.Err(); err != nil {
 		return domain.LogicGateWorkView{}, err
 	}
-	return buildLogicGateWorkView(logicGate, assignments), nil
+	work := buildLogicGateWorkView(logicGate, assignments)
+	if err := r.markPostgresLogicGateWorkEmailOriginCards(ctx, &work); err != nil {
+		return domain.LogicGateWorkView{}, err
+	}
+	return work, nil
+}
+
+func (r *PostgresRepo) markPostgresLogicGateWorkEmailOriginCards(ctx context.Context, work *domain.LogicGateWorkView) error {
+	rows, err := r.db.QueryContext(ctx, `
+select board_id, card_id::text, node_id::text
+from communications_email_nodes
+where company_id=$1::uuid
+  and logic_gate_id=$2::uuid`, work.CompanyID, work.LogicGateID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	emailOriginKeys := make(map[string]bool)
+	for rows.Next() {
+		var boardID, cardID, nodeID string
+		if err := rows.Scan(&boardID, &cardID, &nodeID); err != nil {
+			return err
+		}
+		emailOriginKeys[logicGateWorkCardEmailOriginKey(boardID, cardID, nodeID)] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	markLogicGateWorkEmailOriginCards(work, emailOriginKeys)
+	return nil
 }
 
 func scanLogicGateWorkAssignment(row interface{ Scan(dest ...any) error }) (domain.LogicGateWorkAssignment, error) {

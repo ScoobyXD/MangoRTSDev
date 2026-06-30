@@ -279,6 +279,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			DescriptionSnapshot: emailDescriptionSnapshot(triageItem.Message),
 			IsIssue:             false,
 			Position:            nextCardPositionValue + index*1000,
+			CreatedFromEmail:    true,
 			CreatedTimestamp:    now,
 			UpdatedTimestamp:    now,
 		}
@@ -604,21 +605,7 @@ func (r *MemoryRepo) RevertCommunicationsTriageNode(input CommunicationsTriageRe
 	}
 	r.triageItems[triageItemKey(input.UserID, link.MessageID)] = triageItem
 
-	boardCards := r.kanbanCards[boardKey(input.CompanyID, input.BoardID)]
-	nextCards := boardCards[:0]
-	for _, card := range boardCards {
-		if card.CardID != input.CardID {
-			nextCards = append(nextCards, card)
-		}
-	}
-	r.kanbanCards[boardKey(input.CompanyID, input.BoardID)] = nextCards
-	delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(input.CompanyID, link.NodeID))
-	delete(r.emailNodeLinks, linkKey)
-	delete(r.nodes, key(input.CompanyID, link.NodeID))
-	delete(r.nodeInfo, key(input.CompanyID, link.NodeID))
-	delete(r.nodeText, key(input.CompanyID, link.NodeID))
-	delete(r.nodeMapPositions, key(input.CompanyID, link.NodeID))
-	delete(r.folderItems, folderItemKey(input.CompanyID, "node", link.NodeID))
+	r.deleteCommunicationsEmailSourceNodeLocked(input.CompanyID, linkKey, link)
 
 	return CommunicationsTriageRevertResult{
 		TriageItem:    triageItem,
@@ -626,6 +613,99 @@ func (r *MemoryRepo) RevertCommunicationsTriageNode(input CommunicationsTriageRe
 		DeletedCardID: input.CardID,
 		BoardID:       input.BoardID,
 	}, nil
+}
+
+func (r *MemoryRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferResult, error) {
+	input, err := NormalizeCommunicationsEmailNodeTransferInput(input)
+	if err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	sourceKey := emailNodeLinkKey(input.CompanyID, input.SourceBoardID, input.SourceCardID)
+	sourceLink, ok := r.emailNodeLinks[sourceKey]
+	if !ok || sourceLink.UserID != input.UserID {
+		return CommunicationsEmailNodeTransferResult{}, ErrNotFound
+	}
+	targetCard, ok := r.kanbanCardLocked(input.CompanyID, input.TargetBoardID, input.TargetCardID)
+	if !ok {
+		return CommunicationsEmailNodeTransferResult{}, ErrNotFound
+	}
+	targetLogicGateID := ""
+	if targetCard.LogicGateID != nil {
+		targetLogicGateID = strings.TrimSpace(*targetCard.LogicGateID)
+	}
+	if targetLogicGateID == "" || targetCard.NodeID == sourceLink.NodeID {
+		return CommunicationsEmailNodeTransferResult{}, ErrInvalid
+	}
+
+	now := time.Now().UTC()
+	attachmentLink := sourceLink
+	attachmentLink.NodeID = targetCard.NodeID
+	attachmentLink.BoardID = targetCard.BoardID
+	attachmentLink.CardID = targetCard.CardID
+	attachmentLink.LogicGateID = targetLogicGateID
+	attachmentLink.CreatedTimestamp = now
+	attachmentLink.UpdatedTimestamp = now
+	if existing, ok := r.emailNodeLinks[emailNodeAttachmentLinkKey(input.CompanyID, input.UserID, sourceLink.MessageID, targetCard.NodeID)]; ok {
+		attachmentLink.CreatedTimestamp = existing.CreatedTimestamp
+	}
+	r.emailNodeLinks[emailNodeAttachmentLinkKey(input.CompanyID, input.UserID, sourceLink.MessageID, targetCard.NodeID)] = attachmentLink
+	r.addEmailProjectionLocked(input.CompanyID, targetCard.NodeID, sourceLink.Message, now)
+	r.deleteCommunicationsEmailSourceNodeLocked(input.CompanyID, sourceKey, sourceLink)
+
+	return CommunicationsEmailNodeTransferResult{
+		EmailPlacement: domain.CommunicationsEmailPlacement{
+			CompanyID:        attachmentLink.CompanyID,
+			UserID:           attachmentLink.UserID,
+			MessageID:        attachmentLink.MessageID,
+			NodeID:           attachmentLink.NodeID,
+			BoardID:          attachmentLink.BoardID,
+			CardID:           attachmentLink.CardID,
+			LogicGateID:      attachmentLink.LogicGateID,
+			CreatedTimestamp: attachmentLink.CreatedTimestamp,
+			UpdatedTimestamp: attachmentLink.UpdatedTimestamp,
+		},
+		DeletedNodeID: sourceLink.NodeID,
+		DeletedCardID: sourceLink.CardID,
+		SourceBoardID: sourceLink.BoardID,
+		TargetNodeID:  targetCard.NodeID,
+		TargetBoardID: targetCard.BoardID,
+		TargetCardID:  targetCard.CardID,
+	}, nil
+}
+
+func (r *MemoryRepo) deleteCommunicationsEmailSourceNodeLocked(companyID, directLinkKey string, link communicationsEmailNodeLink) {
+	boardCards := r.kanbanCards[boardKey(companyID, link.BoardID)]
+	nextCards := boardCards[:0]
+	for _, card := range boardCards {
+		if card.CardID != link.CardID {
+			nextCards = append(nextCards, card)
+		}
+	}
+	r.kanbanCards[boardKey(companyID, link.BoardID)] = nextCards
+	delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(companyID, link.NodeID))
+	for candidateKey, candidate := range r.emailNodeLinks {
+		if candidateKey == directLinkKey || (candidate.CompanyID == companyID && candidate.NodeID == link.NodeID) {
+			delete(r.emailNodeLinks, candidateKey)
+		}
+	}
+	delete(r.nodes, key(companyID, link.NodeID))
+	delete(r.nodeInfo, key(companyID, link.NodeID))
+	delete(r.nodeText, key(companyID, link.NodeID))
+	delete(r.nodeMapPositions, key(companyID, link.NodeID))
+	delete(r.folderItems, folderItemKey(companyID, "node", link.NodeID))
+}
+
+func (r *MemoryRepo) kanbanCardLocked(companyID, boardID, cardID string) (domain.KanbanCard, bool) {
+	for _, card := range r.kanbanCards[boardKey(companyID, boardID)] {
+		if card.CardID == cardID {
+			return r.withKanbanCardProjectionFieldsLocked(card), true
+		}
+	}
+	return domain.KanbanCard{}, false
 }
 
 func (r *MemoryRepo) ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error) {
