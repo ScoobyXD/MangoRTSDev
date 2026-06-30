@@ -379,7 +379,7 @@ export function AppSidebar({
         companyID: cleanCompanyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID: menu.sharedInboxID,
-        logicGateID: target.mode === "existing_logic_gate" ? target.logicGateID : undefined,
+        logicGateID: conversion?.logicGateID || (target.mode === "existing_logic_gate" ? target.logicGateID : undefined),
         nodeIDs: conversion?.result.nodes?.map((node) => node.node_id) ?? [],
         boardIDs: [
           conversion?.boardID ?? "",
@@ -462,7 +462,7 @@ export function AppSidebar({
         companyID: cleanCompanyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID: menu.action.sharedInboxID,
-        logicGateID: menu.action.kind === "triage_to_logic_gate" ? menu.action.logicGateID : undefined,
+        logicGateID: conversion?.logicGateID || (menu.action.kind === "triage_to_logic_gate" ? menu.action.logicGateID : undefined),
         nodeIDs: conversion?.result.nodes?.map((node) => node.node_id) ?? [],
         boardIDs: [
           conversion?.boardID ?? "",

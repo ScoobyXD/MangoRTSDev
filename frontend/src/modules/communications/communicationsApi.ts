@@ -1218,6 +1218,41 @@ export function removeEmailMessageFromCache(messageID: string): void {
   removeEmailMessageFromCachedPages(cleanMessageID);
 }
 
+export function emailMessageWithLogicGatePlacement(message: EmailMessage, logicGateID: string): EmailMessage {
+  const cleanLogicGateID = logicGateID.trim();
+  if (!cleanLogicGateID) return message;
+  const currentIDs = cleanIDs(message.logic_gate_ids ?? []);
+  const nextIDs = currentIDs.includes(cleanLogicGateID) ? currentIDs : [...currentIDs, cleanLogicGateID];
+  const currentCount = Math.max(0, Math.floor(message.logic_gate_count ?? currentIDs.length));
+  const nextCount = Math.max(currentCount, nextIDs.length);
+  const currentMatches = (message.logic_gate_ids ?? []).length === nextIDs.length
+    && (message.logic_gate_ids ?? []).every((id, index) => id === nextIDs[index]);
+  if (currentMatches && message.logic_gate_count === nextCount) return message;
+  return { ...message, logic_gate_ids: nextIDs, logic_gate_count: nextCount };
+}
+
+export function patchEmailMessagesLogicGatePlacement(messageIDs: string[], logicGateID: string): void {
+  const ids = new Set(cleanIDs(messageIDs));
+  const cleanLogicGateID = logicGateID.trim();
+  if (ids.size === 0 || !cleanLogicGateID) return;
+  const patch = (message: EmailMessage): EmailMessage => (
+    ids.has(message.id) ? emailMessageWithLogicGatePlacement(message, cleanLogicGateID) : message
+  );
+  for (const [key, entry] of messageDetailCache.entries()) {
+    const next = patch(entry.value);
+    if (next !== entry.value) messageDetailCache.set(key, { value: next, fetchedAt: entry.fetchedAt });
+  }
+  for (const cache of [recentArchivedMessages, recentPrimaryMessages, recentStarredMessages]) {
+    for (const id of ids) {
+      const entry = cache.get(id);
+      if (!entry) continue;
+      const next = emailMessageWithLogicGatePlacement(entry.value, cleanLogicGateID);
+      if (next !== entry.value) cache.set(id, { value: next, fetchedAt: entry.fetchedAt });
+    }
+  }
+  patchCachedPageMessages(patch);
+}
+
 export function addLocalEmailReply(replyToMessageID: string, reply: EmailMessage): void {
   const cleanReplyToMessageID = replyToMessageID.trim();
   if (!cleanReplyToMessageID || !reply.id.trim()) return;
