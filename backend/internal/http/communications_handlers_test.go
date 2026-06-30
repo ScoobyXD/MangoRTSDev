@@ -54,6 +54,7 @@ type fakeNylasClient struct {
 }
 
 type fakeNylasUpdateCall struct {
+	GrantID   string
 	MessageID string
 	Update    NylasMessageUpdate
 }
@@ -144,14 +145,14 @@ func (f *fakeNylasClient) DownloadAttachment(_ context.Context, grantID, message
 	return append([]byte(nil), f.downloadContent...), nil
 }
 
-func (f *fakeNylasClient) UpdateMessage(_ context.Context, _, messageID string, update NylasMessageUpdate) (NylasMessage, error) {
+func (f *fakeNylasClient) UpdateMessage(_ context.Context, grantID, messageID string, update NylasMessageUpdate) (NylasMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.updateErrByID != nil && f.updateErrByID[messageID] != nil {
 		return NylasMessage{}, f.updateErrByID[messageID]
 	}
 	f.update = update
-	f.updateCalls = append(f.updateCalls, fakeNylasUpdateCall{MessageID: messageID, Update: update})
+	f.updateCalls = append(f.updateCalls, fakeNylasUpdateCall{GrantID: grantID, MessageID: messageID, Update: update})
 	message := f.message
 	if f.messagesByID != nil {
 		if stored, ok := f.messagesByID[messageID]; ok {
@@ -1853,11 +1854,14 @@ func TestCommunicationsArchiveBatchBackgroundReturnsAcceptedAndArchivesAsync(t *
 			{ID: "message-2", Subject: "Two", Folders: []string{"INBOX", "Label_456"}},
 		},
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
-	}).Routes()
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator:                      testValidator(t, "kid", key),
+		NylasConfig:                        testNylasConfig(),
+		NylasClient:                        nylas,
+		DisableCommunicationsArchiveWorker: true,
+	})
+	defer server.Close()
+	handler := server.Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=primary&limit=5", "", token, http.StatusOK)
@@ -1872,6 +1876,7 @@ func TestCommunicationsArchiveBatchBackgroundReturnsAcceptedAndArchivesAsync(t *
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
+		JobID       string   `json:"job_id"`
 		AcceptedIDs []string `json:"accepted_ids"`
 		ArchivedIDs []string `json:"archived_ids"`
 		Failed      []struct {
@@ -1885,25 +1890,129 @@ func TestCommunicationsArchiveBatchBackgroundReturnsAcceptedAndArchivesAsync(t *
 	if strings.Join(payload.AcceptedIDs, ",") != "message-1,message-2" {
 		t.Fatalf("accepted ids = %+v, want both messages", payload.AcceptedIDs)
 	}
+	if strings.TrimSpace(payload.JobID) == "" {
+		t.Fatalf("job_id = %q, want durable job id", payload.JobID)
+	}
 	if len(payload.ArchivedIDs) != 0 || len(payload.Failed) != 0 {
 		t.Fatalf("background response = archived %+v failed %+v, want compact accepted response", payload.ArchivedIDs, payload.Failed)
 	}
+	if len(nylas.updateCalls) != 0 {
+		t.Fatalf("update calls before worker = %+v, want durable enqueue only", nylas.updateCalls)
+	}
+	items, err := repo.ListCommunicationsArchiveJobItems(payload.JobID)
+	if err != nil {
+		t.Fatalf("ListCommunicationsArchiveJobItems: %v", err)
+	}
+	if len(items) != 2 || items[0].Status != store.CommunicationsArchiveJobItemStatusPending || items[1].Status != store.CommunicationsArchiveJobItemStatusPending {
+		t.Fatalf("job items after accept = %+v, want two pending items", items)
+	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		nylas.mu.Lock()
-		updateCalls := append([]fakeNylasUpdateCall(nil), nylas.updateCalls...)
-		nylas.mu.Unlock()
-		if len(updateCalls) == 2 {
-			if updateCalls[0].MessageID == "" || updateCalls[1].MessageID == "" {
-				t.Fatalf("update calls = %+v, want message IDs", updateCalls)
-			}
-			return
+	processed, err := server.processAvailableCommunicationsArchiveJobItems(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("processAvailableCommunicationsArchiveJobItems: %v", err)
+	}
+	if processed != 2 {
+		t.Fatalf("processed = %d, want 2", processed)
+	}
+	updateCalls := append([]fakeNylasUpdateCall(nil), nylas.updateCalls...)
+	if len(updateCalls) != 2 {
+		t.Fatalf("update calls = %+v, want 2 background archive updates", updateCalls)
+	}
+	if updateCalls[0].MessageID == "" || updateCalls[1].MessageID == "" {
+		t.Fatalf("update calls = %+v, want message IDs", updateCalls)
+	}
+	items, err = repo.ListCommunicationsArchiveJobItems(payload.JobID)
+	if err != nil {
+		t.Fatalf("ListCommunicationsArchiveJobItems after process: %v", err)
+	}
+	for _, item := range items {
+		if item.Status != store.CommunicationsArchiveJobItemStatusArchived || item.ArchivedTimestamp == nil {
+			t.Fatalf("processed item = %+v, want archived timestamp", item)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("update calls = %+v, want 2 background archive updates", updateCalls)
-		}
-		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestCommunicationsArchiveBatchBackgroundUsesSharedInboxJobScope(t *testing.T) {
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "company-shared-archive-job"
+	repo.EnsureCompany(companyID, "Shared Archive Job Company")
+	actor, err := repo.UpsertAuthUser("shared-archive-actor", "actor@example.com", "Actor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(actor.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID:         companyID,
+		Provider:          "google",
+		AccountEmail:      "support@example.com",
+		GrantID:           "grant-shared",
+		Status:            "connected",
+		ConnectedByUserID: actor.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeSharedInbox,
+		EntityID:   folder.FolderID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   actor.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		messagesByID: map[string]NylasMessage{
+			"shared-message-1": {ID: "shared-message-1", Subject: "Shared", Folders: []string{"INBOX", "Label_shared"}},
+		},
+	}
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator:                      testValidator(t, "kid", key),
+		NylasConfig:                        testNylasConfig(),
+		NylasClient:                        nylas,
+		DisableCommunicationsArchiveWorker: true,
+	})
+	defer server.Close()
+	handler := server.Routes()
+	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
+
+	body := `{"message_ids":["shared-message-1"]}`
+	path := "/v1/communications/messages/archive-batch?background=true&company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	items, err := repo.ListCommunicationsArchiveJobItems(payload.JobID)
+	if err != nil {
+		t.Fatalf("ListCommunicationsArchiveJobItems: %v", err)
+	}
+	if len(items) != 1 || items[0].CompanyID != companyID || items[0].SharedInboxID != folder.FolderID || items[0].ConnectionScope != "shared" {
+		t.Fatalf("shared archive job item = %+v, want shared scope", items)
+	}
+	if processed, err := server.processAvailableCommunicationsArchiveJobItems(context.Background(), 10); err != nil || processed != 1 {
+		t.Fatalf("process shared archive job = %d err=%v, want one", processed, err)
+	}
+	if len(nylas.updateCalls) != 1 || nylas.updateCalls[0].GrantID != "grant-shared" || nylas.updateCalls[0].MessageID != "shared-message-1" {
+		t.Fatalf("shared archive update calls = %+v, want shared grant/message", nylas.updateCalls)
 	}
 }
 

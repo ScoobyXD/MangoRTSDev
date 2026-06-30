@@ -326,10 +326,22 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 		return
 	}
 	if isTruthyQueryValue(r.URL.Query().Get("background")) {
-		acceptedIDs := append([]string(nil), messageIDs...)
-		go s.archiveCommunicationsMessagesBatchInBackground(connection, acceptedIDs, sharedInboxID)
+		job, err := s.repo.CreateCommunicationsArchiveJob(store.CommunicationsArchiveJobInput{
+			ActorUserID:   actor.User.UserID,
+			CompanyID:     companyID,
+			SharedInboxID: sharedInboxID,
+			Connection:    connection,
+			MessageIDs:    messageIDs,
+		})
+		if err != nil {
+			log.Printf("failed to create communications archive job user_id=%s company_id=%s shared_inbox_id=%s: %v", actor.User.UserID, companyID, sharedInboxID, err)
+			writeError(w, http.StatusInternalServerError, "failed_to_create_archive_job")
+			return
+		}
+		s.wakeCommunicationsArchiveWorker()
 		writeJSON(w, http.StatusAccepted, map[string]any{
-			"accepted_ids": acceptedIDs,
+			"job_id":       job.JobID,
+			"accepted_ids": job.AcceptedMessageIDs,
 			"archived_ids": []string{},
 			"failed":       []communicationsArchiveBatchFailure{},
 		})
@@ -359,32 +371,6 @@ func (s *Server) handleCommunicationsMessagesArchiveBatch(w http.ResponseWriter,
 		"archived_ids": result.ArchivedIDs,
 		"failed":       result.Failed,
 	})
-}
-
-func (s *Server) archiveCommunicationsMessagesBatchInBackground(connection domain.UserEmailConnection, messageIDs []string, sharedInboxID string) {
-	if len(messageIDs) == 0 {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	archiveFolderID := ""
-	if connection.Provider != "google" {
-		emailFolders, err := s.communicationsFolders(ctx, connection)
-		if err != nil {
-			log.Printf("failed to load archive folders for background archive user_id=%s account_email=%s shared_inbox_id=%s: %v", connection.UserID, connection.AccountEmail, sharedInboxID, err)
-			return
-		}
-		archiveFolderID = findNylasArchiveFolderID(emailFolders)
-		if archiveFolderID == "" {
-			log.Printf("archive folder unavailable for background archive user_id=%s account_email=%s shared_inbox_id=%s", connection.UserID, connection.AccountEmail, sharedInboxID)
-			return
-		}
-	}
-	result := s.archiveCommunicationsMessagesBatch(ctx, connection, messageIDs, archiveFolderID)
-	if len(result.Failed) > 0 {
-		log.Printf("background archive completed with failures user_id=%s account_email=%s shared_inbox_id=%s archived=%d failed=%d", connection.UserID, connection.AccountEmail, sharedInboxID, len(result.ArchivedIDs), len(result.Failed))
-	}
-	s.applyCommunicationsArchiveBatchResult(connection, sharedInboxID, result)
 }
 
 func (s *Server) applyCommunicationsArchiveBatchResult(connection domain.UserEmailConnection, sharedInboxID string, result communicationsArchiveBatchResult) {

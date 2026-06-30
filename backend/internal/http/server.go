@@ -33,75 +33,85 @@ type BootstrapDevAdminConfig struct {
 }
 
 type Server struct {
-	repo                            store.Repository
-	workspaceEvents                 *localWorkspaceEventBus
-	projectionHub                   *projectionDeltaHub
-	realtimeRegistry                *realtimeSubscriptionRegistry
-	realtimeTickets                 *realtimeTicketStore
-	notifications                   *notifications.Service
-	kanban                          *kanban.Service
-	workspaceFanout                 store.WorkspaceEventFanout
-	workspaceFanoutCancel           context.CancelFunc
-	workspacePublishDedupe          *workspaceEventPublishDedupe
-	workspaceDerivedCatchupCancel   context.CancelFunc
-	workspaceDerivedCatchupInterval time.Duration
-	workspaceDerivedCatchupLimit    int
-	notificationCatchupCancel       context.CancelFunc
-	notificationCatchupInterval     time.Duration
-	notificationCatchupLimit        int
-	notificationCleanupCancel       context.CancelFunc
-	notificationCleanupInterval     time.Duration
-	notificationRetentionDuration   time.Duration
-	notificationCleanupLimit        int
-	notificationCleanupDisabled     bool
-	eventWorkerCancel               context.CancelFunc
-	eventWorkerInterval             time.Duration
-	eventWorkerBatchLimit           int
-	eventWorkerLeaseTimeout         time.Duration
-	eventWorkerDisabled             bool
-	metrics                         MetricsRecorder
-	commCache                       *communicationsCache
-	commArchiveMutations            *communicationsArchiveMutationTracker
-	nylasGate                       *nylasRequestGate
-	nylasWebhooks                   *nylasWebhookReceiptCache
-	authValidator                   AuthTokenValidator
-	authCache                       *authMembershipCache
-	cognitoAdmin                    CognitoAdminClient
-	emailSender                     AuthEmailSender
-	appBaseURL                      string
-	bootstrapDevAdmin               BootstrapDevAdminConfig
-	nylasClient                     NylasClient
-	nylasConfig                     NylasConfig
-	maxBodyBytes                    int64
-	legacyMapRoutesEnabled          bool
+	repo                                    store.Repository
+	workspaceEvents                         *localWorkspaceEventBus
+	projectionHub                           *projectionDeltaHub
+	realtimeRegistry                        *realtimeSubscriptionRegistry
+	realtimeTickets                         *realtimeTicketStore
+	notifications                           *notifications.Service
+	kanban                                  *kanban.Service
+	workspaceFanout                         store.WorkspaceEventFanout
+	workspaceFanoutCancel                   context.CancelFunc
+	workspacePublishDedupe                  *workspaceEventPublishDedupe
+	workspaceDerivedCatchupCancel           context.CancelFunc
+	workspaceDerivedCatchupInterval         time.Duration
+	workspaceDerivedCatchupLimit            int
+	notificationCatchupCancel               context.CancelFunc
+	notificationCatchupInterval             time.Duration
+	notificationCatchupLimit                int
+	notificationCleanupCancel               context.CancelFunc
+	notificationCleanupInterval             time.Duration
+	notificationRetentionDuration           time.Duration
+	notificationCleanupLimit                int
+	notificationCleanupDisabled             bool
+	eventWorkerCancel                       context.CancelFunc
+	eventWorkerInterval                     time.Duration
+	eventWorkerBatchLimit                   int
+	eventWorkerLeaseTimeout                 time.Duration
+	eventWorkerDisabled                     bool
+	communicationsArchiveWorkerCancel       context.CancelFunc
+	communicationsArchiveWorkerWake         chan struct{}
+	communicationsArchiveWorkerInterval     time.Duration
+	communicationsArchiveWorkerBatchLimit   int
+	communicationsArchiveWorkerLeaseTimeout time.Duration
+	communicationsArchiveWorkerDisabled     bool
+	metrics                                 MetricsRecorder
+	commCache                               *communicationsCache
+	commArchiveMutations                    *communicationsArchiveMutationTracker
+	nylasGate                               *nylasRequestGate
+	nylasWebhooks                           *nylasWebhookReceiptCache
+	authValidator                           AuthTokenValidator
+	authCache                               *authMembershipCache
+	cognitoAdmin                            CognitoAdminClient
+	emailSender                             AuthEmailSender
+	appBaseURL                              string
+	bootstrapDevAdmin                       BootstrapDevAdminConfig
+	nylasClient                             NylasClient
+	nylasConfig                             NylasConfig
+	maxBodyBytes                            int64
+	legacyMapRoutesEnabled                  bool
 }
 
 type ServerOptions struct {
-	AuthValidator                   AuthTokenValidator
-	AuthMembershipCacheTTL          time.Duration
-	AuthMembershipCacheMaxEntries   int
-	CognitoAdmin                    CognitoAdminClient
-	EmailSender                     AuthEmailSender
-	AppBaseURL                      string
-	BootstrapDevAdmin               BootstrapDevAdminConfig
-	NylasClient                     NylasClient
-	NylasConfig                     NylasConfig
-	MaxRequestBodyBytes             int64
-	LegacyMapRoutesEnabled          bool
-	WorkspaceEventFanout            store.WorkspaceEventFanout
-	WorkspaceDerivedCatchupInterval time.Duration
-	WorkspaceDerivedCatchupLimit    int
-	NotificationCatchupInterval     time.Duration
-	NotificationCatchupLimit        int
-	NotificationCleanupInterval     time.Duration
-	NotificationRetentionDuration   time.Duration
-	NotificationCleanupLimit        int
-	DisableNotificationCleanup      bool
-	EventWorkerInterval             time.Duration
-	EventWorkerBatchLimit           int
-	EventWorkerLeaseTimeout         time.Duration
-	DisableEventWorker              bool
-	Metrics                         MetricsRecorder
+	AuthValidator                           AuthTokenValidator
+	AuthMembershipCacheTTL                  time.Duration
+	AuthMembershipCacheMaxEntries           int
+	CognitoAdmin                            CognitoAdminClient
+	EmailSender                             AuthEmailSender
+	AppBaseURL                              string
+	BootstrapDevAdmin                       BootstrapDevAdminConfig
+	NylasClient                             NylasClient
+	NylasConfig                             NylasConfig
+	MaxRequestBodyBytes                     int64
+	LegacyMapRoutesEnabled                  bool
+	WorkspaceEventFanout                    store.WorkspaceEventFanout
+	WorkspaceDerivedCatchupInterval         time.Duration
+	WorkspaceDerivedCatchupLimit            int
+	NotificationCatchupInterval             time.Duration
+	NotificationCatchupLimit                int
+	NotificationCleanupInterval             time.Duration
+	NotificationRetentionDuration           time.Duration
+	NotificationCleanupLimit                int
+	DisableNotificationCleanup              bool
+	EventWorkerInterval                     time.Duration
+	EventWorkerBatchLimit                   int
+	EventWorkerLeaseTimeout                 time.Duration
+	DisableEventWorker                      bool
+	CommunicationsArchiveWorkerInterval     time.Duration
+	CommunicationsArchiveWorkerBatchLimit   int
+	CommunicationsArchiveWorkerLeaseTimeout time.Duration
+	DisableCommunicationsArchiveWorker      bool
+	Metrics                                 MetricsRecorder
 }
 
 func NewServer(repo store.Repository) *Server {
@@ -153,6 +163,15 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		eventWorkerBatchLimit = defaultEventWorkerBatchLimit
 	}
 	eventWorkerLeaseTimeout := store.NormalizeEventRowProcessingLeaseTimeout(options.EventWorkerLeaseTimeout)
+	communicationsArchiveWorkerInterval := options.CommunicationsArchiveWorkerInterval
+	if communicationsArchiveWorkerInterval <= 0 {
+		communicationsArchiveWorkerInterval = defaultCommunicationsArchiveWorkerInterval
+	}
+	communicationsArchiveWorkerBatchLimit := options.CommunicationsArchiveWorkerBatchLimit
+	if communicationsArchiveWorkerBatchLimit <= 0 {
+		communicationsArchiveWorkerBatchLimit = defaultCommunicationsArchiveWorkerBatchLimit
+	}
+	communicationsArchiveWorkerLeaseTimeout := store.NormalizeCommunicationsArchiveJobProcessingLeaseTimeout(options.CommunicationsArchiveWorkerLeaseTimeout)
 	workspaceDerivedCatchupInterval := options.WorkspaceDerivedCatchupInterval
 	if workspaceDerivedCatchupInterval <= 0 {
 		workspaceDerivedCatchupInterval = workspaceDerivedDomainEventCatchupInterval
@@ -166,42 +185,47 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		metrics = NewInMemoryMetricsRecorder()
 	}
 	server := &Server{
-		repo:                            repo,
-		workspaceEvents:                 newLocalWorkspaceEventBus(),
-		projectionHub:                   newProjectionDeltaHub(),
-		realtimeRegistry:                newRealtimeSubscriptionRegistry(),
-		realtimeTickets:                 newRealtimeTicketStore(),
-		notifications:                   notifications.NewService(repo),
-		kanban:                          kanban.NewService(repo),
-		workspaceFanout:                 options.WorkspaceEventFanout,
-		workspacePublishDedupe:          newWorkspaceEventPublishDedupe(),
-		workspaceDerivedCatchupInterval: workspaceDerivedCatchupInterval,
-		workspaceDerivedCatchupLimit:    workspaceDerivedCatchupLimit,
-		notificationCatchupInterval:     notificationCatchupInterval,
-		notificationCatchupLimit:        notificationCatchupLimit,
-		notificationCleanupInterval:     notificationCleanupInterval,
-		notificationRetentionDuration:   notificationRetentionDuration,
-		notificationCleanupLimit:        notificationCleanupLimit,
-		notificationCleanupDisabled:     options.DisableNotificationCleanup,
-		eventWorkerInterval:             eventWorkerInterval,
-		eventWorkerBatchLimit:           eventWorkerBatchLimit,
-		eventWorkerLeaseTimeout:         eventWorkerLeaseTimeout,
-		eventWorkerDisabled:             options.DisableEventWorker,
-		metrics:                         metrics,
-		commCache:                       newCommunicationsCache(),
-		commArchiveMutations:            newCommunicationsArchiveMutationTracker(),
-		nylasGate:                       newNylasRequestGate(communicationsNylasMinRequestInterval),
-		nylasWebhooks:                   newNylasWebhookReceiptCache(),
-		authValidator:                   options.AuthValidator,
-		authCache:                       newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
-		cognitoAdmin:                    options.CognitoAdmin,
-		emailSender:                     options.EmailSender,
-		appBaseURL:                      strings.TrimSpace(options.AppBaseURL),
-		bootstrapDevAdmin:               normalizeBootstrapDevAdminConfig(options.BootstrapDevAdmin),
-		nylasClient:                     options.NylasClient,
-		nylasConfig:                     options.NylasConfig,
-		maxBodyBytes:                    options.MaxRequestBodyBytes,
-		legacyMapRoutesEnabled:          options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
+		repo:                                    repo,
+		workspaceEvents:                         newLocalWorkspaceEventBus(),
+		projectionHub:                           newProjectionDeltaHub(),
+		realtimeRegistry:                        newRealtimeSubscriptionRegistry(),
+		realtimeTickets:                         newRealtimeTicketStore(),
+		notifications:                           notifications.NewService(repo),
+		kanban:                                  kanban.NewService(repo),
+		workspaceFanout:                         options.WorkspaceEventFanout,
+		workspacePublishDedupe:                  newWorkspaceEventPublishDedupe(),
+		workspaceDerivedCatchupInterval:         workspaceDerivedCatchupInterval,
+		workspaceDerivedCatchupLimit:            workspaceDerivedCatchupLimit,
+		notificationCatchupInterval:             notificationCatchupInterval,
+		notificationCatchupLimit:                notificationCatchupLimit,
+		notificationCleanupInterval:             notificationCleanupInterval,
+		notificationRetentionDuration:           notificationRetentionDuration,
+		notificationCleanupLimit:                notificationCleanupLimit,
+		notificationCleanupDisabled:             options.DisableNotificationCleanup,
+		eventWorkerInterval:                     eventWorkerInterval,
+		eventWorkerBatchLimit:                   eventWorkerBatchLimit,
+		eventWorkerLeaseTimeout:                 eventWorkerLeaseTimeout,
+		eventWorkerDisabled:                     options.DisableEventWorker,
+		communicationsArchiveWorkerWake:         make(chan struct{}, 1),
+		communicationsArchiveWorkerInterval:     communicationsArchiveWorkerInterval,
+		communicationsArchiveWorkerBatchLimit:   communicationsArchiveWorkerBatchLimit,
+		communicationsArchiveWorkerLeaseTimeout: communicationsArchiveWorkerLeaseTimeout,
+		communicationsArchiveWorkerDisabled:     options.DisableCommunicationsArchiveWorker,
+		metrics:                                 metrics,
+		commCache:                               newCommunicationsCache(),
+		commArchiveMutations:                    newCommunicationsArchiveMutationTracker(),
+		nylasGate:                               newNylasRequestGate(communicationsNylasMinRequestInterval),
+		nylasWebhooks:                           newNylasWebhookReceiptCache(),
+		authValidator:                           options.AuthValidator,
+		authCache:                               newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
+		cognitoAdmin:                            options.CognitoAdmin,
+		emailSender:                             options.EmailSender,
+		appBaseURL:                              strings.TrimSpace(options.AppBaseURL),
+		bootstrapDevAdmin:                       normalizeBootstrapDevAdminConfig(options.BootstrapDevAdmin),
+		nylasClient:                             options.NylasClient,
+		nylasConfig:                             options.NylasConfig,
+		maxBodyBytes:                            options.MaxRequestBodyBytes,
+		legacyMapRoutesEnabled:                  options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
 	}
 	server.initializeNotificationDomainEventCheckpoints(context.Background())
 	server.initializeWorkspaceDerivedDomainEventCheckpoints(context.Background())
@@ -210,6 +234,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	server.startNotificationDomainEventCatchup()
 	server.startNotificationCleanup()
 	server.startEventWorker()
+	server.startCommunicationsArchiveWorker()
 	return server
 }
 
@@ -228,6 +253,9 @@ func (s *Server) Close() {
 	}
 	if s.eventWorkerCancel != nil {
 		s.eventWorkerCancel()
+	}
+	if s.communicationsArchiveWorkerCancel != nil {
+		s.communicationsArchiveWorkerCancel()
 	}
 }
 

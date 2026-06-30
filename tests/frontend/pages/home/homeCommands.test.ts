@@ -678,13 +678,14 @@ test("Home mail message commands normalize ids and pass shared inbox context", a
   assert.equal(updated?.message.unread, false);
 });
 
-test("Home archive command sends message IDs in two-message batch requests by default", async () => {
-  const calls: Array<{ messageIDs: string[]; sharedInboxID?: string; companyID?: string }> = [];
-  const archiveEmailMessagesBatch: HomeArchiveEmailMessagesBatch = async (messageIDs, sharedInboxID, companyID) => {
-    calls.push({ messageIDs, sharedInboxID, companyID });
+test("Home archive command sends one background batch request by default", async () => {
+  const calls: Array<{ messageIDs: string[]; sharedInboxID?: string; companyID?: string; background?: boolean }> = [];
+  const archiveEmailMessagesBatch: HomeArchiveEmailMessagesBatch = async (messageIDs, sharedInboxID, companyID, options) => {
+    calls.push({ messageIDs, sharedInboxID, companyID, background: options?.background });
     return {
-      archived_ids: messageIDs.filter((messageID) => messageID !== "message-6"),
-      failed: messageIDs.includes("message-6") ? [{ message_id: "message-6", error: "nylas_rate_limited" }] : [],
+      accepted_ids: messageIDs,
+      archived_ids: [],
+      failed: [],
     };
   };
 
@@ -696,12 +697,11 @@ test("Home archive command sends message IDs in two-message batch requests by de
   });
 
   assert.deepEqual(calls, [
-    { companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-1", "message-2"] },
-    { companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-3", "message-4"] },
-    { companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-5", "message-6"] },
+    { companyID: "company-1", sharedInboxID: "shared-1", messageIDs: ["message-1", "message-2", "message-3", "message-4", "message-5", "message-6"], background: true },
   ]);
-  assert.deepEqual(result?.messageIDs, ["message-1", "message-2", "message-3", "message-4", "message-5"]);
-  assert.deepEqual(result?.failed, [{ message_id: "message-6", error: "nylas_rate_limited" }]);
+  assert.deepEqual(result?.messageIDs, ["message-1", "message-2", "message-3", "message-4", "message-5", "message-6"]);
+  assert.equal(result?.accepted, true);
+  assert.equal(result?.failed, undefined);
 });
 
 test("Home compose command validates and normalizes send payloads", async () => {

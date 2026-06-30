@@ -252,6 +252,7 @@ export type MessagePage = {
 };
 
 export type ArchiveEmailMessagesBatchResult = {
+  job_id?: string;
   accepted_ids?: string[];
   archived_ids: string[];
   failed: Array<{ message_id: string; error: string }>;
@@ -556,6 +557,7 @@ export async function archiveEmailMessagesBatch(messageIDs: string[], sharedInbo
     markCachedMessageArchived(messageID);
   }
   return {
+    job_id: payload.job_id?.trim() || undefined,
     accepted_ids: acceptedIDs,
     archived_ids: archivedIDs,
     failed: (payload.failed ?? [])

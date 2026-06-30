@@ -438,8 +438,10 @@ test("archive helpers call mailbox action endpoints", async () => {
     await archiveEmailMessage("msg 2", "shared-1", "company-1");
     const batch = await archiveEmailMessagesBatch(["msg 2", "msg 3", "msg 2", "msg 4"], "shared-1", "company-1");
     assert.deepEqual(batch, {
+      accepted_ids: [],
       archived_ids: ["msg 2", "msg 3"],
       failed: [{ message_id: "msg 4", error: "nylas_rate_limited" }],
+      job_id: undefined,
     });
     assert.deepEqual(calls, [
       { path: "/v1/communications/messages/msg%201/archive", method: "POST", body: undefined },
