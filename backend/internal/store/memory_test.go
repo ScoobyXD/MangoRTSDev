@@ -20,6 +20,47 @@ func memoryNodeTextBlockInformation(t *testing.T, document string) string {
 	return editorTextBlockContentPrefix + string(payload)
 }
 
+func TestMemoryRepoUpsertAuthUserPreservesDisplayNameOnBlankOrEmailClaims(t *testing.T) {
+	repo := NewMemoryRepo()
+	const subject = "display-name-preserve-subject"
+
+	if _, err := repo.UpsertAuthUser(subject, "jonathan@example.com", "Jonathan Kim"); err != nil {
+		t.Fatalf("initial UpsertAuthUser failed: %v", err)
+	}
+	if _, err := repo.UpsertAuthUser(subject, "jonathan@example.com", ""); err != nil {
+		t.Fatalf("blank-name UpsertAuthUser failed: %v", err)
+	}
+	user, err := repo.GetAuthUser(subject)
+	if err != nil {
+		t.Fatalf("GetAuthUser after blank-name upsert failed: %v", err)
+	}
+	if user.DisplayName != "Jonathan Kim" {
+		t.Fatalf("display name after blank claim = %q, want Jonathan Kim", user.DisplayName)
+	}
+
+	if _, err := repo.UpsertAuthUser(subject, "jonathan.new@example.com", "jonathan.new@example.com"); err != nil {
+		t.Fatalf("email-like-name UpsertAuthUser failed: %v", err)
+	}
+	user, err = repo.GetAuthUser(subject)
+	if err != nil {
+		t.Fatalf("GetAuthUser after email-like-name upsert failed: %v", err)
+	}
+	if user.Email != "jonathan.new@example.com" || user.DisplayName != "Jonathan Kim" {
+		t.Fatalf("user after email-like claim = %+v, want updated email and preserved display name", user)
+	}
+
+	if _, err := repo.UpsertAuthUser(subject, "jonathan.new@example.com", "Jon Kim"); err != nil {
+		t.Fatalf("real-name UpsertAuthUser failed: %v", err)
+	}
+	user, err = repo.GetAuthUser(subject)
+	if err != nil {
+		t.Fatalf("GetAuthUser after real-name upsert failed: %v", err)
+	}
+	if user.DisplayName != "Jon Kim" {
+		t.Fatalf("display name after real claim = %q, want Jon Kim", user.DisplayName)
+	}
+}
+
 func TestMemoryRepo_AddNodeInformation_ProjectionKeyStaysStableWhenInformationIDProvided(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"
