@@ -421,6 +421,34 @@ test("archive updates add messages to archive and all overlays even before those
   }
 });
 
+test("background archive acceptance does not remove messages from cached primary pages", async () => {
+  invalidateCommunicationsCache();
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = input.toString();
+    calls.push(path);
+    if (path.includes("archive-batch")) {
+      assert.equal(init?.method, "POST");
+      return jsonResponse({ job_id: "job-1", accepted_ids: ["msg-1"], archived_ids: [], failed: [] });
+    }
+    if (path.includes("mailbox=primary")) return jsonResponse({ messages: [message("msg-1", { date: 300, folders: ["INBOX"] }), message("msg-2", { date: 200, folders: ["INBOX"] })] });
+    return jsonResponse({ messages: [] });
+  };
+  try {
+    assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), ["msg-1", "msg-2"]);
+    const accepted = await archiveEmailMessagesBatch(["msg-1"], undefined, undefined, { background: true });
+
+    assert.equal(accepted.job_id, "job-1");
+    assert.deepEqual(accepted.accepted_ids, ["msg-1"]);
+    assert.deepEqual((await listEmailMessages({ mailbox: "primary", limit: 25 })).messages.map((item) => item.id), ["msg-1", "msg-2"]);
+    assert.equal(calls.filter((path) => path.includes("mailbox=primary")).length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
 test("archive helpers call mailbox action endpoints", async () => {
   invalidateCommunicationsCache();
   const calls: Array<{ path: string; method: string; body?: unknown }> = [];
