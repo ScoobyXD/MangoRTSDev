@@ -1777,6 +1777,19 @@ function copySelectedEditorImage(root: HTMLElement, clipboardData: DataTransfer)
   return true;
 }
 
+function copySelectedEditorDocumentFragment(root: HTMLElement, clipboardData: DataTransfer): boolean {
+  const range = getEditorSelectionRange(root);
+  if (!range || range.collapsed) return false;
+  const container = root.ownerDocument.createElement("div");
+  container.appendChild(range.cloneContents());
+  const html = sanitizeEditorDocumentHTML(container.innerHTML);
+  const text = range.toString();
+  if (!html.trim() && !text.trim()) return false;
+  clipboardData.setData("text/html", html);
+  clipboardData.setData("text/plain", text);
+  return true;
+}
+
 function getFontSizeElementForNode(root: HTMLElement, node: Node | null): Element {
   if (!node) return root;
   if (node.nodeType === Node.TEXT_NODE) return node.parentElement ?? root;
@@ -2964,8 +2977,10 @@ export function useEditorDocumentSurfaceHandlers({
       }
     },
     onCopy(event) {
-      if (!copySelectedEditorImage(event.currentTarget, event.clipboardData)) return;
-      event.preventDefault();
+      const root = event.currentTarget;
+      if (copySelectedEditorImage(root, event.clipboardData) || copySelectedEditorDocumentFragment(root, event.clipboardData)) {
+        event.preventDefault();
+      }
     },
     onDrop(event) {
       const root = event.currentTarget;

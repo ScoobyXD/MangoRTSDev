@@ -644,14 +644,20 @@ button, input, textarea, select {
 .editor-document-scroll li[data-mango-editor-list-item="bullet"]::before {
   content: "";
   position: absolute;
-  left: 3px;
+  left: 5px;
   top: 0.78em;
-  width: 9px;
-  height: 9px;
+  width: 5px;
+  height: 5px;
   border-radius: 999px;
   transform: translateY(-50%);
   background: #000000;
+  border: 0;
   box-shadow: none;
+}
+
+.editor-document-scroll ul[data-mango-editor-list] ul[data-mango-editor-list] > li[data-mango-editor-list-item="bullet"]::before {
+  background: transparent;
+  border: 1px solid #000000;
 }
 
 .editor-document-scroll li[data-mango-editor-list-item="checklist"]::before {
