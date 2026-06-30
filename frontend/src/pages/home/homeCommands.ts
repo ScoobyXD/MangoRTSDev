@@ -7,7 +7,6 @@ import {
   createCommunicationsSharedInbox as defaultCreateCommunicationsSharedInbox,
   deleteCommunicationsSharedInbox as defaultDeleteCommunicationsSharedInbox,
   deleteEmailMessage as defaultDeleteEmailMessage,
-  invalidateCommunicationsCache as defaultInvalidateCommunicationsCache,
   removeCommunicationsSharedInbox as defaultRemoveCommunicationsSharedInbox,
   removeMyLogicGateShortcut as defaultRemoveMyLogicGateShortcut,
   parseEmailAddressList,
@@ -935,7 +934,6 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   upsertNodeRelationshipGraphNode?: HomeNodeGraphNodeUpsert;
   upsertNodeFolderItemInRelationshipGraph?: HomeFolderItemGraphUpsert;
   upsertLogicGateFolderItemInRelationshipGraph?: HomeFolderItemGraphUpsert;
-  invalidateCommunications?: typeof defaultInvalidateCommunicationsCache;
 }): Promise<HomeExplorerTriageConversionCommandResult | null> {
   const companyID = args.companyID.trim();
   const messageIDs = cleanIDList(args.messageIDs);
@@ -965,7 +963,6 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   const upsertNodeRelationshipGraphNode = args.upsertNodeRelationshipGraphNode ?? noopNodeGraphNodeUpsert;
   const upsertNodeFolderItemInRelationshipGraph = args.upsertNodeFolderItemInRelationshipGraph ?? noopFolderItemGraphUpsert;
   const upsertLogicGateFolderItemInRelationshipGraph = args.upsertLogicGateFolderItemInRelationshipGraph ?? noopFolderItemGraphUpsert;
-  const invalidateCommunications = args.invalidateCommunications ?? defaultInvalidateCommunicationsCache;
 
   if (boardID && boardLogicGateID) {
     invalidateKanbanBoardList(args.apiBase, companyID);
@@ -982,7 +979,6 @@ export async function convertMessagesToExplorerTargetCommand(args: {
     upsertNodeFolderItemInRelationshipGraph(args.apiBase, companyID, item);
     upsertLogicGateFolderItemInRelationshipGraph(args.apiBase, companyID, item);
   }
-  invalidateCommunications({ messagePages: true, messages: true });
 
   const convertedMessageIDs = result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs;
   return { result, boardID, logicGateID: boardLogicGateID, convertedMessageIDs };
@@ -1005,7 +1001,6 @@ export async function convertMessagesToLogicGateCommand(args: {
   upsertNodeRelationshipGraphNode?: HomeNodeGraphNodeUpsert;
   upsertNodeFolderItemInRelationshipGraph?: HomeFolderItemGraphUpsert;
   upsertLogicGateFolderItemInRelationshipGraph?: HomeFolderItemGraphUpsert;
-  invalidateCommunications?: typeof defaultInvalidateCommunicationsCache;
 }): Promise<HomeTriageConversionCommandResult | null> {
   const logicGateID = args.logicGateID.trim();
   const nodeID = args.nodeID?.trim() ?? "";
@@ -1036,7 +1031,6 @@ export async function convertMessagesToLogicGateCommand(args: {
   const upsertNodeRelationshipGraphNode = args.upsertNodeRelationshipGraphNode ?? noopNodeGraphNodeUpsert;
   const upsertNodeFolderItemInRelationshipGraph = args.upsertNodeFolderItemInRelationshipGraph ?? noopFolderItemGraphUpsert;
   const upsertLogicGateFolderItemInRelationshipGraph = args.upsertLogicGateFolderItemInRelationshipGraph ?? noopFolderItemGraphUpsert;
-  const invalidateCommunications = args.invalidateCommunications ?? defaultInvalidateCommunicationsCache;
 
   invalidateKanbanBoardList(args.apiBase, args.companyID);
   invalidateKanbanBoardContents(args.apiBase, args.companyID, boardID);
@@ -1051,7 +1045,6 @@ export async function convertMessagesToLogicGateCommand(args: {
     upsertNodeFolderItemInRelationshipGraph(args.apiBase, args.companyID, item);
     upsertLogicGateFolderItemInRelationshipGraph(args.apiBase, args.companyID, item);
   }
-  invalidateCommunications({ messagePages: true, messages: true });
 
   const convertedMessageIDs = result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs;
   return {

@@ -90,6 +90,8 @@ ST79 - Dragging a Shared Triage mailbox email into a Logic Gate or eligible Expl
 ST80 - Shared Triage email conversion uses the company-owned shared mailbox grant for message detail reads; it must not require or fall back to the actor's personal mailbox connection.
 ST81 - A successful Shared Triage email conversion creates the same direct email-created Kanban node/card semantics as My Triage, including the visible email-origin marker and later email-transfer behavior.
 ST82 - Local Shared Triage conversion echoes from communications realtime and workspace realtime must be reconciled from the conversion response; they must not blank, fully reload, or repeatedly refetch the shared mailbox message list or Home workspace panel.
+ST83 - Successful local Shared Triage email conversion removes converted rows from visible state and local message caches, and suppresses matching local `triage.converted` echoes by `shared_inbox_id`, without invalidating all communications message page/detail caches or triggering post-removal mail prefetch.
+ST84 - Successful local Shared Triage email conversion into a Logic Gate must show a temporary green success banner or notice.
 
 ## Scenarios
 
@@ -370,6 +372,8 @@ Business logic covered:
 - ST80
 - ST81
 - ST82
+- ST83
+- ST84
 
 Given:
 - A user has edit access to a mailbox-capable Shared Triage inbox.
@@ -380,4 +384,5 @@ Expected:
 - The drag payload and conversion request include the selected `shared_inbox_id`.
 - The backend reads the message through the shared mailbox grant and authorizes the mutation as the actor.
 - The resulting Kanban card is marked as directly email-created and can later transfer its email attachment into another node card.
-- The visible Shared Triage email list handles the local conversion without blanking, full-list replacement, or repeated workspace/mail GET bursts from the matching realtime echo.
+- The visible Shared Triage email list and app-level communications live-freshness bridge handle the local conversion by removing converted rows from local state/cache and suppressing the matching `shared_inbox_id` scoped realtime echo without full-list replacement, communications message cache invalidation, post-removal prefetch, or repeated workspace/mail GET bursts.
+- The UI shows a temporary green success banner or notice after the conversion succeeds.

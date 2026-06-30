@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { fetchCurrentUser, readAuthConfig, type CurrentUserResponse } from "../auth/cognitoAuth";
 import { getActiveCompanyID } from "../auth/currentCompany";
 import {
@@ -21,6 +21,8 @@ import { emitNotificationsUpdated } from "../modules/notifications/notifications
 import { ensureMangoRealtimeConnection, subscribeRealtimeScope } from "../modules/realtime/realtimeWebSocket";
 import { markWorkspaceSnapshotScopeStale, markWorkspaceSnapshotStale } from "../modules/workspace/workspaceSnapshotCache";
 import { deriveWorkspaceReconciliationScopes, subscribeWorkspaceUserRealtime, workspaceRealtimeScope, type WorkspaceReconciliationScope, type WorkspaceStreamEventContext, type WorkspaceStreamGapSignal } from "../modules/workspace/workspaceRealtime";
+import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, type HomeTriageConversionAppliedDetail } from "../pages/home/homeConstants";
+import { localTriageConversionWasApplied, rememberLocalTriageConversionIDs } from "./appLiveFreshnessBridgeEcho";
 
 type StreamEvent = {
   event: string;
@@ -30,6 +32,7 @@ type StreamEvent = {
 type CommunicationsStreamEnvelope = {
   trigger?: string;
   message_id?: string;
+  shared_inbox_id?: string;
 };
 
 type WorkspaceStreamEnvelope = {
@@ -40,11 +43,14 @@ type WorkspaceStreamEnvelope = {
 export function AppLiveFreshnessBridge() {
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
+  const locallyAppliedTriageConversionIDsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     const unsubscribe = subscribeCommunicationsStream(apiBase, companyID, {
       onEvent(event) {
-        markCommunicationsCachesStaleForEvent(event, companyID);
+        markCommunicationsCachesStaleForEvent(event, companyID, (messageID, sharedInboxID) => (
+          localTriageConversionWasApplied(locallyAppliedTriageConversionIDsRef.current, messageID, sharedInboxID)
+        ));
       },
       onError() {
         // Individual pages surface reload errors; this bridge only keeps caches honest.
@@ -52,6 +58,20 @@ export function AppLiveFreshnessBridge() {
     });
     return unsubscribe;
   }, [apiBase, companyID]);
+
+  useEffect(() => {
+    const rememberLocalTriageConversion = (event: Event) => {
+      const detail = (event as CustomEvent<HomeTriageConversionAppliedDetail>).detail ?? {};
+      if (detail.companyID && detail.companyID !== companyID) return;
+      rememberLocalTriageConversionIDs(
+        locallyAppliedTriageConversionIDsRef.current,
+        detail.messageIDs ?? [],
+        detail.sharedInboxID,
+      );
+    };
+    window.addEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, rememberLocalTriageConversion);
+    return () => window.removeEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, rememberLocalTriageConversion);
+  }, [companyID]);
 
   useEffect(() => {
     if (!companyID) return undefined;
@@ -106,7 +126,7 @@ export function AppLiveFreshnessBridge() {
   return null;
 }
 
-function markCommunicationsCachesStaleForEvent(event: StreamEvent, companyID: string): void {
+function markCommunicationsCachesStaleForEvent(event: StreamEvent, companyID: string, localTriageConversionWasApplied?: (messageID: string, sharedInboxID?: string) => boolean): void {
   if (event.event !== "communications") return;
   let envelope: CommunicationsStreamEnvelope;
   try {
@@ -125,6 +145,7 @@ function markCommunicationsCachesStaleForEvent(event: StreamEvent, companyID: st
   }
 
   if (trigger.startsWith("triage.")) {
+    if (trigger.startsWith("triage.converted") && localTriageConversionWasApplied?.(messageID, envelope.shared_inbox_id)) return;
     invalidateCommunicationsCache({ messagePages: true });
     return;
   }

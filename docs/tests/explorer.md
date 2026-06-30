@@ -1,4 +1,4 @@
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 # Explorer Tests
 
@@ -54,6 +54,9 @@ E43 - Placing or moving a project or Logic Gate into an Explorer folder copies t
 E44 - Reordering or re-saving a project or Logic Gate under the same Explorer folder preserves the resource's own permissions.
 E45 - Moving a project or Logic Gate out of a folder to the company root preserves the resource's own permissions.
 E46 - Editing an Explorer folder's permissions after placement does not fan out to existing subfolders, projects, or Logic Gates.
+E47 - Dropping a My Triage or Shared Triage email onto a Company Explorer Logic Gate row uses the communications conversion path to create a Pending direct email-created node/card in that Logic Gate.
+E48 - A successful Company Explorer email-to-Logic-Gate drop updates Home triage state from the conversion result; Home and the global communications live-freshness bridge must treat the matching `triage.converted` stream event as a local echo and must not invalidate communications message page/detail caches, trigger post-removal mail prefetch, blank the list, or issue repeated mail GETs.
+E49 - A successful Company Explorer email-to-Logic-Gate drop shows a temporary green success banner in the sidebar.
 
 ## Scenarios
 
@@ -228,3 +231,23 @@ Expected:
 - Dragging or placing nodes through Company Explorer is rejected.
 - Nodes continue to be found by search through source-of-truth relationships.
 - Folder-scoped node-map queries do not return nodes for non-root Company Explorer folders.
+
+### Scenario E-S7: Email Drop Onto Explorer Logic Gate
+
+Business logic covered:
+- E47
+- E48
+- E49
+
+Given:
+- A user has a My Triage or mailbox-capable Shared Triage email selected.
+- The user drags that email onto a Company Explorer Logic Gate row and chooses a priority.
+- The active Home triage list is visible and has a cached message page/detail entry for that email.
+
+Expected:
+- The conversion request preserves the source mailbox scope, including `shared_inbox_id` for Shared Triage.
+- The backend creates a Pending direct email-created node/card in the target Logic Gate.
+- The Home triage list removes the converted row from local state and local message caches without clearing all communications message caches.
+- The Home listener and app-level communications live-freshness bridge suppress the matching local `triage.converted` echo by message ID and `shared_inbox_id`.
+- The local conversion path does not trigger immediate `/v1/communications/messages` list/detail refetches, post-removal prefetch, or repeated workspace-panel reloads.
+- The sidebar shows a short green success banner and clears it automatically.
