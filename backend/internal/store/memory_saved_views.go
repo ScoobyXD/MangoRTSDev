@@ -60,6 +60,37 @@ func (r *MemoryRepo) UpsertSavedView(input SavedViewInput) (domain.SavedView, er
 	}
 
 	now := time.Now().UTC()
+	if savedViewIsSingleLogicGateKanbanUserView(input) {
+		existingKey := ""
+		var existing domain.SavedView
+		for key, candidate := range r.savedViews {
+			if candidate.CompanyID != input.CompanyID || candidate.Surface != input.Surface || candidate.Principal != input.Principal || candidate.PrincipalID != input.PrincipalID {
+				continue
+			}
+			if existingKey == "" || candidate.UpdatedTimestamp.After(existing.UpdatedTimestamp) || (candidate.UpdatedTimestamp.Equal(existing.UpdatedTimestamp) && candidate.CreatedTimestamp.After(existing.CreatedTimestamp)) {
+				existingKey = key
+				existing = candidate
+			}
+		}
+		if existingKey != "" {
+			for key, candidate := range r.savedViews {
+				if key != existingKey && candidate.CompanyID == input.CompanyID && candidate.Surface == input.Surface && candidate.Principal == input.Principal && candidate.PrincipalID == input.PrincipalID {
+					delete(r.savedViews, key)
+				}
+			}
+			existing.Name = input.Name
+			existing.Groupings = cloneSavedViewGroupings(input.Groupings)
+			existing.Settings = input.Settings
+			if input.Position > 0 {
+				existing.Position = input.Position
+			} else if existing.Position <= 0 {
+				existing.Position = 1000
+			}
+			existing.UpdatedTimestamp = now
+			r.savedViews[existingKey] = existing
+			return cloneSavedView(existing), nil
+		}
+	}
 	k := savedViewKey(input.CompanyID, input.SavedViewID)
 	item, exists := r.savedViews[k]
 	if exists {

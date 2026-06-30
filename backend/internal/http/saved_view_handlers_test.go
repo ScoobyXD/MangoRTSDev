@@ -196,7 +196,7 @@ func TestSavedViewsUpdatesProjectLogicGateGroupings(t *testing.T) {
 	}
 }
 
-func TestSavedViewsLogicGateKanbanPreference(t *testing.T) {
+func TestSavedViewsLogicGateKanbanSingleUserView(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	handler := NewServer(repo).Routes()
 	companyID := "55555555-5555-4555-8555-555555555555"
@@ -231,6 +231,68 @@ func TestSavedViewsLogicGateKanbanPreference(t *testing.T) {
 		t.Fatalf("created logic gate kanban view = %+v", created)
 	}
 
+	updateBody := `{
+		"company_id":"` + companyID + `",
+		"surface":"logic_gate_kanban",
+		"principal":"user",
+		"principal_id":"` + user.UserID + `",
+		"name":"Account Only",
+		"groupings":[{"field":"account","direction":"desc"}],
+		"settings":{"date_added_sort_direction":"asc"}
+	}`
+	updateRec := httptest.NewRecorder()
+	updateReq := httptest.NewRequest(http.MethodPost, "/v1/saved-views", bytes.NewBufferString(updateBody))
+	handler.ServeHTTP(updateRec, savedViewRequestWithActor(updateReq, user, companyID, domain.RoleCompanyUser))
+	if updateRec.Code != http.StatusCreated {
+		t.Fatalf("update status = %d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+	var updated domain.SavedView
+	if err := json.NewDecoder(updateRec.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode updated: %v", err)
+	}
+	if updated.SavedViewID != created.SavedViewID || updated.Name != "Account Only" || len(updated.Groupings) != 1 || updated.Groupings[0].Field != "account" || updated.Groupings[0].Direction != "desc" || updated.Settings.DateAddedSortDirection != "asc" {
+		t.Fatalf("updated singleton logic gate kanban view = %+v, want same row with updated settings", updated)
+	}
+
+	listRec := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/saved-views?company_id="+companyID+"&surface=logic_gate_kanban", nil)
+	handler.ServeHTTP(listRec, savedViewRequestWithActor(listReq, user, companyID, domain.RoleCompanyUser))
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var listPayload struct {
+		SavedViews []domain.SavedView `json:"saved_views"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(listPayload.SavedViews) != 1 || listPayload.SavedViews[0].SavedViewID != created.SavedViewID || listPayload.SavedViews[0].Name != "Account Only" {
+		t.Fatalf("list saved views = %+v, want exactly one updated logic gate kanban row", listPayload.SavedViews)
+	}
+
+	otherBody := `{
+		"company_id":"` + companyID + `",
+		"surface":"logic_gate_kanban",
+		"principal":"user",
+		"principal_id":"` + other.UserID + `",
+		"name":"Other User Kanban",
+		"groupings":[{"field":"priority","direction":"desc"}],
+		"settings":{"date_added_sort_direction":"desc"}
+	}`
+	otherRec := httptest.NewRecorder()
+	otherReq := httptest.NewRequest(http.MethodPost, "/v1/saved-views", bytes.NewBufferString(otherBody))
+	handler.ServeHTTP(otherRec, savedViewRequestWithActor(otherReq, other, companyID, domain.RoleCompanyUser))
+	if otherRec.Code != http.StatusCreated {
+		t.Fatalf("other create status = %d body=%s", otherRec.Code, otherRec.Body.String())
+	}
+	var otherCreated domain.SavedView
+	if err := json.NewDecoder(otherRec.Body).Decode(&otherCreated); err != nil {
+		t.Fatalf("decode other created: %v", err)
+	}
+	if otherCreated.SavedViewID == created.SavedViewID || otherCreated.PrincipalID != other.UserID {
+		t.Fatalf("other created view = %+v, want separate per-user singleton", otherCreated)
+	}
+
 	preferenceBody := `{
 		"company_id":"` + companyID + `",
 		"surface":"logic_gate_kanban",
@@ -239,36 +301,8 @@ func TestSavedViewsLogicGateKanbanPreference(t *testing.T) {
 	preferenceRec := httptest.NewRecorder()
 	preferenceReq := httptest.NewRequest(http.MethodPut, "/v1/saved-view-preferences", bytes.NewBufferString(preferenceBody))
 	handler.ServeHTTP(preferenceRec, savedViewRequestWithActor(preferenceReq, user, companyID, domain.RoleCompanyUser))
-	if preferenceRec.Code != http.StatusOK {
-		t.Fatalf("preference status = %d body=%s", preferenceRec.Code, preferenceRec.Body.String())
-	}
-	var preference domain.SavedViewPreference
-	if err := json.NewDecoder(preferenceRec.Body).Decode(&preference); err != nil {
-		t.Fatalf("decode preference: %v", err)
-	}
-	if preference.UserID != user.UserID || preference.SelectedSavedViewID != created.SavedViewID {
-		t.Fatalf("preference = %+v, want selected view for user", preference)
-	}
-
-	getPreferenceRec := httptest.NewRecorder()
-	getPreferenceReq := httptest.NewRequest(http.MethodGet, "/v1/saved-view-preferences?company_id="+companyID+"&surface=logic_gate_kanban", nil)
-	handler.ServeHTTP(getPreferenceRec, savedViewRequestWithActor(getPreferenceReq, user, companyID, domain.RoleCompanyUser))
-	if getPreferenceRec.Code != http.StatusOK {
-		t.Fatalf("get preference status = %d body=%s", getPreferenceRec.Code, getPreferenceRec.Body.String())
-	}
-	var fetchedPreference domain.SavedViewPreference
-	if err := json.NewDecoder(getPreferenceRec.Body).Decode(&fetchedPreference); err != nil {
-		t.Fatalf("decode fetched preference: %v", err)
-	}
-	if fetchedPreference.SelectedSavedViewID != created.SavedViewID {
-		t.Fatalf("fetched preference = %+v, want selected view", fetchedPreference)
-	}
-
-	otherPreferenceRec := httptest.NewRecorder()
-	otherPreferenceReq := httptest.NewRequest(http.MethodPut, "/v1/saved-view-preferences", bytes.NewBufferString(preferenceBody))
-	handler.ServeHTTP(otherPreferenceRec, savedViewRequestWithActor(otherPreferenceReq, other, companyID, domain.RoleCompanyUser))
-	if otherPreferenceRec.Code != http.StatusBadRequest {
-		t.Fatalf("other preference status = %d body=%s, want bad request", otherPreferenceRec.Code, otherPreferenceRec.Body.String())
+	if preferenceRec.Code != http.StatusBadRequest {
+		t.Fatalf("logic gate kanban preference status = %d body=%s, want bad request", preferenceRec.Code, preferenceRec.Body.String())
 	}
 
 	group, err := repo.CreateCompanyUserGroup(companyID, "", "Kanban Group")
