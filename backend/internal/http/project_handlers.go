@@ -301,10 +301,11 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request, proje
 		if !s.requireEntityAdmin(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
 			return
 		}
-		deletedByUserID, ok := requireAuthenticatedActorUserID(w, r)
+		actor, ok := requireActorDisplayNameConfirmation(w, r, confirmationDisplayNameFromHeader(r))
 		if !ok {
 			return
 		}
+		deletedByUserID := actor.User.UserID
 		result, err := s.repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{Kind: "project", ID: projectID}}, deletedByUserID)
 		if err != nil {
 			s.writeProjectMutationError(w, err, "failed_to_delete_project")

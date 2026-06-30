@@ -40,10 +40,11 @@ create table if not exists users (
   user_id uuid not null,
   cognito_subject text not null,
   email text not null default '',
-  display_name text not null default '',
+  display_name text not null,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   constraint users_cognito_subject_nonblank_chk check (btrim(cognito_subject) <> ''),
+  constraint users_display_name_nonblank_chk check (btrim(display_name) <> ''),
   constraint users_email_lowercase_chk check (email = lower(btrim(email))),
   primary key (user_id),
   unique (cognito_subject)

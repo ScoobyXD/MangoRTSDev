@@ -448,6 +448,8 @@ function friendlyApiError(code: string): string {
       return "This user already exists.";
     case "display_name_required":
       return "Enter your full name.";
+    case "display_name_confirmation_required":
+      return "Type your full name exactly as it appears on your account.";
     case "password_reset_user_not_found":
       return "You are not a user.";
     case "nylas_rate_limited":

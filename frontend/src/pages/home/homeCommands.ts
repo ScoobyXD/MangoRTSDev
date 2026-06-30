@@ -591,6 +591,7 @@ export async function deleteHomeEntitiesCommand(args: {
   apiBase: string;
   companyID: string;
   targets: HomeDeleteEntityTarget[];
+  confirmationDisplayName: string;
   requestJSON?: HomeEntityCreateRequestJSON;
 }): Promise<HomeDeleteEntitiesResponse | null> {
   const seen = new Set<string>();
@@ -610,7 +611,10 @@ export async function deleteHomeEntitiesCommand(args: {
     const endpoint = target.kind === "node"
       ? `/v1/nodes/${encodeURIComponent(target.id)}?company_id=${encodeURIComponent(args.companyID)}`
       : `/v1/logic-gates/${encodeURIComponent(target.id)}?company_id=${encodeURIComponent(args.companyID)}`;
-    return requestJSON(args.apiBase, endpoint, { method: "DELETE" });
+    return requestJSON(args.apiBase, endpoint, {
+      method: "DELETE",
+      headers: { "X-Mango-Confirmation-Display-Name": args.confirmationDisplayName },
+    });
   }));
 
   for (const target of targets) {

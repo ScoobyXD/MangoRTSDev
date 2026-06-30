@@ -741,6 +741,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [timelineContextMenu, setTimelineContextMenu] = useState<TimelineContextMenuState | null>(null);
   const [projectContextMenu, setProjectContextMenu] = useState<ProjectContextMenuState | null>(null);
   const [projectDeleteConfirmation, setProjectDeleteConfirmation] = useState<{ project: ProjectRecord; position?: ConfirmActionMenuPosition | null } | null>(null);
+  const [timelineNodeDeleteConfirmation, setTimelineNodeDeleteConfirmation] = useState<{ item: ProjectManagementTimelineRow; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectRecord | null>(null);
   const [projectRenameDraft, setProjectRenameDraft] = useState("");
   const [projectRenameSaving, setProjectRenameSaving] = useState(false);
@@ -1197,11 +1198,17 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     }
   }, [companyID, loadTimelineRows]);
 
-  const deleteTimelineNode = useCallback(async (item: ProjectManagementTimelineRow) => {
+  const requestDeleteTimelineNode = useCallback((item: ProjectManagementTimelineRow, position?: ConfirmActionMenuPosition) => {
+    setTimelineContextMenu(null);
+    setTimelineNodeDeleteConfirmation({ item, position: position ?? null });
+  }, []);
+
+  const deleteTimelineNode = useCallback(async (item: ProjectManagementTimelineRow, confirmationDisplayName: string) => {
     if (item.resource_type !== "node") return;
     const nodeID = nodeIDForTimelineRow(item);
     if (!nodeID) return;
     setTimelineContextMenu(null);
+    setTimelineNodeDeleteConfirmation(null);
     const previousWorkspace = workspace;
     setTimelineRows((current) => current.filter((row) => nodeIDForTimelineRow(row) !== nodeID));
     setWorkspace((current) => ({
@@ -1210,7 +1217,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       nodeFolderItems: current.nodeFolderItems.filter((folderItem) => folderItem.item_type !== "node" || folderItem.item_id !== nodeID),
     }));
     try {
-      await deleteProjectManagementNode(companyID, nodeID);
+      await deleteProjectManagementNode(companyID, nodeID, confirmationDisplayName);
       scheduleWorkspacePanelReload();
       void loadTimelineRows();
     } catch (deleteError) {
@@ -1234,7 +1241,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     onProjectOpen?.(cleanProjectID);
   }, [onProjectOpen]);
 
-  const confirmDeleteProject = useCallback(async (project: ProjectRecord) => {
+  const confirmDeleteProject = useCallback(async (project: ProjectRecord, confirmationDisplayName: string) => {
     const projectID = project.project_id.trim();
     if (!companyID.trim() || !projectID) return;
     setProjectDeleteConfirmation(null);
@@ -1243,7 +1250,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     const previousProjects = projects;
     setProjects((current) => current.filter((item) => item.project_id !== projectID));
     try {
-      await deleteProject(companyID, projectID);
+      await deleteProject(companyID, projectID, confirmationDisplayName);
       scheduleProjectListReload();
       scheduleWorkspacePanelReload();
     } catch (deleteError) {
@@ -1395,7 +1402,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
             draft={barDraft}
             onDropEntity={addTimelineItem}
             onRemoveItem={removeTimelineItem}
-            onDeleteNode={deleteTimelineNode}
+            onDeleteNode={requestDeleteTimelineNode}
             onNodeOpen={onNodeOpen}
             onLogicGateOpen={onLogicGateOpen}
             contextMenu={timelineContextMenu}
@@ -1549,8 +1556,19 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           position={projectDeleteConfirmation.position}
           confirmLabel="Yes, delete"
           cancelLabel="No"
-          onConfirm={() => void confirmDeleteProject(projectDeleteConfirmation.project)}
+          onConfirm={(confirmationDisplayName) => void confirmDeleteProject(projectDeleteConfirmation.project, confirmationDisplayName)}
           onCancel={() => setProjectDeleteConfirmation(null)}
+        />
+      ) : null}
+      {timelineNodeDeleteConfirmation ? (
+        <ConfirmActionMenu
+          title="Delete node?"
+          detail="This moves the underlying node to the Recycle Bin."
+          position={timelineNodeDeleteConfirmation.position}
+          confirmLabel="Yes, delete"
+          cancelLabel="No"
+          onConfirm={(confirmationDisplayName) => void deleteTimelineNode(timelineNodeDeleteConfirmation.item, confirmationDisplayName)}
+          onCancel={() => setTimelineNodeDeleteConfirmation(null)}
         />
       ) : null}
       <div aria-hidden="true" data-project-management-scope={widgetId?.trim() || "project-management"} style={{ display: "none" }} />
@@ -1754,11 +1772,11 @@ function TimelineChart({
   draft: BarDraft | null;
   onDropEntity: (payload: ProjectTimelinePayload, startOffset: number) => void;
   onRemoveItem: (item: ProjectManagementTimelineRow) => void;
-  onDeleteNode: (item: ProjectManagementTimelineRow) => void;
   onNodeOpen?: (nodeID: string) => void;
   onLogicGateOpen?: (logicGateID: string) => void;
   contextMenu: TimelineContextMenuState | null;
   onOpenContextMenu: (state: TimelineContextMenuState | null) => void;
+  onDeleteNode: (item: ProjectManagementTimelineRow, position?: ConfirmActionMenuPosition) => void;
   onStartBarInteraction: (interaction: BarInteraction) => void;
   onToggleGate: (gateID: string) => void;
 }) {
@@ -1960,7 +1978,7 @@ function TimelineChart({
               type="button"
               role="menuitem"
               style={{ ...timelineContextMenuButtonStyle, color: "#dc2626" }}
-              onClick={() => onDeleteNode(contextMenu.item)}
+              onClick={(event) => onDeleteNode(contextMenu.item, confirmMenuPositionFromElement(event.currentTarget))}
             >
               Delete node
             </button>

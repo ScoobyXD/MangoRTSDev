@@ -269,10 +269,11 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			stop()
-			deletedByUserID, ok := requireAuthenticatedActorUserID(w, r)
+			actor, ok := requireActorDisplayNameConfirmation(w, r, confirmationDisplayNameFromHeader(r))
 			if !ok {
 				return
 			}
+			deletedByUserID := actor.User.UserID
 			targets := []store.CompanyExplorerDeleteTargetInput{{Kind: "node", ID: nodeID}}
 			stop = timings.observeAccounted("source.transaction")
 			var result store.CompanyExplorerDeleteResult

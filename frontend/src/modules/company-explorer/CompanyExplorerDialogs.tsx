@@ -146,7 +146,7 @@ type CompanyExplorerDeleteConfirmationDialogProps = {
   isDarkTheme: boolean;
   position?: ConfirmActionMenuPosition | null;
   onAcknowledgedChange: (acknowledged: boolean) => void;
-  onConfirm: (targets: ExplorerDeleteTargetWithLabel[]) => void;
+  onConfirm: (targets: ExplorerDeleteTargetWithLabel[], confirmationDisplayName: string) => void;
   onCancel: () => void;
 };
 
@@ -173,7 +173,7 @@ export function CompanyExplorerDeleteConfirmationDialog({
       position={position}
       isDarkTheme={isDarkTheme}
       confirmDisabled={confirmationDisabled}
-      onConfirm={() => onConfirm(targets)}
+      onConfirm={(confirmationDisplayName) => onConfirm(targets, confirmationDisplayName)}
       onCancel={onCancel}
     >
       {summary.requiresFolderAcknowledgement && (

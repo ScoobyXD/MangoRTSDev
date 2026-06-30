@@ -773,15 +773,15 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setRelationshipDeleteConfirmation({ isLogicGate, resourceIDs: uniqueResourceIDs, label, position: position ?? null });
   }, [relationshipContextMenu?.relationship, relationships, selectedRelationshipNodeIDs]);
 
-  const deleteRelationshipResource = useCallback(async (confirmation: { isLogicGate: boolean; resourceIDs: string[]; label: string }) => {
+  const deleteRelationshipResource = useCallback(async (confirmation: { isLogicGate: boolean; resourceIDs: string[]; label: string }, confirmationDisplayName: string) => {
     const { isLogicGate, resourceIDs } = confirmation;
     setRelationshipDeleteConfirmation(null);
     setError("");
     try {
       if (isLogicGate) {
-        await deleteProjectManagementLogicGate(companyID, resourceIDs[0]);
+        await deleteProjectManagementLogicGate(companyID, resourceIDs[0], confirmationDisplayName);
       } else {
-        await Promise.all(resourceIDs.map((nodeID) => deleteProjectManagementNode(companyID, nodeID)));
+        await Promise.all(resourceIDs.map((nodeID) => deleteProjectManagementNode(companyID, nodeID, confirmationDisplayName)));
       }
       setSelectedRelationshipNodeIDs(new Set());
       setSelectionAnchorRelationshipNodeID("");
@@ -1533,7 +1533,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               position={relationshipDeleteConfirmation.position}
               confirmLabel="Yes"
               cancelLabel="No"
-              onConfirm={() => void deleteRelationshipResource(relationshipDeleteConfirmation)}
+              onConfirm={(confirmationDisplayName) => void deleteRelationshipResource(relationshipDeleteConfirmation, confirmationDisplayName)}
               onCancel={() => setRelationshipDeleteConfirmation(null)}
             />
           ) : null}

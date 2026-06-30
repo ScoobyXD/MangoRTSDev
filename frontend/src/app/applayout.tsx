@@ -1298,12 +1298,15 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     }
   }, [explorerNodePopup, onNavigate, upsertDockTab]);
 
-  const deleteExplorerNodePopupNode = useCallback(async (nodeID: string): Promise<boolean> => {
+  const deleteExplorerNodePopupNode = useCallback(async (nodeID: string, confirmationDisplayName: string): Promise<boolean> => {
     const cleanNodeID = nodeID.trim();
     const companyID = getActiveCompanyID();
     if (!cleanNodeID || !companyID) return false;
     try {
-      await appRequestJSON<{ status?: string }>(`/v1/nodes/${encodeURIComponent(cleanNodeID)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+      await appRequestJSON<{ status?: string }>(`/v1/nodes/${encodeURIComponent(cleanNodeID)}?company_id=${encodeURIComponent(companyID)}`, {
+        method: "DELETE",
+        headers: { "X-Mango-Confirmation-Display-Name": confirmationDisplayName },
+      });
       invalidateNodeRecordStoreCaches(apiBase, companyID, cleanNodeID);
       removeNodeRelationshipGraphNode(apiBase, companyID, cleanNodeID);
       setExplorerNodePopup((current) => (current?.nodeID === cleanNodeID ? null : current));

@@ -3868,7 +3868,7 @@ export function HomePage({
       setBusy("");
     }
   }, [apiBase, companyID, mergeUpdatedNode, nodeByID, scheduleMyWorkLiveRefresh]);
-  const deleteHomeEntities = useCallback(async (targets: HomeEntityDeleteTarget[]): Promise<boolean> => {
+  const deleteHomeEntities = useCallback(async (targets: HomeEntityDeleteTarget[], confirmationDisplayName: string): Promise<boolean> => {
     const normalizedTargets = targets.map((target) => ({ kind: target.kind, id: target.id.trim() })).filter((target) => target.id);
     const nodeIDSet = new Set(normalizedTargets.filter((target) => target.kind === "node").map((target) => target.id));
     const logicGateIDSet = new Set(normalizedTargets.filter((target) => target.kind === "logic_gate").map((target) => target.id));
@@ -3880,7 +3880,7 @@ export function HomePage({
     setBusy("entity-delete");
     setError("");
     try {
-      await deleteHomeEntitiesCommand({ apiBase, companyID, targets: normalizedTargets });
+      await deleteHomeEntitiesCommand({ apiBase, companyID, targets: normalizedTargets, confirmationDisplayName });
       setNodes((previous) => previous
         .filter((node) => !nodeIDSet.has(node.node_id))
         .map((node) => {
@@ -3931,10 +3931,10 @@ export function HomePage({
       setBusy("");
     }
   }, [apiBase, companyID, logicGateIDFromTreeID, logicGateSelectionAnchorID, nodeIDFromTreeID, nodeSelectionAnchorID, nodes, scheduleMyWorkLiveRefresh]);
-  const deleteNodeEditorOverlayNode = useCallback(async (nodeID: string): Promise<boolean> => {
+  const deleteNodeEditorOverlayNode = useCallback(async (nodeID: string, confirmationDisplayName: string): Promise<boolean> => {
     const targets = buildNodeDeleteTargets([nodeID]);
     if (targets.length === 0) return false;
-    return deleteHomeEntities(targets);
+    return deleteHomeEntities(targets, confirmationDisplayName);
   }, [buildNodeDeleteTargets, deleteHomeEntities]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -4513,7 +4513,7 @@ export function HomePage({
           position={entityDeleteConfirmation.position}
           busy={busy === "entity-delete"}
           onCancel={() => setEntityDeleteConfirmation(null)}
-          onConfirm={() => { void deleteHomeEntities(entityDeleteConfirmation.targets); }}
+          onConfirm={(confirmationDisplayName) => { void deleteHomeEntities(entityDeleteConfirmation.targets, confirmationDisplayName); }}
         />
       )}
       {sharedInboxEmailAssignmentDialog && (

@@ -268,11 +268,12 @@ export async function updateProject(input: {
   });
 }
 
-export async function deleteProject(companyID: string, projectID: string): Promise<ProjectMutationResponse & { deleted_project_id?: string }> {
+export async function deleteProject(companyID: string, projectID: string, confirmationDisplayName: string): Promise<ProjectMutationResponse & { deleted_project_id?: string }> {
   const params = new URLSearchParams();
   params.set("company_id", companyID);
   return apiFetchJSON<ProjectMutationResponse & { deleted_project_id?: string }>(`/v1/projects/${encodeURIComponent(projectID)}?${params.toString()}`, {
     method: "DELETE",
+    headers: { "X-Mango-Confirmation-Display-Name": confirmationDisplayName },
   });
 }
 
@@ -431,18 +432,20 @@ export async function listProjectRelationshipsForResource(input: {
   return apiFetchJSON<{ relationships: ProjectRelationshipProjection[] }>(`/v1/projects/relationships?${params.toString()}`);
 }
 
-export async function deleteProjectManagementNode(companyID: string, nodeID: string): Promise<{ status: string }> {
+export async function deleteProjectManagementNode(companyID: string, nodeID: string, confirmationDisplayName: string): Promise<{ status: string }> {
   const params = new URLSearchParams();
   params.set("company_id", companyID);
   return apiFetchJSON<{ status: string }>(`/v1/nodes/${encodeURIComponent(nodeID)}?${params.toString()}`, {
     method: "DELETE",
+    headers: { "X-Mango-Confirmation-Display-Name": confirmationDisplayName },
   });
 }
 
-export async function deleteProjectManagementLogicGate(companyID: string, logicGateID: string): Promise<{ status: string }> {
+export async function deleteProjectManagementLogicGate(companyID: string, logicGateID: string, confirmationDisplayName: string): Promise<{ status: string }> {
   const params = new URLSearchParams();
   params.set("company_id", companyID);
   return apiFetchJSON<{ status: string }>(`/v1/logic-gates/${encodeURIComponent(logicGateID)}?${params.toString()}`, {
     method: "DELETE",
+    headers: { "X-Mango-Confirmation-Display-Name": confirmationDisplayName },
   });
 }
