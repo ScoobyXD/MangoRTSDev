@@ -135,6 +135,31 @@ func (r *MemoryRepo) nodeLogicGateAssignmentLocked(companyID, nodeID, logicGateI
 	return assignment, true
 }
 
+func (r *MemoryRepo) clearLogicGateAssignmentMemberReferencesLocked(companyID, userID string) {
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	for assignmentKeyValue, assignment := range r.nodeLogicGateAssignments {
+		if companyID != "" && assignment.CompanyID != companyID {
+			continue
+		}
+		changed := false
+		if strings.TrimSpace(assignment.RequestedByUserID) == userID {
+			assignment.RequestedByUserID = ""
+			changed = true
+		}
+		if strings.TrimSpace(assignment.PlacedByUserID) == userID {
+			assignment.PlacedByUserID = ""
+			changed = true
+		}
+		if changed {
+			r.nodeLogicGateAssignments[assignmentKeyValue] = assignment
+		}
+	}
+}
+
 func (r *MemoryRepo) deleteNodeLogicGateAssignmentForCardLocked(card domain.KanbanCard) {
 	assignment, ok := r.nodeLogicGateAssignmentLocked(card.CompanyID, card.NodeID, "")
 	if !ok {

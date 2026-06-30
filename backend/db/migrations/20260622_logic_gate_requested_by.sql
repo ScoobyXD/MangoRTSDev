@@ -3,17 +3,20 @@ alter table node_logic_gate_assignments
 
 do $$
 begin
-  if not exists (
+  if exists (
     select 1
     from pg_constraint
     where conname = 'node_logic_gate_assignments_requested_by_user_id_fkey'
   ) then
     alter table node_logic_gate_assignments
+      drop constraint node_logic_gate_assignments_requested_by_user_id_fkey;
+  end if;
+
+  alter table node_logic_gate_assignments
       add constraint node_logic_gate_assignments_requested_by_user_id_fkey
       foreign key (company_id, requested_by_user_id)
       references company_memberships(company_id, user_id)
-      on delete set null;
-  end if;
+      on delete set null (requested_by_user_id);
 end $$;
 
 alter table kanban_board_projection

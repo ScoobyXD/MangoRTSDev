@@ -43,6 +43,88 @@ func TestLegacyKanbanTablesAreRemovedFromCanonicalSchema(t *testing.T) {
 	}
 }
 
+func TestNodeLogicGateAssignmentMemberReferenceFksNullOnlyUserColumns(t *testing.T) {
+	schemaPath := filepath.Join("..", "..", "db", "schema.sql")
+	raw, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatalf("ReadFile schema: %v", err)
+	}
+	assignmentTable := normalizedCreateTableForTest(t, string(raw), "node_logic_gate_assignments")
+	for _, required := range []string{
+		"foreign key (company_id, requested_by_user_id) references company_memberships (company_id, user_id) on delete set null (requested_by_user_id)",
+		"foreign key (company_id, placed_by_user_id) references company_memberships (company_id, user_id) on delete set null (placed_by_user_id)",
+	} {
+		if !strings.Contains(assignmentTable, required) {
+			t.Fatalf("node_logic_gate_assignments missing member FK shape %q", required)
+		}
+	}
+
+	for _, migrationName := range []string{
+		"20260622_logic_gate_requested_by.sql",
+		"20260629_logic_gate_kanban_grouping_preferences.sql",
+		"20260630_fix_logic_gate_assignment_membership_fks.sql",
+	} {
+		migrationPath := filepath.Join("..", "..", "db", "migrations", migrationName)
+		migrationRaw, err := os.ReadFile(migrationPath)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", migrationName, err)
+		}
+		normalizedMigration := strings.ToLower(strings.Join(strings.Fields(string(migrationRaw)), " "))
+		switch migrationName {
+		case "20260622_logic_gate_requested_by.sql":
+			if !strings.Contains(normalizedMigration, "on delete set null (requested_by_user_id)") {
+				t.Fatalf("%s must null only requested_by_user_id", migrationName)
+			}
+		case "20260629_logic_gate_kanban_grouping_preferences.sql":
+			if !strings.Contains(normalizedMigration, "on delete set null (placed_by_user_id)") {
+				t.Fatalf("%s must null only placed_by_user_id", migrationName)
+			}
+		default:
+			for _, required := range []string{
+				"drop constraint if exists node_logic_gate_assignments_requested_by_user_id_fkey",
+				"drop constraint if exists node_logic_gate_assignments_placed_by_user_id_fkey",
+				"on delete set null (requested_by_user_id)",
+				"on delete set null (placed_by_user_id)",
+			} {
+				if !strings.Contains(normalizedMigration, required) {
+					t.Fatalf("%s missing repair marker %q", migrationName, required)
+				}
+			}
+		}
+	}
+}
+
+func TestPostgresDeleteCompanyUserClearsLogicGateMemberReferencesBeforeMembershipDelete(t *testing.T) {
+	raw, err := os.ReadFile("postgres_auth.go")
+	if err != nil {
+		t.Fatalf("ReadFile postgres_auth.go: %v", err)
+	}
+	body := postgresKanbanFunctionBodyForTest(t, string(raw), "func (r *PostgresRepo) DeleteCompanyUser")
+	normalized := strings.ToLower(strings.Join(strings.Fields(body), " "))
+	for _, required := range []string{
+		"update node_logic_gate_assignments set requested_by_user_id = case when requested_by_user_id = $2::uuid then null else requested_by_user_id end",
+		"update kanban_board_projection set requested_by_user_id = case when requested_by_user_id = $2::uuid then null else requested_by_user_id end",
+		"update node_logic_gate_assignments set requested_by_user_id = case when requested_by_user_id = $1::uuid then null else requested_by_user_id end",
+		"update kanban_board_projection set requested_by_user_id = case when requested_by_user_id = $1::uuid then null else requested_by_user_id end",
+	} {
+		if !strings.Contains(normalized, required) {
+			t.Fatalf("DeleteCompanyUser missing cleanup marker %q", required)
+		}
+	}
+
+	companyScopedCleanup := strings.Index(normalized, "clearcompanylogicgateassignmentmemberrefs(companyid, userid)")
+	companyMembershipDelete := strings.Index(normalized, "delete from company_memberships where company_id = $1::uuid and user_id = $2::uuid")
+	if companyScopedCleanup < 0 || companyMembershipDelete < 0 || companyScopedCleanup > companyMembershipDelete {
+		t.Fatalf("company-scoped logic gate member cleanup must run before deleting the company membership")
+	}
+
+	allScopedCleanup := strings.Index(normalized, "clearalllogicgateassignmentmemberrefs(userid)")
+	remainingMembershipDelete := strings.Index(normalized, "delete from company_memberships where user_id = $1::uuid")
+	if allScopedCleanup < 0 || remainingMembershipDelete < 0 || allScopedCleanup > remainingMembershipDelete {
+		t.Fatalf("all-company logic gate member cleanup must run before deleting remaining memberships")
+	}
+}
+
 func TestDropLegacyKanbanTablesMigration(t *testing.T) {
 	migrationPath := filepath.Join("..", "..", "db", "migrations", "20260602_drop_legacy_kanban_tables.sql")
 	raw, err := os.ReadFile(migrationPath)
