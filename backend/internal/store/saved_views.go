@@ -44,17 +44,6 @@ func NormalizeSavedViewSurface(surface string) (string, bool) {
 	}
 }
 
-func NormalizeSavedViewPreferenceSurface(surface string) (string, bool) {
-	switch strings.TrimSpace(surface) {
-	case SavedViewSurfaceMyWork:
-		return SavedViewSurfaceMyWork, true
-	case SavedViewSurfaceUpdates:
-		return SavedViewSurfaceUpdates, true
-	default:
-		return "", false
-	}
-}
-
 func NormalizeSavedViewPrincipal(principal string) (string, bool) {
 	switch strings.TrimSpace(principal) {
 	case SavedViewPrincipalUser:
@@ -182,21 +171,6 @@ func normalizeSavedViewInput(input SavedViewInput) (SavedViewInput, bool) {
 
 func savedViewIsSingleLogicGateKanbanUserView(input SavedViewInput) bool {
 	return input.Surface == SavedViewSurfaceLogicGateKanban && input.Principal == SavedViewPrincipalUser
-}
-
-func normalizeSavedViewPreferenceInput(input SavedViewPreferenceInput) (SavedViewPreferenceInput, bool) {
-	companyID := cleanUUIDText(input.CompanyID)
-	userID := cleanUUIDText(input.UserID)
-	surface, ok := NormalizeSavedViewPreferenceSurface(input.Surface)
-	if companyID == "" || userID == "" || !ok {
-		return SavedViewPreferenceInput{}, false
-	}
-	selectedSavedViewID := cleanUUIDText(input.SelectedSavedViewID)
-	input.CompanyID = companyID
-	input.UserID = userID
-	input.Surface = surface
-	input.SelectedSavedViewID = selectedSavedViewID
-	return input, true
 }
 
 func normalizeSavedViewListInput(input SavedViewListInput) (SavedViewListInput, bool) {

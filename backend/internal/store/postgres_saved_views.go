@@ -212,89 +212,7 @@ func (r *PostgresRepo) DeleteSavedView(input SavedViewDeleteInput) error {
 	if count == 0 {
 		return ErrNotFound
 	}
-	if _, err := tx.ExecContext(context.Background(), `
-update saved_view_preferences
-set selected_saved_view_id=null,
-    updated_timestamp=now()
-where company_id=$1::uuid
-  and selected_saved_view_id=$2::uuid`, input.CompanyID, input.SavedViewID); err != nil {
-		return err
-	}
 	return tx.Commit()
-}
-
-func (r *PostgresRepo) GetSavedViewPreference(input SavedViewPreferenceInput) (domain.SavedViewPreference, error) {
-	input, ok := normalizeSavedViewPreferenceInput(input)
-	if !ok {
-		return domain.SavedViewPreference{}, ErrInvalid
-	}
-	item, err := scanSavedViewPreference(r.db.QueryRowContext(context.Background(), `
-select
-  $1::uuid::text as company_id,
-  $2::text as surface,
-  $3::uuid::text as user_id,
-  coalesce(preference.selected_saved_view_id::text, '') as selected_saved_view_id,
-  coalesce(preference.created_timestamp, now()) as created_timestamp,
-  coalesce(preference.updated_timestamp, now()) as updated_timestamp
-from (select 1) seed
-left join saved_view_preferences preference
-  on preference.company_id=$1::uuid
- and preference.surface=$2
- and preference.user_id=$3::uuid`,
-		input.CompanyID,
-		input.Surface,
-		input.UserID,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.SavedViewPreference{}, ErrNotFound
-	}
-	return item, err
-}
-
-func (r *PostgresRepo) UpsertSavedViewPreference(input SavedViewPreferenceInput) (domain.SavedViewPreference, error) {
-	input, ok := normalizeSavedViewPreferenceInput(input)
-	if !ok {
-		return domain.SavedViewPreference{}, ErrInvalid
-	}
-	if input.SelectedSavedViewID != "" {
-		var exists bool
-		if err := r.db.QueryRowContext(context.Background(), `
-select exists (
-  select 1
-  from saved_views
-  where company_id=$1::uuid
-    and saved_view_id=$2::uuid
-    and surface=$3
-    and principal=$4
-    and principal_id=$5::uuid
-)`, input.CompanyID, input.SelectedSavedViewID, input.Surface, SavedViewPrincipalUser, input.UserID).Scan(&exists); err != nil {
-			return domain.SavedViewPreference{}, err
-		} else if !exists {
-			return domain.SavedViewPreference{}, ErrInvalid
-		}
-	}
-	item, err := scanSavedViewPreference(r.db.QueryRowContext(context.Background(), `
-insert into saved_view_preferences (
-  company_id,
-  surface,
-  user_id,
-  selected_saved_view_id,
-  created_timestamp,
-  updated_timestamp
-) values ($1::uuid, $2, $3::uuid, nullif($4, '')::uuid, now(), now())
-on conflict (company_id, surface, user_id) do update
-set selected_saved_view_id=excluded.selected_saved_view_id,
-    updated_timestamp=now()
-returning company_id::text, surface, user_id::text, coalesce(selected_saved_view_id::text, ''), created_timestamp, updated_timestamp`,
-		input.CompanyID,
-		input.Surface,
-		input.UserID,
-		input.SelectedSavedViewID,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.SavedViewPreference{}, ErrNotFound
-	}
-	return item, err
 }
 
 func scanSavedViews(rows *sql.Rows) ([]domain.SavedView, error) {
@@ -344,19 +262,6 @@ func scanSavedView(row interface{ Scan(dest ...any) error }) (domain.SavedView, 
 	}
 	item.Settings = settings
 	return item, nil
-}
-
-func scanSavedViewPreference(row interface{ Scan(dest ...any) error }) (domain.SavedViewPreference, error) {
-	var item domain.SavedViewPreference
-	err := row.Scan(
-		&item.CompanyID,
-		&item.Surface,
-		&item.UserID,
-		&item.SelectedSavedViewID,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	)
-	return item, err
 }
 
 func (r *PostgresRepo) savedViewPrincipalExists(companyID, principal, principalID string) (bool, error) {

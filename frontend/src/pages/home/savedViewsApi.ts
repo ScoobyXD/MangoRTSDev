@@ -1,7 +1,6 @@
 import { requestJSON } from "../../modules/api/requestJSON.js";
 
 export type SavedViewSurface = "my_work" | "updates" | "logic_gate_kanban";
-export type SavedViewPreferenceSurface = Exclude<SavedViewSurface, "logic_gate_kanban">;
 export type SavedViewPrincipal = "user" | "group";
 export type SavedViewGroupingDirection = "asc" | "desc";
 
@@ -24,15 +23,6 @@ export type SavedView = {
   groupings: SavedViewGrouping[];
   settings: SavedViewSettings;
   position: number;
-  created_timestamp: string;
-  updated_timestamp: string;
-};
-
-export type SavedViewPreference = {
-  company_id: string;
-  surface: SavedViewPreferenceSurface;
-  user_id: string;
-  selected_saved_view_id: string;
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -91,34 +81,6 @@ export async function deleteSavedView(input: {
   });
 }
 
-export async function fetchSavedViewPreference(input: {
-  apiBase: string;
-  companyID: string;
-  surface: SavedViewPreferenceSurface;
-}): Promise<SavedViewPreference> {
-  const query = new URLSearchParams({
-    company_id: input.companyID.trim(),
-    surface: input.surface,
-  });
-  return normalizeSavedViewPreference(await requestJSON<SavedViewPreference>(input.apiBase, `/v1/saved-view-preferences?${query.toString()}`));
-}
-
-export async function saveSavedViewPreference(input: {
-  apiBase: string;
-  companyID: string;
-  surface: SavedViewPreferenceSurface;
-  selectedSavedViewID: string;
-}): Promise<SavedViewPreference> {
-  return normalizeSavedViewPreference(await requestJSON<SavedViewPreference>(input.apiBase, "/v1/saved-view-preferences", {
-    method: "PUT",
-    json: {
-      company_id: input.companyID.trim(),
-      surface: input.surface,
-      selected_saved_view_id: input.selectedSavedViewID.trim(),
-    },
-  }));
-}
-
 export function createSavedViewID(): string {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   const randomHex = () => Math.floor(Math.random() * 0xffff).toString(16).padStart(4, "0");
@@ -163,30 +125,10 @@ function normalizeSavedView(value: SavedView): SavedView | null {
   };
 }
 
-function normalizeSavedViewPreference(value: SavedViewPreference): SavedViewPreference {
-  if (!value || typeof value !== "object") {
-    return { company_id: "", surface: "my_work", user_id: "", selected_saved_view_id: "", created_timestamp: "", updated_timestamp: "" };
-  }
-  return {
-    company_id: value.company_id?.trim() ?? "",
-    surface: normalizeSavedViewPreferenceSurface(value.surface) || "my_work",
-    user_id: value.user_id?.trim() ?? "",
-    selected_saved_view_id: value.selected_saved_view_id?.trim() ?? "",
-    created_timestamp: typeof value.created_timestamp === "string" ? value.created_timestamp : "",
-    updated_timestamp: typeof value.updated_timestamp === "string" ? value.updated_timestamp : "",
-  };
-}
-
 function normalizeSavedViewSurface(value: unknown): SavedViewSurface | "" {
   if (value === "updates") return "updates";
   if (value === "my_work") return "my_work";
   if (value === "logic_gate_kanban") return "logic_gate_kanban";
-  return "";
-}
-
-function normalizeSavedViewPreferenceSurface(value: unknown): SavedViewPreferenceSurface | "" {
-  if (value === "updates") return "updates";
-  if (value === "my_work") return "my_work";
   return "";
 }
 

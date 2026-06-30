@@ -293,18 +293,6 @@ func TestSavedViewsLogicGateKanbanSingleUserView(t *testing.T) {
 		t.Fatalf("other created view = %+v, want separate per-user singleton", otherCreated)
 	}
 
-	preferenceBody := `{
-		"company_id":"` + companyID + `",
-		"surface":"logic_gate_kanban",
-		"selected_saved_view_id":"` + created.SavedViewID + `"
-	}`
-	preferenceRec := httptest.NewRecorder()
-	preferenceReq := httptest.NewRequest(http.MethodPut, "/v1/saved-view-preferences", bytes.NewBufferString(preferenceBody))
-	handler.ServeHTTP(preferenceRec, savedViewRequestWithActor(preferenceReq, user, companyID, domain.RoleCompanyUser))
-	if preferenceRec.Code != http.StatusBadRequest {
-		t.Fatalf("logic gate kanban preference status = %d body=%s, want bad request", preferenceRec.Code, preferenceRec.Body.String())
-	}
-
 	group, err := repo.CreateCompanyUserGroup(companyID, "", "Kanban Group")
 	if err != nil {
 		t.Fatalf("CreateCompanyUserGroup: %v", err)
