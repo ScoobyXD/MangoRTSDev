@@ -1370,7 +1370,7 @@ func TestCompanyExplorerBatchDeleteTargetsMovesV2RowsToRecycleBinAndRestores(t *
 		t.Fatalf("UpsertCompanyExplorerV2Edge B: %v", err)
 	}
 
-	body := []byte(`{"company_id":"` + companyID + `","targets":[` +
+	body := []byte(`{"company_id":"` + companyID + `","confirmation_display_name":"` + deleteActor.DisplayName + `","targets":[` +
 		`{"kind":"logic_gate","id":"` + gateA.LogicGateID + `","edge_id":"` + rowA.EdgeID + `"},` +
 		`{"kind":"logic_gate","id":"` + gateB.LogicGateID + `","edge_id":"` + rowB.EdgeID + `"}` +
 		`]}`)
@@ -1464,8 +1464,9 @@ func TestRecycleBinHandlersScopeItemsToDeletingUser(t *testing.T) {
 	postDeleteTargetForUser := func(t *testing.T, user domain.User, nodeID string) {
 		t.Helper()
 		body, err := json.Marshal(map[string]any{
-			"company_id": companyID,
-			"targets":    []map[string]string{{"kind": "node", "id": nodeID}},
+			"company_id":                companyID,
+			"confirmation_display_name": user.DisplayName,
+			"targets":                   []map[string]string{{"kind": "node", "id": nodeID}},
 		})
 		if err != nil {
 			t.Fatalf("Marshal delete target request: %v", err)
@@ -1497,7 +1498,7 @@ func TestRecycleBinHandlersScopeItemsToDeletingUser(t *testing.T) {
 	}
 	postRecycleMutationForUser := func(t *testing.T, path string, user domain.User, itemID string) int {
 		t.Helper()
-		body, err := json.Marshal(map[string]any{"company_id": companyID, "item_ids": []string{itemID}})
+		body, err := json.Marshal(map[string]any{"company_id": companyID, "item_ids": []string{itemID}, "confirmation_display_name": user.DisplayName})
 		if err != nil {
 			t.Fatalf("Marshal recycle mutation request: %v", err)
 		}
@@ -1567,7 +1568,7 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 		targets = append(targets, map[string]string{"kind": "logic_gate", "id": logicGate.LogicGateID, "edge_id": row.EdgeID})
 	}
 
-	body, err := json.Marshal(map[string]any{"company_id": companyID, "targets": targets})
+	body, err := json.Marshal(map[string]any{"company_id": companyID, "confirmation_display_name": deleteActor.DisplayName, "targets": targets})
 	if err != nil {
 		t.Fatalf("Marshal request: %v", err)
 	}
@@ -1624,7 +1625,7 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 	if len(children.Rows) != count {
 		t.Fatalf("children after large restore = %d, want %d", len(children.Rows), count)
 	}
-	deleteAgainBody, err := json.Marshal(map[string]any{"company_id": companyID, "targets": targets})
+	deleteAgainBody, err := json.Marshal(map[string]any{"company_id": companyID, "confirmation_display_name": deleteActor.DisplayName, "targets": targets})
 	if err != nil {
 		t.Fatalf("Marshal second large delete request: %v", err)
 	}

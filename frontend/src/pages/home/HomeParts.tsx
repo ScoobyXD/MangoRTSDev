@@ -747,7 +747,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
   focusRequestID?: number;
   onClose: () => void;
   onCollapseToTab?: () => void;
-  onDeleteNode?: (nodeID: string) => boolean | void | Promise<boolean | void>;
+  onDeleteNode?: (nodeID: string, confirmationDisplayName: string) => boolean | void | Promise<boolean | void>;
 }) {
   const [popupRect, setPopupRect] = useState(defaultNodeEditorPopupRect);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ position?: ConfirmActionMenuPosition | null } | null>(null);
@@ -824,11 +824,11 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
     setDeleteConfirmation({ position: confirmMenuPositionFromElement(event.currentTarget) });
   }, []);
 
-  const confirmDeleteNode = useCallback(async () => {
+  const confirmDeleteNode = useCallback(async (confirmationDisplayName: string) => {
     if (!onDeleteNode || deleteBusy) return;
     setDeleteBusy(true);
     try {
-      const deleted = await onDeleteNode(nodeID);
+      const deleted = await onDeleteNode(nodeID, confirmationDisplayName);
       if (deleted === false) return;
       setDeleteConfirmation(null);
       onClose();
@@ -930,7 +930,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
             confirmLabel={deleteBusy ? "Deleting" : "Yes"}
             cancelLabel="No"
             confirmDisabled={deleteBusy}
-            onConfirm={() => { void confirmDeleteNode(); }}
+            onConfirm={(confirmationDisplayName) => { void confirmDeleteNode(confirmationDisplayName); }}
             onCancel={() => setDeleteConfirmation(null)}
           />
         )}
@@ -6100,7 +6100,7 @@ export function DeleteHomeEntitiesConfirmationModal({ targets, busy, position, o
   targets: HomeEntityDeleteTarget[];
   busy: boolean;
   position?: ConfirmActionMenuPosition | null;
-  onConfirm: () => void;
+  onConfirm: (confirmationDisplayName: string) => void;
   onCancel: () => void;
 }) {
   const count = targets.length;

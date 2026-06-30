@@ -17,6 +17,12 @@ func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email, displayName string)
 	if cognitoSubject == "" {
 		return domain.User{}, ErrInvalid
 	}
+	if displayName == "" {
+		displayName = email
+	}
+	if displayName == "" {
+		displayName = cognitoSubject
+	}
 
 	var user domain.User
 	err := r.db.QueryRow(

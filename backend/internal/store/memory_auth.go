@@ -14,6 +14,12 @@ func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (
 	if cognitoSubject == "" {
 		return domain.User{}, ErrInvalid
 	}
+	if displayName == "" {
+		displayName = email
+	}
+	if displayName == "" {
+		displayName = cognitoSubject
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()

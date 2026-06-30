@@ -38,7 +38,7 @@ type NodeMapContextMenusProps = {
   onOpenPermissions: (nodeID: string) => void;
   onRequestDeleteNodes: (nodeIDs: string[], position?: ConfirmActionMenuPosition) => void;
   onDeleteRelationships: (relationshipIDs: string[], position?: ConfirmActionMenuPosition) => void;
-  onConfirmDelete: () => void;
+  onConfirmDelete: (confirmationDisplayName: string) => void;
   onCancelDelete: () => void;
 };
 

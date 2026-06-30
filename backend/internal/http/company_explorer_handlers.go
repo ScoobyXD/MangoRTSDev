@@ -584,8 +584,9 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 		return
 	}
 	var req struct {
-		CompanyID string `json:"company_id"`
-		Targets   []struct {
+		CompanyID               string `json:"company_id"`
+		ConfirmationDisplayName string `json:"confirmation_display_name"`
+		Targets                 []struct {
 			Kind       string `json:"kind"`
 			ID         string `json:"id"`
 			FolderKind string `json:"folder_kind"`
@@ -604,10 +605,11 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 	if !requireCompanyAccess(w, r, req.CompanyID) {
 		return
 	}
-	deletedByUserID, ok := requireAuthenticatedActorUserID(w, r)
+	actor, ok := requireActorDisplayNameConfirmation(w, r, req.ConfirmationDisplayName)
 	if !ok {
 		return
 	}
+	deletedByUserID := actor.User.UserID
 
 	deleteTargets := make([]store.CompanyExplorerDeleteTargetInput, 0, len(req.Targets))
 	for _, target := range req.Targets {

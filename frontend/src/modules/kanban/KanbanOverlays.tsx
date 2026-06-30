@@ -414,7 +414,7 @@ function ModalShell({ title, detail, position, onConfirm, onCancel }: {
   title: React.ReactNode;
   detail: React.ReactNode;
   position?: ConfirmActionMenuPosition | null;
-  onConfirm: () => void;
+  onConfirm: (confirmationDisplayName: string) => void;
   onCancel: () => void;
 }) {
   return (
@@ -438,7 +438,7 @@ export function KanbanDeleteConfirmations({
 }: {
   deleteNodeConfirmation: { nodeIDs: string[]; position?: ConfirmActionMenuPosition | null } | null;
   deleteCardConfirmation: { cardIDs: string[]; position?: ConfirmActionMenuPosition | null } | null;
-  onRemoveNodes: (nodeIDs: string[]) => void;
+  onRemoveNodes: (nodeIDs: string[], confirmationDisplayName: string) => void;
   onRemoveCards: (cardIDs: string[]) => void;
   onCancelNodeDelete: () => void;
   onCancelCardDelete: () => void;
@@ -449,7 +449,7 @@ export function KanbanDeleteConfirmations({
         title={`Are you sure you want to delete ${deleteNodeConfirmation.nodeIDs.length} node${deleteNodeConfirmation.nodeIDs.length === 1 ? "" : "s"}?`}
         detail="This moves the underlying node data to the Recycle Bin and removes its Kanban placements."
         position={deleteNodeConfirmation.position}
-        onConfirm={() => onRemoveNodes(deleteNodeConfirmation.nodeIDs)}
+        onConfirm={(confirmationDisplayName) => onRemoveNodes(deleteNodeConfirmation.nodeIDs, confirmationDisplayName)}
         onCancel={onCancelNodeDelete}
       />
     );

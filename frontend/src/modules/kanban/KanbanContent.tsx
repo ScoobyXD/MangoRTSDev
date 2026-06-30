@@ -1936,7 +1936,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     }
   }, [cards, kanbanCommandContext]);
 
-  const removeNodes = useCallback(async (nodeIDs: string[]) => {
+  const removeNodes = useCallback(async (nodeIDs: string[], confirmationDisplayName: string) => {
     const ids = new Set(nodeIDs.map((nodeID) => nodeID.trim()).filter(Boolean));
     if (ids.size === 0) return;
     const previousCards = cards;
@@ -1950,6 +1950,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     try {
       await Promise.all(Array.from(ids).map((nodeID) => requestJSON<{ status: string }>(`/v1/nodes/${encodeURIComponent(nodeID)}?company_id=${encodeURIComponent(companyID)}`, {
         method: "DELETE",
+        headers: { "X-Mango-Confirmation-Display-Name": confirmationDisplayName },
       })));
       for (const nodeID of ids) {
         invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
@@ -2734,8 +2735,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       <KanbanDeleteConfirmations
         deleteNodeConfirmation={deleteNodeConfirmation}
         deleteCardConfirmation={deleteCardConfirmation}
-        onRemoveNodes={(nodeIDs) => {
-          void removeNodes(nodeIDs);
+        onRemoveNodes={(nodeIDs, confirmationDisplayName) => {
+          void removeNodes(nodeIDs, confirmationDisplayName);
           setDeleteNodeConfirmation(null);
         }}
         onRemoveCards={(cardIDs) => {

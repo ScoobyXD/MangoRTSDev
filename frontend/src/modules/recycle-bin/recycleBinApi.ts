@@ -40,9 +40,9 @@ export function restoreRecycleBinItems(companyID: string, itemIDs: string[]): Pr
   });
 }
 
-export function permanentlyDeleteRecycleBinItems(companyID: string, itemIDs: string[]): Promise<RecycleBinMutationResult> {
+export function permanentlyDeleteRecycleBinItems(companyID: string, itemIDs: string[], confirmationDisplayName: string): Promise<RecycleBinMutationResult> {
   return apiFetchJSON<RecycleBinMutationResult>("/v1/recycle-bin/delete", {
     method: "POST",
-    body: JSON.stringify({ company_id: companyID, item_ids: itemIDs }),
+    body: JSON.stringify({ company_id: companyID, item_ids: itemIDs, confirmation_display_name: confirmationDisplayName }),
   });
 }

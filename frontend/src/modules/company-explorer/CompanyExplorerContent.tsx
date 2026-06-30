@@ -2655,7 +2655,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
 
   // Delete through one canonical batch request, then patch local/shared caches
   // once so multi-select deletes do not visibly collapse one row at a time.
-  const deleteExplorerTargets = useCallback(async (targets: ExplorerDeleteTargetWithLabel[]) => {
+  const deleteExplorerTargets = useCallback(async (targets: ExplorerDeleteTargetWithLabel[], confirmationDisplayName: string) => {
     const seen = new Set<string>();
     const selectedLogicGateBoardIDs = new Set(
       targets
@@ -2738,7 +2738,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       });
       await requestJSON("/v1/company-explorer/delete-targets", {
         method: "POST",
-        body: JSON.stringify({ company_id: companyID, targets: deleteTargets }),
+        body: JSON.stringify({ company_id: companyID, targets: deleteTargets, confirmation_display_name: confirmationDisplayName }),
       });
 
       if (deletedFolderIDs.size > 0) {
@@ -3776,10 +3776,10 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           isDarkTheme={isDarkTheme}
           position={deleteConfirmation.position}
           onAcknowledgedChange={setDeleteFolderAcknowledged}
-          onConfirm={(targets) => {
+          onConfirm={(targets, confirmationDisplayName) => {
             setDeleteConfirmation(null);
             setDeleteFolderAcknowledged(false);
-            void deleteExplorerTargets(targets);
+            void deleteExplorerTargets(targets, confirmationDisplayName);
           }}
           onCancel={() => {
             setDeleteConfirmation(null);

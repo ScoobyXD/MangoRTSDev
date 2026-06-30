@@ -174,10 +174,11 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			if !s.requireEntityAdmin(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 				return
 			}
-			deletedByUserID, ok := requireAuthenticatedActorUserID(w, r)
+			actor, ok := requireActorDisplayNameConfirmation(w, r, confirmationDisplayNameFromHeader(r))
 			if !ok {
 				return
 			}
+			deletedByUserID := actor.User.UserID
 			result, err := s.repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{Kind: "logic_gate", ID: logicGateID}}, deletedByUserID)
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "logic_gate_not_found")

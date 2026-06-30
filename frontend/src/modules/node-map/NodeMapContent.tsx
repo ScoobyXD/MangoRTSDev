@@ -1117,7 +1117,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
   }, [activeFolderID, canvasActive, nodePositions, nodeSizes, nodes, relationships, relationshipAnchors, selectedNodeID, selectedNodeIDs, visibleInsertionPosition]);
 
   // Delete-nodes action with selection/context cleanup and snapshot refresh.
-  const deleteNodes = async (nodeIDs: string[]) => {
+  const deleteNodes = async (nodeIDs: string[], confirmationDisplayName: string) => {
     const unique = Array.from(new Set(nodeIDs.filter((nodeID) => {
       if (!nodeID) return false;
       const node = nodes.find((item) => item.node_id === nodeID);
@@ -1128,6 +1128,7 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
     try {
       await Promise.all(unique.map((nodeID) => requestJSON<{ status: string }>(`/v1/nodes/${nodeID}?company_id=${encodeURIComponent(companyID)}`, {
         method: "DELETE",
+        headers: { "X-Mango-Confirmation-Display-Name": confirmationDisplayName },
       })));
       for (const id of unique) removeNodeRelationshipGraphNode(apiBase, companyID, id);
       setDetails((current) => (current && unique.includes(current.node.node_id) ? null : current));
@@ -1655,11 +1656,11 @@ export const NodeMapContent: React.FC<NodeMapContentProps> = ({
             const editableIDs = relationshipIDs.filter((relationshipID) => editableRelationshipIDs.has(relationshipID));
             if (editableIDs.length > 0) setConfirmDelete({ nodeIDs: [], relationshipIDs: editableIDs, position: position ?? null });
           }}
-          onConfirmDelete={() => {
+          onConfirmDelete={(confirmationDisplayName) => {
             const relationshipIDs = (confirmDelete?.relationshipIDs ?? []).filter((relationshipID) => editableRelationshipIDs.has(relationshipID));
             const nodeIDs = (confirmDelete?.nodeIDs ?? []).filter((nodeID) => editableNodeIDs.has(nodeID));
             if (relationshipIDs.length) void deleteRelationships(relationshipIDs);
-            if (nodeIDs.length) void deleteNodes(nodeIDs);
+            if (nodeIDs.length) void deleteNodes(nodeIDs, confirmationDisplayName);
             setConfirmDelete(null);
           }}
           onCancelDelete={() => setConfirmDelete(null)}

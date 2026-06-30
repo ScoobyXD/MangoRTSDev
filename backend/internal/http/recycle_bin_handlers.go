@@ -77,12 +77,14 @@ func (s *Server) handleRecycleBinPermanentDelete(w http.ResponseWriter, r *http.
 		return
 	}
 	var req struct {
-		CompanyID string   `json:"company_id"`
-		ItemIDs   []string `json:"item_ids"`
+		CompanyID               string   `json:"company_id"`
+		ItemIDs                 []string `json:"item_ids"`
+		ConfirmationDisplayName string   `json:"confirmation_display_name"`
 	}
 	if r.Method == http.MethodDelete && r.Body == nil {
 		req.CompanyID = strings.TrimSpace(r.URL.Query().Get("company_id"))
 		req.ItemIDs = r.URL.Query()["item_id"]
+		req.ConfirmationDisplayName = confirmationDisplayNameFromHeader(r)
 	} else if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
@@ -91,10 +93,15 @@ func (s *Server) handleRecycleBinPermanentDelete(w http.ResponseWriter, r *http.
 	if !requireCompanyAccess(w, r, req.CompanyID) {
 		return
 	}
-	deletedByUserID, ok := requireAuthenticatedActorUserID(w, r)
+	actor, ok := requireActorDisplayNameConfirmation(w, r, req.ConfirmationDisplayName)
 	if !ok {
 		return
 	}
+	if !actorCanManageCompany(actor, req.CompanyID) {
+		writeError(w, http.StatusForbidden, "company_admin_required")
+		return
+	}
+	deletedByUserID := actor.User.UserID
 	if err := s.repo.PermanentlyDeleteRecycleBinItems(req.CompanyID, deletedByUserID, req.ItemIDs); errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "recycle_bin_item_ids_required")
 		return

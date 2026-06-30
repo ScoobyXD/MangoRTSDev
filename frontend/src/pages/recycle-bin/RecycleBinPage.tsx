@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
+import { fetchCurrentUser } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons.js";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation.js";
@@ -35,11 +36,29 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [canPermanentlyDelete, setCanPermanentlyDelete] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ itemIDs: string[]; position?: ConfirmActionMenuPosition | null } | null>(null);
   const dragSelectRef = useRef<DragSelectState>(EMPTY_DRAG_STATE);
   const orderedIDs = useMemo(() => items.map((item) => item.recycle_bin_item_id), [items]);
   const selectedItemIDs = useMemo(() => orderedIDs.filter((id) => selectedIDs.has(id)), [orderedIDs, selectedIDs]);
   const allItemsSelected = orderedIDs.length > 0 && selectedItemIDs.length === orderedIDs.length;
+
+  useEffect(() => {
+    if (!companyID) {
+      setCanPermanentlyDelete(false);
+      return undefined;
+    }
+    let cancelled = false;
+    void fetchCurrentUser()
+      .then((current) => {
+        if (cancelled) return;
+        setCanPermanentlyDelete(current.is_dev_admin || current.memberships.some((membership) => membership.company_id === companyID && membership.role === "company_admin"));
+      })
+      .catch(() => {
+        if (!cancelled) setCanPermanentlyDelete(false);
+      });
+    return () => { cancelled = true; };
+  }, [companyID]);
 
   const loadItems = useCallback(() => {
     if (!companyID) return;
@@ -134,17 +153,17 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
   }, [busy, companyID, selectedItemIDs]);
 
   const requestDeleteSelected = useCallback((position?: ConfirmActionMenuPosition) => {
-    if (!companyID || selectedItemIDs.length === 0 || busy) return;
+    if (!companyID || selectedItemIDs.length === 0 || busy || !canPermanentlyDelete) return;
     setDeleteConfirmation({ itemIDs: selectedItemIDs, position: position ?? null });
-  }, [busy, companyID, selectedItemIDs]);
+  }, [busy, canPermanentlyDelete, companyID, selectedItemIDs]);
 
-  const deleteSelected = useCallback(async (itemIDs: string[]) => {
+  const deleteSelected = useCallback(async (itemIDs: string[], confirmationDisplayName: string) => {
     if (!companyID || itemIDs.length === 0 || busy) return;
     setDeleteConfirmation(null);
     setBusy(true);
     setError("");
     try {
-      await permanentlyDeleteRecycleBinItems(companyID, itemIDs);
+      await permanentlyDeleteRecycleBinItems(companyID, itemIDs, confirmationDisplayName);
       setSelectedIDs(new Set());
       setSelectionAnchorID("");
       await listRecycleBinItems(companyID).then(setItems);
@@ -170,7 +189,7 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
           <button type="button" disabled={busy || selectedItemIDs.length === 0} onClick={restoreSelected} style={toolbarButtonStyle("primary", busy || selectedItemIDs.length === 0)}>
             Restore
           </button>
-          <button type="button" disabled={busy || selectedItemIDs.length === 0} onClick={(event) => requestDeleteSelected(confirmMenuPositionFromElement(event.currentTarget))} style={toolbarButtonStyle("danger", busy || selectedItemIDs.length === 0)}>
+          <button type="button" disabled={busy || selectedItemIDs.length === 0 || !canPermanentlyDelete} onClick={(event) => requestDeleteSelected(confirmMenuPositionFromElement(event.currentTarget))} style={toolbarButtonStyle("danger", busy || selectedItemIDs.length === 0 || !canPermanentlyDelete)} title={canPermanentlyDelete ? "Permanently delete selected items" : "Company admin access required"}>
             Permanently delete
           </button>
         </div>
@@ -183,7 +202,7 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
           confirmLabel={busy ? "Deleting" : "Yes"}
           cancelLabel="No"
           confirmDisabled={busy}
-          onConfirm={() => void deleteSelected(deleteConfirmation.itemIDs)}
+          onConfirm={(confirmationDisplayName) => void deleteSelected(deleteConfirmation.itemIDs, confirmationDisplayName)}
           onCancel={() => setDeleteConfirmation(null)}
         />
       )}

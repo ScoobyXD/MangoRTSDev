@@ -1,4 +1,5 @@
 import React from "react";
+import { fetchCurrentUser } from "../auth/cognitoAuth";
 import FrameRightClickMenu from "./framerightclickmenu";
 
 export type ConfirmActionMenuPosition = {
@@ -21,9 +22,11 @@ type ConfirmActionMenuProps = {
   confirmLabel?: string;
   cancelLabel?: string;
   confirmDisabled?: boolean;
+  requireDisplayNameConfirmation?: boolean;
+  requiredConfirmationText?: string;
   isDarkTheme?: boolean;
   children?: React.ReactNode;
-  onConfirm: () => void;
+  onConfirm: (confirmationDisplayName: string) => void;
   onCancel: () => void;
 };
 
@@ -34,6 +37,8 @@ export const ConfirmActionMenu: React.FC<ConfirmActionMenuProps> = ({
   confirmLabel = "Yes",
   cancelLabel = "No",
   confirmDisabled = false,
+  requireDisplayNameConfirmation = true,
+  requiredConfirmationText,
   isDarkTheme = false,
   children,
   onConfirm,
@@ -46,6 +51,25 @@ export const ConfirmActionMenu: React.FC<ConfirmActionMenuProps> = ({
   const panelText = isDarkTheme ? "#f6f8fb" : "#111827";
   const mutedText = isDarkTheme ? "#b8c4cc" : "#334155";
   const buttonSurface = isDarkTheme ? "rgba(255,255,255,0.08)" : "#ffffff";
+  const [currentUserDisplayName, setCurrentUserDisplayName] = React.useState("");
+  const [confirmationInput, setConfirmationInput] = React.useState("");
+  const expectedConfirmationText = (requiredConfirmationText ?? currentUserDisplayName).trim();
+  const confirmationRequired = requireDisplayNameConfirmation && expectedConfirmationText !== "";
+  const confirmationMatches = !confirmationRequired || confirmationInput.trim() === expectedConfirmationText;
+  const effectiveConfirmDisabled = confirmDisabled || !confirmationMatches;
+
+  React.useEffect(() => {
+    if (!requireDisplayNameConfirmation || requiredConfirmationText !== undefined) return undefined;
+    let cancelled = false;
+    void fetchCurrentUser()
+      .then((current) => {
+        if (!cancelled) setCurrentUserDisplayName(current.user.display_name?.trim() ?? "");
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentUserDisplayName("");
+      });
+    return () => { cancelled = true; };
+  }, [requireDisplayNameConfirmation, requiredConfirmationText]);
 
   const complete = (callback: () => void) => {
     try {
@@ -69,21 +93,47 @@ export const ConfirmActionMenu: React.FC<ConfirmActionMenuProps> = ({
             {detail}
           </div>
         )}
+        {confirmationRequired && (
+          <label style={{ display: "grid", gap: 4, fontSize: 11, fontWeight: 700, color: panelText }}>
+            <span>Type your full name to confirm</span>
+            <input
+              type="text"
+              value={confirmationInput}
+              onChange={(event) => setConfirmationInput(event.currentTarget.value)}
+              autoComplete="name"
+              spellCheck={false}
+              style={{
+                minHeight: 28,
+                minWidth: 0,
+                border: "1px solid rgba(100,116,139,0.45)",
+                borderRadius: 6,
+                background: buttonSurface,
+                color: panelText,
+                padding: "0 8px",
+                fontSize: 12,
+                boxSizing: "border-box",
+              }}
+            />
+          </label>
+        )}
         {children}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <button
             type="button"
-            disabled={confirmDisabled}
-            onClick={() => complete(onConfirm)}
+            disabled={effectiveConfirmDisabled}
+            onClick={() => {
+              if (effectiveConfirmDisabled) return;
+              complete(() => onConfirm(confirmationInput.trim()));
+            }}
             style={{
               minHeight: 26,
               border: "1px solid rgba(100,116,139,0.45)",
               borderRadius: 8,
               background: buttonSurface,
               color: panelText,
-              cursor: confirmDisabled ? "not-allowed" : "pointer",
+              cursor: effectiveConfirmDisabled ? "not-allowed" : "pointer",
               fontWeight: 800,
-              opacity: confirmDisabled ? 0.55 : 1,
+              opacity: effectiveConfirmDisabled ? 0.55 : 1,
             }}
           >
             {confirmLabel}

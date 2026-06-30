@@ -960,7 +960,7 @@ function AcceptInvitePage({ onAuthenticated, onNavigate }: { onAuthenticated: ()
       }}>
         {tokenFromURL && invitedEmail && <div style={authInfoMessageStyle}>Invitation for {invitedEmail}.</div>}
         {!tokenFromURL && <AuthTextField label="Invite token" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Invite token" autoComplete="off" spellCheck={false} />}
-        <AuthTextField label="Your full name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your full name" autoComplete="name" />
+        <AuthTextField label="Your full name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your full name" autoComplete="name" required />
         <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" />
         <AuthTextField label="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
         <AuthTextField label="Confirm password" value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} type="password" placeholder="Confirm password" autoComplete="new-password" />
