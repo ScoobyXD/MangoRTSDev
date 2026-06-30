@@ -90,7 +90,7 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
   const cardFrame = `linear-gradient(135deg, ${hexToRgba(color, selected || highlighted ? 0.88 : 0.62)}, rgba(255,255,255,0.84) 72%)`;
   const accounts = (card.accounts ?? []).filter((account) => account.account_id.trim()).slice(0, 4);
   const showRequestedActions = Boolean(requestedActions);
-  const hasFooter = Boolean(requestedStatusText || bylineText);
+  const hasFooter = Boolean(requestedStatusText || requestedStatusAction || bylineText);
   const requestedActionButtonBase: React.CSSProperties = {
     width: 24,
     height: 24,
@@ -263,45 +263,44 @@ export const KanbanCardView: React.FC<KanbanCardViewProps> = ({
         </div>
       )}
       {hasFooter && (
-        <div style={{ marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, color: isIssue ? "#334155" : subtext, fontSize: 10.5, fontWeight: 760, lineHeight: 1.25, overflowWrap: "anywhere" }}>
-          <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            {requestedStatusText && <span>{requestedStatusText}</span>}
-            {requestedStatusAction && (
-              <button
-                type="button"
-                title={requestedStatusAction.title}
-                disabled={requestedStatusAction.busy}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  requestedStatusAction.onClick();
-                }}
-                style={{
-                  minHeight: 21,
-                  border: `1px solid ${hexToRgba(color, 0.30)}`,
-                  borderRadius: 7,
-                  background: requestedStatusAction.busy ? "rgba(241,245,249,0.78)" : "rgba(255,255,255,0.86)",
-                  color: isIssue ? "#334155" : text,
-                  cursor: requestedStatusAction.busy ? "wait" : "pointer",
-                  padding: "2px 7px",
-                  font: "inherit",
-                  fontSize: 10,
-                  fontWeight: 850,
-                  lineHeight: 1,
-                  boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.76)",
-                  opacity: requestedStatusAction.busy ? 0.64 : 1,
-                }}
-              >
-                {requestedStatusAction.label}
-              </button>
-            )}
-          </div>
-          {bylineText && (
-            <div title={bylineText} style={{ minWidth: 0, maxWidth: "52%", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {bylineText}
-            </div>
+        <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: requestedStatusAction ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)", alignItems: "center", gap: 8, color: isIssue ? "#334155" : subtext, fontSize: 10.5, fontWeight: 760, lineHeight: 1.25, overflowWrap: "anywhere" }}>
+          {requestedStatusAction && (
+            <button
+              type="button"
+              title={requestedStatusAction.title}
+              disabled={requestedStatusAction.busy}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                requestedStatusAction.onClick();
+              }}
+              style={{
+                minHeight: 21,
+                border: `1px solid ${hexToRgba(color, 0.30)}`,
+                borderRadius: 7,
+                background: requestedStatusAction.busy ? "rgba(241,245,249,0.78)" : "rgba(255,255,255,0.86)",
+                color: isIssue ? "#334155" : text,
+                cursor: requestedStatusAction.busy ? "wait" : "pointer",
+                padding: "2px 7px",
+                font: "inherit",
+                fontSize: 10,
+                fontWeight: 850,
+                lineHeight: 1,
+                boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.76)",
+                opacity: requestedStatusAction.busy ? 0.64 : 1,
+              }}
+            >
+              {requestedStatusAction.label}
+            </button>
           )}
+          <div
+            title={[requestedStatusText, bylineText].filter(Boolean).join(" · ")}
+            style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, flexWrap: "wrap", textAlign: "right" }}
+          >
+            {requestedStatusText && <span>{requestedStatusText}</span>}
+            {bylineText && <span>{bylineText}</span>}
+          </div>
         </div>
       )}
     </article>
