@@ -264,6 +264,27 @@ export function shouldInvalidateKanbanBoardListForExplorerEnvelope(
     || envelope.type === "kanban_board_deleted";
 }
 
+export function companyExplorerBranchHasMaterializedRows(
+  rows: CompanyExplorerV2Row[],
+  parentEntityID: string,
+): boolean {
+  const cleanParentEntityID = parentEntityID.trim();
+  if (!cleanParentEntityID) return false;
+  return rows.some((row) => (row.parent_entity_id ?? "").trim() === cleanParentEntityID && row.entity_type !== "node");
+}
+
+export function shouldLoadCompanyExplorerBranchChildren(input: {
+  parentEntityID: string;
+  rows: CompanyExplorerV2Row[];
+  branchLoaded: boolean;
+  branchStale: boolean;
+  branchInflight: boolean;
+}): boolean {
+  if (!input.parentEntityID.trim() || input.branchInflight) return false;
+  if (input.branchStale || !input.branchLoaded) return true;
+  return !companyExplorerBranchHasMaterializedRows(input.rows, input.parentEntityID);
+}
+
 function applyKanbanBoardsUpdated(
   state: CompanyExplorerStoreState,
   companyID: string,

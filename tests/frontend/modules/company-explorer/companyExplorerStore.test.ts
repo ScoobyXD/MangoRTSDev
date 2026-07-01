@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import {
   companyExplorerAffectedScopesFromEnvelope,
   companyExplorerRefreshPlanFromAffectedScopes,
+  companyExplorerBranchHasMaterializedRows,
   createCompanyExplorerStoreState,
   reduceCompanyExplorerStore,
+  shouldLoadCompanyExplorerBranchChildren,
   shouldInvalidateKanbanBoardListForExplorerEnvelope,
   shouldRefreshCompanyExplorerSnapshotForGap,
   shouldRefreshKanbanBoardsAfterUpdate,
@@ -307,6 +309,46 @@ run("affected scope helpers ignore non-Explorer semantic scopes", () => {
   assert.equal(plan.hasCompanyExplorerScopes, false);
   assert.equal(plan.refreshRoot, false);
   assert.deepEqual(plan.parentEntityIDs, []);
+});
+
+run("loaded branch guard refetches when child rows are no longer materialized", () => {
+  const rows = [
+    v2Row({ entityID: "folder-entity", entityType: "folder", parentEntityID: "root-entity" }),
+    v2Row({ entityID: "gate-entity", entityType: "logic_gate", resourceID: "gate-a", parentEntityID: "folder-entity", edgeID: "edge-gate-a" }),
+  ];
+
+  assert.equal(companyExplorerBranchHasMaterializedRows(rows, "folder-entity"), true);
+  assert.equal(shouldLoadCompanyExplorerBranchChildren({
+    parentEntityID: "folder-entity",
+    rows,
+    branchLoaded: true,
+    branchStale: false,
+    branchInflight: false,
+  }), false);
+
+  assert.equal(shouldLoadCompanyExplorerBranchChildren({
+    parentEntityID: "folder-entity",
+    rows: rows.filter((row) => row.parent_entity_id !== "folder-entity"),
+    branchLoaded: true,
+    branchStale: false,
+    branchInflight: false,
+  }), true);
+
+  assert.equal(shouldLoadCompanyExplorerBranchChildren({
+    parentEntityID: "folder-entity",
+    rows,
+    branchLoaded: true,
+    branchStale: true,
+    branchInflight: false,
+  }), true);
+
+  assert.equal(shouldLoadCompanyExplorerBranchChildren({
+    parentEntityID: "folder-entity",
+    rows: [],
+    branchLoaded: true,
+    branchStale: false,
+    branchInflight: true,
+  }), false);
 });
 
 run("store event helpers preserve existing refresh contracts", () => {

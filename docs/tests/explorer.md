@@ -1,4 +1,4 @@
-Last updated: 2026-06-30
+Last updated: 2026-07-01
 
 # Explorer Tests
 
@@ -58,6 +58,10 @@ E47 - Dropping a My Triage or Shared Triage email onto a Company Explorer Logic 
 E48 - A successful Company Explorer email-to-Logic-Gate drop updates Home triage state from the conversion result; Home and the global communications live-freshness bridge must keep the source email row visible, patch the Logic Gate icon state, treat the matching `triage.converted` stream event as a local echo, and must not invalidate communications message page/detail caches, remove the row, reuse stale prefetched pages, trigger post-removal fill or message-length prefetch, blank the list, or issue repeated mail GETs. This Explorer drop path is regression-prone because one broad cache invalidation or row removal can reopen the Home refill loop.
 E49 - A successful Company Explorer email-to-Logic-Gate drop shows a temporary green success banner over the Company Explorer sidebar section.
 E50 - A successful Company Explorer email-to-Logic-Gate or eligible node drop sets source emails to unstarred through the source mailbox scope, returns `unstarred_message_ids`, and reconciles Home locally without pulling replacement rows into Inbox, All, Starred, My Triage, or Shared Triage.
+
+## Bug History
+
+BH1 - Reopening a previously opened folder could show the disclosure arrow changing from collapsed to expanded while rendering no child rows. The failure mode was a stale lazy-branch loaded marker surviving after the branch's V2 child rows were no longer materialized. The frontend must treat a loaded marker as insufficient when an expanded `has_children` folder has no visible materialized child rows, and must refetch that branch instead of trusting the stale marker.
 
 ## Scenarios
 
