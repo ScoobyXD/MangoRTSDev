@@ -93,6 +93,8 @@ ST82 - Local Shared Triage conversion echoes from communications realtime and wo
 ST83 - Successful local Shared Triage email conversion keeps converted source email rows visible, patches their Logic Gate icon state from the conversion result, suppresses matching local `triage.converted` echoes by `shared_inbox_id`, and tolerates a matching unscoped realtime echo without invalidating all communications message page/detail caches, removing rows, or triggering post-removal fill/message-length prefetch. This conversion/cache/realtime/prefetch path is regression-prone and must be protected whenever email conversion, star/unstar, row-removal, or pagination refill behavior changes.
 ST84 - Successful local Shared Triage email conversion into a Company Explorer Logic Gate must show a temporary green success banner over the Company Explorer section; other Logic Gate conversion surfaces must show a temporary success banner or notice.
 ST85 - When a dragged Shared Triage email is converted into a Logic Gate, Company Explorer Logic Gate, pinned Logic Gate, or eligible node target, the source email is set to unstarred through the company-owned shared mailbox grant after workspace conversion succeeds. The response returns `unstarred_message_ids`, and Shared Triage applies those IDs locally without full-list replacement, stale prefetched-page top-up, or repeated shared mailbox GETs.
+ST86 - Conversion-driven Shared Triage unstar reconciliation must use the same local echo discipline as conversion: the Starred source card de-stars immediately, the local mutation is remembered under both the scoped `shared_inbox_id` key and a fallback unscoped key, and later backend/provider confirmations must not blank, refill, or fully reload the active Shared Triage list when the realtime payload omits `shared_inbox_id`.
+ST87 - Unread Shared Triage email rows keep their outer unread outline/highlight, but the small top-left colored dot is reserved for the currently selected email only; unread but unselected rows must not show that dot.
 
 ## Scenarios
 
@@ -335,6 +337,7 @@ Business logic covered:
 - ST75
 - ST76
 - ST77
+- ST87
 
 Given:
 - A user opens a mailbox-capable Shared Triage inbox with view access to the shared mailbox.
@@ -361,6 +364,7 @@ Expected:
 - Shared Triage archive confirmation events from the app backend or provider webhook reconcile pending archive bookkeeping without blanking, fully reloading, or removing rows from the currently visible prefetched page.
 - Accepted background Shared Triage archive IDs are not treated as already archived in the frontend list cache; the current page remains stable while earlier page jobs drain in the backend.
 - Starring or unstarring a message updates the row and Starred count locally, and the matching backend/provider confirmation does not blank or fully reload the active Inbox or Starred tab.
+- Unread rows keep their unread outline, while the top-left dot is visible only on the selected email row.
 - Opening or returning to a Shared Triage mailbox does not fire background logic-gate view repair requests for missing, inaccessible, or stale node-linked logic gate IDs.
 - If the backend accepts the archive page but a later provider mutation fails or never confirms, the source email is not deleted and can remain or reappear after refresh.
 - If the archive request fails after the next page is shown, the user remains on the next page and sees an archive failure.
@@ -376,6 +380,7 @@ Business logic covered:
 - ST83
 - ST84
 - ST85
+- ST86
 
 Given:
 - A user has edit access to a mailbox-capable Shared Triage inbox.
@@ -388,4 +393,5 @@ Expected:
 - The resulting Kanban card is marked as directly email-created and can later transfer its email attachment into another node card.
 - The visible Shared Triage email list and app-level communications live-freshness bridge handle the local conversion by keeping converted rows visible, patching the row/detail/cache Logic Gate icon state from the conversion result, and suppressing the matching `shared_inbox_id` scoped realtime echo, plus a matching unscoped echo if the realtime payload omits `shared_inbox_id`, without full-list replacement, communications message cache invalidation, stale prefetched-page top-up, post-removal fill, message-length prefetch, or repeated workspace/mail GET bursts.
 - The backend sets converted shared source emails to unstarred through the shared mailbox grant, returns successfully updated IDs in `unstarred_message_ids`, and the Shared Triage Starred count/list reconcile locally without loading replacement Starred rows.
+- A converted email dragged from Shared Triage Starred visually de-stars immediately and matching scoped or unscoped star/unstar confirmations are treated as local reconciliation, not as a reason to clear caches, refill from prefetched pages, or reload the active Shared Triage message list.
 - Company Explorer drops show a temporary green success banner over the Company Explorer section after the conversion succeeds.

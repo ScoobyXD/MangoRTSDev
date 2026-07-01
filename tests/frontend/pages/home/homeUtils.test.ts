@@ -17,6 +17,7 @@ import {
   getHomeViewLabel,
   inboxLogicGateLabel,
   isWorkspacePanelHomeViewID,
+  localMailboxMutationEchoKeys,
   logicGateTitle,
   missingLogicGateRecordIDs,
   getInboxMatrixGridTemplateColumns,
@@ -33,6 +34,7 @@ import {
   triageMessageIDsFromStreamMessageID,
   workspaceEventTouchesHomePanel,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
+import { messageSelectDotStyle, triageMessageRowStyle } from "../../../../frontend/src/pages/home/homeStyles.js";
 import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { EXPLORER_ENTITY_DRAG_MIME } from "../../../../frontend/src/modules/kanban/shared.js";
 import { GVIC_INBOX_SECTIONS } from "../../../../frontend/src/pages/home/homeConstants.js";
@@ -120,6 +122,33 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
 test("communications triage stream message ids are cleaned and deduped", () => {
   assert.deepEqual(triageMessageIDsFromStreamMessageID(" message-1,message-2, message-1 ,,message-3 "), ["message-1", "message-2", "message-3"]);
   assert.deepEqual(triageMessageIDsFromStreamMessageID(" , "), []);
+});
+
+test("shared inbox local mailbox mutation echoes include scoped and unscoped keys", () => {
+  assert.deepEqual(localMailboxMutationEchoKeys(" company-1 ", undefined, " message-1 "), [
+    "company-1\x1f\x1fmessage-1",
+  ]);
+  assert.deepEqual(localMailboxMutationEchoKeys("company-1", " shared-1 ", "message-2"), [
+    "company-1\x1fshared-1\x1fmessage-2",
+    "company-1\x1f\x1fmessage-2",
+  ]);
+  assert.deepEqual(localMailboxMutationEchoKeys("", "shared-1", "message-2"), []);
+  assert.deepEqual(localMailboxMutationEchoKeys("company-1", "shared-1", " "), []);
+});
+
+test("message select dot only appears for the selected email while unread rows keep their outline", () => {
+  const unreadInactiveDot = messageSelectDotStyle(false, true);
+  assert.equal(unreadInactiveDot.visibility, "hidden");
+  assert.equal(unreadInactiveDot.background, "transparent");
+  assert.equal(unreadInactiveDot.boxShadow, "none");
+
+  const activeDot = messageSelectDotStyle(true, false);
+  assert.equal(activeDot.visibility, "visible");
+  assert.notEqual(activeDot.background, "transparent");
+
+  const unreadRow = triageMessageRowStyle(false, true, true);
+  assert.equal(unreadRow.border, "1px solid transparent");
+  assert.match(String(unreadRow.background), /border-box/);
 });
 
 test("communications archive stream events are identified without treating generic updates as archive confirmations", () => {

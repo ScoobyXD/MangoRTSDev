@@ -244,6 +244,15 @@ export function cleanIDList(values: string[]): string[] {
   return ids;
 }
 
+export function localMailboxMutationEchoKeys(companyID: string, sharedInboxID: string | undefined, messageID: string): string[] {
+  const cleanCompanyID = companyID.trim();
+  const cleanMessageID = messageID.trim();
+  if (!cleanCompanyID || !cleanMessageID) return [];
+  const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
+  const scopedKey = `${cleanCompanyID}\x1f${cleanSharedInboxID}\x1f${cleanMessageID}`;
+  return cleanSharedInboxID ? [scopedKey, `${cleanCompanyID}\x1f\x1f${cleanMessageID}`] : [scopedKey];
+}
+
 export function triageMessageIDsFromStreamMessageID(value: string): string[] {
   return cleanIDList(value.split(","));
 }

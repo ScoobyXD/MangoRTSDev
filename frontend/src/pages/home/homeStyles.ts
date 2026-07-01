@@ -1,6 +1,6 @@
 import React from "react";
-import { HOME_COLUMN_RESIZER_WIDTH, HOME_ROW_RESIZER_HEIGHT, INBOX_PRIORITIES } from "./homeConstants";
-import { normalizeGVICInboxStatus, gvicStatusColor } from "./homeUtils";
+import { HOME_COLUMN_RESIZER_WIDTH, HOME_ROW_RESIZER_HEIGHT, INBOX_PRIORITIES } from "./homeConstants.js";
+import { normalizeGVICInboxStatus, gvicStatusColor } from "./homeUtils.js";
 
 export const HOME_CYAN = "rgb(71, 85, 105)";
 const HOME_CYAN_FAINT = "rgba(71, 85, 105, 0.10)";
@@ -25,7 +25,6 @@ const HOME_KEY_ACTIVE_SHADOW = "8px 8px 20px rgba(174, 174, 192, 0.30), -7px -7p
 const HOME_KEY_EDGE_FRAME_GRADIENT = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
 const HOME_KEY_EDGE_FRAME_SHADOW = "0 0 0 1px rgba(120, 224, 255, 0.22), 0 8px 22px rgba(96, 165, 250, 0.12), 0 0 16px rgba(183, 124, 255, 0.24), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
 const HOME_KEY_PANEL_SHADOW = "inset 0 0 0 1px rgba(255, 255, 255, 0.72), inset 5px 5px 16px rgba(174, 174, 192, 0.16), inset -5px -5px 16px rgba(255, 255, 255, 0.86), 0 12px 28px rgba(15, 23, 42, 0.14)";
-const HOME_MAIL_UNREAD_EDGE = "#38bdf8";
 const HOME_MAIL_UNREAD_EDGE_FRAME = "linear-gradient(#38bdf8, #38bdf8)";
 const HOME_MAIL_STAR_YELLOW = "#facc15";
 const HOME_MAIL_STAR_EDGE_FRAME = "linear-gradient(135deg, #facc15 0%, #fde68a 45%, #f59e0b 100%)";
@@ -1928,18 +1927,17 @@ export function triageMessageRowStyle(active: boolean, unread: boolean, draggabl
   };
 }
 
-export function messageSelectDotStyle(active: boolean, unread: boolean): React.CSSProperties {
+export function messageSelectDotStyle(active: boolean, _unread: boolean): React.CSSProperties {
   return {
     width: 9,
     height: 9,
     marginTop: 4,
     borderRadius: 9,
-    background: active ? HOME_KEY_EDGE_FRAME_GRADIENT : unread ? HOME_MAIL_UNREAD_EDGE : "rgba(100, 116, 139, 0.22)",
+    visibility: active ? "visible" : "hidden",
+    background: active ? HOME_KEY_EDGE_FRAME_GRADIENT : "transparent",
     boxShadow: active
       ? "0 0 0 4px rgba(92, 238, 255, 0.18), 0 0 13px rgba(183, 124, 255, 0.34), 2px 2px 5px rgba(157, 171, 191, 0.5)"
-      : unread
-        ? "0 0 0 4px rgba(56, 189, 248, 0.16), 0 0 12px rgba(56, 189, 248, 0.34)"
-        : "inset 1px 1px 2px rgba(15, 23, 42, 0.12), inset -1px -1px 2px rgba(255, 255, 255, 0.75)",
+      : "none",
   };
 }
 
