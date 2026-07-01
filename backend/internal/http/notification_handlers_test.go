@@ -741,7 +741,7 @@ func TestLogicGateTextBoxMentionCreatesMentionNotification(t *testing.T) {
 	}
 }
 
-func TestNodeTextBoxMentionsCreateFreshNotificationsAcrossSameInformationID(t *testing.T) {
+func TestNodeTextBoxMentionsCreateOnlyNewNotificationsAcrossSameInformationID(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -807,7 +807,7 @@ func TestNodeTextBoxMentionsCreateFreshNotificationsAcrossSameInformationID(t *t
 			t.Fatalf("body preview contains raw editor HTML: %q", notifications[0].BodyPreview)
 		}
 	}
-	assertMentionCount(first, 2)
+	assertMentionCount(first, 1)
 	assertMentionCount(second, 1)
 }
 
@@ -864,7 +864,7 @@ func TestNodeTextBoxRepeatedMentionOccurrenceCreatesFreshAndOccurrenceNotificati
 		listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventMentionCreated, nil)
 		listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
 		return listNotificationsForRequestForTest(t, handler, listReq)
-	}, 3)
+	}, 2)
 }
 
 func TestNotificationReadAllCanClearOneNotificationType(t *testing.T) {

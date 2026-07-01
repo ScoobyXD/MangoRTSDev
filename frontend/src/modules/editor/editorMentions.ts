@@ -85,6 +85,7 @@ export function buildMentionOptions(users: MentionableCompanyUser[], query: stri
 
 export function applyEditorMentionStyle(element: HTMLElement) {
   element.setAttribute(EDITOR_MENTION_ATTRIBUTE, "true");
+  element.setAttribute("contenteditable", "false");
   const urgent = element.getAttribute(EDITOR_MENTION_KIND_ATTRIBUTE) === "urgent";
   element.style.background = urgent ? EDITOR_URGENT_MENTION_BACKGROUND : EDITOR_MENTION_BACKGROUND;
   element.style.color = EDITOR_MENTION_COLOR;
@@ -92,6 +93,7 @@ export function applyEditorMentionStyle(element: HTMLElement) {
   element.style.borderRadius = "6px";
   element.style.padding = "0 4px";
   element.style.fontWeight = "800";
+  element.style.whiteSpace = "nowrap";
   element.style.boxShadow = "inset 1px 1px 0 rgba(255,255,255,0.86), 0 2px 7px rgba(15,23,42,0.08)";
   element.style.setProperty("box-decoration-break", "clone");
 }
