@@ -2906,6 +2906,7 @@ export function HomePage({
   }, [currentDirectSharedInboxGVICAssignments, saveSharedInboxGVICAssignments]);
 
   const nodeByID = useMemo(() => new Map(nodes.map((node) => [node.node_id, node])), [nodes]);
+  const companyUserByID = useMemo(() => new Map(companyUsers.map((user) => [user.user_id, user])), [companyUsers]);
   const allNodeRows = useMemo(() => buildCompanyExplorerTreeRows({
     expanded: nodeExpandedIDs,
     nodes,
@@ -4485,12 +4486,14 @@ export function HomePage({
               companyID={companyID}
               currentUserID={currentUserID}
               liveRefreshToken={updatesLiveRefreshToken}
-              onOpenNode={(nodeID, informationID) => {
-                const node = nodeByID.get(nodeID);
-                if (node) openNodeEditorOverlay(node, informationID);
-              }}
+              onOpenNode={() => undefined}
               onOpenLogicGate={(logicGateID, label) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)))}
               onOpenProject={openProjectManagement}
+              resolveNodeDetails={(nodeID) => {
+                const node = nodeByID.get(nodeID);
+                return node ? { title: nodeTitle(node), status: node.status, priority: node.priority } : null;
+              }}
+              resolveUserLabel={(userID) => homeCompanyUserLabel(companyUserByID.get(userID), userID)}
             />
           ) : isInboxMatrixView ? (
             <>

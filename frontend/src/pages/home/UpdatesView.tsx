@@ -1,5 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildNodeRoute } from "../../app/deepLinkRoutes";
+import { MinimizeToLineIcon, OpenInNewTabIcon } from "../../app/nodeEditorPopupControls";
+import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import {
+  KANBAN_LOGIC_GATE_BACKLOG_COLOR,
+  KANBAN_LOGIC_GATE_DONE_COLOR,
+  KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
+  KANBAN_LOGIC_GATE_PENDING_COLOR,
+  KANBAN_LOGIC_GATE_REQUESTED_COLOR,
+  KANBAN_LOGIC_GATE_REVIEW_COLOR,
+  KANBAN_NODE_PRIORITY_STYLE_OPTIONS,
+} from "../../modules/kanban/shared";
 import {
   deleteNotification,
   deleteNotifications,
@@ -17,6 +29,24 @@ import { createSavedViewID, deleteSavedView as deleteSavedViewRequest, fetchSave
 import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNestedGroup } from "../../modules/grouping/universalGrouping";
 import { orderedUpdateSelection, resolveUpdateClickSelection } from "./updatesSelection";
 
+type UpdatesEditorContentComponent = React.FC<{
+  accent: string;
+  widgetId?: string;
+  theme?: "mango" | "teal" | "light" | "dark";
+  forcedEntityKind?: "node" | "logic_gate";
+  forcedEntityID?: string;
+  forcedLabel?: string;
+  forcedEmptyMessage?: string;
+  focusInformationID?: string;
+  focusRequestID?: number;
+  suppressLegacyWorkspaceStream?: boolean;
+}>;
+
+const LazyUpdatesEditorContent = React.lazy(async () => {
+  const module = await import("../../modules/editor/EditorContent");
+  return { default: module.EditorContent as UpdatesEditorContentComponent };
+});
+
 type UpdatesViewProps = {
   apiBase: string;
   companyID: string;
@@ -25,6 +55,8 @@ type UpdatesViewProps = {
   onOpenNode: (nodeID: string, informationID?: string) => void;
   onOpenLogicGate: (logicGateID: string, label: string) => void;
   onOpenProject: (projectID: string, label: string) => void;
+  resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
+  resolveUserLabel?: (userID: string) => string;
 };
 
 type UpdateGroupingField = "type" | "date" | "gvic" | "project" | "logic_gate";
@@ -68,9 +100,29 @@ type UpdateFeedRow = {
   node?: UpdateRowResource;
 };
 
+type UpdateDisplayGroup = Omit<UpdateGroup, "groups"> & {
+  groups: UpdateDisplayGroup[];
+  rows: UpdateFeedRow[];
+};
+
 type UpdateContextMenuState = {
   x: number;
   y: number;
+};
+
+type UpdateNodeDetails = {
+  title?: string;
+  status?: string | null;
+  priority?: number | null;
+};
+
+type UpdatesNodePanelState = {
+  nodeID: string;
+  nodeTitle: string;
+  focusInformationID?: string;
+  focusRequestID: number;
+  notificationKey: string;
+  row: UpdateFeedRow | null;
 };
 
 const UPDATE_FILTERS: ReadonlyArray<{ value: UpdateFeedFilter; label: string; title: string }> = [
@@ -101,7 +153,17 @@ const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_SAVED = "work_item.logic_gate_assi
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_MOVED = "work_item.logic_gate_assignment_moved";
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_REMOVED = "work_item.logic_gate_assignment_removed";
 
-export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToken = 0, onOpenNode, onOpenLogicGate, onOpenProject }: UpdatesViewProps) {
+export function UpdatesView({
+  apiBase,
+  companyID,
+  currentUserID,
+  liveRefreshToken = 0,
+  onOpenNode,
+  onOpenLogicGate,
+  onOpenProject,
+  resolveNodeDetails,
+  resolveUserLabel,
+}: UpdatesViewProps) {
   const [rootGroups, setRootGroups] = useState<UpdateGroup[]>([]);
   const [branchByRootID, setBranchByRootID] = useState<Record<string, UpdateGroup>>({});
   const [loadingRoots, setLoadingRoots] = useState(false);
@@ -121,7 +183,9 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
   const [selectionAnchorNotificationKey, setSelectionAnchorNotificationKey] = useState("");
   const [hoveredNotificationKey, setHoveredNotificationKey] = useState("");
   const [contextMenu, setContextMenu] = useState<UpdateContextMenuState | null>(null);
+  const [activeNodePanel, setActiveNodePanel] = useState<UpdatesNodePanelState | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const updatesListRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!apiBase || !companyID.trim()) {
@@ -160,6 +224,7 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
     setSelectionAnchorNotificationKey("");
     setHoveredNotificationKey("");
     setContextMenu(null);
+    setActiveNodePanel(null);
   }, [companyID]);
 
   useEffect(() => {
@@ -168,6 +233,7 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
     setSelectionAnchorNotificationKey("");
     setHoveredNotificationKey("");
     setContextMenu(null);
+    setActiveNodePanel(null);
   }, [filter]);
 
   const persistSavedSetting = useCallback((setting: UpdateSavedGroupingSetting) => {
@@ -357,7 +423,8 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
   const sourceGroups = useMemo(() => rootGroups.map((root) => branchByRootID[root.id] ?? root), [branchByRootID, rootGroups]);
   const updateRows = useMemo(() => flattenUpdateRows(sourceGroups, hiddenNotificationIDs), [hiddenNotificationIDs, sourceGroups]);
   const displayGroups = useMemo(() => buildUpdateDisplayGroups(updateRows, selectedSetting.groupings), [selectedSetting.groupings, updateRows]);
-  const visibleNotifications = useMemo(() => flattenDisplayNotifications(displayGroups), [displayGroups]);
+  const visibleUpdateRows = useMemo(() => flattenDisplayRows(displayGroups), [displayGroups]);
+  const visibleNotifications = useMemo(() => visibleUpdateRows.map((row) => row.item), [visibleUpdateRows]);
   const groupingSignature = useMemo(() => JSON.stringify({
     setting: selectedSetting.setting_id,
     groupings: selectedSetting.groupings,
@@ -376,18 +443,24 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
 
   useEffect(() => {
     if (!selectedNotificationKey) return;
-    if (visibleNotifications.some((item) => updateNotificationSelectionKey(item) === selectedNotificationKey)) return;
+    if (visibleUpdateRows.some((row) => updateNotificationSelectionKey(row.item) === selectedNotificationKey)) return;
     setSelectedNotificationKey("");
-  }, [selectedNotificationKey, visibleNotifications]);
+  }, [selectedNotificationKey, visibleUpdateRows]);
 
   useEffect(() => {
-    const visibleKeys = new Set(visibleNotifications.map(updateNotificationSelectionKey));
+    const visibleKeys = new Set(visibleUpdateRows.map((row) => updateNotificationSelectionKey(row.item)));
     setSelectedNotificationKeys((current) => {
       const next = new Set(Array.from(current).filter((key) => visibleKeys.has(key)));
       return next.size === current.size ? current : next;
     });
     if (selectionAnchorNotificationKey && !visibleKeys.has(selectionAnchorNotificationKey)) setSelectionAnchorNotificationKey("");
-  }, [selectionAnchorNotificationKey, visibleNotifications]);
+  }, [selectionAnchorNotificationKey, visibleUpdateRows]);
+
+  useEffect(() => {
+    if (!activeNodePanel?.notificationKey) return;
+    if (visibleUpdateRows.some((row) => updateNotificationSelectionKey(row.item) === activeNodePanel.notificationKey)) return;
+    setActiveNodePanel(null);
+  }, [activeNodePanel, visibleUpdateRows]);
 
   useEffect(() => {
     if (!contextMenu) return undefined;
@@ -420,9 +493,49 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
     return visibleNotifications.filter((item) => selectedNotificationKeys.has(updateNotificationSelectionKey(item)));
   }, [selectedNotificationKeys, visibleNotifications]);
 
-  const selectUpdateItem = useCallback((item: NotificationItem, event?: React.MouseEvent | React.KeyboardEvent, options: { open?: boolean } = {}) => {
+  const focusUpdateRow = useCallback((notificationKey: string) => {
+    if (!notificationKey) return;
+    window.requestAnimationFrame(() => {
+      const rows = Array.from(updatesListRef.current?.querySelectorAll<HTMLElement>("[data-update-key]") ?? []);
+      rows.find((row) => row.dataset.updateKey === notificationKey)?.focus();
+    });
+  }, []);
+
+  const openUpdateNodePanel = useCallback((row: UpdateFeedRow) => {
+    const nodeID = updateRowNodeID(row);
+    if (!nodeID) return;
+    const details = resolveNodeDetails?.(nodeID) ?? null;
+    const informationID = row.item.information_id?.trim() || undefined;
+    const notificationKey = updateNotificationSelectionKey(row.item);
+    setActiveNodePanel({
+      nodeID,
+      nodeTitle: updateRowNodeLabel(row, details),
+      focusInformationID: informationID,
+      focusRequestID: Date.now(),
+      notificationKey,
+      row,
+    });
+    onOpenNode(nodeID, informationID);
+  }, [onOpenNode, resolveNodeDetails]);
+
+  const openNodePanelByResource = useCallback((nodeID: string, label = "") => {
+    const cleanNodeID = nodeID.trim();
+    if (!cleanNodeID) return;
+    const details = resolveNodeDetails?.(cleanNodeID) ?? null;
+    setActiveNodePanel({
+      nodeID: cleanNodeID,
+      nodeTitle: details?.title?.trim() || label.trim() || "Node",
+      focusRequestID: Date.now(),
+      notificationKey: "",
+      row: null,
+    });
+    onOpenNode(cleanNodeID);
+  }, [onOpenNode, resolveNodeDetails]);
+
+  const selectUpdateRow = useCallback((row: UpdateFeedRow, event?: React.MouseEvent | React.KeyboardEvent, options: { open?: boolean; focus?: boolean } = {}) => {
+    const item = row.item;
     const itemKey = updateNotificationSelectionKey(item);
-    const orderedKeys = visibleNotifications.map(updateNotificationSelectionKey);
+    const orderedKeys = visibleUpdateRows.map((candidate) => updateNotificationSelectionKey(candidate.item));
     const selected = resolveUpdateClickSelection({
       orderedIDs: orderedKeys,
       previousSelectedIDs: selectedNotificationKeys,
@@ -438,21 +551,19 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
     setSelectedNotificationKeys(new Set(orderedSelectedIDs.length > 0 ? orderedSelectedIDs : [itemKey]));
     setSelectionAnchorNotificationKey(selected.anchorID);
     setSelectedNotificationKey(primaryKey);
+    if (options.focus) focusUpdateRow(itemKey);
     if (!shouldOpen) return;
-    const nodeID = item.node_id?.trim() || (item.entity_type === "node" ? item.entity_id.trim() : "");
-    if (nodeID) {
-      onOpenNode(nodeID, item.information_id?.trim() || undefined);
-    }
-  }, [onOpenNode, selectedNotificationKeys, selectionAnchorNotificationKey, visibleNotifications]);
+    openUpdateNodePanel(row);
+  }, [focusUpdateRow, openUpdateNodePanel, selectedNotificationKeys, selectionAnchorNotificationKey, visibleUpdateRows]);
 
-  const selectAdjacentUpdate = useCallback((item: NotificationItem, direction: 1 | -1) => {
-    if (visibleNotifications.length === 0) return;
-    const itemKey = updateNotificationSelectionKey(item);
+  const selectAdjacentUpdate = useCallback((row: UpdateFeedRow, direction: 1 | -1) => {
+    if (visibleUpdateRows.length === 0) return;
+    const itemKey = updateNotificationSelectionKey(row.item);
     const activeKey = selectedNotificationKey || itemKey;
-    const currentIndex = Math.max(0, visibleNotifications.findIndex((candidate) => updateNotificationSelectionKey(candidate) === activeKey));
-    const nextIndex = Math.min(Math.max(currentIndex + direction, 0), visibleNotifications.length - 1);
-    selectUpdateItem(visibleNotifications[nextIndex], undefined, { open: true });
-  }, [selectUpdateItem, selectedNotificationKey, visibleNotifications]);
+    const currentIndex = Math.max(0, visibleUpdateRows.findIndex((candidate) => updateNotificationSelectionKey(candidate.item) === activeKey));
+    const nextIndex = Math.min(Math.max(currentIndex + direction, 0), visibleUpdateRows.length - 1);
+    selectUpdateRow(visibleUpdateRows[nextIndex], undefined, { open: true, focus: true });
+  }, [selectUpdateRow, selectedNotificationKey, visibleUpdateRows]);
 
   const removeSeenUpdates = useCallback((items: NotificationItem[], confirmMessage = "") => {
     const uniqueItems = Array.from(new Map(items.map((item) => [updateNotificationSelectionKey(item), item])).values());
@@ -514,9 +625,10 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
     });
   }, [companyID, visibleNotifications]);
 
-  const openUpdateContextMenu = useCallback((event: React.MouseEvent, item: NotificationItem) => {
+  const openUpdateContextMenu = useCallback((event: React.MouseEvent, row: UpdateFeedRow) => {
     event.preventDefault();
     event.stopPropagation();
+    const item = row.item;
     const itemKey = updateNotificationSelectionKey(item);
     if (!selectedNotificationKeys.has(itemKey)) {
       setSelectedNotificationKey(itemKey);
@@ -526,78 +638,90 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
     setContextMenu({ x: event.clientX, y: event.clientY });
   }, [selectedNotificationKeys]);
 
-  const openGroupResource = useCallback((group: UpdateGroup) => {
+  const openGroupResource = useCallback((group: UpdateDisplayGroup) => {
     const resourceID = group.resource_id?.trim() ?? "";
     if (!resourceID) return;
-    if (group.resource_type === "node") onOpenNode(resourceID);
+    if (group.resource_type === "node") openNodePanelByResource(resourceID, group.label);
     if (group.resource_type === "logic_gate") onOpenLogicGate(resourceID, group.label);
     if (group.resource_type === "project") onOpenProject(resourceID, group.label);
-  }, [onOpenLogicGate, onOpenNode, onOpenProject]);
+  }, [onOpenLogicGate, onOpenProject, openNodePanelByResource]);
 
   const meta = loadingRoots || branchLoadingIDs.size > 0 ? "Loading" : error || settingsError;
 
   return (
-    <section style={updatesShellStyle}>
-      <div style={updatesHeaderStyle}>
-        <div style={updatesTitleStackStyle}>
-          <h2 style={updatesTitleStyle}>Updates</h2>
-          {meta && <div style={updatesMetaStyle}>{meta}</div>}
-        </div>
-        <div style={updatesHeaderControlsStyle}>
-          <button
-            type="button"
-            style={updatesSeenAllButtonStyle}
-            disabled={visibleNotifications.length === 0}
-            onClick={markAllUpdatesSeen}
-          >
-            Seen all
-          </button>
-          <UpdateGroupingPanel
-            setting={selectedSetting}
-            settings={settings}
-            addableFields={addableFields}
-            addGroupingOpen={addGroupingOpen}
-            groupingFieldMenuIndex={groupingFieldMenuIndex}
-            onSelectSetting={setSelectedSettingID}
-            onAddSavedView={addSavedView}
-            onDeleteSavedView={deleteSavedView}
-            onToggleCollapsed={toggleSelectedSettingCollapsed}
-            onUpdateGrouping={updateGrouping}
-            onRemoveGrouping={removeGrouping}
-            onSetAddGroupingOpen={setAddGroupingOpen}
-            onSetGroupingFieldMenuIndex={setGroupingFieldMenuIndex}
-            onAddGrouping={addGrouping}
-          />
-          <div style={updatesFilterRowStyle}>
-            {UPDATE_FILTERS.map((item) => (
-              <button key={item.value} type="button" title={item.title} style={updatesFilterButtonStyle(filter === item.value)} onClick={() => setFilter(item.value)}>
-                {item.label}
-              </button>
-            ))}
+    <section style={updatesShellStyle(Boolean(activeNodePanel))}>
+      <div style={updatesMainPaneStyle}>
+        <div style={updatesHeaderStyle}>
+          <div style={updatesTitleStackStyle}>
+            <h2 style={updatesTitleStyle}>Updates</h2>
+            {meta && <div style={updatesMetaStyle}>{meta}</div>}
+          </div>
+          <div style={updatesHeaderControlsStyle}>
+            <button
+              type="button"
+              style={updatesSeenAllButtonStyle}
+              disabled={visibleNotifications.length === 0}
+              onClick={markAllUpdatesSeen}
+            >
+              Seen all
+            </button>
+            <UpdateGroupingPanel
+              setting={selectedSetting}
+              settings={settings}
+              addableFields={addableFields}
+              addGroupingOpen={addGroupingOpen}
+              groupingFieldMenuIndex={groupingFieldMenuIndex}
+              onSelectSetting={setSelectedSettingID}
+              onAddSavedView={addSavedView}
+              onDeleteSavedView={deleteSavedView}
+              onToggleCollapsed={toggleSelectedSettingCollapsed}
+              onUpdateGrouping={updateGrouping}
+              onRemoveGrouping={removeGrouping}
+              onSetAddGroupingOpen={setAddGroupingOpen}
+              onSetGroupingFieldMenuIndex={setGroupingFieldMenuIndex}
+              onAddGrouping={addGrouping}
+            />
+            <div style={updatesFilterRowStyle}>
+              {UPDATE_FILTERS.map((item) => (
+                <button key={item.value} type="button" title={item.title} style={updatesFilterButtonStyle(filter === item.value)} onClick={() => setFilter(item.value)}>
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
+        <div ref={updatesListRef} className="mango-home-scroll" style={updatesListStyle}>
+          {!loadingRoots && !error && displayGroups.length === 0 ? (
+            <div style={updatesEmptyStyle}>No updates</div>
+          ) : (
+            <UpdateGroupList
+              groups={displayGroups}
+              expandedGroupIDs={expandedGroupIDs}
+              branchLoadingIDs={branchLoadingIDs}
+              onToggleGroup={toggleGroup}
+              onSelectRow={selectUpdateRow}
+              onSelectAdjacent={selectAdjacentUpdate}
+              onMarkSeen={markUpdateSeen}
+              selectedNotificationKey={selectedNotificationKey}
+              selectedNotificationKeys={selectedNotificationKeys}
+              hoveredNotificationKey={hoveredNotificationKey}
+              onHoverNotification={setHoveredNotificationKey}
+              onOpenGroupResource={openGroupResource}
+              onOpenContextMenu={openUpdateContextMenu}
+              resolveNodeDetails={resolveNodeDetails}
+              resolveUserLabel={resolveUserLabel}
+            />
+          )}
+        </div>
       </div>
-      <div className="mango-home-scroll" style={updatesListStyle}>
-        {!loadingRoots && !error && displayGroups.length === 0 ? (
-          <div style={updatesEmptyStyle}>No updates</div>
-        ) : (
-          <UpdateGroupList
-            groups={displayGroups}
-            expandedGroupIDs={expandedGroupIDs}
-            branchLoadingIDs={branchLoadingIDs}
-            onToggleGroup={toggleGroup}
-            onSelectItem={selectUpdateItem}
-            onSelectAdjacent={selectAdjacentUpdate}
-            onMarkSeen={markUpdateSeen}
-            selectedNotificationKey={selectedNotificationKey}
-            selectedNotificationKeys={selectedNotificationKeys}
-            hoveredNotificationKey={hoveredNotificationKey}
-            onHoverNotification={setHoveredNotificationKey}
-            onOpenGroupResource={openGroupResource}
-            onOpenContextMenu={openUpdateContextMenu}
-          />
-        )}
-      </div>
+      {activeNodePanel && (
+        <UpdatesNodePanel
+          panel={activeNodePanel}
+          resolveNodeDetails={resolveNodeDetails}
+          resolveUserLabel={resolveUserLabel}
+          onClose={() => setActiveNodePanel(null)}
+        />
+      )}
       {contextMenu && (
         <UpdateContextMenu
           x={contextMenu.x}
@@ -741,7 +865,7 @@ function UpdateGroupList({
   expandedGroupIDs,
   branchLoadingIDs,
   onToggleGroup,
-  onSelectItem,
+  onSelectRow,
   onSelectAdjacent,
   onMarkSeen,
   selectedNotificationKey,
@@ -750,27 +874,31 @@ function UpdateGroupList({
   onHoverNotification,
   onOpenGroupResource,
   onOpenContextMenu,
+  resolveNodeDetails,
+  resolveUserLabel,
 }: {
-  groups: UpdateGroup[];
+  groups: UpdateDisplayGroup[];
   expandedGroupIDs: Set<string>;
   branchLoadingIDs: Set<string>;
   onToggleGroup: (groupID: string) => void;
-  onSelectItem: (item: NotificationItem, event?: React.MouseEvent | React.KeyboardEvent) => void;
-  onSelectAdjacent: (item: NotificationItem, direction: 1 | -1) => void;
+  onSelectRow: (row: UpdateFeedRow, event?: React.MouseEvent | React.KeyboardEvent) => void;
+  onSelectAdjacent: (row: UpdateFeedRow, direction: 1 | -1) => void;
   onMarkSeen: (item: NotificationItem) => void;
   selectedNotificationKey: string;
   selectedNotificationKeys: Set<string>;
   hoveredNotificationKey: string;
   onHoverNotification: (notificationKey: string) => void;
-  onOpenGroupResource: (group: UpdateGroup) => void;
-  onOpenContextMenu: (event: React.MouseEvent, item: NotificationItem) => void;
+  onOpenGroupResource: (group: UpdateDisplayGroup) => void;
+  onOpenContextMenu: (event: React.MouseEvent, row: UpdateFeedRow) => void;
+  resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
+  resolveUserLabel?: (userID: string) => string;
 }) {
   return (
     <div style={updateGroupListStyle}>
       {groups.map((group) => {
         const open = expandedGroupIDs.has(group.id);
         const branchLoading = branchLoadingIDs.has(group.id);
-        const rows = group.notifications ?? [];
+        const rows = group.rows ?? [];
         const canOpenResource = updateGroupCanOpenResource(group);
         return (
           <div key={group.id} style={updateGroupBlockStyle}>
@@ -802,7 +930,7 @@ function UpdateGroupList({
                 expandedGroupIDs={expandedGroupIDs}
                 branchLoadingIDs={branchLoadingIDs}
                 onToggleGroup={onToggleGroup}
-                onSelectItem={onSelectItem}
+                onSelectRow={onSelectRow}
                 onSelectAdjacent={onSelectAdjacent}
                 onMarkSeen={onMarkSeen}
                 selectedNotificationKey={selectedNotificationKey}
@@ -811,13 +939,15 @@ function UpdateGroupList({
                 onHoverNotification={onHoverNotification}
                 onOpenGroupResource={onOpenGroupResource}
                 onOpenContextMenu={onOpenContextMenu}
+                resolveNodeDetails={resolveNodeDetails}
+                resolveUserLabel={resolveUserLabel}
               />
             )}
             {open && rows.length > 0 && (
               <UpdateRows
                 rows={rows}
                 depth={group.depth + 1}
-                onSelectItem={onSelectItem}
+                onSelectRow={onSelectRow}
                 onSelectAdjacent={onSelectAdjacent}
                 onMarkSeen={onMarkSeen}
                 selectedNotificationKey={selectedNotificationKey}
@@ -825,6 +955,8 @@ function UpdateGroupList({
                 hoveredNotificationKey={hoveredNotificationKey}
                 onHoverNotification={onHoverNotification}
                 onOpenContextMenu={onOpenContextMenu}
+                resolveNodeDetails={resolveNodeDetails}
+                resolveUserLabel={resolveUserLabel}
               />
             )}
           </div>
@@ -864,7 +996,7 @@ function updateGroupIconBadge(group: UpdateGroup): { label: string; tone: "urgen
 function UpdateRows({
   rows,
   depth,
-  onSelectItem,
+  onSelectRow,
   onSelectAdjacent,
   onMarkSeen,
   selectedNotificationKey,
@@ -872,47 +1004,59 @@ function UpdateRows({
   hoveredNotificationKey,
   onHoverNotification,
   onOpenContextMenu,
+  resolveNodeDetails,
+  resolveUserLabel,
 }: {
-  rows: NotificationItem[];
+  rows: UpdateFeedRow[];
   depth: number;
-  onSelectItem: (item: NotificationItem, event?: React.MouseEvent | React.KeyboardEvent) => void;
-  onSelectAdjacent: (item: NotificationItem, direction: 1 | -1) => void;
+  onSelectRow: (row: UpdateFeedRow, event?: React.MouseEvent | React.KeyboardEvent) => void;
+  onSelectAdjacent: (row: UpdateFeedRow, direction: 1 | -1) => void;
   onMarkSeen: (item: NotificationItem) => void;
   selectedNotificationKey: string;
   selectedNotificationKeys: Set<string>;
   hoveredNotificationKey: string;
   onHoverNotification: (notificationKey: string) => void;
-  onOpenContextMenu: (event: React.MouseEvent, item: NotificationItem) => void;
+  onOpenContextMenu: (event: React.MouseEvent, row: UpdateFeedRow) => void;
+  resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
+  resolveUserLabel?: (userID: string) => string;
 }) {
   return (
     <div style={updateRowsStyle}>
-      {rows.map((item, index) => {
+      {rows.map((row, index) => {
+        const item = row.item;
         const notificationKey = updateNotificationSelectionKey(item);
         const rowTone = updateRowTone(item);
-        const rowBody = formatUpdateRowBody(item);
+        const rowBody = formatUpdateRowBody(row);
         return (
           <div
-            key={`${notificationKey}:${index}`}
+            key={`${row.rowKey}:${index}`}
             role="button"
             tabIndex={0}
+            data-update-key={notificationKey}
             style={updateRowStyle(depth, !item.read_timestamp, rowTone, selectedNotificationKeys.has(notificationKey) || selectedNotificationKey === notificationKey, hoveredNotificationKey === notificationKey)}
-            onClick={(event) => onSelectItem(item, event)}
-            onContextMenu={(event) => onOpenContextMenu(event, item)}
+            onMouseDown={(event) => {
+              if (event.button !== 0) return;
+              if ((event.target as HTMLElement).closest("button")) return;
+              event.preventDefault();
+              event.currentTarget.focus();
+            }}
+            onClick={(event) => onSelectRow(row, event)}
+            onContextMenu={(event) => onOpenContextMenu(event, row)}
             onMouseEnter={() => onHoverNotification(notificationKey)}
             onMouseLeave={() => onHoverNotification("")}
             onKeyDown={(event) => {
               if ((event.target as HTMLElement).tagName === "BUTTON") return;
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                onSelectItem(item, event);
+                onSelectRow(row, event);
               }
               if (event.key === "ArrowDown") {
                 event.preventDefault();
-                onSelectAdjacent(item, 1);
+                onSelectAdjacent(row, 1);
               }
               if (event.key === "ArrowUp") {
                 event.preventDefault();
-                onSelectAdjacent(item, -1);
+                onSelectAdjacent(row, -1);
               }
             }}
           >
@@ -920,7 +1064,9 @@ function UpdateRows({
               {updateRowIcon(item)}
             </span>
             <span style={updateRowTextStyle}>
-              <span style={updateRowTitleStyle}>{formatUpdateRowTitle(item)}</span>
+              <span style={updateRowTitleStyle}>
+                <UpdateCanonicalRowCopy row={row} resolveNodeDetails={resolveNodeDetails} resolveUserLabel={resolveUserLabel} />
+              </span>
               {rowBody && <span style={updateRowBodyStyle}>{rowBody}</span>}
             </span>
             <span style={updateRowTimeStyle}>{formatNotificationTimestamp(item.created_timestamp)}</span>
@@ -1020,28 +1166,207 @@ function updateRowTone(item: NotificationItem): "urgent" | "mention" | "new" | "
   return "update";
 }
 
-function formatUpdateRowTitle(item: NotificationItem): string {
-  const title = item.title.trim();
-  const fallback = title || "Update";
-  if (item.type === NOTIFICATION_TYPE_URGENT_MENTION) {
-    if (/^urgent\b/i.test(fallback)) return fallback.replace(/^urgent\b/i, "URGENT");
-    return `URGENT ${fallback.replace(/\burgently mentioned you\b/i, "mentioned you").replace(/\bhas mentioned you\b/i, "mentioned you")}`;
+function UpdateCanonicalRowCopy({
+  row,
+  resolveNodeDetails,
+  resolveUserLabel,
+}: {
+  row: UpdateFeedRow;
+  resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
+  resolveUserLabel?: (userID: string) => string;
+}) {
+  const item = row.item;
+  const tone = updateRowTone(item);
+  const nodeID = updateRowNodeID(row);
+  const nodeDetails = nodeID ? resolveNodeDetails?.(nodeID) ?? null : null;
+  const actor = updateActorLabel(item, resolveUserLabel);
+  const nodeLabel = updateRowNodeLabel(row, nodeDetails);
+  const logicGateLabel = updateRowLogicGateLabel(row);
+  const statusLabel = updateRowStatusLabel(row, nodeDetails);
+  const priorityValue = nodeDetails ? updatePriorityValue(nodeDetails.priority) : null;
+  const statusToken = statusLabel ? <UpdateStatusToken status={statusLabel} /> : null;
+  const priorityToken = priorityValue !== null ? <UpdatePriorityToken priority={priorityValue} /> : null;
+  const nodeEntity = <UpdateInlineEntity kind="node" label={nodeLabel} />;
+  const logicGateEntity = <UpdateInlineEntity kind="logic_gate" label={logicGateLabel} />;
+
+  if (tone === "urgent" || tone === "mention") {
+    return (
+      <span style={updateRowCopyStyle}>
+        <span>{actor}</span>
+        <span>{tone === "urgent" ? "urgently mentioned you in" : "mentioned you in"}</span>
+        {nodeEntity}
+        <span>in</span>
+        {logicGateEntity}
+      </span>
+    );
   }
-  if (item.type === NOTIFICATION_TYPE_MENTION) {
-    return fallback.replace(/\bhas mentioned you\b/i, "mentioned you");
+
+  if (item.type === NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_SAVED || item.type === NOTIFICATION_TYPE_NODE_ASSIGNED || tone === "new") {
+    return (
+      <span style={updateRowCopyStyle}>
+        <span>{actor}</span>
+        <span>added</span>
+        {nodeEntity}
+        {priorityToken}
+        {statusToken}
+        <span>to</span>
+        {logicGateEntity}
+      </span>
+    );
   }
-  if (updateRowTone(item) === "new") return "Brand new node";
-  if (updateRowTone(item) === "deleted") {
-    if (/removed/i.test(fallback)) return "Removed from work";
-    return "Deleted";
+
+  if (tone === "deleted") {
+    return (
+      <span style={updateRowCopyStyle}>
+        <span>{actor}</span>
+        <span>removed</span>
+        {nodeEntity}
+        <span>from</span>
+        {logicGateEntity}
+      </span>
+    );
   }
-  return fallback;
+
+  if (tone === "status") {
+    return (
+      <span style={updateRowCopyStyle}>
+        <span>{actor}</span>
+        <span>updated</span>
+        {nodeEntity}
+        {statusToken ? <span>to</span> : null}
+        {statusToken}
+        <span>in</span>
+        {logicGateEntity}
+      </span>
+    );
+  }
+
+  if (tone === "comment") {
+    return (
+      <span style={updateRowCopyStyle}>
+        <span>{actor}</span>
+        <span>sent chat on</span>
+        {nodeEntity}
+        <span>in</span>
+        {logicGateEntity}
+      </span>
+    );
+  }
+
+  return (
+    <span style={updateRowCopyStyle}>
+      <span>{normalizeLegacyUpdateTitle(item.title) || "Update"}</span>
+    </span>
+  );
 }
 
-function formatUpdateRowBody(item: NotificationItem): string {
-  const body = (item.body_preview ?? "").trim();
+function UpdateInlineEntity({ kind, label }: { kind: "node" | "logic_gate" | "project"; label: string }) {
+  return (
+    <span style={updateInlineEntityStyle}>
+      <ExplorerRowIcon kind={kind} />
+      <span style={updateInlineEntityLabelStyle}>{label}</span>
+    </span>
+  );
+}
+
+function UpdatePriorityToken({ priority }: { priority: number }) {
+  const option = KANBAN_NODE_PRIORITY_STYLE_OPTIONS.find((item) => item.value === String(priority))
+    ?? KANBAN_NODE_PRIORITY_STYLE_OPTIONS.find((item) => item.value === "0")
+    ?? KANBAN_NODE_PRIORITY_STYLE_OPTIONS[0];
+  return (
+    <span
+      style={{
+        ...updateInlineTokenStyle,
+        color: option.color,
+        borderColor: option.borderColor,
+        background: option.surface,
+      }}
+    >
+      {option.label}
+    </span>
+  );
+}
+
+function UpdateStatusToken({ status }: { status: string }) {
+  const color = updateStatusColor(status);
+  return (
+    <span
+      style={{
+        ...updateInlineTokenStyle,
+        color,
+        borderColor: `${color}55`,
+        background: `${color}16`,
+      }}
+    >
+      {formatUpdateStatusLabel(status)}
+    </span>
+  );
+}
+
+function UpdatesNodePanel({
+  panel,
+  resolveNodeDetails,
+  resolveUserLabel,
+  onClose,
+}: {
+  panel: UpdatesNodePanelState;
+  resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined;
+  resolveUserLabel?: (userID: string) => string;
+  onClose: () => void;
+}) {
+  const details = resolveNodeDetails?.(panel.nodeID) ?? null;
+  const nodeTitle = details?.title?.trim() || panel.nodeTitle;
+  const body = panel.row ? formatUpdateRowBody(panel.row) : "";
+  return (
+    <aside style={updatesNodePanelStyle} aria-label="Selected update node">
+      <div style={updatesNodePanelHeaderStyle}>
+        <div style={updatesNodePanelTitleStackStyle}>
+          <span style={updatesNodePanelEyebrowStyle}>Selected update</span>
+          <span style={updatesNodePanelTitleStyle}>{nodeTitle}</span>
+        </div>
+        <div style={updatesNodePanelControlsStyle}>
+          <button type="button" title="Open node in new tab" style={updatesNodePanelIconButtonStyle} onClick={() => openAppPathInNewTab(buildNodeRoute(panel.nodeID))}>
+            <OpenInNewTabIcon />
+          </button>
+          <button type="button" title="Close node panel" style={updatesNodePanelIconButtonStyle} onClick={onClose}>
+            <MinimizeToLineIcon />
+          </button>
+        </div>
+      </div>
+      {panel.row && (
+        <div style={updatesNodePanelNotificationStyle}>
+          <span style={updateRowIconStyle(updateRowTone(panel.row.item))}>{updateRowIcon(panel.row.item)}</span>
+          <span style={updatesNodePanelNotificationTextStyle}>
+            <UpdateCanonicalRowCopy row={panel.row} resolveNodeDetails={resolveNodeDetails} resolveUserLabel={resolveUserLabel} />
+            {body && <span style={updatesNodePanelNotificationBodyStyle}>{body}</span>}
+          </span>
+          <span style={updatesNodePanelNotificationTimeStyle}>{formatNotificationTimestamp(panel.row.item.created_timestamp)}</span>
+        </div>
+      )}
+      <div style={updatesNodePanelEditorStyle}>
+        <React.Suspense fallback={<div style={updatesNodePanelLoadingStyle}>Loading node</div>}>
+          <LazyUpdatesEditorContent
+            accent="#2563eb"
+            widgetId={`updates-node:${panel.nodeID}`}
+            theme="mango"
+            forcedEntityKind="node"
+            forcedEntityID={panel.nodeID}
+            forcedLabel={nodeTitle}
+            forcedEmptyMessage="Select an update that points to a node."
+            focusInformationID={panel.focusInformationID}
+            focusRequestID={panel.focusRequestID}
+            suppressLegacyWorkspaceStream
+          />
+        </React.Suspense>
+      </div>
+    </aside>
+  );
+}
+
+function formatUpdateRowBody(row: UpdateFeedRow): string {
+  const body = (row.item.body_preview ?? "").trim();
   if (!body) return "";
-  if (updateRowTone(item) === "new") {
+  if (updateRowTone(row.item) === "new") {
     const addedIn = body.match(/\bwas added in ([^.]+)\./i);
     if (addedIn?.[1]) return `Added in ${addedIn[1].trim()}.`;
     if (/was added to logic gate work/i.test(body)) return "Added to Logic Gate work.";
@@ -1049,7 +1374,109 @@ function formatUpdateRowBody(item: NotificationItem): string {
   return body;
 }
 
-function collectUpdateGroupIDs(group: UpdateGroup): string[] {
+function updateRowNodeID(row: UpdateFeedRow): string {
+  return row.item.node_id?.trim()
+    || row.node?.id.trim()
+    || (row.item.entity_type === "node" ? row.item.entity_id.trim() : "");
+}
+
+function updateRowNodeLabel(row: UpdateFeedRow, details?: UpdateNodeDetails | null): string {
+  return details?.title?.trim()
+    || row.node?.label.trim()
+    || extractMentionTargetLabel(row.item)
+    || extractNodeLabelFromPreview(row.item)
+    || "Node";
+}
+
+function updateRowLogicGateLabel(row: UpdateFeedRow): string {
+  return row.logicGate?.label.trim() || "Logic Gate";
+}
+
+function updateActorLabel(item: NotificationItem, resolveUserLabel?: (userID: string) => string): string {
+  const actorID = item.actor_user_id?.trim() ?? "";
+  const resolved = actorID ? resolveUserLabel?.(actorID)?.trim() ?? "" : "";
+  return resolved || extractActorFromNotification(item) || "Someone";
+}
+
+function updateRowStatusLabel(row: UpdateFeedRow, details?: UpdateNodeDetails | null): string {
+  return extractStatusFromNotification(row.item) || details?.status?.trim() || "";
+}
+
+function updatePriorityValue(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(5, Math.round(value)));
+}
+
+function extractActorFromNotification(item: NotificationItem): string {
+  const title = item.title.trim();
+  const body = (item.body_preview ?? "").trim();
+  const mentionMatch = title.match(/^(?:urgent\s+)?(.+?)\s+(?:urgently\s+)?mentioned you\b/i);
+  if (mentionMatch?.[1]) return mentionMatch[1].trim();
+  const bodyChangedMatch = body.match(/^(.+?)\s+(?:changed|updated|moved|added|removed)\b/i);
+  if (bodyChangedMatch?.[1]) return bodyChangedMatch[1].trim();
+  const titleActionMatch = title.match(/^(.+?)\s+(?:added|updated|removed|deleted|assigned|sent|attached|gave|requested)\b/i);
+  if (titleActionMatch?.[1]) return titleActionMatch[1].trim();
+  return "";
+}
+
+function extractMentionTargetLabel(item: NotificationItem): string {
+  const title = item.title.trim();
+  const match = title.match(/\bmentioned you in\s+(.+)$/i);
+  return match?.[1]?.trim() ?? "";
+}
+
+function extractNodeLabelFromPreview(item: NotificationItem): string {
+  const title = item.title.trim();
+  const body = (item.body_preview ?? "").trim();
+  const addedMatch = body.match(/^(.+?)\s+was added\b/i);
+  if (addedMatch?.[1]) return addedMatch[1].trim();
+  const movedMatch = body.match(/^(.+?)\s+moved to\b/i);
+  if (movedMatch?.[1]) return movedMatch[1].trim();
+  const changedMatch = body.match(/^.+?\s+changed\s+(.+?)\s+to\b/i);
+  if (changedMatch?.[1]) return changedMatch[1].trim();
+  return normalizeLegacyUpdateTitle(title);
+}
+
+function extractStatusFromNotification(item: NotificationItem): string {
+  const title = item.title.trim();
+  const body = (item.body_preview ?? "").trim();
+  const titleMatch = title.match(/\bstatus changed to\s+(.+)$/i);
+  if (titleMatch?.[1]) return titleMatch[1].trim();
+  const addedMatch = body.match(/\bwas added in\s+([^.]+)\.?$/i);
+  if (addedMatch?.[1]) return addedMatch[1].trim();
+  const movedMatch = body.match(/\bmoved to\s+([^.]+)\.?$/i);
+  if (movedMatch?.[1]) return movedMatch[1].trim();
+  const changedMatch = body.match(/\bchanged\s+.+?\s+to\s+([^.]+)\.?$/i);
+  if (changedMatch?.[1]) return changedMatch[1].trim();
+  return "";
+}
+
+function normalizeLegacyUpdateTitle(value: string): string {
+  return value.trim()
+    .replace(/^URGENT\s+/i, "")
+    .replace(/\bhas mentioned you\b/i, "mentioned you")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function formatUpdateStatusLabel(status: string): string {
+  return status.trim().replace(/[_-]+/g, " ").replace(/\s+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function updateStatusColor(status: string): string {
+  const token = status.trim().toLowerCase().replace(/[_-]+/g, " ");
+  if (token === "requested") return KANBAN_LOGIC_GATE_REQUESTED_COLOR;
+  if (token === "backlog") return KANBAN_LOGIC_GATE_BACKLOG_COLOR;
+  if (token === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
+  if (token === "in progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
+  if (token === "review") return KANBAN_LOGIC_GATE_REVIEW_COLOR;
+  if (token === "done") return KANBAN_LOGIC_GATE_DONE_COLOR;
+  return "#64748b";
+}
+
+type UpdateGroupIDTree = { id: string; groups: UpdateGroupIDTree[] };
+
+function collectUpdateGroupIDs(group: UpdateGroupIDTree): string[] {
   const ids = [group.id];
   for (const child of group.groups) ids.push(...collectUpdateGroupIDs(child));
   return ids;
@@ -1075,10 +1502,10 @@ function flattenUpdateRows(groups: UpdateGroup[], hiddenNotificationIDs: Set<str
   return sortUpdateRows(rows);
 }
 
-function flattenDisplayNotifications(groups: UpdateGroup[]): NotificationItem[] {
-  const rows: NotificationItem[] = [];
-  const visit = (group: UpdateGroup) => {
-    for (const item of group.notifications ?? []) rows.push(item);
+function flattenDisplayRows(groups: UpdateDisplayGroup[]): UpdateFeedRow[] {
+  const rows: UpdateFeedRow[] = [];
+  const visit = (group: UpdateDisplayGroup) => {
+    for (const row of group.rows ?? []) rows.push(row);
     for (const child of group.groups) visit(child);
   };
   for (const group of groups) visit(group);
@@ -1099,9 +1526,10 @@ function updatePathWithGroup(path: { project?: UpdateRowResource; logicGate?: Up
   return path;
 }
 
-function buildUpdateDisplayGroups(rows: UpdateFeedRow[], groupings: UpdateGroupingSetting[]): UpdateGroup[] {
+function buildUpdateDisplayGroups(rows: UpdateFeedRow[], groupings: UpdateGroupingSetting[]): UpdateDisplayGroup[] {
   const displayGroupings: UpdateDisplayGroupingSetting[] = normalizeUpdateGroupingStack(groupings);
   if (displayGroupings.length === 0) {
+    const sortedRows = sortUpdateRows(rows);
     return [{
       id: "updates/all",
       key: "updates:all",
@@ -1111,7 +1539,8 @@ function buildUpdateDisplayGroups(rows: UpdateFeedRow[], groupings: UpdateGroupi
       resource_id: "",
       depth: 0,
       groups: [],
-      notifications: sortUpdateRows(rows).map((row) => row.item),
+      notifications: sortedRows.map((row) => row.item),
+      rows: sortedRows,
     }];
   }
   const groups = buildUniversalNestedGroups(rows, displayGroupings, {
@@ -1123,8 +1552,9 @@ function buildUpdateDisplayGroups(rows: UpdateFeedRow[], groupings: UpdateGroupi
   return groups.map(convertUniversalUpdateGroup);
 }
 
-function convertUniversalUpdateGroup(group: UniversalNestedGroup<UpdateFeedRow, UpdateDisplayGroupingField>): UpdateGroup {
+function convertUniversalUpdateGroup(group: UniversalNestedGroup<UpdateFeedRow, UpdateDisplayGroupingField>): UpdateDisplayGroup {
   const resource = updateGroupResourceFromValue(group.field, group.key);
+  const sortedRows = sortUpdateRows(group.rows);
   return {
     id: group.id,
     key: group.key,
@@ -1134,7 +1564,8 @@ function convertUniversalUpdateGroup(group: UniversalNestedGroup<UpdateFeedRow, 
     resource_id: resource?.id ?? "",
     depth: group.depth,
     groups: group.groups.map(convertUniversalUpdateGroup),
-    notifications: group.rows.map((row) => row.item),
+    notifications: sortedRows.map((row) => row.item),
+    rows: sortedRows,
   };
 }
 
@@ -1299,16 +1730,27 @@ function savedViewErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim() ? error.message.trim() : fallback;
 }
 
-const updatesShellStyle: React.CSSProperties = {
+function updatesShellStyle(panelOpen: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: 0,
+    height: "100%",
+    display: "grid",
+    gridTemplateColumns: panelOpen ? "minmax(0, 1fr) clamp(390px, 44vw, 620px)" : "minmax(0, 1fr)",
+    gap: panelOpen ? 12 : 0,
+    padding: "10px 14px 14px",
+    background: "radial-gradient(circle at 18% 12%, rgba(20, 184, 166, 0.16), transparent 34%), radial-gradient(circle at 88% 18%, rgba(251, 146, 60, 0.12), transparent 30%), linear-gradient(135deg, rgba(240, 253, 250, 0.94), rgba(255, 247, 237, 0.78) 48%, rgba(248, 250, 252, 0.96))",
+    color: "#111827",
+    overflow: "hidden",
+  };
+}
+
+const updatesMainPaneStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
-  height: "100%",
   display: "grid",
   gridTemplateRows: "auto minmax(0, 1fr)",
   gap: 10,
-  padding: "10px 14px 14px",
-  background: "radial-gradient(circle at 18% 12%, rgba(20, 184, 166, 0.16), transparent 34%), radial-gradient(circle at 88% 18%, rgba(251, 146, 60, 0.12), transparent 30%), linear-gradient(135deg, rgba(240, 253, 250, 0.94), rgba(255, 247, 237, 0.78) 48%, rgba(248, 250, 252, 0.96))",
-  color: "#111827",
   overflow: "hidden",
 };
 
@@ -1728,9 +2170,9 @@ function updateRowStyle(depth: number, unread: boolean, tone: ReturnType<typeof 
   const isUrgent = tone === "urgent";
   return {
     width: "min(980px, calc(100% - 16px))",
-    minHeight: 38,
+    minHeight: 44,
     display: "grid",
-    gridTemplateColumns: "18px minmax(220px, 1fr) 58px 96px",
+    gridTemplateColumns: "18px minmax(180px, 1fr) 58px 78px",
     alignItems: "center",
     gap: 9,
     marginLeft: depth * 28 + 42,
@@ -1751,6 +2193,8 @@ function updateRowStyle(depth: number, unread: boolean, tone: ReturnType<typeof 
     padding: "0 8px",
     fontWeight: unread ? 800 : 650,
     outline: "none",
+    userSelect: "none",
+    WebkitUserSelect: "none",
   };
 }
 
@@ -1778,7 +2222,7 @@ function updateRowIconStyle(tone: ReturnType<typeof updateRowTone>): React.CSSPr
 }
 
 const updateRowTextStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 2 };
-const updateRowTitleStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 780 };
+const updateRowTitleStyle: React.CSSProperties = { minWidth: 0, display: "block", overflow: "hidden", fontSize: 12, fontWeight: 780 };
 const updateRowBodyStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 11, fontWeight: 650 };
 const updateRowTimeStyle: React.CSSProperties = { color: "#64748b", fontSize: 10, fontWeight: 700, textAlign: "right" };
 const updateMarkReadButtonStyle: React.CSSProperties = {
@@ -1795,6 +2239,110 @@ const updateMarkReadButtonStyle: React.CSSProperties = {
   padding: "0 7px",
   whiteSpace: "nowrap",
 };
+
+const updateRowCopyStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: "3px 5px",
+  lineHeight: 1.25,
+};
+
+const updateInlineEntityStyle: React.CSSProperties = {
+  minWidth: 0,
+  maxWidth: 230,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 3,
+  color: "#0f172a",
+  fontWeight: 850,
+  verticalAlign: "middle",
+};
+
+const updateInlineEntityLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const updateInlineTokenStyle: React.CSSProperties = {
+  maxWidth: 190,
+  minHeight: 18,
+  display: "inline-flex",
+  alignItems: "center",
+  border: "1px solid",
+  borderRadius: 4,
+  padding: "0 5px",
+  fontSize: 10,
+  fontWeight: 850,
+  lineHeight: 1.2,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const updatesNodePanelStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 0,
+  display: "grid",
+  gridTemplateRows: "auto auto minmax(0, 1fr)",
+  border: "1px solid rgba(15, 23, 42, 0.14)",
+  borderRadius: 8,
+  background: "rgba(255, 255, 255, 0.96)",
+  boxShadow: "0 18px 40px rgba(15, 23, 42, 0.14)",
+  overflow: "hidden",
+};
+
+const updatesNodePanelHeaderStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 48,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: 8,
+  borderBottom: "1px solid rgba(148, 163, 184, 0.22)",
+  background: "linear-gradient(90deg, rgba(239, 246, 255, 0.96), rgba(240, 253, 250, 0.88))",
+  padding: "8px 10px",
+};
+
+const updatesNodePanelTitleStackStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 2 };
+const updatesNodePanelEyebrowStyle: React.CSSProperties = { color: "#64748b", fontSize: 10, fontWeight: 850, textTransform: "uppercase" };
+const updatesNodePanelTitleStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#0f172a", fontSize: 13, fontWeight: 900 };
+const updatesNodePanelControlsStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 5 };
+
+const updatesNodePanelIconButtonStyle: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(15, 23, 42, 0.16)",
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "#334155",
+  cursor: "pointer",
+  padding: 0,
+};
+
+const updatesNodePanelNotificationStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "18px minmax(0, 1fr) auto",
+  alignItems: "start",
+  gap: 8,
+  borderBottom: "1px solid rgba(148, 163, 184, 0.18)",
+  background: "rgba(248, 250, 252, 0.82)",
+  padding: "8px 10px",
+  userSelect: "none",
+  WebkitUserSelect: "none",
+};
+
+const updatesNodePanelNotificationTextStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 3, color: "#111827", fontSize: 12, fontWeight: 760 };
+const updatesNodePanelNotificationBodyStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 11, fontWeight: 650 };
+const updatesNodePanelNotificationTimeStyle: React.CSSProperties = { color: "#64748b", fontSize: 10, fontWeight: 750, whiteSpace: "nowrap" };
+const updatesNodePanelEditorStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden", background: "#f8fafc" };
+const updatesNodePanelLoadingStyle: React.CSSProperties = { minHeight: 180, display: "grid", placeItems: "center", color: "#64748b", fontSize: 12, fontWeight: 750 };
 
 const updatesContextMenuStyle: React.CSSProperties = {
   position: "fixed",
