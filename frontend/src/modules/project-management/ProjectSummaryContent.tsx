@@ -27,6 +27,7 @@ import {
   type EditorChatAttachment,
   type EditorTextBlockChatMessage,
 } from "../editor/editorProjection.js";
+import { EditorContent } from "../editor/EditorContent.js";
 import { generateStableInformationID } from "../editor/editorTypes.js";
 import {
   AttachedEmailOrganizerPane,
@@ -154,6 +155,12 @@ type CriticalPathStepUpdates = Partial<{
   isCurrent: boolean;
 }>;
 
+type CriticalPathNodePreviewSelection = {
+  stepID: string;
+  nodeID: string;
+  title: string;
+};
+
 const PROJECT_SUMMARY_SURFACE_TEXT = "#172033";
 const PROJECT_SUMMARY_RULE = "rgba(91, 141, 239, 0.24)";
 const PROJECT_SUMMARY_SPLIT_MIN = 42;
@@ -221,6 +228,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [selectionAnchorRelationshipNodeID, setSelectionAnchorRelationshipNodeID] = useState("");
   const [activeRightPanelTab, setActiveRightPanelTab] = useState<"relationships" | "critical-path">("relationships");
   const [criticalPathDropStepID, setCriticalPathDropStepID] = useState("");
+  const [selectedCriticalPathNode, setSelectedCriticalPathNode] = useState<CriticalPathNodePreviewSelection | null>(null);
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
 
   const loadProject = useCallback(async (options: { showLoading?: boolean } = {}) => {
@@ -320,6 +328,17 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }, [collapsedGateRelationshipIDs, relationshipGroups, ungroupedNodes]);
   const currentCriticalStep = useMemo(() => criticalPath.find((step) => step.is_current) ?? null, [criticalPath]);
   const currentCriticalRelationshipID = currentCriticalStep?.relationship_id?.trim() ?? "";
+
+  useEffect(() => {
+    if (!selectedCriticalPathNode) return;
+    const relationshipByID = new Map(relationships.map((relationship) => [relationship.relationship_id, relationship]));
+    const stillVisible = criticalPath.some((step) => {
+      const preview = criticalPathNodePreviewFromStep(step, relationshipByID);
+      return preview?.stepID === selectedCriticalPathNode.stepID && preview.nodeID === selectedCriticalPathNode.nodeID;
+    });
+    if (!stillVisible) setSelectedCriticalPathNode(null);
+  }, [criticalPath, relationships, selectedCriticalPathNode]);
+
   const chatMessagesByBlockID = useMemo(() => {
     const grouped = new Map<string, EditorTextBlockChatMessage[]>();
     for (const message of chatMessages) {
@@ -1480,6 +1499,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               onDeleteStep={(step) => void removeCriticalPathStep(step)}
               onDropRelationship={(step, dataTransfer) => void dropCriticalPathRelationship(step, dataTransfer)}
               onSetCurrent={(step) => void setCurrentCriticalStep(step)}
+              selectedNodePreview={selectedCriticalPathNode}
+              onSelectNodePreview={setSelectedCriticalPathNode}
+              onClearNodePreview={() => setSelectedCriticalPathNode(null)}
               onNodeOpen={onNodeOpen}
               onLogicGateOpen={onLogicGateOpen}
             />
@@ -1580,6 +1602,9 @@ function CriticalPathTable({
   onDeleteStep,
   onDropRelationship,
   onSetCurrent,
+  selectedNodePreview,
+  onSelectNodePreview,
+  onClearNodePreview,
   onNodeOpen,
   onLogicGateOpen,
 }: {
@@ -1595,6 +1620,9 @@ function CriticalPathTable({
   onDeleteStep: (step: ProjectCriticalPathStep) => void;
   onDropRelationship: (step: ProjectCriticalPathStep, dataTransfer: DataTransfer) => void;
   onSetCurrent: (step: ProjectCriticalPathStep) => void;
+  selectedNodePreview: CriticalPathNodePreviewSelection | null;
+  onSelectNodePreview: (selection: CriticalPathNodePreviewSelection) => void;
+  onClearNodePreview: () => void;
   onNodeOpen?: (nodeID: string) => void;
   onLogicGateOpen?: (logicGateID: string) => void;
 }) {
@@ -1623,22 +1651,28 @@ function CriticalPathTable({
           const status = step.status ?? relationship?.status ?? (resourceType === "logic_gate" ? "Logic Gate" : "");
           const ownerValue = step.owner_type && step.owner_id ? `${step.owner_type}:${step.owner_id}` : "";
           const isDropTarget = dropStepID === step.step_id;
+          const nodePreview = criticalPathNodePreviewFromStep(step, relationshipByID);
+          const nodePreviewSelected = Boolean(
+            nodePreview &&
+            selectedNodePreview?.stepID === nodePreview.stepID &&
+            selectedNodePreview.nodeID === nodePreview.nodeID
+          );
           return (
-            <div
-              key={step.step_id}
-              role="row"
-              style={criticalPathRowStyle(step.is_current, isDropTarget)}
-              onDragOver={(event) => {
-                if (!Array.from(event.dataTransfer.types).includes(PROJECT_CRITICAL_STEP_DRAG_MIME)) return;
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-              }}
-              onDrop={(event) => {
-                if (!Array.from(event.dataTransfer.types).includes(PROJECT_CRITICAL_STEP_DRAG_MIME)) return;
-                event.preventDefault();
-                onSetCurrent(step);
-              }}
-            >
+            <React.Fragment key={step.step_id}>
+              <div
+                role="row"
+                style={criticalPathRowStyle(step.is_current, isDropTarget, nodePreviewSelected)}
+                onDragOver={(event) => {
+                  if (!Array.from(event.dataTransfer.types).includes(PROJECT_CRITICAL_STEP_DRAG_MIME)) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                }}
+                onDrop={(event) => {
+                  if (!Array.from(event.dataTransfer.types).includes(PROJECT_CRITICAL_STEP_DRAG_MIME)) return;
+                  event.preventDefault();
+                  onSetCurrent(step);
+                }}
+              >
               <div role="cell" style={criticalPathNameCellStyle}>
                 <button type="button" aria-label="Delete step" title="Delete step" style={criticalPathDeleteButtonStyle} onClick={() => onDeleteStep(step)}>x</button>
                 <input
@@ -1681,10 +1715,17 @@ function CriticalPathTable({
                 {title ? (
                   <button
                     type="button"
-                    style={criticalPathLinkedResourceStyle(resourceType)}
+                    title={resourceType === "node" ? "Preview node. Double-click to open node." : "Open logic gate"}
+                    style={criticalPathLinkedResourceStyle(resourceType, nodePreviewSelected)}
                     onClick={() => {
                       if (resourceType === "logic_gate" && logicGateID) onLogicGateOpen?.(logicGateID);
-                      if (resourceType === "node" && nodeID) onNodeOpen?.(nodeID);
+                      if (resourceType === "node" && nodePreview) onSelectNodePreview(nodePreview);
+                    }}
+                    onDoubleClick={(event) => {
+                      if (!nodeID) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onNodeOpen?.(nodeID);
                     }}
                   >
                     <span style={criticalPathResourceIconStyle(resourceType)}>
@@ -1750,7 +1791,20 @@ function CriticalPathTable({
                   Set current
                 </button>
               )}
-            </div>
+              </div>
+              {nodePreviewSelected && nodePreview ? (
+                <div role="row" style={criticalPathNodePreviewRowStyle}>
+                  <div role="cell" style={criticalPathNodePreviewCellStyle}>
+                    <ProjectCriticalPathNodeWindow
+                      accent={accent}
+                      selection={nodePreview}
+                      onClose={onClearNodePreview}
+                      onOpen={onNodeOpen ? () => onNodeOpen(nodePreview.nodeID) : undefined}
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </React.Fragment>
           );
         })}
         {orderedSteps.length === 0 ? (
@@ -1758,6 +1812,70 @@ function CriticalPathTable({
             Add Step
           </button>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function criticalPathNodePreviewFromStep(
+  step: ProjectCriticalPathStep,
+  relationshipByID: Map<string, ProjectRelationshipProjection>,
+): CriticalPathNodePreviewSelection | null {
+  const relationship = step.relationship_id ? relationshipByID.get(step.relationship_id) : undefined;
+  const resourceType = (step.resource_type || relationship?.resource_type || "") as "logic_gate" | "node" | "";
+  const resourceID = (step.resource_id || relationship?.resource_id || "").trim();
+  const nodeID = step.node_id?.trim() || relationship?.node_id?.trim() || (resourceType === "node" ? resourceID : "");
+  if (resourceType !== "node" || !nodeID) return null;
+  return {
+    stepID: step.step_id,
+    nodeID,
+    title: (step.display_title || relationship?.display_title || "Node").trim() || "Node",
+  };
+}
+
+function ProjectCriticalPathNodeWindow({
+  accent,
+  selection,
+  onClose,
+  onOpen,
+}: {
+  accent: string;
+  selection: CriticalPathNodePreviewSelection;
+  onClose: () => void;
+  onOpen?: () => void;
+}) {
+  return (
+    <div style={criticalPathNodePreviewShellStyle}>
+      <span aria-hidden="true" className="project-critical-path-node-window-stem" style={criticalPathNodePreviewStemStyle(accent)} />
+      <div className="project-critical-path-node-window" style={criticalPathNodePreviewSurfaceStyle(accent)}>
+        <div style={criticalPathNodePreviewHeaderStyle}>
+          <div style={criticalPathNodePreviewTitleWrapStyle}>
+            <span style={criticalPathNodePreviewIconStyle(accent)}>
+              <ExplorerRowIcon kind="node" />
+            </span>
+            <span style={criticalPathNodePreviewTitleStyle}>{selection.title}</span>
+          </div>
+          <div style={criticalPathNodePreviewActionsStyle}>
+            <button type="button" style={criticalPathNodePreviewOpenButtonStyle(accent)} onClick={onOpen} disabled={!onOpen}>
+              Open
+            </button>
+            <button type="button" aria-label="Close node window" title="Close" style={criticalPathNodePreviewCloseButtonStyle} onClick={onClose}>
+              x
+            </button>
+          </div>
+        </div>
+        <div style={criticalPathNodePreviewEditorFrameStyle}>
+          <EditorContent
+            key={`${selection.stepID}:${selection.nodeID}`}
+            accent={accent}
+            widgetId={`project-critical-path-node:${selection.stepID}:${selection.nodeID}`}
+            theme="mango"
+            forcedEntityKind="node"
+            forcedEntityID={selection.nodeID}
+            forcedLabel={selection.title}
+            forcedEmptyMessage="Select a critical-path node."
+          />
+        </div>
       </div>
     </div>
   );
@@ -2593,7 +2711,7 @@ const criticalPathHeaderCellStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
-function criticalPathRowStyle(current: boolean, dropActive: boolean): React.CSSProperties {
+function criticalPathRowStyle(current: boolean, dropActive: boolean, previewOpen = false): React.CSSProperties {
   return {
     position: "relative",
     display: "grid",
@@ -2604,11 +2722,19 @@ function criticalPathRowStyle(current: boolean, dropActive: boolean): React.CSSP
     borderBottom: "1px solid rgba(226, 232, 240, 0.9)",
     background: current
       ? "linear-gradient(90deg, rgba(255, 247, 237, 0.96), rgba(255, 255, 255, 0.94))"
+      : previewOpen
+        ? "linear-gradient(90deg, rgba(240, 249, 255, 0.98), rgba(255, 255, 255, 0.96))"
       : dropActive
         ? "rgba(239, 246, 255, 0.90)"
         : "#ffffff",
-    outline: current ? "2px solid rgba(249, 115, 22, 0.58)" : dropActive ? "2px solid rgba(37, 99, 235, 0.28)" : "2px solid transparent",
+    outline: current
+      ? "2px solid rgba(249, 115, 22, 0.58)"
+      : previewOpen
+        ? "2px solid rgba(14, 165, 233, 0.46)"
+        : dropActive ? "2px solid rgba(37, 99, 235, 0.28)" : "2px solid transparent",
     outlineOffset: -2,
+    boxShadow: previewOpen ? "0 10px 22px rgba(14, 165, 233, 0.12)" : undefined,
+    zIndex: previewOpen ? 3 : 1,
     boxSizing: "border-box",
   };
 }
@@ -2666,7 +2792,8 @@ function criticalPathDropCellStyle(active: boolean): React.CSSProperties {
   };
 }
 
-function criticalPathLinkedResourceStyle(resourceType: "logic_gate" | "node" | ""): React.CSSProperties {
+function criticalPathLinkedResourceStyle(resourceType: "logic_gate" | "node" | "", selected = false): React.CSSProperties {
+  const selectedNode = selected && resourceType === "node";
   return {
     minWidth: 0,
     width: "100%",
@@ -2675,17 +2802,161 @@ function criticalPathLinkedResourceStyle(resourceType: "logic_gate" | "node" | "
     gridTemplateColumns: "20px minmax(0, 1fr)",
     alignItems: "center",
     gap: 7,
-    border: resourceType === "logic_gate" ? "1px solid rgba(34, 197, 94, 0.34)" : "1px solid rgba(14, 165, 233, 0.28)",
+    border: selectedNode ? "1px solid transparent" : resourceType === "logic_gate" ? "1px solid rgba(34, 197, 94, 0.34)" : "1px solid rgba(14, 165, 233, 0.28)",
     borderRadius: 8,
-    background: resourceType === "logic_gate" ? "#f0fdf4" : "#f0f9ff",
+    background: selectedNode ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : resourceType === "logic_gate" ? "#f0fdf4" : "#f0f9ff",
     color: "#0f172a",
     cursor: "pointer",
     fontFamily: "inherit",
     padding: "0 8px",
     textAlign: "left",
+    boxShadow: selectedNode ? "4px 4px 10px rgba(174,174,192,0.20), -4px -4px 10px rgba(255,255,255,0.88), 0 0 0 4px rgba(14,165,233,0.08)" : undefined,
+    transform: selectedNode ? "translateY(-1px)" : undefined,
     boxSizing: "border-box",
   };
 }
+
+const criticalPathNodePreviewRowStyle: React.CSSProperties = {
+  position: "relative",
+  display: "grid",
+  gridTemplateColumns: criticalPathGridColumns,
+  minWidth: 760,
+  borderBottom: "1px solid rgba(186, 230, 253, 0.82)",
+  background: "linear-gradient(180deg, rgba(240, 249, 255, 0.74), rgba(248, 250, 252, 0.40))",
+  zIndex: 2,
+};
+
+const criticalPathNodePreviewCellStyle: React.CSSProperties = {
+  position: "relative",
+  gridColumn: "1 / -1",
+  minWidth: 0,
+  padding: "0 12px 18px",
+  boxSizing: "border-box",
+};
+
+const criticalPathNodePreviewShellStyle: React.CSSProperties = {
+  position: "relative",
+  minWidth: 0,
+  paddingTop: 15,
+};
+
+function criticalPathNodePreviewStemStyle(accent: string): React.CSSProperties {
+  return {
+    position: "absolute",
+    top: 0,
+    left: "clamp(170px, 28%, 330px)",
+    width: 26,
+    height: 24,
+    borderLeft: `2px solid ${accent}`,
+    borderBottom: `2px solid ${accent}`,
+    borderBottomLeftRadius: 14,
+    opacity: 0.56,
+    transform: "translateY(-2px)",
+    pointerEvents: "none",
+    zIndex: 1,
+  };
+}
+
+function criticalPathNodePreviewSurfaceStyle(accent: string): React.CSSProperties {
+  return {
+    position: "relative",
+    minWidth: 0,
+    border: "1px solid transparent",
+    borderRadius: 16,
+    background: `${EDITOR_NEU_PANEL_BACKGROUND} padding-box, linear-gradient(135deg, rgba(255,255,255,0.95), ${accent}) border-box`,
+    color: PROJECT_SUMMARY_SURFACE_TEXT,
+    overflow: "hidden",
+    boxShadow: "16px 18px 34px rgba(174,174,192,0.28), -12px -12px 24px rgba(255,255,255,0.92), 0 20px 46px rgba(15,23,42,0.14), inset 1px 1px 0 rgba(255,255,255,0.88)",
+    transformOrigin: "top center",
+  };
+}
+
+const criticalPathNodePreviewHeaderStyle: React.CSSProperties = {
+  minHeight: 44,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: 10,
+  padding: "7px 9px 7px 11px",
+  borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`,
+  background: "linear-gradient(90deg, rgba(255,241,242,0.54), rgba(236,253,245,0.34) 52%, rgba(239,246,255,0.62))",
+  boxSizing: "border-box",
+};
+
+const criticalPathNodePreviewTitleWrapStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "24px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 8,
+};
+
+function criticalPathNodePreviewIconStyle(accent: string): React.CSSProperties {
+  return {
+    width: 24,
+    height: 24,
+    display: "grid",
+    placeItems: "center",
+    border: "1px solid transparent",
+    borderRadius: 8,
+    background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
+    color: accent,
+    boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.78)",
+  };
+}
+
+const criticalPathNodePreviewTitleStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#172033",
+  fontSize: 12,
+  fontWeight: 950,
+};
+
+const criticalPathNodePreviewActionsStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 7,
+};
+
+const criticalPathNodePreviewOpenButtonStyle = (accent: string): React.CSSProperties => ({
+  height: 28,
+  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+  borderRadius: 8,
+  background: EDITOR_NEU_SURFACE,
+  color: accent,
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 11,
+  fontWeight: 900,
+  padding: "0 10px",
+  boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)",
+});
+
+const criticalPathNodePreviewCloseButtonStyle: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+  borderRadius: 8,
+  background: EDITOR_NEU_SURFACE,
+  color: "#64748b",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 12,
+  fontWeight: 950,
+  padding: 0,
+  boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)",
+};
+
+const criticalPathNodePreviewEditorFrameStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 0,
+  height: "clamp(440px, 58vh, 760px)",
+  overflow: "hidden",
+  background: EDITOR_NEU_PANEL_BACKGROUND,
+};
 
 function criticalPathResourceIconStyle(resourceType: "logic_gate" | "node" | ""): React.CSSProperties {
   return {
