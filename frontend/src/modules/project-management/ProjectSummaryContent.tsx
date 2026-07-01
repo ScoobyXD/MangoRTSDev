@@ -10,6 +10,10 @@ import type { Account } from "../accounts/accountsApi.js";
 import { listCompanyUserGroups, listCompanyUsers, type CompanyUser, type CompanyUserGroup } from "../communications/communicationsApi.js";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
+import { CompanyExplorerSearchBox } from "../company-explorer/CompanyExplorerSearchBox.js";
+import { fetchCompanyExplorerSearchResults, type CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi.js";
+import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyExplorerTreeRows.js";
+import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
 import { getExplorerDropPayloadItems, getExplorerDropPayloadItemType, type ExplorerDropPayload } from "../company-explorer/treePresentation.js";
 import { createRequestJSON } from "../api/requestJSON.js";
 import {
@@ -226,8 +230,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [hoveredRelationshipNodeID, setHoveredRelationshipNodeID] = useState("");
   const [selectedRelationshipNodeIDs, setSelectedRelationshipNodeIDs] = useState<Set<string>>(() => new Set());
   const [selectionAnchorRelationshipNodeID, setSelectionAnchorRelationshipNodeID] = useState("");
-  const [activeRightPanelTab, setActiveRightPanelTab] = useState<"relationships" | "critical-path">("relationships");
-  const [criticalPathDropStepID, setCriticalPathDropStepID] = useState("");
+  const [activeRightPanelTab, setActiveRightPanelTab] = useState<"relationships" | "critical-path">("critical-path");
   const [selectedCriticalPathNode, setSelectedCriticalPathNode] = useState<CriticalPathNodePreviewSelection | null>(null);
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
 
@@ -266,6 +269,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setLoading(true);
     void loadProject({ showLoading: true });
   }, [loadProject]);
+
+  useEffect(() => {
+    setActiveRightPanelTab("critical-path");
+  }, [projectID]);
 
   useEffect(() => {
     if (refreshToken === refreshTokenRef.current) return;
@@ -939,14 +946,19 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [companyID, criticalPath, projectID]);
 
-  const dropCriticalPathRelationship = useCallback(async (step: ProjectCriticalPathStep, dataTransfer: DataTransfer) => {
-    const target = relationshipTargetsFromTransfer(dataTransfer)[0];
-    if (!target) return;
-    const ensured = await addRelationshipTargets([target]);
-    const relationship = ensured.find((item) => item.resource_type === target.resourceType && item.resource_id === target.resourceID);
+  const assignCriticalPathNode = useCallback(async (step: ProjectCriticalPathStep, nodeID: string) => {
+    const cleanNodeID = nodeID.trim();
+    if (!cleanNodeID) return;
+    const ensured = await addRelationshipTargets([{ resourceType: "node", resourceID: cleanNodeID }]);
+    const relationship = ensured.find((item) => item.resource_type === "node" && item.resource_id === cleanNodeID);
     if (!relationship) return;
     await saveCriticalPathStep(step, { relationshipID: relationship.relationship_id });
-  }, [addRelationshipTargets, relationshipTargetsFromTransfer, saveCriticalPathStep]);
+    setSelectedCriticalPathNode({
+      stepID: step.step_id,
+      nodeID: cleanNodeID,
+      title: relationship.display_title || "Node",
+    });
+  }, [addRelationshipTargets, saveCriticalPathStep]);
 
   const setCurrentCriticalStep = useCallback(async (step: ProjectCriticalPathStep) => {
     if (step.is_current) return;
@@ -1313,20 +1325,20 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               <button
                 type="button"
                 role="tab"
-                aria-selected={activeRightPanelTab === "relationships"}
-                style={rightPanelTabStyle(activeRightPanelTab === "relationships")}
-                onClick={() => setActiveRightPanelTab("relationships")}
-              >
-                Logic Gates / Nodes
-              </button>
-              <button
-                type="button"
-                role="tab"
                 aria-selected={activeRightPanelTab === "critical-path"}
                 style={rightPanelTabStyle(activeRightPanelTab === "critical-path")}
                 onClick={() => setActiveRightPanelTab("critical-path")}
               >
                 Critical Path
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeRightPanelTab === "relationships"}
+                style={rightPanelTabStyle(activeRightPanelTab === "relationships")}
+                onClick={() => setActiveRightPanelTab("relationships")}
+              >
+                Logic Gates / Nodes
               </button>
             </div>
           </div>
@@ -1488,17 +1500,16 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           ) : (
             <CriticalPathTable
               accent={accent}
+              companyID={companyID}
               steps={criticalPath}
               relationships={relationships}
               companyUsers={companyUsers}
               groups={groups}
-              dropStepID={criticalPathDropStepID}
-              onSetDropStepID={setCriticalPathDropStepID}
               onAddStep={() => void addCriticalPathStep()}
               onSaveStep={(step, updates) => void saveCriticalPathStep(step, updates)}
               onDeleteStep={(step) => void removeCriticalPathStep(step)}
-              onDropRelationship={(step, dataTransfer) => void dropCriticalPathRelationship(step, dataTransfer)}
               onSetCurrent={(step) => void setCurrentCriticalStep(step)}
+              onAssignNode={(step, nodeID) => void assignCriticalPathNode(step, nodeID)}
               selectedNodePreview={selectedCriticalPathNode}
               onSelectNodePreview={setSelectedCriticalPathNode}
               onClearNodePreview={() => setSelectedCriticalPathNode(null)}
@@ -1591,17 +1602,16 @@ function blockDraftsFromProjections(projections: ProjectProjection[]): ProjectTe
 
 function CriticalPathTable({
   accent,
+  companyID,
   steps,
   relationships,
   companyUsers,
   groups,
-  dropStepID,
-  onSetDropStepID,
   onAddStep,
   onSaveStep,
   onDeleteStep,
-  onDropRelationship,
   onSetCurrent,
+  onAssignNode,
   selectedNodePreview,
   onSelectNodePreview,
   onClearNodePreview,
@@ -1609,25 +1619,93 @@ function CriticalPathTable({
   onLogicGateOpen,
 }: {
   accent: string;
+  companyID: string;
   steps: ProjectCriticalPathStep[];
   relationships: ProjectRelationshipProjection[];
   companyUsers: CompanyUser[];
   groups: CompanyUserGroup[];
-  dropStepID: string;
-  onSetDropStepID: (stepID: string) => void;
   onAddStep: () => void;
   onSaveStep: (step: ProjectCriticalPathStep, updates: CriticalPathStepUpdates) => void;
   onDeleteStep: (step: ProjectCriticalPathStep) => void;
-  onDropRelationship: (step: ProjectCriticalPathStep, dataTransfer: DataTransfer) => void;
   onSetCurrent: (step: ProjectCriticalPathStep) => void;
+  onAssignNode: (step: ProjectCriticalPathStep, nodeID: string) => void;
   selectedNodePreview: CriticalPathNodePreviewSelection | null;
   onSelectNodePreview: (selection: CriticalPathNodePreviewSelection) => void;
   onClearNodePreview: () => void;
   onNodeOpen?: (nodeID: string) => void;
   onLogicGateOpen?: (logicGateID: string) => void;
 }) {
+  const apiBase = readAuthConfig().apiBase;
+  const nodePickerRequestRef = useRef(0);
+  const [nodePickerStepID, setNodePickerStepID] = useState("");
+  const [nodePickerQuery, setNodePickerQuery] = useState("");
+  const [nodePickerResults, setNodePickerResults] = useState<CompanyExplorerSearchResult[]>([]);
+  const [nodePickerLoading, setNodePickerLoading] = useState(false);
+  const [nodePickerError, setNodePickerError] = useState("");
   const relationshipByID = useMemo(() => new Map(relationships.map((relationship) => [relationship.relationship_id, relationship])), [relationships]);
   const orderedSteps = useMemo(() => orderCriticalPathSteps(steps), [steps]);
+  const nodePickerSearchText = nodePickerQuery.trim();
+  const nodePickerRows = useMemo(() => (
+    buildCompanyExplorerSearchTreeRows(nodePickerResults.filter((result) => result.resource_type === "node"))
+      .filter((row) => row.syntheticKind === "search_result" && row.kind === "node" && row.nodeID)
+  ), [nodePickerResults]);
+
+  useEffect(() => {
+    if (!nodePickerStepID || !nodePickerSearchText) {
+      setNodePickerResults([]);
+      setNodePickerLoading(false);
+      setNodePickerError("");
+      return undefined;
+    }
+    const requestID = nodePickerRequestRef.current + 1;
+    nodePickerRequestRef.current = requestID;
+    let cancelled = false;
+    setNodePickerLoading(true);
+    setNodePickerError("");
+    void fetchCompanyExplorerSearchResults(apiBase, companyID, nodePickerSearchText, 20)
+      .then((payload) => {
+        if (cancelled || nodePickerRequestRef.current !== requestID) return;
+        setNodePickerResults(payload.results ?? []);
+      })
+      .catch((searchError) => {
+        if (cancelled || nodePickerRequestRef.current !== requestID) return;
+        setNodePickerResults([]);
+        setNodePickerError(searchError instanceof Error ? searchError.message : "Failed to search nodes");
+      })
+      .finally(() => {
+        if (cancelled || nodePickerRequestRef.current !== requestID) return;
+        setNodePickerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, companyID, nodePickerSearchText, nodePickerStepID]);
+
+  useEffect(() => {
+    if (!nodePickerStepID) return;
+    if (!orderedSteps.some((step) => step.step_id === nodePickerStepID)) setNodePickerStepID("");
+  }, [nodePickerStepID, orderedSteps]);
+
+  const openNodePicker = useCallback((stepID: string) => {
+    setNodePickerStepID(stepID);
+    setNodePickerQuery("");
+    setNodePickerResults([]);
+    setNodePickerError("");
+  }, []);
+
+  const closeNodePicker = useCallback(() => {
+    setNodePickerStepID("");
+    setNodePickerQuery("");
+    setNodePickerResults([]);
+    setNodePickerError("");
+    setNodePickerLoading(false);
+  }, []);
+
+  const assignNodeFromPicker = useCallback((step: ProjectCriticalPathStep, nodeID: string) => {
+    closeNodePicker();
+    onAssignNode(step, nodeID);
+  }, [closeNodePicker, onAssignNode]);
+
   return (
     <div style={criticalPathPanelStyle}>
       <div style={criticalPathActionsStyle}>
@@ -1636,7 +1714,7 @@ function CriticalPathTable({
       <div role="table" aria-label="Critical path" className="kanban-board-scroll" style={criticalPathTableStyle}>
         <div role="row" style={criticalPathHeaderRowStyle}>
           <div style={criticalPathHeaderCellStyle}>Name</div>
-          <div style={criticalPathHeaderCellStyle}>Node / Logic Gate</div>
+          <div style={criticalPathHeaderCellStyle}>Node</div>
           <div style={criticalPathHeaderCellStyle}>Status</div>
           <div style={criticalPathHeaderCellStyle}>Due Date</div>
           <div style={criticalPathHeaderCellStyle}>Owner</div>
@@ -1650,7 +1728,7 @@ function CriticalPathTable({
           const title = step.display_title || relationship?.display_title || "";
           const status = step.status ?? relationship?.status ?? (resourceType === "logic_gate" ? "Logic Gate" : "");
           const ownerValue = step.owner_type && step.owner_id ? `${step.owner_type}:${step.owner_id}` : "";
-          const isDropTarget = dropStepID === step.step_id;
+          const nodePickerOpen = nodePickerStepID === step.step_id;
           const nodePreview = criticalPathNodePreviewFromStep(step, relationshipByID);
           const nodePreviewSelected = Boolean(
             nodePreview &&
@@ -1661,7 +1739,7 @@ function CriticalPathTable({
             <React.Fragment key={step.step_id}>
               <div
                 role="row"
-                style={criticalPathRowStyle(step.is_current, isDropTarget, nodePreviewSelected)}
+                style={criticalPathRowStyle(step.is_current, false, nodePreviewSelected || nodePickerOpen)}
                 onDragOver={(event) => {
                   if (!Array.from(event.dataTransfer.types).includes(PROJECT_CRITICAL_STEP_DRAG_MIME)) return;
                   event.preventDefault();
@@ -1673,70 +1751,55 @@ function CriticalPathTable({
                   onSetCurrent(step);
                 }}
               >
-              <div role="cell" style={criticalPathNameCellStyle}>
-                <button type="button" aria-label="Delete step" title="Delete step" style={criticalPathDeleteButtonStyle} onClick={() => onDeleteStep(step)}>x</button>
-                <input
-                  defaultValue={step.name}
-                  style={criticalPathNameInputStyle}
-                  onBlur={(event) => {
-                    const nextName = event.currentTarget.value.trim();
-                    if (nextName !== (step.name ?? "")) onSaveStep(step, { name: nextName });
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      event.currentTarget.blur();
-                    }
-                  }}
-                />
-              </div>
-              <div
-                role="cell"
-                style={criticalPathDropCellStyle(isDropTarget)}
-                onDragOver={(event) => {
-                  if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME)) return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  event.dataTransfer.dropEffect = "copy";
-                  onSetDropStepID(step.step_id);
-                }}
-                onDragLeave={(event) => {
-                  if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-                  onSetDropStepID("");
-                }}
-                onDrop={(event) => {
-                  if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME)) return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onSetDropStepID("");
-                  onDropRelationship(step, event.dataTransfer);
-                }}
-              >
-                {title ? (
-                  <button
-                    type="button"
-                    title={resourceType === "node" ? "Preview node. Double-click to open node." : "Open logic gate"}
-                    style={criticalPathLinkedResourceStyle(resourceType, nodePreviewSelected)}
-                    onClick={() => {
-                      if (resourceType === "logic_gate" && logicGateID) onLogicGateOpen?.(logicGateID);
-                      if (resourceType === "node" && nodePreview) onSelectNodePreview(nodePreview);
+                <div role="cell" style={criticalPathNameCellStyle}>
+                  <button type="button" aria-label="Delete step" title="Delete step" style={criticalPathDeleteButtonStyle} onClick={() => onDeleteStep(step)}>x</button>
+                  <input
+                    defaultValue={step.name}
+                    style={criticalPathNameInputStyle}
+                    onBlur={(event) => {
+                      const nextName = event.currentTarget.value.trim();
+                      if (nextName !== (step.name ?? "")) onSaveStep(step, { name: nextName });
                     }}
-                    onDoubleClick={(event) => {
-                      if (!nodeID) return;
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onNodeOpen?.(nodeID);
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                      }
                     }}
-                  >
-                    <span style={criticalPathResourceIconStyle(resourceType)}>
-                      <ExplorerRowIcon kind={resourceType === "logic_gate" ? "logic_gate" : "node"} />
-                    </span>
-                    <span style={criticalPathResourceTitleStyle}>{title}</span>
-                  </button>
-                ) : (
-                  <span style={criticalPathEmptyDropStyle}>Drop node or logic gate</span>
-                )}
-              </div>
+                  />
+                </div>
+                <div role="cell" style={criticalPathNodeCellStyle}>
+                  {title ? (
+                    <button
+                      type="button"
+                      title={resourceType === "node" ? "Preview node. Double-click to open node." : "Open logic gate"}
+                      style={criticalPathLinkedResourceStyle(resourceType, nodePreviewSelected)}
+                      onClick={() => {
+                        if (resourceType === "logic_gate" && logicGateID) onLogicGateOpen?.(logicGateID);
+                        if (resourceType === "node" && nodePreview) onSelectNodePreview(nodePreview);
+                      }}
+                      onDoubleClick={(event) => {
+                        if (!nodeID) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onNodeOpen?.(nodeID);
+                      }}
+                    >
+                      <span style={criticalPathResourceIconStyle(resourceType)}>
+                        <ExplorerRowIcon kind={resourceType === "logic_gate" ? "logic_gate" : "node"} />
+                      </span>
+                      <span style={criticalPathResourceTitleStyle}>{title}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      style={criticalPathAddNodeCellButtonStyle(nodePickerOpen)}
+                      onClick={() => openNodePicker(step.step_id)}
+                    >
+                      Add node
+                    </button>
+                  )}
+                </div>
               <div role="cell" style={criticalPathCellStyle}>
                 <span style={criticalPathStatusPillStyle(status || "No status")}>{status || "No status"}</span>
               </div>
@@ -1792,6 +1855,22 @@ function CriticalPathTable({
                 </button>
               )}
               </div>
+              {nodePickerOpen ? (
+                <div role="row" style={criticalPathNodePickerRowStyle}>
+                  <div role="cell" style={criticalPathNodePickerCellStyle}>
+                    <CriticalPathNodeSearchPicker
+                      accent={accent}
+                      query={nodePickerQuery}
+                      rows={nodePickerRows}
+                      loading={nodePickerLoading}
+                      error={nodePickerError}
+                      onQueryChange={setNodePickerQuery}
+                      onCancel={closeNodePicker}
+                      onSelectNode={(nodeID) => assignNodeFromPicker(step, nodeID)}
+                    />
+                  </div>
+                </div>
+              ) : null}
               {nodePreviewSelected && nodePreview ? (
                 <div role="row" style={criticalPathNodePreviewRowStyle}>
                   <div role="cell" style={criticalPathNodePreviewCellStyle}>
@@ -1812,6 +1891,80 @@ function CriticalPathTable({
             Add Step
           </button>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CriticalPathNodeSearchPicker({
+  accent,
+  query,
+  rows,
+  loading,
+  error,
+  onQueryChange,
+  onCancel,
+  onSelectNode,
+}: {
+  accent: string;
+  query: string;
+  rows: ExplorerTreeNode[];
+  loading: boolean;
+  error: string;
+  onQueryChange: (value: string) => void;
+  onCancel: () => void;
+  onSelectNode: (nodeID: string) => void;
+}) {
+  const hasQuery = query.trim().length > 0;
+  return (
+    <div style={criticalPathNodePickerSurfaceStyle}>
+      <div style={criticalPathNodePickerSearchRowStyle}>
+        <CompanyExplorerSearchBox
+          value={query}
+          onChange={onQueryChange}
+          onEscape={onCancel}
+          placeholder="Search Explorer nodes"
+          ariaLabel="Search Explorer nodes"
+          autoFocus
+          style={criticalPathNodePickerSearchBoxStyle}
+        />
+        <button type="button" style={criticalPathNodePickerCancelButtonStyle} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+      <div role="listbox" aria-label="Node search results" style={criticalPathNodePickerResultsStyle}>
+        {!hasQuery ? (
+          <div style={criticalPathNodePickerEmptyStyle}>Search for a node</div>
+        ) : loading ? (
+          <div style={criticalPathNodePickerEmptyStyle}>Searching...</div>
+        ) : error ? (
+          <div style={criticalPathNodePickerErrorStyle}>{error}</div>
+        ) : rows.length === 0 ? (
+          <div style={criticalPathNodePickerEmptyStyle}>No node matches</div>
+        ) : (
+          rows.map((row) => {
+            const nodeID = row.nodeID?.trim() || row.resourceID?.trim() || "";
+            if (!nodeID) return null;
+            return (
+              <button
+                key={row.id}
+                type="button"
+                role="option"
+                aria-selected="false"
+                style={criticalPathNodePickerResultButtonStyle}
+                onClick={() => onSelectNode(nodeID)}
+              >
+                <span style={criticalPathNodePickerResultIconStyle(accent)}>
+                  <ExplorerRowIcon kind="node" />
+                </span>
+                <span style={criticalPathNodePickerResultTextStyle}>
+                  <span style={criticalPathNodePickerResultTitleStyle}>{row.label}</span>
+                  {row.folderLabel ? <span style={criticalPathNodePickerResultPathStyle}>{row.folderLabel}</span> : null}
+                </span>
+              </button>
+            );
+          })
+        )}
       </div>
     </div>
   );
@@ -2784,11 +2937,27 @@ const criticalPathNameInputStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
-function criticalPathDropCellStyle(active: boolean): React.CSSProperties {
+const criticalPathNodeCellStyle: React.CSSProperties = {
+  ...criticalPathCellStyle,
+  position: "relative",
+};
+
+function criticalPathAddNodeCellButtonStyle(active: boolean): React.CSSProperties {
   return {
-    ...criticalPathCellStyle,
-    border: active ? "1px dashed rgba(37, 99, 235, 0.52)" : criticalPathCellStyle.border,
-    background: active ? "rgba(239, 246, 255, 0.86)" : "transparent",
+    width: "100%",
+    minHeight: 32,
+    display: "grid",
+    placeItems: "center",
+    border: active ? "1px solid transparent" : "1px dashed rgba(14, 165, 233, 0.34)",
+    borderRadius: 8,
+    background: active ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : "#f8fafc",
+    color: active ? "#0284c7" : "#64748b",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: 11,
+    fontWeight: 900,
+    padding: "0 10px",
+    boxShadow: active ? "4px 4px 10px rgba(174,174,192,0.16), -4px -4px 10px rgba(255,255,255,0.84)" : undefined,
   };
 }
 
@@ -2838,6 +3007,139 @@ const criticalPathNodePreviewShellStyle: React.CSSProperties = {
   position: "relative",
   minWidth: 0,
   paddingTop: 15,
+};
+
+const criticalPathNodePickerRowStyle: React.CSSProperties = {
+  position: "relative",
+  display: "grid",
+  gridTemplateColumns: criticalPathGridColumns,
+  minWidth: 760,
+  borderBottom: "1px solid rgba(186, 230, 253, 0.70)",
+  background: "linear-gradient(180deg, rgba(240, 249, 255, 0.66), rgba(248, 250, 252, 0.42))",
+  zIndex: 5,
+};
+
+const criticalPathNodePickerCellStyle: React.CSSProperties = {
+  gridColumn: "1 / -1",
+  minWidth: 0,
+  padding: "0 12px 14px",
+  boxSizing: "border-box",
+};
+
+const criticalPathNodePickerSurfaceStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 8,
+  border: "1px solid transparent",
+  borderRadius: 12,
+  background: `${EDITOR_NEU_PANEL_BACKGROUND} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
+  padding: 10,
+  boxShadow: "9px 10px 22px rgba(174,174,192,0.22), -7px -7px 16px rgba(255,255,255,0.86), inset 1px 1px 0 rgba(255,255,255,0.78)",
+};
+
+const criticalPathNodePickerSearchRowStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  alignItems: "center",
+  gap: 8,
+};
+
+const criticalPathNodePickerSearchBoxStyle: React.CSSProperties = {
+  height: 34,
+};
+
+const criticalPathNodePickerCancelButtonStyle: React.CSSProperties = {
+  height: 32,
+  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+  borderRadius: 8,
+  background: EDITOR_NEU_SURFACE,
+  color: "#64748b",
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 11,
+  fontWeight: 900,
+  padding: "0 10px",
+  boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)",
+};
+
+const criticalPathNodePickerResultsStyle: React.CSSProperties = {
+  minWidth: 0,
+  maxHeight: 220,
+  overflow: "auto",
+  display: "grid",
+  alignContent: "start",
+  gap: 6,
+};
+
+const criticalPathNodePickerEmptyStyle: React.CSSProperties = {
+  minHeight: 34,
+  display: "flex",
+  alignItems: "center",
+  color: "rgba(71, 85, 105, 0.78)",
+  fontSize: 11,
+  fontWeight: 800,
+  padding: "0 4px",
+};
+
+const criticalPathNodePickerErrorStyle: React.CSSProperties = {
+  ...criticalPathNodePickerEmptyStyle,
+  color: "#b91c1c",
+};
+
+const criticalPathNodePickerResultButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 42,
+  display: "grid",
+  gridTemplateColumns: "24px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 8,
+  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+  borderRadius: 9,
+  background: EDITOR_NEU_SURFACE,
+  color: PROJECT_SUMMARY_SURFACE_TEXT,
+  cursor: "pointer",
+  fontFamily: "inherit",
+  padding: "7px 9px",
+  textAlign: "left",
+  boxShadow: "2px 2px 8px rgba(174,174,192,0.12), -2px -2px 8px rgba(255,255,255,0.76)",
+};
+
+function criticalPathNodePickerResultIconStyle(accent: string): React.CSSProperties {
+  return {
+    width: 22,
+    height: 22,
+    display: "grid",
+    placeItems: "center",
+    borderRadius: 7,
+    color: accent,
+    background: "#ffffff",
+  };
+}
+
+const criticalPathNodePickerResultTextStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 2,
+};
+
+const criticalPathNodePickerResultTitleStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 12,
+  fontWeight: 900,
+};
+
+const criticalPathNodePickerResultPathStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "rgba(71, 85, 105, 0.72)",
+  fontSize: 10,
+  fontWeight: 800,
 };
 
 function criticalPathNodePreviewStemStyle(accent: string): React.CSSProperties {
@@ -2975,18 +3277,6 @@ const criticalPathResourceTitleStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
   fontSize: 11,
   fontWeight: 900,
-};
-
-const criticalPathEmptyDropStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 30,
-  display: "grid",
-  placeItems: "center",
-  border: "1px dashed rgba(148, 163, 184, 0.38)",
-  borderRadius: 8,
-  color: "#64748b",
-  fontSize: 11,
-  fontWeight: 850,
 };
 
 function criticalPathStatusPillStyle(status: string): React.CSSProperties {

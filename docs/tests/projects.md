@@ -18,6 +18,10 @@ P7 - Project view access alone does not reveal node editor content; the selected
 P8 - Multiple node text boxes, emails, and chats remain scrollable inside the inline node window without changing critical-path row ordering.
 P9 - Node editor mutations made inside the inline node window follow the existing node editor update, attachment, chat, highlight, and intent behavior.
 P10 - Opening the selected node in the standalone node popup remains available from the inline node window.
+P11 - The project work panel opens with Critical Path selected before Logic Gates / Nodes.
+P12 - Empty critical-path resource cells use an Add node action, not a drag/drop node-or-logic-gate prompt.
+P13 - Add node opens a Company Explorer node search picker that uses Company Explorer search results and visibility rules.
+P14 - Selecting a node search result creates or reuses the project node relationship and saves that relationship onto the critical-path step.
 
 ## Scenarios
 
@@ -31,12 +35,14 @@ Business logic covered:
 - P5
 - P8
 - P10
+- P11
 
 Given:
 - A project critical path contains two rows linked to nodes the viewer can view.
 - Each node has text boxes, attached emails, and text-block chats.
 
 Expected:
+- The project work panel defaults to the Critical Path tab and shows that tab before Logic Gates / Nodes.
 - Clicking the first node-backed critical-path row reveals an inline node window from that row.
 - The inline node window renders the node's text boxes, attached emails, and chats through the shared node editor workspace.
 - The user can scroll through multiple text boxes, emails, and chats inside that window.
@@ -74,3 +80,21 @@ Expected:
 - The inline node window uses the same editor projections as the standalone node popup.
 - Email attachment, email highlight, chat creation, text editing, checkbox, bullet, and intent updates follow the existing node editor rules.
 - Updates made in the inline node window persist as node editor updates, not project critical-path updates.
+
+### Scenario P-S4: Add Node From Critical Path
+
+Business logic covered:
+- P12
+- P13
+- P14
+
+Given:
+- A project critical-path row does not have a linked node.
+- The viewer can edit the project and can view nodes returned by Company Explorer search.
+
+Expected:
+- The empty node cell shows Add node.
+- Clicking Add node opens a node picker with the shared Company Explorer search input.
+- Search results are limited to visible node results from the Company Explorer search path.
+- Selecting a result creates or reuses the project relationship for that node and saves the relationship on the critical-path step.
+- The empty cell no longer advertises dropping a node or logic gate.
