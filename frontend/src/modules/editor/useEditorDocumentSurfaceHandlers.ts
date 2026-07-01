@@ -379,6 +379,7 @@ function replaceSelectionWithHTML(root: HTMLElement, html: string): boolean {
   const template = root.ownerDocument.createElement("template");
   template.innerHTML = html;
   const fragment = template.content;
+  if (replaceSelectionWithEditorListFragment(root, range, fragment)) return true;
   const lastChild = fragment.lastChild;
   range.deleteContents();
   range.insertNode(fragment);
@@ -394,6 +395,65 @@ function replaceSelectionWithHTML(root: HTMLElement, html: string): boolean {
   const selection = root.ownerDocument.getSelection();
   selection?.removeAllRanges();
   selection?.addRange(range);
+  return true;
+}
+
+function isIgnorableEditorFragmentText(node: Node): boolean {
+  return node.nodeType === Node.TEXT_NODE && !(node.textContent ?? "").trim();
+}
+
+function editorFragmentMeaningfulChildren(fragment: DocumentFragment): Node[] {
+  return Array.from(fragment.childNodes).filter((node) => !isIgnorableEditorFragmentText(node));
+}
+
+function editorFragmentRootLists(fragment: DocumentFragment): HTMLUListElement[] {
+  const meaningfulChildren = editorFragmentMeaningfulChildren(fragment);
+  if (meaningfulChildren.length === 0) return [];
+  const lists = meaningfulChildren.filter((node): node is HTMLUListElement => (
+    node instanceof HTMLUListElement && readEditorListKind(node.getAttribute(EDITOR_LIST_ATTRIBUTE)) !== null
+  ));
+  return lists.length === meaningfulChildren.length ? lists : [];
+}
+
+function insertEditorListItemsAfter(referenceItem: HTMLLIElement, items: HTMLLIElement[]) {
+  let anchor: ChildNode = referenceItem;
+  for (const item of items) {
+    anchor.after(item);
+    anchor = item;
+  }
+}
+
+function insertEditorListItemsBefore(referenceItem: HTMLLIElement, items: HTMLLIElement[]) {
+  const list = getEditorListForItem(referenceItem);
+  if (!list) return;
+  for (const item of items) list.insertBefore(item, referenceItem);
+}
+
+function replaceSelectionWithEditorListFragment(root: HTMLElement, range: Range, fragment: DocumentFragment): boolean {
+  if (!range.collapsed) return false;
+  const activeItem = getCurrentEditorListItem(root);
+  const activeList = activeItem ? getEditorListForItem(activeItem) : null;
+  const activeKind = getEditorListKindForList(activeList);
+  if (!activeItem || !activeList || !activeKind) return false;
+
+  const rootLists = editorFragmentRootLists(fragment);
+  if (rootLists.length === 0) return false;
+  if (rootLists.some((list) => readEditorListKind(list.getAttribute(EDITOR_LIST_ATTRIBUTE)) !== activeKind)) return false;
+
+  const pastedItems = rootLists.flatMap((list) => (
+    Array.from(list.children).filter((child): child is HTMLLIElement => child instanceof HTMLLIElement)
+  ));
+  if (pastedItems.length === 0) return false;
+
+  removeEditorTerminalBreaks(root);
+  if (editorListItemContentIsEmpty(activeItem)) {
+    insertEditorListItemsBefore(activeItem, pastedItems);
+    activeItem.remove();
+  } else {
+    insertEditorListItemsAfter(activeItem, pastedItems);
+  }
+
+  selectEditorListItem(root, pastedItems[pastedItems.length - 1], "end");
   return true;
 }
 
@@ -1049,6 +1109,20 @@ function removeEditorListItemPlaceholders(item: HTMLLIElement) {
   });
 }
 
+function editorListItemHasOwnEditableContent(item: HTMLLIElement): boolean {
+  return Array.from(item.childNodes).some((child) => {
+    if (child instanceof HTMLUListElement && readEditorListKind(child.getAttribute(EDITOR_LIST_ATTRIBUTE))) return false;
+    if (child instanceof HTMLBRElement) return false;
+    if (child.nodeType === Node.TEXT_NODE) return (child.textContent ?? "").length > 0;
+    return true;
+  });
+}
+
+function ensureEditorListItemEditableContent(item: HTMLLIElement) {
+  if (editorListItemHasOwnEditableContent(item)) return;
+  item.insertBefore(item.ownerDocument.createElement("br"), directNestedEditorList(item));
+}
+
 function createEditorListItem(ownerDocument: Document, kind: EditorListKind, text = ""): HTMLLIElement {
   const item = ownerDocument.createElement("li");
   item.setAttribute(EDITOR_LIST_ITEM_ATTRIBUTE, kind);
@@ -1165,6 +1239,27 @@ function insertEditorListItemAfter(root: HTMLElement, item: HTMLLIElement): bool
   const kind = getEditorListKindForItem(item);
   if (!kind) return false;
   const nextItem = createEditorListItem(root.ownerDocument, kind);
+  const range = getEditorSelectionRange(root);
+  if (range && (item === range.startContainer || item.contains(range.startContainer))) {
+    const splitRange = root.ownerDocument.createRange();
+    try {
+      if (!range.collapsed) range.deleteContents();
+      splitRange.setStart(range.startContainer, range.startOffset);
+      splitRange.setEnd(item, item.childNodes.length);
+    } catch {
+      item.after(nextItem);
+      selectEditorListItem(root, nextItem, "start");
+      return true;
+    }
+    const trailingContent = splitRange.extractContents();
+    nextItem.replaceChildren();
+    nextItem.appendChild(trailingContent);
+    ensureEditorListItemEditableContent(item);
+    ensureEditorListItemEditableContent(nextItem);
+    item.after(nextItem);
+    selectEditorListItem(root, nextItem, "start");
+    return true;
+  }
   item.after(nextItem);
   selectEditorListItem(root, nextItem, "start");
   return true;
