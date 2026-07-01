@@ -1,4 +1,4 @@
-Last updated: 2026-06-30
+Last updated: 2026-07-01
 
 # My Triage Tests
 
@@ -76,6 +76,19 @@ MT65 - The authoritative personal receipt signal is the Nylas `message.opened` w
 MT66 - Personal mailbox receipts are stored in the sender user's personal receipt scope and are enriched onto Sent message list/detail responses for that same personal mailbox scope.
 MT67 - A personal `message.opened` receipt with a message ID must reconcile only the affected visible or selected sent message and must not trigger a full message-list reload, top-up, or prefetch.
 MT68 - Sent messages without a stored personal receipt must not show a green `Not opened` indicator; the UI shows `Seen` only after a stored open signal, with timestamp/count details when available.
+MT69 - Nylas receipt support requires a public `/nylas/webhook` destination for the same Nylas app/client ID used by outbound personal sends, and that webhook must subscribe to the Message tracking `message.opened` trigger.
+MT70 - The Nylas dashboard Message tracking group may be configured with all 3 triggers selected: `message.opened`, `message.link_clicked`, and `thread.replied`; the current My Triage receipt contract consumes only `message.opened`, so link-clicked and thread-replied webhook deliveries must not create or mutate read-receipt state unless a future feature explicitly adds that behavior.
+MT71 - The backend `NYLAS_WEBHOOK_SECRET` must match the secret returned by the configured Nylas webhook destination, and the Nylas app/environment must support message tracking; without that webhook secret and tracking-capable app, personal sends can request `tracking_options.opens = true` but the product will not receive usable receipt updates.
+
+## Nylas Configuration Contract
+
+Personal read receipts depend on both outbound send tracking and webhook delivery. The expected Nylas webhook configuration for this contract is:
+
+- Webhook destination URL: the backend `/nylas/webhook` route for the active environment, for example `https://api.dev.<domain>/nylas/webhook` in dev or a public HTTPS tunnel URL for localhost.
+- Required trigger: Message tracking `message.opened`.
+- Accepted full Message tracking selection: `message.opened`, `message.link_clicked`, and `thread.replied` selected together.
+- Backend secret: `NYLAS_WEBHOOK_SECRET` set to the webhook secret returned by that Nylas destination.
+- Current product behavior: only `message.opened` writes personal read-receipt summaries; `message.link_clicked` and `thread.replied` are allowed in Nylas but are ignored for read receipts.
 
 ## Scenarios
 
@@ -216,12 +229,16 @@ Business logic covered:
 - MT66
 - MT67
 - MT68
+- MT69
+- MT70
+- MT71
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
 - The mailbox has more than 20 messages available.
 - The first visible page and the next page can be read from the mailbox provider.
 - The user sends mail from the personal mailbox and later receives Nylas `message.opened` webhooks for those sent messages.
+- The active Nylas app has a public `/nylas/webhook` destination with Message tracking `message.opened` selected; selecting all 3 Message tracking triggers (`message.opened`, `message.link_clicked`, and `thread.replied`) is valid for this environment.
 
 Expected:
 - The visible page contains no more than 20 messages.
@@ -235,6 +252,8 @@ Expected:
 - A successful local conversion shows a short green success notice.
 - Realtime message events that do not carry a message ID do not trigger a whole-list reload; the next explicit page/list load reconciles provider state.
 - Personal sends request Nylas open tracking, and Nylas `message.opened` webhooks store personal receipt summaries keyed by the sender mailbox scope and provider message ID.
+- The configured webhook secret matches `NYLAS_WEBHOOK_SECRET`; otherwise webhook POSTs are rejected and no personal receipt summary is written.
+- `message.link_clicked` and `thread.replied` webhook deliveries do not create or mutate read-receipt state under the current My Triage contract.
 - The Sent mailbox shows `Seen` only for messages with a stored receipt signal; messages without a signal do not show `Not opened`.
 - A `message.opened` event with a message ID updates the affected sent row/detail only and preserves the rest of the visible list and prefetched page state.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.

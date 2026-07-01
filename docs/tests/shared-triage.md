@@ -1,4 +1,4 @@
-Last updated: 2026-06-30
+Last updated: 2026-07-01
 
 # Shared Triage Tests
 
@@ -98,6 +98,19 @@ ST87 - Shared mailbox receipt realtime events include `shared_inbox_id` and are 
 ST88 - A shared `message.opened` receipt with a message ID must reconcile only the affected visible or selected sent message and must not trigger a full Shared Triage message-list reload, top-up, or prefetch.
 ST89 - Sent shared mailbox messages without a stored receipt must not show a green `Not opened` indicator; the UI shows `Seen` only after a stored open signal, with timestamp/count details when available.
 ST90 - Multiple Shared Triage mailbox work surfaces that point at the same company email connection share receipt state for the same provider message, while realtime events remain scoped to each linked `shared_inbox_id` audience.
+ST91 - Nylas shared receipt support requires a public `/nylas/webhook` destination for the same Nylas app/client ID used by company-owned shared mailbox sends, and that webhook must subscribe to the Message tracking `message.opened` trigger.
+ST92 - The Nylas dashboard Message tracking group may be configured with all 3 triggers selected: `message.opened`, `message.link_clicked`, and `thread.replied`; the current Shared Triage receipt contract consumes only `message.opened`, so link-clicked and thread-replied webhook deliveries must not create or mutate shared read-receipt state unless a future feature explicitly adds that behavior.
+ST93 - The backend `NYLAS_WEBHOOK_SECRET` must match the secret returned by the configured Nylas webhook destination, and the Nylas app/environment must support message tracking; without that webhook secret and tracking-capable app, shared sends can request `tracking_options.opens = true` but the product will not receive usable receipt updates.
+
+## Nylas Configuration Contract
+
+Shared mailbox read receipts depend on both outbound send tracking and webhook delivery for the company-owned shared grant. The expected Nylas webhook configuration for this contract is:
+
+- Webhook destination URL: the backend `/nylas/webhook` route for the active environment, for example `https://api.dev.<domain>/nylas/webhook` in dev or a public HTTPS tunnel URL for localhost.
+- Required trigger: Message tracking `message.opened`.
+- Accepted full Message tracking selection: `message.opened`, `message.link_clicked`, and `thread.replied` selected together.
+- Backend secret: `NYLAS_WEBHOOK_SECRET` set to the webhook secret returned by that Nylas destination.
+- Current product behavior: only `message.opened` writes shared read-receipt summaries and fans out shared-inbox realtime updates; `message.link_clicked` and `thread.replied` are allowed in Nylas but are ignored for read receipts.
 
 ## Scenarios
 
@@ -402,15 +415,21 @@ Business logic covered:
 - ST88
 - ST89
 - ST90
+- ST91
+- ST92
+- ST93
 
 Given:
 - A user has edit access to a mailbox-capable Shared Triage inbox.
 - The shared inbox has a connected company-owned mailbox grant.
 - The user sends mail from that shared mailbox, and Nylas later emits `message.opened` webhooks for the shared grant.
+- The active Nylas app has a public `/nylas/webhook` destination with Message tracking `message.opened` selected; selecting all 3 Message tracking triggers (`message.opened`, `message.link_clicked`, and `thread.replied`) is valid for this environment.
 
 Expected:
 - Shared sends request Nylas open tracking through the company-owned shared grant.
+- The configured webhook secret matches `NYLAS_WEBHOOK_SECRET`; otherwise webhook POSTs are rejected and no shared receipt summary is written.
 - The backend stores open signals under the company email connection/shared mailbox scope and does not write them to the actor's personal receipt scope.
+- `message.link_clicked` and `thread.replied` webhook deliveries do not create or mutate read-receipt state under the current Shared Triage contract.
 - Realtime receipt events include the linked `shared_inbox_id` and are delivered only to users with view access to that shared inbox.
 - The Sent mailbox shows `Seen` only for messages with a stored receipt signal; messages without a signal do not show `Not opened`.
 - A `message.opened` event with a message ID updates the affected sent row/detail only and preserves the rest of the visible list and prefetched page state.
