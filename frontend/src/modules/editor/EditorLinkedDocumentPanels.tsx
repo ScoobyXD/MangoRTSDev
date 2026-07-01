@@ -36,6 +36,7 @@ type EditorLinkedDocumentPanelsProps = {
   linkedNodeHistoryRows: string[];
   canEdit: boolean;
   canEditGVIC?: boolean;
+  compactHeader?: boolean;
   nodePresetFields: {
     status: string;
     priorityDraft: string;
@@ -298,6 +299,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   linkedNodeHistoryRows,
   canEdit,
   canEditGVIC = canEdit,
+  compactHeader = false,
   nodePresetFields,
   gvicFields,
   logicGateGVICApplyToDescendants = false,
@@ -427,6 +429,25 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
       onRemovePrincipal={onRemoveGVICPrincipal}
     />
   ) : null;
+  const nodePresetGridStyle: React.CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: compactHeader
+      ? "repeat(auto-fit, minmax(150px, 1fr))"
+      : "minmax(132px, 150px) minmax(170px, 210px) minmax(190px, 230px) minmax(136px, 148px)",
+    justifyContent: "start",
+    columnGap: compactHeader ? 10 : 8,
+    rowGap: compactHeader ? 7 : 4,
+    width: compactHeader ? "min(840px, 100%)" : undefined,
+    maxWidth: compactHeader ? "100%" : "min(760px, 100%)",
+    overflow: "visible",
+    padding: compactHeader ? "2px 0 6px" : "1px 0 4px",
+    borderBottom: `1px dashed ${ruleColor}`,
+    fontFamily: "var(--mango-font-family)",
+    fontSize: 12,
+    lineHeight: 1.35,
+    color: "inherit",
+    pointerEvents: "auto",
+  };
 
   return (
     <>
@@ -530,24 +551,9 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
           {nodePresetFields && (
             <div
               className="mango-editor-hover-highlight"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "minmax(132px, 150px) minmax(170px, 210px) minmax(190px, 230px) minmax(136px, 148px)",
-                justifyContent: "start",
-                columnGap: 8,
-                rowGap: 4,
-                maxWidth: "min(760px, 100%)",
-                overflow: "visible",
-                padding: "1px 0 4px",
-                borderBottom: `1px dashed ${ruleColor}`,
-                fontFamily: "var(--mango-font-family)",
-                fontSize: 12,
-                lineHeight: 1.35,
-                color: "inherit",
-                pointerEvents: "auto",
-              }}
+              style={nodePresetGridStyle}
             >
-              <div style={{ gridColumn: 1, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+              <div style={{ ...(compactHeader ? { order: 1 } : { gridColumn: 1, gridRow: 1 }), minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Status:</strong>
                 <span ref={statusMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 170px)" }}>
                   <button
@@ -651,7 +657,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   )}
                 </span>
               </div>
-              <div style={{ gridColumn: 3, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+              <div style={{ ...(compactHeader ? { order: 3 } : { gridColumn: 3, gridRow: 1 }), minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Accounts:</strong>
                 <AccountFilterControl
                   accounts={nodePresetFields.accountOptions}
@@ -661,12 +667,12 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   compact
                   showLabel={false}
                   placeholder="Search accounts"
-                  style={{ minWidth: 0, width: "min(220px, 100%)" }}
+                  style={{ minWidth: 0, width: compactHeader ? "100%" : "min(220px, 100%)" }}
                 />
               </div>
-              <label style={{ gridColumn: 4, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+              <label style={{ ...(compactHeader ? { order: 4 } : { gridColumn: 4, gridRow: 1 }), minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Due Date:</strong>
-                <span style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: 138 }}>
+                <span style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: compactHeader ? "min(148px, 100%)" : 138 }}>
                   <input
                     value={nodePresetFields.dueDateDraft}
                     disabled={!canEdit}
@@ -717,7 +723,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
                   />
                 </span>
               </label>
-              <label style={{ gridColumn: 2, gridRow: 1, minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
+              <label style={{ ...(compactHeader ? { order: 2 } : { gridColumn: 2, gridRow: 1 }), minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Priority:</strong>
                 <span style={{ display: "grid", gap: 4, minWidth: 0 }}>
                   <span ref={priorityMenuRef} style={{ position: "relative", display: "inline-block", width: "min(100%, 200px)" }}>
