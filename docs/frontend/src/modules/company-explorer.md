@@ -224,6 +224,9 @@ Permission marker update (2026-06-29):
 - Folder, logic-gate, and project rows render the same lock marker when that flag is true, so resource-specific permission rules are visible directly in the tree.
 - The lock is a status indicator only. It does not open permissions, grant access, deny access, or change the context-menu rules by itself.
 
+Bug history (2026-07-01):
+- A previously opened lazy folder could later reopen with only the disclosure arrow changing to expanded and no child rows appearing. The stale state was a branch marked loaded while its V2 child rows were no longer materialized. Expanded `has_children` folders now refetch when their loaded marker has no visible child rows behind it.
+
 Kanban Explorer update (2026-05-04):
 - Kanban boards are durable Explorer items with `item_type=kanban` and a fixed three-column board icon.
 - Kanban boards can be placed in either node folders or logic-gate folders. Folder kinds remain `node` and `logic_gate`; Kanban is an item type, not a third map scope.
