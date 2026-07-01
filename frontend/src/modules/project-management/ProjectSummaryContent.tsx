@@ -1772,11 +1772,14 @@ function CriticalPathTable({
                   {title ? (
                     <button
                       type="button"
-                      title={resourceType === "node" ? "Preview node. Double-click to open node." : "Open logic gate"}
+                      title={resourceType === "node" ? "Click to preview node. Click again to collapse. Double-click to open node." : "Open logic gate"}
                       style={criticalPathLinkedResourceStyle(resourceType, nodePreviewSelected)}
                       onClick={() => {
                         if (resourceType === "logic_gate" && logicGateID) onLogicGateOpen?.(logicGateID);
-                        if (resourceType === "node" && nodePreview) onSelectNodePreview(nodePreview);
+                        if (resourceType === "node" && nodePreview) {
+                          if (nodePreviewSelected) onClearNodePreview();
+                          else onSelectNodePreview(nodePreview);
+                        }
                       }}
                       onDoubleClick={(event) => {
                         if (!nodeID) return;
@@ -1877,8 +1880,6 @@ function CriticalPathTable({
                     <ProjectCriticalPathNodeWindow
                       accent={accent}
                       selection={nodePreview}
-                      onClose={onClearNodePreview}
-                      onOpen={onNodeOpen ? () => onNodeOpen(nodePreview.nodeID) : undefined}
                     />
                   </div>
                 </div>
@@ -1989,46 +1990,24 @@ function criticalPathNodePreviewFromStep(
 function ProjectCriticalPathNodeWindow({
   accent,
   selection,
-  onClose,
-  onOpen,
 }: {
   accent: string;
   selection: CriticalPathNodePreviewSelection;
-  onClose: () => void;
-  onOpen?: () => void;
 }) {
   return (
-    <div style={criticalPathNodePreviewShellStyle}>
-      <span aria-hidden="true" className="project-critical-path-node-window-stem" style={criticalPathNodePreviewStemStyle(accent)} />
-      <div className="project-critical-path-node-window" style={criticalPathNodePreviewSurfaceStyle(accent)}>
-        <div style={criticalPathNodePreviewHeaderStyle}>
-          <div style={criticalPathNodePreviewTitleWrapStyle}>
-            <span style={criticalPathNodePreviewIconStyle(accent)}>
-              <ExplorerRowIcon kind="node" />
-            </span>
-            <span style={criticalPathNodePreviewTitleStyle}>{selection.title}</span>
-          </div>
-          <div style={criticalPathNodePreviewActionsStyle}>
-            <button type="button" style={criticalPathNodePreviewOpenButtonStyle(accent)} onClick={onOpen} disabled={!onOpen}>
-              Open
-            </button>
-            <button type="button" aria-label="Close node window" title="Close" style={criticalPathNodePreviewCloseButtonStyle} onClick={onClose}>
-              x
-            </button>
-          </div>
-        </div>
-        <div style={criticalPathNodePreviewEditorFrameStyle}>
-          <EditorContent
-            key={`${selection.stepID}:${selection.nodeID}`}
-            accent={accent}
-            widgetId={`project-critical-path-node:${selection.stepID}:${selection.nodeID}`}
-            theme="mango"
-            forcedEntityKind="node"
-            forcedEntityID={selection.nodeID}
-            forcedLabel={selection.title}
-            forcedEmptyMessage="Select a critical-path node."
-          />
-        </div>
+    <div className="project-critical-path-node-window" style={criticalPathNodePreviewSurfaceStyle(accent)}>
+      <div style={criticalPathNodePreviewEditorFrameStyle}>
+        <EditorContent
+          key={`${selection.stepID}:${selection.nodeID}`}
+          accent={accent}
+          widgetId={`project-critical-path-node:${selection.stepID}:${selection.nodeID}`}
+          theme="mango"
+          forcedEntityKind="node"
+          forcedEntityID={selection.nodeID}
+          forcedLabel={selection.title}
+          forcedEmptyMessage="Select a critical-path node."
+          compactLinkedDocumentHeader
+        />
       </div>
     </div>
   );
@@ -2991,7 +2970,7 @@ const criticalPathNodePreviewRowStyle: React.CSSProperties = {
   gridTemplateColumns: criticalPathGridColumns,
   minWidth: 760,
   borderBottom: "1px solid rgba(186, 230, 253, 0.82)",
-  background: "linear-gradient(180deg, rgba(240, 249, 255, 0.74), rgba(248, 250, 252, 0.40))",
+  background: "#ffffff",
   zIndex: 2,
 };
 
@@ -2999,14 +2978,8 @@ const criticalPathNodePreviewCellStyle: React.CSSProperties = {
   position: "relative",
   gridColumn: "1 / -1",
   minWidth: 0,
-  padding: "0 12px 18px",
+  padding: "0 8px 14px",
   boxSizing: "border-box",
-};
-
-const criticalPathNodePreviewShellStyle: React.CSSProperties = {
-  position: "relative",
-  minWidth: 0,
-  paddingTop: 15,
 };
 
 const criticalPathNodePickerRowStyle: React.CSSProperties = {
@@ -3142,120 +3115,24 @@ const criticalPathNodePickerResultPathStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
-function criticalPathNodePreviewStemStyle(accent: string): React.CSSProperties {
-  return {
-    position: "absolute",
-    top: 0,
-    left: "clamp(170px, 28%, 330px)",
-    width: 26,
-    height: 24,
-    borderLeft: `2px solid ${accent}`,
-    borderBottom: `2px solid ${accent}`,
-    borderBottomLeftRadius: 14,
-    opacity: 0.56,
-    transform: "translateY(-2px)",
-    pointerEvents: "none",
-    zIndex: 1,
-  };
-}
-
 function criticalPathNodePreviewSurfaceStyle(accent: string): React.CSSProperties {
   return {
     position: "relative",
     minWidth: 0,
     border: "1px solid transparent",
-    borderRadius: 16,
+    borderRadius: 10,
     background: `${EDITOR_NEU_PANEL_BACKGROUND} padding-box, linear-gradient(135deg, rgba(255,255,255,0.95), ${accent}) border-box`,
     color: PROJECT_SUMMARY_SURFACE_TEXT,
     overflow: "hidden",
-    boxShadow: "16px 18px 34px rgba(174,174,192,0.28), -12px -12px 24px rgba(255,255,255,0.92), 0 20px 46px rgba(15,23,42,0.14), inset 1px 1px 0 rgba(255,255,255,0.88)",
+    boxShadow: "8px 10px 22px rgba(174,174,192,0.18), -6px -6px 16px rgba(255,255,255,0.84), inset 1px 1px 0 rgba(255,255,255,0.86)",
     transformOrigin: "top center",
   };
 }
 
-const criticalPathNodePreviewHeaderStyle: React.CSSProperties = {
-  minHeight: 44,
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto",
-  alignItems: "center",
-  gap: 10,
-  padding: "7px 9px 7px 11px",
-  borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`,
-  background: "linear-gradient(90deg, rgba(255,241,242,0.54), rgba(236,253,245,0.34) 52%, rgba(239,246,255,0.62))",
-  boxSizing: "border-box",
-};
-
-const criticalPathNodePreviewTitleWrapStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  gridTemplateColumns: "24px minmax(0, 1fr)",
-  alignItems: "center",
-  gap: 8,
-};
-
-function criticalPathNodePreviewIconStyle(accent: string): React.CSSProperties {
-  return {
-    width: 24,
-    height: 24,
-    display: "grid",
-    placeItems: "center",
-    border: "1px solid transparent",
-    borderRadius: 8,
-    background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
-    color: accent,
-    boxShadow: "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.78)",
-  };
-}
-
-const criticalPathNodePreviewTitleStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  color: "#172033",
-  fontSize: 12,
-  fontWeight: 950,
-};
-
-const criticalPathNodePreviewActionsStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 7,
-};
-
-const criticalPathNodePreviewOpenButtonStyle = (accent: string): React.CSSProperties => ({
-  height: 28,
-  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-  borderRadius: 8,
-  background: EDITOR_NEU_SURFACE,
-  color: accent,
-  cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: 11,
-  fontWeight: 900,
-  padding: "0 10px",
-  boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)",
-});
-
-const criticalPathNodePreviewCloseButtonStyle: React.CSSProperties = {
-  width: 28,
-  height: 28,
-  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-  borderRadius: 8,
-  background: EDITOR_NEU_SURFACE,
-  color: "#64748b",
-  cursor: "pointer",
-  fontFamily: "inherit",
-  fontSize: 12,
-  fontWeight: 950,
-  padding: 0,
-  boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)",
-};
-
 const criticalPathNodePreviewEditorFrameStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
-  height: "clamp(440px, 58vh, 760px)",
+  height: "clamp(500px, 64vh, 820px)",
   overflow: "hidden",
   background: EDITOR_NEU_PANEL_BACKGROUND,
 };
