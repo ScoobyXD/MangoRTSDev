@@ -174,6 +174,42 @@ func (r *PostgresRepo) GetCompanyEmailConnectionByID(companyID, connectionID str
 	return connection, err
 }
 
+func (r *PostgresRepo) GetCompanyEmailConnectionByGrantID(grantID string) (domain.CompanyEmailConnection, error) {
+	grantID = strings.TrimSpace(grantID)
+	if grantID == "" {
+		return domain.CompanyEmailConnection{}, ErrInvalid
+	}
+
+	var connection domain.CompanyEmailConnection
+	var connectedBy sql.NullString
+	err := r.db.QueryRow(
+		`select company_email_connection_id::text, company_id::text, provider, account_email, grant_id, status,
+		        connected_by_user_id::text, created_timestamp, updated_timestamp
+		 from company_email_connections
+		 where grant_id = $1
+		 order by updated_timestamp desc
+		 limit 1`,
+		grantID,
+	).Scan(
+		&connection.CompanyEmailConnectionID,
+		&connection.CompanyID,
+		&connection.Provider,
+		&connection.AccountEmail,
+		&connection.GrantID,
+		&connection.Status,
+		&connectedBy,
+		&connection.CreatedTimestamp,
+		&connection.UpdatedTimestamp,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.CompanyEmailConnection{}, ErrNotFound
+	}
+	if connectedBy.Valid {
+		connection.ConnectedByUserID = connectedBy.String
+	}
+	return connection, err
+}
+
 func (r *PostgresRepo) GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error) {
 	grantID = strings.TrimSpace(grantID)
 	if grantID == "" {
@@ -638,11 +674,14 @@ func (r *PostgresRepo) UpsertCommunicationsMessageReadStatus(input Communication
 	if err := r.ensureCommunicationsMessageReadStatusSchema(); err != nil {
 		return domain.CommunicationsMessageReadStatus{}, err
 	}
-	userID := strings.TrimSpace(input.UserID)
+	scope, ok := communicationsMessageReadStatusScope(input.ScopeType, input.UserID, input.CompanyID, input.CompanyEmailConnectionID, input.SharedInboxID)
+	if !ok {
+		return domain.CommunicationsMessageReadStatus{}, ErrInvalid
+	}
 	messageID := strings.TrimSpace(input.MessageID)
 	threadID := strings.TrimSpace(input.ThreadID)
 	status := normalizeCommunicationsMessageReadStatus(input.Status)
-	if userID == "" || messageID == "" || status == "" {
+	if messageID == "" || status == "" {
 		return domain.CommunicationsMessageReadStatus{}, ErrInvalid
 	}
 	signalAt := input.SignalTimestamp.UTC()
@@ -658,9 +697,14 @@ func (r *PostgresRepo) UpsertCommunicationsMessageReadStatus(input Communication
 		initialCount = 1
 	}
 
-	return scanCommunicationsMessageReadStatus(r.db.QueryRow(`
-insert into communications_message_read_statuses (
+	return scanCommunicationsMessageReadReceiptSummary(r.db.QueryRow(`
+insert into communications_message_read_receipt_summaries (
+  receipt_scope_type,
+  receipt_scope_id,
   user_id,
+  company_id,
+  company_email_connection_id,
+  shared_inbox_id,
   message_id,
   thread_id,
   status,
@@ -669,25 +713,30 @@ insert into communications_message_read_statuses (
   last_signal_timestamp,
   created_timestamp,
   updated_timestamp
-) values ($1, $2, $3, $4, $5, $6, $6, now(), now())
-on conflict (user_id, message_id) do update set
+) values ($1, $2, nullif($3, '')::uuid, nullif($4, '')::uuid, nullif($5, '')::uuid, nullif($6, '')::uuid, $7, $8, $9, $10, $11, $11, now(), now())
+on conflict (receipt_scope_type, receipt_scope_id, message_id) do update set
   thread_id = case
     when excluded.thread_id <> '' then excluded.thread_id
-    else communications_message_read_statuses.thread_id
+    else communications_message_read_receipt_summaries.thread_id
   end,
   status = case
-    when communications_message_read_statuses.status = 'read' or excluded.status = 'read' then 'read'
+    when communications_message_read_receipt_summaries.status = 'read' or excluded.status = 'read' then 'read'
     else 'likely_read'
   end,
   signal_count = case
-    when $7::integer > 0 then greatest(communications_message_read_statuses.signal_count, excluded.signal_count)
-    else communications_message_read_statuses.signal_count + 1
+    when $12::integer > 0 then greatest(communications_message_read_receipt_summaries.signal_count, excluded.signal_count)
+    else communications_message_read_receipt_summaries.signal_count + 1
   end,
-  first_signal_timestamp = least(communications_message_read_statuses.first_signal_timestamp, excluded.first_signal_timestamp),
-  last_signal_timestamp = greatest(communications_message_read_statuses.last_signal_timestamp, excluded.last_signal_timestamp),
+  first_signal_timestamp = least(communications_message_read_receipt_summaries.first_signal_timestamp, excluded.first_signal_timestamp),
+  last_signal_timestamp = greatest(communications_message_read_receipt_summaries.last_signal_timestamp, excluded.last_signal_timestamp),
   updated_timestamp = now()
-returning user_id::text, message_id, thread_id, status, signal_count, first_signal_timestamp, last_signal_timestamp, created_timestamp, updated_timestamp`,
-		userID,
+returning receipt_scope_type, receipt_scope_id, coalesce(user_id::text, ''), coalesce(company_id::text, ''), coalesce(company_email_connection_id::text, ''), coalesce(shared_inbox_id::text, ''), message_id, thread_id, status, signal_count, first_signal_timestamp, last_signal_timestamp, created_timestamp, updated_timestamp`,
+		scope.ScopeType,
+		scope.ScopeID,
+		scope.UserID,
+		scope.CompanyID,
+		scope.CompanyEmailConnectionID,
+		scope.SharedInboxID,
 		messageID,
 		threadID,
 		status,
@@ -697,29 +746,30 @@ returning user_id::text, message_id, thread_id, status, signal_count, first_sign
 	))
 }
 
-func (r *PostgresRepo) ListCommunicationsMessageReadStatuses(userID string, messageIDs []string) ([]domain.CommunicationsMessageReadStatus, error) {
+func (r *PostgresRepo) ListCommunicationsMessageReadStatuses(input CommunicationsMessageReadStatusListInput) ([]domain.CommunicationsMessageReadStatus, error) {
 	if err := r.ensureCommunicationsMessageReadStatusSchema(); err != nil {
 		return nil, err
 	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
+	scope, ok := communicationsMessageReadStatusScope(input.ScopeType, input.UserID, input.CompanyID, input.CompanyEmailConnectionID, "")
+	if !ok {
 		return nil, ErrInvalid
 	}
-	ids := normalizeUniqueStrings(messageIDs, 0)
+	ids := normalizeUniqueStrings(input.MessageIDs, 0)
 	if len(ids) == 0 {
 		return []domain.CommunicationsMessageReadStatus{}, nil
 	}
 
-	args := []any{userID}
+	args := []any{scope.ScopeType, scope.ScopeID}
 	placeholders := make([]string, 0, len(ids))
 	for _, id := range ids {
 		args = append(args, id)
 		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
 	}
 	rows, err := r.db.Query(`
-select user_id::text, message_id, thread_id, status, signal_count, first_signal_timestamp, last_signal_timestamp, created_timestamp, updated_timestamp
-from communications_message_read_statuses
-where user_id = $1
+select receipt_scope_type, receipt_scope_id, coalesce(user_id::text, ''), coalesce(company_id::text, ''), coalesce(company_email_connection_id::text, ''), coalesce(shared_inbox_id::text, ''), message_id, thread_id, status, signal_count, first_signal_timestamp, last_signal_timestamp, created_timestamp, updated_timestamp
+from communications_message_read_receipt_summaries
+where receipt_scope_type = $1
+  and receipt_scope_id = $2
   and message_id in (`+strings.Join(placeholders, ",")+`)
 order by last_signal_timestamp desc, message_id asc`, args...)
 	if err != nil {
@@ -729,7 +779,7 @@ order by last_signal_timestamp desc, message_id asc`, args...)
 
 	statuses := make([]domain.CommunicationsMessageReadStatus, 0, len(ids))
 	for rows.Next() {
-		status, err := scanCommunicationsMessageReadStatus(rows)
+		status, err := scanCommunicationsMessageReadReceiptSummary(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -765,17 +815,105 @@ create index if not exists idx_communications_message_read_statuses_user_thread
   where thread_id <> '';
 
 create index if not exists idx_communications_message_read_statuses_user_latest
-  on communications_message_read_statuses(user_id, last_signal_timestamp desc);`)
+  on communications_message_read_statuses(user_id, last_signal_timestamp desc);
+
+create table if not exists communications_message_read_receipt_summaries (
+  receipt_scope_type varchar not null,
+  receipt_scope_id varchar not null,
+  user_id uuid references users(user_id) on delete cascade,
+  company_id uuid references companies(company_id) on delete cascade,
+  company_email_connection_id uuid references company_email_connections(company_email_connection_id) on delete cascade,
+  shared_inbox_id uuid,
+  message_id text not null,
+  thread_id text not null default '',
+  status text not null default 'likely_read',
+  signal_count integer not null default 0,
+  first_signal_timestamp timestamptz not null,
+  last_signal_timestamp timestamptz not null,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  primary key (receipt_scope_type, receipt_scope_id, message_id),
+  constraint communications_message_read_receipt_summaries_scope_chk check (receipt_scope_type in ('personal', 'shared')),
+  constraint communications_message_read_receipt_summaries_message_id_chk check (btrim(message_id) <> ''),
+  constraint communications_message_read_receipt_summaries_status_chk check (status in ('likely_read', 'read')),
+  constraint communications_message_read_receipt_summaries_signal_count_chk check (signal_count >= 0),
+  constraint communications_message_read_receipt_summaries_personal_chk check (
+    (receipt_scope_type = 'personal' and user_id is not null and company_email_connection_id is null)
+    or (receipt_scope_type = 'shared' and company_id is not null and company_email_connection_id is not null)
+  )
+);
+
+create index if not exists idx_communications_message_read_receipt_summaries_user_latest
+  on communications_message_read_receipt_summaries(user_id, last_signal_timestamp desc)
+  where receipt_scope_type = 'personal';
+
+create index if not exists idx_communications_message_read_receipt_summaries_shared_latest
+  on communications_message_read_receipt_summaries(company_email_connection_id, last_signal_timestamp desc)
+  where receipt_scope_type = 'shared';
+
+create index if not exists idx_communications_message_read_receipt_summaries_thread
+  on communications_message_read_receipt_summaries(receipt_scope_type, receipt_scope_id, thread_id)
+  where thread_id <> '';
+
+do $$
+begin
+  if to_regclass('public.communications_message_read_statuses') is not null then
+    insert into public.communications_message_read_receipt_summaries (
+      receipt_scope_type,
+      receipt_scope_id,
+      user_id,
+      message_id,
+      thread_id,
+      status,
+      signal_count,
+      first_signal_timestamp,
+      last_signal_timestamp,
+      created_timestamp,
+      updated_timestamp
+    )
+    select
+      'personal',
+      user_id::text,
+      user_id,
+      message_id,
+      thread_id,
+      status,
+      signal_count,
+      first_signal_timestamp,
+      last_signal_timestamp,
+      created_timestamp,
+      updated_timestamp
+    from public.communications_message_read_statuses
+    on conflict (receipt_scope_type, receipt_scope_id, message_id) do update set
+      thread_id = case
+        when excluded.thread_id <> '' then excluded.thread_id
+        else communications_message_read_receipt_summaries.thread_id
+      end,
+      status = case
+        when communications_message_read_receipt_summaries.status = 'read' or excluded.status = 'read' then 'read'
+        else 'likely_read'
+      end,
+      signal_count = greatest(communications_message_read_receipt_summaries.signal_count, excluded.signal_count),
+      first_signal_timestamp = least(communications_message_read_receipt_summaries.first_signal_timestamp, excluded.first_signal_timestamp),
+      last_signal_timestamp = greatest(communications_message_read_receipt_summaries.last_signal_timestamp, excluded.last_signal_timestamp),
+      updated_timestamp = greatest(communications_message_read_receipt_summaries.updated_timestamp, excluded.updated_timestamp);
+  end if;
+end $$;`)
 	})
 	return r.communicationsMessageReadStatusSchemaErr
 }
 
-func scanCommunicationsMessageReadStatus(row interface {
+func scanCommunicationsMessageReadReceiptSummary(row interface {
 	Scan(dest ...any) error
 }) (domain.CommunicationsMessageReadStatus, error) {
 	var status domain.CommunicationsMessageReadStatus
 	err := row.Scan(
+		&status.ScopeType,
+		&status.ScopeID,
 		&status.UserID,
+		&status.CompanyID,
+		&status.CompanyEmailConnectionID,
+		&status.SharedInboxID,
 		&status.MessageID,
 		&status.ThreadID,
 		&status.Status,

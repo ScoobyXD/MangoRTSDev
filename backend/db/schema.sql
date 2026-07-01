@@ -278,6 +278,44 @@ create index if not exists idx_communications_message_read_statuses_user_thread
 create index if not exists idx_communications_message_read_statuses_user_latest
   on communications_message_read_statuses(user_id, last_signal_timestamp desc);
 
+create table if not exists communications_message_read_receipt_summaries (
+  receipt_scope_type varchar not null,
+  receipt_scope_id varchar not null,
+  user_id uuid references users(user_id) on delete cascade,
+  company_id uuid references companies(company_id) on delete cascade,
+  company_email_connection_id uuid references company_email_connections(company_email_connection_id) on delete cascade,
+  shared_inbox_id uuid,
+  message_id text not null,
+  thread_id text not null default '',
+  status text not null default 'likely_read',
+  signal_count integer not null default 0,
+  first_signal_timestamp timestamptz not null,
+  last_signal_timestamp timestamptz not null,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  primary key (receipt_scope_type, receipt_scope_id, message_id),
+  constraint communications_message_read_receipt_summaries_scope_chk check (receipt_scope_type in ('personal', 'shared')),
+  constraint communications_message_read_receipt_summaries_message_id_chk check (btrim(message_id) <> ''),
+  constraint communications_message_read_receipt_summaries_status_chk check (status in ('likely_read', 'read')),
+  constraint communications_message_read_receipt_summaries_signal_count_chk check (signal_count >= 0),
+  constraint communications_message_read_receipt_summaries_personal_chk check (
+    (receipt_scope_type = 'personal' and user_id is not null and company_email_connection_id is null)
+    or (receipt_scope_type = 'shared' and company_id is not null and company_email_connection_id is not null)
+  )
+);
+
+create index if not exists idx_communications_message_read_receipt_summaries_user_latest
+  on communications_message_read_receipt_summaries(user_id, last_signal_timestamp desc)
+  where receipt_scope_type = 'personal';
+
+create index if not exists idx_communications_message_read_receipt_summaries_shared_latest
+  on communications_message_read_receipt_summaries(company_email_connection_id, last_signal_timestamp desc)
+  where receipt_scope_type = 'shared';
+
+create index if not exists idx_communications_message_read_receipt_summaries_thread
+  on communications_message_read_receipt_summaries(receipt_scope_type, receipt_scope_id, thread_id)
+  where thread_id <> '';
+
 create table if not exists auth_external_identity_deletions (
   provider text not null,
   external_subject text not null,

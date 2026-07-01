@@ -92,6 +92,12 @@ ST81 - A successful Shared Triage email conversion creates the same direct email
 ST82 - Local Shared Triage conversion echoes from communications realtime and workspace realtime must be reconciled from the conversion response; they must not blank, fully reload, reuse stale prefetched pages, or repeatedly refetch the shared mailbox message list or Home workspace panel.
 ST83 - Successful local Shared Triage email conversion removes converted rows from visible state and local message caches, suppresses matching local `triage.converted` echoes by `shared_inbox_id`, and tolerates a matching unscoped realtime echo without invalidating all communications message page/detail caches or triggering post-removal fill/message-length prefetch.
 ST84 - Successful local Shared Triage email conversion into a Company Explorer Logic Gate must show a temporary green success banner over the Company Explorer section; other Logic Gate conversion surfaces must show a temporary success banner or notice.
+ST85 - Sent email read receipts from Shared Triage use Nylas open tracking on outbound shared mailbox sends by sending `tracking_options.opens = true` through the company-owned shared grant.
+ST86 - Shared mailbox `message.opened` receipts are stored in the company email connection/shared mailbox receipt scope, not in the viewer's personal user receipt scope.
+ST87 - Shared mailbox receipt realtime events include `shared_inbox_id` and are published only to users with view access to the linked Shared Triage mailbox work surface.
+ST88 - A shared `message.opened` receipt with a message ID must reconcile only the affected visible or selected sent message and must not trigger a full Shared Triage message-list reload, top-up, or prefetch.
+ST89 - Sent shared mailbox messages without a stored receipt must not show a green `Not opened` indicator; the UI shows `Seen` only after a stored open signal, with timestamp/count details when available.
+ST90 - Multiple Shared Triage mailbox work surfaces that point at the same company email connection share receipt state for the same provider message, while realtime events remain scoped to each linked `shared_inbox_id` audience.
 
 ## Scenarios
 
@@ -386,3 +392,26 @@ Expected:
 - The resulting Kanban card is marked as directly email-created and can later transfer its email attachment into another node card.
 - The visible Shared Triage email list and app-level communications live-freshness bridge handle the local conversion by removing converted rows from local state/cache and suppressing the matching `shared_inbox_id` scoped realtime echo, plus a matching unscoped echo if the realtime payload omits `shared_inbox_id`, without full-list replacement, communications message cache invalidation, stale prefetched-page top-up, post-removal fill, message-length prefetch, or repeated workspace/mail GET bursts.
 - Company Explorer drops show a temporary green success banner over the Company Explorer section after the conversion succeeds.
+
+### Scenario ST-S11: Shared Sent Read Receipts
+
+Business logic covered:
+- ST85
+- ST86
+- ST87
+- ST88
+- ST89
+- ST90
+
+Given:
+- A user has edit access to a mailbox-capable Shared Triage inbox.
+- The shared inbox has a connected company-owned mailbox grant.
+- The user sends mail from that shared mailbox, and Nylas later emits `message.opened` webhooks for the shared grant.
+
+Expected:
+- Shared sends request Nylas open tracking through the company-owned shared grant.
+- The backend stores open signals under the company email connection/shared mailbox scope and does not write them to the actor's personal receipt scope.
+- Realtime receipt events include the linked `shared_inbox_id` and are delivered only to users with view access to that shared inbox.
+- The Sent mailbox shows `Seen` only for messages with a stored receipt signal; messages without a signal do not show `Not opened`.
+- A `message.opened` event with a message ID updates the affected sent row/detail only and preserves the rest of the visible list and prefetched page state.
+- If more than one Shared Triage mailbox entry points at the same company email connection, those entries share the stored receipt summary for the same provider message while audience fanout remains tied to each linked shared inbox.

@@ -1318,6 +1318,13 @@ func userConnectionForCompanyEmailConnection(connection domain.CompanyEmailConne
 	}
 }
 
+func communicationsMessageReadStatusScopeTypeForConnection(connection domain.UserEmailConnection) string {
+	if strings.TrimSpace(connection.Scope) == "shared" || strings.TrimSpace(connection.CompanyEmailConnectionID) != "" {
+		return "shared"
+	}
+	return "personal"
+}
+
 func requireConnectedCompanyEmailStatus(w http.ResponseWriter, connection domain.CompanyEmailConnection, actorUserID string) (domain.UserEmailConnection, bool) {
 	return requireConnectedEmailStatus(w, userConnectionForCompanyEmailConnection(connection, actorUserID))
 }
@@ -1454,7 +1461,7 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 	cacheQuery.Refresh = false
 	if !query.Refresh {
 		if page, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL, now); ok {
-			return s.enrichCommunicationsMessagePage(connection.UserID, query.CompanyID, page), nil
+			return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, page), nil
 		}
 	}
 
@@ -1473,19 +1480,19 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 	if err != nil {
 		if shouldServeStaleCommunicationsCache(err) {
 			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL+communicationsMaxStaleTTL, now); ok {
-				return s.enrichCommunicationsMessagePage(connection.UserID, query.CompanyID, cached), nil
+				return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, cached), nil
 			}
 		}
 		return NylasMessagePage{}, err
 	}
 	s.commCache.setMessagePage(connection.UserID, cacheScope, cacheQuery, page, now)
-	return s.enrichCommunicationsMessagePage(connection.UserID, query.CompanyID, page), nil
+	return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, page), nil
 }
 func (s *Server) communicationsMessage(ctx context.Context, connection domain.UserEmailConnection, messageID string) (NylasMessage, error) {
 	now := time.Now().UTC()
 	cacheScope := communicationsConnectionCacheScope(connection)
 	if message, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, now); ok {
-		return s.enrichCommunicationsMessageReadStatus(connection.UserID, message), nil
+		return s.enrichCommunicationsMessageReadStatus(connection, message), nil
 	}
 	var message NylasMessage
 	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
@@ -1504,13 +1511,13 @@ func (s *Server) communicationsMessage(ctx context.Context, connection domain.Us
 	if err != nil {
 		if shouldServeStaleCommunicationsCache(err) {
 			if cached, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL+communicationsMaxStaleTTL, now); ok {
-				return s.enrichCommunicationsMessageReadStatus(connection.UserID, cached), nil
+				return s.enrichCommunicationsMessageReadStatus(connection, cached), nil
 			}
 		}
 		return NylasMessage{}, err
 	}
 	s.commCache.setMessage(connection.UserID, cacheScope, message, now)
-	return s.enrichCommunicationsMessageReadStatus(connection.UserID, message), nil
+	return s.enrichCommunicationsMessageReadStatus(connection, message), nil
 }
 
 func shouldServeStaleCommunicationsCache(err error) bool {
@@ -1526,21 +1533,27 @@ func (s *Server) enrichCommunicationsMessagePagePlacements(userID, companyID str
 
 func (s *Server) enrichCommunicationsMessagePage(userID, companyID string, page NylasMessagePage) NylasMessagePage {
 	page = cloneNylasMessagePage(page)
-	page.Messages = s.enrichCommunicationsMessagesReadStatuses(userID, page.Messages)
 	page.Messages = s.enrichCommunicationsMessagesPlacements(userID, companyID, page.Messages)
 	return page
 }
 
-func (s *Server) enrichCommunicationsMessageReadStatus(userID string, message NylasMessage) NylasMessage {
-	messages := s.enrichCommunicationsMessagesReadStatuses(userID, []NylasMessage{message})
+func (s *Server) enrichCommunicationsMessagePageForConnection(connection domain.UserEmailConnection, companyID string, page NylasMessagePage) NylasMessagePage {
+	page = cloneNylasMessagePage(page)
+	page.Messages = s.enrichCommunicationsMessagesReadStatuses(connection, page.Messages)
+	page.Messages = s.enrichCommunicationsMessagesPlacements(connection.UserID, companyID, page.Messages)
+	return page
+}
+
+func (s *Server) enrichCommunicationsMessageReadStatus(connection domain.UserEmailConnection, message NylasMessage) NylasMessage {
+	messages := s.enrichCommunicationsMessagesReadStatuses(connection, []NylasMessage{message})
 	if len(messages) == 0 {
 		return message
 	}
 	return messages[0]
 }
 
-func (s *Server) enrichCommunicationsMessagesReadStatuses(userID string, messages []NylasMessage) []NylasMessage {
-	if s == nil || s.repo == nil || strings.TrimSpace(userID) == "" || len(messages) == 0 {
+func (s *Server) enrichCommunicationsMessagesReadStatuses(connection domain.UserEmailConnection, messages []NylasMessage) []NylasMessage {
+	if s == nil || s.repo == nil || len(messages) == 0 {
 		return messages
 	}
 	messageIDs := make([]string, 0, len(messages))
@@ -1553,9 +1566,15 @@ func (s *Server) enrichCommunicationsMessagesReadStatuses(userID string, message
 	if len(messageIDs) == 0 {
 		return messages
 	}
-	statuses, err := s.repo.ListCommunicationsMessageReadStatuses(userID, messageIDs)
+	statuses, err := s.repo.ListCommunicationsMessageReadStatuses(store.CommunicationsMessageReadStatusListInput{
+		ScopeType:                communicationsMessageReadStatusScopeTypeForConnection(connection),
+		UserID:                   connection.UserID,
+		CompanyID:                connection.CompanyID,
+		CompanyEmailConnectionID: connection.CompanyEmailConnectionID,
+		MessageIDs:               messageIDs,
+	})
 	if err != nil {
-		log.Printf("failed to load communications message read statuses user_id=%s message_count=%d: %v", userID, len(messageIDs), err)
+		log.Printf("failed to load communications message read statuses user_id=%s scope=%s company_id=%s company_email_connection_id=%s message_count=%d: %v", connection.UserID, communicationsMessageReadStatusScopeTypeForConnection(connection), connection.CompanyID, connection.CompanyEmailConnectionID, len(messageIDs), err)
 		return messages
 	}
 	readStatusByMessageID := make(map[string]domain.CommunicationsMessageReadStatus, len(statuses))
