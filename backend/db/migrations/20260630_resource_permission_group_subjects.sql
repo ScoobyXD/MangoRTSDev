@@ -5,8 +5,21 @@ alter table resource_permissions
   add column if not exists subject_id uuid,
   add column if not exists access_level text;
 
-alter table resource_permissions
-  drop constraint if exists resource_permissions_pkey;
+do $$
+declare
+  primary_key_name text;
+begin
+  select constraint.conname
+    into primary_key_name
+  from pg_constraint constraint
+  where constraint.conrelid = 'resource_permissions'::regclass
+    and constraint.contype = 'p'
+  limit 1;
+
+  if primary_key_name is not null then
+    execute format('alter table resource_permissions drop constraint %I', primary_key_name);
+  end if;
+end $$;
 
 alter table resource_permissions
   alter column user_id drop not null;
