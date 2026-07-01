@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import {
+  deleteNotification,
+  deleteNotifications,
   fetchUpdateBranch,
   fetchUpdateRootGroups,
   EVENT_NOTIFICATIONS_UPDATED,
-  markNotificationRead,
   NOTIFICATION_TYPE_MENTION,
   NOTIFICATION_TYPE_URGENT_MENTION,
   type NotificationItem,
@@ -14,6 +15,7 @@ import {
 import { formatNotificationTimestamp } from "../../modules/notifications/notificationTime";
 import { createSavedViewID, deleteSavedView as deleteSavedViewRequest, fetchSavedViews, saveSavedView, type SavedView, type SavedViewPrincipal } from "./savedViewsApi";
 import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNestedGroup } from "../../modules/grouping/universalGrouping";
+import { orderedUpdateSelection, resolveUpdateClickSelection } from "./updatesSelection";
 
 type UpdatesViewProps = {
   apiBase: string;
@@ -66,6 +68,11 @@ type UpdateFeedRow = {
   node?: UpdateRowResource;
 };
 
+type UpdateContextMenuState = {
+  x: number;
+  y: number;
+};
+
 const UPDATE_FILTERS: ReadonlyArray<{ value: UpdateFeedFilter; label: string; title: string }> = [
   { value: "urgent", label: "!", title: "Urgent mentions" },
   { value: "mention", label: "@", title: "Mentions" },
@@ -110,7 +117,10 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
   const [settingsError, setSettingsError] = useState("");
   const [hiddenNotificationIDs, setHiddenNotificationIDs] = useState<Set<string>>(new Set());
   const [selectedNotificationKey, setSelectedNotificationKey] = useState("");
+  const [selectedNotificationKeys, setSelectedNotificationKeys] = useState<Set<string>>(new Set());
+  const [selectionAnchorNotificationKey, setSelectionAnchorNotificationKey] = useState("");
   const [hoveredNotificationKey, setHoveredNotificationKey] = useState("");
+  const [contextMenu, setContextMenu] = useState<UpdateContextMenuState | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -146,12 +156,18 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
   useEffect(() => {
     setHiddenNotificationIDs(new Set());
     setSelectedNotificationKey("");
+    setSelectedNotificationKeys(new Set());
+    setSelectionAnchorNotificationKey("");
     setHoveredNotificationKey("");
+    setContextMenu(null);
   }, [companyID]);
 
   useEffect(() => {
     setSelectedNotificationKey("");
+    setSelectedNotificationKeys(new Set());
+    setSelectionAnchorNotificationKey("");
     setHoveredNotificationKey("");
+    setContextMenu(null);
   }, [filter]);
 
   const persistSavedSetting = useCallback((setting: UpdateSavedGroupingSetting) => {
@@ -364,6 +380,29 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
     setSelectedNotificationKey("");
   }, [selectedNotificationKey, visibleNotifications]);
 
+  useEffect(() => {
+    const visibleKeys = new Set(visibleNotifications.map(updateNotificationSelectionKey));
+    setSelectedNotificationKeys((current) => {
+      const next = new Set(Array.from(current).filter((key) => visibleKeys.has(key)));
+      return next.size === current.size ? current : next;
+    });
+    if (selectionAnchorNotificationKey && !visibleKeys.has(selectionAnchorNotificationKey)) setSelectionAnchorNotificationKey("");
+  }, [selectionAnchorNotificationKey, visibleNotifications]);
+
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    const closeContextMenu = () => setContextMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeContextMenu();
+    };
+    window.addEventListener("pointerdown", closeContextMenu);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", closeContextMenu);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextMenu]);
+
   const toggleGroup = useCallback((groupID: string) => {
     const isRoot = rootGroups.some((group) => group.id === groupID);
     const willOpen = !expandedGroupIDs.has(groupID);
@@ -376,13 +415,35 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
     });
   }, [branchByRootID, expandedGroupIDs, loadBranch, rootGroups]);
 
-  const selectUpdateItem = useCallback((item: NotificationItem) => {
-    setSelectedNotificationKey(updateNotificationSelectionKey(item));
+  const selectedNotificationItems = useMemo(() => {
+    if (selectedNotificationKeys.size === 0) return [];
+    return visibleNotifications.filter((item) => selectedNotificationKeys.has(updateNotificationSelectionKey(item)));
+  }, [selectedNotificationKeys, visibleNotifications]);
+
+  const selectUpdateItem = useCallback((item: NotificationItem, event?: React.MouseEvent | React.KeyboardEvent, options: { open?: boolean } = {}) => {
+    const itemKey = updateNotificationSelectionKey(item);
+    const orderedKeys = visibleNotifications.map(updateNotificationSelectionKey);
+    const selected = resolveUpdateClickSelection({
+      orderedIDs: orderedKeys,
+      previousSelectedIDs: selectedNotificationKeys,
+      anchorID: selectionAnchorNotificationKey,
+      clickedID: itemKey,
+      shiftKey: !!event?.shiftKey,
+      ctrlKey: !!event?.ctrlKey || !!event?.metaKey,
+    });
+    if (selected.selectedIDs.size === 0) selected.selectedIDs.add(itemKey);
+    const orderedSelectedIDs = orderedUpdateSelection(orderedKeys, selected.selectedIDs);
+    const primaryKey = selected.selectedIDs.has(itemKey) ? itemKey : (orderedSelectedIDs[0] ?? itemKey);
+    const shouldOpen = options.open ?? (!event?.shiftKey && !event?.ctrlKey && !event?.metaKey);
+    setSelectedNotificationKeys(new Set(orderedSelectedIDs.length > 0 ? orderedSelectedIDs : [itemKey]));
+    setSelectionAnchorNotificationKey(selected.anchorID);
+    setSelectedNotificationKey(primaryKey);
+    if (!shouldOpen) return;
     const nodeID = item.node_id?.trim() || (item.entity_type === "node" ? item.entity_id.trim() : "");
     if (nodeID) {
       onOpenNode(nodeID, item.information_id?.trim() || undefined);
     }
-  }, [onOpenNode]);
+  }, [onOpenNode, selectedNotificationKeys, selectionAnchorNotificationKey, visibleNotifications]);
 
   const selectAdjacentUpdate = useCallback((item: NotificationItem, direction: 1 | -1) => {
     if (visibleNotifications.length === 0) return;
@@ -390,28 +451,80 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
     const activeKey = selectedNotificationKey || itemKey;
     const currentIndex = Math.max(0, visibleNotifications.findIndex((candidate) => updateNotificationSelectionKey(candidate) === activeKey));
     const nextIndex = Math.min(Math.max(currentIndex + direction, 0), visibleNotifications.length - 1);
-    selectUpdateItem(visibleNotifications[nextIndex]);
+    selectUpdateItem(visibleNotifications[nextIndex], undefined, { open: true });
   }, [selectUpdateItem, selectedNotificationKey, visibleNotifications]);
 
-  const markUpdateRead = useCallback((item: NotificationItem) => {
-    const notificationID = item.notification_id?.trim() ?? "";
-    if (!notificationID) return;
-    const selectionKey = updateNotificationSelectionKey(item);
+  const removeSeenUpdates = useCallback((items: NotificationItem[], confirmMessage = "") => {
+    const uniqueItems = Array.from(new Map(items.map((item) => [updateNotificationSelectionKey(item), item])).values());
+    const notificationIDs = uniqueItems.map((item) => item.notification_id?.trim() ?? "").filter(Boolean);
+    if (notificationIDs.length === 0) return;
+    if (confirmMessage && typeof window !== "undefined" && !window.confirm(confirmMessage)) return;
+    const hiddenKeys = uniqueItems.map(updateNotificationSelectionKey);
     setHiddenNotificationIDs((current) => {
       const next = new Set(current);
-      next.add(notificationID);
+      for (const key of hiddenKeys) next.add(key);
       return next;
     });
-    if (selectedNotificationKey === selectionKey) setSelectedNotificationKey("");
-    void markNotificationRead(notificationID, true).catch((nextError) => {
+    setSelectedNotificationKeys((current) => {
+      const next = new Set(current);
+      for (const key of hiddenKeys) next.delete(key);
+      return next;
+    });
+    if (hiddenKeys.includes(selectedNotificationKey)) setSelectedNotificationKey("");
+    setContextMenu(null);
+    void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, companyID))).catch((nextError) => {
       setHiddenNotificationIDs((current) => {
         const next = new Set(current);
-        next.delete(notificationID);
+        for (const key of hiddenKeys) next.delete(key);
         return next;
       });
-      setError(nextError instanceof Error ? nextError.message : "Failed to mark update as read");
+      setError(nextError instanceof Error ? nextError.message : "Failed to mark update as seen");
     });
-  }, [selectedNotificationKey]);
+  }, [companyID, selectedNotificationKey]);
+
+  const markUpdateSeen = useCallback((item: NotificationItem) => {
+    removeSeenUpdates([item]);
+  }, [removeSeenUpdates]);
+
+  const markSelectedUpdatesSeen = useCallback(() => {
+    const items = selectedNotificationItems.length > 0 ? selectedNotificationItems : visibleNotifications;
+    removeSeenUpdates(items, `Are you sure you want to mark ${items.length === 1 ? "this update" : `${items.length} updates`} as seen?`);
+  }, [removeSeenUpdates, selectedNotificationItems, visibleNotifications]);
+
+  const markAllUpdatesSeen = useCallback(() => {
+    if (!companyID.trim()) return;
+    if (typeof window !== "undefined" && !window.confirm("Are you sure you want to mark all updates as seen? This will remove them from Updates.")) return;
+    const hiddenKeys = visibleNotifications.map(updateNotificationSelectionKey);
+    setHiddenNotificationIDs((current) => {
+      const next = new Set(current);
+      for (const key of hiddenKeys) next.add(key);
+      return next;
+    });
+    setSelectedNotificationKey("");
+    setSelectedNotificationKeys(new Set());
+    setSelectionAnchorNotificationKey("");
+    setContextMenu(null);
+    void deleteNotifications({ companyID }).catch((nextError) => {
+      setHiddenNotificationIDs((current) => {
+        const next = new Set(current);
+        for (const key of hiddenKeys) next.delete(key);
+        return next;
+      });
+      setError(nextError instanceof Error ? nextError.message : "Failed to mark all updates as seen");
+    });
+  }, [companyID, visibleNotifications]);
+
+  const openUpdateContextMenu = useCallback((event: React.MouseEvent, item: NotificationItem) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const itemKey = updateNotificationSelectionKey(item);
+    if (!selectedNotificationKeys.has(itemKey)) {
+      setSelectedNotificationKey(itemKey);
+      setSelectedNotificationKeys(new Set([itemKey]));
+      setSelectionAnchorNotificationKey(itemKey);
+    }
+    setContextMenu({ x: event.clientX, y: event.clientY });
+  }, [selectedNotificationKeys]);
 
   const openGroupResource = useCallback((group: UpdateGroup) => {
     const resourceID = group.resource_id?.trim() ?? "";
@@ -431,6 +544,14 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
           {meta && <div style={updatesMetaStyle}>{meta}</div>}
         </div>
         <div style={updatesHeaderControlsStyle}>
+          <button
+            type="button"
+            style={updatesSeenAllButtonStyle}
+            disabled={visibleNotifications.length === 0}
+            onClick={markAllUpdatesSeen}
+          >
+            Seen all
+          </button>
           <UpdateGroupingPanel
             setting={selectedSetting}
             settings={settings}
@@ -467,14 +588,27 @@ export function UpdatesView({ apiBase, companyID, currentUserID, liveRefreshToke
             onToggleGroup={toggleGroup}
             onSelectItem={selectUpdateItem}
             onSelectAdjacent={selectAdjacentUpdate}
-            onMarkRead={markUpdateRead}
+            onMarkSeen={markUpdateSeen}
             selectedNotificationKey={selectedNotificationKey}
+            selectedNotificationKeys={selectedNotificationKeys}
             hoveredNotificationKey={hoveredNotificationKey}
             onHoverNotification={setHoveredNotificationKey}
             onOpenGroupResource={openGroupResource}
+            onOpenContextMenu={openUpdateContextMenu}
           />
         )}
       </div>
+      {contextMenu && (
+        <UpdateContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          selectedCount={selectedNotificationItems.length}
+          totalCount={visibleNotifications.length}
+          onSeenSelected={markSelectedUpdatesSeen}
+          onSeenAll={markAllUpdatesSeen}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </section>
   );
 }
@@ -609,23 +743,27 @@ function UpdateGroupList({
   onToggleGroup,
   onSelectItem,
   onSelectAdjacent,
-  onMarkRead,
+  onMarkSeen,
   selectedNotificationKey,
+  selectedNotificationKeys,
   hoveredNotificationKey,
   onHoverNotification,
   onOpenGroupResource,
+  onOpenContextMenu,
 }: {
   groups: UpdateGroup[];
   expandedGroupIDs: Set<string>;
   branchLoadingIDs: Set<string>;
   onToggleGroup: (groupID: string) => void;
-  onSelectItem: (item: NotificationItem) => void;
+  onSelectItem: (item: NotificationItem, event?: React.MouseEvent | React.KeyboardEvent) => void;
   onSelectAdjacent: (item: NotificationItem, direction: 1 | -1) => void;
-  onMarkRead: (item: NotificationItem) => void;
+  onMarkSeen: (item: NotificationItem) => void;
   selectedNotificationKey: string;
+  selectedNotificationKeys: Set<string>;
   hoveredNotificationKey: string;
   onHoverNotification: (notificationKey: string) => void;
   onOpenGroupResource: (group: UpdateGroup) => void;
+  onOpenContextMenu: (event: React.MouseEvent, item: NotificationItem) => void;
 }) {
   return (
     <div style={updateGroupListStyle}>
@@ -666,11 +804,13 @@ function UpdateGroupList({
                 onToggleGroup={onToggleGroup}
                 onSelectItem={onSelectItem}
                 onSelectAdjacent={onSelectAdjacent}
-                onMarkRead={onMarkRead}
+                onMarkSeen={onMarkSeen}
                 selectedNotificationKey={selectedNotificationKey}
+                selectedNotificationKeys={selectedNotificationKeys}
                 hoveredNotificationKey={hoveredNotificationKey}
                 onHoverNotification={onHoverNotification}
                 onOpenGroupResource={onOpenGroupResource}
+                onOpenContextMenu={onOpenContextMenu}
               />
             )}
             {open && rows.length > 0 && (
@@ -679,10 +819,12 @@ function UpdateGroupList({
                 depth={group.depth + 1}
                 onSelectItem={onSelectItem}
                 onSelectAdjacent={onSelectAdjacent}
-                onMarkRead={onMarkRead}
+                onMarkSeen={onMarkSeen}
                 selectedNotificationKey={selectedNotificationKey}
+                selectedNotificationKeys={selectedNotificationKeys}
                 hoveredNotificationKey={hoveredNotificationKey}
                 onHoverNotification={onHoverNotification}
+                onOpenContextMenu={onOpenContextMenu}
               />
             )}
           </div>
@@ -724,19 +866,23 @@ function UpdateRows({
   depth,
   onSelectItem,
   onSelectAdjacent,
-  onMarkRead,
+  onMarkSeen,
   selectedNotificationKey,
+  selectedNotificationKeys,
   hoveredNotificationKey,
   onHoverNotification,
+  onOpenContextMenu,
 }: {
   rows: NotificationItem[];
   depth: number;
-  onSelectItem: (item: NotificationItem) => void;
+  onSelectItem: (item: NotificationItem, event?: React.MouseEvent | React.KeyboardEvent) => void;
   onSelectAdjacent: (item: NotificationItem, direction: 1 | -1) => void;
-  onMarkRead: (item: NotificationItem) => void;
+  onMarkSeen: (item: NotificationItem) => void;
   selectedNotificationKey: string;
+  selectedNotificationKeys: Set<string>;
   hoveredNotificationKey: string;
   onHoverNotification: (notificationKey: string) => void;
+  onOpenContextMenu: (event: React.MouseEvent, item: NotificationItem) => void;
 }) {
   return (
     <div style={updateRowsStyle}>
@@ -749,15 +895,16 @@ function UpdateRows({
             key={`${notificationKey}:${index}`}
             role="button"
             tabIndex={0}
-            style={updateRowStyle(depth, !item.read_timestamp, rowTone, selectedNotificationKey === notificationKey, hoveredNotificationKey === notificationKey)}
-            onClick={() => onSelectItem(item)}
+            style={updateRowStyle(depth, !item.read_timestamp, rowTone, selectedNotificationKeys.has(notificationKey) || selectedNotificationKey === notificationKey, hoveredNotificationKey === notificationKey)}
+            onClick={(event) => onSelectItem(item, event)}
+            onContextMenu={(event) => onOpenContextMenu(event, item)}
             onMouseEnter={() => onHoverNotification(notificationKey)}
             onMouseLeave={() => onHoverNotification("")}
             onKeyDown={(event) => {
               if ((event.target as HTMLElement).tagName === "BUTTON") return;
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                onSelectItem(item);
+                onSelectItem(item, event);
               }
               if (event.key === "ArrowDown") {
                 event.preventDefault();
@@ -783,14 +930,68 @@ function UpdateRows({
               disabled={!item.notification_id?.trim()}
               onClick={(event) => {
                 event.stopPropagation();
-                onMarkRead(item);
+                onMarkSeen(item);
               }}
             >
-              Mark as read
+              Seen
             </button>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function UpdateContextMenu({
+  x,
+  y,
+  selectedCount,
+  totalCount,
+  onSeenSelected,
+  onSeenAll,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  selectedCount: number;
+  totalCount: number;
+  onSeenSelected: () => void;
+  onSeenAll: () => void;
+  onClose: () => void;
+}) {
+  const left = Math.max(8, Math.min(x, (typeof window === "undefined" ? x : window.innerWidth - 190)));
+  const top = Math.max(8, Math.min(y, (typeof window === "undefined" ? y : window.innerHeight - 104)));
+  return (
+    <div
+      role="menu"
+      style={{ ...updatesContextMenuStyle, left, top }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        style={updatesContextMenuItemStyle}
+        disabled={selectedCount <= 0}
+        onClick={() => {
+          onSeenSelected();
+          onClose();
+        }}
+      >
+        {selectedCount <= 1 ? "Seen update" : `Seen selected (${selectedCount})`}
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        style={updatesContextMenuItemStyle}
+        disabled={totalCount <= 0}
+        onClick={() => {
+          onSeenAll();
+          onClose();
+        }}
+      >
+        Seen all
+      </button>
     </div>
   );
 }
@@ -1394,6 +1595,20 @@ const updatesTitleStackStyle: React.CSSProperties = { minWidth: 0, display: "gri
 const updatesTitleStyle: React.CSSProperties = { margin: 0, color: "#111827", fontSize: 16, lineHeight: 1.2, fontWeight: 800, letterSpacing: 0 };
 const updatesMetaStyle: React.CSSProperties = { color: "#64748b", fontSize: 11, fontWeight: 700 };
 const updatesHeaderControlsStyle: React.CSSProperties = { minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 8 };
+const updatesSeenAllButtonStyle: React.CSSProperties = {
+  minHeight: 30,
+  border: "1px solid rgba(15, 23, 42, 0.18)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#334155",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 850,
+  cursor: "pointer",
+  padding: "0 10px",
+  whiteSpace: "nowrap",
+  boxShadow: "0 6px 14px rgba(15, 23, 42, 0.06)",
+};
 const updatesFilterRowStyle: React.CSSProperties = {
   display: "inline-flex",
   border: "1px solid rgba(15, 23, 42, 0.18)",
@@ -1484,7 +1699,7 @@ const updateGroupStaticContentStyle: React.CSSProperties = {
 function updateGroupBadgeStyle(tone: "urgent" | "mention" | "update" | "generated" | "verified" | "consulted" | "informed" | "other" | "date"): React.CSSProperties {
   const colors: Record<typeof tone, { color: string; background: string }> = {
     urgent: { color: "#b91c1c", background: "rgba(248, 113, 113, 0.14)" },
-    mention: { color: "#2563eb", background: "rgba(96, 165, 250, 0.14)" },
+    mention: { color: "#c2410c", background: "rgba(251, 146, 60, 0.16)" },
     update: { color: "#475569", background: "rgba(148, 163, 184, 0.14)" },
     generated: { color: "#047857", background: "rgba(52, 211, 153, 0.14)" },
     verified: { color: "#7c3aed", background: "rgba(167, 139, 250, 0.14)" },
@@ -1542,11 +1757,11 @@ function updateRowStyle(depth: number, unread: boolean, tone: ReturnType<typeof 
 function updateRowIconStyle(tone: ReturnType<typeof updateRowTone>): React.CSSProperties {
   const colors: Record<ReturnType<typeof updateRowTone>, { color: string; background: string }> = {
     urgent: { color: "#b91c1c", background: "rgba(248, 113, 113, 0.14)" },
-    mention: { color: "#2563eb", background: "rgba(96, 165, 250, 0.14)" },
-    new: { color: "#047857", background: "rgba(52, 211, 153, 0.14)" },
-    deleted: { color: "#991b1b", background: "rgba(248, 113, 113, 0.14)" },
+    mention: { color: "#c2410c", background: "rgba(251, 146, 60, 0.16)" },
+    new: { color: "#2563eb", background: "rgba(96, 165, 250, 0.14)" },
+    deleted: { color: "#991b1b", background: "rgba(127, 29, 29, 0.12)" },
     status: { color: "#7c3aed", background: "rgba(167, 139, 250, 0.14)" },
-    comment: { color: "#0891b2", background: "rgba(34, 211, 238, 0.14)" },
+    comment: { color: "#2563eb", background: "rgba(96, 165, 250, 0.14)" },
     update: { color: "#475569", background: "rgba(148, 163, 184, 0.14)" },
   };
   return {
@@ -1579,4 +1794,31 @@ const updateMarkReadButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   padding: "0 7px",
   whiteSpace: "nowrap",
+};
+
+const updatesContextMenuStyle: React.CSSProperties = {
+  position: "fixed",
+  zIndex: 2400,
+  width: 180,
+  display: "grid",
+  gap: 2,
+  padding: 5,
+  border: "1px solid rgba(15, 23, 42, 0.16)",
+  borderRadius: 6,
+  background: "#ffffff",
+  boxShadow: "0 16px 36px rgba(15, 23, 42, 0.18)",
+};
+
+const updatesContextMenuItemStyle: React.CSSProperties = {
+  minHeight: 30,
+  border: "none",
+  borderRadius: 5,
+  background: "transparent",
+  color: "#111827",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 800,
+  textAlign: "left",
+  cursor: "pointer",
+  padding: "0 8px",
 };

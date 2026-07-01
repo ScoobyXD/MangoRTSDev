@@ -30,6 +30,8 @@
     "../modules/notifications/notificationsApi.test.ts",
     "../../../frontend/src/pages/home/homeUtils.ts",
     "../pages/home/homeUtils.test.ts",
+    "../../../frontend/src/pages/home/updatesSelection.ts",
+    "../pages/home/updatesSelection.test.ts",
     "../../../frontend/src/pages/home/myWorkGrouping.ts",
     "../pages/home/myWorkGrouping.test.ts",
     "../../../frontend/src/pages/home/myWorkDisplayRows.ts",
