@@ -9,11 +9,11 @@ do $$
 declare
   primary_key_name text;
 begin
-  select constraint.conname
+  select pgc.conname
     into primary_key_name
-  from pg_constraint constraint
-  where constraint.conrelid = 'resource_permissions'::regclass
-    and constraint.contype = 'p'
+  from pg_constraint pgc
+  where pgc.conrelid = 'resource_permissions'::regclass
+    and pgc.contype = 'p'
   limit 1;
 
   if primary_key_name is not null then
