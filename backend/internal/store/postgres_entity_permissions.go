@@ -362,6 +362,13 @@ where company_id=$1::uuid
   and principal_id::text = any($2::text[])`, companyID, groupIDs); err != nil && !isPostgresUndefinedTable(err, "resource_gvic_assignments") {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `
+delete from resource_permissions
+where company_id=$1::uuid
+  and subject_type='group'
+  and subject_id::text = any($2::text[])`, companyID, groupIDs); err != nil && !isPostgresUndefinedTable(err, "resource_permissions") {
+		return err
+	}
 	deleted, err := tx.ExecContext(ctx, `
 delete from company_user_groups
 where company_id=$1::uuid and group_id=$2::uuid`, companyID, groupID)
@@ -523,28 +530,30 @@ func (r *PostgresRepo) ListEntityPermissions(companyID, entityType, entityID str
 	}
 
 	if usesDefaultResourceAccessPolicy(entityType) {
-		defaultAccess, err := postgresResourceDefaultAccess(ctx, r.db, companyID, entityType, entityID)
-		if err != nil {
-			return nil, err
-		}
-		overrideAccess := OppositeResourceDefaultAccess(defaultAccess)
 		rows, err := r.db.QueryContext(ctx, `
 select access.company_id::text,
        access.resource_type,
        access.resource_id::text,
-       'user'::text,
-       access.user_id::text,
-       nullif(app_user.display_name, ''),
+       access.subject_type,
+       access.subject_id::text,
+       coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, '')),
        nullif(app_user.email, ''),
-       $4::text,
+       access.access_level,
        access.created_timestamp
 from resource_permissions access
-join users app_user on app_user.user_id=access.user_id
+left join users app_user
+  on access.subject_type='user'
+ and app_user.user_id=access.subject_id
+left join company_user_groups user_group
+  on access.subject_type='group'
+ and user_group.company_id=access.company_id
+ and user_group.group_id=access.subject_id
 where access.company_id=$1::uuid
   and access.resource_type=$2
   and access.resource_id=$3::uuid
-order by lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), access.user_id::text)) asc,
-         access.user_id::text asc`, companyID, entityType, entityID, overrideAccess)
+order by access.subject_type asc,
+         lower(coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, ''), access.subject_id::text)) asc,
+         access.subject_id::text asc`, companyID, entityType, entityID)
 		if err != nil {
 			return nil, err
 		}
@@ -578,21 +587,61 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 			return nil, err
 		}
 		defer tx.Rollback()
+		var beforeDefaultAccess string
+		var beforeAssignments []resourcePermissionAssignment
+		if input.ApplyToDescendants {
+			beforeDefaultAccess, err = postgresResourceDefaultAccess(ctx, tx, companyID, entityType, entityID)
+			if err != nil {
+				return nil, err
+			}
+			beforeAssignments, err = postgresResourcePermissionAssignmentsTx(ctx, tx, companyID, entityType, entityID)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if err := setPostgresResourceAccessPolicyTx(ctx, tx, input, entityType, entityID); err != nil {
 			return nil, err
 		}
-		projectionDeltas, err := applyResourcePermissionProjectionDeltaDependenciesTx(ctx, tx, ResourcePermissionProjectionDeltaDependencyInput{
-			CompanyID:    companyID,
-			ResourceType: entityType,
-			ResourceID:   entityID,
-		})
-		if err != nil {
-			return nil, err
+		changedTargets := []resourcePermissionTarget{{ResourceType: entityType, ResourceID: entityID}}
+		if input.ApplyToDescendants {
+			afterDefaultAccess, err := postgresResourceDefaultAccess(ctx, tx, companyID, entityType, entityID)
+			if err != nil {
+				return nil, err
+			}
+			afterAssignments, err := postgresResourcePermissionAssignmentsTx(ctx, tx, companyID, entityType, entityID)
+			if err != nil {
+				return nil, err
+			}
+			descendantTargets, err := applyPostgresResourcePermissionPolicyToDescendantsTx(ctx, tx, input, beforeDefaultAccess, beforeAssignments, afterDefaultAccess, afterAssignments)
+			if err != nil {
+				return nil, err
+			}
+			changedTargets = append(changedTargets, descendantTargets...)
+		}
+		projectionDeltas := []ProjectionDelta{}
+		permissionEvents := []EventRowInput{}
+		seenPermissionEvents := map[string]bool{}
+		for _, target := range changedTargets {
+			targetDeltas, err := applyResourcePermissionProjectionDeltaDependenciesTx(ctx, tx, ResourcePermissionProjectionDeltaDependencyInput{
+				CompanyID:    companyID,
+				ResourceType: target.ResourceType,
+				ResourceID:   target.ResourceID,
+			})
+			if err != nil {
+				return nil, err
+			}
+			projectionDeltas = append(projectionDeltas, targetDeltas...)
+			eventKey := target.ResourceType + ":" + target.ResourceID
+			if seenPermissionEvents[eventKey] {
+				continue
+			}
+			seenPermissionEvents[eventKey] = true
+			if eventInput, ok := PermissionChangedEventInput(companyID, target.ResourceType, target.ResourceID, input.ActorUserID); ok {
+				permissionEvents = append(permissionEvents, eventInput)
+			}
 		}
 		eventInputs := ProjectRelationshipProjectionDeltaEventInputs(companyID, input.ActorUserID, "", projectionDeltas)
-		if eventInput, ok := PermissionChangedEventInput(companyID, entityType, entityID, input.ActorUserID); ok {
-			eventInputs = append(eventInputs, eventInput)
-		}
+		eventInputs = append(eventInputs, permissionEvents...)
 		if _, err := r.appendEventRowsTx(ctx, tx, eventInputs); err != nil {
 			return nil, err
 		}
@@ -689,27 +738,31 @@ with communications_shared_items as (
 select access.company_id::text,
        access.resource_type,
        access.resource_id::text,
-       'user'::text,
-       access.user_id::text,
-       nullif(app_user.display_name, ''),
+       access.subject_type,
+       access.subject_id::text,
+       coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, '')),
        nullif(app_user.email, ''),
-       case
-         when coalesce(folder.default_access, $5) = $5 then $6
-         else $5
-       end as access_level,
+       access.access_level,
        access.created_timestamp
 from resource_permissions access
 join communications_shared_items folder
   on folder.company_id=access.company_id
  and folder.resource_id=access.resource_id
  and folder.resource_type=access.resource_type
-join users app_user on app_user.user_id=access.user_id
+left join users app_user
+  on access.subject_type='user'
+ and app_user.user_id=access.subject_id
+left join company_user_groups user_group
+  on access.subject_type='group'
+ and user_group.company_id=access.company_id
+ and user_group.group_id=access.subject_id
 where access.company_id=$1::uuid
   and access.resource_type in ($2, $3)
   and access.resource_id = any(string_to_array($4, ',')::uuid[])
 order by access.resource_id::text asc,
-         lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), access.user_id::text)) asc,
-         access.user_id::text asc`, companyID, EntityTypeSharedInboxFolder, EntityTypeSharedInbox, strings.Join(ids, ","), ResourceDefaultAccessEdit, ResourceDefaultAccessNoAccess)
+         access.subject_type asc,
+         lower(coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, ''), access.subject_id::text)) asc,
+         access.subject_id::text asc`, companyID, EntityTypeSharedInboxFolder, EntityTypeSharedInbox, strings.Join(ids, ","))
 	if err != nil {
 		if isPostgresUndefinedTable(err, "resource_permissions") || postgresSharedInboxStorageUnavailable(err) || isPostgresInvalidTextRepresentation(err) {
 			return folders, nil

@@ -186,6 +186,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [applyToDescendants, setApplyToDescendants] = useState(false);
 
   const permissionsPath = useMemo(
     () => permissionsPathOverride ?? permissionsPathFor(entityType, entityID),
@@ -219,6 +220,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         setEffectiveAccessByUser(effectiveAccessToMap(permissionsPayload.effective_access ?? []));
         setServerCanEditPermissions(permissionsPayload.can_edit_permissions === true);
         setServerCanEditManagerPermissions(permissionsPayload.can_edit_manager_permissions === true);
+        setApplyToDescendants(false);
         setSaved(false);
       } catch (loadError) {
         if (!cancelled) {
@@ -267,6 +269,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const effectiveReadOnly = readOnly || !serverCanEditPermissions;
   const controlsDisabled = busy || effectiveReadOnly;
   const usesDefaultAccessPolicy = entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "company_explorer_folder" || entityType === "shared_triage_folder" || entityType === "shared_inbox_folder" || entityType === "shared_inbox";
+  const supportsDescendantApply = entityType === "company_explorer_folder" || entityType === "logic_gate";
   const defaultExceptionAccessLevel = oppositeDefaultAccess(defaultAccess);
 
   const setAccess = (key: PermissionSelectionKey, accessLevel: ResourceAccessLevel) => {
@@ -336,7 +339,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     });
   };
 
-  const save = async () => {
+  const save = async (closeAfter = false) => {
     if (effectiveReadOnly) return;
     setBusy(true);
     setError("");
@@ -349,18 +352,18 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         .filter((userID) => userID.trim() !== "");
       const permissions = Array.from(accessBySubject.entries()).map(([key, accessLevel]) => {
         const [subjectType, subjectID] = key.split(":", 2) as [PermissionSubjectType, string];
-        const normalizedAccess = usesDefaultAccessPolicy ? defaultExceptionAccessLevel : accessLevel;
+        const normalizedAccess = accessLevel;
         return { subject_type: subjectType, subject_id: subjectID, permission: normalizedAccess, access_level: normalizedAccess };
       });
       await requestJSON(permissionsPath, {
         method: "PUT",
         body: JSON.stringify(usesDefaultAccessPolicy
-          ? { company_id: companyID, default_access: defaultAccess, override_user_ids: overrideUserIDs, permissions }
+          ? { company_id: companyID, default_access: defaultAccess, override_user_ids: overrideUserIDs, permissions, apply_to_descendants: applyToDescendants }
           : { company_id: companyID, permissions }),
       });
       setSaved(true);
       onSaved?.();
-      onClose?.();
+      if (closeAfter) onClose?.();
     } catch (saveError) {
       console.error("Failed to save permissions", saveError);
       setError(permissionRequestErrorMessage(saveError, "edit"));
@@ -439,9 +442,11 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     );
   };
 
-  const renderDefaultUserRow = (user: CompanyUser, label: string, keySuffix: string, depth = 0): React.ReactNode => {
+  const renderDefaultUserRow = (user: CompanyUser, label: string, keySuffix: string, depth = 0, inheritedAccessLevel: ResourceAccessLevel | "" = ""): React.ReactNode => {
     const key = `user:${user.user_id}` as PermissionSelectionKey;
-    const checked = accessBySubject.has(key);
+    const directAccessLevel = accessBySubject.get(key) ?? "";
+    const displayAccessLevel = directAccessLevel || inheritedAccessLevel;
+    const checked = displayAccessLevel === defaultExceptionAccessLevel;
     const editable = canEditDefaultUserOverride(user);
     return (
       <label key={keySuffix} style={{ ...permissionRowStyle, marginLeft: depth * 14, opacity: editable || companyUserRoleForcesAdmin(user.role) ? 1 : 0.72 }}>
@@ -454,7 +459,14 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
             type="checkbox"
             checked={checked}
             onChange={(event) => {
-              if (editable) setUserOverride(user.user_id, event.currentTarget.checked);
+              if (!editable) return;
+              if (event.currentTarget.checked) {
+                setUserOverride(user.user_id, true);
+              } else if (inheritedAccessLevel && inheritedAccessLevel !== defaultAccess) {
+                setAccess(key, defaultAccess);
+              } else {
+                setUserOverride(user.user_id, false);
+              }
             }}
             disabled={controlsDisabled || !editable}
             aria-label="Permission exception"
@@ -465,7 +477,11 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     );
   };
 
-  const renderDefaultGroup = (group: CompanyUserGroup, depth: number): React.ReactNode => {
+  const renderDefaultGroup = (group: CompanyUserGroup, depth: number, inheritedAccessLevel: ResourceAccessLevel | "" = ""): React.ReactNode => {
+    const groupKey = `group:${group.group_id}` as PermissionSelectionKey;
+    const directGroupAccessLevel = accessBySubject.get(groupKey) ?? "";
+    const displayGroupAccessLevel = directGroupAccessLevel || inheritedAccessLevel;
+    const checked = displayGroupAccessLevel === defaultExceptionAccessLevel;
     const groupMembers = membersByGroup.get(group.group_id) ?? [];
     const children = childrenByParent.get(group.group_id) ?? [];
     const expanded = expandedGroupIDs.has(group.group_id);
@@ -483,26 +499,63 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
           </button>
           <span style={permissionStrongTextStyle}>{group.name}</span>
           <span style={permissionMutedTextStyle}>{visibleCount} items</span>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(event) => {
+              if (event.currentTarget.checked) {
+                setAccess(groupKey, defaultExceptionAccessLevel);
+              } else if (inheritedAccessLevel && inheritedAccessLevel !== defaultAccess) {
+                setAccess(groupKey, defaultAccess);
+              } else {
+                clearAccess(groupKey);
+              }
+            }}
+            disabled={controlsDisabled || !serverCanEditManagerPermissions}
+            aria-label="Group permission exception"
+            style={permissionCheckboxStyle}
+          />
         </div>
         {expanded && groupMembers.map((member) => {
           const user = usersByID.get(member.user_id);
-          return user ? renderDefaultUserRow(user, permissionUserLabel(member), `${group.group_id}:${member.user_id}`, 1) : null;
+          return user ? renderDefaultUserRow(user, permissionUserLabel(member), `${group.group_id}:${member.user_id}`, 1, displayGroupAccessLevel) : null;
         })}
-        {expanded && children.map((child) => renderDefaultGroup(child, depth + 1))}
+        {expanded && children.map((child) => renderDefaultGroup(child, depth + 1, displayGroupAccessLevel))}
       </div>
     );
   };
 
   const dialogMode = variant === "dialog";
   const containerStyle = dialogMode ? permissionDialogStyle : permissionEmbeddedStyle;
+  const closeWithSave = () => {
+    if (!onClose) return;
+    if (effectiveReadOnly) {
+      onClose();
+      return;
+    }
+    void save(true);
+  };
   const actionButtons = (
     <div style={permissionHeaderActionsStyle}>
       <button className="mango-elevated-action" type="button" style={permissionSecondaryButtonStyle} onClick={() => { if (!effectiveReadOnly) { setSaved(false); setAccessBySubject(new Map()); } }} disabled={controlsDisabled}>{usesDefaultAccessPolicy ? "Clear exceptions" : "Clear grants"}</button>
       {usesDefaultAccessPolicy && <DefaultAccessToggle defaultAccess={defaultAccess} disabled={controlsDisabled} onChange={setDefaultAccessMode} />}
-      {onClose && <button className="mango-elevated-action" type="button" style={permissionSecondaryButtonStyle} onClick={onClose} disabled={busy}>Cancel</button>}
-      <button className="mango-elevated-action" type="button" style={permissionPrimaryButtonStyle} onClick={save} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>
+      {usesDefaultAccessPolicy && supportsDescendantApply && (
+        <label style={permissionDescendantApplyStyle}>
+          <input
+            type="checkbox"
+            checked={applyToDescendants}
+            onChange={(event) => {
+              setSaved(false);
+              setApplyToDescendants(event.currentTarget.checked);
+            }}
+            disabled={controlsDisabled}
+          />
+          Apply to descendants
+        </label>
+      )}
+      {!dialogMode && <button className="mango-elevated-action" type="button" style={permissionPrimaryButtonStyle} onClick={() => { void save(false); }} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>}
       {onClose && (
-        <button className="mango-elevated-action" type="button" style={permissionIconButtonStyle} onClick={onClose} aria-label="Close permissions">x</button>
+        <button className="mango-elevated-action" type="button" style={permissionIconButtonStyle} onClick={closeWithSave} disabled={busy} aria-label="Close permissions">x</button>
       )}
     </div>
   );
@@ -563,7 +616,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
 
 export const EntityPermissionsDialog: React.FC<EntityPermissionsDialogProps> = (props) => {
   return (
-    <div style={permissionBackdropStyle} onPointerDown={props.onClose}>
+    <div style={permissionBackdropStyle}>
       <div onPointerDown={(event) => event.stopPropagation()}>
         <EntityPermissionsPanel
           requestJSON={props.requestJSON}
@@ -657,8 +710,8 @@ function permissionSummaryText(saved: boolean, assignmentCount: number, entityTy
   if (saved) return "Permissions saved. Dev admins and company admins always keep admin access. Managers follow resource permissions.";
   if (entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "company_explorer_folder" || entityType === "shared_triage_folder" || entityType === "shared_inbox_folder" || entityType === "shared_inbox") {
     const defaultLabel = defaultAccess === "edit" ? "Default edit" : "Default no access";
-    if (assignmentCount > 0) return `${defaultLabel}. ${assignmentCount} exception users. Dev admins and company admins always keep admin access. Managers follow resource permissions.`;
-    return `${defaultLabel}. No exception users. Dev admins and company admins always keep admin access. Managers follow resource permissions.`;
+    if (assignmentCount > 0) return `${defaultLabel}. ${assignmentCount} explicit permission ${assignmentCount === 1 ? "row" : "rows"}. Dev admins and company admins always keep admin access. Managers follow resource permissions.`;
+    return `${defaultLabel}. No explicit permission rows. Dev admins and company admins always keep admin access. Managers follow resource permissions.`;
   }
   if (assignmentCount > 0) return `${assignmentCount} access grants. Dev admins and company admins always keep admin access. Managers follow resource permissions.`;
   return "No explicit grants. Access is denied except for dev admins and company admins.";
@@ -849,7 +902,7 @@ const permissionRowStyle: React.CSSProperties = {
 
 const permissionGroupRowStyle: React.CSSProperties = {
   ...permissionRowStyle,
-  gridTemplateColumns: "24px minmax(0, 1fr) auto",
+  gridTemplateColumns: "24px minmax(0, 1fr) auto 48px",
 };
 
 const permissionDisclosureButtonStyle: React.CSSProperties = {
@@ -884,6 +937,21 @@ const permissionCheckboxStyle: React.CSSProperties = {
   width: 18,
   height: 18,
   accentColor: "#2563eb",
+};
+
+const permissionDescendantApplyStyle: React.CSSProperties = {
+  minHeight: 32,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "0 10px",
+  border: "1px solid rgba(255, 255, 255, 0.72)",
+  borderRadius: 10,
+  background: PERMISSION_SURFACE,
+  boxShadow: PERMISSION_SHADOW,
+  fontSize: 12,
+  fontWeight: 750,
+  color: "#111827",
 };
 
 const permissionStrongTextStyle: React.CSSProperties = {

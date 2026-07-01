@@ -393,11 +393,9 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 		"func (r *postgresrepo) listvisiblecommunicationssharedinboxfolders",
 		"actor_access as",
 		"item_access as",
-		"from resource_permissions access",
-		"access.resource_type in (item.resource_type, $5)",
 		"where item.company_id=$1::text",
-		"coalesce(item.default_access, $3) = $3 and not item.has_direct_override",
-		"coalesce(item.default_access, $3) = $4 and item.has_direct_override",
+		"mangorts_user_can_access_resource($1::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'edit')",
+		"mangorts_user_can_access_resource($1::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'view')",
 		"'shared_inbox_folder'",
 		"'shared_inbox'",
 	} {
@@ -405,7 +403,7 @@ func TestPostgresVisibleQueriesUseDynamicPermissions(t *testing.T) {
 			t.Fatalf("Postgres visible shared inbox query missing %q", needle)
 		}
 	}
-	for _, forbidden := range []string{"listaccessibleentityids", "effective_" + "resource_" + "access", "mangorts_user_can_access_resource"} {
+	for _, forbidden := range []string{"listaccessibleentityids", "effective_" + "resource_" + "access", "has_direct_override"} {
 		if strings.Contains(sharedInboxSource, forbidden) {
 			t.Fatalf("Postgres visible shared inbox query should not use %q", forbidden)
 		}

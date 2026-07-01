@@ -6,6 +6,7 @@ import (
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"sort"
+	"strings"
 )
 
 func (r *PostgresRepo) ListResourceGVICAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICAssignment, error) {
@@ -24,12 +25,13 @@ func (r *PostgresRepo) ListResourceGVICAssignments(companyID, resourceType, reso
 
 func (r *PostgresRepo) SetResourceGVICAssignments(input ResourceGVICAssignmentUpdateInput) (ResourceGVICAssignmentMutationResult, error) {
 	command := ResourceGVICAssignmentCommandInput{
-		CompanyID:      input.CompanyID,
-		ResourceType:   input.ResourceType,
-		ResourceID:     input.ResourceID,
-		Assignments:    input.Assignments,
-		ActorUserID:    input.ActorUserID,
-		IdempotencyKey: input.IdempotencyKey,
+		CompanyID:          input.CompanyID,
+		ResourceType:       input.ResourceType,
+		ResourceID:         input.ResourceID,
+		Assignments:        input.Assignments,
+		ActorUserID:        input.ActorUserID,
+		IdempotencyKey:     input.IdempotencyKey,
+		ApplyToDescendants: input.ApplyToDescendants,
 	}
 	return r.applyResourceGVICAssignmentCommand(command, GVICAssignmentCommandSet)
 }
@@ -197,6 +199,14 @@ where company_id=$1::uuid
 	}
 
 	affected := []resourceGVICKey{keyValue}
+	if input.ApplyToDescendants {
+		descendantAffected, descendantChanged, err := applyPostgresResourceGVICCommandToDescendantsTx(ctx, tx, keyValue, assignments, operation)
+		if err != nil {
+			return ResourceGVICAssignmentMutationResult{}, err
+		}
+		affected = append(affected, descendantAffected...)
+		changed = changed || descendantChanged
+	}
 	if keyValue.resourceType != EntityTypeLogicGate {
 		var err error
 		affected, err = postgresAffectedGVICResourceKeysTx(ctx, tx, keyValue)
@@ -249,6 +259,161 @@ where company_id=$1::uuid
 		ProjectionDeltas:     deltas,
 		Events:               []domain.DomainEvent{},
 	}, nil
+}
+
+func applyPostgresResourceGVICCommandToDescendantsTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey, assignments []normalizedGVICAssignmentInput, operation string) ([]resourceGVICKey, bool, error) {
+	if keyValue.resourceType != EntityTypeLogicGate {
+		return []resourceGVICKey{}, false, nil
+	}
+	nodeIDs, err := nodeIDsAssignedToLogicGatesTx(ctx, tx, keyValue.companyID, []string{keyValue.resourceID})
+	if err != nil {
+		return nil, false, err
+	}
+	if len(nodeIDs) == 0 {
+		return []resourceGVICKey{}, false, nil
+	}
+	nodeIDList := strings.Join(nodeIDs, ",")
+	changed := false
+	switch operation {
+	case GVICAssignmentCommandSet:
+		deleted, err := tx.ExecContext(ctx, `
+delete from resource_gvic_assignments
+where company_id=$1::uuid
+  and resource_type='node'
+  and resource_id = any(string_to_array($2, ',')::uuid[])`, keyValue.companyID, nodeIDList)
+		if err != nil {
+			return nil, false, err
+		}
+		if affected, err := deleted.RowsAffected(); err == nil && affected > 0 {
+			changed = true
+		} else if err != nil {
+			return nil, false, err
+		}
+		inserted, err := tx.ExecContext(ctx, `
+with target(node_id) as (
+  select unnest(string_to_array($3, ',')::uuid[])
+)
+insert into resource_gvic_assignments (
+  company_id,
+  resource_type,
+  resource_id,
+  role,
+  principal_type,
+  principal_id,
+  created_timestamp,
+  updated_timestamp
+)
+select assignment.company_id,
+       'node',
+       target.node_id,
+       assignment.role,
+       assignment.principal_type,
+       assignment.principal_id,
+       now(),
+       now()
+from target
+cross join resource_gvic_assignments assignment
+where assignment.company_id=$1::uuid
+  and assignment.resource_type='logic_gate'
+  and assignment.resource_id=$2::uuid
+on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id) do nothing`, keyValue.companyID, keyValue.resourceID, nodeIDList)
+		if err != nil {
+			return nil, false, err
+		}
+		if affected, err := inserted.RowsAffected(); err == nil && affected > 0 {
+			changed = true
+		} else if err != nil {
+			return nil, false, err
+		}
+	case GVICAssignmentCommandAdd:
+		for _, assignment := range assignments {
+			deleted, err := tx.ExecContext(ctx, `
+delete from resource_gvic_assignments
+where company_id=$1::uuid
+  and resource_type='node'
+  and resource_id = any(string_to_array($2, ',')::uuid[])
+  and principal_type=$3
+  and principal_id=$4::uuid
+  and role<>$5`, keyValue.companyID, nodeIDList, assignment.principalType, assignment.principalID, assignment.role)
+			if err != nil {
+				return nil, false, err
+			}
+			if affected, err := deleted.RowsAffected(); err == nil && affected > 0 {
+				changed = true
+			} else if err != nil {
+				return nil, false, err
+			}
+			if isSingleUserPrimaryGVICRole(assignment.role) {
+				deleted, err := tx.ExecContext(ctx, `
+delete from resource_gvic_assignments
+where company_id=$1::uuid
+  and resource_type='node'
+  and resource_id = any(string_to_array($2, ',')::uuid[])
+  and role=$3
+  and not (principal_type=$4 and principal_id=$5::uuid)`, keyValue.companyID, nodeIDList, assignment.role, assignment.principalType, assignment.principalID)
+				if err != nil {
+					return nil, false, err
+				}
+				if affected, err := deleted.RowsAffected(); err == nil && affected > 0 {
+					changed = true
+				} else if err != nil {
+					return nil, false, err
+				}
+			}
+			inserted, err := tx.ExecContext(ctx, `
+with target(node_id) as (
+  select unnest(string_to_array($5, ',')::uuid[])
+)
+insert into resource_gvic_assignments (
+  company_id,
+  resource_type,
+  resource_id,
+  role,
+  principal_type,
+  principal_id,
+  created_timestamp,
+  updated_timestamp
+)
+select $1::uuid, 'node', target.node_id, $2, $3, $4::uuid, now(), now()
+from target
+on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id) do nothing`,
+				keyValue.companyID, assignment.role, assignment.principalType, assignment.principalID, nodeIDList)
+			if err != nil {
+				return nil, false, err
+			}
+			if affected, err := inserted.RowsAffected(); err == nil && affected > 0 {
+				changed = true
+			} else if err != nil {
+				return nil, false, err
+			}
+		}
+	case GVICAssignmentCommandRemove:
+		for _, assignment := range assignments {
+			deleted, err := tx.ExecContext(ctx, `
+delete from resource_gvic_assignments
+where company_id=$1::uuid
+  and resource_type='node'
+  and resource_id = any(string_to_array($2, ',')::uuid[])
+  and role=$3
+  and principal_type=$4
+  and principal_id=$5::uuid`, keyValue.companyID, nodeIDList, assignment.role, assignment.principalType, assignment.principalID)
+			if err != nil {
+				return nil, false, err
+			}
+			if affected, err := deleted.RowsAffected(); err == nil && affected > 0 {
+				changed = true
+			} else if err != nil {
+				return nil, false, err
+			}
+		}
+	default:
+		return nil, false, ErrInvalid
+	}
+	affected := make([]resourceGVICKey, 0, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
+		affected = append(affected, resourceGVICKey{companyID: keyValue.companyID, resourceType: EntityTypeNode, resourceID: nodeID})
+	}
+	return affected, changed, nil
 }
 
 func (r *PostgresRepo) ListResourceGVICEffectiveAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICEffectiveAssignment, error) {

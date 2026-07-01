@@ -409,15 +409,7 @@ actor_access as (
   ) as is_member
 ),
 item_access as (
-  select item.*,
-         exists (
-           select 1
-           from resource_permissions access
-           where access.company_id=item.company_id::uuid
-             and access.resource_type in (item.resource_type, $5)
-             and access.resource_id=item.folder_id::uuid
-             and access.user_id=$2::uuid
-         ) as has_direct_override
+  select item.*
   from communications_shared_items item
   where item.company_id=$1::text
 )
@@ -435,23 +427,18 @@ select item.company_id,
        item.updated_timestamp,
        case
          when actor_access.is_admin then 'admin'
-         when actor_access.is_member and (
-           (coalesce(item.default_access, $3) = $3 and not item.has_direct_override)
-           or (coalesce(item.default_access, $3) = $4 and item.has_direct_override)
-         ) then 'edit'
-         else 'no_access'
-       end as effective_access_level
+         when actor_access.is_member
+          and mangorts_user_can_access_resource($1::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'edit') then 'edit'
+          else 'no_access'
+        end as effective_access_level
 from item_access item
 cross join actor_access
 where actor_access.is_admin
    or (
-     actor_access.is_member
-     and (
-       (coalesce(item.default_access, $3) = $3 and not item.has_direct_override)
-       or (coalesce(item.default_access, $3) = $4 and item.has_direct_override)
-     )
-   )
-order by item.position asc, item.created_timestamp asc`, companyID, userID, ResourceDefaultAccessEdit, ResourceDefaultAccessNoAccess, EntityTypeSharedTriageFolder)
+      actor_access.is_member
+      and mangorts_user_can_access_resource($1::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'view')
+    )
+order by item.position asc, item.created_timestamp asc`, companyID, userID, ResourceDefaultAccessEdit, ResourceDefaultAccessNoAccess)
 	if err != nil {
 		if postgresSharedInboxStorageUnavailable(err) {
 			return nil, ErrSharedInboxStorageUnavailable

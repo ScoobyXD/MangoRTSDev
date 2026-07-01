@@ -300,11 +300,8 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 		if !ok {
 			return false
 		}
-		hasOverride := r.resourceAccessOverrideExistsLocked(companyID, resourceType, resourceID, userID)
-		if defaultAccess == ResourceDefaultAccessEdit && hasOverride {
-			return false
-		}
-		if defaultAccess == ResourceDefaultAccessNoAccess && !hasOverride {
+		resolvedAccess := r.resourcePermissionAccessLevelForUserLocked(companyID, userID, resourceType, resourceID, defaultAccess)
+		if EntityPermissionRank(resolvedAccess) == 0 {
 			return false
 		}
 		for _, assignment := range r.gvicEffectiveAssignmentsForResourceLocked(companyID, resourceType, resourceID) {
@@ -316,7 +313,7 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 				return true
 			}
 		}
-		return (defaultAccess == ResourceDefaultAccessEdit) != hasOverride
+		return EntityPermissionSatisfies(resolvedAccess, accessLevel)
 	default:
 		return false
 	}
@@ -371,17 +368,102 @@ func (r *MemoryRepo) defaultAccessForResourceLocked(companyID, resourceType, res
 	}
 }
 
-func (r *MemoryRepo) resourceAccessOverrideExistsLocked(companyID, resourceType, resourceID, userID string) bool {
+func (r *MemoryRepo) directResourcePermissionAccessLevelLocked(companyID, resourceType, resourceID, userID string) (string, bool) {
 	for _, permission := range r.entityPermissions {
 		if permission.CompanyID == companyID &&
 			permission.EntityType == resourceType &&
 			permission.EntityID == resourceID &&
 			permission.SubjectType == EntityPermissionSubjectUser &&
 			permission.SubjectID == userID {
-			return true
+			accessLevel, ok := NormalizeEntityPermission(permission.AccessLevel)
+			if !ok {
+				accessLevel, ok = NormalizeEntityPermission(permission.Permission)
+			}
+			if !ok {
+				return "", false
+			}
+			return accessLevel, true
 		}
 	}
-	return false
+	return "", false
+}
+
+func (r *MemoryRepo) resourceAccessOverrideExistsLocked(companyID, resourceType, resourceID, userID string) bool {
+	_, ok := r.directResourcePermissionAccessLevelLocked(companyID, resourceType, resourceID, userID)
+	return ok
+}
+
+func (r *MemoryRepo) resourcePermissionAccessLevelForUserLocked(companyID, userID, resourceType, resourceID, defaultAccess string) string {
+	if directAccess, ok := r.directResourcePermissionAccessLevelLocked(companyID, resourceType, resourceID, userID); ok {
+		return directAccess
+	}
+	bestAccess := ""
+	bestDepth := int(^uint(0) >> 1)
+	bestRank := int(^uint(0) >> 1)
+	for _, permission := range r.entityPermissions {
+		if permission.CompanyID != companyID ||
+			permission.EntityType != resourceType ||
+			permission.EntityID != resourceID ||
+			permission.SubjectType != EntityPermissionSubjectGroup {
+			continue
+		}
+		depth, ok := r.userGroupPermissionDepthLocked(companyID, userID, permission.SubjectID)
+		if !ok {
+			continue
+		}
+		accessLevel, ok := NormalizeEntityPermission(permission.AccessLevel)
+		if !ok {
+			accessLevel, ok = NormalizeEntityPermission(permission.Permission)
+		}
+		if !ok {
+			continue
+		}
+		rank := EntityPermissionRank(accessLevel)
+		if bestAccess == "" || depth < bestDepth || (depth == bestDepth && rank < bestRank) {
+			bestAccess = accessLevel
+			bestDepth = depth
+			bestRank = rank
+		}
+	}
+	if bestAccess != "" {
+		return bestAccess
+	}
+	return defaultResourceAccessOrEdit(defaultAccess)
+}
+
+func (r *MemoryRepo) userGroupPermissionDepthLocked(companyID, userID, ancestorGroupID string) (int, bool) {
+	ancestorGroupID = strings.TrimSpace(ancestorGroupID)
+	if ancestorGroupID == "" {
+		return 0, false
+	}
+	if _, ok := r.userGroups[userGroupKey(companyID, ancestorGroupID)]; !ok {
+		return 0, false
+	}
+	type queuedGroup struct {
+		groupID string
+		depth   int
+	}
+	queue := []queuedGroup{{groupID: ancestorGroupID, depth: 0}}
+	seen := map[string]bool{ancestorGroupID: true}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if _, ok := r.userGroupMembers[userGroupMemberKey(companyID, current.groupID, userID)]; ok {
+			return current.depth, true
+		}
+		for _, group := range r.userGroups {
+			if group.CompanyID != companyID || group.ParentGroupID == nil {
+				continue
+			}
+			parentID := strings.TrimSpace(*group.ParentGroupID)
+			if parentID != current.groupID || seen[group.GroupID] {
+				continue
+			}
+			seen[group.GroupID] = true
+			queue = append(queue, queuedGroup{groupID: group.GroupID, depth: current.depth + 1})
+		}
+	}
+	return 0, false
 }
 
 func validateEffectiveAccessCompatibilityScope(companyID, resourceType, resourceID string) error {

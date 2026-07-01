@@ -736,11 +736,17 @@ create table if not exists resource_permissions (
   company_id uuid not null,
   resource_type text not null,
   resource_id uuid not null,
-  user_id uuid not null,
+  subject_type text not null default 'user',
+  subject_id uuid not null,
+  user_id uuid,
+  access_level text not null,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
   constraint resource_permissions_resource_type_chk check (resource_type in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_inbox_folder', 'shared_inbox')),
-  primary key (company_id, resource_type, resource_id, user_id),
+  constraint resource_permissions_subject_type_chk check (subject_type in ('user', 'group')),
+  constraint resource_permissions_access_level_chk check (access_level in ('no_access', 'view', 'edit', 'admin')),
+  constraint resource_permissions_user_subject_chk check ((subject_type = 'user' and user_id = subject_id) or (subject_type = 'group' and user_id is null)),
+  primary key (company_id, resource_type, resource_id, subject_type, subject_id),
   foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (user_id) references users (user_id) on delete cascade
 );
@@ -748,8 +754,11 @@ create table if not exists resource_permissions (
 create index if not exists idx_resource_permissions_user_resource
   on resource_permissions(company_id, user_id, resource_type, resource_id);
 
-create index if not exists idx_resource_permissions_resource_user
-  on resource_permissions(company_id, resource_type, resource_id, user_id);
+create index if not exists idx_resource_permissions_subject_resource
+  on resource_permissions(company_id, subject_type, subject_id, resource_type, resource_id);
+
+create index if not exists idx_resource_permissions_resource_subject
+  on resource_permissions(company_id, resource_type, resource_id, subject_type, subject_id);
 
 create or replace function mangorts_access_level_rank(p_access_level text)
 returns integer as $$
@@ -827,16 +836,39 @@ returns boolean as $$
       and inbox.company_id=p_company_id
       and inbox.shared_inbox_id=p_resource_id
   ),
-  direct_override(exists_override) as (
-    select exists (
-      select 1
+  permission_access(access_level) as (
+    select candidate.access_level
+    from (
+      select access.access_level, 0 as source_rank, 0 as group_depth, mangorts_access_level_rank(access.access_level) as access_rank
       from resource_permissions access
       join normalized_resource normalized
         on normalized.resource_type=access.resource_type
       where access.company_id=p_company_id
         and access.resource_id=p_resource_id
-        and access.user_id=p_user_id
-    )
+        and access.subject_type='user'
+        and access.subject_id=p_user_id
+      union all
+      select access.access_level, 1 as source_rank, min(closure.depth) as group_depth, mangorts_access_level_rank(access.access_level) as access_rank
+      from resource_permissions access
+      join normalized_resource normalized
+        on normalized.resource_type=access.resource_type
+      join company_user_group_closure closure
+        on closure.company_id=access.company_id
+       and closure.ancestor_group_id=access.subject_id
+      join company_user_group_members member
+        on member.company_id=closure.company_id
+       and member.group_id=closure.descendant_group_id
+       and member.user_id=p_user_id
+      where access.company_id=p_company_id
+        and access.resource_id=p_resource_id
+        and access.subject_type='group'
+      group by access.access_level
+      union all
+      select default_access, 2 as source_rank, 0 as group_depth, mangorts_access_level_rank(default_access) as access_rank
+      from normalized_resource_row
+    ) candidate
+    order by candidate.source_rank asc, candidate.group_depth asc, candidate.access_rank asc
+    limit 1
   ),
   gvic_resource_lookup(resource_type, resource_id) as (
     select
@@ -866,12 +898,8 @@ returns boolean as $$
     when requested.required_rank = 0 then false
     when normalized_resource.resource_type not in ('node', 'logic_gate', 'project', 'company_explorer_folder', 'shared_inbox_folder', 'shared_inbox') then false
     when (select allowed from role_admin_actor) then true
-    when exists (select 1 from normalized_resource_row)
-      and (select default_access from normalized_resource_row limit 1) = 'edit'
-      and (select exists_override from direct_override) then false
-    when exists (select 1 from normalized_resource_row)
-      and (select default_access from normalized_resource_row limit 1) = 'no_access'
-      and not (select exists_override from direct_override) then false
+    when not exists (select 1 from permission_access) then false
+    when (select mangorts_access_level_rank(access_level) from permission_access limit 1) = 0 then false
     when (select max_rank from gvic_access) >= requested.required_rank then true
     when exists (
         select 1
@@ -879,11 +907,7 @@ returns boolean as $$
         where membership.company_id = p_company_id
           and membership.user_id = p_user_id
       )
-      and exists (select 1 from normalized_resource_row)
-      and (
-        ((select default_access from normalized_resource_row limit 1) = 'edit' and not (select exists_override from direct_override))
-        or ((select default_access from normalized_resource_row limit 1) = 'no_access' and (select exists_override from direct_override))
-      ) then true
+      and (select mangorts_access_level_rank(access_level) from permission_access limit 1) >= requested.required_rank then true
     else false
   end
   from requested, normalized_resource;

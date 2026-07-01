@@ -753,13 +753,16 @@ export async function updateLogicGateGVICAssignments(
   companyID: string,
   logicGateID: string,
   assignments: Array<{ role: LogicGateGVICRole; user_id?: string; principal_type?: LogicGateGVICPrincipalType; principal_id?: string }>,
+  applyToDescendants = false,
 ): Promise<LogicGateGVICAssignment[]> {
+  const body: { company_id: string; gvic_assignments: ReturnType<typeof toResourceGVICAssignmentInput>[]; apply_to_descendants?: boolean } = {
+    company_id: companyID,
+    gvic_assignments: assignments.map(toResourceGVICAssignmentInput),
+  };
+  if (applyToDescendants) body.apply_to_descendants = true;
   const payload = await apiFetchJSON<{ gvic_assignments?: LogicGateGVICAssignment[] }>(`/v1/resources/logic_gate/${encodeURIComponent(logicGateID)}/gvic`, {
     method: "PUT",
-    body: JSON.stringify({
-      company_id: companyID,
-      gvic_assignments: assignments.map(toResourceGVICAssignmentInput),
-    }),
+    body: JSON.stringify(body),
   });
   invalidateWorkspacePanelCache(companyID);
   markLogicGateWorkspaceSnapshotScopesStale(companyID, logicGateID);
@@ -780,13 +783,16 @@ async function commandLogicGateGVICAssignments(
   logicGateID: string,
   operation: "add" | "remove",
   assignments: Array<{ role: LogicGateGVICRole; user_id?: string; principal_type?: LogicGateGVICPrincipalType; principal_id?: string }>,
+  applyToDescendants = false,
 ): Promise<LogicGateGVICAssignment[]> {
+  const body: { company_id: string; gvic_assignments: ReturnType<typeof toResourceGVICAssignmentInput>[]; apply_to_descendants?: boolean } = {
+    company_id: companyID,
+    gvic_assignments: assignments.map(toResourceGVICAssignmentInput),
+  };
+  if (applyToDescendants) body.apply_to_descendants = true;
   const payload = await apiFetchJSON<LogicGateGVICAssignmentCommandResult>(`/v1/resources/logic_gate/${encodeURIComponent(logicGateID)}/gvic/${operation}`, {
     method: "POST",
-    body: JSON.stringify({
-      company_id: companyID,
-      gvic_assignments: assignments.map(toResourceGVICAssignmentInput),
-    }),
+    body: JSON.stringify(body),
   });
   invalidateWorkspacePanelCache(companyID);
   markLogicGateWorkspaceSnapshotScopesStale(companyID, logicGateID);
@@ -797,16 +803,18 @@ export function addLogicGateGVICAssignments(
   companyID: string,
   logicGateID: string,
   assignments: Array<{ role: LogicGateGVICRole; user_id?: string; principal_type?: LogicGateGVICPrincipalType; principal_id?: string }>,
+  applyToDescendants = false,
 ): Promise<LogicGateGVICAssignment[]> {
-  return commandLogicGateGVICAssignments(companyID, logicGateID, "add", assignments);
+  return commandLogicGateGVICAssignments(companyID, logicGateID, "add", assignments, applyToDescendants);
 }
 
 export function removeLogicGateGVICAssignments(
   companyID: string,
   logicGateID: string,
   assignments: Array<{ role: LogicGateGVICRole; user_id?: string; principal_type?: LogicGateGVICPrincipalType; principal_id?: string }>,
+  applyToDescendants = false,
 ): Promise<LogicGateGVICAssignment[]> {
-  return commandLogicGateGVICAssignments(companyID, logicGateID, "remove", assignments);
+  return commandLogicGateGVICAssignments(companyID, logicGateID, "remove", assignments, applyToDescendants);
 }
 
 export async function listNodes(companyID: string): Promise<NodeRecord[]> {

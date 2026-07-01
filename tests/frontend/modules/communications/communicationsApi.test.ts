@@ -672,6 +672,7 @@ test("logic gate GVIC helpers call add and remove command endpoints", async () =
   try {
     const addResult = await addLogicGateGVICAssignments("company-1", "gate 1", [{ role: "generated", user_id: "user-1" }]);
     const removeResult = await removeLogicGateGVICAssignments("company-1", "gate 1", [{ role: "generated", user_id: "user-1" }]);
+    await addLogicGateGVICAssignments("company-1", "gate 1", [{ role: "consulted", principal_type: "group", principal_id: "group-1" }], true);
     assert.deepEqual(calls, [
       {
         path: "/v1/resources/logic_gate/gate%201/gvic/add",
@@ -682,6 +683,11 @@ test("logic gate GVIC helpers call add and remove command endpoints", async () =
         path: "/v1/resources/logic_gate/gate%201/gvic/remove",
         method: "POST",
         body: { company_id: "company-1", gvic_assignments: [{ role: "generated", principal_type: "user", principal_id: "user-1" }] },
+      },
+      {
+        path: "/v1/resources/logic_gate/gate%201/gvic/add",
+        method: "POST",
+        body: { company_id: "company-1", gvic_assignments: [{ role: "consulted", principal_type: "group", principal_id: "group-1" }], apply_to_descendants: true },
       },
     ]);
     assert.deepEqual(addResult.map((item) => [item.role, item.user_id]), [["generated", "user-1"]]);

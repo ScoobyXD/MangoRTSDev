@@ -49,6 +49,7 @@ type EditorLinkedDocumentPanelsProps = {
     inherited?: boolean;
     readOnlyReason?: string;
   } | null;
+  logicGateGVICApplyToDescendants?: boolean;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
   companyUserGroupMembers: Array<{ group_id: string; user_id: string }>;
@@ -67,6 +68,7 @@ type EditorLinkedDocumentPanelsProps = {
   onCommitNodeAccountIDs: (accountIDs: string[]) => void;
   onSetNodeDueDateDraft: React.Dispatch<React.SetStateAction<string>>;
   onCommitNodeDueDateDraft: (draft: string) => void;
+  onSetLogicGateGVICApplyToDescendants?: (next: boolean) => void;
   onAddGVICPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
   onRemoveGVICPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
 };
@@ -298,6 +300,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   canEditGVIC = canEdit,
   nodePresetFields,
   gvicFields,
+  logicGateGVICApplyToDescendants = false,
   companyUsers,
   companyUserGroups,
   companyUserGroupMembers,
@@ -316,6 +319,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onCommitNodeAccountIDs,
   onSetNodeDueDateDraft,
   onCommitNodeDueDateDraft,
+  onSetLogicGateGVICApplyToDescendants,
   onAddGVICPrincipal,
   onRemoveGVICPrincipal,
 }) => {
@@ -417,6 +421,8 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
       ruleColor={ruleColor}
       canEdit={canEditGVIC}
       disabledReason={gvicFields.readOnlyReason}
+      applyToDescendants={linkedEntityKind === "logic_gate" ? logicGateGVICApplyToDescendants : false}
+      onApplyToDescendantsChange={linkedEntityKind === "logic_gate" ? onSetLogicGateGVICApplyToDescendants : undefined}
       onAddPrincipal={onAddGVICPrincipal}
       onRemovePrincipal={onRemoveGVICPrincipal}
     />
@@ -865,6 +871,8 @@ function GVICAssignmentBoard({
   ruleColor,
   canEdit,
   disabledReason,
+  applyToDescendants,
+  onApplyToDescendantsChange,
   onAddPrincipal,
   onRemovePrincipal,
 }: {
@@ -878,41 +886,75 @@ function GVICAssignmentBoard({
   ruleColor: string;
   canEdit: boolean;
   disabledReason?: string;
+  applyToDescendants?: boolean;
+  onApplyToDescendantsChange?: (next: boolean) => void;
   onAddPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
   onRemovePrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
 }) {
   return (
-    <div
-      aria-label="GVIC assignments"
-      style={{
-        minWidth: 0,
-        width: "100%",
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))",
-        gap: 6,
-        alignItems: "stretch",
-      }}
-    >
-      {GVIC_ROLES.map((item) => (
-        <GVICRoleEditor
-          key={item.role}
-          role={item.role}
-          label={item.label}
-          linkedEntityKind={linkedEntityKind}
-          assignments={assignments.filter((assignment) => assignment.role === item.role)}
-          allAssignments={assignments}
-          companyUsers={companyUsers}
-          companyUserGroups={companyUserGroups}
-          companyUserGroupMembers={companyUserGroupMembers}
-          accent={accent}
-          panelBackground={panelBackground}
-          ruleColor={ruleColor}
-          canEdit={canEdit}
-          disabledReason={disabledReason}
-          onAddPrincipal={onAddPrincipal}
-          onRemovePrincipal={onRemovePrincipal}
-        />
-      ))}
+    <div style={{ minWidth: 0, width: "100%", display: "grid", gap: 6 }}>
+      {linkedEntityKind === "logic_gate" && onApplyToDescendantsChange && (
+        <label
+          style={{
+            justifySelf: "start",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            minWidth: 0,
+            maxWidth: "100%",
+            padding: "3px 6px",
+            border: `1px solid ${ruleColor}`,
+            borderRadius: 6,
+            background: panelBackground,
+            color: "#374151",
+            fontSize: 11,
+            fontWeight: 600,
+            lineHeight: 1.2,
+            cursor: canEdit ? "pointer" : "default",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={Boolean(applyToDescendants)}
+            disabled={!canEdit}
+            onChange={(event) => onApplyToDescendantsChange(event.currentTarget.checked)}
+            style={{ width: 13, height: 13, margin: 0, accentColor: accent, flex: "0 0 auto" }}
+          />
+          <span style={{ overflowWrap: "anywhere" }}>Apply to assigned nodes</span>
+        </label>
+      )}
+      <div
+        aria-label="GVIC assignments"
+        style={{
+          minWidth: 0,
+          width: "100%",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))",
+          gap: 6,
+          alignItems: "stretch",
+        }}
+      >
+        {GVIC_ROLES.map((item) => (
+          <GVICRoleEditor
+            key={item.role}
+            role={item.role}
+            label={item.label}
+            linkedEntityKind={linkedEntityKind}
+            assignments={assignments.filter((assignment) => assignment.role === item.role)}
+            allAssignments={assignments}
+            companyUsers={companyUsers}
+            companyUserGroups={companyUserGroups}
+            companyUserGroupMembers={companyUserGroupMembers}
+            accent={accent}
+            panelBackground={panelBackground}
+            ruleColor={ruleColor}
+            canEdit={canEdit}
+            disabledReason={disabledReason}
+            onAddPrincipal={onAddPrincipal}
+            onRemovePrincipal={onRemovePrincipal}
+          />
+        ))}
+      </div>
     </div>
   );
 }

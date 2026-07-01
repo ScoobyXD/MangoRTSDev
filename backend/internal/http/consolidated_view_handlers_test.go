@@ -98,8 +98,8 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 	handler := server.Routes()
 
 	view, _ := getNodeViewV2ForTest(t, handler, companyID, node.NodeID, viewer, http.StatusOK)
-	if !view.CanView || !view.CanEdit || view.CanAdmin {
-		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view/edit", view.CanView, view.CanEdit, view.CanAdmin)
+	if !view.CanView || view.CanEdit || view.CanAdmin {
+		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view only", view.CanView, view.CanEdit, view.CanAdmin)
 	}
 	if view.Node.NodeID != node.NodeID || view.ProjectionCount != 1 || view.AssignmentCount != 1 {
 		t.Fatalf("node view = %+v, want summary, projection, and assignment metadata", view)
@@ -370,8 +370,8 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 	handler := server.Routes()
 
 	view, viewBody := getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, viewer, http.StatusOK)
-	if !view.CanView || !view.CanEdit || view.CanAdmin {
-		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view/edit", view.CanView, view.CanEdit, view.CanAdmin)
+	if !view.CanView || view.CanEdit || view.CanAdmin {
+		t.Fatalf("viewer flags = view:%v edit:%v admin:%v, want view only", view.CanView, view.CanEdit, view.CanAdmin)
 	}
 	if view.LogicGate.LogicGateID != logicGate.LogicGateID || view.ProjectionCount != 1 || view.GVICAssignmentCount != 1 {
 		t.Fatalf("logic gate view = %+v, want details, projection, and GVIC", view)

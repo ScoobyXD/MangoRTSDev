@@ -1,10 +1,10 @@
-Last updated: 2026-06-24
+Last updated: 2026-07-01
 
 # GVIC Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: partial backend coverage for role validation, Logic Gate-to-node GVIC snapshots, linked node editing, detach preservation, effective-delta stability, group membership deltas, and scoped projection sync. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: partial backend coverage for role validation, Logic Gate-to-node GVIC snapshots, explicit Logic Gate GVIC apply-to-descendants, linked node editing, detach preservation, effective-delta stability, group membership deltas, and scoped projection sync. Rule ID mapping is partial.
 
 ## Business Logic
 
@@ -18,7 +18,7 @@ GVIC7 - Consulted and informed assignments imply view-level access to the resour
 GVIC8 - Group GVIC assignments expand into effective user assignments for group members.
 GVIC9 - Effective GVIC assignment records preserve enough source/inheritance data to explain whether access came from a direct or group assignment.
 GVIC10 - Updating logic gate GVIC applies precise effective-assignment deltas for the logic gate; unchanged effective rows must not be deleted, rewritten, or retimestamped.
-GVIC11 - Updating logic gate GVIC updates the logic gate's GVIC template/effective rows only; it must not fan out to nodes that already have a node-level snapshot.
+GVIC11 - Updating logic gate GVIC updates the logic gate's GVIC template/effective rows only by default; it must not fan out to nodes that already have a node-level snapshot unless apply-to-descendants is set.
 GVIC12 - Updating project, node, or shared resource GVIC applies precise effective access and projection deltas for affected users without rebuilding unaffected rows.
 GVIC13 - My Work reads active work from the GVIC matrix projection table, not by guessing from UI state.
 GVIC14 - GVIC matrix projection sequences are tracked per company and scope so clients can process ordered deltas.
@@ -45,6 +45,7 @@ GVIC34 - Projects have their own GVIC for project visibility and updates, but lo
 GVIC35 - My Work membership is based on node effective GVIC only; project and logic gate data decorate and group visible node rows but do not hide or reveal node rows.
 GVIC36 - Updates visibility is target-based: node events use node effective GVIC/access, logic gate events use logic gate GVIC/access, and project events use project GVIC/access.
 GVIC37 - Group membership, group parent moves, and group deletion update effective GVIC for any resource that directly references the affected group, including Logic Gate templates and node snapshots.
+GVIC38 - Logic Gate GVIC write commands can set apply-to-descendants to update nodes currently assigned to that Logic Gate; set replaces each assigned node snapshot, add applies the added source rows, and remove deletes the removed source rows.
 
 ## Scenarios
 
@@ -107,14 +108,18 @@ Business logic covered:
 - GVIC14
 - GVIC15
 - GVIC16
+- GVIC38
 
 Given:
 - A logic gate has assigned nodes, node GVIC snapshots, and GVIC template assignments.
+- A logic gate GVIC write is run once without apply-to-descendants and once with apply-to-descendants.
 - A user has My Work open while GVIC assignments change.
 - A client receives matrix deltas with and without sequence gaps.
 
 Expected:
-- Logic gate GVIC updates apply precise effective-assignment deltas for the gate template and do not mutate existing node snapshots or assigned-node matrix rows.
+- Logic gate GVIC updates apply precise effective-assignment deltas for the gate template.
+- Without apply-to-descendants, existing assigned node snapshots and assigned-node matrix rows are not mutated.
+- With apply-to-descendants, currently assigned node snapshots are updated and affected node effective/projection rows are refreshed.
 - Project, node, and supported shared resource GVIC changes apply precise access/projection deltas for affected users.
 - My Work reads from the GVIC matrix projection table.
 - Projection sequence values are ordered per company and scope.
@@ -142,10 +147,11 @@ Business logic covered:
 - GVIC26
 - GVIC27
 - GVIC28
+- GVIC38
 
 Given:
 - A logic gate has generated, verified, consulted, and informed GVIC assignments.
-- A user adds or removes one assignment through POST or PUT.
+- A user adds or removes one assignment through POST or PUT, optionally with apply-to-descendants.
 - A broad Logic Gate payload or workspace list request may already be cached or in flight.
 - A node is assigned to the logic gate and receives a node-level GVIC snapshot from the logic gate's current template.
 
@@ -158,6 +164,7 @@ Expected:
 - Stale broad Logic Gate payloads, stale workspace list cache entries, and stale in-flight reads cannot overwrite newer Logic Gate GVIC assignments.
 - Logic Gate and Node GVIC follow the same freshness contract.
 - Linked node effective access resolves through the node's own copied snapshot rows after the node enters the logic gate.
+- When apply-to-descendants is set on a Logic Gate GVIC command, the same source-shaped write response remains authoritative for the edited Logic Gate and affected node snapshots refresh through projection/realtime deltas.
 
 ### Scenario GVIC-S6: Node Logic Gate GVIC Snapshots, My Work, And Updates
 
@@ -172,11 +179,13 @@ Business logic covered:
 - GVIC34
 - GVIC35
 - GVIC36
+- GVIC38
 
 Given:
 - A standalone node has its own GVIC assignments.
 - The node is placed into a logic gate that has different GVIC assignments.
 - The logic gate GVIC changes after the node has entered.
+- The logic gate GVIC change may be saved with or without apply-to-descendants.
 - A second node enters after the logic gate GVIC changes.
 - The node is later detached from the logic gate.
 - Project, logic gate, and node updates are shown in Updates.
@@ -185,7 +194,8 @@ Expected:
 - Before placement, the standalone node GVIC is editable and controls the node's My Work visibility.
 - When the node is placed into the logic gate, the node's GVIC assignments are replaced with a snapshot of the logic gate's current GVIC template.
 - While the node is inside the logic gate, the node GVIC editor shows editable node-level assignments.
-- Changing the parent logic gate GVIC does not change the existing node's GVIC or My Work visibility.
+- Changing the parent logic gate GVIC without apply-to-descendants does not change the existing node's GVIC or My Work visibility.
+- Changing the parent logic gate GVIC with apply-to-descendants updates existing assigned node snapshots and My Work visibility for affected users.
 - Nodes created in or transferred into the logic gate after that change receive the logic gate's new GVIC template.
 - My Work shows the node only when the user's effective node GVIC includes that node; parent project or logic gate GVIC only provides grouping and context.
 - Detaching the node preserves the node-level GVIC snapshot.
