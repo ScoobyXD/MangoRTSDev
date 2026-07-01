@@ -72,6 +72,7 @@ MT61 - Drag payloads from My Triage and Shared Triage must carry message IDs plu
 MT62 - Successful local email conversion into a Logic Gate or Company Explorer Logic Gate must keep the source email row visible in Inbox, All, My Triage, and Shared Triage mailbox lists, patch the row/detail/cache with the returned Logic Gate placement so the Logic Gate icon changes immediately, and suppress the matching local `triage.converted` echo. It must not remove the row from visible state, invalidate all communications message page/detail caches, reuse stale prefetched pages, trigger post-removal fill or message-length prefetch, blank the email list, or repeatedly issue mail GETs. This is a regression-prone path: any change to conversion, communications cache invalidation, realtime echo handling, pagination prefetch/refill, row-removal logic, or star/unstar mutation must preserve this keep-row/no-blank/no-refill/no-repeat-GET behavior.
 MT63 - Successful local email conversion into a Company Explorer Logic Gate must show a temporary green success banner over the Company Explorer section; other Logic Gate conversion surfaces must show a temporary success banner or notice.
 MT64 - When a dragged email is converted into a Logic Gate, Company Explorer Logic Gate, pinned Logic Gate, or eligible node target, the source email is set to unstarred through the same source mailbox scope after the workspace conversion succeeds. The conversion response returns `unstarred_message_ids`, and Home applies those IDs as a local star mutation so Inbox, All, Starred, My Triage, and Shared Triage views do not refill, blink, or reload.
+MT65 - Unread My Triage email rows keep their outer unread outline/highlight, but the small top-left colored dot is reserved for the currently selected email only; unread but unselected rows must not show that dot.
 
 ## Scenarios
 
@@ -208,6 +209,7 @@ Business logic covered:
 - MT62
 - MT63
 - MT64
+- MT65
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
@@ -225,6 +227,7 @@ Expected:
 - Local conversion from the user's own email-to-Logic-Gate drop keeps converted source email rows in place, patches their Logic Gate icon state from the conversion result, and suppresses matching local `triage.converted` echoes without clearing all message caches, reusing stale prefetched pages, post-removal prefetching, repeated mail GETs, workspace panel GET bursts, or visible list blanking.
 - The backend sets converted source emails to unstarred after successful conversion, the response includes successfully updated IDs in `unstarred_message_ids`, and the visible Home list/Starred count reconciles locally without loading replacement Starred rows.
 - A successful local conversion shows a short green success notice.
+- Unread rows keep their unread outline, while the top-left dot is visible only on the selected email row.
 - Realtime message events that do not carry a message ID do not trigger a whole-list reload; the next explicit page/list load reconciles provider state.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
 - Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.

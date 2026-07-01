@@ -86,7 +86,7 @@ import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "
 import { composeHasDraftContent, createHomeMailDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_QUEUE_MAX_EMAILS, EVENT_HOME_TRIAGE_CONVERSION_APPLIED, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME, type HomeTriageConversionAppliedDetail } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, communicationStreamEventIsArchiveConfirmation, communicationStreamEventIsStarConfirmation, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, triageMessageIDsFromStreamMessageID, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, communicationStreamEventIsArchiveConfirmation, communicationStreamEventIsStarConfirmation, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, localMailboxMutationEchoKeys, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, triageMessageIDsFromStreamMessageID, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
 
@@ -1543,29 +1543,36 @@ export function HomePage({
     locallyArchivedMessageKeysRef.current.delete(key);
     return true;
   }, [companyID, locallyArchivedMessageKey]);
-  const locallyStarMutationMessageKey = useCallback((nextCompanyID: string, sharedInboxID: string | undefined, messageID: string) => (
-    `${nextCompanyID.trim()}\x1f${sharedInboxID?.trim() ?? ""}\x1f${messageID.trim()}`
-  ), []);
   const rememberLocallyStarMutatedMessages = useCallback((nextCompanyID: string, sharedInboxID: string | undefined, messageIDs: string[]) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
     const expiresAt = Date.now() + 120_000;
     for (const messageID of ids) {
-      locallyStarMutatedMessageKeysRef.current.set(locallyStarMutationMessageKey(nextCompanyID, sharedInboxID, messageID), expiresAt);
+      for (const key of localMailboxMutationEchoKeys(nextCompanyID, sharedInboxID, messageID)) {
+        locallyStarMutatedMessageKeysRef.current.set(key, expiresAt);
+      }
     }
-  }, [locallyStarMutationMessageKey]);
+  }, []);
   const starUpdateWasAppliedLocally = useCallback((messageID: string, sharedInboxID: string | undefined, options?: { consume?: boolean }): boolean => {
     const cleanMessageID = messageID.trim();
     if (!cleanMessageID) return false;
-    const key = locallyStarMutationMessageKey(companyID, sharedInboxID, cleanMessageID);
-    const expiresAt = locallyStarMutatedMessageKeysRef.current.get(key) ?? 0;
-    if (expiresAt <= Date.now()) {
-      locallyStarMutatedMessageKeysRef.current.delete(key);
-      return false;
+    const now = Date.now();
+    const keys = localMailboxMutationEchoKeys(companyID, sharedInboxID, cleanMessageID);
+    let handled = false;
+    for (const key of keys) {
+      const expiresAt = locallyStarMutatedMessageKeysRef.current.get(key) ?? 0;
+      if (expiresAt <= now) {
+        locallyStarMutatedMessageKeysRef.current.delete(key);
+        continue;
+      }
+      handled = true;
     }
-    if (options?.consume !== false) locallyStarMutatedMessageKeysRef.current.delete(key);
+    if (!handled) return false;
+    if (options?.consume !== false) {
+      for (const key of keys) locallyStarMutatedMessageKeysRef.current.delete(key);
+    }
     return true;
-  }, [companyID, locallyStarMutationMessageKey]);
+  }, [companyID]);
   const archiveQueueBatchKey = useCallback((nextCompanyID: string, sharedInboxID?: string) => (
     `${nextCompanyID.trim()}\x1f${sharedInboxID?.trim() ?? ""}`
   ), []);
