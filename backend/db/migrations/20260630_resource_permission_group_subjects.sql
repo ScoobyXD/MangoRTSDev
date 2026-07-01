@@ -1,7 +1,12 @@
+begin;
+
 alter table resource_permissions
   add column if not exists subject_type text not null default 'user',
   add column if not exists subject_id uuid,
   add column if not exists access_level text;
+
+alter table resource_permissions
+  drop constraint if exists resource_permissions_pkey;
 
 alter table resource_permissions
   alter column user_id drop not null;
@@ -41,9 +46,6 @@ where subject_id is null
 alter table resource_permissions
   alter column subject_id set not null,
   alter column access_level set not null;
-
-alter table resource_permissions
-  drop constraint if exists resource_permissions_pkey;
 
 do $$
 begin
@@ -221,3 +223,5 @@ returns boolean as $$
   end
   from requested, normalized_resource;
 $$ language sql stable;
+
+commit;
