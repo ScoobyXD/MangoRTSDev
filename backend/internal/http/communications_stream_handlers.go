@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strconv"
@@ -33,8 +34,9 @@ type communicationsEventMetadata struct {
 }
 
 type communicationsWebhookGrantContext struct {
-	userID     string
-	cacheScope string
+	connection     domain.UserEmailConnection
+	cacheScope     string
+	sharedInboxIDs []string
 }
 
 type nylasWebhookChange struct {
@@ -118,7 +120,9 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 		}
 		grantContext, ok := grantContexts[grantID]
 		if !ok {
-			connection, err := s.repo.GetUserEmailConnectionByGrantID(grantID)
+			var found bool
+			var err error
+			grantContext, found, err = s.loadCommunicationsWebhookGrantContext(grantID)
 			if errors.Is(err, store.ErrNotFound) {
 				missingGrants[grantID] = struct{}{}
 				continue
@@ -128,9 +132,9 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 				writeError(w, http.StatusInternalServerError, "failed_to_load_email_connection")
 				return
 			}
-			grantContext = communicationsWebhookGrantContext{
-				userID:     connection.UserID,
-				cacheScope: communicationsConnectionCacheScope(connection),
+			if !found {
+				missingGrants[grantID] = struct{}{}
+				continue
 			}
 			grantContexts[grantID] = grantContext
 		}
@@ -143,31 +147,71 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 				signalAt = time.Now().UTC()
 			}
 			status, err := s.repo.UpsertCommunicationsMessageReadStatus(store.CommunicationsMessageReadStatusInput{
-				UserID:          grantContext.userID,
-				MessageID:       change.MessageID,
-				ThreadID:        change.ThreadID,
-				Status:          "likely_read",
-				SignalTimestamp: signalAt,
-				SignalCount:     change.SignalCount,
+				ScopeType:                communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection),
+				UserID:                   grantContext.connection.UserID,
+				CompanyID:                grantContext.connection.CompanyID,
+				CompanyEmailConnectionID: grantContext.connection.CompanyEmailConnectionID,
+				SharedInboxID:            firstNonEmptyString(grantContext.sharedInboxIDs...),
+				MessageID:                change.MessageID,
+				ThreadID:                 change.ThreadID,
+				Status:                   "likely_read",
+				SignalTimestamp:          signalAt,
+				SignalCount:              change.SignalCount,
 			})
 			if err != nil {
-				log.Printf("failed to store nylas message.opened read status user_id=%s grant_id=%s message_id=%s: %v", grantContext.userID, grantID, change.MessageID, err)
+				log.Printf("failed to store nylas message.opened read status user_id=%s scope=%s company_id=%s company_email_connection_id=%s grant_id=%s message_id=%s: %v", grantContext.connection.UserID, communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection), grantContext.connection.CompanyID, grantContext.connection.CompanyEmailConnectionID, grantID, change.MessageID, err)
 				s.nylasWebhooks.forget(receiptKey)
 				writeError(w, http.StatusInternalServerError, "failed_to_store_message_read_status")
 				return
 			}
-			log.Printf("stored nylas message.opened read status user_id=%s grant_id=%s message_id=%s status=%s signal_count=%d last_signal=%s", grantContext.userID, grantID, status.MessageID, status.Status, status.SignalCount, status.LastSignalTimestamp.Format(time.RFC3339))
+			log.Printf("stored nylas message.opened read status user_id=%s scope=%s company_id=%s company_email_connection_id=%s grant_id=%s message_id=%s status=%s signal_count=%d last_signal=%s", grantContext.connection.UserID, status.ScopeType, status.CompanyID, status.CompanyEmailConnectionID, grantID, status.MessageID, status.Status, status.SignalCount, status.LastSignalTimestamp.Format(time.RFC3339))
 		}
-		s.applyNylasWebhookCacheInvalidation(grantContext.userID, change)
 		trigger := change.Trigger
 		meta := communicationsEventMetadata{}
 		if normalizedTrigger == "message.updated" && s.consumeRecentCommunicationsArchiveMutation(grantContext.cacheScope, change.MessageID, time.Now().UTC()) {
 			trigger = "message.archived"
 			meta.Action = "archive"
 		}
-		s.publishCommunicationsEventWithMeta(grantContext.userID, "mailbox_changed", trigger, change.MessageID, meta)
+		s.publishCommunicationsWebhookEvent(grantContext, "mailbox_changed", trigger, change.MessageID, meta, change)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) loadCommunicationsWebhookGrantContext(grantID string) (communicationsWebhookGrantContext, bool, error) {
+	grantID = strings.TrimSpace(grantID)
+	if grantID == "" {
+		return communicationsWebhookGrantContext{}, false, store.ErrInvalid
+	}
+	connection, err := s.repo.GetUserEmailConnectionByGrantID(grantID)
+	if err == nil {
+		connection.Scope = firstNonBlank(connection.Scope, "personal")
+		return communicationsWebhookGrantContext{
+			connection: connection,
+			cacheScope: communicationsConnectionCacheScope(connection),
+		}, true, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return communicationsWebhookGrantContext{}, false, err
+	}
+
+	companyConnection, err := s.repo.GetCompanyEmailConnectionByGrantID(grantID)
+	if errors.Is(err, store.ErrNotFound) {
+		return communicationsWebhookGrantContext{}, false, store.ErrNotFound
+	}
+	if err != nil {
+		return communicationsWebhookGrantContext{}, false, err
+	}
+	sharedInboxIDs, err := s.communicationsSharedInboxIDsForCompanyEmailConnection(companyConnection)
+	if err != nil {
+		log.Printf("failed to resolve shared inboxes for communications webhook company_id=%s company_email_connection_id=%s grant_id=%s: %v", companyConnection.CompanyID, companyConnection.CompanyEmailConnectionID, grantID, err)
+		sharedInboxIDs = nil
+	}
+	connection = userConnectionForCompanyEmailConnection(companyConnection, companyConnection.ConnectedByUserID)
+	return communicationsWebhookGrantContext{
+		connection:     connection,
+		cacheScope:     communicationsConnectionCacheScope(connection),
+		sharedInboxIDs: sharedInboxIDs,
+	}, true, nil
 }
 
 func verifyNylasWebhookSignature(rawBody []byte, signatureHeader, secret string) bool {
@@ -265,22 +309,107 @@ func normalizedNylasMailboxTrigger(trigger string) string {
 	}
 }
 
-func (s *Server) applyNylasWebhookCacheInvalidation(userID string, change nylasWebhookChange) {
+func (s *Server) applyNylasWebhookCacheInvalidation(userID, accountScope string, change nylasWebhookChange) {
 	trigger := strings.TrimSpace(strings.ToLower(change.Trigger))
 	switch {
 	case strings.HasPrefix(trigger, "folder."):
-		s.commCache.invalidateFolders(userID)
+		s.commCache.invalidateFolders(userID, accountScope)
 	case strings.HasPrefix(trigger, "message.created"):
 		s.commCache.invalidateMessagePages(userID)
-		s.commCache.invalidateMessage(userID, "", change.MessageID)
+		s.commCache.invalidateMessage(userID, accountScope, change.MessageID)
 	case strings.HasPrefix(trigger, "message.opened"):
-		s.commCache.invalidateMessage(userID, "", change.MessageID)
+		s.commCache.invalidateMessage(userID, accountScope, change.MessageID)
 	case strings.HasPrefix(trigger, "message.updated"), strings.HasPrefix(trigger, "message.deleted"):
-		s.commCache.invalidateMessage(userID, "", change.MessageID)
+		s.commCache.invalidateMessage(userID, accountScope, change.MessageID)
 		s.commCache.invalidateMessagePages(userID)
 	default:
 		s.commCache.invalidateUser(userID)
 	}
+}
+
+func (s *Server) publishCommunicationsWebhookEvent(grantContext communicationsWebhookGrantContext, eventType, trigger, messageID string, meta communicationsEventMetadata, change nylasWebhookChange) {
+	if communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection) != "shared" {
+		s.applyNylasWebhookCacheInvalidation(grantContext.connection.UserID, grantContext.cacheScope, change)
+		s.publishCommunicationsEventWithMeta(grantContext.connection.UserID, eventType, trigger, messageID, meta)
+		return
+	}
+	if len(grantContext.sharedInboxIDs) == 0 {
+		log.Printf("skipping shared communications webhook publish without linked shared inbox company_id=%s company_email_connection_id=%s trigger=%s message_id=%s", grantContext.connection.CompanyID, grantContext.connection.CompanyEmailConnectionID, trigger, messageID)
+		return
+	}
+	published := map[string]struct{}{}
+	for _, sharedInboxID := range grantContext.sharedInboxIDs {
+		sharedInboxID = strings.TrimSpace(sharedInboxID)
+		if sharedInboxID == "" {
+			continue
+		}
+		userIDs, err := s.communicationsWebhookSharedInboxAudience(grantContext.connection.CompanyID, sharedInboxID)
+		if err != nil {
+			log.Printf("failed to resolve shared communications webhook audience company_id=%s shared_inbox_id=%s trigger=%s message_id=%s: %v", grantContext.connection.CompanyID, sharedInboxID, trigger, messageID, err)
+			continue
+		}
+		eventMeta := meta
+		eventMeta.SharedInboxID = sharedInboxID
+		for _, userID := range userIDs {
+			userID = strings.TrimSpace(userID)
+			if userID == "" {
+				continue
+			}
+			key := userID + communicationsCacheKeySeparator + sharedInboxID
+			if _, ok := published[key]; ok {
+				continue
+			}
+			published[key] = struct{}{}
+			s.applyNylasWebhookCacheInvalidation(userID, grantContext.cacheScope, change)
+			s.publishCommunicationsEventWithMeta(userID, eventType, trigger, messageID, eventMeta)
+		}
+	}
+}
+
+func (s *Server) communicationsSharedInboxIDsForCompanyEmailConnection(connection domain.CompanyEmailConnection) ([]string, error) {
+	companyID := strings.TrimSpace(connection.CompanyID)
+	connectionID := strings.TrimSpace(connection.CompanyEmailConnectionID)
+	accountEmail := normalizeEmailForCompare(connection.AccountEmail)
+	if companyID == "" || connectionID == "" {
+		return nil, store.ErrInvalid
+	}
+	items, err := s.repo.ListCommunicationsSharedInboxFolders(companyID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{}
+	ids := make([]string, 0)
+	for _, item := range items {
+		if store.CommunicationsSharedInboxResourceType(item) != store.EntityTypeSharedInbox {
+			continue
+		}
+		matchesConnection := strings.TrimSpace(item.CompanyEmailConnectionID) == connectionID
+		if !matchesConnection && accountEmail != "" && item.AccountEmail != nil {
+			matchesConnection = normalizeEmailForCompare(*item.AccountEmail) == accountEmail
+		}
+		if !matchesConnection {
+			continue
+		}
+		sharedInboxID := firstNonBlank(item.SharedInboxID, item.FolderID)
+		if sharedInboxID == "" {
+			continue
+		}
+		if _, ok := seen[sharedInboxID]; ok {
+			continue
+		}
+		seen[sharedInboxID] = struct{}{}
+		ids = append(ids, sharedInboxID)
+	}
+	return ids, nil
+}
+
+func (s *Server) communicationsWebhookSharedInboxAudience(companyID, sharedInboxID string) ([]string, error) {
+	companyID = strings.TrimSpace(companyID)
+	sharedInboxID = strings.TrimSpace(sharedInboxID)
+	if companyID == "" || sharedInboxID == "" {
+		return nil, store.ErrInvalid
+	}
+	return s.repo.ListEffectiveUsersForResource(companyID, store.EntityTypeSharedInbox, sharedInboxID, store.EntityPermissionView)
 }
 
 func (s *Server) publishCommunicationsEvent(userID, eventType, trigger, messageID string) {
@@ -378,6 +507,15 @@ func findNylasMessageID(value any) string {
 }
 
 func findNylasWebhookSignalCount(value any) int {
+	object := nylasWebhookObject(value)
+	if messageData, ok := object["message_data"].(map[string]any); ok {
+		if count := intValue(messageData["count"]); count > 0 {
+			return count
+		}
+	}
+	if count := intValue(object["count"]); count > 0 {
+		return count
+	}
 	for _, key := range []string{"signal_count", "open_count", "count"} {
 		if count := findIntField(value, key); count > 0 {
 			return count
@@ -387,12 +525,46 @@ func findNylasWebhookSignalCount(value any) int {
 }
 
 func findNylasWebhookTimestamp(value any) time.Time {
+	object := nylasWebhookObject(value)
+	if messageData, ok := object["message_data"].(map[string]any); ok {
+		if ts := timeValue(messageData["timestamp"]); !ts.IsZero() {
+			return ts
+		}
+		if recents, ok := messageData["recents"].([]any); ok {
+			for _, recent := range recents {
+				if recentMap, ok := recent.(map[string]any); ok {
+					if ts := timeValue(recentMap["timestamp"]); !ts.IsZero() {
+						return ts
+					}
+				}
+			}
+		}
+	}
+	if ts := timeValue(object["timestamp"]); !ts.IsZero() {
+		return ts
+	}
 	for _, key := range []string{"time", "timestamp", "created_at", "created_timestamp"} {
 		if ts := findTimeField(value, key); !ts.IsZero() {
 			return ts
 		}
 	}
 	return time.Time{}
+}
+
+func nylasWebhookObject(value any) map[string]any {
+	root, ok := value.(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	if data, ok := root["data"].(map[string]any); ok {
+		if object, ok := data["object"].(map[string]any); ok {
+			return object
+		}
+	}
+	if object, ok := root["object"].(map[string]any); ok {
+		return object
+	}
+	return root
 }
 
 func findMessageIDInPreferredShapes(value any) string {

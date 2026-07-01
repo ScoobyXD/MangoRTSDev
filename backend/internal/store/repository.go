@@ -94,6 +94,7 @@ type IdentityRepository interface {
 	ListUserEmailConnections(userID string) ([]domain.UserEmailConnection, error)
 	GetCompanyEmailConnectionByAccountEmail(companyID, accountEmail string) (domain.CompanyEmailConnection, error)
 	GetCompanyEmailConnectionByID(companyID, connectionID string) (domain.CompanyEmailConnection, error)
+	GetCompanyEmailConnectionByGrantID(grantID string) (domain.CompanyEmailConnection, error)
 	GetUserEmailConnectionByGrantID(grantID string) (domain.UserEmailConnection, error)
 	UpsertUserEmailConnection(input UserEmailConnectionInput) (domain.UserEmailConnection, error)
 	UpsertCompanyEmailConnection(input CompanyEmailConnectionInput) (domain.CompanyEmailConnection, error)
@@ -107,7 +108,7 @@ type CommunicationsRepository interface {
 	UpsertCommunicationsTriageItem(userID string, message domain.EmailMessageSnapshot) (domain.CommunicationsTriageItem, error)
 	DeleteCommunicationsTriageItem(userID, messageID string) error
 	UpsertCommunicationsMessageReadStatus(input CommunicationsMessageReadStatusInput) (domain.CommunicationsMessageReadStatus, error)
-	ListCommunicationsMessageReadStatuses(userID string, messageIDs []string) ([]domain.CommunicationsMessageReadStatus, error)
+	ListCommunicationsMessageReadStatuses(input CommunicationsMessageReadStatusListInput) ([]domain.CommunicationsMessageReadStatus, error)
 	CreateCommunicationsArchiveJob(input CommunicationsArchiveJobInput) (CommunicationsArchiveJob, error)
 	ClaimCommunicationsArchiveJobItems(limit int, processingLeaseTimeout time.Duration) ([]CommunicationsArchiveJobItem, error)
 	MarkCommunicationsArchiveJobItemArchived(jobItemID string) error
@@ -1446,12 +1447,24 @@ type CommunicationsTriageConversionTarget struct {
 }
 
 type CommunicationsMessageReadStatusInput struct {
-	UserID          string
-	MessageID       string
-	ThreadID        string
-	Status          string
-	SignalTimestamp time.Time
-	SignalCount     int
+	ScopeType                string
+	UserID                   string
+	CompanyID                string
+	CompanyEmailConnectionID string
+	SharedInboxID            string
+	MessageID                string
+	ThreadID                 string
+	Status                   string
+	SignalTimestamp          time.Time
+	SignalCount              int
+}
+
+type CommunicationsMessageReadStatusListInput struct {
+	ScopeType                string
+	UserID                   string
+	CompanyID                string
+	CompanyEmailConnectionID string
+	MessageIDs               []string
 }
 
 type CommunicationsEmailConversionProvenance struct {

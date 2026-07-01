@@ -1028,10 +1028,8 @@ export function formatMessageDate(epochSeconds?: number): string {
 }
 
 export function messageReadStatusLabel(status?: EmailReadStatus): string {
-  if (!status) return "Not opened";
-  if (status.status === "read") return "Read";
-  if (status.status === "likely_read") return "Likely read";
-  return "Not opened";
+  if (!status) return "";
+  return "Seen";
 }
 
 export function messageReadStatusTimestamp(status?: EmailReadStatus): string {
@@ -1043,12 +1041,13 @@ export function messageReadStatusTimestamp(status?: EmailReadStatus): string {
 }
 
 export function messageReadStatusTitle(status?: EmailReadStatus): string {
+  if (!status) return "";
   const label = messageReadStatusLabel(status);
   if (!label) return "";
-  if (!status) return "No opens recorded yet.";
   const timestamp = messageReadStatusTimestamp(status);
-  const count = typeof status?.signal_count === "number" && status.signal_count > 1 ? ` (${Math.floor(status.signal_count)} signals)` : "";
-  return timestamp ? `${label} ${timestamp}${count}` : `${label}${count}`;
+  const count = typeof status.signal_count === "number" && status.signal_count > 1 ? ` (${Math.floor(status.signal_count)} open signals)` : "";
+  const caveat = "Open tracking can be affected by recipient image and privacy settings.";
+  return timestamp ? `${label} ${timestamp}${count}. ${caveat}` : `${label}${count}. ${caveat}`;
 }
 
 function emailFolderTotalCount(folder: EmailFolder | undefined): number | undefined {

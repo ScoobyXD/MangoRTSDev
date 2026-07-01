@@ -1490,7 +1490,7 @@ func TestNylasWebhookCacheInvalidationIsGranular(t *testing.T) {
 	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
 	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
 
-	server.applyNylasWebhookCacheInvalidation("user-1", nylasWebhookChange{Trigger: "message.opened", MessageID: "message-1"})
+	server.applyNylasWebhookCacheInvalidation("user-1", "account:user@example.com", nylasWebhookChange{Trigger: "message.opened", MessageID: "message-1"})
 
 	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
 		t.Fatal("message webhook invalidated folders; want folder cache preserved")
@@ -1504,7 +1504,7 @@ func TestNylasWebhookCacheInvalidationIsGranular(t *testing.T) {
 
 	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
 	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
-	server.applyNylasWebhookCacheInvalidation("user-1", nylasWebhookChange{Trigger: "message.updated", MessageID: "message-1"})
+	server.applyNylasWebhookCacheInvalidation("user-1", "account:user@example.com", nylasWebhookChange{Trigger: "message.updated", MessageID: "message-1"})
 	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
 		t.Fatal("message.updated invalidated folders; want folder cache preserved")
 	}
@@ -1521,7 +1521,7 @@ func TestNylasWebhookCacheInvalidationIsGranular(t *testing.T) {
 	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
 	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
 
-	server.applyNylasWebhookCacheInvalidation("user-1", nylasWebhookChange{Trigger: "folder.updated"})
+	server.applyNylasWebhookCacheInvalidation("user-1", "account:user@example.com", nylasWebhookChange{Trigger: "folder.updated"})
 
 	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
 		t.Fatal("folder webhook preserved folders; want folder cache invalidated")
@@ -2272,7 +2272,10 @@ func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 	if openedRec.Code != http.StatusOK {
 		t.Fatalf("opened webhook status = %d body=%s", openedRec.Code, openedRec.Body.String())
 	}
-	statuses, err := repo.ListCommunicationsMessageReadStatuses(user.UserID, []string{"message-1"})
+	statuses, err := repo.ListCommunicationsMessageReadStatuses(store.CommunicationsMessageReadStatusListInput{
+		UserID:     user.UserID,
+		MessageIDs: []string{"message-1"},
+	})
 	if err != nil {
 		t.Fatalf("ListCommunicationsMessageReadStatuses: %v", err)
 	}
@@ -2295,6 +2298,121 @@ func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 	if badRec.Code != http.StatusUnauthorized {
 		t.Fatalf("bad signature status = %d", badRec.Code)
 	}
+}
+
+func TestNylasWebhookStoresSharedReadStatusAndPublishesToSharedInboxAudience(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "80808080-8080-4080-8080-808080808001"
+	tokenVisible := "communications-shared-webhook-visible-token"
+	tokenBlocked := "communications-shared-webhook-blocked-token"
+	repo.EnsureCompany(companyID, "Communications Shared Webhook")
+	visible := mustRealtimeAuthUser(t, repo, companyID, "communications-shared-webhook-visible", domain.RoleCompanyUser)
+	blocked := mustRealtimeAuthUser(t, repo, companyID, "communications-shared-webhook-blocked", domain.RoleCompanyUser)
+	companyConnection, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID:         companyID,
+		Provider:          "google",
+		AccountEmail:      "support@example.com",
+		GrantID:           "shared-grant-1",
+		Status:            "connected",
+		ConnectedByUserID: visible.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeSharedInbox,
+		EntityID:         folder.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   visible.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	config := testNylasConfig()
+	config.WebhookSecret = "webhook-secret"
+	server := NewServerWithOptions(repo, ServerOptions{
+		NylasConfig: config,
+		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+			tokenVisible: {Subject: visible.CognitoSubject, Email: visible.Email, Name: visible.DisplayName},
+			tokenBlocked: {Subject: blocked.CognitoSubject, Email: blocked.Email, Name: blocked.DisplayName},
+		}},
+	})
+	defer server.Close()
+	handler := server.Routes()
+
+	visibleClient := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, tokenVisible)
+	defer visibleClient.close()
+	visibleClient.readJSON(t)
+	visibleScope := realtimeCommunicationsScope(visible.UserID)
+	visibleClient.writeJSON(t, map[string]any{"type": "subscribe", "scope": visibleScope})
+	visibleAccepted := visibleClient.readJSON(t)
+	if visibleAccepted["type"] != realtimeMessageSubscriptionAccepted || visibleAccepted["scope"] != visibleScope {
+		t.Fatalf("visible communications subscription accepted = %+v, want %s", visibleAccepted, visibleScope)
+	}
+
+	blockedClient := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, tokenBlocked)
+	defer blockedClient.close()
+	blockedClient.readJSON(t)
+	blockedScope := realtimeCommunicationsScope(blocked.UserID)
+	blockedClient.writeJSON(t, map[string]any{"type": "subscribe", "scope": blockedScope})
+	blockedAccepted := blockedClient.readJSON(t)
+	if blockedAccepted["type"] != realtimeMessageSubscriptionAccepted || blockedAccepted["scope"] != blockedScope {
+		t.Fatalf("blocked communications subscription accepted = %+v, want %s", blockedAccepted, blockedScope)
+	}
+
+	body := `{"type":"message.opened","data":{"object":{"message_id":"shared-message-1","thread_id":"shared-thread-1","grant_id":"shared-grant-1","message_data":{"count":3,"timestamp":"2026-06-10T12:30:00Z"}}}}`
+	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
+	req.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("shared opened webhook status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	statuses, err := repo.ListCommunicationsMessageReadStatuses(store.CommunicationsMessageReadStatusListInput{
+		ScopeType:                "shared",
+		CompanyID:                companyID,
+		CompanyEmailConnectionID: companyConnection.CompanyEmailConnectionID,
+		MessageIDs:               []string{"shared-message-1"},
+	})
+	if err != nil {
+		t.Fatalf("ListCommunicationsMessageReadStatuses shared: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].ScopeType != "shared" || statuses[0].SharedInboxID != folder.FolderID || statuses[0].MessageID != "shared-message-1" || statuses[0].ThreadID != "shared-thread-1" || statuses[0].SignalCount != 3 {
+		t.Fatalf("shared read statuses = %+v, want scoped shared receipt count 3", statuses)
+	}
+	if got := statuses[0].LastSignalTimestamp.Format(time.RFC3339); got != "2026-06-10T12:30:00Z" {
+		t.Fatalf("shared last signal timestamp = %s", got)
+	}
+	personalStatuses, err := repo.ListCommunicationsMessageReadStatuses(store.CommunicationsMessageReadStatusListInput{
+		UserID:     visible.UserID,
+		MessageIDs: []string{"shared-message-1"},
+	})
+	if err != nil {
+		t.Fatalf("ListCommunicationsMessageReadStatuses personal: %v", err)
+	}
+	if len(personalStatuses) != 0 {
+		t.Fatalf("personal read statuses = %+v, want shared webhook not stored in viewer personal scope", personalStatuses)
+	}
+
+	message := visibleClient.readJSON(t)
+	if message["type"] != realtimeMessageCommunicationsEvent || message["company_id"] != companyID || message["scope"] != visibleScope {
+		t.Fatalf("shared communications websocket message = %+v, want visible user communications event", message)
+	}
+	event := message["event"].(map[string]any)
+	if event["user_id"] != visible.UserID || event["type"] != "mailbox_changed" || event["trigger"] != "message.opened" || event["message_id"] != "shared-message-1" || event["shared_inbox_id"] != folder.FolderID {
+		t.Fatalf("shared opened communications event = %+v", event)
+	}
+	blockedClient.assertNoMessage(t)
 }
 
 func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {
