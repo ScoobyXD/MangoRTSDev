@@ -312,14 +312,11 @@ func (r *MemoryRepo) ListEntityPermissions(companyID, entityType, entityID strin
 		return nil, ErrNotFound
 	}
 	if usesDefaultResourceAccessPolicy(normalizedEntityType) {
-		defaultAccess, _ := r.defaultAccessForResourceLocked(companyID, normalizedEntityType, entityID)
 		items := make([]domain.EntityPermission, 0)
 		for _, permission := range r.entityPermissions {
 			if permission.CompanyID == companyID &&
 				permission.EntityType == normalizedEntityType &&
-				permission.EntityID == entityID &&
-				permission.SubjectType == EntityPermissionSubjectUser {
-				permission.Permission = OppositeResourceDefaultAccess(defaultAccess)
+				permission.EntityID == entityID {
 				permission.AccessLevel = permission.Permission
 				items = append(items, r.withEntityPermissionSubjectLocked(permission))
 			}
@@ -516,6 +513,10 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 	}
 	defaultAccess, _ := r.defaultAccessForResourceLocked(companyID, entityType, entityID)
 	oldDefaultAccess := defaultAccess
+	var beforeAssignments []resourcePermissionAssignment
+	if input.ApplyToDescendants {
+		beforeAssignments = r.resourcePermissionAssignmentsLocked(companyID, entityType, entityID)
+	}
 	canMutateManagerOverrides := true
 	if strings.TrimSpace(input.ActorUserID) != "" {
 		canMutateManagerOverrides = r.userCanMutateManagerResourceOverridesLocked(companyID, input.ActorUserID)
@@ -545,33 +546,63 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 		}
 	}
 
-	overrideUserIDs := map[string]bool{}
-	addOverrideUser := func(userID string) error {
-		userID = strings.TrimSpace(userID)
-		if userID == "" {
+	assignments := map[string]domain.EntityPermission{}
+	addAssignment := func(subjectType, subjectID, accessLevel string) error {
+		subjectType, ok := NormalizeEntityPermissionSubjectType(subjectType)
+		if !ok {
 			return ErrInvalid
 		}
-		membership, ok := r.memberships[membershipKey(companyID, userID)]
+		accessLevel, ok = NormalizeEntityPermission(accessLevel)
 		if !ok {
-			return ErrPrincipalNotInCompany
+			return ErrInvalid
 		}
-		role := domain.NormalizeRole(membership.Role)
-		if domain.CanBypassResourcePermissions(role) {
-			return nil
+		subjectID = strings.TrimSpace(subjectID)
+		if subjectID == "" {
+			return ErrInvalid
 		}
-		if role == domain.RoleCompanyManager && !canMutateManagerOverrides {
-			return nil
+		switch subjectType {
+		case EntityPermissionSubjectUser:
+			membership, ok := r.memberships[membershipKey(companyID, subjectID)]
+			if !ok {
+				return ErrPrincipalNotInCompany
+			}
+			role := domain.NormalizeRole(membership.Role)
+			if domain.CanBypassResourcePermissions(role) {
+				return nil
+			}
+			if role == domain.RoleCompanyManager && !canMutateManagerOverrides {
+				return nil
+			}
+		case EntityPermissionSubjectGroup:
+			if !canMutateManagerOverrides {
+				return ErrInvalid
+			}
+			if _, ok := r.userGroups[userGroupKey(companyID, subjectID)]; !ok {
+				return ErrNotFound
+			}
+		default:
+			return ErrInvalid
 		}
-		overrideUserIDs[userID] = true
+		assignments[subjectType+":"+subjectID] = domain.EntityPermission{
+			CompanyID:   companyID,
+			EntityType:  entityType,
+			EntityID:    entityID,
+			SubjectType: subjectType,
+			SubjectID:   subjectID,
+			Permission:  accessLevel,
+			AccessLevel: accessLevel,
+		}
 		return nil
 	}
 
-	for _, userID := range input.OverrideUserIDs {
-		if err := addOverrideUser(userID); err != nil {
-			return nil, err
+	if len(input.OverrideUserIDs) > 0 && len(input.Permissions) == 0 {
+		overrideAccess := OppositeResourceDefaultAccess(defaultAccess)
+		for _, userID := range input.OverrideUserIDs {
+			if err := addAssignment(EntityPermissionSubjectUser, userID, overrideAccess); err != nil {
+				return nil, err
+			}
 		}
-	}
-	if len(input.OverrideUserIDs) == 0 {
+	} else {
 		for _, raw := range input.Permissions {
 			subjectType, ok := NormalizeEntityPermissionSubjectType(raw.SubjectType)
 			if !ok {
@@ -590,26 +621,11 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 					return nil, ErrInvalid
 				}
 			}
-			if !input.DefaultAccessSet && accessLevel != "" && accessLevel == defaultAccess {
-				continue
+			if accessLevel == "" {
+				return nil, ErrInvalid
 			}
-			switch subjectType {
-			case EntityPermissionSubjectUser:
-				if err := addOverrideUser(subjectID); err != nil {
-					return nil, err
-				}
-			case EntityPermissionSubjectGroup:
-				groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, companyID, subjectID)
-				if len(groupIDs) == 0 {
-					return nil, ErrNotFound
-				}
-				for _, member := range r.userGroupMembers {
-					if member.CompanyID == companyID && groupIDs[member.GroupID] {
-						if err := addOverrideUser(member.UserID); err != nil {
-							return nil, err
-						}
-					}
-				}
+			if err := addAssignment(subjectType, subjectID, accessLevel); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -618,13 +634,20 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 			if membership.CompanyID != companyID || domain.NormalizeRole(membership.Role) != domain.RoleCompanyManager {
 				continue
 			}
-			hasOverride := r.resourceAccessOverrideExistsLocked(companyID, entityType, entityID, membership.UserID)
 			effectiveAccess := oldDefaultAccess
-			if hasOverride {
-				effectiveAccess = OppositeResourceDefaultAccess(oldDefaultAccess)
+			if directAccess, ok := r.directResourcePermissionAccessLevelLocked(companyID, entityType, entityID, membership.UserID); ok {
+				effectiveAccess = directAccess
 			}
 			if effectiveAccess != defaultAccess {
-				overrideUserIDs[membership.UserID] = true
+				assignments[EntityPermissionSubjectUser+":"+membership.UserID] = domain.EntityPermission{
+					CompanyID:   companyID,
+					EntityType:  entityType,
+					EntityID:    entityID,
+					SubjectType: EntityPermissionSubjectUser,
+					SubjectID:   membership.UserID,
+					Permission:  effectiveAccess,
+					AccessLevel: effectiveAccess,
+				}
 			}
 		}
 	}
@@ -635,36 +658,51 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 		}
 	}
 	now := time.Now().UTC()
-	out := make([]domain.EntityPermission, 0, len(overrideUserIDs))
-	overrideAccess := OppositeResourceDefaultAccess(defaultAccess)
-	for userID := range overrideUserIDs {
-		permission := domain.EntityPermission{
-			CompanyID:        companyID,
-			EntityType:       entityType,
-			EntityID:         entityID,
-			SubjectType:      EntityPermissionSubjectUser,
-			SubjectID:        userID,
-			Permission:       overrideAccess,
-			AccessLevel:      overrideAccess,
-			CreatedTimestamp: now,
-		}
-		r.entityPermissions[entityPermissionKey(companyID, entityType, entityID, EntityPermissionSubjectUser, userID, "")] = permission
+	out := make([]domain.EntityPermission, 0, len(assignments))
+	for _, permission := range assignments {
+		permission.CreatedTimestamp = now
+		r.entityPermissions[entityPermissionKey(companyID, entityType, entityID, permission.SubjectType, permission.SubjectID, "")] = permission
 		out = append(out, r.withEntityPermissionSubjectLocked(permission))
 	}
-	if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, entityType, entityID); err != nil {
-		restore()
-		return nil, err
-	}
-	if entityType == EntityTypeLogicGate {
-		if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{entityID}, nil); err != nil {
+	changedTargets := []resourcePermissionTarget{{ResourceType: entityType, ResourceID: entityID}}
+	if input.ApplyToDescendants {
+		afterDefaultAccess, _ := r.defaultAccessForResourceLocked(companyID, entityType, entityID)
+		afterAssignments := r.resourcePermissionAssignmentsLocked(companyID, entityType, entityID)
+		descendantTargets, err := r.applyResourcePermissionPolicyToDescendantsLocked(input, oldDefaultAccess, beforeAssignments, afterDefaultAccess, afterAssignments)
+		if err != nil {
 			restore()
 			return nil, err
 		}
+		changedTargets = append(changedTargets, descendantTargets...)
 	}
-	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(companyID, input.ActorUserID, "", r.projectRelationshipPermissionProjectionDeltasLocked(companyID, entityType, entityID))
-	if eventInput, ok := PermissionChangedEventInput(companyID, entityType, entityID, input.ActorUserID); ok {
-		eventInputs = append(eventInputs, eventInput)
+	for _, target := range changedTargets {
+		if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, target.ResourceType, target.ResourceID); err != nil {
+			restore()
+			return nil, err
+		}
+		if target.ResourceType == EntityTypeLogicGate {
+			if err := r.recomputeLogicGateAssignedNodeVisibilityLocked(companyID, []string{target.ResourceID}, nil); err != nil {
+				restore()
+				return nil, err
+			}
+		}
 	}
+	projectionDeltas := []ProjectionDelta{}
+	permissionEvents := []EventRowInput{}
+	seenPermissionEvents := map[string]bool{}
+	for _, target := range changedTargets {
+		projectionDeltas = append(projectionDeltas, r.projectRelationshipPermissionProjectionDeltasLocked(companyID, target.ResourceType, target.ResourceID)...)
+		eventKey := target.ResourceType + ":" + target.ResourceID
+		if seenPermissionEvents[eventKey] {
+			continue
+		}
+		seenPermissionEvents[eventKey] = true
+		if eventInput, ok := PermissionChangedEventInput(companyID, target.ResourceType, target.ResourceID, input.ActorUserID); ok {
+			permissionEvents = append(permissionEvents, eventInput)
+		}
+	}
+	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(companyID, input.ActorUserID, "", projectionDeltas)
+	eventInputs = append(eventInputs, permissionEvents...)
 	if _, err := r.appendEventRowsLocked(eventInputs); err != nil {
 		restore()
 		return nil, err
@@ -777,8 +815,7 @@ func (r *MemoryRepo) resourceHasDirectEntityPermissionsLocked(companyID, entityT
 	for _, permission := range r.entityPermissions {
 		if permission.CompanyID == companyID &&
 			permission.EntityType == entityType &&
-			permission.EntityID == entityID &&
-			permission.SubjectType == EntityPermissionSubjectUser {
+			permission.EntityID == entityID {
 			return true
 		}
 	}
@@ -1134,19 +1171,183 @@ func (r *MemoryRepo) setResourceDefaultAccessLocked(companyID, entityType, entit
 	return nil
 }
 
-func (r *MemoryRepo) resourceAccessOverrideUserIDsLocked(companyID, resourceType, resourceID string) []string {
-	userIDs := make([]string, 0)
+func (r *MemoryRepo) resourcePermissionAssignmentsLocked(companyID, resourceType, resourceID string) []resourcePermissionAssignment {
+	assignments := make([]resourcePermissionAssignment, 0)
 	for _, permission := range r.entityPermissions {
 		if permission.CompanyID == companyID &&
 			permission.EntityType == resourceType &&
 			permission.EntityID == resourceID &&
-			permission.SubjectType == EntityPermissionSubjectUser &&
+			strings.TrimSpace(permission.SubjectType) != "" &&
 			strings.TrimSpace(permission.SubjectID) != "" {
-			userIDs = append(userIDs, permission.SubjectID)
+			accessLevel, ok := NormalizeEntityPermission(permission.AccessLevel)
+			if !ok {
+				accessLevel, ok = NormalizeEntityPermission(permission.Permission)
+			}
+			if !ok {
+				continue
+			}
+			assignments = append(assignments, resourcePermissionAssignment{
+				SubjectType: permission.SubjectType,
+				SubjectID:   permission.SubjectID,
+				AccessLevel: accessLevel,
+			})
 		}
 	}
-	sort.Strings(userIDs)
-	return userIDs
+	sort.Slice(assignments, func(i, j int) bool {
+		if assignments[i].SubjectType != assignments[j].SubjectType {
+			return assignments[i].SubjectType < assignments[j].SubjectType
+		}
+		return assignments[i].SubjectID < assignments[j].SubjectID
+	})
+	return assignments
+}
+
+func (r *MemoryRepo) resourcePermissionDescendantTargetsLocked(companyID, resourceType, resourceID string) []resourcePermissionTarget {
+	targets := []resourcePermissionTarget{}
+	seen := map[string]bool{}
+	addTarget := func(targetType, targetID string) {
+		targetType, ok := NormalizeEntityType(targetType)
+		targetID = strings.TrimSpace(targetID)
+		if !ok || targetID == "" || !usesDefaultResourceAccessPolicy(targetType) {
+			return
+		}
+		keyValue := targetType + ":" + targetID
+		if seen[keyValue] {
+			return
+		}
+		seen[keyValue] = true
+		targets = append(targets, resourcePermissionTarget{ResourceType: targetType, ResourceID: targetID})
+	}
+	addAssignedNodes := func(logicGateID string) {
+		for _, assignment := range r.nodeLogicGateAssignments {
+			if assignment.CompanyID == companyID && assignment.LogicGateID == logicGateID {
+				addTarget(EntityTypeNode, assignment.NodeID)
+			}
+		}
+	}
+	switch resourceType {
+	case EntityTypeCompanyExplorerFolder:
+		queue := []string{resourceID}
+		visitedFolders := map[string]bool{resourceID: true}
+		for len(queue) > 0 {
+			parentID := queue[0]
+			queue = queue[1:]
+			for _, edge := range r.companyExplorerV2Edges {
+				if edge.CompanyID != companyID || edge.ParentEntityID != parentID {
+					continue
+				}
+				child, ok := r.companyExplorerV2Entities[key(companyID, edge.ChildEntityID)]
+				if !ok {
+					continue
+				}
+				childResourceID := strings.TrimSpace(child.ResourceID)
+				if childResourceID == "" {
+					childResourceID = child.EntityID
+				}
+				switch child.EntityType {
+				case CompanyExplorerV2EntityFolder:
+					addTarget(EntityTypeCompanyExplorerFolder, child.EntityID)
+					if !visitedFolders[child.EntityID] {
+						visitedFolders[child.EntityID] = true
+						queue = append(queue, child.EntityID)
+					}
+				case CompanyExplorerV2EntityProject:
+					addTarget(EntityTypeProject, childResourceID)
+				case CompanyExplorerV2EntityLogicGate:
+					addTarget(EntityTypeLogicGate, childResourceID)
+					addAssignedNodes(childResourceID)
+				}
+			}
+		}
+		folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, resourceID, "node")
+		for folderID := range folderIDs {
+			if folderID != resourceID {
+				addTarget(EntityTypeCompanyExplorerFolder, folderID)
+			}
+		}
+		for _, item := range r.folderItems {
+			if item.CompanyID != companyID || !folderIDs[item.FolderID] {
+				continue
+			}
+			switch item.ItemType {
+			case EntityTypeProject:
+				addTarget(EntityTypeProject, item.ItemID)
+			case EntityTypeLogicGate:
+				addTarget(EntityTypeLogicGate, item.ItemID)
+				addAssignedNodes(item.ItemID)
+			}
+		}
+	case EntityTypeLogicGate:
+		addAssignedNodes(resourceID)
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].ResourceType != targets[j].ResourceType {
+			return targets[i].ResourceType < targets[j].ResourceType
+		}
+		return targets[i].ResourceID < targets[j].ResourceID
+	})
+	return targets
+}
+
+func (r *MemoryRepo) applyResourcePermissionPolicyToDescendantsLocked(input EntityPermissionUpdateInput, beforeDefault string, beforeAssignments []resourcePermissionAssignment, afterDefault string, afterAssignments []resourcePermissionAssignment) ([]resourcePermissionTarget, error) {
+	if !input.ApplyToDescendants {
+		return []resourcePermissionTarget{}, nil
+	}
+	companyID := strings.TrimSpace(input.CompanyID)
+	resourceID := strings.TrimSpace(input.EntityID)
+	resourceType, ok := NormalizeEntityType(input.EntityType)
+	if companyID == "" || resourceID == "" || !ok {
+		return nil, ErrInvalid
+	}
+	targets := r.resourcePermissionDescendantTargetsLocked(companyID, resourceType, resourceID)
+	if len(targets) == 0 {
+		return targets, nil
+	}
+	if beforeDefault != afterDefault {
+		for _, target := range targets {
+			if err := r.setResourceDefaultAccessLocked(companyID, target.ResourceType, target.ResourceID, afterDefault); err != nil {
+				return nil, err
+			}
+		}
+	}
+	beforeByKey := resourcePermissionAssignmentMap(beforeAssignments)
+	afterByKey := resourcePermissionAssignmentMap(afterAssignments)
+	for assignmentKey, before := range beforeByKey {
+		if _, ok := afterByKey[assignmentKey]; ok {
+			continue
+		}
+		for _, target := range targets {
+			for permissionKey, permission := range r.entityPermissions {
+				if permission.CompanyID == companyID &&
+					permission.EntityType == target.ResourceType &&
+					permission.EntityID == target.ResourceID &&
+					permission.SubjectType == before.SubjectType &&
+					permission.SubjectID == before.SubjectID {
+					delete(r.entityPermissions, permissionKey)
+				}
+			}
+		}
+	}
+	now := time.Now().UTC()
+	for assignmentKey, after := range afterByKey {
+		if before, ok := beforeByKey[assignmentKey]; ok && before == after {
+			continue
+		}
+		for _, target := range targets {
+			permission := domain.EntityPermission{
+				CompanyID:        companyID,
+				EntityType:       target.ResourceType,
+				EntityID:         target.ResourceID,
+				SubjectType:      after.SubjectType,
+				SubjectID:        after.SubjectID,
+				Permission:       after.AccessLevel,
+				AccessLevel:      after.AccessLevel,
+				CreatedTimestamp: now,
+			}
+			r.entityPermissions[entityPermissionKey(companyID, target.ResourceType, target.ResourceID, after.SubjectType, after.SubjectID, "")] = permission
+		}
+	}
+	return targets, nil
 }
 
 func (r *MemoryRepo) snapshotResourceAccessPolicyLocked(companyID, sourceType, sourceID, targetType, targetID string) (bool, error) {
@@ -1171,9 +1372,9 @@ func (r *MemoryRepo) snapshotResourceAccessPolicyLocked(companyID, sourceType, s
 	if !ok {
 		return false, ErrNotFound
 	}
-	sourceOverrideUserIDs := r.resourceAccessOverrideUserIDsLocked(companyID, sourceType, sourceID)
-	targetOverrideUserIDs := r.resourceAccessOverrideUserIDsLocked(companyID, targetType, targetID)
-	if sourceDefaultAccess == targetDefaultAccess && orderedStringSlicesEqual(sourceOverrideUserIDs, targetOverrideUserIDs) {
+	sourceAssignments := r.resourcePermissionAssignmentsLocked(companyID, sourceType, sourceID)
+	targetAssignments := r.resourcePermissionAssignmentsLocked(companyID, targetType, targetID)
+	if sourceDefaultAccess == targetDefaultAccess && orderedResourcePermissionAssignmentsEqual(sourceAssignments, targetAssignments) {
 		return false, nil
 	}
 	if err := r.setResourceDefaultAccessLocked(companyID, targetType, targetID, sourceDefaultAccess); err != nil {
@@ -1185,19 +1386,18 @@ func (r *MemoryRepo) snapshotResourceAccessPolicyLocked(companyID, sourceType, s
 		}
 	}
 	now := time.Now().UTC()
-	overrideAccess := OppositeResourceDefaultAccess(sourceDefaultAccess)
-	for _, userID := range sourceOverrideUserIDs {
+	for _, assignment := range sourceAssignments {
 		permission := domain.EntityPermission{
 			CompanyID:        companyID,
 			EntityType:       targetType,
 			EntityID:         targetID,
-			SubjectType:      EntityPermissionSubjectUser,
-			SubjectID:        userID,
-			Permission:       overrideAccess,
-			AccessLevel:      overrideAccess,
+			SubjectType:      assignment.SubjectType,
+			SubjectID:        assignment.SubjectID,
+			Permission:       assignment.AccessLevel,
+			AccessLevel:      assignment.AccessLevel,
 			CreatedTimestamp: now,
 		}
-		r.entityPermissions[entityPermissionKey(companyID, targetType, targetID, EntityPermissionSubjectUser, userID, "")] = permission
+		r.entityPermissions[entityPermissionKey(companyID, targetType, targetID, assignment.SubjectType, assignment.SubjectID, "")] = permission
 	}
 	if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, targetType, targetID); err != nil {
 		return false, err

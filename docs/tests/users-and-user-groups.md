@@ -1,4 +1,4 @@
-Last updated: 2026-06-26
+Last updated: 2026-07-01
 
 # Users And User Groups Tests
 
@@ -30,7 +30,7 @@ UG19 - A user group's parent must exist in the same company.
 UG20 - User group hierarchy changes cannot create parent cycles.
 UG21 - Setting user group members replaces the full member list for that group.
 UG22 - Every user added to a group must already belong to the same company.
-UG23 - User group membership changes recompute group-derived effective access and GVIC projections.
+UG23 - User group membership changes affect resources that directly reference the group: resource permissions resolve dynamically from group rows, and GVIC effective/projection rows are recomputed.
 UG24 - Creating an invitation requires company manager, company admin, or dev admin authority.
 UG25 - Invitation email addresses are normalized before storage and comparison.
 UG26 - Invitation roles are normalized to an invitable company role.
@@ -41,6 +41,7 @@ UG30 - Accepting an invitation checks token, email, status, and expiration befor
 UG31 - Invitation delivery status is tracked separately from invitation acceptance status.
 UG32 - Company managers can invite company users and company managers; only company admins and dev admins can invite company admins.
 UG33 - Company managers can delete company users and company managers, but cannot delete company admins or dev admins.
+UG34 - Deleting a user group removes permission and GVIC source rows that reference the deleted group/subtree and refreshes affected effective/projection rows.
 
 ## Scenarios
 
@@ -109,10 +110,12 @@ Business logic covered:
 - UG21
 - UG22
 - UG23
+- UG34
 
 Given:
 - A company has nested user groups and company users.
 - A manager changes group hierarchy and member lists.
+- Resources have permission and GVIC source rows that reference those groups.
 - A request tries to add a user from another company.
 
 Expected:
@@ -122,7 +125,8 @@ Expected:
 - Hierarchy changes cannot create cycles.
 - Setting members replaces the full member list.
 - Users from another company are rejected.
-- Membership changes recompute group-derived effective access and GVIC projections.
+- Membership changes dynamically affect group permission rows and recompute group-derived GVIC projections.
+- Deleting a group removes permission and GVIC source rows for the deleted group/subtree and refreshes affected rows.
 
 ### Scenario UG-S4: Invitations
 

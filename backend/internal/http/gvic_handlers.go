@@ -9,9 +9,10 @@ import (
 )
 
 type resourceGVICAssignmentsRequest struct {
-	CompanyID       string                              `json:"company_id"`
-	GVICAssignments []store.ResourceGVICAssignmentInput `json:"gvic_assignments"`
-	IdempotencyKey  string                              `json:"idempotency_key"`
+	CompanyID          string                              `json:"company_id"`
+	GVICAssignments    []store.ResourceGVICAssignmentInput `json:"gvic_assignments"`
+	IdempotencyKey     string                              `json:"idempotency_key"`
+	ApplyToDescendants bool                                `json:"apply_to_descendants"`
 }
 
 func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Request) {
@@ -72,12 +73,13 @@ func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Reques
 				actorUserID = strings.TrimSpace(actor.User.UserID)
 			}
 			result, err := s.repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
-				CompanyID:      req.CompanyID,
-				ResourceType:   resourceType,
-				ResourceID:     resourceID,
-				Assignments:    req.GVICAssignments,
-				ActorUserID:    actorUserID,
-				IdempotencyKey: req.IdempotencyKey,
+				CompanyID:          req.CompanyID,
+				ResourceType:       resourceType,
+				ResourceID:         resourceID,
+				Assignments:        req.GVICAssignments,
+				ActorUserID:        actorUserID,
+				IdempotencyKey:     req.IdempotencyKey,
+				ApplyToDescendants: req.ApplyToDescendants,
 			})
 			writeGVICMutationResult(w, err, result)
 			return
@@ -126,12 +128,13 @@ func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Reques
 			actorUserID = strings.TrimSpace(actor.User.UserID)
 		}
 		input := store.ResourceGVICAssignmentCommandInput{
-			CompanyID:      req.CompanyID,
-			ResourceType:   resourceType,
-			ResourceID:     resourceID,
-			Assignments:    req.GVICAssignments,
-			ActorUserID:    actorUserID,
-			IdempotencyKey: req.IdempotencyKey,
+			CompanyID:          req.CompanyID,
+			ResourceType:       resourceType,
+			ResourceID:         resourceID,
+			Assignments:        req.GVICAssignments,
+			ActorUserID:        actorUserID,
+			IdempotencyKey:     req.IdempotencyKey,
+			ApplyToDescendants: req.ApplyToDescendants,
 		}
 		var result store.ResourceGVICAssignmentMutationResult
 		var err error

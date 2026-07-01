@@ -10,10 +10,11 @@ import (
 )
 
 type entityPermissionUpdateRequest struct {
-	CompanyID       string                        `json:"company_id"`
-	DefaultAccess   *string                       `json:"default_access"`
-	OverrideUserIDs []string                      `json:"override_user_ids"`
-	Permissions     []store.EntityPermissionInput `json:"permissions"`
+	CompanyID          string                        `json:"company_id"`
+	DefaultAccess      *string                       `json:"default_access"`
+	OverrideUserIDs    []string                      `json:"override_user_ids"`
+	Permissions        []store.EntityPermissionInput `json:"permissions"`
+	ApplyToDescendants bool                          `json:"apply_to_descendants"`
 }
 
 const (
@@ -681,14 +682,15 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	permissions, err := s.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        req.CompanyID,
-		EntityType:       entityType,
-		EntityID:         entityID,
-		DefaultAccess:    stringPointerValue(req.DefaultAccess),
-		DefaultAccessSet: req.DefaultAccess != nil,
-		OverrideUserIDs:  req.OverrideUserIDs,
-		Permissions:      req.Permissions,
-		ActorUserID:      actor.User.UserID,
+		CompanyID:          req.CompanyID,
+		EntityType:         entityType,
+		EntityID:           entityID,
+		DefaultAccess:      stringPointerValue(req.DefaultAccess),
+		DefaultAccessSet:   req.DefaultAccess != nil,
+		OverrideUserIDs:    req.OverrideUserIDs,
+		Permissions:        req.Permissions,
+		ActorUserID:        actor.User.UserID,
+		ApplyToDescendants: req.ApplyToDescendants,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_entity_permissions")
@@ -707,9 +709,10 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	payload := map[string]any{
-		"entity_type": entityType,
-		"entity_id":   entityID,
-		"permissions": permissions,
+		"entity_type":          entityType,
+		"entity_id":            entityID,
+		"permissions":          permissions,
+		"apply_to_descendants": req.ApplyToDescendants,
 	}
 	if entityType == store.EntityTypeNode {
 		payload["node_id"] = entityID
@@ -735,13 +738,14 @@ func (s *Server) handleEntityPermissions(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"company_id":        req.CompanyID,
-		"entity_type":       entityType,
-		"entity_id":         entityID,
-		"default_access":    defaultAccess,
-		"permissions":       permissions,
-		"access_grants":     permissions,
-		"override_user_ids": entityPermissionUserIDs(permissions),
+		"company_id":           req.CompanyID,
+		"entity_type":          entityType,
+		"entity_id":            entityID,
+		"default_access":       defaultAccess,
+		"permissions":          permissions,
+		"access_grants":        permissions,
+		"override_user_ids":    entityPermissionUserIDs(permissions),
+		"apply_to_descendants": req.ApplyToDescendants,
 	})
 }
 

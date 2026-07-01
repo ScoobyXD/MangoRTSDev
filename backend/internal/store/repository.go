@@ -872,21 +872,23 @@ type ResourceGVICAssignmentInput struct {
 }
 
 type ResourceGVICAssignmentUpdateInput struct {
-	CompanyID      string
-	ResourceType   string
-	ResourceID     string
-	Assignments    []ResourceGVICAssignmentInput
-	ActorUserID    string
-	IdempotencyKey string
+	CompanyID          string
+	ResourceType       string
+	ResourceID         string
+	Assignments        []ResourceGVICAssignmentInput
+	ActorUserID        string
+	IdempotencyKey     string
+	ApplyToDescendants bool
 }
 
 type ResourceGVICAssignmentCommandInput struct {
-	CompanyID      string
-	ResourceType   string
-	ResourceID     string
-	Assignments    []ResourceGVICAssignmentInput
-	ActorUserID    string
-	IdempotencyKey string
+	CompanyID          string
+	ResourceType       string
+	ResourceID         string
+	Assignments        []ResourceGVICAssignmentInput
+	ActorUserID        string
+	IdempotencyKey     string
+	ApplyToDescendants bool
 }
 
 type ResourceGVICAssignmentMutationResult struct {
@@ -1899,14 +1901,15 @@ type EntityPermissionInput struct {
 }
 
 type EntityPermissionUpdateInput struct {
-	CompanyID        string
-	EntityType       string
-	EntityID         string
-	DefaultAccess    string
-	DefaultAccessSet bool
-	OverrideUserIDs  []string
-	Permissions      []EntityPermissionInput
-	ActorUserID      string
+	CompanyID          string
+	EntityType         string
+	EntityID           string
+	DefaultAccess      string
+	DefaultAccessSet   bool
+	OverrideUserIDs    []string
+	Permissions        []EntityPermissionInput
+	ActorUserID        string
+	ApplyToDescendants bool
 }
 
 type CreateInvitationInput struct {

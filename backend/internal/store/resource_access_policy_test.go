@@ -468,6 +468,195 @@ func TestMemoryResourceAccessPolicyNewCompanyUserFollowsDefault(t *testing.T) {
 	}
 }
 
+func TestMemoryResourceAccessPolicyGroupPointerFollowsLaterMembershipAndUserOverride(t *testing.T) {
+	repo, companyID, _, allowed, other := setupResourceAccessPolicyTest(t)
+	parentGroup, err := repo.CreateCompanyUserGroup(companyID, "", "Operations")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup parent: %v", err)
+	}
+	childGroup, err := repo.CreateCompanyUserGroup(companyID, parentGroup.GroupID, "Field Team")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup child: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Group pointer node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    ResourceDefaultAccessEdit,
+		DefaultAccessSet: true,
+		Permissions: []EntityPermissionInput{{
+			SubjectType: EntityPermissionSubjectGroup,
+			SubjectID:   parentGroup.GroupID,
+			AccessLevel: EntityPermissionNoAccess,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions group deny: %v", err)
+	}
+	assertMemoryResourcePolicySubjectsForTest(t, repo, companyID, EntityTypeNode, node.NodeID, ResourceDefaultAccessEdit, map[string]string{
+		resourcePermissionSubjectKeyForTest(EntityPermissionSubjectGroup, parentGroup.GroupID): EntityPermissionNoAccess,
+	})
+
+	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionView); err != nil || !allowedAccess {
+		t.Fatalf("unassigned user access before group membership = %v err = %v, want true", allowedAccess, err)
+	}
+	if _, err := repo.SetCompanyUserGroupMembers(companyID, childGroup.GroupID, []string{other.UserID}); err != nil {
+		t.Fatalf("SetCompanyUserGroupMembers child other: %v", err)
+	}
+	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionView); err != nil || allowedAccess {
+		t.Fatalf("new child-group member access = %v err = %v, want false from parent group row", allowedAccess, err)
+	}
+
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       EntityTypeNode,
+		EntityID:         node.NodeID,
+		DefaultAccess:    ResourceDefaultAccessEdit,
+		DefaultAccessSet: true,
+		Permissions: []EntityPermissionInput{
+			{SubjectType: EntityPermissionSubjectGroup, SubjectID: parentGroup.GroupID, AccessLevel: EntityPermissionNoAccess},
+			{SubjectType: EntityPermissionSubjectUser, SubjectID: other.UserID, AccessLevel: EntityPermissionEdit},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions direct user override: %v", err)
+	}
+	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionEdit); err != nil || !allowedAccess {
+		t.Fatalf("direct user override access = %v err = %v, want true", allowedAccess, err)
+	}
+	if _, err := repo.SetCompanyUserGroupMembers(companyID, childGroup.GroupID, []string{other.UserID, allowed.UserID}); err != nil {
+		t.Fatalf("SetCompanyUserGroupMembers child other+allowed: %v", err)
+	}
+	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, allowed.UserID, EntityPermissionView); err != nil || allowedAccess {
+		t.Fatalf("second child-group member access = %v err = %v, want false from group pointer", allowedAccess, err)
+	}
+	assertMemoryResourcePolicySubjectsForTest(t, repo, companyID, EntityTypeNode, node.NodeID, ResourceDefaultAccessEdit, map[string]string{
+		resourcePermissionSubjectKeyForTest(EntityPermissionSubjectGroup, parentGroup.GroupID): EntityPermissionNoAccess,
+		resourcePermissionSubjectKeyForTest(EntityPermissionSubjectUser, other.UserID):         EntityPermissionEdit,
+	})
+}
+
+func TestMemoryResourceAccessPolicyApplyToDescendantsUpdatesExplorerTree(t *testing.T) {
+	repo, companyID, _, _, other := setupResourceAccessPolicyTest(t)
+	group, err := repo.CreateCompanyUserGroup(companyID, "", "Descendant Team")
+	if err != nil {
+		t.Fatalf("CreateCompanyUserGroup: %v", err)
+	}
+	if _, err := repo.SetCompanyUserGroupMembers(companyID, group.GroupID, []string{other.UserID}); err != nil {
+		t.Fatalf("SetCompanyUserGroupMembers: %v", err)
+	}
+	parentFolder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
+		CompanyID:      companyID,
+		ParentEntityID: companyID,
+		Name:           "Cascade root",
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder parent: %v", err)
+	}
+	childFolder, err := repo.CreateCompanyExplorerV2Folder(CompanyExplorerV2FolderInput{
+		CompanyID:      companyID,
+		ParentEntityID: parentFolder.EntityID,
+		Name:           "Cascade child",
+	})
+	if err != nil {
+		t.Fatalf("CreateCompanyExplorerV2Folder child: %v", err)
+	}
+	projectResult, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Cascade project", Status: "Active"})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if projectResult.Project == nil {
+		t.Fatalf("CreateProject returned nil project")
+	}
+	if _, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:       companyID,
+		ParentEntityID:  childFolder.EntityID,
+		ChildEntityType: EntityTypeProject,
+		ChildResourceID: projectResult.Project.ProjectID,
+	}); err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge project: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Cascade gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID:       companyID,
+		ParentEntityID:  childFolder.EntityID,
+		ChildEntityType: EntityTypeLogicGate,
+		ChildResourceID: logicGate.LogicGateID,
+	}); err != nil {
+		t.Fatalf("UpsertCompanyExplorerV2Edge logic gate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Cascade node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	priority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    &priority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:          companyID,
+		EntityType:         EntityTypeCompanyExplorerFolder,
+		EntityID:           parentFolder.EntityID,
+		DefaultAccess:      ResourceDefaultAccessNoAccess,
+		DefaultAccessSet:   true,
+		ApplyToDescendants: true,
+		Permissions: []EntityPermissionInput{{
+			SubjectType: EntityPermissionSubjectGroup,
+			SubjectID:   group.GroupID,
+			AccessLevel: EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions apply descendants: %v", err)
+	}
+	wantGroupEdit := map[string]string{resourcePermissionSubjectKeyForTest(EntityPermissionSubjectGroup, group.GroupID): EntityPermissionEdit}
+	assertMemoryResourcePolicySubjectsForTest(t, repo, companyID, EntityTypeCompanyExplorerFolder, parentFolder.EntityID, ResourceDefaultAccessNoAccess, wantGroupEdit)
+	assertMemoryResourcePolicySubjectsForTest(t, repo, companyID, EntityTypeCompanyExplorerFolder, childFolder.EntityID, ResourceDefaultAccessNoAccess, wantGroupEdit)
+	assertMemoryResourcePolicySubjectsForTest(t, repo, companyID, EntityTypeProject, projectResult.Project.ProjectID, ResourceDefaultAccessNoAccess, wantGroupEdit)
+	assertMemoryResourcePolicySubjectsForTest(t, repo, companyID, EntityTypeLogicGate, logicGate.LogicGateID, ResourceDefaultAccessNoAccess, wantGroupEdit)
+	assertMemoryResourcePolicySubjectsForTest(t, repo, companyID, EntityTypeNode, node.NodeID, ResourceDefaultAccessNoAccess, wantGroupEdit)
+	for _, target := range []struct {
+		resourceType string
+		resourceID   string
+	}{
+		{EntityTypeCompanyExplorerFolder, childFolder.EntityID},
+		{EntityTypeProject, projectResult.Project.ProjectID},
+		{EntityTypeLogicGate, logicGate.LogicGateID},
+		{EntityTypeNode, node.NodeID},
+	} {
+		if allowedAccess, err := repo.UserCanAccessEntity(companyID, target.resourceType, target.resourceID, other.UserID, EntityPermissionEdit); err != nil || !allowedAccess {
+			t.Fatalf("group member access to %s/%s = %v err = %v, want true", target.resourceType, target.resourceID, allowedAccess, err)
+		}
+	}
+
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID:          companyID,
+		EntityType:         EntityTypeCompanyExplorerFolder,
+		EntityID:           parentFolder.EntityID,
+		DefaultAccess:      ResourceDefaultAccessNoAccess,
+		DefaultAccessSet:   true,
+		ApplyToDescendants: true,
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions remove descendant group row: %v", err)
+	}
+	assertMemoryResourcePolicySubjectsForTest(t, repo, companyID, EntityTypeNode, node.NodeID, ResourceDefaultAccessNoAccess, map[string]string{})
+	if allowedAccess, err := repo.UserCanAccessEntity(companyID, EntityTypeNode, node.NodeID, other.UserID, EntityPermissionView); err != nil || allowedAccess {
+		t.Fatalf("group member access after descendant row removal = %v err = %v, want false", allowedAccess, err)
+	}
+}
+
 func TestMemoryResourceAccessPolicyManagerActorPreservesManagerAccess(t *testing.T) {
 	repo, companyID, _, allowed, other := setupResourceAccessPolicyTest(t)
 	manager, err := repo.UpsertAuthUser("resource-manager", "resource-manager@example.com", "Resource Manager")
@@ -597,6 +786,34 @@ func assertMemoryResourcePolicyForTest(t *testing.T, repo *MemoryRepo, companyID
 			t.Fatalf("%s permission for user %s = %q, want %q; all permissions = %+v", entityType, userID, got[userID], accessLevel, permissions)
 		}
 	}
+}
+
+func assertMemoryResourcePolicySubjectsForTest(t *testing.T, repo *MemoryRepo, companyID, entityType, entityID, wantDefault string, wantRows map[string]string) {
+	t.Helper()
+	gotDefault := memoryResourceDefaultAccessForTest(t, repo, companyID, entityType, entityID)
+	if gotDefault != wantDefault {
+		t.Fatalf("%s default_access = %q, want %q", entityType, gotDefault, wantDefault)
+	}
+	permissions, err := repo.ListEntityPermissions(companyID, entityType, entityID)
+	if err != nil {
+		t.Fatalf("ListEntityPermissions %s/%s: %v", entityType, entityID, err)
+	}
+	got := make(map[string]string, len(permissions))
+	for _, permission := range permissions {
+		got[resourcePermissionSubjectKeyForTest(permission.SubjectType, permission.SubjectID)] = permission.AccessLevel
+	}
+	if len(got) != len(wantRows) {
+		t.Fatalf("%s permissions = %+v, want %+v", entityType, permissions, wantRows)
+	}
+	for subjectKey, accessLevel := range wantRows {
+		if got[subjectKey] != accessLevel {
+			t.Fatalf("%s permission for %s = %q, want %q; all permissions = %+v", entityType, subjectKey, got[subjectKey], accessLevel, permissions)
+		}
+	}
+}
+
+func resourcePermissionSubjectKeyForTest(subjectType, subjectID string) string {
+	return subjectType + ":" + subjectID
 }
 
 func memoryResourceDefaultAccessForTest(t *testing.T, repo *MemoryRepo, companyID, entityType, entityID string) string {

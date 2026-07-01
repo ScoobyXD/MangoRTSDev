@@ -54,12 +54,14 @@ func TestNodePermissionsFilterListsAndDirectReads(t *testing.T) {
 		t.Fatalf("SetEntityPermissions open: %v", err)
 	}
 	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeNode,
-		EntityID:   restrictedNode.NodeID,
+		CompanyID:     companyID,
+		EntityType:    store.EntityTypeNode,
+		EntityID:      restrictedNode.NodeID,
+		DefaultAccess: store.EntityPermissionNoAccess,
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   allowedUser.UserID,
+			AccessLevel: store.EntityPermissionEdit,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)

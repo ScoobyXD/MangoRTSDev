@@ -210,6 +210,67 @@ func TestMemoryLogicGateResourceGVICSnapshotsForLinkedNodes(t *testing.T) {
 	assertMemoryNodeGVICSnapshot(t, repo, companyID, node.NodeID, directUser.UserID)
 }
 
+func TestMemoryLogicGateResourceGVICApplyToDescendantsRefreshesNodeSnapshots(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepo()
+	companyID := "company-GVIC-apply-descendants"
+	repo.EnsureCompany(companyID, "GVIC Apply Descendants Company")
+	initialUser := mustCreateGVICMembershipUser(t, repo, "GVIC-apply-descendants-initial", companyID)
+	nextUser := mustCreateGVICMembershipUser(t, repo, "GVIC-apply-descendants-next", companyID)
+	node := mustCreateGVICMembershipNode(t, repo, companyID, "apply descendants node")
+	logicGate, err := repo.CreateLogicGate(companyID, "Apply Descendants Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: EntityTypeLogicGate,
+		ResourceID:   logicGate.LogicGateID,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: EntityPermissionSubjectUser,
+			PrincipalID:   initialUser.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments initial gate: %v", err)
+	}
+	priority := 1
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      "pending",
+		Priority:    &priority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	assertMemoryNodeGVICSnapshot(t, repo, companyID, node.NodeID, initialUser.UserID)
+
+	result, err := repo.SetResourceGVICAssignments(ResourceGVICAssignmentUpdateInput{
+		CompanyID:          companyID,
+		ResourceType:       EntityTypeLogicGate,
+		ResourceID:         logicGate.LogicGateID,
+		ApplyToDescendants: true,
+		Assignments: []ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: EntityPermissionSubjectUser,
+			PrincipalID:   nextUser.UserID,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SetResourceGVICAssignments apply descendants: %v", err)
+	}
+	if !result.Changed {
+		t.Fatalf("SetResourceGVICAssignments apply descendants changed = false, want true")
+	}
+	if len(result.GVICAssignments) != 1 || result.GVICAssignments[0].UserID != nextUser.UserID {
+		t.Fatalf("gate source assignments = %+v, want next generated user", result.GVICAssignments)
+	}
+	assertMemoryNodeGVICSnapshot(t, repo, companyID, node.NodeID, nextUser.UserID)
+}
+
 func assertMemoryNodeGVICSnapshot(t *testing.T, repo *MemoryRepo, companyID, nodeID, userID string) {
 	t.Helper()
 	source, err := repo.ListResourceGVICAssignments(companyID, EntityTypeNode, nodeID)

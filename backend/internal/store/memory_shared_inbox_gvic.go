@@ -35,10 +35,9 @@ func (r *MemoryRepo) withSharedInboxGVICLocked(folder domain.CompanyExplorerFold
 	}
 	resourceType := CommunicationsSharedInboxResourceType(folder)
 	for _, grant := range r.entityPermissions {
-		if grant.CompanyID != folder.CompanyID || grant.EntityType != resourceType || grant.EntityID != folder.FolderID || grant.SubjectType != EntityPermissionSubjectUser {
+		if grant.CompanyID != folder.CompanyID || grant.EntityType != resourceType || grant.EntityID != folder.FolderID {
 			continue
 		}
-		grant.Permission = OppositeResourceDefaultAccess(folder.DefaultAccess)
 		grant.AccessLevel = grant.Permission
 		accessGrants = append(accessGrants, r.withEntityPermissionSubjectLocked(grant))
 	}
