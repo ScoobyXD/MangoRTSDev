@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 type companyExplorerSearchResultScanner interface {
@@ -109,6 +110,7 @@ with recursive visible_folder_paths as (
    and parent.folder_id=item.parent_folder_id
   where item.company_id=$1::uuid
     and item.target_type in ('project', 'logic_gate')
+    and ($6 = '' or item.target_type = any(string_to_array($6, ',')::text[]) or 'node' = any(string_to_array($6, ',')::text[]))
     and (item.parent_folder_id is null or parent.folder_id is not null)
     and `+companyExplorerAccessPredicate("item.target_type", "item.target_id", "$3", "$4")+`
 ), visible_logic_gate_locations as (
@@ -146,6 +148,7 @@ with recursive visible_folder_paths as (
     on logic_gate_location.company_id=assignment.company_id
    and logic_gate_location.target_id=assignment.logic_gate_id
   where assignment.company_id=$1::uuid
+    and ($6 = '' or 'node' = any(string_to_array($6, ',')::text[]))
     and `+companyExplorerAccessPredicate("'node'", "assignment.node_id", "$3", "$4")+`
   union all
   select relationship.company_id,
@@ -167,6 +170,7 @@ with recursive visible_folder_paths as (
    and project_location.target_id=relationship.project_id
   where relationship.company_id=$1::uuid
     and relationship.resource_type='node'
+    and ($6 = '' or 'node' = any(string_to_array($6, ',')::text[]))
     and `+companyExplorerAccessPredicate("'node'", "relationship.resource_id", "$3", "$4")+`
 ), node_organization_links as (
   select distinct assignment.company_id,
@@ -213,6 +217,7 @@ with recursive visible_folder_paths as (
    and location.target_type='logic_gate'
    and location.target_id=logic_gate.logic_gate_id
   where logic_gate.company_id=$1::uuid
+    and ($6 = '' or 'logic_gate' = any(string_to_array($6, ',')::text[]))
   union all
   select node.company_id,
          'node'::text as resource_type,
@@ -231,6 +236,7 @@ with recursive visible_folder_paths as (
     on node_link.company_id=node.company_id
    and node_link.target_id=node.node_id
   where node.company_id=$1::uuid
+    and ($6 = '' or 'node' = any(string_to_array($6, ',')::text[]))
     and `+companyExplorerAccessPredicate("'node'", "node.node_id", "$3", "$4")+`
     and (location.target_id is not null or node_link.target_id is null)
   union all
@@ -248,6 +254,7 @@ with recursive visible_folder_paths as (
    and location.target_type='project'
    and location.target_id=project.project_id
   where project.company_id=$1::uuid
+    and ($6 = '' or 'project' = any(string_to_array($6, ',')::text[]))
   union all
   select folder.company_id,
          'folder'::text as resource_type,
@@ -258,6 +265,7 @@ with recursive visible_folder_paths as (
          folder.created_timestamp,
          folder.updated_timestamp
   from visible_folder_paths folder
+  where ($6 = '' or 'folder' = any(string_to_array($6, ',')::text[]))
 ), matched as (
   select candidate.*,
          case
@@ -280,7 +288,8 @@ with recursive visible_folder_paths as (
            else 3
          end as match_priority
   from candidates candidate
-  where (
+  where ($6 = '' or candidate.resource_type = any(string_to_array($6, ',')::text[]))
+    and (
       lower(candidate.display_name) like '%' || lower($2) || '%'
       or candidate.entity_id::text like '%' || $2 || '%'
     )
@@ -301,7 +310,7 @@ order by matched.type_priority,
          lower(matched.display_name),
          matched.created_timestamp desc,
          matched.entity_id
-limit $5`, query.CompanyID, query.Query, companyExplorerLazyNullable(query.PermissionUserID), EntityPermissionView, query.Limit)
+limit $5`, query.CompanyID, query.Query, companyExplorerLazyNullable(query.PermissionUserID), EntityPermissionView, query.Limit, strings.Join(query.ResourceTypes, ","))
 	if errors.Is(err, sql.ErrNoRows) {
 		return CompanyExplorerSearchResults{Results: []CompanyExplorerSearchResult{}}, nil
 	}

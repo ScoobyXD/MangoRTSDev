@@ -4,7 +4,7 @@ Last updated: 2026-07-02
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; GVIC picker rule IDs are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; Company Explorer search resource-type filtering has backend coverage; GVIC picker rule IDs and the Assign to Logic Gate picker no-preload UI behavior are not mapped to automated tests yet.
 
 ## Business Logic
 
@@ -19,6 +19,7 @@ N8 - A generated or verified node assignment chip should show the assigned user'
 N9 - DELETE `/v1/nodes/{node_id}` is a soft delete that moves the node and related placements/projections to the deleting actor's Recycle Bin.
 N10 - Node soft delete requires edit access to the node; resource admin access is not required, and view-only access is not enough.
 N11 - Successful node soft delete stamps `deleted_by_user_id` with the deleting actor.
+N12 - The node Assign to Logic Gate picker should not preload or display Logic Gates when opened; it should search only after the user enters text, using the Company Explorer search contract for visible folders, subfolders, and Logic Gates.
 
 ## Scenarios
 
@@ -89,3 +90,19 @@ Expected:
 - The view-only user's DELETE request is rejected.
 - The edit user's DELETE request succeeds.
 - The deleted node appears in the edit user's Recycle Bin with `deleted_by_user_id` set to that user.
+
+### Scenario N-S5: Assign To Logic Gate Search Starts On Typing
+
+Business logic covered:
+- N12
+
+Given:
+- A user opens a node's Assign to Logic Gate picker.
+- The company has visible Logic Gate folders, subfolders, Logic Gates, and unrelated nodes.
+
+Expected:
+- Opening the picker does not automatically query or display Logic Gates.
+- Entering a non-blank search term queries the Company Explorer search path for folders, subfolders, and Logic Gates.
+- Search results may show folder and subfolder rows as context.
+- Only Logic Gate rows are selectable assignment targets.
+- Node results are excluded from the picker search results.

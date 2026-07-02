@@ -926,6 +926,27 @@ func TestMemoryCompanyExplorerSearchOrdersTypesAndReturnsLocationPath(t *testing
 			t.Fatalf("search result missing metadata: %+v", result)
 		}
 	}
+
+	filtered, err := repo.SearchCompanyExplorer(CompanyExplorerSearchQuery{
+		CompanyID:        companyID,
+		Query:            "Search Alpha",
+		PermissionUserID: user.UserID,
+		Limit:            10,
+		ResourceTypes:    []string{CompanyExplorerV2EntityFolder, EntityTypeLogicGate},
+	})
+	if err != nil {
+		t.Fatalf("SearchCompanyExplorer filtered: %v", err)
+	}
+	if len(filtered.Results) == 0 {
+		t.Fatalf("filtered search results = none, want Logic Gate and folder matches")
+	}
+	for _, result := range filtered.Results {
+		if result.ResourceType != EntityTypeLogicGate && result.ResourceType != CompanyExplorerV2EntityFolder {
+			t.Fatalf("filtered search result type = %q, want only Logic Gate or folder: %+v", result.ResourceType, filtered.Results)
+		}
+	}
+	requireCompanyExplorerSearchPath(t, filtered.Results, EntityTypeLogicGate, gateID, []string{CompanyExplorerDefaultRootFolderName, CompanyExplorerDefaultLogicGatesFolderName})
+	requireCompanyExplorerSearchPath(t, filtered.Results, CompanyExplorerV2EntityFolder, folder.EntityID, []string{})
 }
 
 func TestMemoryCompanyExplorerSearchHidesNodeWithOnlyHiddenLocation(t *testing.T) {
