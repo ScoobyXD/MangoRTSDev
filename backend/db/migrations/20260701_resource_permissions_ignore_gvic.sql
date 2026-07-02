@@ -8,7 +8,7 @@ create or replace function mangorts_user_can_access_resource(
   p_access_level text
 )
 returns boolean as $$
-  with normalized_resource(resource_type) as (
+  with recursive normalized_resource(resource_type) as (
     select case lower(btrim(coalesce(p_resource_type, '')))
       when 'shared_triage_folder' then 'shared_inbox_folder'
       when 'communications_folder' then 'shared_inbox_folder'
@@ -66,6 +66,24 @@ returns boolean as $$
       and inbox.company_id=p_company_id
       and inbox.shared_inbox_id=p_resource_id
   ),
+  group_tree(company_id, ancestor_group_id, descendant_group_id, depth) as (
+    select user_group.company_id,
+           user_group.group_id,
+           user_group.group_id,
+           0
+    from company_user_groups user_group
+    where user_group.company_id=p_company_id
+    union all
+    select parent.company_id,
+           parent.ancestor_group_id,
+           child.group_id,
+           parent.depth + 1
+    from group_tree parent
+    join company_user_groups child
+      on child.company_id=parent.company_id
+     and child.parent_group_id=parent.descendant_group_id
+    where parent.depth < 100
+  ),
   permission_access(access_level) as (
     select candidate.access_level
     from (
@@ -82,7 +100,7 @@ returns boolean as $$
       from resource_permissions access
       join normalized_resource normalized
         on normalized.resource_type=access.resource_type
-      join company_user_group_closure closure
+      join group_tree closure
         on closure.company_id=access.company_id
        and closure.ancestor_group_id=access.subject_id
       join company_user_group_members member
