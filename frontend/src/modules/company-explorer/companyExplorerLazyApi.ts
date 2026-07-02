@@ -4,6 +4,7 @@ import type { CompanyExplorerSnapshotPayload } from "./companyExplorerStore.js";
 export type CompanyExplorerLazyScope = "all";
 
 export type CompanyExplorerV2EntityType = "company" | "folder" | "project" | "logic_gate" | "node";
+export type CompanyExplorerSearchResourceType = Exclude<CompanyExplorerV2EntityType, "company">;
 
 export type CompanyExplorerV2Row = {
   company_id: string;
@@ -79,11 +80,14 @@ export function fetchCompanyExplorerSearchResults(
   companyID: string,
   query: string,
   limit?: number,
+  resourceTypes?: CompanyExplorerSearchResourceType[],
 ): Promise<CompanyExplorerSearchResponse> {
   const params = new URLSearchParams();
   params.set("company_id", companyID);
   params.set("q", query);
   if (limit && limit > 0) params.set("limit", String(limit));
+  const cleanResourceTypes = Array.from(new Set((resourceTypes ?? []).map((item) => item.trim()).filter(Boolean)));
+  if (cleanResourceTypes.length > 0) params.set("resource_types", cleanResourceTypes.join(","));
   return requestJSON<CompanyExplorerSearchResponse>(
     apiBase,
     `/v1/company-explorer/search?${params.toString()}`,

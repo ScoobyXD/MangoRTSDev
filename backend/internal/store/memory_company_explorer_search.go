@@ -163,6 +163,9 @@ func (r *MemoryRepo) SearchCompanyExplorer(query CompanyExplorerSearchQuery) (Co
 	rowsQuery := CompanyExplorerV2RowsQuery{CompanyID: query.CompanyID, PermissionUserID: query.PermissionUserID}
 	matches := make([]CompanyExplorerSearchResult, 0)
 	add := func(entity memoryCompanyExplorerV2Entity) {
+		if !companyExplorerSearchResourceTypeAllowed(query.ResourceTypes, entity.EntityType) {
+			return
+		}
 		if !r.companyExplorerV2EntityVisibleLocked(rowsQuery, entity) {
 			return
 		}

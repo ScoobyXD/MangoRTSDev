@@ -455,6 +455,7 @@ type CompanyExplorerSearchQuery struct {
 	Query            string
 	PermissionUserID string
 	Limit            int
+	ResourceTypes    []string
 }
 
 type CompanyExplorerSearchResult struct {

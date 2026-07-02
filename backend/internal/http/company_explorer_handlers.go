@@ -112,11 +112,22 @@ func (s *Server) handleCompanyExplorerSearch(w http.ResponseWriter, r *http.Requ
 		}
 		limit = parsedLimit
 	}
+	resourceTypes := make([]string, 0)
+	for _, key := range []string{"resource_types", "resource_type", "types"} {
+		for _, rawValue := range r.URL.Query()[key] {
+			for _, value := range strings.Split(rawValue, ",") {
+				if clean := strings.TrimSpace(value); clean != "" {
+					resourceTypes = append(resourceTypes, clean)
+				}
+			}
+		}
+	}
 	results, err := s.repo.SearchCompanyExplorer(store.CompanyExplorerSearchQuery{
 		CompanyID:        companyID,
 		Query:            queryText,
 		PermissionUserID: s.entityPermissionActorUserID(r, companyID),
 		Limit:            limit,
+		ResourceTypes:    resourceTypes,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_company_explorer_search_query")

@@ -1,4 +1,4 @@
-Last updated: 2026-06-22
+Last updated: 2026-07-02
 
 # Nodes Tests
 
@@ -16,6 +16,7 @@ N5 - Node consulted and informed GVIC assignments may include users and user gro
 N6 - Node GVIC assignment pickers should display the company user-group tree as a collapsed hierarchy.
 N7 - Node GVIC picker subgroups and users should be visually indented according to their hierarchy depth.
 N8 - A generated or verified node assignment chip should show the assigned user's name and provide a direct remove action.
+N9 - The node Assign to Logic Gate picker should not preload or display Logic Gates when opened; it should search only after the user enters text, using the Company Explorer search contract for visible folders, subfolders, and Logic Gates.
 
 ## Scenarios
 
@@ -70,3 +71,19 @@ Expected:
 - Expanding a group reveals its subgroups and users.
 - Top-level groups, subgroups, and users are indented by hierarchy depth so the organization structure is visible.
 - Searching may reveal matching branches, but the row indentation still reflects the underlying hierarchy.
+
+### Scenario N-S4: Assign To Logic Gate Search Starts On Typing
+
+Business logic covered:
+- N9
+
+Given:
+- A user opens a node's Assign to Logic Gate picker.
+- The company has visible Logic Gate folders, subfolders, Logic Gates, and unrelated nodes.
+
+Expected:
+- Opening the picker does not automatically query or display Logic Gates.
+- Entering a non-blank search term queries the Company Explorer search path for folders, subfolders, and Logic Gates.
+- Search results may show folder and subfolder rows as context.
+- Only Logic Gate rows are selectable assignment targets.
+- Node results are excluded from the picker search results.

@@ -5,9 +5,11 @@ import { humanLabelOrFallback } from "../entityLabels.js";
 import { getLogicGateRecordSingleFlight } from "../logic-gate-map/LogicGateRecordStore.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../node-map/eventbus";
-import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
-import type { CompanyExplorerV2Row } from "../company-explorer/companyExplorerLazyApi";
-import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
+import { CompanyExplorerSearchBox } from "../company-explorer/CompanyExplorerSearchBox";
+import { fetchCompanyExplorerSearchResults, type CompanyExplorerSearchResult } from "../company-explorer/companyExplorerLazyApi";
+import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyExplorerTreeRows";
+import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockContentPayload,
@@ -243,74 +245,6 @@ const RelationshipCheckIcon: React.FC<{ color: string }> = ({ color }) => (
   </svg>
 );
 
-function sortLogicGateOptions(items: LogicGateRecord[]): LogicGateRecord[] {
-  return [...items].sort((a, b) => (
-    logicGateOptionLabel(a).localeCompare(logicGateOptionLabel(b), undefined, { numeric: true, sensitivity: "base" })
-    || a.logic_gate_id.localeCompare(b.logic_gate_id)
-  ));
-}
-
-type LogicGateOptionGroup = {
-  key: string;
-  label: string;
-  folder: CompanyExplorerFolder | null;
-  logicGates: LogicGateRecord[];
-};
-
-function folderPathLabel(folderByID: Map<string, CompanyExplorerFolder>, folderID: string): string {
-  const names: string[] = [];
-  const seen = new Set<string>();
-  let currentID = folderID;
-  while (currentID && !seen.has(currentID)) {
-    seen.add(currentID);
-    const folder = folderByID.get(currentID);
-    if (!folder) break;
-    names.push(folder.name);
-    currentID = folder.parent_folder_id ?? "";
-  }
-  return names.reverse().join(" / ") || "Logic Gates";
-}
-
-function buildLogicGateOptionGroups(input: {
-  logicGates: LogicGateRecord[];
-  folders: CompanyExplorerFolder[];
-  folderItems: CompanyExplorerFolderItem[];
-}): LogicGateOptionGroup[] {
-  const folderByID = new Map(input.folders.map((folder) => [folder.folder_id, folder]));
-  const folderIDByLogicGateID = new Map(
-    input.folderItems
-      .filter((item) => item.item_type === "logic_gate")
-      .map((item) => [item.item_id, item.folder_id]),
-  );
-  const groupByKey = new Map<string, LogicGateOptionGroup>();
-  for (const logicGate of sortLogicGateOptions(input.logicGates)) {
-    const folderID = folderIDByLogicGateID.get(logicGate.logic_gate_id) ?? "";
-    const key = folderID || "unfiled";
-    const group = groupByKey.get(key) ?? {
-      key,
-      label: folderID ? folderPathLabel(folderByID, folderID) : "Unfiled Logic Gates",
-      folder: folderByID.get(folderID) ?? null,
-      logicGates: [],
-    };
-    group.logicGates.push(logicGate);
-    groupByKey.set(key, group);
-  }
-  return Array.from(groupByKey.values()).sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }));
-}
-
-function uniqueLogicGateOptions(items: LogicGateRecord[]): LogicGateRecord[] {
-  const byID = new Map<string, LogicGateRecord>();
-  for (const item of items) {
-    if (!item.logic_gate_id || byID.has(item.logic_gate_id)) continue;
-    byID.set(item.logic_gate_id, item);
-  }
-  return Array.from(byID.values());
-}
-
-function companyExplorerRowsFromPayload(payload: { rows?: CompanyExplorerV2Row[] } | CompanyExplorerV2Row[]): CompanyExplorerV2Row[] {
-  return Array.isArray(payload) ? payload : (payload.rows ?? []);
-}
-
 function focusContentEditableAtEnd(element: HTMLElement | null) {
   if (!element) return;
   element.focus({ preventScroll: true });
@@ -363,6 +297,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
+  const logicGateSearchRequestRef = useRef(0);
   const saveTimersRef = useRef(new Map<string, number>());
   const logicGateAssignStatusTimerRef = useRef<number | null>(null);
   const logicGateAssignFlashTimerRef = useRef<number | null>(null);
@@ -394,16 +329,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
   const [logicGateAssignerOpen, setLogicGateAssignerOpen] = useState(false);
   const [logicGateSearch, setLogicGateSearch] = useState("");
-  const [logicGateOptions, setLogicGateOptions] = useState<LogicGateRecord[]>([]);
-  const [logicGateFolders, setLogicGateFolders] = useState<CompanyExplorerFolder[]>([]);
-  const [logicGateFolderItems, setLogicGateFolderItems] = useState<CompanyExplorerFolderItem[]>([]);
-  const [logicGateOptionsLoading, setLogicGateOptionsLoading] = useState(false);
-  const [logicGateSearchResults, setLogicGateSearchResults] = useState<LogicGateRecord[]>([]);
+  const [logicGateSearchResults, setLogicGateSearchResults] = useState<CompanyExplorerSearchResult[]>([]);
   const [assignedLogicGateRecords, setAssignedLogicGateRecords] = useState<LogicGateRecord[]>([]);
   const [logicGateSearchLoading, setLogicGateSearchLoading] = useState(false);
   const [assigningLogicGateID, setAssigningLogicGateID] = useState("");
   const [hoveredLogicGateID, setHoveredLogicGateID] = useState("");
-  const [collapsedLogicGateGroupKeys, setCollapsedLogicGateGroupKeys] = useState<Set<string>>(() => new Set());
   const [lastAssignedLogicGateID, setLastAssignedLogicGateID] = useState("");
   const [lastAssignedLogicGateLabel, setLastAssignedLogicGateLabel] = useState("");
   const [logicGateAssignStatus, setLogicGateAssignStatus] = useState("");
@@ -455,28 +385,25 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const editorGridTemplateColumns = compact
     ? `${TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX}px minmax(0, 1fr)`
     : `${TEXT_TIMELINE_COLUMN_WIDTH_PX}px minmax(0, 1fr)`;
-  const myLogicGates = useMemo(
-    () => sortLogicGateOptions(logicGateOptions),
-    [logicGateOptions],
-  );
-  const searchedLogicGates = useMemo(() => sortLogicGateOptions(logicGateSearchResults), [logicGateSearchResults]);
-  const myLogicGateGroups = useMemo(() => buildLogicGateOptionGroups({
-    logicGates: myLogicGates,
-    folders: logicGateFolders,
-    folderItems: logicGateFolderItems,
-  }), [logicGateFolderItems, logicGateFolders, myLogicGates]);
-  const searchedLogicGateGroups = useMemo(() => buildLogicGateOptionGroups({
-    logicGates: searchedLogicGates,
-    folders: logicGateFolders,
-    folderItems: logicGateFolderItems,
-  }), [logicGateFolderItems, logicGateFolders, searchedLogicGates]);
+  const logicGateSearchTreeRows = useMemo(() => (
+    buildCompanyExplorerSearchTreeRows(logicGateSearchResults.filter((result) => (
+      result.resource_type === "folder" || result.resource_type === "logic_gate"
+    )))
+  ), [logicGateSearchResults]);
   const logicGateLabelByID = useMemo(() => {
     const labels = new Map<string, string>();
-    for (const logicGate of uniqueLogicGateOptions([...logicGateOptions, ...logicGateSearchResults, ...assignedLogicGateRecords])) {
+    for (const logicGate of assignedLogicGateRecords) {
+      if (!logicGate.logic_gate_id || labels.has(logicGate.logic_gate_id)) continue;
       labels.set(logicGate.logic_gate_id, logicGateOptionLabel(logicGate));
     }
+    for (const result of logicGateSearchResults) {
+      if (result.resource_type !== "logic_gate") continue;
+      const logicGateID = (result.resource_id || result.entity_id).trim();
+      if (!logicGateID || labels.has(logicGateID)) continue;
+      labels.set(logicGateID, humanLabelOrFallback(result.display_name, humanLabelOrFallback(logicGateID, "Logic Gate")));
+    }
     return labels;
-  }, [assignedLogicGateRecords, logicGateOptions, logicGateSearchResults]);
+  }, [assignedLogicGateRecords, logicGateSearchResults]);
   const assignedLogicGateIDSet = useMemo(() => new Set(assignedLogicGateIDs.map((id) => id.trim()).filter(Boolean)), [assignedLogicGateIDs]);
   const hasAssignedLogicGate = assignedLogicGateIDSet.size > 0 || Boolean(lastAssignedLogicGateID.trim());
   const assignedLogicGateLabel = useMemo(() => {
@@ -507,9 +434,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return !Number.isInteger(parsed) || parsed < 1 || parsed > 5;
   }, [nodePriorityDraft]);
   const logicGateSearchQuery = logicGateSearch.trim();
-  const visibleLogicGateGroups = logicGateSearchQuery ? searchedLogicGateGroups : myLogicGateGroups;
-  const visibleLogicGateGroupsLoading = logicGateSearchQuery ? logicGateSearchLoading : logicGateOptionsLoading;
-  const visibleLogicGateGroupsEmptyMessage = logicGateSearchQuery ? "No matches" : "No assigned logic gates";
   const unseenChangesByBlockID = useMemo(() => {
     const items = new Map<string, NodeContentChange[]>();
     for (const change of unseenChanges) {
@@ -586,6 +510,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       window.removeEventListener("pointerdown", closeOnPointerDown);
       window.removeEventListener("keydown", closeOnEscape);
     };
+  }, [logicGateAssignerOpen]);
+
+  useEffect(() => {
+    if (logicGateAssignerOpen) return;
+    setLogicGateSearch("");
+    setLogicGateSearchResults([]);
+    setLogicGateSearchLoading(false);
   }, [logicGateAssignerOpen]);
 
   useEffect(() => {
@@ -705,100 +636,33 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return () => { cancelled = true; };
   }, [apiBase, assignedLogicGateIDs, companyID]);
   useEffect(() => {
-    if (!logicGateAssignerOpen || !companyID) return;
-    let cancelled = false;
-    setLogicGateOptionsLoading(true);
-    const params = new URLSearchParams({ company_id: companyID, assigned_to_me: "1" });
-    const folderParams = new URLSearchParams({ company_id: companyID, folder_kind: "logic_gate" });
-    const logicGateRowToFolderItem = (row: CompanyExplorerV2Row): CompanyExplorerFolderItem | null => {
-      if (row.entity_type !== "logic_gate" || !row.parent_entity_id || !row.edge_id) return null;
-      return {
-        company_id: row.company_id,
-        folder_id: row.parent_entity_id,
-        item_type: "logic_gate",
-        item_id: row.resource_id || row.entity_id,
-        position: row.position,
-        created_timestamp: row.created_timestamp,
-        updated_timestamp: row.updated_timestamp,
-      };
-    };
-    const listLogicGateExplorerItems = async (folders: CompanyExplorerFolder[]): Promise<CompanyExplorerFolderItem[]> => {
-      const query = new URLSearchParams({ company_id: companyID });
-      const payload = await requestJSON<{ rows?: CompanyExplorerV2Row[] } | CompanyExplorerV2Row[]>(`/v1/company-explorer/roots?${query.toString()}`);
-      const rootRows = companyExplorerRowsFromPayload(payload);
-      const folderIDs = new Set([
-        ...folders.map((folder) => folder.folder_id.trim()).filter(Boolean),
-        ...rootRows.filter((row) => row.entity_type === "folder").map((row) => row.entity_id.trim()).filter(Boolean),
-      ]);
-      const childRows = (await Promise.all(Array.from(folderIDs).map(async (folderID) => {
-        try {
-          const childQuery = new URLSearchParams({ company_id: companyID, parent_id: folderID });
-          const childPayload = await requestJSON<{ rows?: CompanyExplorerV2Row[] } | CompanyExplorerV2Row[]>(`/v1/company-explorer/children?${childQuery.toString()}`);
-          return companyExplorerRowsFromPayload(childPayload);
-        } catch {
-          return [];
-        }
-      }))).flat();
-      const itemByLogicGateID = new Map<string, CompanyExplorerFolderItem>();
-      for (const row of [...rootRows, ...childRows]) {
-        const item = logicGateRowToFolderItem(row);
-        if (!item || !item.item_id) continue;
-        itemByLogicGateID.set(item.item_id, item);
-      }
-      return Array.from(itemByLogicGateID.values()).sort((a, b) => a.position - b.position || a.item_id.localeCompare(b.item_id));
-    };
-    void (async () => {
-      const [logicGatePayload, folderPayload] = await Promise.all([
-        requestJSON<{ logic_gates?: LogicGateRecord[] }>(`/v1/logic-gates?${params.toString()}`),
-        requestJSON<{ folders?: CompanyExplorerFolder[] }>(`/v1/company-explorer/folders?${folderParams.toString()}`),
-      ]);
-      const folders = folderPayload.folders ?? [];
-      const folderItems = await listLogicGateExplorerItems(folders);
-      return { logicGatePayload, folders, folderItems };
-    })()
-      .then(({ logicGatePayload, folders, folderItems }) => {
-        if (!cancelled) {
-          setLogicGateOptions(logicGatePayload.logic_gates ?? []);
-          setLogicGateFolders(folders);
-          setLogicGateFolderItems(folderItems);
-        }
-      })
-      .catch((cause) => {
-        if (!cancelled) onError(cause instanceof Error ? cause.message : "failed_to_load_logic_gates");
-      })
-      .finally(() => {
-        if (!cancelled) setLogicGateOptionsLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [companyID, logicGateAssignerOpen, onError, requestJSON]);
-
-  useEffect(() => {
     const query = logicGateSearch.trim();
     if (!logicGateAssignerOpen || !companyID || !query) {
       setLogicGateSearchResults([]);
       setLogicGateSearchLoading(false);
       return;
     }
+    const requestID = logicGateSearchRequestRef.current + 1;
+    logicGateSearchRequestRef.current = requestID;
     let cancelled = false;
     setLogicGateSearchLoading(true);
     const timer = window.setTimeout(() => {
-      const params = new URLSearchParams({ company_id: companyID, q: query, limit: "12" });
-      void requestJSON<{ logic_gates?: LogicGateRecord[] }>(`/v1/logic-gates?${params.toString()}`)
+      void fetchCompanyExplorerSearchResults(apiBase, companyID, query, 24, ["folder", "logic_gate"])
         .then((payload) => {
-          if (!cancelled) setLogicGateSearchResults(payload.logic_gates ?? []);
+          if (!cancelled && logicGateSearchRequestRef.current === requestID) setLogicGateSearchResults(payload.results ?? []);
         })
         .catch((cause) => {
-          if (!cancelled) onError(cause instanceof Error ? cause.message : "failed_to_search_logic_gates");
+          if (!cancelled && logicGateSearchRequestRef.current === requestID) onError(cause instanceof Error ? cause.message : "failed_to_search_logic_gates");
         })
         .finally(() => {
-          if (!cancelled) setLogicGateSearchLoading(false);
+          if (!cancelled && logicGateSearchRequestRef.current === requestID) setLogicGateSearchLoading(false);
         });
     }, 180);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [companyID, logicGateAssignerOpen, logicGateSearch, onError, requestJSON]);
+  }, [apiBase, companyID, logicGateAssignerOpen, logicGateSearch, onError]);
 
   useEffect(() => () => {
     if (logicGateAssignStatusTimerRef.current !== null) window.clearTimeout(logicGateAssignStatusTimerRef.current);
@@ -1422,9 +1286,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }, 700);
   }, []);
 
-  const assignToLogicGate = useCallback(async (logicGate: LogicGateRecord) => {
+  const assignToLogicGate = useCallback(async (logicGateID: string, rawLabel: string) => {
     if (!canEdit) return;
-    const cleanLogicGateID = logicGate.logic_gate_id.trim();
+    const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID || assigningLogicGateID) return;
     if (logicGateAssignStatusTimerRef.current !== null) {
       window.clearTimeout(logicGateAssignStatusTimerRef.current);
@@ -1443,7 +1307,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       }, 1500);
       return;
     }
-    const label = logicGateOptionLabel(logicGate);
+    const label = humanLabelOrFallback(rawLabel, humanLabelOrFallback(cleanLogicGateID, "Logic Gate"));
     const previousAssignedLogicGateID = lastAssignedLogicGateID;
     const previousAssignedLogicGateLabel = lastAssignedLogicGateLabel;
     setAssigningLogicGateID(cleanLogicGateID);
@@ -1634,34 +1498,55 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     );
   };
 
-  const toggleLogicGateGroup = (groupKey: string) => {
-    setCollapsedLogicGateGroupKeys((current) => {
-      const next = new Set(current);
-      if (next.has(groupKey)) next.delete(groupKey);
-      else next.add(groupKey);
-      return next;
-    });
-  };
-
-  const renderLogicGateRow = (logicGate: LogicGateRecord, keyPrefix: string) => {
-    const logicGateID = logicGate.logic_gate_id;
+  const renderLogicGateSearchRow = (row: ExplorerTreeNode) => {
+    const logicGateID = (row.logicGateID ?? row.resourceID ?? (row.entityType === "logic_gate" ? row.entityID : "") ?? "").trim();
+    const selectable = row.kind === "logic_gate" && Boolean(logicGateID);
+    const label = row.label || logicGateID;
+    const depthInset = Math.min(72, Math.max(0, row.depth) * 14);
+    if (!selectable) {
+      return (
+        <div
+          key={row.id}
+          role="presentation"
+          style={{
+            minHeight: 30,
+            display: "grid",
+            gridTemplateColumns: `${depthInset}px 24px minmax(0, 1fr)`,
+            alignItems: "center",
+            gap: 7,
+            color: surfaceText,
+            opacity: row.syntheticKind === "search_path" ? 0.66 : 0.82,
+            padding: "4px 8px",
+            minWidth: 0,
+          }}
+        >
+          <span aria-hidden="true" />
+          <span aria-hidden="true" style={{ width: 22, height: 22, display: "grid", placeItems: "center" }}>
+            <ExplorerRowIcon kind="folder" systemKey={row.systemKey} mangoDefaultFolder={Boolean(row.systemKey || row.protectedDefaultFolder)} />
+          </span>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: row.syntheticKind === "search_result" ? 850 : 760 }}>
+            {label}
+          </span>
+        </div>
+      );
+    }
     const selected = assignedLogicGateIDSet.has(logicGateID) || lastAssignedLogicGateID === logicGateID;
     const busy = assigningLogicGateID === logicGateID;
     const hovered = hoveredLogicGateID === logicGateID;
     const highlighted = selected || busy || hovered;
     return (
       <button
-        key={`${keyPrefix}-${logicGateID}`}
+        key={row.id}
         type="button"
         disabled={Boolean(assigningLogicGateID)}
-        onClick={() => { void assignToLogicGate(logicGate); }}
-        title={logicGateOptionLabel(logicGate)}
+        onClick={() => { void assignToLogicGate(logicGateID, label); }}
+        title={label}
         style={{
           position: "relative",
           width: "100%",
           minHeight: 38,
           display: "grid",
-          gridTemplateColumns: "28px minmax(0, 1fr) 24px",
+          gridTemplateColumns: `${depthInset}px 28px minmax(0, 1fr) 24px`,
           alignItems: "center",
           gap: 8,
           border: highlighted ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
@@ -1680,11 +1565,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         onMouseEnter={() => setHoveredLogicGateID(logicGateID)}
         onMouseLeave={() => setHoveredLogicGateID((current) => (current === logicGateID ? "" : current))}
       >
+        <span aria-hidden="true" />
         <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 8, display: "grid", placeItems: "center", background: highlighted ? "rgba(255,255,255,0.76)" : "rgba(255,255,255,0.58)", boxShadow: highlighted ? "inset 1px 1px 0 rgba(255,255,255,0.86)" : "2px 2px 6px rgba(174,174,192,0.18), -2px -2px 6px rgba(255,255,255,0.86)" }}>
           <ExplorerRowIcon kind="logic_gate" />
         </span>
         <span style={{ maxWidth: "100%", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: selected ? 900 : 820, lineHeight: 1.2 }}>
-          {logicGateOptionLabel(logicGate)}
+          {label}
         </span>
         <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 8, display: "grid", placeItems: "center", border: selected ? `1px solid ${accent}` : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: selected ? "#ffffff" : "rgba(255,255,255,0.5)", opacity: selected || busy ? 1 : 0 }}>
           {selected ? <RelationshipCheckIcon color={accent} /> : busy ? "..." : null}
@@ -1692,53 +1578,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       </button>
     );
   };
-
-  const renderLogicGateGroups = (groups: LogicGateOptionGroup[], keyPrefix: string) => (
-    <div style={{ display: "grid", alignContent: "start", gap: 7 }}>
-      {groups.map((group) => {
-        const groupStateKey = `${keyPrefix}:${group.key}`;
-        const collapsed = collapsedLogicGateGroupKeys.has(groupStateKey);
-        return (
-          <div key={`${keyPrefix}-group-${group.key}`} style={{ display: "grid", gap: 5, minWidth: 0 }}>
-            <button
-              type="button"
-              aria-expanded={!collapsed}
-              onClick={() => toggleLogicGateGroup(groupStateKey)}
-              style={{
-                minWidth: 0,
-                minHeight: 32,
-                display: "grid",
-                gridTemplateColumns: "14px 20px minmax(0, 1fr) auto",
-                alignItems: "center",
-                gap: 7,
-                border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-                borderRadius: 9,
-                background: "linear-gradient(145deg, rgba(255,255,255,0.9), rgba(244,247,251,0.76))",
-                color: surfaceText,
-                cursor: "pointer",
-                font: "inherit",
-                padding: "5px 8px",
-                textAlign: "left",
-                boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.76)",
-              }}
-            >
-              <ExplorerDisclosureIcon open={!collapsed} color="rgba(15,23,42,0.62)" />
-              <span aria-hidden="true" style={{ width: 20, height: 20, display: "grid", placeItems: "center" }}>
-                <ExplorerRowIcon kind="folder" systemKey={group.folder?.system_key} mangoDefaultFolder={Boolean(group.folder?.system_key)} />
-              </span>
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 900 }}>{group.label}</span>
-              <span style={{ color: surfaceText, opacity: 0.62, fontSize: 10, fontWeight: 850 }}>{group.logicGates.length}</span>
-            </button>
-            {!collapsed && (
-              <div role="listbox" aria-label={`${group.label} logic gates`} style={{ display: "grid", gap: 5, paddingLeft: 12 }}>
-                {group.logicGates.map((logicGate) => renderLogicGateRow(logicGate, keyPrefix))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
 
   const logicGateAssignerMenuWidth = Math.max(
     280,
@@ -1788,24 +1627,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         boxShadow: `${EDITOR_NEU_PANEL_SHADOW}, 0 18px 36px rgba(15,23,42,0.16)`,
       }}
     >
-      <div style={{ position: "relative", minWidth: 0 }}>
-        <input
+      <div style={{ minWidth: 0 }}>
+        <CompanyExplorerSearchBox
           value={logicGateSearch}
-          onChange={(event) => setLogicGateSearch(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              setLogicGateSearch("");
-              event.currentTarget.blur();
-            }
-          }}
+          onChange={setLogicGateSearch}
+          onEscape={() => setLogicGateSearch("")}
           placeholder="Search logic gates"
-          aria-label="Search logic gates"
-          style={{ width: "100%", minHeight: 34, border: logicGateSearchQuery ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", background: logicGateSearchQuery ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_ACTIVE_SURFACE, color: surfaceText, padding: "0 31px 0 10px", boxSizing: "border-box", fontSize: 12, fontWeight: 760, letterSpacing: 0, boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+          ariaLabel="Search logic gates"
+          autoFocus
+          style={{
+            height: 34,
+            borderRadius: 10,
+            border: logicGateSearchQuery ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+            background: logicGateSearchQuery ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_ACTIVE_SURFACE,
+            boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.16), inset -2px -2px 6px rgba(255,255,255,0.82)",
+          }}
         />
-        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ position: "absolute", right: 10, top: 10, color: accent, pointerEvents: "none" }}>
-          <circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M10.2 10.2 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
       </div>
 
       {nodePriorityUnassignedForLogicGate && (
@@ -1814,28 +1651,30 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         </div>
       )}
 
-      <div
-        className="editor-document-scroll"
-        role="listbox"
-        aria-label={logicGateSearchQuery ? "Logic gate search results" : "My Logic Gates"}
-        style={{
-          minHeight: 0,
-          maxHeight: 314,
-          overflowY: "auto",
-          padding: "2px 6px 8px 2px",
-          display: "grid",
-          alignContent: "start",
-          gap: 7,
-          background: "rgba(255,255,255,0.42)",
-          borderRadius: 10,
-          ["--editor-document-scroll-accent" as string]: "linear-gradient(180deg, rgba(92,238,255,0.92), rgba(183,124,255,0.82))",
-          ["--editor-document-scroll-track" as string]: "rgba(255,255,255,0.46)",
-        }}
-      >
-        {visibleLogicGateGroupsLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>{logicGateSearchQuery ? "Searching..." : "Loading..."}</div>}
-        {!visibleLogicGateGroupsLoading && visibleLogicGateGroups.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>{visibleLogicGateGroupsEmptyMessage}</div>}
-        {!visibleLogicGateGroupsLoading && visibleLogicGateGroups.length > 0 && renderLogicGateGroups(visibleLogicGateGroups, logicGateSearchQuery ? "search" : "mine")}
-      </div>
+      {logicGateSearchQuery && (
+        <div
+          className="editor-document-scroll"
+          role="listbox"
+          aria-label="Logic gate search results"
+          style={{
+            minHeight: 0,
+            maxHeight: 314,
+            overflowY: "auto",
+            padding: "2px 6px 8px 2px",
+            display: "grid",
+            alignContent: "start",
+            gap: 5,
+            background: "rgba(255,255,255,0.42)",
+            borderRadius: 10,
+            ["--editor-document-scroll-accent" as string]: "linear-gradient(180deg, rgba(92,238,255,0.92), rgba(183,124,255,0.82))",
+            ["--editor-document-scroll-track" as string]: "rgba(255,255,255,0.46)",
+          }}
+        >
+          {logicGateSearchLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>Searching...</div>}
+          {!logicGateSearchLoading && logicGateSearchTreeRows.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>No matches</div>}
+          {!logicGateSearchLoading && logicGateSearchTreeRows.length > 0 && logicGateSearchTreeRows.map(renderLogicGateSearchRow)}
+        </div>
+      )}
 
       {logicGateAssignStatus && <div style={{ justifySelf: "start", maxWidth: "100%", border: `1px solid ${logicGateAssignStatus.startsWith("Assigning") ? "rgba(59,130,246,0.24)" : logicGateAssignStatus.startsWith("Assigned") ? "rgba(100,116,139,0.22)" : "rgba(245,158,11,0.30)"}`, borderRadius: 9, background: logicGateAssignStatus.startsWith("Assigning") ? "rgba(239,246,255,0.82)" : logicGateAssignStatus.startsWith("Assigned") ? "rgba(248,250,252,0.9)" : "rgba(255,251,235,0.9)", color: logicGateAssignStatus.startsWith("Assigning") ? accent : logicGateAssignStatus.startsWith("Assigned") ? surfaceText : "#92400e", padding: "5px 8px", fontSize: 11, fontWeight: 800, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{logicGateAssignStatus}</div>}
     </div>

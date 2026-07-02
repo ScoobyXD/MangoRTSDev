@@ -88,6 +88,11 @@ func normalizeCompanyExplorerSearchQuery(query CompanyExplorerSearchQuery) (Comp
 	query.CompanyID = cleanUUIDText(query.CompanyID)
 	query.Query = strings.TrimSpace(query.Query)
 	query.PermissionUserID = cleanUUIDText(query.PermissionUserID)
+	resourceTypes, err := normalizeCompanyExplorerSearchResourceTypes(query.ResourceTypes)
+	if err != nil {
+		return CompanyExplorerSearchQuery{}, err
+	}
+	query.ResourceTypes = resourceTypes
 	if query.CompanyID == "" || query.Query == "" {
 		return CompanyExplorerSearchQuery{}, ErrInvalid
 	}
@@ -98,4 +103,39 @@ func normalizeCompanyExplorerSearchQuery(query CompanyExplorerSearchQuery) (Comp
 		query.Limit = CompanyExplorerSearchMaxLimit
 	}
 	return query, nil
+}
+
+func normalizeCompanyExplorerSearchResourceTypes(values []string) ([]string, error) {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		clean := strings.ToLower(strings.TrimSpace(value))
+		if clean == "" {
+			continue
+		}
+		switch clean {
+		case EntityTypeLogicGate, EntityTypeNode, EntityTypeProject, CompanyExplorerV2EntityFolder:
+		default:
+			return nil, ErrInvalid
+		}
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		out = append(out, clean)
+	}
+	return out, nil
+}
+
+func companyExplorerSearchResourceTypeAllowed(resourceTypes []string, resourceType string) bool {
+	if len(resourceTypes) == 0 {
+		return true
+	}
+	resourceType = strings.ToLower(strings.TrimSpace(resourceType))
+	for _, allowed := range resourceTypes {
+		if allowed == resourceType {
+			return true
+		}
+	}
+	return false
 }
