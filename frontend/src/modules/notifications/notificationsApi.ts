@@ -4,6 +4,8 @@ export type NotificationGVICRole = "generated" | "verified" | "consulted" | "inf
 export type NotificationSurface = "r_inbox" | "aci_inbox" | "my_triage" | "shared_triage" | "";
 
 export const EVENT_NOTIFICATIONS_UPDATED = "mangorts:notifications-updated";
+export const NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN = "updates-local-seen";
+const LOCAL_NOTIFICATION_ECHO_TTL_MS = 10_000;
 
 export type NotificationItem = {
   notification_id: string;
@@ -82,6 +84,14 @@ export type NotificationUpdateEventSource = {
   source?: string;
 };
 
+type LocalNotificationEcho = {
+  source: string;
+  expiresAt: number;
+};
+
+const localNotificationDeleteEchoes = new Map<string, LocalNotificationEcho>();
+const localNotificationClearEchoes = new Map<string, LocalNotificationEcho>();
+
 export function emptyNotificationSummary(companyID = ""): NotificationSummary {
   return {
     company_id: companyID,
@@ -95,6 +105,7 @@ export function emptyNotificationSummary(companyID = ""): NotificationSummary {
 export async function deleteNotification(notificationID: string, companyID = "", options: NotificationUpdateEventSource = {}): Promise<number> {
   const cleanNotificationID = notificationID.trim();
   if (!cleanNotificationID) throw new Error("notification_id_required");
+  rememberLocalNotificationDeleteEcho(companyID, [cleanNotificationID], options.source);
   const result = await apiFetchJSON<{ deleted_count?: number }>(`/v1/notifications/${encodeURIComponent(cleanNotificationID)}`, {
     method: "DELETE",
   });
@@ -105,6 +116,7 @@ export async function deleteNotification(notificationID: string, companyID = "",
 export async function deleteNotifications(input: NotificationClearInput & { companyID: string } & NotificationUpdateEventSource): Promise<number> {
   const cleanCompanyID = input.companyID.trim();
   if (!cleanCompanyID) throw new Error("company_id_required");
+  rememberLocalNotificationClearEcho(cleanCompanyID, input.source);
   const query = new URLSearchParams({ company_id: cleanCompanyID });
   const cleanType = input.type?.trim() ?? "";
   const cleanSurface = input.surface?.trim() ?? "";
@@ -315,4 +327,63 @@ function normalizeNotification(item: NotificationItem): NotificationItem {
 export function emitNotificationsUpdated(companyID?: string, source = ""): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: { companyID: companyID?.trim() ?? "", source: source.trim() } }));
+}
+
+export function rememberLocalNotificationDeleteEcho(companyID: string, notificationIDs: string[], source = ""): void {
+  const cleanSource = source.trim();
+  if (!cleanSource) return;
+  const cleanCompanyID = companyID.trim();
+  const expiresAt = Date.now() + LOCAL_NOTIFICATION_ECHO_TTL_MS;
+  cleanupLocalNotificationEchoes();
+  for (const notificationID of notificationIDs) {
+    const key = localNotificationDeleteEchoKey(cleanCompanyID, notificationID);
+    if (key) localNotificationDeleteEchoes.set(key, { source: cleanSource, expiresAt });
+  }
+}
+
+export function consumeLocalNotificationDeleteEcho(companyID: string, notificationID: string): string {
+  cleanupLocalNotificationEchoes();
+  const key = localNotificationDeleteEchoKey(companyID, notificationID);
+  if (!key) return "";
+  const echo = localNotificationDeleteEchoes.get(key);
+  if (!echo) return "";
+  localNotificationDeleteEchoes.delete(key);
+  return echo.source;
+}
+
+export function rememberLocalNotificationClearEcho(companyID: string, source = ""): void {
+  const cleanCompanyID = companyID.trim();
+  const cleanSource = source.trim();
+  if (!cleanCompanyID || !cleanSource) return;
+  cleanupLocalNotificationEchoes();
+  localNotificationClearEchoes.set(cleanCompanyID, {
+    source: cleanSource,
+    expiresAt: Date.now() + LOCAL_NOTIFICATION_ECHO_TTL_MS,
+  });
+}
+
+export function consumeLocalNotificationClearEcho(companyID: string): string {
+  cleanupLocalNotificationEchoes();
+  const cleanCompanyID = companyID.trim();
+  if (!cleanCompanyID) return "";
+  const echo = localNotificationClearEchoes.get(cleanCompanyID);
+  if (!echo) return "";
+  localNotificationClearEchoes.delete(cleanCompanyID);
+  return echo.source;
+}
+
+function cleanupLocalNotificationEchoes(): void {
+  const now = Date.now();
+  for (const [key, echo] of localNotificationDeleteEchoes) {
+    if (echo.expiresAt <= now) localNotificationDeleteEchoes.delete(key);
+  }
+  for (const [key, echo] of localNotificationClearEchoes) {
+    if (echo.expiresAt <= now) localNotificationClearEchoes.delete(key);
+  }
+}
+
+function localNotificationDeleteEchoKey(companyID: string, notificationID: string): string {
+  const cleanNotificationID = notificationID.trim();
+  if (!cleanNotificationID) return "";
+  return `${companyID.trim()}::${cleanNotificationID}`;
 }

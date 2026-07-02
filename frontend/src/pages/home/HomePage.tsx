@@ -4445,6 +4445,7 @@ export function HomePage({
               connectedAccountEmail={connection?.account_email}
               sharedInboxes={sharedInboxes}
               loadingSharedInboxes={loadingSharedInboxes}
+              notificationSummary={notificationSummary}
               busy={busy}
               canManageSharedTriage={currentUserCanManageSharedInboxStructure}
               onSelectView={selectHomeView}

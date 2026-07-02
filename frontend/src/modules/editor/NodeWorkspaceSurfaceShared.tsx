@@ -23,6 +23,7 @@ export type NodeWorkspaceSurfaceProps = {
   projectionsLoaded: boolean;
   focusInformationID?: string;
   focusRequestID?: number;
+  focusInformationMode?: "focus" | "scroll";
   topPx: number;
   accent: string;
   surfaceText: string;

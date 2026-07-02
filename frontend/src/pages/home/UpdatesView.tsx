@@ -18,6 +18,7 @@ import {
   fetchUpdateBranch,
   fetchUpdateRootGroups,
   EVENT_NOTIFICATIONS_UPDATED,
+  NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN,
   NOTIFICATION_TYPE_MENTION,
   NOTIFICATION_TYPE_URGENT_MENTION,
   type NotificationItem,
@@ -39,6 +40,7 @@ type UpdatesEditorContentComponent = React.FC<{
   forcedEmptyMessage?: string;
   focusInformationID?: string;
   focusRequestID?: number;
+  focusInformationMode?: "focus" | "scroll";
   suppressLegacyWorkspaceStream?: boolean;
 }>;
 
@@ -152,7 +154,6 @@ const NOTIFICATION_TYPE_NODE_COMMENT_CREATED = "node.comment_created";
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_SAVED = "work_item.logic_gate_assignment_saved";
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_MOVED = "work_item.logic_gate_assignment_moved";
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_REMOVED = "work_item.logic_gate_assignment_removed";
-const UPDATES_LOCAL_SEEN_EVENT_SOURCE = "updates-local-seen";
 
 export function UpdatesView({
   apiBase,
@@ -415,7 +416,7 @@ export function UpdatesView({
       const detail = (event as CustomEvent<{ companyID?: string; source?: string }>).detail;
       const eventCompanyID = detail?.companyID?.trim() ?? "";
       if (eventCompanyID && eventCompanyID !== companyID) return;
-      if (detail?.source === UPDATES_LOCAL_SEEN_EVENT_SOURCE) return;
+      if (detail?.source === NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN) return;
       setReloadToken((value) => value + 1);
     };
     window.addEventListener(EVENT_NOTIFICATIONS_UPDATED, handleNotificationsUpdated);
@@ -503,6 +504,8 @@ export function UpdatesView({
     };
     window.requestAnimationFrame(focusSelectedRow);
     window.setTimeout(focusSelectedRow, 80);
+    window.setTimeout(focusSelectedRow, 240);
+    window.setTimeout(focusSelectedRow, 600);
   }, []);
 
   const openUpdateNodePanel = useCallback((row: UpdateFeedRow) => {
@@ -588,7 +591,7 @@ export function UpdatesView({
     });
     if (hiddenKeys.includes(selectedNotificationKey)) setSelectedNotificationKey("");
     setContextMenu(null);
-    void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, companyID, { source: UPDATES_LOCAL_SEEN_EVENT_SOURCE }))).catch((nextError) => {
+    void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, companyID, { source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN }))).catch((nextError) => {
       setHiddenNotificationIDs((current) => {
         const next = new Set(current);
         for (const key of hiddenKeys) next.delete(key);
@@ -620,7 +623,7 @@ export function UpdatesView({
     setSelectedNotificationKeys(new Set());
     setSelectionAnchorNotificationKey("");
     setContextMenu(null);
-    void deleteNotifications({ companyID, source: UPDATES_LOCAL_SEEN_EVENT_SOURCE }).catch((nextError) => {
+    void deleteNotifications({ companyID, source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN }).catch((nextError) => {
       setHiddenNotificationIDs((current) => {
         const next = new Set(current);
         for (const key of hiddenKeys) next.delete(key);
@@ -1364,6 +1367,7 @@ function UpdatesNodePanel({
             forcedEmptyMessage="Select an update that points to a node."
             focusInformationID={panel.focusInformationID}
             focusRequestID={panel.focusRequestID}
+            focusInformationMode="scroll"
             suppressLegacyWorkspaceStream
           />
         </React.Suspense>

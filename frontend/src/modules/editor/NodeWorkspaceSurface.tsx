@@ -343,6 +343,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   projectionsLoaded,
   focusInformationID,
   focusRequestID,
+  focusInformationMode = "focus",
   topPx,
   accent,
   surfaceText,
@@ -1584,7 +1585,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       window.requestAnimationFrame(() => {
         const editor = rootRef.current?.querySelector<HTMLElement>(`[data-node-text-block-id="${block.id}"]`) ?? null;
         scrollNodeWorkspaceInformationIntoView(rootRef.current, block.id);
-        if (canEdit) focusContentEditableAtEnd(editor);
+        if (canEdit && focusInformationMode !== "scroll") focusContentEditableAtEnd(editor);
       });
       return;
     }
@@ -1598,7 +1599,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       scrollNodeWorkspaceInformationIntoView(rootRef.current, message.blockID);
       scrollNodeWorkspaceInformationIntoView(rootRef.current, message.id);
     });
-  }, [blocks, canEdit, chatMessages, chatMessagesByBlock, focusInformationID, focusRequestID, navigateToChatMessage, nodeID, projectionsLoaded]);
+  }, [blocks, canEdit, chatMessages, chatMessagesByBlock, focusInformationID, focusInformationMode, focusRequestID, navigateToChatMessage, nodeID, projectionsLoaded]);
 
   const renderTextSidePaneResizeHandle = (blockID: string, pane: TextSidePaneKind, fallbackWidth: number, maxWidth: number) => {
     if (compact) return null;

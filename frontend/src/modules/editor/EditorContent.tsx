@@ -182,6 +182,7 @@ type EditorContentProps = {
   forcedEmptyMessage?: string;
   focusInformationID?: string;
   focusRequestID?: number;
+  focusInformationMode?: "focus" | "scroll";
   suppressLegacyWorkspaceStream?: boolean;
   compactLinkedDocumentHeader?: boolean;
   onLogicGateTitleChange?: (update: { logicGateID: string; label: string }) => void;
@@ -400,7 +401,7 @@ const ProjectRelationshipsSurface: React.FC<{
 };
 
 // Editor module: linked document canvas for node or logic-gate context.
-export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID, suppressLegacyWorkspaceStream = false, compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
+export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID, focusInformationMode = "focus", suppressLegacyWorkspaceStream = false, compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -2521,6 +2522,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             projectionsLoaded={nodeWorkspaceLoadedNodeID === linkedNodeID}
             focusInformationID={focusInformationID}
             focusRequestID={focusRequestID}
+            focusInformationMode={focusInformationMode}
             topPx={documentTopPx}
             accent={accent}
             surfaceText={surfaceText}
