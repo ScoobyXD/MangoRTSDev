@@ -434,6 +434,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 	case domain.NotificationEventMentionCreated, domain.NotificationEventUrgentMentionCreated:
 		mentionedUserIDs := payloadStringSlice(payload, "mentioned_user_ids")
 		informationID := payloadString(payload, "information_id")
+		informationType := payloadString(payload, "information_type")
 		urgent := event.Type == domain.NotificationEventUrgentMentionCreated
 		entityTitle := ""
 		switch event.EntityType {
@@ -492,9 +493,17 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		}
 		if entityTitle != "" {
 			if urgent {
-				title = fmt.Sprintf("URGENT %s mentioned you in %s", actorLabel, entityTitle)
+				if strings.TrimSpace(informationType) == "Text block chat" && event.EntityType == "node" {
+					title = fmt.Sprintf("URGENT %s mentioned you in chat on %s", actorLabel, entityTitle)
+				} else {
+					title = fmt.Sprintf("URGENT %s mentioned you in %s", actorLabel, entityTitle)
+				}
 			} else {
-				title = fmt.Sprintf("%s mentioned you in %s", actorLabel, entityTitle)
+				if strings.TrimSpace(informationType) == "Text block chat" && event.EntityType == "node" {
+					title = fmt.Sprintf("%s mentioned you in chat on %s", actorLabel, entityTitle)
+				} else {
+					title = fmt.Sprintf("%s mentioned you in %s", actorLabel, entityTitle)
+				}
 			}
 		} else if urgent {
 			title = "URGENT " + actorLabel + " mentioned you"
@@ -592,6 +601,13 @@ func notificationEventFromDomainEvent(event domain.DomainEvent) (notificationPro
 		notificationType = domain.NotificationEventLogicGateGVICUpdated
 		entityType = store.EntityTypeLogicGate
 		entityID = payloadString(payload, "logic_gate_id")
+	case domain.NotificationEventNodeCommentCreated:
+		notificationType = domain.NotificationEventNodeCommentCreated
+		entityType = store.EntityTypeNode
+		entityID = payloadString(payload, "node_id")
+		if entityID == "" {
+			entityID = payloadString(payload, "entity_id")
+		}
 	case "node_updated":
 		switch mapped := payloadString(payload, "notification_event_type"); mapped {
 		case domain.NotificationEventNodeAssigned, domain.NotificationEventNodeFieldsChanged:

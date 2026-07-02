@@ -467,6 +467,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			mentionInformationID = item.InformationID
 		}
 		s.recordMentionNotifications(r, req.CompanyID, "node", nodeID, mentionInformationID, req.Type, req.Information)
+		s.recordNodeChatNotification(r, req.CompanyID, nodeID, mentionInformationID, req.Type, req.Information)
 		writeJSON(w, http.StatusCreated, item)
 		return
 	}

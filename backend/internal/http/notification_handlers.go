@@ -625,6 +625,7 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 					"entity_id":          entityID,
 					"comment":            comment,
 					"information_id":     informationID,
+					"information_type":   strings.TrimSpace(infoType),
 					"mention_kind":       mentionKind,
 					"mentioned_user_ids": []string{userID},
 					"actor_display_name": actorLabel,
@@ -644,6 +645,63 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 	if len(events) > 0 {
 		s.projectCommittedNotificationEvents(events)
 	}
+}
+
+func (s *Server) recordNodeChatNotification(r *http.Request, companyID, nodeID, informationID, infoType, information string) {
+	companyID = strings.TrimSpace(companyID)
+	nodeID = strings.TrimSpace(nodeID)
+	informationID = strings.TrimSpace(informationID)
+	if companyID == "" || nodeID == "" || informationID == "" || strings.TrimSpace(infoType) != "Text block chat" {
+		return
+	}
+	comment := editorMentionCommentPreview(infoType, information)
+	if strings.TrimSpace(comment) == "" {
+		return
+	}
+	mentionedUserIDs := []string{}
+	if regularMentionedUserIDs, err := s.notifications.ResolveMentionedUserIDOccurrencesByKind(companyID, information, "regular"); err == nil {
+		mentionedUserIDs = append(mentionedUserIDs, regularMentionedUserIDs...)
+	}
+	if urgentMentionedUserIDs, err := s.notifications.ResolveMentionedUserIDOccurrencesByKind(companyID, information, "urgent"); err == nil {
+		mentionedUserIDs = append(mentionedUserIDs, urgentMentionedUserIDs...)
+	}
+	actorUserID, actorLabel := notificationActorPayload(r)
+	event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
+		CompanyID:      companyID,
+		StreamType:     "notification",
+		StreamID:       "node:" + nodeID,
+		Type:           domain.NotificationEventNodeCommentCreated,
+		ActorUserID:    actorUserID,
+		IdempotencyKey: "node-chat:" + nodeID + ":" + informationID,
+		Payload: map[string]any{
+			"node_id":            nodeID,
+			"entity_type":        store.EntityTypeNode,
+			"entity_id":          nodeID,
+			"comment":            comment,
+			"information_id":     informationID,
+			"mentioned_user_ids": uniqueCleanStrings(mentionedUserIDs),
+			"actor_display_name": actorLabel,
+		},
+	})
+	if err != nil {
+		log.Printf("failed to append node chat notification domain event company_id=%s node_id=%s information_id=%s: %v", companyID, nodeID, informationID, err)
+		return
+	}
+	s.projectCommittedNotificationEvents([]domain.DomainEvent{event})
+}
+
+func uniqueCleanStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func parseBoolQuery(raw string) bool {

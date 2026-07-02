@@ -592,7 +592,7 @@ func TestNodeChatMentionCreatesMentionNotification(t *testing.T) {
 	if !strings.Contains(notifications[0].Title, "Author User") {
 		t.Fatalf("notification title = %q, want author label", notifications[0].Title)
 	}
-	if !strings.Contains(notifications[0].Title, "mentioned you in Review packet") {
+	if !strings.Contains(notifications[0].Title, "mentioned you in chat on Review packet") {
 		t.Fatalf("notification title = %q, want mention target format", notifications[0].Title)
 	}
 	if notifications[0].Surface != domain.NotificationSurfaceACIInbox || notifications[0].Role != domain.NotificationRoleOther {
@@ -1235,7 +1235,7 @@ func TestClearNotificationsAppliesSurfaceAndRoleFilters(t *testing.T) {
 	}
 }
 
-func TestNodeChatWithoutMentionDoesNotNotifyAssignee(t *testing.T) {
+func TestNodeChatWithoutMentionCreatesChatUpdateForLogicGateGVICUser(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -1261,6 +1261,31 @@ func TestNodeChatWithoutMentionDoesNotNotifyAssignee(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Quiet Gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	priority := 3
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      store.LogicGateWorkStatusPending,
+		Priority:    &priority,
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []store.LogicGateGVICAssignmentInput{{
+			Role:   domain.GVICRoleGenerated,
+			UserID: assignee.UserID,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	commentBody, _ := json.Marshal(map[string]any{
 		"company_id":  companyID,
 		"type":        "Text block chat",
@@ -1275,21 +1300,23 @@ func TestNodeChatWithoutMentionDoesNotNotifyAssignee(t *testing.T) {
 		t.Fatalf("POST node information status = %d body=%s", commentRec.Code, commentRec.Body.String())
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID, nil)
-	listReq = requestWithActorForNotifications(listReq, assignee, companyID)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("GET notifications status = %d body=%s", listRec.Code, listRec.Body.String())
+	notifications := waitForNotificationCountForTest(t, func() []domain.Notification {
+		listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+domain.NotificationEventNodeCommentCreated, nil)
+		listReq = requestWithActorForNotifications(listReq, assignee, companyID)
+		return listNotificationsForRequestForTest(t, handler, listReq)
+	}, 1)
+	item := notifications[0]
+	if item.Type != domain.NotificationEventNodeCommentCreated || item.EntityType != store.EntityTypeNode || item.EntityID != node.NodeID {
+		t.Fatalf("notification = %+v, want node comment update", item)
 	}
-	var payload struct {
-		Notifications []domain.Notification `json:"notifications"`
+	if item.RecipientUserID != assignee.UserID || item.ActorUserID == nil || *item.ActorUserID != author.UserID {
+		t.Fatalf("notification users = %+v, want assignee recipient and author actor", item)
 	}
-	if err := json.NewDecoder(listRec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode notifications: %v", err)
+	if item.LogicGateID != logicGate.LogicGateID || item.NodeID != node.NodeID || item.Role != domain.GVICRoleGenerated {
+		t.Fatalf("notification routing = %+v, want generated logic gate node routing", item)
 	}
-	if len(payload.Notifications) != 0 {
-		t.Fatalf("notification count = %d, want 0: %+v", len(payload.Notifications), payload.Notifications)
+	if !strings.Contains(item.BodyPreview, "Plain discussion without a mention.") {
+		t.Fatalf("notification body = %q, want chat preview", item.BodyPreview)
 	}
 }
 
