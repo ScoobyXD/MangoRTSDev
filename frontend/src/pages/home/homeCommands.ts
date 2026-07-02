@@ -48,6 +48,7 @@ import {
   type KanbanBoardContentsUpdatedDetail,
   type KanbanBoardsUpdatedDetail,
 } from "../../modules/kanban/shared.js";
+import { EDITOR_RICH_TEXT_PREFIX, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing.js";
 import type { NodeRecord } from "../../modules/node-map/shared.js";
 import {
   moveMyWorkNodeToCell as defaultMoveMyWorkNodeToCell,
@@ -166,6 +167,27 @@ function linkifyEmailBodyLine(value: string): string {
 function plainTextEmailBodyToHTML(value: string): string {
   const lines = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   return `<div style="font:14px/1.5 Arial,sans-serif;color:#111827;">${lines.map(linkifyEmailBodyLine).join("<br>")}</div>`;
+}
+
+function richEmailBodyToHTML(value: string): string {
+  const html = sanitizeEditorDocumentHTML(value.slice(EDITOR_RICH_TEXT_PREFIX.length));
+  return `<div style="font:14px/1.5 Arial,sans-serif;color:#111827;">${html}</div>`;
+}
+
+function composeBodyToEmailHTML(value: string): string {
+  return value.startsWith(EDITOR_RICH_TEXT_PREFIX) ? richEmailBodyToHTML(value) : plainTextEmailBodyToHTML(value);
+}
+
+function composeBodyHasContent(value: string): boolean {
+  const body = value.trim();
+  if (!body) return false;
+  if (!body.startsWith(EDITOR_RICH_TEXT_PREFIX)) return true;
+  return body
+    .slice(EDITOR_RICH_TEXT_PREFIX.length)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .trim()
+    .length > 0;
 }
 
 export type HomeSharedInboxCommandResult = {
@@ -342,7 +364,7 @@ export async function sendHomeMailComposeCommand(args: {
       size: attachment.size,
     }))
     .filter((attachment) => attachment.content.trim());
-  if (!subject && !bodyText && attachments.length === 0) {
+  if (!subject && !composeBodyHasContent(bodyText) && attachments.length === 0) {
     throw new Error("Add a subject or message body.");
   }
   const input: SendEmailInput = {
@@ -350,7 +372,7 @@ export async function sendHomeMailComposeCommand(args: {
     cc,
     bcc,
     subject,
-    body: bodyText ? plainTextEmailBodyToHTML(bodyText) : "",
+    body: bodyText ? composeBodyToEmailHTML(bodyText) : "",
     attachments,
     reply_to_message_id: args.compose.replyToMessageID || undefined,
   };

@@ -5,6 +5,7 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../
 import type { LogicGateAssignmentCommandResult, GVICMatrixProjectionRow } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
+import { EDITOR_RICH_TEXT_PREFIX } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "../../../../frontend/src/pages/home/homeConstants.js";
 import { addMyLogicGateShortcutsCommand, addSharedInboxGVICPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxCommand, removeSharedInboxGVICPrincipalCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateGVICMatrixNode, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeMoveMyWorkNodeToCell, type HomeRemoveMyLogicGateShortcut, type HomeRemoveSharedInbox, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxGVICAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 
@@ -791,6 +792,31 @@ test("Home compose command validates and normalizes send payloads", async () => 
     () => sendHomeMailComposeCommand({ compose: { to: "", cc: "", bcc: "", subject: "", body: "Body", attachments: [], replyToMessageID: "" }, sendEmail }),
     /Add at least one recipient\./,
   );
+});
+
+test("Home compose command sends rich editor HTML without plain-text escaping", async () => {
+  const sentInputs: SendEmailInput[] = [];
+  const sendEmail: HomeSendEmail = async (input) => {
+    sentInputs.push(input);
+    return emailMessage("sent-rich", { to: input.to, subject: input.subject, body: input.body });
+  };
+
+  await sendHomeMailComposeCommand({
+    compose: {
+      to: "reader@example.test",
+      cc: "",
+      bcc: "",
+      subject: "Rich",
+      body: `${EDITOR_RICH_TEXT_PREFIX}<b>Bold</b> <a href="https://example.test" target="_blank" rel="noopener noreferrer">link</a>`,
+      attachments: [],
+      replyToMessageID: "",
+    },
+    sendEmail,
+  });
+
+  assert.match(sentInputs[0]?.body ?? "", /<b>Bold<\/b>/);
+  assert.match(sentInputs[0]?.body ?? "", /href="https:\/\/example\.test\/?"/);
+  assert.doesNotMatch(sentInputs[0]?.body ?? "", /&lt;b&gt;/);
 });
 
 test("Home shared inbox commands normalize folder operations", async () => {

@@ -113,7 +113,7 @@ export type ListMessagesParams = {
   refresh?: boolean;
 };
 
-export type EmailMailbox = "primary" | "drafts" | "sent" | "starred" | "all" | "archive";
+export type EmailMailbox = "primary" | "drafts" | "sent" | "starred" | "all" | "archive" | "spam";
 
 export type ListEmailFoldersParams = {
   companyID?: string;
@@ -2063,7 +2063,7 @@ function listMessageParamsFromCacheKey(path: string): ListMessagesParams {
 }
 
 function normalizeMailbox(value: string | undefined): EmailMailbox | undefined {
-  if (value === "primary" || value === "drafts" || value === "sent" || value === "starred" || value === "all" || value === "archive") return value;
+  if (value === "primary" || value === "drafts" || value === "sent" || value === "starred" || value === "all" || value === "archive" || value === "spam") return value;
   return undefined;
 }
 
@@ -2073,6 +2073,7 @@ function messageMatchesMailbox(message: EmailMessage, mailbox: EmailMailbox): bo
   if (mailbox === "sent") return messageHasAnyFolder(message, ["sent", "\\sent"]);
   if (mailbox === "starred") return message.starred;
   if (mailbox === "archive") return messageIsArchived(message);
+  if (mailbox === "spam") return messageHasAnyFolder(message, ["spam", "\\spam", "junk", "\\junk"]);
   if (messageHasAnyFolder(message, ["sent", "\\sent", "trash", "\\trash", "spam", "\\spam", "junk", "\\junk"])) return false;
   return !messageHasFolderMetadata(message) || messageHasAnyFolder(message, ["inbox", "\\inbox"]);
 }

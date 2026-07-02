@@ -7,6 +7,7 @@ export const MAILBOX_OPTIONS: MailboxOption[] = [
   { value: "sent", label: "Sent mail" },
   { value: "archive", label: "Archived" },
   { value: "all", label: "All" },
+  { value: "spam", label: "Spam" },
 ];
 export const MESSAGE_BATCH_SIZE = 20;
 export const ARCHIVE_QUEUE_BATCH_SIZE = 2;

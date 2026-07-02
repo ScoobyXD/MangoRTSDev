@@ -11,7 +11,7 @@ import {
 
 export const EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES = 20;
 export const EDITOR_RICH_TEXT_PREFIX = "<!-- mango-editor-html-v1 -->";
-export const EDITOR_LINK_COLOR = "rgb(51, 65, 85)";
+export const EDITOR_LINK_COLOR = "#0369a1";
 export const EDITOR_TERMINAL_BREAK_ATTRIBUTE = "data-mango-editor-terminal-break";
 export const EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE = "data-mango-editor-image-clear";
 export const EDITOR_TABLE_ATTRIBUTE = "data-mango-editor-table";
@@ -372,6 +372,24 @@ function appendSanitizedEditorList(source: HTMLElement, target: Node, ownerDocum
   target.appendChild(list);
 }
 
+function appendSanitizedOrderedList(source: HTMLElement, target: Node, ownerDocument: Document) {
+  const list = ownerDocument.createElement("ol");
+  Array.from(source.children)
+    .filter((child): child is HTMLElement => child instanceof HTMLElement && child.tagName.toLowerCase() === "li")
+    .forEach((sourceItem) => {
+      const item = ownerDocument.createElement("li");
+      appendSanitizedChildren(sourceItem, item, ownerDocument);
+      if (item.childNodes.length === 0) item.appendChild(ownerDocument.createElement("br"));
+      list.appendChild(item);
+    });
+  if (list.children.length === 0) {
+    const item = ownerDocument.createElement("li");
+    item.appendChild(ownerDocument.createElement("br"));
+    list.appendChild(item);
+  }
+  target.appendChild(list);
+}
+
 function wrapRootEditorListItems(fragment: DocumentFragment, ownerDocument: Document) {
   let activeList: HTMLUListElement | null = null;
   let activeKind: EditorListKind | null = null;
@@ -520,6 +538,11 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
 
   if (tagName === "ul") {
     appendSanitizedEditorList(element, target, ownerDocument, "bullet");
+    return;
+  }
+
+  if (tagName === "ol") {
+    appendSanitizedOrderedList(element, target, ownerDocument);
     return;
   }
 

@@ -40,6 +40,7 @@ test("communications message query omits empty values and encodes filters", () =
   );
   assert.equal(createMessageQuery({ mailbox: "archive", limit: 10 }), "?limit=10&mailbox=archive");
   assert.equal(createMessageQuery({ mailbox: "starred", limit: 10 }), "?limit=10&mailbox=starred");
+  assert.equal(createMessageQuery({ mailbox: "spam", limit: 10 }), "?limit=10&mailbox=spam");
   assert.equal(createMessageQuery({ mailbox: "primary", refresh: true }), "?mailbox=primary&refresh=true");
   assert.equal(createMessageQuery({ mailbox: "primary", companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?mailbox=primary&company_id=company-1&shared_inbox_id=shared-1");
   assert.equal(createMessageQuery({ q: "   " }), "");
@@ -345,6 +346,12 @@ test("primary mailbox filter matches real inbox labels, not archived Gmail categ
 test("starred mailbox filter only matches starred messages", () => {
   assert.equal(emailMessageMatchesListFilters(message("starred", { starred: true }), { mailbox: "starred" }), true);
   assert.equal(emailMessageMatchesListFilters(message("plain", { starred: false }), { mailbox: "starred" }), false);
+});
+
+test("spam mailbox filter matches spam and junk messages only", () => {
+  assert.equal(emailMessageMatchesListFilters(message("spam", { folders: ["SPAM"] }), { mailbox: "spam" }), true);
+  assert.equal(emailMessageMatchesListFilters(message("junk", { folders: ["JUNK"] }), { mailbox: "spam" }), true);
+  assert.equal(emailMessageMatchesListFilters(message("inbox", { folders: ["INBOX"] }), { mailbox: "spam" }), false);
 });
 
 test("logic gate placement patch keeps cached email rows visible", async () => {

@@ -13,6 +13,7 @@ test("editor paste linkification turns plain URLs into safe visible links", () =
 
   assert.match(html, /<a href="https:\/\/youtube\.com\/watch\?v=abc"/);
   assert.match(html, /target="_blank"/);
+  assert.match(html, /color: #0369a1/);
   assert.match(html, /text-decoration: underline/);
 });
 

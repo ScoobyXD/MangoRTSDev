@@ -10,6 +10,7 @@ import { HeaderRecycleBinIcon } from "../../app/HeaderIcons";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { BoundRequestJSON } from "../../modules/api/requestJSON";
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage } from "../../modules/communications/communicationsApi";
+import { EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
@@ -5319,7 +5320,7 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
-type ComposeRecipientField = "to" | "cc";
+type ComposeRecipientField = "to" | "cc" | "bcc";
 
 const recipientSuggestionsStyle: React.CSSProperties = {
   display: "grid",
@@ -5428,41 +5429,54 @@ const recipientDraftInputStyle: React.CSSProperties = {
   padding: 0,
 };
 
-const composeMessageEditorShellStyle: React.CSSProperties = {
-  position: "relative",
-  minWidth: 0,
+const composeRichToolbarStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 5,
+  flexWrap: "wrap",
+  padding: "5px 6px",
+  border: "1px solid rgba(148, 163, 184, 0.24)",
+  borderRadius: 7,
+  background: "rgba(255, 255, 255, 0.72)",
 };
 
-const composeMessagePreviewStyle: React.CSSProperties = {
+const composeRichToolButtonStyle: React.CSSProperties = {
+  ...mailPanelSmallButtonStyle,
+  width: 30,
+  minWidth: 30,
+  height: 28,
+  minHeight: 28,
+  padding: 0,
+  fontSize: 12,
+  fontWeight: 850,
+};
+
+const composeRichToolWideButtonStyle: React.CSSProperties = {
+  ...mailPanelSmallButtonStyle,
+  minHeight: 28,
+  padding: "0 8px",
+  fontSize: 11,
+  fontWeight: 760,
+};
+
+const composeRichFontSelectStyle: React.CSSProperties = {
+  ...mailPanelInputStyle,
+  width: 76,
+  height: 28,
+  minHeight: 28,
+  padding: "0 6px",
+  fontSize: 11,
+};
+
+const composeRichEditorStyle: React.CSSProperties = {
   ...mailPanelTextareaStyle,
-  position: "absolute",
-  inset: 0,
-  overflow: "hidden",
-  resize: "none",
-  pointerEvents: "none",
+  minHeight: 180,
+  height: "min(280px, 34vh)",
+  overflowY: "auto",
+  outline: "none",
+  color: "#111827",
   whiteSpace: "pre-wrap",
   overflowWrap: "anywhere",
-  color: "#1f2937",
-  borderColor: "transparent",
-  boxShadow: "none",
-};
-
-const composeMessageTextareaStyle: React.CSSProperties = {
-  ...mailPanelTextareaStyle,
-  position: "relative",
-  zIndex: 1,
-  background: "transparent",
-  color: "transparent",
-  caretColor: "#0f172a",
-  overflowWrap: "anywhere",
-};
-
-const composeMessageLinkStyle: React.CSSProperties = {
-  color: "#0369a1",
-  textDecoration: "underline",
-  textDecorationThickness: 1.5,
-  textUnderlineOffset: 2,
-  fontWeight: 650,
 };
 
 function composePanelStyle(replyMode: boolean): React.CSSProperties {
@@ -5567,26 +5581,9 @@ const composeReplyResizeGripStyle: React.CSSProperties = {
   background: "rgba(100, 116, 139, 0.38)",
 };
 
-function composeReplyMessageEditorShellStyle(height: number): React.CSSProperties {
+function composeReplyRichEditorStyle(height: number): React.CSSProperties {
   return {
-    ...composeMessageEditorShellStyle,
-    height,
-    minHeight: 150,
-  };
-}
-
-function composeReplyMessagePreviewStyle(height: number): React.CSSProperties {
-  return {
-    ...composeMessagePreviewStyle,
-    height,
-    minHeight: 0,
-    maxHeight: "none",
-  };
-}
-
-function composeReplyMessageTextareaStyle(height: number): React.CSSProperties {
-  return {
-    ...composeMessageTextareaStyle,
+    ...composeRichEditorStyle,
     height,
     minHeight: 150,
     maxHeight: "none",
@@ -5594,44 +5591,39 @@ function composeReplyMessageTextareaStyle(height: number): React.CSSProperties {
   };
 }
 
+function composeBodyToEditorHTML(body: string): string {
+  if (!body.trim()) return "";
+  if (body.startsWith(EDITOR_RICH_TEXT_PREFIX)) return deserializeEditorDocumentHTML(body);
+  return linkifyEditorPlainTextToHTML(body);
+}
+
+function normalizeComposeLinkHref(value: string): string | null {
+  const withProtocol = value.trim().toLowerCase().startsWith("www.") ? `https://${value.trim()}` : value.trim();
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+function escapeComposeEditorHTML(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function setSelectionToNodeEnd(node: Node) {
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
 function recipientQuery(value: string): string {
   return value.trim().toLowerCase();
-}
-
-function renderComposePreviewLine(value: string, lineKey: string): React.ReactNode[] {
-  const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
-  const output: React.ReactNode[] = [];
-  let cursor = 0;
-  let indexKey = 0;
-  for (const match of value.matchAll(urlPattern)) {
-    const matchText = match[0] ?? "";
-    const matchIndex = match.index ?? 0;
-    if (matchIndex > cursor) output.push(value.slice(cursor, matchIndex));
-    const trailingPunctuation = matchText.match(/[),.;:!?]+$/)?.[0] ?? "";
-    const cleanURL = trailingPunctuation ? matchText.slice(0, -trailingPunctuation.length) : matchText;
-    output.push(
-      <span key={`${lineKey}:link:${indexKey}`} style={composeMessageLinkStyle}>
-        {cleanURL}
-      </span>,
-    );
-    if (trailingPunctuation) output.push(trailingPunctuation);
-    cursor = matchIndex + matchText.length;
-    indexKey += 1;
-  }
-  if (cursor < value.length) output.push(value.slice(cursor));
-  return output;
-}
-
-function renderComposeMessagePreview(value: string): React.ReactNode {
-  const normalized = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  if (!normalized) return <span style={{ color: "#94a3b8" }}>Message</span>;
-  const lines = normalized.split("\n");
-  return lines.map((line, lineIndex) => (
-    <React.Fragment key={`line:${lineIndex}`}>
-      {renderComposePreviewLine(line, `line:${lineIndex}`)}
-      {lineIndex < lines.length - 1 ? "\n" : ""}
-    </React.Fragment>
-  ));
 }
 
 function companyUserRecipient(user: CompanyUser): EmailAddress | null {
@@ -5701,12 +5693,13 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   onSaveDraft: () => void;
 }) {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
-  const bodyPreviewRef = React.useRef<HTMLDivElement | null>(null);
-  const recipientInputRefs = React.useRef<Record<ComposeRecipientField, HTMLInputElement | null>>({ to: null, cc: null });
+  const bodyEditorRef = React.useRef<HTMLDivElement | null>(null);
+  const lastBodyHTMLRef = React.useRef("");
+  const recipientInputRefs = React.useRef<Record<ComposeRecipientField, HTMLInputElement | null>>({ to: null, cc: null, bcc: null });
   const [attachmentError, setAttachmentError] = React.useState("");
   const [signatureEditorOpen, setSignatureEditorOpen] = React.useState(false);
   const [activeRecipientField, setActiveRecipientField] = React.useState<ComposeRecipientField | "">("");
-  const [recipientDrafts, setRecipientDrafts] = React.useState<Record<ComposeRecipientField, string>>({ to: "", cc: "" });
+  const [recipientDrafts, setRecipientDrafts] = React.useState<Record<ComposeRecipientField, string>>({ to: "", cc: "", bcc: "" });
   const [replyEditorHeight, setReplyEditorHeight] = React.useState(220);
   const update = (patch: Partial<ComposeState>) => onChange({ ...compose, ...patch });
   const totalAttachmentBytes = compose.attachments.reduce((sum, attachment) => sum + Math.max(0, attachment.size || 0), 0);
@@ -5721,7 +5714,8 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   const updateRecipientField = (field: ComposeRecipientField, recipients: EmailAddress[]) => {
     const value = serializeRecipients(recipients);
     if (field === "to") update({ to: value });
-    else update({ cc: value });
+    else if (field === "cc") update({ cc: value });
+    else update({ bcc: value });
   };
   const addRecipient = (field: ComposeRecipientField, recipient: EmailAddress) => {
     updateRecipientField(field, appendRecipient(parseEmailAddressList(compose[field]), recipient));
@@ -5875,6 +5869,85 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     if (body.endsWith(signature)) return;
     update({ body: body ? `${body}\n\n\n${signature}` : `\n\n\n${signature}` });
   };
+  const commitBodyEditor = React.useCallback(() => {
+    const editor = bodyEditorRef.current;
+    if (!editor) return;
+    const html = sanitizeEditorDocumentHTML(editor.innerHTML);
+    const text = (editor.textContent ?? "").replace(/\u00a0/g, " ").trim();
+    const nextBody = text || html.replace(/<br\s*\/?>/gi, "").trim() ? `${EDITOR_RICH_TEXT_PREFIX}${html}` : "";
+    lastBodyHTMLRef.current = nextBody;
+    update({ body: nextBody });
+  }, [compose]);
+  const focusBodyEditor = () => {
+    const editor = bodyEditorRef.current;
+    if (!editor) return;
+    editor.focus();
+  };
+  const execRichCommand = (command: string, value?: string) => {
+    focusBodyEditor();
+    document.execCommand(command, false, value);
+    commitBodyEditor();
+  };
+  const applyFontSize = (size: string) => {
+    const fontSize = Number.parseInt(size, 10);
+    if (!Number.isFinite(fontSize)) return;
+    const selection = window.getSelection();
+    const editor = bodyEditorRef.current;
+    if (!selection || !editor || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) {
+      focusBodyEditor();
+      return;
+    }
+    const span = document.createElement("span");
+    span.style.fontSize = `${fontSize}px`;
+    if (range.collapsed) {
+      span.appendChild(document.createTextNode("\u200b"));
+      range.insertNode(span);
+      setSelectionToNodeEnd(span);
+    } else {
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+      setSelectionToNodeEnd(span);
+    }
+    commitBodyEditor();
+  };
+  const createHyperlink = () => {
+    focusBodyEditor();
+    const rawHref = window.prompt("Link URL") ?? "";
+    const href = normalizeComposeLinkHref(rawHref);
+    if (!href) return;
+    const selection = window.getSelection();
+    const editor = bodyEditorRef.current;
+    const label = selection && selection.rangeCount > 0 && !selection.getRangeAt(0).collapsed
+      ? selection.toString()
+      : href;
+    document.execCommand("insertHTML", false, `<a href="${escapeComposeEditorHTML(href)}" target="_blank" rel="noopener noreferrer" style="color:#0369a1;text-decoration:underline;cursor:pointer;">${escapeComposeEditorHTML(label)}</a>`);
+    if (editor) setSelectionToNodeEnd(editor);
+    commitBodyEditor();
+  };
+  const insertChecklist = () => {
+    focusBodyEditor();
+    document.execCommand("insertHTML", false, '<ul data-mango-editor-list="checklist"><li data-mango-editor-list-item="checklist" data-mango-editor-checklist-checked="false">[ ] </li></ul>');
+    commitBodyEditor();
+  };
+  const onBodyPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const html = event.clipboardData.getData("text/html");
+    const text = event.clipboardData.getData("text/plain");
+    const insertHTML = html.trim() ? sanitizeEditorDocumentHTML(html) : linkifyEditorPlainTextToHTML(text);
+    document.execCommand("insertHTML", false, insertHTML);
+    commitBodyEditor();
+  };
+  React.useEffect(() => {
+    const editor = bodyEditorRef.current;
+    if (!editor) return;
+    if (lastBodyHTMLRef.current === compose.body) return;
+    const hadFocus = document.activeElement === editor;
+    editor.innerHTML = composeBodyToEditorHTML(compose.body);
+    lastBodyHTMLRef.current = compose.body;
+    if (hadFocus) setSelectionToNodeEnd(editor);
+  }, [compose.body]);
   const isReplyMode = !!replyMessage;
   const startReplyEditorResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -5904,9 +5977,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   ) : (
     <input style={mailPanelInputStyle} value={compose.subject} onChange={(event) => update({ subject: event.target.value })} placeholder="Subject" />
   );
-  const messageEditorShellStyle = isReplyMode ? composeReplyMessageEditorShellStyle(replyEditorHeight) : composeMessageEditorShellStyle;
-  const messagePreviewStyle = isReplyMode ? composeReplyMessagePreviewStyle(replyEditorHeight) : composeMessagePreviewStyle;
-  const messageTextareaStyle = isReplyMode ? composeReplyMessageTextareaStyle(replyEditorHeight) : composeMessageTextareaStyle;
+  const richEditorStyle = isReplyMode ? composeReplyRichEditorStyle(replyEditorHeight) : composeRichEditorStyle;
   return (
     <form style={composePanelStyle(isReplyMode)} onSubmit={onSubmit}>
       <div style={isReplyMode ? composeReplyHeaderStyle : panelHeaderStyle}>
@@ -5915,6 +5986,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           <div style={composeReplyHeaderFieldsStyle}>
             {renderRecipientInput("to", "To")}
             {renderRecipientInput("cc", "Cc")}
+            {renderRecipientInput("bcc", "Bcc")}
             {renderSubjectInput(true)}
           </div>
         )}
@@ -5928,12 +6000,13 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           <div style={mutedSmallStyle}>
             Original from {formatAddressList(replyMessage.from) || "Unknown sender"} to {formatAddressList(replyMessage.to) || "me"}
           </div>
-          <iframe title="Original email" sandbox="" srcDoc={messageDocument(replyMessage.body || replyMessage.snippet || "")} style={composeReplyOriginalFrameStyle} />
+          <iframe title="Original email" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={messageDocument(replyMessage.body || replyMessage.snippet || "")} style={composeReplyOriginalFrameStyle} />
         </div>
       )}
       <div style={isReplyMode ? composeReplyDockStyle : undefined}>
         {!isReplyMode && renderRecipientInput("to", "To")}
         {!isReplyMode && renderRecipientInput("cc", "Cc")}
+        {!isReplyMode && renderRecipientInput("bcc", "Bcc")}
         {!isReplyMode && renderSubjectInput(false)}
         {isReplyMode && (
           <div
@@ -5945,22 +6018,51 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
             <div style={composeReplyResizeGripStyle} />
           </div>
         )}
-        <div style={messageEditorShellStyle}>
-          <div ref={bodyPreviewRef} aria-hidden="true" style={messagePreviewStyle}>
-            {renderComposeMessagePreview(compose.body)}
-          </div>
-          <textarea
-            aria-label="Message"
-            style={messageTextareaStyle}
-            value={compose.body}
-            onChange={(event) => update({ body: event.target.value })}
-            onScroll={(event) => {
-              if (!bodyPreviewRef.current) return;
-              bodyPreviewRef.current.scrollTop = event.currentTarget.scrollTop;
-              bodyPreviewRef.current.scrollLeft = event.currentTarget.scrollLeft;
+        <div style={composeRichToolbarStyle}>
+          <button type="button" title="Bold" aria-label="Bold" style={composeRichToolButtonStyle} onClick={() => execRichCommand("bold")}>B</button>
+          <button type="button" title="Underline" aria-label="Underline" style={composeRichToolButtonStyle} onClick={() => execRichCommand("underline")}>U</button>
+          <button type="button" title="Numbered list" aria-label="Numbered list" style={composeRichToolButtonStyle} onClick={() => execRichCommand("insertOrderedList")}>1.</button>
+          <button type="button" title="Bullet list" aria-label="Bullet list" style={composeRichToolButtonStyle} onClick={() => execRichCommand("insertUnorderedList")}>-</button>
+          <button type="button" title="Checklist" aria-label="Checklist" style={composeRichToolWideButtonStyle} onClick={insertChecklist}>Check</button>
+          <button type="button" title="Outdent" aria-label="Outdent" style={composeRichToolButtonStyle} onClick={() => execRichCommand("outdent")}>{"<"}</button>
+          <button type="button" title="Indent" aria-label="Indent" style={composeRichToolButtonStyle} onClick={() => execRichCommand("indent")}>{">"}</button>
+          <button type="button" title="Create link" aria-label="Create link" style={composeRichToolWideButtonStyle} onClick={createHyperlink}>Link</button>
+          <select
+            aria-label="Font size"
+            style={composeRichFontSelectStyle}
+            defaultValue=""
+            onChange={(event) => {
+              applyFontSize(event.currentTarget.value);
+              event.currentTarget.value = "";
             }}
-          />
+          >
+            <option value="" disabled>Size</option>
+            <option value="12">12</option>
+            <option value="14">14</option>
+            <option value="16">16</option>
+            <option value="18">18</option>
+            <option value="22">22</option>
+            <option value="28">28</option>
+          </select>
         </div>
+        <div
+          ref={bodyEditorRef}
+          role="textbox"
+          aria-label="Message"
+          contentEditable
+          suppressContentEditableWarning
+          style={richEditorStyle}
+          data-placeholder="Message"
+          onInput={commitBodyEditor}
+          onBlur={commitBodyEditor}
+          onPaste={onBodyPaste}
+          onClick={(event) => {
+            const anchor = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+            if (!anchor) return;
+            event.preventDefault();
+            window.open(anchor.href, "_blank", "noopener,noreferrer");
+          }}
+        />
         <div style={mailComposeAttachmentRowStyle}>
           <input
             ref={fileInputRef}
@@ -5976,10 +6078,18 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           <button type="button" style={mailPanelSmallButtonStyle} onClick={() => setSignatureEditorOpen((current) => !current)}>
             {signatureEditorOpen ? "Hide Signature" : "Edit Signature"}
           </button>
+          <input
+            type="datetime-local"
+            aria-label="Schedule send"
+            style={{ ...mailPanelInputStyle, width: 190, minHeight: 30, height: 30, padding: "0 8px" }}
+            value={compose.scheduledAt}
+            onChange={(event) => update({ scheduledAt: event.currentTarget.value })}
+          />
           {attachmentError && <span style={mutedSmallStyle}>{attachmentError}</span>}
           {compose.draftID && <span style={mutedSmallStyle}>Saved in My Drafts</span>}
+          {compose.scheduledAt && <span style={mutedSmallStyle}>Scheduled</span>}
           <span aria-hidden="true" style={{ flex: "1 1 160px" }} />
-          <button type="submit" style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : "Send"}</button>
+          <button type="submit" style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : compose.scheduledAt ? "Schedule" : "Send"}</button>
         </div>
         {compose.attachments.length > 0 && (
           <div style={mailAttachmentGridStyle}>
@@ -6007,7 +6117,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   );
 }
 
-export function MessageDetail({ message, companyID, sharedInboxID, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, onReply, onArchive, onDelete, onToggleRead, onToggleStar }: {
+export function MessageDetail({ message, companyID, sharedInboxID, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, onReply, onReplyAll, onForward, onArchive, onDelete, onToggleRead, onToggleStar }: {
   message: EmailMessage;
   companyID: string;
   sharedInboxID?: string;
@@ -6017,6 +6127,8 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
   busy: boolean;
   deleteAvailable: boolean;
   onReply: () => void;
+  onReplyAll: () => void;
+  onForward: () => void;
   onArchive: () => void;
   onDelete: () => void;
   onToggleRead: () => void;
@@ -6042,6 +6154,8 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
         <div style={{ minWidth: 0 }}>
           <h2 style={detailSubjectStyle}>{message.subject || "(no subject)"}</h2>
           <div style={mutedSmallStyle}>From {formatAddressList(message.from) || "Unknown sender"} to {formatAddressList(message.to) || "me"}</div>
+          {formatAddressList(message.cc) && <div style={mutedSmallStyle}>Cc {formatAddressList(message.cc)}</div>}
+          {formatAddressList(message.bcc) && <div style={mutedSmallStyle}>Bcc {formatAddressList(message.bcc)}</div>}
           {messageDate && (
             <div style={{ ...mutedSmallStyle, ...messageTimestampStatusRowStyle, justifyContent: "flex-start" }}>
               <span>{messageDate}</span>
@@ -6052,6 +6166,8 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
       </div>
       <div style={toolbarStyle}>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onReply}>Reply</button>
+        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onReplyAll}>Reply all</button>
+        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onForward}>Forward</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleRead}>{message.unread ? "Mark read" : "Mark unread"}</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleStar}>{message.starred ? "Unstar" : "Star"}</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy || !archiveAvailable} onClick={onArchive}>{archiveLabel}</button>
@@ -6076,7 +6192,7 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
             </div>
           </div>
         )}
-        <iframe title="Email body" sandbox="" srcDoc={messageDocument(message.body || message.snippet || "")} style={bodyFrameStyle} />
+        <iframe title="Email body" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={messageDocument(message.body || message.snippet || "")} style={bodyFrameStyle} />
         {localReplies.map((reply) => (
           <div key={reply.id} style={{
             display: "grid",
@@ -6093,7 +6209,7 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
                 </span>
               )}
             </div>
-            <iframe title="Sent reply body" sandbox="" srcDoc={messageDocument(reply.body || reply.snippet || "")} style={replyFrameStyle} />
+            <iframe title="Sent reply body" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={messageDocument(reply.body || reply.snippet || "")} style={replyFrameStyle} />
           </div>
         ))}
       </div>
