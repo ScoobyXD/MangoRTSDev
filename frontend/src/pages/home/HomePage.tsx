@@ -4442,7 +4442,10 @@ export function HomePage({
           {!hideNavigation && (
             <HomeSidebar
               activeViewID={activeViewID}
+              apiBase={apiBase}
+              companyID={companyID}
               connectedAccountEmail={connection?.account_email}
+              currentUserID={currentUserID}
               sharedInboxes={sharedInboxes}
               loadingSharedInboxes={loadingSharedInboxes}
               busy={busy}

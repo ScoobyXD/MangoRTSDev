@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { NotificationPopover } from "../../app/NotificationPopover";
@@ -23,6 +24,8 @@ import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, H
 import type { ComposeAttachment, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, GVICInboxRole, GVICInboxStatus } from "./homeTypes";
 import { buildGVICRoleInboxGroupsByCell, buildSharedInboxRows, cleanIDList, clampNumber, collectSharedInboxSubtreeIDs, formatAddressList, formatMessageDate, getSharedInboxChildPosition, getSharedInboxSiblingPosition, hasExplorerDrag, hasTriageMessageDrag, isSharedInboxFolderDescendant, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData, type SharedInboxDropPlacement, type SharedInboxTreeRow } from "./homeUtils";
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, deleteModalBackdropStyle, deleteModalDetailStyle, deleteModalStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, navButtonStyle, navLabelStyle, navMetaStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, primaryButtonStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxAccountMetaStyle, sharedInboxContextMenuButtonStyle, sharedInboxDisclosureButtonStyle, sharedInboxFolderRowStyle, sharedInboxLabelStackStyle, sharedInboxNameLineStyle, sharedInboxPermissionLockStyle, sharedInboxRenameInputStyle, sharedInboxRowsStyle, shortcutRemoveStyle, sidebarNavStyle, sidebarSectionStyle, sidebarStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
+import { DEFAULT_MY_WORK_GROUPINGS, MY_WORK_GROUPING_FIELDS, myWorkGroupingFieldLabel, normalizeMyWorkGroupingStack } from "./myWorkGrouping";
+import { createSavedViewID, deleteSavedView as deleteSavedViewRequest, fetchSavedViews, saveSavedView, type SavedView, type SavedViewGrouping, type SavedViewPrincipal, type SavedViewSurface } from "./savedViewsApi";
 
 const SHARED_TRIAGE_FOLDER_DRAG_MIME = "application/x-mangorts-shared-triage-folder";
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
@@ -939,6 +942,688 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
   );
 }
 
+type HomeSidebarSavedViewsSurface = Extract<SavedViewSurface, "my_work" | "updates">;
+
+type HomeSidebarSavedGroupingSetting = {
+  setting_id: string;
+  company_id: string;
+  user_id: string;
+  surface: HomeSidebarSavedViewsSurface;
+  principal: SavedViewPrincipal;
+  principal_id: string;
+  name: string;
+  groupings: SavedViewGrouping[];
+  position: number;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+const HOME_UPDATES_GROUPING_FIELDS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "type", label: "Type" },
+  { value: "date", label: "Date" },
+  { value: "gvic", label: "GVIC" },
+  { value: "project", label: "Project" },
+  { value: "logic_gate", label: "Logic Gate" },
+];
+const HOME_DEFAULT_UPDATE_GROUPINGS: SavedViewGrouping[] = [
+  { field: "project", direction: "asc" },
+  { field: "logic_gate", direction: "asc" },
+];
+const HOME_MY_WORK_SELECTED_VIEW_STORAGE_KEY = "mangorts.myWork.selectedView.v1";
+const HOME_UPDATES_SELECTED_VIEW_STORAGE_KEY = "mangorts.updates.selectedView.v1";
+
+function homeSidebarSavedViewStorageKey(surface: HomeSidebarSavedViewsSurface, companyID: string, userID: string): string {
+  const prefix = surface === "my_work" ? HOME_MY_WORK_SELECTED_VIEW_STORAGE_KEY : HOME_UPDATES_SELECTED_VIEW_STORAGE_KEY;
+  const cleanCompanyID = companyID.trim();
+  const cleanUserID = userID.trim();
+  return cleanCompanyID && cleanUserID ? `${prefix}:${cleanCompanyID}:${cleanUserID}` : prefix;
+}
+
+function readHomeSidebarSelectedViewID(surface: HomeSidebarSavedViewsSurface, companyID: string, userID: string): string {
+  try {
+    return localStorage.getItem(homeSidebarSavedViewStorageKey(surface, companyID, userID))?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function storeHomeSidebarSelectedViewID(surface: HomeSidebarSavedViewsSurface, companyID: string, userID: string, settingID: string): void {
+  const cleanSettingID = settingID.trim();
+  if (!cleanSettingID) return;
+  try {
+    localStorage.setItem(homeSidebarSavedViewStorageKey(surface, companyID, userID), cleanSettingID);
+  } catch {}
+}
+
+function homeSidebarGroupingFields(surface: HomeSidebarSavedViewsSurface): ReadonlyArray<{ value: string; label: string }> {
+  return surface === "my_work" ? MY_WORK_GROUPING_FIELDS : HOME_UPDATES_GROUPING_FIELDS;
+}
+
+function homeSidebarDefaultGroupings(surface: HomeSidebarSavedViewsSurface): SavedViewGrouping[] {
+  return surface === "my_work" ? DEFAULT_MY_WORK_GROUPINGS.map((item) => ({ field: item.field, direction: item.direction })) : [...HOME_DEFAULT_UPDATE_GROUPINGS];
+}
+
+function normalizeHomeSidebarGroupingStack(surface: HomeSidebarSavedViewsSurface, value: unknown): SavedViewGrouping[] {
+  if (surface === "my_work") {
+    return normalizeMyWorkGroupingStack(value).map((item) => ({ field: item.field, direction: item.direction }));
+  }
+  if (!Array.isArray(value)) return homeSidebarDefaultGroupings(surface);
+  const validFields = new Set(homeSidebarGroupingFields(surface).map((field) => field.value));
+  const out: SavedViewGrouping[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const candidate = item as { field?: unknown; direction?: unknown };
+    const field = typeof candidate.field === "string" ? candidate.field.trim() : "";
+    if (!field || !validFields.has(field) || seen.has(field)) continue;
+    seen.add(field);
+    out.push({ field, direction: candidate.direction === "desc" ? "desc" : "asc" });
+  }
+  return out;
+}
+
+function homeSidebarGroupingFieldLabel(surface: HomeSidebarSavedViewsSurface, field: string): string {
+  if (surface === "my_work") return myWorkGroupingFieldLabel(field as Parameters<typeof myWorkGroupingFieldLabel>[0]);
+  return HOME_UPDATES_GROUPING_FIELDS.find((item) => item.value === field)?.label ?? "Field";
+}
+
+function createDefaultHomeSidebarSavedView(surface: HomeSidebarSavedViewsSurface, companyID: string, currentUserID: string): HomeSidebarSavedGroupingSetting {
+  const now = new Date().toISOString();
+  return {
+    setting_id: createSavedViewID(),
+    company_id: companyID.trim(),
+    user_id: currentUserID.trim(),
+    surface,
+    principal: "user",
+    principal_id: currentUserID.trim(),
+    name: surface === "my_work" ? "Project" : "Updates",
+    groupings: homeSidebarDefaultGroupings(surface),
+    position: 1000,
+    created_timestamp: now,
+    updated_timestamp: now,
+  };
+}
+
+function homeSidebarSavedViewToSetting(
+  view: SavedView,
+  fallback: HomeSidebarSavedGroupingSetting,
+  surface: HomeSidebarSavedViewsSurface,
+  currentUserID: string,
+): HomeSidebarSavedGroupingSetting {
+  return {
+    setting_id: view.saved_view_id.trim() || fallback.setting_id,
+    company_id: fallback.company_id,
+    user_id: currentUserID.trim(),
+    surface,
+    principal: view.principal === "group" ? "group" : "user",
+    principal_id: view.principal_id.trim() || fallback.principal_id,
+    name: view.name.trim() || fallback.name,
+    groupings: normalizeHomeSidebarGroupingStack(surface, view.groupings),
+    position: Number.isFinite(view.position) ? view.position : fallback.position,
+    created_timestamp: view.created_timestamp || fallback.created_timestamp,
+    updated_timestamp: view.updated_timestamp || fallback.updated_timestamp,
+  };
+}
+
+function homeSidebarSettingToSavedViewInput(setting: HomeSidebarSavedGroupingSetting, companyID: string, currentUserID: string) {
+  return {
+    company_id: companyID.trim(),
+    saved_view_id: setting.setting_id,
+    surface: setting.surface,
+    principal: setting.principal,
+    principal_id: (setting.principal === "group" ? setting.principal_id : currentUserID).trim(),
+    name: setting.name,
+    groupings: normalizeHomeSidebarGroupingStack(setting.surface, setting.groupings),
+    position: setting.position,
+  };
+}
+
+function nextHomeSidebarSavedViewPosition(settings: HomeSidebarSavedGroupingSetting[]): number {
+  return Math.max(0, ...settings.map((setting) => Number.isFinite(setting.position) ? setting.position : 0)) + 1000;
+}
+
+function HomeSidebarSavedViewsFallback({
+  apiBase,
+  companyID,
+  currentUserID,
+  surface,
+  onSelectSurface,
+}: {
+  apiBase: string;
+  companyID: string;
+  currentUserID: string;
+  surface: HomeSidebarSavedViewsSurface;
+  onSelectSurface: () => void;
+}) {
+  const fallbackSetting = useMemo(() => createDefaultHomeSidebarSavedView(surface, companyID, currentUserID), [companyID, currentUserID, surface]);
+  const [settings, setSettings] = useState<HomeSidebarSavedGroupingSetting[]>(() => [fallbackSetting]);
+  const [selectedSettingID, setSelectedSettingID] = useState(fallbackSetting.setting_id);
+  const [contextMenu, setContextMenu] = useState<{ settingID: string; x: number; y: number } | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorPosition, setEditorPosition] = useState({ left: 320, top: 92 });
+  const [fieldMenuIndex, setFieldMenuIndex] = useState<number | null>(null);
+  const [addGroupingOpen, setAddGroupingOpen] = useState(false);
+  const [error, setError] = useState("");
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
+  const contextSetting = contextMenu ? settings.find((setting) => setting.setting_id === contextMenu.settingID) ?? null : null;
+  const activeFieldSet = new Set(selectedSetting.groupings.map((grouping) => grouping.field));
+  const addableFields = homeSidebarGroupingFields(surface).filter((field) => !activeFieldSet.has(field.value));
+
+  const updateEditorPosition = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = 430;
+    const inset = 10;
+    const left = Math.max(inset, Math.min(rect.right + 12, window.innerWidth - width - inset));
+    const top = Math.max(inset, Math.min(rect.top, window.innerHeight - 180));
+    setEditorPosition((current) => (current.left === left && current.top === top ? current : { left, top }));
+  }, []);
+
+  useEffect(() => {
+    if (!apiBase || !companyID.trim()) {
+      setSettings([fallbackSetting]);
+      setSelectedSettingID(fallbackSetting.setting_id);
+      return undefined;
+    }
+    let cancelled = false;
+    setError("");
+    void fetchSavedViews({ apiBase, companyID, surface }).then((savedViews) => {
+      if (cancelled) return;
+      const loaded = savedViews
+        .filter((view) => view.surface === surface)
+        .map((view) => homeSidebarSavedViewToSetting(view, fallbackSetting, surface, currentUserID));
+      const nextSettings = loaded.length > 0 ? loaded : [fallbackSetting];
+      const preferredSettingID = readHomeSidebarSelectedViewID(surface, companyID, currentUserID);
+      const nextSelectedSettingID = nextSettings.find((setting) => setting.setting_id === preferredSettingID)?.setting_id ?? nextSettings[0]?.setting_id ?? "";
+      setSettings(nextSettings);
+      setSelectedSettingID(nextSelectedSettingID);
+      if (nextSelectedSettingID) storeHomeSidebarSelectedViewID(surface, companyID, currentUserID, nextSelectedSettingID);
+    }).catch((loadError) => {
+      if (cancelled) return;
+      setSettings([fallbackSetting]);
+      setSelectedSettingID(fallbackSetting.setting_id);
+      setError(loadError instanceof Error && loadError.message.trim() ? loadError.message.trim() : "Failed to load saved views");
+    });
+    return () => { cancelled = true; };
+  }, [apiBase, companyID, currentUserID, fallbackSetting, surface]);
+
+  useEffect(() => {
+    if (!editorOpen) return undefined;
+    updateEditorPosition();
+    const timer = window.setTimeout(updateEditorPosition, 0);
+    window.addEventListener("resize", updateEditorPosition);
+    window.addEventListener("scroll", updateEditorPosition, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("resize", updateEditorPosition);
+      window.removeEventListener("scroll", updateEditorPosition, true);
+    };
+  }, [editorOpen, updateEditorPosition]);
+
+  const persistSetting = useCallback((setting: HomeSidebarSavedGroupingSetting) => {
+    if (!apiBase || !companyID.trim()) return;
+    setError("");
+    void saveSavedView({
+      apiBase,
+      savedView: homeSidebarSettingToSavedViewInput(setting, companyID, currentUserID),
+    }).then((savedView) => {
+      const normalized = homeSidebarSavedViewToSetting(savedView, setting, surface, currentUserID);
+      setSettings((current) => current.map((item) => (item.setting_id === setting.setting_id ? normalized : item)));
+    }).catch((saveError) => {
+      setError(saveError instanceof Error && saveError.message.trim() ? saveError.message.trim() : "Failed to save view");
+    });
+  }, [apiBase, companyID, currentUserID, surface]);
+
+  const selectSetting = useCallback((settingID: string, navigate = false) => {
+    setSelectedSettingID(settingID);
+    storeHomeSidebarSelectedViewID(surface, companyID, currentUserID, settingID);
+    if (navigate) onSelectSurface();
+  }, [companyID, currentUserID, onSelectSurface, surface]);
+
+  const updateSelectedSetting = useCallback((updater: (setting: HomeSidebarSavedGroupingSetting) => HomeSidebarSavedGroupingSetting) => {
+    const updated = updater(selectedSetting);
+    const next = {
+      ...updated,
+      groupings: normalizeHomeSidebarGroupingStack(surface, updated.groupings),
+      updated_timestamp: new Date().toISOString(),
+    };
+    setSettings((current) => current.map((setting) => (setting.setting_id === selectedSetting.setting_id ? next : setting)));
+    persistSetting(next);
+  }, [persistSetting, selectedSetting, surface]);
+
+  const addSavedView = useCallback(() => {
+    const now = new Date().toISOString();
+    const setting: HomeSidebarSavedGroupingSetting = {
+      ...selectedSetting,
+      setting_id: createSavedViewID(),
+      principal: "user",
+      principal_id: currentUserID,
+      name: `View ${settings.length + 1}`,
+      position: nextHomeSidebarSavedViewPosition(settings),
+      created_timestamp: now,
+      updated_timestamp: now,
+    };
+    setContextMenu(null);
+    setSettings((current) => [...current, setting]);
+    selectSetting(setting.setting_id);
+    setEditorOpen(true);
+    persistSetting(setting);
+  }, [currentUserID, persistSetting, selectSetting, selectedSetting, settings]);
+
+  const renameSavedView = useCallback((settingID: string) => {
+    const setting = settings.find((item) => item.setting_id === settingID);
+    if (!setting) return;
+    const nextName = window.prompt("Rename view", setting.name)?.trim();
+    if (!nextName || nextName === setting.name) return;
+    const next = { ...setting, name: nextName, updated_timestamp: new Date().toISOString() };
+    setSettings((current) => current.map((item) => (item.setting_id === settingID ? next : item)));
+    persistSetting(next);
+  }, [persistSetting, settings]);
+
+  const deleteSavedView = useCallback((settingID: string) => {
+    const setting = settings.find((item) => item.setting_id === settingID);
+    setSettings((current) => {
+      if (current.length <= 1) return current;
+      const next = current.filter((item) => item.setting_id !== settingID);
+      if (selectedSettingID === settingID) {
+        const nextSettingID = next[0]?.setting_id ?? "";
+        setSelectedSettingID(nextSettingID);
+        if (nextSettingID) storeHomeSidebarSelectedViewID(surface, companyID, currentUserID, nextSettingID);
+      }
+      return next;
+    });
+    setContextMenu(null);
+    if (setting?.setting_id === selectedSetting.setting_id) setEditorOpen(false);
+    if (apiBase && companyID.trim() && setting) {
+      void deleteSavedViewRequest({ apiBase, companyID, savedViewID: setting.setting_id }).catch((deleteError) => {
+        setError(deleteError instanceof Error && deleteError.message.trim() ? deleteError.message.trim() : "Failed to delete view");
+      });
+    }
+  }, [apiBase, companyID, currentUserID, selectedSetting.setting_id, selectedSettingID, settings, surface]);
+
+  const editor = editorOpen && typeof document !== "undefined" ? createPortal(
+    <div style={homeSidebarSavedViewEditorStyle(editorPosition)}>
+      <div style={homeSidebarSavedViewEditorHeaderStyle}>
+        <span style={homeSidebarSavedViewEditorTitleStyle}>{selectedSetting.name}</span>
+        <button type="button" title="Close editor" style={homeSidebarSavedViewEditorCloseStyle} onClick={() => setEditorOpen(false)}>x</button>
+      </div>
+      <div style={homeSidebarSavedViewGroupingStackStyle}>
+        {selectedSetting.groupings.map((grouping, index) => (
+          <div key={`${grouping.field}:${index}`} style={homeSidebarSavedViewGroupingRowStyle(index)}>
+            <button
+              type="button"
+              style={homeSidebarSavedViewFieldButtonStyle}
+              onClick={() => {
+                setAddGroupingOpen(false);
+                setFieldMenuIndex(fieldMenuIndex === index ? null : index);
+              }}
+            >
+              {homeSidebarGroupingFieldLabel(surface, grouping.field)}
+            </button>
+            {fieldMenuIndex === index && (
+              <div style={homeSidebarSavedViewMenuStyle}>
+                {homeSidebarGroupingFields(surface)
+                  .filter((field) => field.value === grouping.field || !selectedSetting.groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
+                  .map((field) => (
+                    <button
+                      key={field.value}
+                      type="button"
+                      style={homeSidebarSavedViewMenuOptionStyle(field.value === grouping.field)}
+                      onClick={() => {
+                        updateSelectedSetting((setting) => ({
+                          ...setting,
+                          groupings: setting.groupings.map((item, itemIndex) => itemIndex === index ? { ...item, field: field.value } : item),
+                        }));
+                        setFieldMenuIndex(null);
+                      }}
+                    >
+                      {field.label}
+                    </button>
+                  ))}
+              </div>
+            )}
+            <button
+              type="button"
+              style={homeSidebarSavedViewDirectionButtonStyle}
+              onClick={() => updateSelectedSetting((setting) => ({
+                ...setting,
+                groupings: setting.groupings.map((item, itemIndex) => itemIndex === index ? { ...item, direction: item.direction === "asc" ? "desc" : "asc" } : item),
+              }))}
+            >
+              {grouping.direction === "asc" ? "Asc" : "Desc"}
+            </button>
+            <button
+              type="button"
+              title="Remove grouping"
+              style={homeSidebarSavedViewRemoveButtonStyle}
+              onClick={() => {
+                setFieldMenuIndex(null);
+                updateSelectedSetting((setting) => ({
+                  ...setting,
+                  groupings: setting.groupings.filter((_, itemIndex) => itemIndex !== index),
+                }));
+              }}
+            >
+              x
+            </button>
+          </div>
+        ))}
+        <div style={{ position: "relative" }}>
+          <button
+            type="button"
+            style={homeSidebarSavedViewAddGroupingButtonStyle}
+            disabled={addableFields.length === 0}
+            onClick={() => {
+              setFieldMenuIndex(null);
+              setAddGroupingOpen((open) => !open);
+            }}
+          >
+            + Add Grouping
+          </button>
+          {addGroupingOpen && (
+            <div style={homeSidebarSavedViewMenuStyle}>
+              {addableFields.map((field) => (
+                <button
+                  key={field.value}
+                  type="button"
+                  style={homeSidebarSavedViewMenuOptionStyle(false)}
+                  onClick={() => {
+                    updateSelectedSetting((setting) => ({ ...setting, groupings: [...setting.groupings, { field: field.value, direction: "asc" }] }));
+                    setAddGroupingOpen(false);
+                  }}
+                >
+                  {field.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  ) : null;
+
+  return (
+    <div ref={panelRef} style={homeSidebarSavedViewPanelStyle}>
+      <div style={homeSidebarSavedViewListStyle}>
+        {settings.map((item) => (
+          <button
+            key={item.setting_id}
+            type="button"
+            style={homeSidebarSavedViewRowStyle(item.setting_id === selectedSetting.setting_id)}
+            onClick={() => selectSetting(item.setting_id, true)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setContextMenu({ settingID: item.setting_id, x: event.clientX, y: event.clientY });
+            }}
+          >
+            <span style={homeSidebarSavedViewNameStyle}>{item.name}</span>
+          </button>
+        ))}
+      </div>
+      <button type="button" style={homeSidebarSavedViewAddButtonStyle} onClick={addSavedView}>Add new +</button>
+      {error && <div style={homeSidebarSavedViewErrorStyle}>{error}</div>}
+      {contextMenu && contextSetting && (
+        <FrameRightClickMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)} minWidth={170}>
+          <button type="button" style={sharedInboxContextMenuButtonStyle} onClick={() => { selectSetting(contextSetting.setting_id); setContextMenu(null); setEditorOpen(true); }}>
+            Edit
+          </button>
+          <button type="button" style={sharedInboxContextMenuButtonStyle} onClick={() => { renameSavedView(contextSetting.setting_id); setContextMenu(null); }}>
+            Rename
+          </button>
+          <button
+            type="button"
+            style={{ ...sharedInboxContextMenuButtonStyle, color: settings.length <= 1 ? "#94a3b8" : "#dc2626" }}
+            disabled={settings.length <= 1}
+            onClick={() => deleteSavedView(contextSetting.setting_id)}
+          >
+            Delete
+          </button>
+        </FrameRightClickMenu>
+      )}
+      {editor}
+    </div>
+  );
+}
+
+const homeSidebarSavedViewPanelStyle: React.CSSProperties = {
+  position: "relative",
+  width: "100%",
+  minWidth: 0,
+  display: "grid",
+  gap: 4,
+  padding: "0 4px 2px 14px",
+};
+
+const homeSidebarSavedViewListStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 4,
+};
+
+function homeSidebarSavedViewRowStyle(active: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: 26,
+    display: "grid",
+    alignItems: "center",
+    border: active ? "1px solid rgba(15, 118, 110, 0.34)" : "1px solid transparent",
+    borderRadius: 6,
+    background: active ? "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(153,246,228,0.56))" : "transparent",
+    boxShadow: active ? "inset 3px 0 0 rgba(15, 118, 110, 0.72)" : "none",
+    color: "#111827",
+    cursor: "pointer",
+    font: "inherit",
+    padding: "0 7px",
+  };
+}
+
+const homeSidebarSavedViewNameStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 25,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontSize: 11,
+  fontWeight: 750,
+  textAlign: "left",
+};
+
+const homeSidebarSavedViewAddButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 26,
+  border: "1px solid rgba(15, 118, 110, 0.18)",
+  borderRadius: 6,
+  background: "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(204,251,241,0.48))",
+  color: "#0f766e",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 820,
+  padding: "0 8px",
+};
+
+const homeSidebarSavedViewErrorStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#dc2626",
+  fontSize: 10,
+  fontWeight: 700,
+};
+
+function homeSidebarSavedViewEditorStyle(position: { left: number; top: number }): React.CSSProperties {
+  return {
+    position: "fixed",
+    zIndex: 90,
+    top: position.top,
+    left: position.left,
+    width: "min(430px, calc(100vw - 96px))",
+    maxHeight: "min(520px, calc(100vh - 32px))",
+    overflow: "auto",
+    display: "grid",
+    gap: 10,
+    minWidth: 0,
+    border: "1px solid rgba(37, 99, 235, 0.14)",
+    borderRadius: 14,
+    background: "linear-gradient(145deg, rgba(248, 252, 255, 0.97), rgba(240, 247, 250, 0.92) 48%, rgba(236, 253, 245, 0.86))",
+    boxShadow: "12px 12px 28px rgba(148, 163, 184, 0.22), -8px -8px 22px rgba(255, 255, 255, 0.84), inset 1px 1px 0 rgba(255, 255, 255, 0.88)",
+    backdropFilter: "blur(18px) saturate(1.14)",
+    padding: 10,
+  };
+}
+
+const homeSidebarSavedViewEditorHeaderStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 26px",
+  alignItems: "center",
+  gap: 8,
+};
+
+const homeSidebarSavedViewEditorTitleStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#0f172a",
+  fontSize: 12,
+  fontWeight: 850,
+};
+
+const homeSidebarSavedViewEditorCloseStyle: React.CSSProperties = {
+  width: 26,
+  height: 24,
+  border: "1px solid rgba(15, 23, 42, 0.12)",
+  borderRadius: 6,
+  background: "rgba(255, 255, 255, 0.84)",
+  color: "#64748b",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  padding: 0,
+};
+
+const homeSidebarSavedViewGroupingStackStyle: React.CSSProperties = {
+  width: "min(396px, 100%)",
+  maxWidth: 396,
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 6,
+};
+
+function homeSidebarSavedViewGroupingRowStyle(index: number): React.CSSProperties {
+  const accent = ["#0891b2", "#d97706", "#7c3aed", "#059669", "#be123c"][index % 5] ?? "#475569";
+  return {
+    position: "relative",
+    width: "min(100%, 360px)",
+    minWidth: 0,
+    minHeight: 30,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 46px 22px",
+    alignItems: "center",
+    gap: 5,
+    marginLeft: Math.min(index * 12, 30),
+    border: `1px solid ${homeColorWithAlpha(accent, 0.18)}`,
+    borderRadius: 7,
+    background: `linear-gradient(145deg, rgba(255,255,255,0.92), ${homeColorWithAlpha(accent, 0.12)})`,
+    boxShadow: "4px 4px 12px rgba(148, 163, 184, 0.13), -3px -3px 10px rgba(255, 255, 255, 0.72), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
+    padding: "0 4px 0 7px",
+  };
+}
+
+const homeSidebarSavedViewFieldButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  height: 24,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  border: "none",
+  borderRadius: 4,
+  background: "transparent",
+  color: "#111827",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 800,
+  textAlign: "left",
+  padding: "0 4px",
+};
+
+const homeSidebarSavedViewDirectionButtonStyle: React.CSSProperties = {
+  height: 22,
+  border: "1px solid rgba(37, 99, 235, 0.16)",
+  borderRadius: 5,
+  background: "rgba(255, 255, 255, 0.78)",
+  color: "#1d4ed8",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 10,
+  fontWeight: 820,
+};
+
+const homeSidebarSavedViewRemoveButtonStyle: React.CSSProperties = {
+  height: 22,
+  border: "none",
+  background: "transparent",
+  color: "#64748b",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+};
+
+const homeSidebarSavedViewAddGroupingButtonStyle: React.CSSProperties = {
+  minHeight: 28,
+  border: "1px dashed rgba(14, 165, 233, 0.38)",
+  borderRadius: 6,
+  background: "linear-gradient(135deg, rgba(255,255,255,0.90), rgba(224,242,254,0.56))",
+  color: "#0369a1",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 820,
+  padding: "0 8px",
+};
+
+const homeSidebarSavedViewMenuStyle: React.CSSProperties = {
+  position: "absolute",
+  zIndex: 22,
+  top: "calc(100% + 4px)",
+  left: 0,
+  width: 180,
+  display: "grid",
+  gap: 2,
+  padding: 5,
+  border: "1px solid rgba(15, 23, 42, 0.16)",
+  borderRadius: 6,
+  background: "#ffffff",
+  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.16)",
+};
+
+function homeSidebarSavedViewMenuOptionStyle(active: boolean): React.CSSProperties {
+  return {
+    minHeight: 27,
+    border: "none",
+    borderRadius: 5,
+    background: active ? "rgba(71, 85, 105, 0.12)" : "transparent",
+    color: "#111827",
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: active ? 800 : 700,
+    textAlign: "left",
+    padding: "0 7px",
+  };
+}
+
 export function HomeNavButton({ label, active, depth = 0, meta, onClick }: {
   label: string;
   active: boolean;
@@ -968,7 +1653,10 @@ function getSharedTriageDropPlacement(event: React.DragEvent<HTMLElement>): Shar
 
 export function HomeSidebar({
   activeViewID,
+  apiBase,
+  companyID,
   connectedAccountEmail,
+  currentUserID,
   sharedInboxes,
   loadingSharedInboxes,
   busy,
@@ -982,7 +1670,10 @@ export function HomeSidebar({
   onRemoveSharedInbox,
 }: {
   activeViewID: HomeViewID;
+  apiBase: string;
+  companyID: string;
   connectedAccountEmail?: string;
+  currentUserID: string;
   sharedInboxes: CommunicationsSharedInbox[];
   loadingSharedInboxes: boolean;
   busy: string;
@@ -1502,11 +2193,31 @@ export function HomeSidebar({
         </section>
         <section style={sidebarSectionStyle}>
           <HomeNavButton label="My Work" active={activeViewID === "my-work"} onClick={() => onSelectView("my-work", "all")} />
-          <div id={HOME_MY_WORK_SAVED_VIEWS_SLOT_ID} />
+          <div id={HOME_MY_WORK_SAVED_VIEWS_SLOT_ID}>
+            {activeViewID !== "my-work" && (
+              <HomeSidebarSavedViewsFallback
+                apiBase={apiBase}
+                companyID={companyID}
+                currentUserID={currentUserID}
+                surface="my_work"
+                onSelectSurface={() => onSelectView("my-work", "all")}
+              />
+            )}
+          </div>
         </section>
         <section style={sidebarSectionStyle}>
           <HomeNavButton label="Updates" active={activeViewID === "updates"} onClick={() => onSelectView("updates", "all")} />
-          <div id={HOME_UPDATES_SAVED_VIEWS_SLOT_ID} />
+          <div id={HOME_UPDATES_SAVED_VIEWS_SLOT_ID}>
+            {activeViewID !== "updates" && (
+              <HomeSidebarSavedViewsFallback
+                apiBase={apiBase}
+                companyID={companyID}
+                currentUserID={currentUserID}
+                surface="updates"
+                onSelectSurface={() => onSelectView("updates", "all")}
+              />
+            )}
+          </div>
         </section>
       </nav>
       {sharedContextMenu && (() => {

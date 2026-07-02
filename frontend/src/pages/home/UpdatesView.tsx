@@ -150,6 +150,7 @@ const DEFAULT_UPDATE_GROUPINGS: UpdateGroupingSetting[] = [
 ];
 
 const UPDATE_GROUPING_FIELD_SET = new Set<UpdateGroupingField>(UPDATE_GROUPING_FIELDS.map((field) => field.value));
+const UPDATES_SELECTED_VIEW_STORAGE_KEY = "mangorts.updates.selectedView.v1";
 const NOTIFICATION_TYPE_NODE_ASSIGNED = "node.assigned";
 const NOTIFICATION_TYPE_NODE_FIELDS_CHANGED = "node.fields_changed";
 const NOTIFICATION_TYPE_NODE_COMMENT_CREATED = "node.comment_created";
@@ -209,8 +210,13 @@ export function UpdatesView({
       if (cancelled) return;
       const next = savedViewsToUpdateSettings(savedViews, fallbackSetting, currentUserID);
       const settingsForState = next.length > 0 ? next : [fallbackSetting];
+      const preferredSettingID = readUpdatesSelectedViewID(companyID, currentUserID);
+      const nextSelectedSettingID = settingsForState.find((setting) => setting.setting_id === preferredSettingID)?.setting_id
+        ?? settingsForState[0]?.setting_id
+        ?? "";
       setSettings(settingsForState);
-      setSelectedSettingID(settingsForState[0]?.setting_id ?? "");
+      setSelectedSettingID(nextSelectedSettingID);
+      if (nextSelectedSettingID) storeUpdatesSelectedViewID(companyID, currentUserID, nextSelectedSettingID);
     }).catch((nextError) => {
       if (cancelled) return;
       setSettings([fallbackSetting]);
@@ -222,8 +228,10 @@ export function UpdatesView({
 
   useEffect(() => {
     if (settings.some((setting) => setting.setting_id === selectedSettingID)) return;
-    setSelectedSettingID(settings[0]?.setting_id ?? "");
-  }, [selectedSettingID, settings]);
+    const nextSettingID = settings[0]?.setting_id ?? "";
+    setSelectedSettingID(nextSettingID);
+    if (nextSettingID) storeUpdatesSelectedViewID(companyID, currentUserID, nextSettingID);
+  }, [companyID, currentUserID, selectedSettingID, settings]);
 
   const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
 
@@ -287,8 +295,14 @@ export function UpdatesView({
     };
     setSettings((current) => [...current, setting]);
     setSelectedSettingID(setting.setting_id);
+    storeUpdatesSelectedViewID(companyID, currentUserID, setting.setting_id);
     persistSavedSetting(setting);
-  }, [currentUserID, persistSavedSetting, selectedSetting, settings.length]);
+  }, [companyID, currentUserID, persistSavedSetting, selectedSetting, settings.length]);
+
+  const selectSavedView = useCallback((settingID: string) => {
+    setSelectedSettingID(settingID);
+    storeUpdatesSelectedViewID(companyID, currentUserID, settingID);
+  }, [companyID, currentUserID]);
 
   const renameSavedView = useCallback((settingID: string) => {
     const setting = settings.find((item) => item.setting_id === settingID);
@@ -305,7 +319,11 @@ export function UpdatesView({
     setSettings((current) => {
       if (current.length <= 1) return current;
       const next = current.filter((item) => item.setting_id !== settingID);
-      if (selectedSettingID === settingID) setSelectedSettingID(next[0]?.setting_id ?? "");
+      if (selectedSettingID === settingID) {
+        const nextSettingID = next[0]?.setting_id ?? "";
+        setSelectedSettingID(nextSettingID);
+        if (nextSettingID) storeUpdatesSelectedViewID(companyID, currentUserID, nextSettingID);
+      }
       return next;
     });
     if (apiBase && companyID.trim() && setting) {
@@ -313,7 +331,7 @@ export function UpdatesView({
         setSettingsError(savedViewErrorMessage(nextError, "Failed to delete view"));
       });
     }
-  }, [apiBase, companyID, selectedSettingID, settings]);
+  }, [apiBase, companyID, currentUserID, selectedSettingID, settings]);
 
   const updateGrouping = useCallback((index: number, grouping: UpdateGroupingSetting) => {
     updateSelectedSetting((setting) => ({
@@ -696,7 +714,7 @@ export function UpdatesView({
             addableFields={addableFields}
             addGroupingOpen={addGroupingOpen}
             groupingFieldMenuIndex={groupingFieldMenuIndex}
-            onSelectSetting={setSelectedSettingID}
+            onSelectSetting={selectSavedView}
             onAddSavedView={addSavedView}
             onRenameSavedView={renameSavedView}
             onDeleteSavedView={deleteSavedView}
@@ -1751,6 +1769,30 @@ function sortUpdateRows(rows: UpdateFeedRow[]): UpdateFeedRow[] {
       || left.item.title.localeCompare(right.item.title, undefined, { numeric: true, sensitivity: "base" })
       || left.rowKey.localeCompare(right.rowKey);
   });
+}
+
+function updatesSelectedViewStorageKey(companyID: string, userID: string): string {
+  const cleanCompanyID = companyID.trim();
+  const cleanUserID = userID.trim();
+  return cleanCompanyID && cleanUserID
+    ? `${UPDATES_SELECTED_VIEW_STORAGE_KEY}:${cleanCompanyID}:${cleanUserID}`
+    : UPDATES_SELECTED_VIEW_STORAGE_KEY;
+}
+
+function readUpdatesSelectedViewID(companyID: string, userID: string): string {
+  try {
+    return localStorage.getItem(updatesSelectedViewStorageKey(companyID, userID))?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function storeUpdatesSelectedViewID(companyID: string, userID: string, settingID: string): void {
+  const cleanSettingID = settingID.trim();
+  if (!cleanSettingID) return;
+  try {
+    localStorage.setItem(updatesSelectedViewStorageKey(companyID, userID), cleanSettingID);
+  } catch {}
 }
 
 function updateGroupingFieldLabel(field: UpdateGroupingField): string {
