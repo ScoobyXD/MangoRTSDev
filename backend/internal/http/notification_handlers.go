@@ -599,11 +599,12 @@ func editorMentionCommentPreviewForOccurrence(infoType, information, mentionKind
 		return fullPreview
 	}
 	text := editorMentionPlainTextPreview(infoType, information)
-	starts := editorMentionAliasOccurrenceStarts(text, aliases, editorMentionTriggerForKind(mentionKind))
+	trigger := editorMentionTriggerForKind(mentionKind)
+	starts := editorMentionAliasOccurrenceStarts(text, aliases, trigger)
 	if occurrenceIndex >= len(starts) {
 		return fullPreview
 	}
-	if line := editorMentionPreviewLineAt(text, starts[occurrenceIndex]); line != "" {
+	if line := editorMentionPreviewLineAt(text, starts[occurrenceIndex], aliases, trigger); line != "" {
 		return line
 	}
 	return fullPreview
@@ -682,7 +683,7 @@ func editorMentionAliasOccurrenceStarts(text string, aliases []string, trigger s
 	return out
 }
 
-func editorMentionPreviewLineAt(text string, start int) string {
+func editorMentionPreviewLineAt(text string, start int, aliases []string, trigger string) string {
 	if start < 0 || start > len(text) {
 		return ""
 	}
@@ -694,7 +695,68 @@ func editorMentionPreviewLineAt(text string, start int) string {
 	if after := strings.Index(text[start:], "\n"); after >= 0 {
 		lineEnd = start + after
 	}
-	return strings.Join(strings.Fields(strings.TrimSpace(text[lineStart:lineEnd])), " ")
+	line := strings.Join(strings.Fields(strings.TrimSpace(text[lineStart:lineEnd])), " ")
+	if !editorMentionPreviewLineIsOnlyMention(line, aliases, trigger) {
+		return line
+	}
+	nextLine := editorMentionNextPreviewLine(text, lineEnd)
+	if nextLine == "" {
+		return line
+	}
+	return strings.TrimSpace(line + " " + nextLine)
+}
+
+func editorMentionPreviewLineIsOnlyMention(line string, aliases []string, trigger string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+	if trigger != "!" {
+		trigger = "@"
+	}
+	for _, alias := range aliases {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			continue
+		}
+		if strings.EqualFold(line, trigger+alias) {
+			return true
+		}
+	}
+	return false
+}
+
+func editorMentionNextPreviewLine(text string, lineEnd int) string {
+	cursor := lineEnd
+	for cursor < len(text) {
+		if text[cursor] == '\n' {
+			cursor++
+			continue
+		}
+		if text[cursor] == ' ' || text[cursor] == '\t' {
+			cursor++
+			continue
+		}
+		nextEnd := len(text)
+		if after := strings.Index(text[cursor:], "\n"); after >= 0 {
+			nextEnd = cursor + after
+		}
+		line := strings.Join(strings.Fields(strings.TrimSpace(text[cursor:nextEnd])), " ")
+		if line != "" {
+			return line
+		}
+		cursor = nextEnd + 1
+	}
+	return ""
+}
+
+func (s *Server) mentionNotificationEventAlreadyRecorded(companyID, idempotencyKey string) (bool, error) {
+	companyID = strings.TrimSpace(companyID)
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if companyID == "" || idempotencyKey == "" {
+		return false, nil
+	}
+	return s.repo.DomainEventExistsByIdempotencyKey(companyID, idempotencyKey)
 }
 
 func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityType, entityID, informationID, infoType, information string) {
@@ -749,6 +811,14 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 			mentionOccurrenceByUserID[userID] = occurrenceIndex + 1
 			comment := editorMentionCommentPreviewForOccurrence(infoType, information, mentionKind, userID, occurrenceIndex, mentionableUsers)
 			idempotencyKey := "mention:" + mentionKind + ":" + idempotencyEntityKey + ":" + entityID + ":" + informationID + ":" + userID + ":" + strconv.Itoa(occurrenceIndex+1)
+			alreadyRecorded, err := s.mentionNotificationEventAlreadyRecorded(companyID, idempotencyKey)
+			if err != nil {
+				log.Printf("failed to check mention notification idempotency company_id=%s entity_type=%s entity_id=%s information_id=%s user_id=%s mention_kind=%s: %v", companyID, entityType, entityID, informationID, userID, mentionKind, err)
+				return false
+			}
+			if alreadyRecorded {
+				continue
+			}
 			event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
 				CompanyID:      companyID,
 				StreamType:     "notification",

@@ -73,6 +73,7 @@ U62 - The Updates header has a Seen all action that asks for confirmation before
 U63 - Updates rows support Company Explorer-style multi-selection: normal click selects one row and activates it, Ctrl-click or Command-click toggles one row, and Shift-click additively selects the visible range from the selection anchor.
 U64 - Right-clicking an Updates row opens an Updates context menu with seen actions for the selected rows and for all rows; destructive multi-row seen actions ask for confirmation before removing notifications.
 U65 - Text editor mention row previews show the text block containing the specific new @ or ! mention occurrence; older mention blocks or unrelated editor text in the same saved document must not appear in that new row preview.
+U66 - Seeing an individual update hides that row locally without reloading the whole Updates feed; the list must not blink away and come back for the current user's own Seen action.
 
 ## Update Row Copy And Visual Language
 
@@ -324,6 +325,7 @@ Business logic covered:
 - U63
 - U64
 - U65
+- U66
 
 Given:
 - A user inserts an @ mention or ! mention into a node text editor or Logic Gate text editor.
@@ -337,7 +339,9 @@ Expected:
 - Autosaves and character edits around an existing committed mention do not create duplicate mention notifications.
 - Adding a genuinely new committed mention occurrence creates one new notification for that new occurrence.
 - The new mention row's preview is scoped to the block containing that occurrence, not earlier mention blocks or unrelated editor text in the same saved document.
+- Saving a text editor that still contains an older already-recorded mention occurrence does not recreate that old mention update, even if the old notification was previously Seen.
 - Clicking Seen on one row removes that notification permanently from the Updates feed for that user.
+- Clicking Seen on one row hides the row without a full Updates feed reload or visible blink.
 - Clicking Seen all asks for confirmation, then removes all current-user Updates notifications for the company.
 - Ctrl-click or Command-click toggles row selection, and Shift-click additively selects the visible range from the selection anchor.
 - Right-clicking a row opens an Updates context menu with seen actions for the selected rows and all rows, with confirmation before multi-row removal.

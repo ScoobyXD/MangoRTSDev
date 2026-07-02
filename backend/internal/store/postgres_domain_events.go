@@ -490,6 +490,24 @@ from domain_events
 where `+strings.Join(where, "\n  and "), args...).Scan(&sequence)
 	return sequence, err
 }
+
+func (r *PostgresRepo) DomainEventExistsByIdempotencyKey(companyID, idempotencyKey string) (bool, error) {
+	companyID = strings.TrimSpace(companyID)
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if companyID == "" || idempotencyKey == "" {
+		return false, ErrInvalid
+	}
+	var exists bool
+	err := r.db.QueryRowContext(context.Background(), `
+select exists (
+  select 1
+  from domain_events
+  where company_id=$1::uuid
+    and idempotency_key=$2
+)`, companyID, idempotencyKey).Scan(&exists)
+	return exists, err
+}
+
 func (r *PostgresRepo) MarkDomainEventPublished(companyID, eventID string) error {
 	companyID = strings.TrimSpace(companyID)
 	eventID = strings.TrimSpace(eventID)

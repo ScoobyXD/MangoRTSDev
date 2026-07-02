@@ -237,6 +237,22 @@ func (r *MemoryRepo) CurrentDomainEventSequence(query DomainEventStreamQuery) (i
 	return sequence, nil
 }
 
+func (r *MemoryRepo) DomainEventExistsByIdempotencyKey(companyID, idempotencyKey string) (bool, error) {
+	companyID = strings.TrimSpace(companyID)
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if companyID == "" || idempotencyKey == "" {
+		return false, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, item := range r.domainEvents {
+		if item.CompanyID == companyID && item.IdempotencyKey == idempotencyKey {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *MemoryRepo) updateWorkspaceReadVersionsLocked(event domain.DomainEvent) {
 	if !isWorkspaceStreamDomainEvent(event) {
 		return
