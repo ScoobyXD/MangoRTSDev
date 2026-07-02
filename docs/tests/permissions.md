@@ -52,6 +52,7 @@ P41 - Direct user permission rows override group permission rows for that user; 
 P42 - On company Explorer folders, apply-to-descendants applies the changed permission setting to all descendant folders, contained projects, contained Logic Gates, and nodes assigned to those Logic Gates.
 P43 - On Logic Gates, apply-to-descendants applies the changed permission setting to nodes currently assigned to that Logic Gate.
 P44 - The permissions dialog saves pending changes when it is closed with the X control; the dialog does not require a separate Save button.
+P45 - Runtime authorization resolves group permission rows from group source tables and group membership source rows; permission checks must not require a derived group closure/projection table to be populated.
 
 ## Scenarios
 
@@ -74,6 +75,7 @@ Business logic covered:
 - P29
 - P40
 - P41
+- P45
 
 Given:
 - A company has resources with default access, user source rows, group source rows, and separate GVIC assignments.
@@ -90,6 +92,7 @@ Expected:
 - Company managers follow resource permissions.
 - `resource_permissions` stores user/group source rows with explicit access levels.
 - Group rows are not expanded to per-user rows; later group membership changes affect effective access.
+- Group permission authorization resolves from source group/membership tables and remains correct after a schema reset even if derived group projections are empty.
 - Direct user rows override group rows for that user.
 - Updates with more than 1000 explicit assignments are rejected.
 

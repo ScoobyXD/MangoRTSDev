@@ -143,7 +143,10 @@ func TestCompanyExplorerAccessHelperCutoverUsesFinalFolderStorage(t *testing.T) 
 			"from shared_inbox_folders folder",
 			"from shared_inboxes inbox",
 			"from resource_permissions access",
-			"join company_user_group_closure closure",
+			"group_tree(company_id, ancestor_group_id, descendant_group_id, depth) as",
+			"join group_tree closure",
+			"from company_user_groups user_group",
+			"join company_user_group_members member",
 		} {
 			if !strings.Contains(normalized, want) {
 				t.Fatalf("%s missing access helper marker %q", path, want)
@@ -153,6 +156,7 @@ func TestCompanyExplorerAccessHelperCutoverUsesFinalFolderStorage(t *testing.T) 
 			"gvic_access",
 			"gvic_resource_lookup",
 			"resource_gvic_effective_assignments",
+			"company_user_group_closure",
 			"when (select max_rank from gvic_access) >= requested.required_rank",
 			"folder.folder_kind",
 			"folder.system_key",
