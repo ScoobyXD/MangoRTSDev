@@ -17,8 +17,18 @@ func (s *Server) handleRecycleBin(w http.ResponseWriter, r *http.Request) {
 	if !requireCompanyAccess(w, r, companyID) {
 		return
 	}
-	deletedByUserID, ok := requireAuthenticatedActorUserID(w, r)
+	actor, ok := authenticatedActor(r)
 	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	deletedByUserID := strings.TrimSpace(actor.User.UserID)
+	scope := "user"
+	if actorCanManageCompany(actor, companyID) {
+		deletedByUserID = ""
+		scope = "company"
+	} else if deletedByUserID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	items, err := s.repo.ListRecycleBinItems(companyID, deletedByUserID)
@@ -30,7 +40,7 @@ func (s *Server) handleRecycleBin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_list_recycle_bin")
 		return
 	}
-	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"items": items})
+	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"items": items, "scope": scope})
 }
 
 func (s *Server) handleRecycleBinRestore(w http.ResponseWriter, r *http.Request) {
@@ -101,8 +111,7 @@ func (s *Server) handleRecycleBinPermanentDelete(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusForbidden, "company_admin_required")
 		return
 	}
-	deletedByUserID := actor.User.UserID
-	if err := s.repo.PermanentlyDeleteRecycleBinItems(req.CompanyID, deletedByUserID, req.ItemIDs); errors.Is(err, store.ErrInvalid) {
+	if err := s.repo.PermanentlyDeleteRecycleBinItems(req.CompanyID, "", req.ItemIDs); errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "recycle_bin_item_ids_required")
 		return
 	} else if errors.Is(err, store.ErrNotFound) {

@@ -70,7 +70,7 @@ func (scope companyExplorerRecycleScope) hasAnyRows() bool {
 func (r *PostgresRepo) ListRecycleBinItems(companyID, deletedByUserID string) ([]domain.RecycleBinItem, error) {
 	companyID = strings.TrimSpace(companyID)
 	deletedByUserID = strings.TrimSpace(deletedByUserID)
-	if companyID == "" || deletedByUserID == "" {
+	if companyID == "" {
 		return nil, ErrInvalid
 	}
 	rows, err := r.db.QueryContext(context.Background(), `
@@ -85,7 +85,7 @@ select company_id::text,
        restore_payload
 from recycle_bin_items
 where company_id=$1::uuid
-  and deleted_by_user_id=$2::uuid
+  and (nullif($2::text, '') is null or deleted_by_user_id=nullif($2::text, '')::uuid)
 order by deleted_timestamp desc, recycle_bin_item_id desc`, companyID, deletedByUserID)
 	if isPostgresUndefinedTable(err, "recycle_bin_items") {
 		return []domain.RecycleBinItem{}, nil
@@ -122,13 +122,13 @@ func (r *PostgresRepo) PermanentlyDeleteRecycleBinItems(companyID, deletedByUser
 	companyID = strings.TrimSpace(companyID)
 	deletedByUserID = strings.TrimSpace(deletedByUserID)
 	itemIDs = normalizeRecycleBinItemIDs(itemIDs)
-	if companyID == "" || deletedByUserID == "" || len(itemIDs) == 0 {
+	if companyID == "" || len(itemIDs) == 0 {
 		return ErrInvalid
 	}
 	result, err := r.db.ExecContext(context.Background(), `
 delete from recycle_bin_items
 where company_id=$1::uuid
-  and deleted_by_user_id=$2::uuid
+  and (nullif($2::text, '') is null or deleted_by_user_id=nullif($2::text, '')::uuid)
   and recycle_bin_item_id = any(string_to_array($3, ',')::uuid[])`, companyID, deletedByUserID, strings.Join(itemIDs, ","))
 	if isPostgresUndefinedTable(err, "recycle_bin_items") {
 		return ErrNotFound

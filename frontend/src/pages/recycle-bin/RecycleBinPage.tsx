@@ -4,6 +4,7 @@ import { fetchCurrentUser } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons.js";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation.js";
+import { listCompanyUserGroups, listCompanyUsers, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../../modules/communications/communicationsApi.js";
 import {
   listRecycleBinItems,
   permanentlyDeleteRecycleBinItems,
@@ -22,6 +23,13 @@ type DragSelectState = {
   baseSelectedIDs: Set<string>;
 };
 
+type RecycleBinUserSection = {
+  key: string;
+  label: string;
+  groupLabel: string;
+  items: RecycleBinItem[];
+};
+
 const EMPTY_DRAG_STATE: DragSelectState = {
   active: false,
   anchorID: "",
@@ -37,10 +45,18 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [canPermanentlyDelete, setCanPermanentlyDelete] = useState(false);
+  const [currentUserID, setCurrentUserID] = useState("");
+  const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
+  const [companyGroups, setCompanyGroups] = useState<CompanyUserGroup[]>([]);
+  const [companyGroupMembers, setCompanyGroupMembers] = useState<CompanyUserGroupMember[]>([]);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ itemIDs: string[]; position?: ConfirmActionMenuPosition | null } | null>(null);
   const dragSelectRef = useRef<DragSelectState>(EMPTY_DRAG_STATE);
-  const orderedIDs = useMemo(() => items.map((item) => item.recycle_bin_item_id), [items]);
+  const recycleSections = useMemo(() => buildRecycleBinUserSections(items, companyUsers, companyGroups, companyGroupMembers), [companyGroupMembers, companyGroups, companyUsers, items]);
+  const displayItems = useMemo(() => canPermanentlyDelete ? recycleSections.flatMap((section) => section.items) : items, [canPermanentlyDelete, items, recycleSections]);
+  const orderedIDs = useMemo(() => displayItems.map((item) => item.recycle_bin_item_id), [displayItems]);
   const selectedItemIDs = useMemo(() => orderedIDs.filter((id) => selectedIDs.has(id)), [orderedIDs, selectedIDs]);
+  const selectedItems = useMemo(() => displayItems.filter((item) => selectedIDs.has(item.recycle_bin_item_id)), [displayItems, selectedIDs]);
+  const canRestoreSelection = selectedItems.length > 0 && selectedItems.every((item) => !canPermanentlyDelete || (item.deleted_by_user_id ?? "") === currentUserID);
   const allItemsSelected = orderedIDs.length > 0 && selectedItemIDs.length === orderedIDs.length;
 
   useEffect(() => {
@@ -52,13 +68,41 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
     void fetchCurrentUser()
       .then((current) => {
         if (cancelled) return;
+        setCurrentUserID(current.user.user_id.trim());
         setCanPermanentlyDelete(current.is_dev_admin || current.memberships.some((membership) => membership.company_id === companyID && membership.role === "company_admin"));
       })
       .catch(() => {
-        if (!cancelled) setCanPermanentlyDelete(false);
+        if (!cancelled) {
+          setCurrentUserID("");
+          setCanPermanentlyDelete(false);
+        }
       });
     return () => { cancelled = true; };
   }, [companyID]);
+
+  useEffect(() => {
+    if (!companyID || !canPermanentlyDelete) {
+      setCompanyUsers([]);
+      setCompanyGroups([]);
+      setCompanyGroupMembers([]);
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([listCompanyUsers(companyID), listCompanyUserGroups(companyID)])
+      .then(([users, groupsPayload]) => {
+        if (cancelled) return;
+        setCompanyUsers(users);
+        setCompanyGroups(groupsPayload.groups);
+        setCompanyGroupMembers(groupsPayload.members);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCompanyUsers([]);
+        setCompanyGroups([]);
+        setCompanyGroupMembers([]);
+      });
+    return () => { cancelled = true; };
+  }, [canPermanentlyDelete, companyID]);
 
   const loadItems = useCallback(() => {
     if (!companyID) return;
@@ -137,7 +181,7 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
   }, [allItemsSelected, busy, orderedIDs]);
 
   const restoreSelected = useCallback(async () => {
-    if (!companyID || selectedItemIDs.length === 0 || busy) return;
+    if (!companyID || selectedItemIDs.length === 0 || busy || !canRestoreSelection) return;
     setBusy(true);
     setError("");
     try {
@@ -150,7 +194,7 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
     } finally {
       setBusy(false);
     }
-  }, [busy, companyID, selectedItemIDs]);
+  }, [busy, canRestoreSelection, companyID, selectedItemIDs]);
 
   const requestDeleteSelected = useCallback((position?: ConfirmActionMenuPosition) => {
     if (!companyID || selectedItemIDs.length === 0 || busy || !canPermanentlyDelete) return;
@@ -186,7 +230,7 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
           <button type="button" disabled={busy || orderedIDs.length === 0} onClick={toggleSelectAll} style={toolbarButtonStyle("primary", busy || orderedIDs.length === 0)}>
             {allItemsSelected ? "Clear selection" : "Select all"}
           </button>
-          <button type="button" disabled={busy || selectedItemIDs.length === 0} onClick={restoreSelected} style={toolbarButtonStyle("primary", busy || selectedItemIDs.length === 0)}>
+          <button type="button" disabled={busy || selectedItemIDs.length === 0 || !canRestoreSelection} onClick={restoreSelected} style={toolbarButtonStyle("primary", busy || selectedItemIDs.length === 0 || !canRestoreSelection)} title={canRestoreSelection ? "Restore selected items" : "Only the deleting user can restore these items"}>
             Restore
           </button>
           <button type="button" disabled={busy || selectedItemIDs.length === 0 || !canPermanentlyDelete} onClick={(event) => requestDeleteSelected(confirmMenuPositionFromElement(event.currentTarget))} style={toolbarButtonStyle("danger", busy || selectedItemIDs.length === 0 || !canPermanentlyDelete)} title={canPermanentlyDelete ? "Permanently delete selected items" : "Company admin access required"}>
@@ -218,49 +262,144 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
             <div style={recycleEmptyStyle}>Loading</div>
           ) : items.length === 0 ? (
             <div style={recycleEmptyStyle}>No deleted objects</div>
-          ) : items.map((item) => {
-            const selected = selectedIDs.has(item.recycle_bin_item_id);
-            const containedSummary = formatContainedItems(item.contained_items ?? []);
-            return (
-              <div
-                key={item.recycle_bin_item_id}
-                role="option"
-                aria-selected={selected}
-                tabIndex={0}
-                onPointerDown={(event) => selectRow(item.recycle_bin_item_id, event)}
-                onPointerEnter={(event) => extendDragSelection(item.recycle_bin_item_id, event)}
-                onKeyDown={(event) => {
-                  if (event.key !== " " && event.key !== "Enter") return;
-                  event.preventDefault();
-                  const selected = resolveExplorerClickSelection({
-                    orderedIDs,
-                    previousSelectedIDs: selectedIDs,
-                    anchorID: selectionAnchorID,
-                    clickedID: item.recycle_bin_item_id,
-                    shiftKey: event.shiftKey,
-                    ctrlKey: event.ctrlKey || event.metaKey,
-                  });
-                  setSelectedIDs(selected.selectedIDs);
-                  setSelectionAnchorID(selected.anchorID);
-                }}
-                style={recycleRowStyle(selected)}
-              >
-                <span style={recycleObjectCellStyle}>
-                  <ObjectKindIcon kind={item.object_kind} />
-                  <span style={recycleObjectStackStyle}>
-                    <span style={recycleObjectTextStyle}>{item.object_label}</span>
-                    {containedSummary && <span style={recycleContainedTextStyle}>{containedSummary}</span>}
-                  </span>
-                </span>
-                <span style={recycleMutedCellStyle}>{formatObjectKind(item.object_kind, item.object_folder_kind)}</span>
-                <span style={recycleMutedCellStyle}>{formatDeletedTimestamp(item.deleted_timestamp)}</span>
+          ) : canPermanentlyDelete ? recycleSections.map((section) => (
+            <React.Fragment key={section.key}>
+              <div role="presentation" style={recycleSectionHeaderStyle}>
+                <span style={recycleSectionTitleStyle}>{section.label}</span>
+                <span style={recycleSectionMetaStyle}>{section.groupLabel}</span>
               </div>
-            );
-          })}
+              {section.items.map((item) => renderRecycleItemRow({
+                item,
+                selectedIDs,
+                selectRow,
+                extendDragSelection,
+                orderedIDs,
+                selectionAnchorID,
+                setSelectedIDs,
+                setSelectionAnchorID,
+              }))}
+            </React.Fragment>
+          )) : items.map((item) => renderRecycleItemRow({
+            item,
+            selectedIDs,
+            selectRow,
+            extendDragSelection,
+            orderedIDs,
+            selectionAnchorID,
+            setSelectedIDs,
+            setSelectionAnchorID,
+          }))}
         </div>
       </section>
     </main>
   );
+}
+
+function renderRecycleItemRow(input: {
+  item: RecycleBinItem;
+  selectedIDs: Set<string>;
+  selectRow: (itemID: string, event: React.PointerEvent<HTMLDivElement>) => void;
+  extendDragSelection: (itemID: string, event: React.PointerEvent<HTMLDivElement>) => void;
+  orderedIDs: string[];
+  selectionAnchorID: string;
+  setSelectedIDs: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setSelectionAnchorID: React.Dispatch<React.SetStateAction<string>>;
+}): React.ReactElement {
+  const { item, selectedIDs, selectRow, extendDragSelection, orderedIDs, selectionAnchorID, setSelectedIDs, setSelectionAnchorID } = input;
+  const selected = selectedIDs.has(item.recycle_bin_item_id);
+  const containedSummary = formatContainedItems(item.contained_items ?? []);
+  return (
+    <div
+      key={item.recycle_bin_item_id}
+      role="option"
+      aria-selected={selected}
+      tabIndex={0}
+      onPointerDown={(event) => selectRow(item.recycle_bin_item_id, event)}
+      onPointerEnter={(event) => extendDragSelection(item.recycle_bin_item_id, event)}
+      onKeyDown={(event) => {
+        if (event.key !== " " && event.key !== "Enter") return;
+        event.preventDefault();
+        const selected = resolveExplorerClickSelection({
+          orderedIDs,
+          previousSelectedIDs: selectedIDs,
+          anchorID: selectionAnchorID,
+          clickedID: item.recycle_bin_item_id,
+          shiftKey: event.shiftKey,
+          ctrlKey: event.ctrlKey || event.metaKey,
+        });
+        setSelectedIDs(selected.selectedIDs);
+        setSelectionAnchorID(selected.anchorID);
+      }}
+      style={recycleRowStyle(selected)}
+    >
+      <span style={recycleObjectCellStyle}>
+        <ObjectKindIcon kind={item.object_kind} />
+        <span style={recycleObjectStackStyle}>
+          <span style={recycleObjectTextStyle}>{item.object_label}</span>
+          {containedSummary && <span style={recycleContainedTextStyle}>{containedSummary}</span>}
+        </span>
+      </span>
+      <span style={recycleMutedCellStyle}>{formatObjectKind(item.object_kind, item.object_folder_kind)}</span>
+      <span style={recycleMutedCellStyle}>{formatDeletedTimestamp(item.deleted_timestamp)}</span>
+    </div>
+  );
+}
+
+function buildRecycleBinUserSections(items: RecycleBinItem[], users: CompanyUser[], groups: CompanyUserGroup[], members: CompanyUserGroupMember[]): RecycleBinUserSection[] {
+  const usersByID = new Map(users.map((user) => [user.user_id.trim(), user]));
+  const groupsByID = new Map(groups.map((group) => [group.group_id.trim(), group]));
+  const groupPathCache = new Map<string, string>();
+  const groupPath = (groupID: string, seen = new Set<string>()): string => {
+    const cleanGroupID = groupID.trim();
+    if (!cleanGroupID || seen.has(cleanGroupID)) return "";
+    const cached = groupPathCache.get(cleanGroupID);
+    if (cached !== undefined) return cached;
+    const group = groupsByID.get(cleanGroupID);
+    if (!group) return cleanGroupID;
+    const nextSeen = new Set(seen);
+    nextSeen.add(cleanGroupID);
+    const parentPath = group.parent_group_id ? groupPath(group.parent_group_id, nextSeen) : "";
+    const label = parentPath ? `${parentPath} / ${group.name}` : group.name;
+    groupPathCache.set(cleanGroupID, label);
+    return label;
+  };
+  const groupLabelsByUserID = new Map<string, string[]>();
+  for (const member of members) {
+    const userID = member.user_id.trim();
+    const label = groupPath(member.group_id);
+    if (!userID || !label) continue;
+    const labels = groupLabelsByUserID.get(userID) ?? [];
+    if (!labels.includes(label)) labels.push(label);
+    groupLabelsByUserID.set(userID, labels);
+  }
+  const sectionsByUserID = new Map<string, RecycleBinUserSection>();
+  for (const item of items) {
+    const userID = (item.deleted_by_user_id ?? "").trim();
+    const key = userID || "unknown";
+    let section = sectionsByUserID.get(key);
+    if (!section) {
+      const groupLabels = (groupLabelsByUserID.get(userID) ?? []).sort((a, b) => a.localeCompare(b));
+      section = {
+        key,
+        label: recycleBinUserLabel(usersByID.get(userID), userID),
+        groupLabel: groupLabels.length > 0 ? groupLabels.join(", ") : "No user group",
+        items: [],
+      };
+      sectionsByUserID.set(key, section);
+    }
+    section.items.push(item);
+  }
+  return Array.from(sectionsByUserID.values()).sort((a, b) => {
+    const byGroup = a.groupLabel.localeCompare(b.groupLabel);
+    if (byGroup !== 0) return byGroup;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+function recycleBinUserLabel(user: CompanyUser | undefined, fallbackUserID: string): string {
+  const name = user?.display_name?.trim() ?? "";
+  const email = user?.email?.trim() ?? "";
+  return name || email || fallbackUserID || "Unknown user";
 }
 
 function formatObjectKind(kind: RecycleBinObjectKind, folderKind?: string): string {
@@ -426,6 +565,38 @@ const recycleTableHeaderStyle: React.CSSProperties = {
 const recycleRowsStyle: React.CSSProperties = {
   minHeight: 0,
   overflow: "auto",
+};
+
+const recycleSectionHeaderStyle: React.CSSProperties = {
+  minHeight: 34,
+  display: "grid",
+  gridTemplateColumns: "minmax(180px, 1fr) minmax(220px, 340px)",
+  alignItems: "center",
+  gap: 10,
+  borderBottom: "1px solid rgba(100, 116, 139, 0.12)",
+  background: "#f8fafc",
+  color: "#334155",
+  padding: "0 12px",
+  fontSize: 11,
+  userSelect: "none",
+};
+
+const recycleSectionTitleStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontWeight: 820,
+};
+
+const recycleSectionMetaStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#64748b",
+  fontWeight: 700,
+  textAlign: "right",
 };
 
 function recycleRowStyle(selected: boolean): React.CSSProperties {

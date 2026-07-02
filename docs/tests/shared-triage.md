@@ -1,4 +1,4 @@
-Last updated: 2026-07-01
+Last updated: 2026-07-02
 
 # Shared Triage Tests
 
@@ -104,6 +104,7 @@ ST93 - Multiple Shared Triage mailbox work surfaces that point at the same compa
 ST94 - Nylas shared receipt support requires a public `/nylas/webhook` destination for the same Nylas app/client ID used by company-owned shared mailbox sends, and that webhook must subscribe to the Message tracking `message.opened` trigger.
 ST95 - The Nylas dashboard Message tracking group may be configured with all 3 triggers selected: `message.opened`, `message.link_clicked`, and `thread.replied`; the current Shared Triage receipt contract consumes only `message.opened`, so link-clicked and thread-replied webhook deliveries must not create or mutate shared read-receipt state unless a future feature explicitly adds that behavior.
 ST96 - The backend `NYLAS_WEBHOOK_SECRET` must match the secret returned by the configured Nylas webhook destination, and the Nylas app/environment must support message tracking; without that webhook secret and tracking-capable app, shared sends can request `tracking_options.opens = true` but the product will not receive usable receipt updates.
+ST97 - The Postgres visible Shared Triage folder list query must pass exactly the SQL arguments it references; stale extra arguments must be regression-covered because they prevent non-admin Shared Triage folder loading before permission logic is reached.
 
 ## Nylas Configuration Contract
 
@@ -126,6 +127,7 @@ Business logic covered:
 - ST6
 - ST22
 - ST32
+- ST97
 
 Given:
 - A company has several shared inbox folders and mailbox-capable shared inboxes.
@@ -139,6 +141,7 @@ Expected:
 - The company manager sees only shared inboxes where effective access grants view or higher.
 - Mailbox-capable entries and plain folder entries are represented in the same tree without mixing their mailbox behavior.
 - User A opens a visible shared inbox without connecting that mailbox to User A's personal account.
+- The visible Shared Triage folder query succeeds for User A without SQL argument-count errors.
 
 ### Scenario ST-S2: Create, Rename, Move, And Delete Shared Inbox Folders
 

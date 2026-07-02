@@ -264,7 +264,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			}
 			stop()
 			stop = timings.observeAccounted("request.access_check")
-			if !s.requireEntityAdmin(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
+			if !s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
 				stop()
 				return
 			}

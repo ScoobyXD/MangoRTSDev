@@ -54,14 +54,14 @@ type memoryRecycleBinSnapshot struct {
 func (r *MemoryRepo) ListRecycleBinItems(companyID, deletedByUserID string) ([]domain.RecycleBinItem, error) {
 	companyID = strings.TrimSpace(companyID)
 	deletedByUserID = strings.TrimSpace(deletedByUserID)
-	if companyID == "" || deletedByUserID == "" {
+	if companyID == "" {
 		return nil, ErrInvalid
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	items := make([]domain.RecycleBinItem, 0)
 	for _, record := range r.recycleBin {
-		if record.Item.CompanyID == companyID && record.Item.DeletedByUserID == deletedByUserID {
+		if record.Item.CompanyID == companyID && (deletedByUserID == "" || record.Item.DeletedByUserID == deletedByUserID) {
 			items = append(items, record.Item)
 		}
 	}
@@ -78,7 +78,7 @@ func (r *MemoryRepo) PermanentlyDeleteRecycleBinItems(companyID, deletedByUserID
 	companyID = strings.TrimSpace(companyID)
 	deletedByUserID = strings.TrimSpace(deletedByUserID)
 	itemIDs = normalizeRecycleBinItemIDs(itemIDs)
-	if companyID == "" || deletedByUserID == "" || len(itemIDs) == 0 {
+	if companyID == "" || len(itemIDs) == 0 {
 		return ErrInvalid
 	}
 	r.mu.Lock()
@@ -86,7 +86,7 @@ func (r *MemoryRepo) PermanentlyDeleteRecycleBinItems(companyID, deletedByUserID
 	deleted := 0
 	for _, itemID := range itemIDs {
 		record, ok := r.recycleBin[key(companyID, itemID)]
-		if !ok || record.Item.CompanyID != companyID || record.Item.DeletedByUserID != deletedByUserID {
+		if !ok || record.Item.CompanyID != companyID || (deletedByUserID != "" && record.Item.DeletedByUserID != deletedByUserID) {
 			continue
 		}
 		delete(r.recycleBin, key(companyID, itemID))

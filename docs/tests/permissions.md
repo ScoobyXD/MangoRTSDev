@@ -1,4 +1,4 @@
-Last updated: 2026-07-01
+Last updated: 2026-07-02
 
 # Permissions Tests
 
@@ -61,6 +61,7 @@ P50 - Removing a permission rule with apply-to-descendants requires an explicit 
 P51 - Apply-to-descendants overwrites existing descendant special rules for the same changed rule keys as of that operation; later descendant edits can override again until a newer ancestor apply occurs.
 P52 - Conflicting direct bindings and ancestor apply records resolve by a monotonic transaction sequence, not wall-clock time.
 P53 - Permission audit/explainability must identify whether a user's rule came from a direct resource binding, create/transfer inheritance, ancestor apply-to-descendants, or group membership, and must not report GVIC assignment as a resource-permission grant.
+P54 - Soft delete for nodes and Company Explorer delete targets requires edit access to the deleted resource or container; resource admin is not required, view-only is not enough, and GVIC assignments must not authorize the delete.
 
 ## Scenarios
 
@@ -117,6 +118,7 @@ Business logic covered:
 - P25
 - P27
 - P39
+- P54
 
 Given:
 - One user cannot view a resource.
@@ -128,6 +130,8 @@ Given:
 Expected:
 - The no-view user receives a hidden/not-found style denial for read checks.
 - The view-only user receives access denied for edit/admin mutations.
+- The view-only user cannot soft-delete the resource.
+- A user with edit access can soft-delete the resource to that user's own Recycle Bin.
 - Invalid access level input returns bad request.
 - Permission settings can be read only by managers/admins who can view the resource.
 - Permission settings can be updated by managers/admins with edit access to the resource.
