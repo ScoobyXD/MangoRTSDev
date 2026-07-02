@@ -73,6 +73,7 @@ U62 - The Updates header has a Seen all action that asks for confirmation before
 U63 - Updates rows support Company Explorer-style multi-selection: normal click selects one row and activates it, Ctrl-click or Command-click toggles one row, and Shift-click additively selects the visible range from the selection anchor.
 U64 - Right-clicking an Updates row opens an Updates context menu with seen actions for the selected rows and for all rows; destructive multi-row seen actions ask for confirmation before removing notifications.
 U65 - Text editor mention row previews show the text block containing the specific new @ or ! mention occurrence; older mention blocks or unrelated editor text in the same saved document must not appear in that new row preview.
+U66 - Updates saved grouping view rows render under the Updates sidebar tab. Add new + opens the floating grouping editor for a new view, and right-clicking an existing view exposes Edit, Rename, and Delete commands.
 
 ## Update Row Copy And Visual Language
 
@@ -231,16 +232,19 @@ Expected:
 ### Scenario U-S4: Saved Grouping Views
 
 Business logic covered:
-- U25
+- U25, U66
 
 Given:
 - A user saves an Updates view grouped by Project and Logic Gate.
+- The user opens an Updates saved view from the sidebar saved-view rows.
 - The user leaves and later reloads Updates saved views.
 
 Expected:
 - Project and Logic Gate grouping fields save through the saved-views API.
 - The saved fields reload in the same grouping order and direction.
 - Unknown Updates grouping fields are rejected instead of silently stored.
+- Updates saved-view rows are shown under the Updates sidebar tab, and the floating grouping editor opens from Add new + or right-click Edit.
+- Right-clicking a saved Updates view can edit, rename, or delete it.
 
 ### Scenario U-S5: Authoritative Update Trigger Canon
 

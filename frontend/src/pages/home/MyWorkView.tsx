@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { buildNodeRoute } from "../../app/deepLinkRoutes";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
@@ -12,6 +13,7 @@ import type { NodeRecord } from "../../modules/node-map/shared";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { listMyWorkMatrixRows, type MyWorkMatrixRow } from "../../modules/work-items/workItemReadApi";
 import { cleanIDList, logicGateTitle } from "./homeUtils";
+import { HOME_MY_WORK_SAVED_VIEWS_SLOT_ID } from "./homeConstants";
 import {
   homeColorWithAlpha,
   homeGVICRoleAccent,
@@ -244,6 +246,7 @@ export function MyWorkView({
   const [scopeMenuLevel, setScopeMenuLevel] = useState<MyWorkScopeLevel | null>(null);
   const [addGroupingOpen, setAddGroupingOpen] = useState(false);
   const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
+  const [savedViewsSidebarSlot, setSavedViewsSidebarSlot] = useState<HTMLElement | null>(null);
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const [matrixCells, setMatrixCells] = useState<MyWorkMatrixCellWithUser[]>([]);
   const [matrixStateCacheKey, setMatrixStateCacheKey] = useState("");
@@ -254,6 +257,11 @@ export function MyWorkView({
   const [roleColumnWidths, setRoleColumnWidths] = useState<MyWorkRoleColumnWidths>(() => readMyWorkRoleColumnWidths(companyID));
   const matrixRefreshTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const lastLiveRefreshTokenRef = useRef(liveRefreshToken);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    setSavedViewsSidebarSlot(document.getElementById(HOME_MY_WORK_SAVED_VIEWS_SLOT_ID));
+  }, []);
 
   useEffect(() => {
     setSelectedScope(defaultMyWorkSelectedScope(currentUserID));
@@ -509,14 +517,6 @@ export function MyWorkView({
     setSettings((current) => current.map((setting) => (setting.setting_id === selectedSetting.setting_id ? next : setting)));
     persistSavedSetting(next);
   }, [persistSavedSetting, selectedScope, selectedSetting]);
-
-  const toggleSelectedSettingCollapsed = useCallback(() => {
-    setSettings((current) => current.map((setting) => (
-      setting.setting_id === selectedSetting.setting_id
-        ? { ...setting, panel_collapsed: !setting.panel_collapsed }
-        : setting
-    )));
-  }, [selectedSetting.setting_id]);
 
   const defaultScopeForLevel = useCallback((level: MyWorkScopeLevel): MyWorkSelectedScope => {
     if (level === "me") return defaultMyWorkSelectedScope(currentUserID);
@@ -819,6 +819,8 @@ export function MyWorkView({
             {settingsError ? ` - ${settingsError}` : ""}
           </div>
         </div>
+      </div>
+      {savedViewsSidebarSlot ? createPortal(
         <GroupingPanel
           setting={selectedSetting}
           settings={settings}
@@ -836,14 +838,14 @@ export function MyWorkView({
           onSelectScope={selectScope}
           onSetScopeMenuLevel={setScopeMenuLevel}
           selectedScope={selectedScope}
-          onToggleCollapsed={toggleSelectedSettingCollapsed}
           onUpdateGrouping={updateGrouping}
           onRemoveGrouping={removeGrouping}
           onSetAddGroupingOpen={setAddGroupingOpen}
           onSetGroupingFieldMenuIndex={setGroupingFieldMenuIndex}
           onAddGrouping={addGrouping}
-        />
-      </div>
+        />,
+        savedViewsSidebarSlot,
+      ) : null}
       {myWorkDebugEnabled() ? (
         <React.Suspense fallback={null}>
           <MyWorkPerformanceDebugPanel />
@@ -913,7 +915,6 @@ function GroupingPanel({
   onSelectScopeLevel,
   onSelectScope,
   onSetScopeMenuLevel,
-  onToggleCollapsed,
   onUpdateGrouping,
   onRemoveGrouping,
   onSetAddGroupingOpen,
@@ -936,7 +937,6 @@ function GroupingPanel({
   onSelectScopeLevel: (level: MyWorkScopeLevel) => void;
   onSelectScope: (scope: MyWorkSelectedScope) => void;
   onSetScopeMenuLevel: (level: MyWorkScopeLevel | null) => void;
-  onToggleCollapsed: () => void;
   onUpdateGrouping: (index: number, grouping: MyWorkGroupingSetting) => void;
   onRemoveGrouping: (index: number) => void;
   onSetAddGroupingOpen: (open: boolean) => void;
@@ -945,7 +945,11 @@ function GroupingPanel({
 }) {
   const [collapsedScopeRowKeys, setCollapsedScopeRowKeys] = useState<Set<string>>(new Set());
   const [savedViewContextMenu, setSavedViewContextMenu] = useState<{ settingID: string; x: number; y: number } | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorPosition, setEditorPosition] = useState<{ left: number; top: number }>({ left: 320, top: 92 });
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const scopeMenuRef = useRef<HTMLDivElement>(null);
+  const pendingEditAfterAddRef = useRef(false);
   const scopeRowsWithChildren = useMemo(() => scopeRows.map((row, index) => ({
     ...row,
     hasChildren: Boolean(scopeRows[index + 1] && scopeRows[index + 1].depth > row.depth),
@@ -971,6 +975,41 @@ function GroupingPanel({
       return next;
     });
   }, []);
+  const updateEditorPosition = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = 432;
+    const inset = 10;
+    const left = Math.max(inset, Math.min(rect.right + 12, window.innerWidth - width - inset));
+    const top = Math.max(inset, Math.min(rect.top, window.innerHeight - 180));
+    setEditorPosition((current) => (current.left === left && current.top === top ? current : { left, top }));
+  }, []);
+  useEffect(() => {
+    if (!editorOpen) return undefined;
+    updateEditorPosition();
+    const timer = window.setTimeout(updateEditorPosition, 0);
+    window.addEventListener("resize", updateEditorPosition);
+    window.addEventListener("scroll", updateEditorPosition, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("resize", updateEditorPosition);
+      window.removeEventListener("scroll", updateEditorPosition, true);
+    };
+  }, [editorOpen, updateEditorPosition]);
+  useEffect(() => {
+    if (!editorOpen) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setEditorOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [editorOpen]);
+  useEffect(() => {
+    if (!pendingEditAfterAddRef.current) return;
+    pendingEditAfterAddRef.current = false;
+    setEditorOpen(true);
+  }, [setting.setting_id]);
   useEffect(() => {
     if (!scopeMenuLevel) return undefined;
     const handleOutsideClick = (event: MouseEvent) => {
@@ -984,15 +1023,26 @@ function GroupingPanel({
       window.removeEventListener("mousedown", handleOutsideClick, true);
     };
   }, [onSetScopeMenuLevel, scopeMenuLevel]);
-  const groupingPanelOpen = !setting.panel_collapsed;
   const contextSettingIndex = savedViewContextMenu ? settings.findIndex((item) => item.setting_id === savedViewContextMenu.settingID) : -1;
   const contextSetting = contextSettingIndex >= 0 ? settings[contextSettingIndex] : null;
-
-  return (
-    <div
-      className="mango-my-work-header-controls"
-      style={groupingPanelStyle}
-    >
+  const closeEditor = useCallback(() => {
+    setEditorOpen(false);
+    onSetScopeMenuLevel(null);
+    onSetAddGroupingOpen(false);
+    onSetGroupingFieldMenuIndex(null);
+  }, [onSetAddGroupingOpen, onSetGroupingFieldMenuIndex, onSetScopeMenuLevel]);
+  const openEditorForSetting = useCallback((settingID: string) => {
+    setSavedViewContextMenu(null);
+    onSelectSetting(settingID);
+    onSetScopeMenuLevel(null);
+    setEditorOpen(true);
+  }, [onSelectSetting, onSetScopeMenuLevel]);
+  const editor = editorOpen && typeof document !== "undefined" ? createPortal(
+    <div style={groupingBodyStyle(editorPosition)}>
+      <div style={groupingEditorHeaderStyle}>
+        <span style={groupingEditorTitleStyle}>{setting.name}</span>
+        <button type="button" title="Close editor" style={groupingEditorCloseButtonStyle} onClick={closeEditor}>x</button>
+      </div>
       <div style={scopeControlRowStyle}>
         <div ref={scopeMenuRef} style={scopeTabsAnchorStyle}>
           <div style={scopeTabsStyle}>
@@ -1053,159 +1103,172 @@ function GroupingPanel({
             </div>
           )}
         </div>
-        <div style={groupingMenuAnchorStyle}>
+      </div>
+      <div style={groupingStackStyle}>
+        {setting.groupings.map((grouping, index) => (
+          <div key={`${grouping.field}:${index}`} style={groupingRowStyle(index)}>
+            <button
+              type="button"
+              className="mango-my-work-subtle-button"
+              style={groupingFieldButtonStyle}
+              onClick={() => {
+                onSetAddGroupingOpen(false);
+                onSetGroupingFieldMenuIndex(groupingFieldMenuIndex === index ? null : index);
+              }}
+            >
+              {myWorkGroupingFieldLabel(grouping.field)}
+            </button>
+            {groupingFieldMenuIndex === index && (
+              <div style={groupingFieldMenuStyle}>
+                {MY_WORK_GROUPING_FIELDS
+                  .filter((field) => field.value === grouping.field || !setting.groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
+                  .map((field) => (
+                    <button
+                      key={field.value}
+                      type="button"
+                      className="mango-my-work-menu-option"
+                      style={groupingFieldOptionStyle(field.value === grouping.field)}
+                      onClick={() => {
+                        onUpdateGrouping(index, { ...grouping, field: field.value });
+                        onSetGroupingFieldMenuIndex(null);
+                      }}
+                    >
+                      {field.label}
+                    </button>
+                  ))}
+              </div>
+            )}
+            <button
+              type="button"
+              className="mango-my-work-action-button"
+              style={groupingDirectionButtonStyle}
+              onClick={() => onUpdateGrouping(index, { ...grouping, direction: grouping.direction === "asc" ? "desc" : "asc" })}
+            >
+              {grouping.direction === "asc" ? "Asc" : "Desc"}
+            </button>
+            <button type="button" className="mango-my-work-icon-button" title="Remove grouping" style={groupingRemoveButtonStyle} onClick={() => onRemoveGrouping(index)}>x</button>
+          </div>
+        ))}
+        <div style={{ position: "relative" }}>
           <button
             type="button"
-            className="mango-my-work-icon-button"
-            title={setting.panel_collapsed ? "Expand grouping settings" : "Collapse grouping settings"}
-            style={collapseButtonStyle}
+            className="mango-my-work-action-button"
+            style={addGroupingButtonStyle}
+            disabled={addableFields.length === 0}
             onClick={() => {
-              onSetScopeMenuLevel(null);
-              onToggleCollapsed();
+              onSetGroupingFieldMenuIndex(null);
+              onSetAddGroupingOpen(!addGroupingOpen);
             }}
           >
-            <ExplorerDisclosureIcon open={groupingPanelOpen} color="currentColor" />
+            + Add Grouping
           </button>
-          {groupingPanelOpen && (
-            <div className="mango-my-work-grouping-body" style={groupingBodyStyle}>
-              <div style={savedViewsStyle}>
-                <div style={savedViewsListStyle}>
-                  {settings.map((item) => (
-                    <div
-                      key={item.setting_id}
-                      style={savedViewRowStyle(item.setting_id === setting.setting_id)}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setSavedViewContextMenu({ settingID: item.setting_id, x: event.clientX, y: event.clientY });
-                      }}
-                    >
-                      <button
-                        type="button"
-                        className="mango-my-work-subtle-button"
-                        style={savedViewButtonStyle}
-                        onClick={() => {
-                          setSavedViewContextMenu(null);
-                          onSelectSetting(item.setting_id);
-                        }}
-                      >
-                        {item.name}
-                      </button>
-                      <button type="button" className="mango-my-work-icon-button" title="Delete view" style={savedViewDeleteStyle} disabled={settings.length <= 1} onClick={() => onDeleteSavedView(item.setting_id)}>x</button>
-                    </div>
-                  ))}
-                </div>
-                <button type="button" className="mango-my-work-action-button" style={newViewButtonStyle} onClick={onAddSavedView}>+ New View</button>
-              </div>
-              <div style={groupingStackStyle}>
-                {setting.groupings.map((grouping, index) => (
-                  <div key={`${grouping.field}:${index}`} style={groupingRowStyle(index)}>
-                    <button
-                      type="button"
-                      className="mango-my-work-subtle-button"
-                      style={groupingFieldButtonStyle}
-                      onClick={() => {
-                        onSetAddGroupingOpen(false);
-                        onSetGroupingFieldMenuIndex(groupingFieldMenuIndex === index ? null : index);
-                      }}
-                    >
-                      {myWorkGroupingFieldLabel(grouping.field)}
-                    </button>
-                    {groupingFieldMenuIndex === index && (
-                      <div style={groupingFieldMenuStyle}>
-                        {MY_WORK_GROUPING_FIELDS
-                          .filter((field) => field.value === grouping.field || !setting.groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
-                          .map((field) => (
-                            <button
-                              key={field.value}
-                              type="button"
-                              className="mango-my-work-menu-option"
-                              style={groupingFieldOptionStyle(field.value === grouping.field)}
-                              onClick={() => {
-                                onUpdateGrouping(index, { ...grouping, field: field.value });
-                                onSetGroupingFieldMenuIndex(null);
-                              }}
-                            >
-                              {field.label}
-                            </button>
-                          ))}
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      className="mango-my-work-action-button"
-                      style={groupingDirectionButtonStyle}
-                      onClick={() => onUpdateGrouping(index, { ...grouping, direction: grouping.direction === "asc" ? "desc" : "asc" })}
-                    >
-                      {grouping.direction === "asc" ? "Asc" : "Desc"}
-                    </button>
-                    <button type="button" className="mango-my-work-icon-button" title="Remove grouping" style={groupingRemoveButtonStyle} onClick={() => onRemoveGrouping(index)}>x</button>
-                  </div>
-                ))}
-                <div style={{ position: "relative" }}>
-                  <button
-                    type="button"
-                    className="mango-my-work-action-button"
-                    style={addGroupingButtonStyle}
-                    disabled={addableFields.length === 0}
-                    onClick={() => {
-                      onSetGroupingFieldMenuIndex(null);
-                      onSetAddGroupingOpen(!addGroupingOpen);
-                    }}
-                  >
-                    + Add Grouping
-                  </button>
-                  {addGroupingOpen && (
-                    <div style={addGroupingMenuStyle}>
-                      {addableFields.map((field) => (
-                        <button key={field.value} type="button" className="mango-my-work-menu-option" style={addGroupingOptionStyle} onClick={() => onAddGrouping(field.value)}>
-                          {field.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
+          {addGroupingOpen && (
+            <div style={addGroupingMenuStyle}>
+              {addableFields.map((field) => (
+                <button key={field.value} type="button" className="mango-my-work-menu-option" style={addGroupingOptionStyle} onClick={() => onAddGrouping(field.value)}>
+                  {field.label}
+                </button>
+              ))}
             </div>
-          )}
-          {savedViewContextMenu && contextSetting && (
-            <FrameRightClickMenu x={savedViewContextMenu.x} y={savedViewContextMenu.y} onClose={() => setSavedViewContextMenu(null)} minWidth={170}>
-              <button
-                type="button"
-                style={sharedInboxContextMenuButtonStyle}
-                onClick={() => {
-                  onRenameSavedView(contextSetting.setting_id);
-                  setSavedViewContextMenu(null);
-                }}
-              >
-                Rename
-              </button>
-              <button
-                type="button"
-                style={sharedInboxContextMenuButtonStyle}
-                disabled={contextSettingIndex <= 0}
-                onClick={() => {
-                  onMoveSavedView(contextSetting.setting_id, -1);
-                  setSavedViewContextMenu(null);
-                }}
-              >
-                Move up
-              </button>
-              <button
-                type="button"
-                style={sharedInboxContextMenuButtonStyle}
-                disabled={contextSettingIndex >= settings.length - 1}
-                onClick={() => {
-                  onMoveSavedView(contextSetting.setting_id, 1);
-                  setSavedViewContextMenu(null);
-                }}
-              >
-                Move down
-              </button>
-            </FrameRightClickMenu>
           )}
         </div>
       </div>
+    </div>,
+    document.body,
+  ) : null;
+
+  return (
+    <div ref={panelRef} className="mango-my-work-sidebar-views" style={groupingPanelStyle}>
+      <div style={savedViewsListStyle}>
+        {settings.map((item) => (
+          <button
+            key={item.setting_id}
+            type="button"
+            className="mango-my-work-subtle-button"
+            style={savedViewRowStyle(item.setting_id === setting.setting_id)}
+            onClick={() => {
+              setSavedViewContextMenu(null);
+              onSelectSetting(item.setting_id);
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setSavedViewContextMenu({ settingID: item.setting_id, x: event.clientX, y: event.clientY });
+            }}
+          >
+            <span style={savedViewButtonStyle}>{item.name}</span>
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="mango-my-work-action-button"
+        style={newViewButtonStyle}
+        onClick={() => {
+          pendingEditAfterAddRef.current = true;
+          setSavedViewContextMenu(null);
+          onAddSavedView();
+        }}
+      >
+        Add new +
+      </button>
+      {savedViewContextMenu && contextSetting && (
+        <FrameRightClickMenu x={savedViewContextMenu.x} y={savedViewContextMenu.y} onClose={() => setSavedViewContextMenu(null)} minWidth={170}>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            onClick={() => openEditorForSetting(contextSetting.setting_id)}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            onClick={() => {
+              onRenameSavedView(contextSetting.setting_id);
+              setSavedViewContextMenu(null);
+            }}
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            disabled={contextSettingIndex <= 0}
+            onClick={() => {
+              onMoveSavedView(contextSetting.setting_id, -1);
+              setSavedViewContextMenu(null);
+            }}
+          >
+            Move up
+          </button>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            disabled={contextSettingIndex >= settings.length - 1}
+            onClick={() => {
+              onMoveSavedView(contextSetting.setting_id, 1);
+              setSavedViewContextMenu(null);
+            }}
+          >
+            Move down
+          </button>
+          <button
+            type="button"
+            style={{ ...sharedInboxContextMenuButtonStyle, color: settings.length <= 1 ? "#94a3b8" : "#dc2626" }}
+            disabled={settings.length <= 1}
+            onClick={() => {
+              if (settings.length <= 1) return;
+              if (contextSetting.setting_id === setting.setting_id) closeEditor();
+              onDeleteSavedView(contextSetting.setting_id);
+              setSavedViewContextMenu(null);
+            }}
+          >
+            Delete
+          </button>
+        </FrameRightClickMenu>
+      )}
+      {editor}
     </div>
   );
 }
@@ -2532,40 +2595,23 @@ const myWorkEmptyStyle: React.CSSProperties = {
 
 const groupingPanelStyle: React.CSSProperties = {
   position: "relative",
-  zIndex: 8,
-  justifySelf: "end",
-  alignSelf: "center",
-  width: 352,
-  maxWidth: "min(352px, 100%)",
+  width: "100%",
   minWidth: 0,
   display: "grid",
-  gap: 0,
-  border: "1px solid rgba(37, 99, 235, 0.14)",
-  borderRadius: 10,
-  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(240, 249, 255, 0.58) 44%, rgba(236, 253, 245, 0.46))",
-  boxShadow: "7px 7px 18px rgba(148, 163, 184, 0.20), -6px -6px 16px rgba(255, 255, 255, 0.86), inset 1px 1px 0 rgba(255, 255, 255, 0.88)",
-  padding: "5px 7px",
+  gap: 4,
+  padding: "0 4px 2px 14px",
   overflow: "visible",
 };
 
 const scopeControlRowStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 294px) 28px",
-  justifyContent: "end",
-  gap: 6,
+  gap: 8,
   alignItems: "center",
 };
 
 const scopeTabsAnchorStyle: React.CSSProperties = {
   position: "relative",
   minWidth: 0,
-};
-
-const groupingMenuAnchorStyle: React.CSSProperties = {
-  position: "relative",
-  width: 28,
-  height: 28,
-  justifySelf: "end",
 };
 
 const scopeTabsStyle: React.CSSProperties = {
@@ -2609,18 +2655,6 @@ function scopeTabStyle(level: MyWorkScopeLevel, active: boolean): React.CSSPrope
     boxShadow: active ? `5px 5px 12px ${homeColorWithAlpha(accent, 0.10)}, -4px -4px 10px rgba(255,255,255,0.86), inset 1px 1px 0 rgba(255, 255, 255, 0.78)` : "none",
   };
 }
-
-const collapseButtonStyle: React.CSSProperties = {
-  width: 28,
-  height: 28,
-  display: "grid",
-  placeItems: "center",
-  border: "1px solid rgba(37, 99, 235, 0.20)",
-  borderRadius: 6,
-  background: "linear-gradient(135deg, rgba(255,255,255,0.94), rgba(219,234,254,0.72))",
-  color: "#1d4ed8",
-  cursor: "pointer",
-};
 
 const scopePickerStyle: React.CSSProperties = {
   position: "absolute",
@@ -2710,16 +2744,16 @@ const scopePickerEmptyStyle: React.CSSProperties = {
   fontWeight: 700,
 };
 
-const groupingBodyStyle: React.CSSProperties = {
-  position: "absolute",
-  zIndex: 70,
-  top: "100%",
-  right: 0,
+function groupingBodyStyle(position: { left: number; top: number }): React.CSSProperties {
+  return {
+  position: "fixed",
+  zIndex: 90,
+  top: position.top,
+  left: position.left,
   width: "min(432px, calc(100vw - 96px))",
-  maxHeight: "min(520px, calc(100vh - 190px))",
-  overflow: "visible",
+  maxHeight: "min(520px, calc(100vh - 32px))",
+  overflow: "auto",
   display: "grid",
-  gridTemplateColumns: "108px minmax(0, 294px)",
   alignItems: "start",
   justifyContent: "start",
   gap: 10,
@@ -2730,17 +2764,39 @@ const groupingBodyStyle: React.CSSProperties = {
   boxShadow: "12px 12px 28px rgba(148, 163, 184, 0.22), -8px -8px 22px rgba(255, 255, 255, 0.84), inset 1px 1px 0 rgba(255, 255, 255, 0.88)",
   backdropFilter: "blur(18px) saturate(1.14)",
   padding: 10,
-};
+  };
+}
 
-const savedViewsStyle: React.CSSProperties = {
+const groupingEditorHeaderStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
-  gridTemplateRows: "minmax(0, 1fr) auto",
-  gap: 6,
-  border: "1px solid rgba(15, 118, 110, 0.12)",
-  borderRadius: 7,
-  background: "rgba(255, 255, 255, 0.50)",
-  padding: 6,
+  gridTemplateColumns: "minmax(0, 1fr) 26px",
+  alignItems: "center",
+  gap: 8,
+};
+
+const groupingEditorTitleStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#0f172a",
+  fontSize: 12,
+  fontWeight: 850,
+};
+
+const groupingEditorCloseButtonStyle: React.CSSProperties = {
+  width: 26,
+  height: 24,
+  border: "1px solid rgba(15, 23, 42, 0.12)",
+  borderRadius: 6,
+  background: "rgba(255, 255, 255, 0.84)",
+  color: "#64748b",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 900,
+  padding: 0,
 };
 
 const savedViewsListStyle: React.CSSProperties = {
@@ -2753,13 +2809,15 @@ const savedViewsListStyle: React.CSSProperties = {
 function savedViewRowStyle(active: boolean): React.CSSProperties {
   return {
     minWidth: 0,
+    minHeight: 26,
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 18px",
     alignItems: "center",
     border: active ? "1px solid rgba(15, 118, 110, 0.34)" : "1px solid transparent",
     borderRadius: 6,
     background: active ? "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(153,246,228,0.56))" : "transparent",
     boxShadow: active ? "inset 3px 0 0 rgba(15, 118, 110, 0.72)" : "none",
+    cursor: "pointer",
+    padding: "0 7px",
   };
 }
 
@@ -2776,25 +2834,12 @@ const savedViewButtonStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 750,
   textAlign: "left",
-  cursor: "pointer",
-  padding: "0 6px",
-};
-
-const savedViewDeleteStyle: React.CSSProperties = {
-  width: 18,
-  height: 24,
-  border: "none",
-  background: "transparent",
-  color: "#64748b",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 11,
-  fontWeight: 900,
   padding: 0,
 };
 
 const newViewButtonStyle: React.CSSProperties = {
   minHeight: 26,
+  width: "100%",
   border: "1px solid rgba(15, 118, 110, 0.18)",
   borderRadius: 6,
   background: "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(204,251,241,0.48))",
@@ -2803,11 +2848,12 @@ const newViewButtonStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 820,
   cursor: "pointer",
+  padding: "0 8px",
 };
 
 const groupingStackStyle: React.CSSProperties = {
-  width: "min(294px, 100%)",
-  maxWidth: 294,
+  width: "min(396px, 100%)",
+  maxWidth: 396,
   minWidth: 0,
   display: "grid",
   justifySelf: "start",
