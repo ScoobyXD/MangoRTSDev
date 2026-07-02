@@ -867,6 +867,95 @@ func TestNodeTextBoxRepeatedMentionOccurrenceCreatesFreshAndOccurrenceNotificati
 	}, 2)
 }
 
+func TestNodeTextBoxMentionBodyPreviewUsesMentionOccurrenceBlock(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	handler := server.Routes()
+	companyID := "58585858-5858-4858-8858-585858585858"
+
+	author, err := repo.UpsertAuthUser("preview-mention-author-subject", "preview-author@example.com", "Preview Author")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("preview-mention-author-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	mentioned, err := repo.UpsertAuthUser("preview-mentioned-subject", "preview-mentioned@example.com", "Preview Mention")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("preview-mentioned-subject", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Preview mention box")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantNotificationEntityAccess(t, repo, companyID, store.EntityTypeNode, node.NodeID, mentioned.UserID)
+
+	postTextBox := func(document string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{
+			"company_id":     companyID,
+			"type":           "Text box",
+			"information":    `<!-- mango-node-text-block-v1 -->{"title":"Plan","document":"<!-- mango-editor-html-v1 -->` + document + `"}`,
+			"information_id": "68686868-6868-4868-8868-686868686868",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+node.NodeID+"/information", bytes.NewReader(body))
+		req = requestWithActorForNotifications(req, author, companyID)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST node text box status = %d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	listNotifications := func(notificationType string) []domain.Notification {
+		t.Helper()
+		listReq := httptest.NewRequest(http.MethodGet, "/v1/notifications?company_id="+companyID+"&type="+notificationType, nil)
+		listReq = requestWithActorForNotifications(listReq, mentioned, companyID)
+		return listNotificationsForRequestForTest(t, handler, listReq)
+	}
+
+	staleMention := `<div><span data-mango-mention=\"true\">@Preview Mention</span> aaaaazzzzz stale mention from hours ago.</div><div>1. Remember automatic numbering from an older note.</div>`
+	freshMention := `<div><span data-mango-mention=\"true\">@Preview Mention</span> editor text box do you see this?</div>`
+	freshUrgentMention := `<div><span data-mango-mention=\"true\" data-mango-mention-kind=\"urgent\">!Preview Mention</span> editor text box very urgent do you see this?</div>`
+
+	postTextBox(staleMention)
+	postTextBox(staleMention + freshMention)
+	normalNotifications := waitForNotificationCountForTest(t, func() []domain.Notification {
+		return listNotifications(domain.NotificationEventMentionCreated)
+	}, 2)
+
+	var normalPreview string
+	for _, item := range normalNotifications {
+		if strings.Contains(item.BodyPreview, "editor text box do you see this") {
+			normalPreview = item.BodyPreview
+			break
+		}
+	}
+	if normalPreview == "" {
+		t.Fatalf("normal mention previews = %+v, want fresh occurrence text", normalNotifications)
+	}
+	if strings.Contains(normalPreview, "aaaaazzzzz") || strings.Contains(normalPreview, "automatic numbering") {
+		t.Fatalf("normal mention body preview = %q, want only the fresh mention block", normalPreview)
+	}
+
+	postTextBox(staleMention + freshMention + freshUrgentMention)
+	urgentNotifications := waitForNotificationCountForTest(t, func() []domain.Notification {
+		return listNotifications(domain.NotificationEventUrgentMentionCreated)
+	}, 1)
+	urgentPreview := urgentNotifications[0].BodyPreview
+	if !strings.Contains(urgentPreview, "editor text box very urgent do you see this") {
+		t.Fatalf("urgent mention body preview = %q, want fresh urgent occurrence text", urgentPreview)
+	}
+	if strings.Contains(urgentPreview, "aaaaazzzzz") || strings.Contains(urgentPreview, "automatic numbering") {
+		t.Fatalf("urgent mention body preview = %q, want only the fresh urgent mention block", urgentPreview)
+	}
+}
+
 func TestNotificationReadAllCanClearOneNotificationType(t *testing.T) {
 	t.Parallel()
 
