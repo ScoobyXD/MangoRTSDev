@@ -1752,6 +1752,15 @@ func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection
 			return query, nil
 		}
 		return s.applyRequiredSystemFolderMailbox(ctx, connection, query, "archive")
+	case "spam":
+		if connection.Provider == "google" {
+			query.SearchQueryNative = gmailSpamSearch(query.Query, query.Unread)
+			query.Query = ""
+			query.Unread = nil
+			query.FolderID = ""
+			return query, nil
+		}
+		return s.applySpamFolderMailbox(ctx, connection, query)
 	default:
 		return NylasMessageQuery{}, errInvalidCommunicationsMailbox
 	}
@@ -1792,6 +1801,25 @@ func (s *Server) applyRequiredSystemFolderMailbox(ctx context.Context, connectio
 	return query, nil
 }
 
+func (s *Server) applySpamFolderMailbox(ctx context.Context, connection domain.UserEmailConnection, query NylasMessageQuery) (NylasMessageQuery, error) {
+	if strings.TrimSpace(query.FolderID) != "" {
+		return query, nil
+	}
+	folders, err := s.communicationsFolders(ctx, connection)
+	if err != nil {
+		return NylasMessageQuery{}, err
+	}
+	folderID := findNylasSystemFolderID(folders, "spam")
+	if folderID == "" {
+		folderID = findNylasSystemFolderID(folders, "junk")
+	}
+	if folderID == "" {
+		return NylasMessageQuery{}, errInvalidCommunicationsMailbox
+	}
+	query.FolderID = folderID
+	return query, nil
+}
+
 func gmailAllSearch(userQuery string, unread *bool) string {
 	return gmailSearch([]string{"in:anywhere"}, userQuery, unread)
 }
@@ -1806,6 +1834,10 @@ func gmailPrimarySearch(userQuery string, unread *bool) string {
 
 func gmailArchiveSearch(userQuery string, unread *bool) string {
 	return gmailSearch([]string{"in:anywhere", "-in:inbox", "-in:trash", "-in:spam", "-in:sent", "-in:drafts"}, userQuery, unread)
+}
+
+func gmailSpamSearch(userQuery string, unread *bool) string {
+	return gmailSearch([]string{"in:spam"}, userQuery, unread)
 }
 
 func gmailSearch(base []string, userQuery string, unread *bool) string {
@@ -1865,6 +1897,8 @@ func normalizeCommunicationsMailbox(mailbox string) string {
 		return "starred"
 	case "archive", "archives", "archived":
 		return "archive"
+	case "spam", "junk":
+		return "spam"
 	case "all", "all_mail", "all mail":
 		return "all"
 	default:

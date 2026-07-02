@@ -108,6 +108,18 @@ ST97 - The Postgres visible Shared Triage folder list query must pass exactly th
 ST98 - Selecting a mailbox-capable Shared Triage row must not clear the existing mail list, folder counts, Inbox count, or Starred count only because the selected shared-inbox metadata has not resolved yet.
 ST99 - When the selected Shared Triage row resolves to a mailbox-capable shared inbox, the UI must load that mailbox's folders, messages, Inbox count, and Starred count without requiring the user to select another shared inbox first.
 ST100 - Disconnecting a Shared Triage mailbox requires an explicit point-of-click confirmation popover before the shared mailbox disconnect mutation runs.
+ST101 - Shared Triage reply drafts are unique per company, user, shared inbox scope, and original message ID; opening Reply on the same shared source email resumes the existing draft instead of creating another draft row.
+ST102 - A saved Shared Triage reply draft stores or reloads the original shared message context, and reopening the draft shows the original email being answered above the compose editor.
+ST103 - Shared Triage compose supports To, Cc, Bcc, Reply, Reply All, and Forward; Reply All excludes the active shared mailbox address from generated recipients.
+ST104 - Shared Triage scheduled sends are saved as scheduled drafts with the selected `shared_inbox_id`, use the company-owned shared grant when due while the app is open, and delete the scheduled draft only after send succeeds.
+ST105 - Shared Triage compose uses the same rich text controls expected from node and logic-gate editors: numbered/alphanumeric list, indent/outdent, bullet list, checklist, font size, bold, underline, and hyperlink creation.
+ST106 - Shared Triage compose stores rich editor content as sanitized rich HTML, while legacy plain text drafts continue to load and send as escaped/linkified HTML.
+ST107 - Shared Triage received email detail must display Cc recipients when the provider returns them; Bcc is displayed only when it is present on messages the viewer is allowed to see.
+ST108 - Links in Shared Triage email bodies, forwarded/replied original-message previews, sent reply bodies, and shared email signatures must open in a new browser tab when clicked.
+ST109 - Node editor, logic-gate editor, and inline comment/chat text opened from Shared Triage workflows must auto-detect plain HTTP(S) or `www.` links, render them as blue underlined link text, and open them on a normal left click.
+ST110 - The Shared Triage All mailbox control is a dropdown with All and Spam folder options; the selected option is visually highlighted and marked, and Spam loads the provider spam/junk mailbox through the selected shared grant.
+ST111 - Shared Triage Spam mailbox reads are scoped by `shared_inbox_id` and the company-owned shared mailbox connection; Spam messages must not leak between shared inboxes or into the primary inbox filter.
+ST112 - View-only Shared Triage users may read Spam when they can view the mailbox, but sending, scheduled sending, reply, reply-all, forward, Bcc, and draft send actions still require edit access to that shared inbox.
 
 ## Nylas Configuration Contract
 
@@ -433,12 +445,26 @@ Business logic covered:
 - ST94
 - ST95
 - ST96
+- ST101
+- ST102
+- ST103
+- ST104
+- ST105
+- ST106
+- ST107
+- ST108
+- ST109
+- ST110
+- ST111
+- ST112
 
 Given:
 - A user has edit access to a mailbox-capable Shared Triage inbox.
 - The shared inbox has a connected company-owned mailbox grant.
 - The user sends mail from that shared mailbox, and Nylas later emits `message.opened` webhooks for the shared grant.
 - The active Nylas app has a public `/nylas/webhook` destination with Message tracking `message.opened` selected; selecting all 3 Message tracking triggers (`message.opened`, `message.link_clicked`, and `thread.replied`) is valid for this environment.
+- The user composes shared replies, reply-all messages, forwards, drafts, scheduled messages, and messages containing links/rich text.
+- The shared mailbox contains Inbox, All, Sent, Draft, and Spam/Junk messages.
 
 Expected:
 - Shared sends request Nylas open tracking through the company-owned shared grant.
@@ -449,6 +475,15 @@ Expected:
 - The Sent mailbox shows `Seen` only for messages with a stored receipt signal; messages without a signal do not show `Not opened`.
 - A `message.opened` event with a message ID updates the affected sent row/detail only and preserves the rest of the visible list and prefetched page state.
 - If more than one Shared Triage mailbox entry points at the same company email connection, those entries share the stored receipt summary for the same provider message while audience fanout remains tied to each linked shared inbox.
+- Replying to the same shared source email never creates more than one reply draft for that source message and shared mailbox scope.
+- Reopening a shared reply draft shows the original email context above the compose editor.
+- Reply, Reply All, Forward, Cc, Bcc, scheduled send, and rich compose send through the selected shared inbox scope and continue to require edit access.
+- A future scheduled shared send is saved as a scheduled draft with `shared_inbox_id`, is sent through the company-owned shared grant when due while the app is open, and is deleted only after send succeeds.
+- Received Cc recipients are visible in message detail.
+- Shared email body/signature/original-preview links open in a new browser tab on click.
+- Node editor, logic-gate editor, and inline comment/chat links render as clickable underlined links and open on single left click.
+- The All mailbox dropdown can switch between All and Spam folder, with the selected option highlighted and marked.
+- Spam/Junk reads stay scoped to the selected Shared Triage mailbox and do not leak into primary inbox results or other shared inboxes.
 
 ### Scenario ST-S12: Shared Mailbox Activation And Disconnect Confirmation
 

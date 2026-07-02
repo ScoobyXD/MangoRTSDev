@@ -83,6 +83,17 @@ MT72 - The Nylas dashboard Message tracking group may be configured with all 3 t
 MT73 - The backend `NYLAS_WEBHOOK_SECRET` must match the secret returned by the configured Nylas webhook destination, and the Nylas app/environment must support message tracking; without that webhook secret and tracking-capable app, personal sends can request `tracking_options.opens = true` but the product will not receive usable receipt updates.
 MT74 - Switching into My Triage or a mailbox-capable Shared Triage inbox must preserve the current mail list/counts until the selected mailbox identity is resolvable; a temporarily missing shared-inbox tree record must not be treated as a plain folder or no-mailbox state.
 MT75 - Disconnecting a personal mailbox from My Triage requires an explicit point-of-click confirmation popover before the disconnect mutation runs.
+MT76 - Personal reply drafts are unique per company, user, mailbox scope, and original message ID; opening Reply on the same source email resumes the existing draft instead of creating another draft row.
+MT77 - A saved personal reply draft stores or reloads the original message context, and reopening the draft shows the original email being answered above the compose editor.
+MT78 - Personal compose supports To, Cc, Bcc, Reply, Reply All, and Forward; Reply All excludes the active mailbox address from generated recipients.
+MT79 - Personal compose supports scheduled sends by saving a scheduled draft with a due timestamp, sending it through the normal personal send path when due while the app is open, and deleting the scheduled draft only after send succeeds.
+MT80 - Personal compose uses the same rich text controls expected from node and logic-gate editors: numbered/alphanumeric list, indent/outdent, bullet list, checklist, font size, bold, underline, and hyperlink creation.
+MT81 - Personal compose stores rich editor content as sanitized rich HTML, while legacy plain text drafts continue to load and send as escaped/linkified HTML.
+MT82 - Received personal email detail must display Cc recipients when the provider returns them; Bcc is displayed only when it is present on messages the user is allowed to see.
+MT83 - Links in received personal email bodies, forwarded/replied original-message previews, sent reply bodies, and email signatures must open in a new browser tab when clicked.
+MT84 - Node editor, logic-gate editor, and inline comment/chat text must auto-detect plain HTTP(S) or `www.` links, render them as blue underlined link text, and open them on a normal left click.
+MT85 - The My Triage All mailbox control is a dropdown with All and Spam folder options; the selected option is visually highlighted and marked, and Spam loads the provider spam/junk mailbox.
+MT86 - Spam mailbox reads are scoped to the same personal connection and filters as the current My Triage mailbox view; Spam messages must not leak into the primary inbox filter.
 
 ## Nylas Configuration Contract
 
@@ -238,6 +249,17 @@ Business logic covered:
 - MT71
 - MT72
 - MT73
+- MT76
+- MT77
+- MT78
+- MT79
+- MT80
+- MT81
+- MT82
+- MT83
+- MT84
+- MT85
+- MT86
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
@@ -245,6 +267,8 @@ Given:
 - The first visible page and the next page can be read from the mailbox provider.
 - The user sends mail from the personal mailbox and later receives Nylas `message.opened` webhooks for those sent messages.
 - The active Nylas app has a public `/nylas/webhook` destination with Message tracking `message.opened` selected; selecting all 3 Message tracking triggers (`message.opened`, `message.link_clicked`, and `thread.replied`) is valid for this environment.
+- The user composes replies, reply-all messages, forwards, drafts, scheduled messages, and messages containing links/rich text.
+- The mailbox contains Inbox, All, Sent, Draft, and Spam/Junk messages.
 
 Expected:
 - The visible page contains no more than 20 messages.
@@ -264,6 +288,15 @@ Expected:
 - `message.link_clicked` and `thread.replied` webhook deliveries do not create or mutate read-receipt state under the current My Triage contract.
 - The Sent mailbox shows `Seen` only for messages with a stored receipt signal; messages without a signal do not show `Not opened`.
 - A `message.opened` event with a message ID updates the affected sent row/detail only and preserves the rest of the visible list and prefetched page state.
+- Replying to the same source email never creates more than one reply draft for that source message and mailbox scope.
+- Reopening a reply draft shows the original email context above the compose editor.
+- Reply, Reply All, Forward, Cc, and Bcc compose paths send through the normal personal mailbox connection and preserve local sent/reply reconciliation.
+- A future scheduled send is saved as a scheduled draft, is sent through the normal personal send path when due while the app is open, and is deleted only after send succeeds.
+- Rich compose controls persist sanitized rich HTML, and legacy plain text drafts still send as escaped/linkified HTML.
+- Received Cc recipients are visible in message detail.
+- Email body/signature/original-preview links open in a new browser tab on click.
+- Node editor, logic-gate editor, and inline comment/chat links render as clickable underlined links and open on single left click.
+- The All mailbox dropdown can switch between All and Spam folder, with the selected option highlighted and marked.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
 - Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.
 - The frozen previous-page IDs are accepted by one page-level backend archive request only after durable archive job rows are written, and provider archive mutations continue from the backend worker.

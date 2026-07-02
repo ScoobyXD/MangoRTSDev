@@ -506,6 +506,8 @@ func nylasMessageMatchesCachedPageQuery(message NylasMessage, query NylasMessage
 			return false
 		}
 		return !nylasMessageHasAnyFolder(message, []string{"inbox", "\\inbox"})
+	case "spam":
+		return nylasMessageHasAnyFolder(message, []string{"spam", "\\spam", "junk", "\\junk"})
 	default:
 		return true
 	}

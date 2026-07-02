@@ -3420,7 +3420,7 @@ export function useEditorDocumentSurfaceHandlers({
       }
       event.preventDefault();
       event.stopPropagation();
-      if (event.ctrlKey || event.metaKey) window.open(anchor.href, "_blank", "noopener,noreferrer");
+      window.open(anchor.href, "_blank", "noopener,noreferrer");
     },
     onDoubleClick(event) {
       const root = event.currentTarget;

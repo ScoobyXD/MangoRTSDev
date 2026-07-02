@@ -1103,7 +1103,7 @@ function linkifyPlainText(value: string): string {
 export function messageDocument(body: string): string {
   const value = body.trim();
   const content = /<\/?[a-z][\s\S]*>/i.test(value) ? value : `<pre>${linkifyPlainText(value)}</pre>`;
-  return `<!doctype html><html><head><meta charset="utf-8"><style>body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:14px;overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}a{color:#0369a1;text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:2px;font-weight:650;cursor:pointer}a:hover{color:#0c4a6e}</style></head><body>${content}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:14px;overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}a{color:#0369a1;text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:2px;font-weight:650;cursor:pointer}a:hover{color:#0c4a6e}</style></head><body>${content}</body></html>`;
 }
 
 export function escapeHTML(value: string): string {

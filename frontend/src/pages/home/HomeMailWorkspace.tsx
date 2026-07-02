@@ -98,6 +98,62 @@ function SendPointerIcon() {
   );
 }
 
+function ChevronDownIcon() {
+  return (
+    <svg aria-hidden="true" width="13" height="13" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
+      <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function MenuCheckIcon() {
+  return (
+    <svg aria-hidden="true" width="13" height="13" viewBox="0 0 16 16" style={{ display: "block", flexShrink: 0 }}>
+      <path d="M3.3 8.2 6.5 11.2 12.8 4.7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+const mailboxDropdownWrapStyle: React.CSSProperties = {
+  position: "relative",
+  minWidth: 0,
+};
+
+const mailboxDropdownMenuStyle: React.CSSProperties = {
+  position: "absolute",
+  zIndex: 30,
+  top: "calc(100% + 6px)",
+  right: 0,
+  minWidth: 132,
+  display: "grid",
+  gap: 4,
+  padding: 6,
+  border: "1px solid rgba(148, 163, 184, 0.32)",
+  borderRadius: 8,
+  background: "#ffffff",
+  boxShadow: "0 14px 34px rgba(15, 23, 42, 0.16)",
+};
+
+function mailboxDropdownItemStyle(active: boolean): React.CSSProperties {
+  return {
+    border: active ? "1px solid rgba(14, 165, 233, 0.72)" : "1px solid transparent",
+    borderRadius: 6,
+    background: active ? "rgba(14, 165, 233, 0.12)" : "transparent",
+    color: "#0f172a",
+    minHeight: 30,
+    padding: "0 8px",
+    display: "grid",
+    gridTemplateColumns: "16px minmax(0, 1fr)",
+    gap: 6,
+    alignItems: "center",
+    textAlign: "left",
+    font: "inherit",
+    fontSize: 12,
+    fontWeight: active ? 800 : 650,
+    cursor: "pointer",
+  };
+}
+
 function MessageReadStatusText({ message }: { message: EmailMessage }) {
   const label = messageReadStatusLabel(message.read_status);
   if (!label) return null;
@@ -175,8 +231,11 @@ export function HomeMailWorkspace({
   onOpenDraftsMailbox,
   onOpenPendingMailbox,
   onOpenReply,
+  onOpenReplyAll,
   onOpenSentMailbox,
+  onOpenSpamMailbox,
   onOpenStarredMailbox,
+  onOpenForward,
   onEmailSignatureChange,
   onSaveEmailSignature,
   onSaveComposeDraft,
@@ -241,8 +300,11 @@ export function HomeMailWorkspace({
   onOpenDraftsMailbox: () => void;
   onOpenPendingMailbox: () => void;
   onOpenReply: () => void;
+  onOpenReplyAll: () => void;
   onOpenSentMailbox: () => void;
+  onOpenSpamMailbox: () => void;
   onOpenStarredMailbox: () => void;
+  onOpenForward: () => void;
   onEmailSignatureChange: (value: string) => void;
   onSaveEmailSignature: () => void;
   onSaveComposeDraft: () => void;
@@ -258,8 +320,10 @@ export function HomeMailWorkspace({
 }) {
   const [hoveredMessageID, setHoveredMessageID] = React.useState("");
   const [hoveredStarMessageID, setHoveredStarMessageID] = React.useState("");
+  const [allMailboxMenuOpen, setAllMailboxMenuOpen] = React.useState(false);
   const triageAdvanceEnabled = isArchivableListView && mailbox === "primary";
   const advanceDisabled = !canAdvanceTriagePage || !!busy || loadingMessages || loadingMoreMessages || messages.length === 0;
+  const allDropdownActive = mailbox === "all" || mailbox === "spam";
 
   if (unassignedSharedInbox) {
     return (
@@ -377,16 +441,47 @@ export function HomeMailWorkspace({
               >
                 <MailboxActionContent label="My Drafts" count={draftCount} />
               </button>
-              <button
-                className="mango-elevated-action"
-                type="button"
-                style={mailArchiveActionButtonStyle(mailbox === "all")}
-                onClick={() => {
-                  if (mailbox !== "all") onOpenAllMailbox();
-                }}
-              >
-                All
-              </button>
+              <div style={mailboxDropdownWrapStyle} onMouseLeave={() => setAllMailboxMenuOpen(false)}>
+                <button
+                  className="mango-elevated-action"
+                  type="button"
+                  style={mailArchiveActionButtonStyle(allDropdownActive)}
+                  aria-haspopup="menu"
+                  aria-expanded={allMailboxMenuOpen}
+                  onClick={() => setAllMailboxMenuOpen((current) => !current)}
+                >
+                  <span style={mailArchiveActionLabelStyle}>{mailbox === "spam" ? "Spam" : "All"}</span>
+                  <ChevronDownIcon />
+                </button>
+                {allMailboxMenuOpen && (
+                  <div role="menu" style={mailboxDropdownMenuStyle}>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      style={mailboxDropdownItemStyle(mailbox === "all")}
+                      onClick={() => {
+                        setAllMailboxMenuOpen(false);
+                        if (mailbox !== "all") onOpenAllMailbox();
+                      }}
+                    >
+                      <span>{mailbox === "all" ? <MenuCheckIcon /> : null}</span>
+                      <span>All</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      style={mailboxDropdownItemStyle(mailbox === "spam")}
+                      onClick={() => {
+                        setAllMailboxMenuOpen(false);
+                        if (mailbox !== "spam") onOpenSpamMailbox();
+                      }}
+                    >
+                      <span>{mailbox === "spam" ? <MenuCheckIcon /> : null}</span>
+                      <span>Spam folder</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
           {isArchivableListView && (
@@ -592,7 +687,7 @@ export function HomeMailWorkspace({
           <ComposePanel
             compose={compose}
             busy={busy === "send"}
-            replyMessage={selectedMessage?.id === compose.replyToMessageID ? selectedMessage : null}
+            replyMessage={compose.replyToMessage ?? (selectedMessage?.id === compose.replyToMessageID ? selectedMessage : null)}
             emailSignature={emailSignature}
             companyUsers={companyUsers}
             onChange={onComposeChange}
@@ -612,6 +707,8 @@ export function HomeMailWorkspace({
             archiveLabel={archiveLabel}
             busy={!!busy}
             onReply={onOpenReply}
+            onReplyAll={onOpenReplyAll}
+            onForward={onOpenForward}
             onArchive={onArchiveSelected}
             onDelete={onDeleteSelected}
             deleteAvailable={archiveAvailable}

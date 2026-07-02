@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import type { NodeInlineCommentThread } from "./nodeInlineComments";
+import { getEditorLinkHrefForText } from "../editor/richTextEditing";
 
 type NodeInlineCommentPanelProps = {
   thread: NodeInlineCommentThread;
@@ -51,6 +52,42 @@ function CloseIcon() {
       <path d="M7 7l10 10M17 7L7 17" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" />
     </svg>
   );
+}
+
+function renderLinkedCommentText(value: string): React.ReactNode {
+  const urlPattern = /\b((?:https?:\/\/|www\.)[^\s<>"']+)/gi;
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  let index = 0;
+  for (const match of value.matchAll(urlPattern)) {
+    const text = match[0] ?? "";
+    const start = match.index ?? 0;
+    const trailing = text.match(/[),.;:!?]+$/)?.[0] ?? "";
+    const label = trailing ? text.slice(0, -trailing.length) : text;
+    const href = getEditorLinkHrefForText(label);
+    if (start > cursor) nodes.push(value.slice(cursor, start));
+    if (href) {
+      nodes.push(
+        <a
+          key={`link:${index}`}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: "#0369a1", textDecoration: "underline", textUnderlineOffset: 2, fontWeight: 750 }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {label}
+        </a>,
+      );
+    } else {
+      nodes.push(label);
+    }
+    if (trailing) nodes.push(trailing);
+    cursor = start + text.length;
+    index += 1;
+  }
+  if (cursor < value.length) nodes.push(value.slice(cursor));
+  return nodes;
 }
 
 export const NodeInlineCommentPanel: React.FC<NodeInlineCommentPanelProps> = ({
@@ -159,7 +196,7 @@ export const NodeInlineCommentPanel: React.FC<NodeInlineCommentPanelProps> = ({
               </span>
             </div>
             <div style={{ fontSize: 11, lineHeight: 1.35, whiteSpace: "pre-wrap", overflowWrap: "anywhere", paddingLeft: 24 }}>
-              {message.body}
+              {renderLinkedCommentText(message.body)}
             </div>
           </div>
         ))}
