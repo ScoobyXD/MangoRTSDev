@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  consumeLocalNotificationClearEcho,
+  consumeLocalNotificationDeleteEcho,
   deleteNotification,
   deleteNotifications,
   markNotificationRead,
   markNotificationsRead,
+  NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN,
 } from "../../../../frontend/src/modules/notifications/notificationsApi.js";
 
 type MutableTestGlobal = {
@@ -120,12 +123,16 @@ test("delete helpers can tag notification update event source", async () => {
   const { events, restore } = installTestWindow();
   (globalThis as unknown as MutableTestGlobal).fetch = async () => jsonResponse({ deleted_count: 1 });
   try {
-    await deleteNotification("notification-1", "company-1", { source: "updates-local-seen" });
-    await deleteNotifications({ companyID: "company-1", source: "updates-local-seen" });
+    await deleteNotification("notification-1", "company-1", { source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN });
+    await deleteNotifications({ companyID: "company-1", source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN });
     assert.deepEqual(events.map((event) => event.detail), [
-      { companyID: "company-1", source: "updates-local-seen" },
-      { companyID: "company-1", source: "updates-local-seen" },
+      { companyID: "company-1", source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN },
+      { companyID: "company-1", source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN },
     ]);
+    assert.equal(consumeLocalNotificationDeleteEcho("company-1", "notification-1"), NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN);
+    assert.equal(consumeLocalNotificationDeleteEcho("company-1", "notification-1"), "");
+    assert.equal(consumeLocalNotificationClearEcho("company-1"), NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN);
+    assert.equal(consumeLocalNotificationClearEcho("company-1"), "");
   } finally {
     globalThis.fetch = originalFetch;
     restore();

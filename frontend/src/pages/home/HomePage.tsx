@@ -4676,6 +4676,7 @@ export function HomePage({
               currentUserID={currentUserID}
               sharedInboxes={sharedInboxes}
               loadingSharedInboxes={loadingSharedInboxes}
+              notificationSummary={notificationSummary}
               busy={busy}
               canManageSharedTriage={currentUserCanManageSharedInboxStructure}
               onSelectView={selectHomeView}

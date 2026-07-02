@@ -17,7 +17,11 @@ import { invalidateKanbanBoardContentsCache } from "../modules/kanban/KanbanBoar
 import { EVENT_KANBAN_BOARD_CONTENTS_UPDATED, type KanbanBoardContentsUpdatedDetail } from "../modules/kanban/shared";
 import { invalidateLogicGateRelationshipGraphSnapshot } from "../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateNodeRelationshipGraphSnapshot } from "../modules/node-map/NodeRelationshipGraph";
-import { emitNotificationsUpdated } from "../modules/notifications/notificationsApi";
+import {
+  consumeLocalNotificationClearEcho,
+  consumeLocalNotificationDeleteEcho,
+  emitNotificationsUpdated,
+} from "../modules/notifications/notificationsApi";
 import { ensureMangoRealtimeConnection, subscribeRealtimeScope } from "../modules/realtime/realtimeWebSocket";
 import { markWorkspaceSnapshotScopeStale, markWorkspaceSnapshotStale } from "../modules/workspace/workspaceSnapshotCache";
 import { deriveWorkspaceReconciliationScopes, subscribeWorkspaceUserRealtime, workspaceRealtimeScope, type WorkspaceReconciliationScope, type WorkspaceStreamEventContext, type WorkspaceStreamGapSignal } from "../modules/workspace/workspaceRealtime";
@@ -91,10 +95,10 @@ export function AppLiveFreshnessBridge() {
             markNotificationCachesStaleForRealtimeMessage(message.company_id, companyID);
           },
           onNotificationDeleted(message) {
-            markNotificationCachesStaleForRealtimeMessage(message.company_id, companyID);
+            markNotificationCachesStaleForRealtimeMessage(message.company_id, companyID, consumeLocalNotificationDeleteEcho(message.company_id, message.notification_id));
           },
           onNotificationsCleared(message) {
-            markNotificationCachesStaleForRealtimeMessage(message.company_id, companyID);
+            markNotificationCachesStaleForRealtimeMessage(message.company_id, companyID, consumeLocalNotificationClearEcho(message.company_id));
           },
         });
       })
@@ -167,11 +171,11 @@ function currentUserCanUseCompany(current: CurrentUserResponse, companyID: strin
   return !!cleanCompanyID && (current.is_dev_admin || current.memberships.some((membership) => membership.company_id === cleanCompanyID));
 }
 
-function markNotificationCachesStaleForRealtimeMessage(messageCompanyID: string | undefined, activeCompanyID: string): void {
+function markNotificationCachesStaleForRealtimeMessage(messageCompanyID: string | undefined, activeCompanyID: string, source = ""): void {
   const cleanMessageCompanyID = messageCompanyID?.trim() ?? "";
   const cleanActiveCompanyID = activeCompanyID.trim();
   if (cleanMessageCompanyID && cleanMessageCompanyID !== cleanActiveCompanyID) return;
-  emitNotificationsUpdated(cleanMessageCompanyID || cleanActiveCompanyID);
+  emitNotificationsUpdated(cleanMessageCompanyID || cleanActiveCompanyID, source);
 }
 
 function markWorkspaceCachesStaleForEvent(event: StreamEvent, apiBase: string, companyID: string, scopes: WorkspaceReconciliationScope[] = []): void {

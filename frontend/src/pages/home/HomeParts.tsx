@@ -18,7 +18,15 @@ import { resolveExplorerClickSelection } from "../../modules/company-explorer/tr
 import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
 import { buildNodeRelationshipHierarchyRows } from "../../modules/node-map/nodeRelationshipStructure";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
-import { deleteNotification, fetchNotifications, type NotificationItem, type NotificationGVICRole, type NotificationSummary } from "../../modules/notifications/notificationsApi";
+import {
+  deleteNotification,
+  fetchNotifications,
+  NOTIFICATION_TYPE_MENTION,
+  NOTIFICATION_TYPE_URGENT_MENTION,
+  type NotificationItem,
+  type NotificationGVICRole,
+  type NotificationSummary,
+} from "../../modules/notifications/notificationsApi";
 import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_MY_WORK_SAVED_VIEWS_SLOT_ID, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, HOME_UPDATES_SAVED_VIEWS_SLOT_ID, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, GVIC_INBOX_SECTIONS, GVIC_STATUS_COLUMNS } from "./homeConstants";
@@ -1701,6 +1709,79 @@ export function HomeNavButton({ label, active, depth = 0, meta, onClick }: {
   );
 }
 
+type UpdatesTabCounts = {
+  urgent: number;
+  mention: number;
+  update: number;
+};
+
+function UpdatesTabNotificationBadges({ counts }: { counts: UpdatesTabCounts }) {
+  const badges = [
+    { key: "urgent", label: "!", title: "Urgent mentions", count: counts.urgent, tone: "urgent" as const },
+    { key: "mention", label: "@", title: "Mentions", count: counts.mention, tone: "mention" as const },
+    { key: "update", label: "U", title: "Updates", count: counts.update, tone: "update" as const },
+  ].filter((item) => item.count > 0);
+  if (badges.length === 0) return null;
+  return (
+    <span style={updatesTabBadgesStyle} aria-label={`Updates counts: ${counts.urgent} urgent, ${counts.mention} mentions, ${counts.update} updates`}>
+      {badges.map((item) => (
+        <span key={item.key} title={`${item.title}: ${item.count}`} style={updatesTabBadgeStyle(item.tone)}>
+          <span>{item.label}</span>
+          <span>{formatInboxNotificationCount(item.count)}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function updatesTabNotificationCounts(summary: NotificationSummary): UpdatesTabCounts {
+  const urgent = notificationSummaryTypeCount(summary, NOTIFICATION_TYPE_URGENT_MENTION);
+  const mention = notificationSummaryTypeCount(summary, NOTIFICATION_TYPE_MENTION);
+  return {
+    urgent,
+    mention,
+    update: Math.max(0, summary.total_unread - urgent - mention),
+  };
+}
+
+function notificationSummaryTypeCount(summary: NotificationSummary, type: string): number {
+  const item = summary.type_counts.find((candidate) => candidate.type === type);
+  return item ? Math.max(0, Math.floor(item.count)) : 0;
+}
+
+const updatesTabBadgesStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 3,
+  marginLeft: "auto",
+  minWidth: 0,
+};
+
+function updatesTabBadgeStyle(tone: "urgent" | "mention" | "update"): React.CSSProperties {
+  const colors = tone === "urgent"
+    ? { color: "#b91c1c", border: "rgba(248, 113, 113, 0.55)", background: "rgba(254, 226, 226, 0.92)" }
+    : tone === "mention"
+      ? { color: "#c2410c", border: "rgba(251, 146, 60, 0.55)", background: "rgba(255, 237, 213, 0.92)" }
+      : { color: "#1d4ed8", border: "rgba(96, 165, 250, 0.52)", background: "rgba(219, 234, 254, 0.92)" };
+  return {
+    minWidth: 24,
+    height: 19,
+    padding: "0 4px",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 6,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+    background: colors.background,
+    color: colors.color,
+    fontSize: 10,
+    fontWeight: 850,
+    lineHeight: 1,
+    flexShrink: 0,
+  };
+}
+
 function readSharedTriageFolderDrag(dataTransfer: DataTransfer): string {
   return dataTransfer.getData(SHARED_TRIAGE_FOLDER_DRAG_MIME).trim();
 }
@@ -1721,6 +1802,7 @@ export function HomeSidebar({
   currentUserID,
   sharedInboxes,
   loadingSharedInboxes,
+  notificationSummary,
   busy,
   canManageSharedTriage,
   onSelectView,
@@ -1738,6 +1820,7 @@ export function HomeSidebar({
   currentUserID: string;
   sharedInboxes: CommunicationsSharedInbox[];
   loadingSharedInboxes: boolean;
+  notificationSummary: NotificationSummary;
   busy: string;
   canManageSharedTriage: boolean;
   onSelectView: (viewID: HomeViewID, mailbox?: EmailMailbox) => void;
@@ -1768,6 +1851,7 @@ export function HomeSidebar({
   const cleanConnectedAccountEmail = connectedAccountEmail?.trim().toLowerCase() ?? "";
   const sharedRows = useMemo(() => sharedRootOpen ? buildSharedInboxRows(sharedInboxes, expandedSharedFolderIDs) : [], [expandedSharedFolderIDs, sharedInboxes, sharedRootOpen]);
   const sharedBusy = busy === "shared-inbox";
+  const updatesCounts = updatesTabNotificationCounts(notificationSummary);
 
   useEffect(() => {
     setExpandedSharedFolderIDs((previous) => {
@@ -2268,7 +2352,12 @@ export function HomeSidebar({
           </div>
         </section>
         <section style={sidebarSectionStyle}>
-          <HomeNavButton label="Updates" active={activeViewID === "updates"} onClick={() => onSelectView("updates", "all")} />
+          <HomeNavButton
+            label="Updates"
+            active={activeViewID === "updates"}
+            meta={<UpdatesTabNotificationBadges counts={updatesCounts} />}
+            onClick={() => onSelectView("updates", "all")}
+          />
           <div id={HOME_UPDATES_SAVED_VIEWS_SLOT_ID}>
             {activeViewID !== "updates" && (
               <HomeSidebarSavedViewsFallback

@@ -75,6 +75,8 @@ U64 - Right-clicking an Updates row opens an Updates context menu with seen acti
 U65 - Text editor mention row previews show the text block containing the specific new @ or ! mention occurrence; older mention blocks or unrelated editor text in the same saved document must not appear in that new row preview.
 U66 - Seeing an individual update hides that row locally without reloading the whole Updates feed; the list must not blink away and come back for the current user's own Seen action.
 U67 - Updates saved grouping view rows render under the Updates sidebar tab. Add new + opens the floating grouping editor for a new view, and right-clicking an existing view exposes Edit, Rename, and Delete commands.
+U68 - Activating an Updates row that opens the node preview panel keeps keyboard focus on the Updates row list; Up and Down arrow keys continue moving through visible rows across grouping boundaries instead of moving the caret inside the node editor.
+U69 - The Home sidebar Updates tab shows separate unread badges for urgent ! mentions, normal @ mentions, and non-mention update notifications using notification summary counts.
 
 ## Update Row Copy And Visual Language
 
@@ -331,6 +333,8 @@ Business logic covered:
 - U64
 - U65
 - U66
+- U68
+- U69
 
 Given:
 - A user inserts an @ mention or ! mention into a node text editor or Logic Gate text editor.
@@ -349,4 +353,7 @@ Expected:
 - Clicking Seen on one row hides the row without a full Updates feed reload or visible blink.
 - Clicking Seen all asks for confirmation, then removes all current-user Updates notifications for the company.
 - Ctrl-click or Command-click toggles row selection, and Shift-click additively selects the visible range from the selection anchor.
+- Activating a row scrolls the node preview to the referenced information without placing the caret inside the node editor.
+- Up and Down arrow keys continue moving the selected row through the flattened visible Updates rows, including across nested groups.
 - Right-clicking a row opens an Updates context menu with seen actions for the selected rows and all rows, with confirmation before multi-row removal.
+- The Updates tab badge set shows one count for ! urgent mentions, one for @ mentions, and one for regular non-mention updates.
