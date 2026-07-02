@@ -920,7 +920,7 @@ func TestNodeTextBoxMentionBodyPreviewUsesMentionOccurrenceBlock(t *testing.T) {
 	}
 
 	staleMention := `<div><span data-mango-mention=\"true\">@Preview Mention</span> aaaaazzzzz stale mention from hours ago.</div><div>1. Remember automatic numbering from an older note.</div>`
-	freshMention := `<div><span data-mango-mention=\"true\">@Preview Mention</span> editor text box do you see this?</div>`
+	freshMention := `<div><span data-mango-mention=\"true\">@Preview Mention</span></div><div>editor text box do you see this?</div>`
 	freshUrgentMention := `<div><span data-mango-mention=\"true\" data-mango-mention-kind=\"urgent\">!Preview Mention</span> editor text box very urgent do you see this?</div>`
 
 	postTextBox(staleMention)
@@ -941,6 +941,30 @@ func TestNodeTextBoxMentionBodyPreviewUsesMentionOccurrenceBlock(t *testing.T) {
 	}
 	if strings.Contains(normalPreview, "aaaaazzzzz") || strings.Contains(normalPreview, "automatic numbering") {
 		t.Fatalf("normal mention body preview = %q, want only the fresh mention block", normalPreview)
+	}
+	var staleNotificationID string
+	for _, item := range normalNotifications {
+		if strings.Contains(item.BodyPreview, "aaaaazzzzz") {
+			staleNotificationID = item.NotificationID
+			break
+		}
+	}
+	if staleNotificationID == "" {
+		t.Fatalf("normal mention previews = %+v, want stale occurrence for delete regression", normalNotifications)
+	}
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/notifications/"+staleNotificationID, nil)
+	deleteReq = requestWithActorForNotifications(deleteReq, mentioned, companyID)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE stale notification status = %d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	postTextBox(staleMention + freshMention)
+	normalAfterDelete := waitForNotificationCountForTest(t, func() []domain.Notification {
+		return listNotifications(domain.NotificationEventMentionCreated)
+	}, 1)
+	if strings.Contains(normalAfterDelete[0].BodyPreview, "aaaaazzzzz") {
+		t.Fatalf("normal mention after stale delete = %+v, old occurrence should not be recreated", normalAfterDelete)
 	}
 
 	postTextBox(staleMention + freshMention + freshUrgentMention)

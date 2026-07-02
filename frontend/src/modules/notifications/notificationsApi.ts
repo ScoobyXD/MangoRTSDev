@@ -78,6 +78,10 @@ export type NotificationClearInput = {
   nodeID?: string;
 };
 
+export type NotificationUpdateEventSource = {
+  source?: string;
+};
+
 export function emptyNotificationSummary(companyID = ""): NotificationSummary {
   return {
     company_id: companyID,
@@ -88,17 +92,17 @@ export function emptyNotificationSummary(companyID = ""): NotificationSummary {
   };
 }
 
-export async function deleteNotification(notificationID: string, companyID = ""): Promise<number> {
+export async function deleteNotification(notificationID: string, companyID = "", options: NotificationUpdateEventSource = {}): Promise<number> {
   const cleanNotificationID = notificationID.trim();
   if (!cleanNotificationID) throw new Error("notification_id_required");
   const result = await apiFetchJSON<{ deleted_count?: number }>(`/v1/notifications/${encodeURIComponent(cleanNotificationID)}`, {
     method: "DELETE",
   });
-  emitNotificationsUpdated(companyID);
+  emitNotificationsUpdated(companyID, options.source);
   return normalizeCount(result.deleted_count);
 }
 
-export async function deleteNotifications(input: NotificationClearInput & { companyID: string }): Promise<number> {
+export async function deleteNotifications(input: NotificationClearInput & { companyID: string } & NotificationUpdateEventSource): Promise<number> {
   const cleanCompanyID = input.companyID.trim();
   if (!cleanCompanyID) throw new Error("company_id_required");
   const query = new URLSearchParams({ company_id: cleanCompanyID });
@@ -115,7 +119,7 @@ export async function deleteNotifications(input: NotificationClearInput & { comp
   const result = await apiFetchJSON<{ deleted_count?: number }>(`/v1/notifications?${query.toString()}`, {
     method: "DELETE",
   });
-  emitNotificationsUpdated(cleanCompanyID);
+  emitNotificationsUpdated(cleanCompanyID, input.source);
   return normalizeCount(result.deleted_count);
 }
 
@@ -308,7 +312,7 @@ function normalizeNotification(item: NotificationItem): NotificationItem {
   };
 }
 
-export function emitNotificationsUpdated(companyID?: string): void {
+export function emitNotificationsUpdated(companyID?: string, source = ""): void {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: { companyID: companyID?.trim() ?? "" } }));
+  window.dispatchEvent(new CustomEvent(EVENT_NOTIFICATIONS_UPDATED, { detail: { companyID: companyID?.trim() ?? "", source: source.trim() } }));
 }

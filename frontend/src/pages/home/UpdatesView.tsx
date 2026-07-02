@@ -152,6 +152,7 @@ const NOTIFICATION_TYPE_NODE_COMMENT_CREATED = "node.comment_created";
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_SAVED = "work_item.logic_gate_assignment_saved";
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_MOVED = "work_item.logic_gate_assignment_moved";
 const NOTIFICATION_TYPE_LOGIC_GATE_ASSIGNMENT_REMOVED = "work_item.logic_gate_assignment_removed";
+const UPDATES_LOCAL_SEEN_EVENT_SOURCE = "updates-local-seen";
 
 export function UpdatesView({
   apiBase,
@@ -411,9 +412,10 @@ export function UpdatesView({
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const handleNotificationsUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ companyID?: string }>).detail;
+      const detail = (event as CustomEvent<{ companyID?: string; source?: string }>).detail;
       const eventCompanyID = detail?.companyID?.trim() ?? "";
       if (eventCompanyID && eventCompanyID !== companyID) return;
+      if (detail?.source === UPDATES_LOCAL_SEEN_EVENT_SOURCE) return;
       setReloadToken((value) => value + 1);
     };
     window.addEventListener(EVENT_NOTIFICATIONS_UPDATED, handleNotificationsUpdated);
@@ -586,7 +588,7 @@ export function UpdatesView({
     });
     if (hiddenKeys.includes(selectedNotificationKey)) setSelectedNotificationKey("");
     setContextMenu(null);
-    void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, companyID))).catch((nextError) => {
+    void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, companyID, { source: UPDATES_LOCAL_SEEN_EVENT_SOURCE }))).catch((nextError) => {
       setHiddenNotificationIDs((current) => {
         const next = new Set(current);
         for (const key of hiddenKeys) next.delete(key);
@@ -618,7 +620,7 @@ export function UpdatesView({
     setSelectedNotificationKeys(new Set());
     setSelectionAnchorNotificationKey("");
     setContextMenu(null);
-    void deleteNotifications({ companyID }).catch((nextError) => {
+    void deleteNotifications({ companyID, source: UPDATES_LOCAL_SEEN_EVENT_SOURCE }).catch((nextError) => {
       setHiddenNotificationIDs((current) => {
         const next = new Set(current);
         for (const key of hiddenKeys) next.delete(key);
@@ -1384,8 +1386,7 @@ function updateRowShowsPreview(row: UpdateFeedRow): boolean {
 
 function updateRowIsChatMention(row: UpdateFeedRow): boolean {
   if (row.item.type !== NOTIFICATION_TYPE_MENTION && row.item.type !== NOTIFICATION_TYPE_URGENT_MENTION) return false;
-  const text = `${row.item.title} ${row.item.body_preview ?? ""}`.toLowerCase();
-  return /\bchat\b/.test(text);
+  return /\bmentioned you in chat on\b/i.test(row.item.title);
 }
 
 function updateRowNodeID(row: UpdateFeedRow): string {
@@ -2186,14 +2187,15 @@ const updateRowsStyle: React.CSSProperties = { minWidth: 0, display: "grid", ali
 
 function updateRowStyle(depth: number, unread: boolean, tone: ReturnType<typeof updateRowTone>, selected: boolean, hovered: boolean): React.CSSProperties {
   const isUrgent = tone === "urgent";
+  const leftOffset = depth * 28 + 42;
   return {
-    width: "min(720px, calc(100% - 16px))",
+    width: `min(860px, calc(100% - ${leftOffset + 8}px))`,
     minHeight: 44,
     display: "grid",
     gridTemplateColumns: "18px minmax(180px, 1fr) 58px 78px",
     alignItems: "center",
     gap: 9,
-    marginLeft: depth * 28 + 42,
+    marginLeft: leftOffset,
     border: selected ? "1px solid rgba(37, 99, 235, 0.55)" : "1px solid transparent",
     borderBottom: "1px solid rgba(148, 163, 184, 0.28)",
     borderRadius: selected ? 5 : 0,
@@ -2240,7 +2242,7 @@ function updateRowIconStyle(tone: ReturnType<typeof updateRowTone>): React.CSSPr
 }
 
 const updateRowTextStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 2 };
-const updateRowTitleStyle: React.CSSProperties = { minWidth: 0, display: "block", overflow: "hidden", fontSize: 12, fontWeight: 780 };
+const updateRowTitleStyle: React.CSSProperties = { minWidth: 0, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 780 };
 const updateRowBodyStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 11, fontWeight: 650 };
 const updateRowTimeStyle: React.CSSProperties = { color: "#64748b", fontSize: 10, fontWeight: 700, textAlign: "right" };
 const updateMarkReadButtonStyle: React.CSSProperties = {
@@ -2262,7 +2264,7 @@ const updateRowCopyStyle: React.CSSProperties = {
   minWidth: 0,
   display: "flex",
   alignItems: "center",
-  flexWrap: "wrap",
+  flexWrap: "nowrap",
   gap: "3px 5px",
   lineHeight: 1.25,
 };

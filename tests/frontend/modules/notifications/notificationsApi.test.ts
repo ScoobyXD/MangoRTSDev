@@ -20,11 +20,11 @@ function jsonResponse(payload: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(payload), { ...init, headers });
 }
 
-function installTestWindow(): { events: CustomEvent<{ companyID?: string }>[]; restore: () => void } {
+function installTestWindow(): { events: CustomEvent<{ companyID?: string; source?: string }>[]; restore: () => void } {
   const mutableGlobal = globalThis as unknown as MutableTestGlobal;
   const originalWindow = mutableGlobal.window;
   const originalCustomEvent = mutableGlobal.CustomEvent;
-  const events: CustomEvent<{ companyID?: string }>[] = [];
+  const events: CustomEvent<{ companyID?: string; source?: string }>[] = [];
 
   if (!originalCustomEvent) {
     class TestCustomEvent<T = unknown> extends Event {
@@ -41,7 +41,7 @@ function installTestWindow(): { events: CustomEvent<{ companyID?: string }>[]; r
   mutableGlobal.window = {
     location: { origin: "https://app.example.test" },
     dispatchEvent(event: Event): boolean {
-      events.push(event as CustomEvent<{ companyID?: string }>);
+      events.push(event as CustomEvent<{ companyID?: string; source?: string }>);
       return true;
     },
   } as Window;
@@ -77,6 +77,7 @@ test("deleteNotification calls DELETE for one notification and emits an update e
     assert.deepEqual(calls, [{ url: "https://app.example.test/v1/notifications/notification-1", method: "DELETE" }]);
     assert.equal(events.length, 1);
     assert.equal(events[0].detail.companyID, "company-1");
+    assert.equal(events[0].detail.source, "");
   } finally {
     globalThis.fetch = originalFetch;
     restore();
@@ -107,6 +108,24 @@ test("deleteNotifications clears matching notifications with DELETE query scope"
     }]);
     assert.equal(events.length, 1);
     assert.equal(events[0].detail.companyID, "company-1");
+    assert.equal(events[0].detail.source, "");
+  } finally {
+    globalThis.fetch = originalFetch;
+    restore();
+  }
+});
+
+test("delete helpers can tag notification update event source", async () => {
+  const originalFetch = globalThis.fetch;
+  const { events, restore } = installTestWindow();
+  (globalThis as unknown as MutableTestGlobal).fetch = async () => jsonResponse({ deleted_count: 1 });
+  try {
+    await deleteNotification("notification-1", "company-1", { source: "updates-local-seen" });
+    await deleteNotifications({ companyID: "company-1", source: "updates-local-seen" });
+    assert.deepEqual(events.map((event) => event.detail), [
+      { companyID: "company-1", source: "updates-local-seen" },
+      { companyID: "company-1", source: "updates-local-seen" },
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
     restore();

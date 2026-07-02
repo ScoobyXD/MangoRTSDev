@@ -627,6 +627,7 @@ type DomainEventRepository interface {
 	ListDomainEventsForNotificationProjection(query DomainEventNotificationProjectionQuery) ([]domain.DomainEvent, error)
 	LatestDomainEventForNotificationProjection(companyID string) (NotificationDomainEventCheckpoint, bool, error)
 	CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error)
+	DomainEventExistsByIdempotencyKey(companyID, idempotencyKey string) (bool, error)
 	CurrentWorkspaceReadVersion(query WorkspaceReadVersionQuery) (int64, bool, error)
 	MarkDomainEventPublished(companyID, eventID string) error
 }
