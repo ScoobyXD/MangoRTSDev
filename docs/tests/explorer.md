@@ -1,4 +1,4 @@
-Last updated: 2026-07-01
+Last updated: 2026-07-02
 
 # Explorer Tests
 
@@ -58,6 +58,7 @@ E47 - Dropping a My Triage or Shared Triage email onto a Company Explorer Logic 
 E48 - A successful Company Explorer email-to-Logic-Gate drop updates Home triage state from the conversion result; Home and the global communications live-freshness bridge must keep the source email row visible, patch the Logic Gate icon state, treat the matching `triage.converted` stream event as a local echo, and must not invalidate communications message page/detail caches, remove the row, reuse stale prefetched pages, trigger post-removal fill or message-length prefetch, blank the list, or issue repeated mail GETs. This Explorer drop path is regression-prone because one broad cache invalidation or row removal can reopen the Home refill loop.
 E49 - A successful Company Explorer email-to-Logic-Gate drop shows a temporary green success banner over the Company Explorer sidebar section.
 E50 - A successful Company Explorer email-to-Logic-Gate or eligible node drop sets source emails to unstarred through the source mailbox scope, returns `unstarred_message_ids`, and reconciles Home locally without pulling replacement rows into Inbox, All, Starred, My Triage, or Shared Triage.
+E51 - Double-clicking a Company Explorer row label must not enter inline rename mode; renaming folders, projects, and Logic Gates requires an explicit rename action that is already authorized for the target.
 
 ## Bug History
 
@@ -258,3 +259,18 @@ Expected:
 - The Home listener and app-level communications live-freshness bridge suppress the matching local `triage.converted` echo by message ID and `shared_inbox_id`.
 - The local conversion and unstar path does not trigger immediate `/v1/communications/messages` list/detail refetches, stale prefetched-page top-up, post-removal fill, message-length prefetch, replacement Starred rows, or repeated workspace-panel reloads.
 - The sidebar shows a short green success banner over the Company Explorer section and clears it automatically.
+
+### Scenario E-S8: Explicit Rename Activation
+
+Business logic covered:
+- E51
+
+Given:
+- A user can see Company Explorer folders, projects, Logic Gates, and node search results.
+- Some visible resources may be editable by that user.
+
+Expected:
+- Double-clicking a Company Explorer row label selects or opens the row according to normal navigation behavior.
+- Double-clicking a Company Explorer row label does not replace the label with an inline text editor.
+- The text caret does not appear inside the row title as a result of double-clicking.
+- Renaming remains available only through the explicit rename command for resources that support rename and pass access checks.

@@ -232,7 +232,7 @@ export function HomeMailWorkspace({
   onColumnResizeStart: (dividerIndex: 0 | 1 | 2, event: React.PointerEvent<HTMLButtonElement>) => void;
   onComposeChange: React.Dispatch<React.SetStateAction<ComposeState>>;
   onDeleteSelected: () => void;
-  onDisconnect: () => void;
+  onDisconnect: (position?: ConfirmActionMenuPosition) => void;
   onLoadMoreMessages: () => void;
   onPrefetchMessages: () => void;
   onOpenAllMailbox: () => void;
@@ -315,7 +315,7 @@ export function HomeMailWorkspace({
               </div>
               <div style={accountRowStyle}>
                 <span style={accountEmailStyle}>{accountEmail}</span>
-                <button className="mango-elevated-action" style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={onDisconnect}>Disconnect</button>
+                <button className="mango-elevated-action" style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={(event) => onDisconnect(confirmMenuPositionFromElement(event.currentTarget))}>Disconnect</button>
               </div>
             </div>
           ) : (
@@ -419,7 +419,7 @@ export function HomeMailWorkspace({
           {!isArchivableListView && (
             <div style={accountRowStyle}>
               <span style={accountEmailStyle}>{accountEmail}</span>
-              <button className="mango-elevated-action" style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={onDisconnect}>Disconnect</button>
+              <button className="mango-elevated-action" style={mailPanelSmallButtonStyle} disabled={busy === "disconnect"} onClick={(event) => onDisconnect(confirmMenuPositionFromElement(event.currentTarget))}>Disconnect</button>
             </div>
           )}
           <form style={searchRowStyle} onSubmit={onSubmitSearch}>

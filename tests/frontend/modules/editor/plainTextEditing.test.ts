@@ -18,7 +18,7 @@ test("editor Tab replaces selected text with five spaces and moves caret after t
 });
 
 test("outline style ids stay explicit for UI and headless callers", () => {
-  assert.equal(DEFAULT_EDITOR_OUTLINE_STYLE, "indent-guides");
+  assert.equal(DEFAULT_EDITOR_OUTLINE_STYLE, "automatic-outline-numbering");
   assert.equal(isEditorOutlineStyleID("automatic-outline-numbering"), true);
   assert.equal(isEditorOutlineStyleID("indent-guides"), true);
   assert.equal(isEditorOutlineStyleID("rich-text"), false);

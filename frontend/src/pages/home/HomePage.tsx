@@ -5,7 +5,7 @@ import { entityMatchesAccountFilter } from "../../modules/accounts/accountsApi";
 import { createRequestJSON, requestJSON } from "../../modules/api/requestJSON";
 import { EntityPermissionsDialog } from "../../modules/permissions/EntityPermissionsDialog";
 import { getActiveCompanyID } from "../../auth/currentCompany";
-import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
+import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { requestAppDockTab } from "../../app/appDockTabs";
 import { MangoWordmark } from "../../app/MangoLogo";
 import { preloadLogicGateArenaSurface, preloadProjectManagementSurface } from "../../app/preloadDashboardModules";
@@ -352,6 +352,7 @@ export function HomePage({
   const [folders, setFolders] = useState<EmailFolder[]>([]);
   const [mailboxCountOverrides, setMailboxCountOverrides] = useState<MailboxCountOverrides>({});
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
+  const [sharedInboxesLoaded, setSharedInboxesLoaded] = useState(false);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [mailbox, setMailbox] = useState<EmailMailbox>("primary");
   const [activeViewID, setActiveViewID] = useState<HomeViewID>(initialViewID);
@@ -364,6 +365,7 @@ export function HomePage({
   const [messageContextMenu, setMessageContextMenu] = useState<{ x: number; y: number; messageIDs: string[] } | null>(null);
   const [bulkEditMenu, setBulkEditMenu] = useState<{ x: number; y: number; kind: "node" | "logic_gate"; ids: string[] } | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ messageIDs: string[]; position?: ConfirmActionMenuPosition | null } | null>(null);
+  const [disconnectConfirmation, setDisconnectConfirmation] = useState<{ position?: ConfirmActionMenuPosition | null } | null>(null);
   const [entityDeleteConfirmation, setEntityDeleteConfirmation] = useState<{ targets: HomeEntityDeleteTarget[]; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -506,6 +508,7 @@ export function HomePage({
   const activeGVICMatrixUserID = isInboxMatrixView ? (GVICMatrixTargetUserID.trim() || currentUserID) : currentUserID;
   useEffect(() => {
     setOptimisticMyWorkDeletedNodeIDs(new Set());
+    setSharedInboxesLoaded(false);
   }, [companyID]);
   const scheduleMyWorkLiveRefresh = useCallback((scopes?: WorkspaceReconciliationScope[]) => {
     const myWorkScopes = (scopes ?? []).filter((scope) => scope.kind === "my_work");
@@ -606,7 +609,7 @@ export function HomePage({
   const activeSharedInboxIsParent = !!activeSharedInbox && activeSharedInbox.entry_type !== "shared_inbox";
   const activeSharedInboxIsMailbox = !!activeSharedInbox && activeSharedInbox.entry_type === "shared_inbox";
   const activeSharedInboxNeedsEmail = activeSharedInboxIsMailbox && !(activeSharedInbox.account_email ?? "").trim();
-  const activeSharedInboxBlocksEmail = !!activeSharedInboxFolderID && (!activeSharedInbox || !activeSharedInboxIsMailbox);
+  const activeSharedInboxBlocksEmail = !!activeSharedInboxFolderID && !!activeSharedInbox && !activeSharedInboxIsMailbox;
   const activeMailViewUsesSharedConnection = sharedInboxCanLoadMail(activeSharedInbox);
   const activeMailViewHasEmailConnection = activeSharedInboxFolderID
     ? activeMailViewUsesSharedConnection
@@ -712,8 +715,9 @@ export function HomePage({
   useEffect(() => {
     if (!activeSharedInboxFolderID) return;
     if (sharedInboxes.some((folder) => folder.folder_id === activeSharedInboxFolderID)) return;
+    if (!sharedInboxesLoaded || loadingSharedInboxes || sharedInboxesRequestInFlightRef.current) return;
     setActiveViewID("shared-root");
-  }, [activeSharedInboxFolderID, sharedInboxes]);
+  }, [activeSharedInboxFolderID, loadingSharedInboxes, sharedInboxes, sharedInboxesLoaded]);
   useEffect(() => {
     messagesRef.current = messages;
     setSelectedMessageIDs((previous) => {
@@ -960,7 +964,8 @@ export function HomePage({
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     if (sharedInboxID) {
       const sharedInbox = sharedInboxes.find((folder) => folder.folder_id === sharedInboxID) ?? null;
-      if (!sharedInbox || sharedInbox.entry_type !== "shared_inbox") {
+      if (!sharedInbox) return false;
+      if (sharedInbox.entry_type !== "shared_inbox") {
         setFolders([]);
         return true;
       }
@@ -1011,6 +1016,7 @@ export function HomePage({
     try {
       const next = await listCommunicationsSharedInboxes(companyID);
       setSharedInboxes(next);
+      setSharedInboxesLoaded(true);
       return true;
     } catch (sharedInboxError) {
       setError(formatError(sharedInboxError, "Failed to load Shared Triage"));
@@ -1170,6 +1176,11 @@ export function HomePage({
     clearPrefetchedMessagePage();
   }, [clearPrefetchedMessagePage]);
   const loadMessages = useCallback(async (options: LoadMessagesOptions = {}) => {
+    const sharedInboxID = sharedInboxIDForHomeView(activeViewID);
+    if (sharedInboxID && !activeSharedInbox) {
+      messageListFilterKeyRef.current = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
+      return;
+    }
     if (!canLoadMailForView(activeViewID)) {
       clearMailListState();
       return;
@@ -1220,7 +1231,7 @@ export function HomePage({
         limit: MESSAGE_BATCH_SIZE,
         mailbox,
         companyID,
-        sharedInboxID: sharedInboxIDForHomeView(activeViewID),
+        sharedInboxID,
         q: searchQuery,
         unread: unreadOnly ? true : undefined,
         refresh: options.refresh,
@@ -1282,6 +1293,12 @@ export function HomePage({
     void loadFolders();
     void loadMessages({ refresh: true });
   }, [activeViewID, loadFolders, loadMessages, mailbox, pendingSharedInboxMessageRefreshID, sharedInboxes]);
+  useEffect(() => {
+    if (!activeSharedInboxFolderID || mailbox !== "primary") return;
+    if (!activeSharedInboxIsMailbox || !activeMailViewHasEmailConnection) return;
+    void loadFolders();
+    void loadMessages({ refresh: true });
+  }, [activeMailViewHasEmailConnection, activeSharedInboxFolderID, activeSharedInboxIsMailbox, loadFolders, loadMessages, mailbox]);
   const consumePrefetchedMessagePage = useCallback((filterKey: string, pageToken: string): MessagePage | null => {
     const prefetched = prefetchedMessagePageRef.current;
     if (!prefetched || prefetched.filterKey !== filterKey || prefetched.pageToken !== pageToken) return null;
@@ -2289,6 +2306,9 @@ export function HomePage({
       setBusy("");
     }
   };
+  const requestDisconnect = useCallback((position?: ConfirmActionMenuPosition) => {
+    setDisconnectConfirmation({ position: position ?? null });
+  }, []);
   const submitSearch = (event: React.FormEvent) => {
     event.preventDefault();
     setSearchQuery(searchDraft.trim());
@@ -4624,7 +4644,7 @@ export function HomePage({
             onColumnResizeStart={startColumnResize}
             onComposeChange={setCompose}
             onDeleteSelected={deleteSelected}
-            onDisconnect={disconnect}
+            onDisconnect={requestDisconnect}
             onLoadMoreMessages={() => { void loadMoreMessages(); }}
             onPrefetchMessages={() => { void prefetchNextMessagePage(); }}
             onOpenAllMailbox={openAllMailbox}
@@ -4744,6 +4764,21 @@ export function HomePage({
         onAddNodesToLogicGate={(nodeIDs, logicGateID) => { void addNodesToLogicGate(nodeIDs, logicGateID); }}
         onRequestDelete={requestDeleteBulkEditTargets}
       />
+      {disconnectConfirmation && (
+        <ConfirmActionMenu
+          title="Are you sure you want to disconnect this email?"
+          detail="Mail will stop syncing until the mailbox is connected again."
+          confirmLabel="Disconnect"
+          position={disconnectConfirmation.position}
+          isDarkTheme={false}
+          requireDisplayNameConfirmation={false}
+          onCancel={() => setDisconnectConfirmation(null)}
+          onConfirm={() => {
+            setDisconnectConfirmation(null);
+            void disconnect();
+          }}
+        />
+      )}
       {entityDeleteConfirmation && (
         <DeleteHomeEntitiesConfirmationModal
           targets={entityDeleteConfirmation.targets}

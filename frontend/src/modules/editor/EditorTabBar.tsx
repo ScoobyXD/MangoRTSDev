@@ -104,6 +104,10 @@ type EditorTabBarProps = {
   onAdjustSelectionFontSize: (delta: number) => void;
   documentFontSize: number;
   onSetSelectionFontSize: (fontSize: number) => void;
+  boldActive: boolean;
+  underlineActive: boolean;
+  onToggleBold: () => void;
+  onToggleUnderline: () => void;
   onOutlineStyleFocus: () => void;
   onOutlineStyleChange: (outlineStyle: EditorOutlineStyleID) => void;
   onCreateRelatedNode?: (kind: EditorRelatedNodeCreationKind) => void;
@@ -125,6 +129,10 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   onAdjustSelectionFontSize,
   documentFontSize,
   onSetSelectionFontSize,
+  boldActive,
+  underlineActive,
+  onToggleBold,
+  onToggleUnderline,
   onOutlineStyleFocus,
   onOutlineStyleChange,
   onCreateRelatedNode,
@@ -231,6 +239,22 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     transform: hovered && !selected ? "translateY(-1px)" : "translateY(0)",
     transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease, color 140ms ease",
   });
+  const inlineFormatButtonStyle = (active: boolean, withRightBorder = true): React.CSSProperties => ({
+    width: 28,
+    height: 24,
+    border: 0,
+    borderRight: withRightBorder ? `1px solid ${strokeColor}` : 0,
+    background: active ? colorWithAlpha(outlineMenuAccent, 0.16) : "transparent",
+    color: active ? outlineMenuAccent : surfaceText,
+    display: "grid",
+    placeItems: "center",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 900,
+    lineHeight: 1,
+    textDecoration: active && !withRightBorder ? "underline" : undefined,
+    boxShadow: active ? "inset 1px 1px 3px rgba(15,23,42,0.08)" : undefined,
+  });
 
   return (
     <div style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", gap: 6, paddingLeft: reserveHeaderOffset ? 106 : 0, overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto" }}>
@@ -288,9 +312,37 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                   event.stopPropagation();
                   onAdjustSelectionFontSize(1);
                 }}
-                style={{ width: 30, height: 24, border: 0, background: "transparent", color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 17, lineHeight: 1 }}
+                style={{ width: 30, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 17, lineHeight: 1 }}
               >
                 +
+              </button>
+              <button
+                type="button"
+                aria-label="Bold"
+                title="Bold"
+                aria-pressed={boldActive}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleBold();
+                }}
+                style={inlineFormatButtonStyle(boldActive)}
+              >
+                B
+              </button>
+              <button
+                type="button"
+                aria-label="Underline"
+                title="Underline"
+                aria-pressed={underlineActive}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleUnderline();
+                }}
+                style={inlineFormatButtonStyle(underlineActive, false)}
+              >
+                <span style={{ textDecoration: "underline", textUnderlineOffset: 2 }}>U</span>
               </button>
             </div>
           );

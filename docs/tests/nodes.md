@@ -20,6 +20,16 @@ N9 - DELETE `/v1/nodes/{node_id}` is a soft delete that moves the node and relat
 N10 - Node soft delete requires edit access to the node; resource admin access is not required, and view-only access is not enough.
 N11 - Successful node soft delete stamps `deleted_by_user_id` with the deleting actor.
 N12 - The node Assign to Logic Gate picker should not preload or display Logic Gates when opened; it should search only after the user enters text, using the Company Explorer search contract for visible folders, subfolders, and Logic Gates.
+N13 - Pasted rich text in node editor surfaces must normalize to the app/editor font family instead of preserving source document fonts.
+N14 - Pasting selected inline text into a node editor must not create extra blank rows above or below the pasted content from source boundary whitespace.
+N15 - New node editor documents default to alphanumerical numbering, and the editor outline dropdown lists alphanumerical numbering before indent guides.
+N16 - The node editor font-size control applies to highlighted text and, for a collapsed caret, becomes the sticky font size for subsequently typed characters until changed again.
+N17 - Node editor bold and underline controls must toggle the selected text or sticky caret formatting and must visually reflect the formatting at the current caret or selection.
+N18 - Inserting a table in a node editor must insert the table at the current caret/selection location, not at the top-left or beginning of the editor.
+N19 - A node header can show and edit the node's project placement: the project button displays the current project when one is known and otherwise offers project assignment.
+N20 - Assigning a node to a project from the node header requires selecting a project and then selecting a Logic Gate within that project; the assignment creates the node/project relationship and moves or assigns the node to the chosen Logic Gate.
+N21 - A node with a known project relationship exposes a Go to Project action that opens the related project directly.
+N22 - When selected node text is sent to chat as a quote/prefill, the quote preview must expose a cancel action that clears the selected-text prefill without sending a message.
 
 ## Scenarios
 
@@ -106,3 +116,49 @@ Expected:
 - Search results may show folder and subfolder rows as context.
 - Only Logic Gate rows are selectable assignment targets.
 - Node results are excluded from the picker search results.
+
+### Scenario N-S6: Node Rich Text Editing Controls
+
+Business logic covered:
+- N13
+- N14
+- N15
+- N16
+- N17
+- N18
+
+Given:
+- A user edits a node text body.
+- The user pastes styled text copied from another application.
+- The user changes font size, bold, underline, outline style, or inserts a table.
+
+Expected:
+- Pasted content renders in the node editor's normal font family.
+- Pasted inline text does not gain empty rows above or below the copied text.
+- New node editor text uses alphanumerical numbering by default, and alphanumerical numbering appears first in the outline dropdown.
+- Changing font size while text is highlighted changes that selected text.
+- Changing font size with only a caret sets the font size for the next typed characters.
+- Bold and underline buttons reflect the caret or selected text state and can be active at the same time.
+- Toggling bold or underline affects the selection or the next typed characters when the selection is collapsed.
+- Table insertion uses the current caret/selection position.
+
+### Scenario N-S7: Node Project Assignment And Chat Quote Cancel
+
+Business logic covered:
+- N19
+- N20
+- N21
+- N22
+
+Given:
+- A user has edit access to a node.
+- Projects and Logic Gates are available in the company.
+- A selected node text snippet is loaded into chat as a quote/prefill.
+
+Expected:
+- The node header project button displays the current related project when one is known.
+- Assigning a node to a project first asks for the project, then asks for a Logic Gate inside that project.
+- Confirming the Logic Gate creates or updates the node/project relationship and assigns the node to the selected Logic Gate.
+- Go to Project opens the related project directly.
+- The selected-text chat quote includes a cancel action next to the quoted text.
+- Canceling the quote clears the prefill and leaves the chat draft otherwise intact.

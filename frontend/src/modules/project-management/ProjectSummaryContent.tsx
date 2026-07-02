@@ -1302,6 +1302,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         onReply={(messageID) => setChatReplyTargets((current) => ({ ...current, [block.id]: messageID }))}
                         onDeleteMessage={(messageID) => void deleteChatMessage(messageID)}
                         onClearReply={() => setChatReplyTargets((current) => omitRecordKey(current, block.id))}
+                        onClearSelectionAnchor={() => setChatSelectionAnchors((current) => omitRecordKey(current, block.id))}
                         onAttachFiles={(files) => attachChatDraftFiles(block.id, files)}
                         onRemoveDraftAttachment={(attachmentID) => setChatDraftAttachments((current) => ({ ...current, [block.id]: (current[block.id] ?? []).filter((attachment) => attachment.id !== attachmentID) }))}
                         onSubmit={() => void submitChatMessage(block.id)}

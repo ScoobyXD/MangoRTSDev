@@ -1,4 +1,4 @@
-Last updated: 2026-07-01
+Last updated: 2026-07-02
 
 # My Triage Tests
 
@@ -81,6 +81,8 @@ MT70 - Sent messages without a stored personal receipt must not show a green `No
 MT71 - Nylas receipt support requires a public `/nylas/webhook` destination for the same Nylas app/client ID used by outbound personal sends, and that webhook must subscribe to the Message tracking `message.opened` trigger.
 MT72 - The Nylas dashboard Message tracking group may be configured with all 3 triggers selected: `message.opened`, `message.link_clicked`, and `thread.replied`; the current My Triage receipt contract consumes only `message.opened`, so link-clicked and thread-replied webhook deliveries must not create or mutate read-receipt state unless a future feature explicitly adds that behavior.
 MT73 - The backend `NYLAS_WEBHOOK_SECRET` must match the secret returned by the configured Nylas webhook destination, and the Nylas app/environment must support message tracking; without that webhook secret and tracking-capable app, personal sends can request `tracking_options.opens = true` but the product will not receive usable receipt updates.
+MT74 - Switching into My Triage or a mailbox-capable Shared Triage inbox must preserve the current mail list/counts until the selected mailbox identity is resolvable; a temporarily missing shared-inbox tree record must not be treated as a plain folder or no-mailbox state.
+MT75 - Disconnecting a personal mailbox from My Triage requires an explicit point-of-click confirmation popover before the disconnect mutation runs.
 
 ## Nylas Configuration Contract
 
@@ -301,3 +303,21 @@ Expected:
 - Future placement lookup for the message points at the target node/card.
 - The original conversion path keeps source mailbox scope on the drag payload, so the same card/transfer semantics apply when the source email came from Shared Triage.
 - The revert behavior still applies only when reverting the original direct email-created card before it is transferred.
+
+### Scenario MT-S7: Mailbox Activation And Disconnect Confirmation
+
+Business logic covered:
+- MT74
+- MT75
+
+Given:
+- A user navigates between My Triage and mailbox-capable Shared Triage inboxes.
+- The selected Shared Triage tree row may resolve after the active view changes.
+- A connected personal mailbox exposes a disconnect action.
+
+Expected:
+- Opening My Triage loads folders, messages, Inbox counts, and Starred counts for the personal mailbox without requiring the user to click away and back.
+- Opening a mailbox-capable Shared Triage inbox does not clear the visible list or counts solely because the selected shared-inbox metadata is still resolving.
+- Once the selected shared-inbox metadata resolves, the active mailbox loads folders, messages, Inbox counts, and Starred counts for that mailbox.
+- Clicking disconnect opens a small confirmation popover near the clicked button.
+- The mailbox disconnect mutation runs only after the user confirms that popover.

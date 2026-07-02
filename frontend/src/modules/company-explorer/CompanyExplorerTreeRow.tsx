@@ -58,7 +58,6 @@ type CompanyExplorerTreeRowProps = {
   isSearchActive: boolean;
   onSelectTreeRow: (row: ExplorerTreeNode, event?: React.MouseEvent, options?: { selectionIntent?: SelectionIntent }) => void;
   onOpenContextMenu: (event: React.MouseEvent, row?: ExplorerTreeNode | null) => void;
-  onStartRenamingRow: (row: ExplorerTreeNode) => void;
   onCommitRename: (draft?: ExplorerRenameDraft) => Promise<void>;
   onSetRenaming: React.Dispatch<React.SetStateAction<ExplorerRenameDraft | null>>;
   onSetExpanded: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -153,7 +152,6 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
   isSearchActive,
   onSelectTreeRow,
   onOpenContextMenu,
-  onStartRenamingRow,
   onCommitRename,
   onSetRenaming,
   onSetExpanded,
@@ -566,7 +564,6 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
             onDoubleClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              onStartRenamingRow(row);
             }}
             style={{
               minWidth: 0,

@@ -3115,18 +3115,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     });
   }, [folderItems, folders, systemFolderTreeIDByKey]);
 
-  const startRenamingRow = useCallback((row: ExplorerTreeNode) => {
-    if (isProtectedGVICRoleRow(row)) return;
-    const target = resolveExplorerRenameTarget(row);
-    if (!target) return;
-    setSelectedTreeID(row.id);
-    setSelectedTreeIDs(new Set([row.id]));
-    setSelectionAnchorTreeID(row.id);
-    focusTreeRow(row, { selectionIntent: "navigate" });
-    cancelRenameOnBlurRef.current = false;
-    setRenaming({ treeID: row.id, target, value: row.label });
-  }, [focusTreeRow]);
-
   const scrollTreeRowIntoView = useCallback((rowID: string, options: { align?: "nearest" | "center" } = {}) => {
     const index = treeRows.findIndex((row) => row.id === rowID);
     const viewport = treeViewportRef.current;
@@ -3751,7 +3739,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         onOpenContextMenu={openExplorerContextMenu}
         onSelectExplorerSearchResult={selectExplorerSearchResult}
         onSelectTreeRow={selectTreeRow}
-        onStartRenamingRow={startRenamingRow}
         onCommitRename={commitRename}
         onSetRenaming={setRenaming}
         onSetExpanded={setExpandedAndLoadChildren}

@@ -8,7 +8,14 @@ import { EDITOR_TAB_TEXT, type EditorOutlineStyleID } from "./plainTextEditing";
 import { buildEditorIndentGuideSegments, editorIndentGuideLeftForDepth, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import { deserializeEditorDocumentHTML, readEditorDocumentText, serializeEditorDocumentHTML } from "./richTextEditing";
 import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
-import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
+import {
+  applyEditorInlineFormatToRoot,
+  applyEditorSelectionFontSizeToRoot,
+  readEditorSelectionFormatState,
+  useEditorDocumentSurfaceHandlers,
+  type EditorDocumentFormattingController,
+  type EditorSelectionInlineFormatState,
+} from "./useEditorDocumentSurfaceHandlers";
 import { getEditorDocumentFontFamily } from "./useEditorPreferences";
 import {
   createStandaloneImageClipboardHTML,
@@ -250,6 +257,9 @@ type NodeTextBlockEditorProps = {
   onSelectionChatRequest: (selection: TextBlockSelectionDraft) => void;
   onImageChatRequest: (image: TextBlockImageDraft) => void;
   onImageNodeRequest: (image: TextBlockImageDraft) => void;
+  formattingControllerRef?: React.MutableRefObject<EditorDocumentFormattingController | null>;
+  onSelectionFontSizeChange?: (fontSize: number) => void;
+  onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
 };
 
 function readStoredTextBlockHeight(storageKey: string): number {
@@ -587,6 +597,9 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   onSelectionChatRequest,
   onImageChatRequest,
   onImageNodeRequest,
+  formattingControllerRef,
+  onSelectionFontSizeChange,
+  onSelectionInlineFormatChange,
 }) => {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -618,6 +631,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const textBlockBottomBufferPx = documentLineHeightPx * TEXT_BLOCK_BOTTOM_BUFFER_ROWS;
   const textBlockPaddingBottomPx = TEXT_BLOCK_PADDING_BOTTOM + textBlockBottomBufferPx;
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
+  const selectionFontSizeRef = useRef(TEXT_BLOCK_FONT_SIZE);
 
   const refreshTextHighlights = useCallback(() => {
     const editor = editorRef.current;
@@ -737,6 +751,29 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     }
   }, []);
 
+  const handleSelectionFontSizeChange = useCallback((fontSize: number) => {
+    selectionFontSizeRef.current = fontSize;
+    onSelectionFontSizeChange?.(fontSize);
+  }, [onSelectionFontSizeChange]);
+
+  const scheduleNodeDocumentSave = useCallback((nextDocument: string, immediate = false) => {
+    if (!editable) return;
+    userEditedDocumentRef.current = true;
+    lastAppliedDocumentRef.current = nextDocument;
+    onDocumentChange(nextDocument);
+    if (immediate) onDocumentFlush(nextDocument);
+  }, [editable, onDocumentChange, onDocumentFlush]);
+
+  const flushNodeDocumentSave = useCallback((fallbackDocument?: string) => {
+    if (!editable) return;
+    const nextDocument = fallbackDocument ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedDocumentRef.current);
+    if (!userEditedDocumentRef.current && nextDocument.trim().length === 0 && documentValue.trim().length > 0 && lastAppliedDocumentRef.current !== documentValue) {
+      return;
+    }
+    lastAppliedDocumentRef.current = nextDocument;
+    onDocumentFlush(nextDocument);
+  }, [documentValue, editable, onDocumentFlush]);
+
   const handlers = useEditorDocumentSurfaceHandlers({
     restoringScrollRef,
     currentDocumentTargetKeyRef: targetKeyRef,
@@ -745,25 +782,12 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     pendingEditorFontSizeRef: pendingFontSizeRef,
     outlineStyle,
     setDocumentScrollTop,
-    scheduleDocumentSave: (nextDocument, immediate = false) => {
-      if (!editable) return;
-      userEditedDocumentRef.current = true;
-      lastAppliedDocumentRef.current = nextDocument;
-      onDocumentChange(nextDocument);
-      if (immediate) onDocumentFlush(nextDocument);
-    },
+    scheduleDocumentSave: scheduleNodeDocumentSave,
     scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
     rememberCurrentDocumentScroll: () => undefined,
-    flushPendingDocumentSave: (fallbackDocument) => {
-      if (!editable) return;
-      const nextDocument = fallbackDocument ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedDocumentRef.current);
-      if (!userEditedDocumentRef.current && nextDocument.trim().length === 0 && documentValue.trim().length > 0 && lastAppliedDocumentRef.current !== documentValue) {
-        return;
-      }
-      lastAppliedDocumentRef.current = nextDocument;
-      onDocumentFlush(nextDocument);
-    },
-    onSelectionFontSizeChange: () => undefined,
+    flushPendingDocumentSave: flushNodeDocumentSave,
+    onSelectionFontSizeChange: handleSelectionFontSizeChange,
+    onSelectionInlineFormatChange,
     mentionUsers: companyUsers,
     mentionAccent: accent,
     mentionSurfaceText: surfaceText,
@@ -771,13 +795,63 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     mentionMenuPosition: "absolute",
   });
   const { mentionMenu: documentMentionMenu, insertTable, ...documentSurfaceHandlers } = handlers;
+  const formattingController = useMemo<EditorDocumentFormattingController>(() => ({
+    applyFontSizeValue: (fontSize: number) => {
+      const editor = editorRef.current;
+      if (!editable || !editor) return false;
+      return applyEditorSelectionFontSizeToRoot(editor, fontSize, {
+        documentUndoHistory: documentUndoHistoryRef.current,
+        pendingEditorFontSizeRef: pendingFontSizeRef,
+        scheduleDocumentSave: scheduleNodeDocumentSave,
+        scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
+        onSelectionFontSizeChange: handleSelectionFontSizeChange,
+      });
+    },
+    adjustFontSize: (delta: number) => {
+      const editor = editorRef.current;
+      if (!editable || !editor) return false;
+      const currentState = readEditorSelectionFormatState(editor, selectionFontSizeRef.current);
+      const currentFontSize = pendingFontSizeRef.current ?? currentState?.fontSize ?? selectionFontSizeRef.current;
+      return applyEditorSelectionFontSizeToRoot(editor, currentFontSize + delta, {
+        documentUndoHistory: documentUndoHistoryRef.current,
+        pendingEditorFontSizeRef: pendingFontSizeRef,
+        scheduleDocumentSave: scheduleNodeDocumentSave,
+        scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
+        onSelectionFontSizeChange: handleSelectionFontSizeChange,
+      });
+    },
+    toggleInlineFormat: (command) => {
+      const editor = editorRef.current;
+      if (!editable || !editor) return false;
+      return applyEditorInlineFormatToRoot(editor, command, {
+        documentUndoHistory: documentUndoHistoryRef.current,
+        scheduleDocumentSave: scheduleNodeDocumentSave,
+        scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
+        onSelectionInlineFormatChange,
+      });
+    },
+    insertTable: () => {
+      if (!editable) return false;
+      return insertTable(editorRef.current);
+    },
+    readFormatState: () => {
+      const editor = editorRef.current;
+      return editor ? readEditorSelectionFormatState(editor, selectionFontSizeRef.current) : null;
+    },
+  }), [editable, handleSelectionFontSizeChange, insertTable, onSelectionInlineFormatChange, scheduleNodeDocumentSave, scheduleTextBlockIndentGuideUpdate]);
+
+  const activateFormattingController = useCallback(() => {
+    if (!formattingControllerRef || !editable) return;
+    formattingControllerRef.current = formattingController;
+  }, [editable, formattingController, formattingControllerRef]);
 
   useEffect(() => {
     if (!tableInsertRequestID || !editable) return;
     if (lastHandledTableInsertRequestIDRef.current === tableInsertRequestID) return;
     lastHandledTableInsertRequestIDRef.current = tableInsertRequestID;
-    insertTable(editorRef.current);
-  }, [editable, insertTable, tableInsertRequestID]);
+    activateFormattingController();
+    formattingController.insertTable();
+  }, [activateFormattingController, editable, formattingController, tableInsertRequestID]);
 
   const handleBlur: React.FocusEventHandler<HTMLDivElement> = (event) => {
     handlers.onBlur(event);
@@ -1004,7 +1078,10 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         suppressContentEditableWarning
         spellCheck
         onFocus={() => {
-          if (editable) onFocus();
+          if (editable) {
+            activateFormattingController();
+            onFocus();
+          }
         }}
         onBeforeInput={(event) => {
           if (!editable) {
@@ -1335,6 +1412,7 @@ type ChatPaneProps = {
   onReply: (messageID: string) => void;
   onDeleteMessage: (messageID: string) => void;
   onClearReply: () => void;
+  onClearSelectionAnchor: () => void;
   onAttachFiles: (files: FileList | File[]) => void;
   onRemoveDraftAttachment: (attachmentID: string) => void;
   onSubmit: () => void;
@@ -1371,6 +1449,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   onReply,
   onDeleteMessage,
   onClearReply,
+  onClearSelectionAnchor,
   onAttachFiles,
   onRemoveDraftAttachment,
   onSubmit,
@@ -1664,8 +1743,17 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             </div>
             <div style={{ display: "grid", gap: 6, padding: 8, borderTop: `1px solid ${ruleColor}` }}>
           {selectionAnchor && active && (
-            <div style={{ border: "1px solid rgba(92,238,255,0.34)", borderLeft: `3px solid ${accent}`, borderRadius: 9, background: "linear-gradient(135deg, rgba(230,252,255,0.58), rgba(247,239,255,0.58))", color: surfaceText, padding: "6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)" }}>
-              {selectionAnchor.quote}
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 22px", alignItems: "start", gap: 6, border: "1px solid rgba(92,238,255,0.34)", borderLeft: `3px solid ${accent}`, borderRadius: 9, background: "linear-gradient(135deg, rgba(230,252,255,0.58), rgba(247,239,255,0.58))", color: surfaceText, padding: "6px 6px 6px 7px", fontSize: 10, lineHeight: 1.35, fontWeight: 800, overflowWrap: "anywhere", maxHeight: 72, overflowY: "auto", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.82)" }}>
+              <span style={{ minWidth: 0 }}>{selectionAnchor.quote}</span>
+              <button
+                type="button"
+                aria-label="Clear selected text"
+                title="Clear selected text"
+                onClick={onClearSelectionAnchor}
+                style={{ width: 22, height: 22, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 6, background: "#ffffff", color: surfaceText, cursor: "pointer", fontSize: 14, fontWeight: 900, lineHeight: 1, padding: 0 }}
+              >
+                x
+              </button>
             </div>
           )}
           {draftAttachments.length > 0 && (
