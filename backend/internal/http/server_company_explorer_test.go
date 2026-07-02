@@ -1451,7 +1451,22 @@ func TestRecycleBinHandlersScopeItemsToDeletingUser(t *testing.T) {
 	companyID := "recycle-bin-user-scope-test"
 	userA := domain.User{UserID: "recycle-user-a", Email: "recycle-a@example.com", DisplayName: "Recycle A"}
 	userB := domain.User{UserID: "recycle-user-b", Email: "recycle-b@example.com", DisplayName: "Recycle B"}
+	admin := domain.User{UserID: "recycle-admin", Email: "recycle-admin@example.com", DisplayName: "Recycle Admin"}
 	repo.EnsureCompany(companyID, "Recycle User Scope")
+	userA, err := repo.UpsertAuthUser(userA.UserID, userA.Email, userA.DisplayName)
+	if err != nil {
+		t.Fatalf("UpsertAuthUser A: %v", err)
+	}
+	userB, err = repo.UpsertAuthUser(userB.UserID, userB.Email, userB.DisplayName)
+	if err != nil {
+		t.Fatalf("UpsertAuthUser B: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(userA.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership A: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership(userB.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership B: %v", err)
+	}
 
 	nodeA, err := repo.CreateNode(companyID, "User A node")
 	if err != nil {
@@ -1460,6 +1475,32 @@ func TestRecycleBinHandlersScopeItemsToDeletingUser(t *testing.T) {
 	nodeB, err := repo.CreateNode(companyID, "User B node")
 	if err != nil {
 		t.Fatalf("CreateNode B: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:     companyID,
+		EntityType:    store.EntityTypeNode,
+		EntityID:      nodeA.NodeID,
+		DefaultAccess: store.EntityPermissionNoAccess,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   userA.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions A: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:     companyID,
+		EntityType:    store.EntityTypeNode,
+		EntityID:      nodeB.NodeID,
+		DefaultAccess: store.EntityPermissionNoAccess,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   userB.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions B: %v", err)
 	}
 	postDeleteTargetForUser := func(t *testing.T, user domain.User, nodeID string) {
 		t.Helper()
@@ -1472,17 +1513,17 @@ func TestRecycleBinHandlersScopeItemsToDeletingUser(t *testing.T) {
 			t.Fatalf("Marshal delete target request: %v", err)
 		}
 		req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/delete-targets", bytes.NewReader(body))
-		req = requestWithActorForTest(req, user, companyID)
+		req = sharedInboxRequestWithActor(req, user, companyID, domain.RoleCompanyUser)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("POST delete target for user %s status = %d, want %d body=%s", user.UserID, rec.Code, http.StatusOK, rec.Body.String())
 		}
 	}
-	listRecycleForUser := func(t *testing.T, user domain.User) []domain.RecycleBinItem {
+	listRecycleForActor := func(t *testing.T, user domain.User, role string) ([]domain.RecycleBinItem, string) {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "/v1/recycle-bin?company_id="+companyID, nil)
-		req = requestWithActorForTest(req, user, companyID)
+		req = sharedInboxRequestWithActor(req, user, companyID, role)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -1490,23 +1531,36 @@ func TestRecycleBinHandlersScopeItemsToDeletingUser(t *testing.T) {
 		}
 		var payload struct {
 			Items []domain.RecycleBinItem `json:"items"`
+			Scope string                  `json:"scope"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 			t.Fatalf("Unmarshal recycle bin response: %v", err)
 		}
-		return payload.Items
+		return payload.Items, payload.Scope
 	}
-	postRecycleMutationForUser := func(t *testing.T, path string, user domain.User, itemID string) int {
+	listRecycleForUser := func(t *testing.T, user domain.User) []domain.RecycleBinItem {
+		t.Helper()
+		items, scope := listRecycleForActor(t, user, domain.RoleCompanyUser)
+		if scope != "user" {
+			t.Fatalf("GET recycle bin scope for user %s = %q, want user", user.UserID, scope)
+		}
+		return items
+	}
+	postRecycleMutationForActor := func(t *testing.T, path string, user domain.User, role string, itemID string) int {
 		t.Helper()
 		body, err := json.Marshal(map[string]any{"company_id": companyID, "item_ids": []string{itemID}, "confirmation_display_name": user.DisplayName})
 		if err != nil {
 			t.Fatalf("Marshal recycle mutation request: %v", err)
 		}
 		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
-		req = requestWithActorForTest(req, user, companyID)
+		req = sharedInboxRequestWithActor(req, user, companyID, role)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		return rec.Code
+	}
+	postRecycleMutationForUser := func(t *testing.T, path string, user domain.User, itemID string) int {
+		t.Helper()
+		return postRecycleMutationForActor(t, path, user, domain.RoleCompanyUser, itemID)
 	}
 
 	postDeleteTargetForUser(t, userA, nodeA.NodeID)
@@ -1523,8 +1577,22 @@ func TestRecycleBinHandlersScopeItemsToDeletingUser(t *testing.T) {
 	if code := postRecycleMutationForUser(t, "/v1/recycle-bin/restore", userB, itemsA[0].RecycleBinItemID); code != http.StatusNotFound {
 		t.Fatalf("cross-user restore status = %d, want %d", code, http.StatusNotFound)
 	}
-	if code := postRecycleMutationForUser(t, "/v1/recycle-bin/delete", userB, itemsA[0].RecycleBinItemID); code != http.StatusNotFound {
-		t.Fatalf("cross-user permanent delete status = %d, want %d", code, http.StatusNotFound)
+	if code := postRecycleMutationForActor(t, "/v1/recycle-bin/delete", userB, domain.RoleCompanyUser, itemsA[0].RecycleBinItemID); code != http.StatusForbidden {
+		t.Fatalf("non-admin permanent delete status = %d, want %d", code, http.StatusForbidden)
+	}
+	adminItems, adminScope := listRecycleForActor(t, admin, domain.RoleCompanyAdmin)
+	if adminScope != "company" {
+		t.Fatalf("admin recycle scope = %q, want company", adminScope)
+	}
+	if len(adminItems) != 2 {
+		t.Fatalf("admin recycle items = %+v, want both users' items", adminItems)
+	}
+	if code := postRecycleMutationForActor(t, "/v1/recycle-bin/delete", admin, domain.RoleCompanyAdmin, itemsB[0].RecycleBinItemID); code != http.StatusOK {
+		t.Fatalf("admin permanent delete status = %d, want %d", code, http.StatusOK)
+	}
+	itemsBAfterAdminDelete := listRecycleForUser(t, userB)
+	if len(itemsBAfterAdminDelete) != 0 {
+		t.Fatalf("user B recycle items after admin permanent delete = %+v, want empty", itemsBAfterAdminDelete)
 	}
 	if code := postRecycleMutationForUser(t, "/v1/recycle-bin/restore", userA, itemsA[0].RecycleBinItemID); code != http.StatusOK {
 		t.Fatalf("owner restore status = %d, want %d", code, http.StatusOK)

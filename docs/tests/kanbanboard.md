@@ -1,4 +1,4 @@
-Last updated: 2026-06-30
+Last updated: 2026-07-02
 
 # Kanban Board Tests
 
@@ -20,7 +20,7 @@ KB3 - Logic Gate Kanban board contents are not independent per-user board copies
 KB4 - User-specific grouping and Date Added sort settings do not belong to the Kanban board record and do not belong to a specific Logic Gate.
 KB5 - User-specific grouping and Date Added sort settings are saved in one user-owned `saved_views` row so the same user's Logic Gate Kanban view applies across all Logic Gate Kanban boards.
 KB6 - Generic Kanban board card APIs remain node-card APIs. Logic Gate work state should continue to use Logic Gate assignment/work-item commands where those command paths exist.
-KB7 - Deleting a node removes its Kanban card placements and Logic Gate Kanban projection rows.
+KB7 - Deleting a node from Kanban uses node soft-delete semantics: the actor must have edit access to the node, the node moves to that actor's Recycle Bin, and Kanban card placements plus Logic Gate Kanban projection rows are removed.
 KB8 - Deleting a Logic Gate removes the Logic Gate Kanban board/work placements owned by that Logic Gate.
 KB9 - Logic Gate Kanban board reads must be permission-filtered by the owning Logic Gate.
 KB10 - Users without view access to the owning Logic Gate must not receive card rows, projection deltas, saved board state, or card metadata for that Logic Gate board.

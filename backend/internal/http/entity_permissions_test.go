@@ -104,6 +104,72 @@ func TestNodePermissionsFilterListsAndDirectReads(t *testing.T) {
 	}
 }
 
+func TestNodeDeleteRequiresEditAndMovesToActorRecycleBin(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111119"
+	repo.EnsureCompany(companyID, "Permission Delete Co")
+
+	editor, err := repo.UpsertAuthUser("delete-editor", "delete-editor@example.com", "Delete Editor")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser editor: %v", err)
+	}
+	viewer, err := repo.UpsertAuthUser("delete-viewer", "delete-viewer@example.com", "Delete Viewer")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser viewer: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("delete-editor", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership editor: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("delete-viewer", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership viewer: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Editor deletable node")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:     companyID,
+		EntityType:    store.EntityTypeNode,
+		EntityID:      node.NodeID,
+		DefaultAccess: store.EntityPermissionNoAccess,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: editor.UserID, AccessLevel: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: viewer.UserID, AccessLevel: store.EntityPermissionView},
+		},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions: %v", err)
+	}
+
+	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key)}).Routes()
+	viewerReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+node.NodeID+"?company_id="+companyID, nil)
+	viewerReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", "delete-viewer", "delete-viewer@example.com"))
+	viewerReq.Header.Set(confirmationDisplayNameHeader, viewer.DisplayName)
+	viewerRes := httptest.NewRecorder()
+	handler.ServeHTTP(viewerRes, viewerReq)
+	if viewerRes.Code != http.StatusForbidden {
+		t.Fatalf("view-only delete status = %d, want %d body=%s", viewerRes.Code, http.StatusForbidden, strings.TrimSpace(viewerRes.Body.String()))
+	}
+
+	editorReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+node.NodeID+"?company_id="+companyID, nil)
+	editorReq.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", "delete-editor", "delete-editor@example.com"))
+	editorReq.Header.Set(confirmationDisplayNameHeader, editor.DisplayName)
+	editorRes := httptest.NewRecorder()
+	handler.ServeHTTP(editorRes, editorReq)
+	if editorRes.Code != http.StatusOK {
+		t.Fatalf("editor delete status = %d, want %d body=%s", editorRes.Code, http.StatusOK, strings.TrimSpace(editorRes.Body.String()))
+	}
+	items, err := repo.ListRecycleBinItems(companyID, editor.UserID)
+	if err != nil {
+		t.Fatalf("ListRecycleBinItems editor: %v", err)
+	}
+	if len(items) != 1 || items[0].ObjectID != node.NodeID || items[0].DeletedByUserID != editor.UserID {
+		t.Fatalf("editor recycle items = %+v, want deleted node in editor recycle bin", items)
+	}
+}
+
 func TestDevAdminPermissionUpdatesRoundTrip(t *testing.T) {
 	t.Parallel()
 

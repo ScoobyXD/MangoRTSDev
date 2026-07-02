@@ -628,6 +628,11 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "company_explorer_delete_targets_required")
 		return
 	}
+	for _, target := range deleteTargets {
+		if !s.requireCompanyExplorerDeleteTargetEdit(w, r, req.CompanyID, target) {
+			return
+		}
+	}
 
 	result := store.CompanyExplorerDeleteResult{Targets: []store.CompanyExplorerDeletedTarget{}}
 	var err error
@@ -647,6 +652,30 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 
 	s.publishCompanyExplorerDeletedTargets(req.CompanyID, result.Targets)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
+}
+
+func (s *Server) requireCompanyExplorerDeleteTargetEdit(w http.ResponseWriter, r *http.Request, companyID string, target store.CompanyExplorerDeleteTargetInput) bool {
+	kind := strings.TrimSpace(target.Kind)
+	id := strings.TrimSpace(target.ID)
+	if kind == "" || id == "" {
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
+		return false
+	}
+	switch kind {
+	case "folder":
+		return s.requireEntityEdit(w, r, companyID, store.EntityTypeCompanyExplorerFolder, id, "company_explorer_folder_not_found")
+	case store.EntityTypeNode:
+		return s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, id, "node_not_found")
+	case store.EntityTypeLogicGate:
+		return s.requireEntityEdit(w, r, companyID, store.EntityTypeLogicGate, id, "logic_gate_not_found")
+	case store.EntityTypeProject:
+		return s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, id, "project_not_found")
+	case "kanban":
+		return s.requireKanbanBoardEdit(w, r, companyID, id, "")
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
+		return false
+	}
 }
 
 func (s *Server) handleCommunicationsSharedInboxGVIC(w http.ResponseWriter, r *http.Request, folderID string) {

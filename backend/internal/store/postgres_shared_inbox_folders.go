@@ -438,7 +438,7 @@ where actor_access.is_admin
       actor_access.is_member
       and mangorts_user_can_access_resource($1::uuid, item.resource_type, item.folder_id::uuid, $2::uuid, 'view')
     )
-order by item.position asc, item.created_timestamp asc`, companyID, userID, ResourceDefaultAccessEdit, ResourceDefaultAccessNoAccess)
+order by item.position asc, item.created_timestamp asc`, companyID, userID, ResourceDefaultAccessEdit)
 	if err != nil {
 		if postgresSharedInboxStorageUnavailable(err) {
 			return nil, ErrSharedInboxStorageUnavailable
