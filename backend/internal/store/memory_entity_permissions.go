@@ -312,17 +312,7 @@ func (r *MemoryRepo) ListEntityPermissions(companyID, entityType, entityID strin
 		return nil, ErrNotFound
 	}
 	if usesDefaultResourceAccessPolicy(normalizedEntityType) {
-		items := make([]domain.EntityPermission, 0)
-		for _, permission := range r.entityPermissions {
-			if permission.CompanyID == companyID &&
-				permission.EntityType == normalizedEntityType &&
-				permission.EntityID == entityID {
-				permission.AccessLevel = permission.Permission
-				items = append(items, r.withEntityPermissionSubjectLocked(permission))
-			}
-		}
-		sortEntityPermissions(items)
-		return items, nil
+		return r.resolvedEntityPermissionsLocked(companyID, normalizedEntityType, entityID), nil
 	}
 	items := make([]domain.EntityPermission, 0)
 	for _, permission := range r.entityPermissions {
@@ -499,6 +489,9 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 	projectsSnapshot := cloneMemoryMap(r.projects)
 	foldersSnapshot := cloneMemoryMap(r.folders)
 	eventRowsSnapshot := cloneMemoryMap(r.eventRows)
+	resourcePolicySequenceSnapshot := r.resourcePolicySequence
+	resourcePermissionRevisionsSnapshot := cloneMemoryMap(r.resourcePermissionRevisions)
+	resourcePermissionApplicationsSnapshot := clonePermissionApplications(r.resourcePermissionApplications)
 	restore := func() {
 		r.entityPermissions = permissionsSnapshot
 		r.effectiveAccess = effectiveAccessSnapshot
@@ -507,15 +500,26 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 		r.projects = projectsSnapshot
 		r.folders = foldersSnapshot
 		r.eventRows = eventRowsSnapshot
+		r.resourcePolicySequence = resourcePolicySequenceSnapshot
+		r.resourcePermissionRevisions = resourcePermissionRevisionsSnapshot
+		r.resourcePermissionApplications = resourcePermissionApplicationsSnapshot
 	}
 	if !r.entityExistsLocked(companyID, entityType, entityID) {
 		return nil, ErrNotFound
 	}
-	defaultAccess, _ := r.defaultAccessForResourceLocked(companyID, entityType, entityID)
-	oldDefaultAccess := defaultAccess
-	var beforeAssignments []resourcePermissionAssignment
+	beforePolicy, ok := r.resolvedResourcePermissionPolicyLocked(companyID, entityType, entityID)
+	if !ok {
+		return nil, ErrNotFound
+	}
+	defaultAccess := beforePolicy.DefaultAccess
+	directDefaultAccess, ok := r.defaultAccessForResourceLocked(companyID, entityType, entityID)
+	if !ok {
+		return nil, ErrNotFound
+	}
+	oldDefaultAccess := beforePolicy.DefaultAccess
+	beforeAssignments := beforePolicy.Assignments
 	if input.ApplyToDescendants {
-		beforeAssignments = r.resourcePermissionAssignmentsLocked(companyID, entityType, entityID)
+		beforeAssignments = beforePolicy.Assignments
 	}
 	canMutateManagerOverrides := true
 	if strings.TrimSpace(input.ActorUserID) != "" {
@@ -539,7 +543,7 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 			defaultAccessChanged = true
 		}
 	}
-	if defaultAccessChanged {
+	if defaultAccessChanged || directDefaultAccess != defaultAccess {
 		if err := r.setResourceDefaultAccessLocked(companyID, entityType, entityID, defaultAccess); err != nil {
 			restore()
 			return nil, err
@@ -664,11 +668,16 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 		r.entityPermissions[entityPermissionKey(companyID, entityType, entityID, permission.SubjectType, permission.SubjectID, "")] = permission
 		out = append(out, r.withEntityPermissionSubjectLocked(permission))
 	}
+	policySequence := r.nextResourcePolicySequenceLocked()
+	r.setDirectResourcePolicySequenceLocked(companyID, entityType, entityID, policySequence)
 	changedTargets := []resourcePermissionTarget{{ResourceType: entityType, ResourceID: entityID}}
 	if input.ApplyToDescendants {
-		afterDefaultAccess, _ := r.defaultAccessForResourceLocked(companyID, entityType, entityID)
-		afterAssignments := r.resourcePermissionAssignmentsLocked(companyID, entityType, entityID)
-		descendantTargets, err := r.applyResourcePermissionPolicyToDescendantsLocked(input, oldDefaultAccess, beforeAssignments, afterDefaultAccess, afterAssignments)
+		afterPolicy, ok := r.resolvedResourcePermissionPolicyLocked(companyID, entityType, entityID)
+		if !ok {
+			restore()
+			return nil, ErrNotFound
+		}
+		descendantTargets, err := r.applyResourcePermissionPolicyToDescendantsLocked(input, policySequence, oldDefaultAccess, beforeAssignments, afterPolicy.DefaultAccess, afterPolicy.Assignments)
 		if err != nil {
 			restore()
 			return nil, err
@@ -1172,34 +1181,11 @@ func (r *MemoryRepo) setResourceDefaultAccessLocked(companyID, entityType, entit
 }
 
 func (r *MemoryRepo) resourcePermissionAssignmentsLocked(companyID, resourceType, resourceID string) []resourcePermissionAssignment {
-	assignments := make([]resourcePermissionAssignment, 0)
-	for _, permission := range r.entityPermissions {
-		if permission.CompanyID == companyID &&
-			permission.EntityType == resourceType &&
-			permission.EntityID == resourceID &&
-			strings.TrimSpace(permission.SubjectType) != "" &&
-			strings.TrimSpace(permission.SubjectID) != "" {
-			accessLevel, ok := NormalizeEntityPermission(permission.AccessLevel)
-			if !ok {
-				accessLevel, ok = NormalizeEntityPermission(permission.Permission)
-			}
-			if !ok {
-				continue
-			}
-			assignments = append(assignments, resourcePermissionAssignment{
-				SubjectType: permission.SubjectType,
-				SubjectID:   permission.SubjectID,
-				AccessLevel: accessLevel,
-			})
-		}
+	policy, ok := r.resolvedResourcePermissionPolicyLocked(companyID, resourceType, resourceID)
+	if !ok {
+		return nil
 	}
-	sort.Slice(assignments, func(i, j int) bool {
-		if assignments[i].SubjectType != assignments[j].SubjectType {
-			return assignments[i].SubjectType < assignments[j].SubjectType
-		}
-		return assignments[i].SubjectID < assignments[j].SubjectID
-	})
-	return assignments
+	return policy.Assignments
 }
 
 func (r *MemoryRepo) resourcePermissionDescendantTargetsLocked(companyID, resourceType, resourceID string) []resourcePermissionTarget {
@@ -1289,7 +1275,7 @@ func (r *MemoryRepo) resourcePermissionDescendantTargetsLocked(companyID, resour
 	return targets
 }
 
-func (r *MemoryRepo) applyResourcePermissionPolicyToDescendantsLocked(input EntityPermissionUpdateInput, beforeDefault string, beforeAssignments []resourcePermissionAssignment, afterDefault string, afterAssignments []resourcePermissionAssignment) ([]resourcePermissionTarget, error) {
+func (r *MemoryRepo) applyResourcePermissionPolicyToDescendantsLocked(input EntityPermissionUpdateInput, policySequence int64, beforeDefault string, beforeAssignments []resourcePermissionAssignment, afterDefault string, afterAssignments []resourcePermissionAssignment) ([]resourcePermissionTarget, error) {
 	if !input.ApplyToDescendants {
 		return []resourcePermissionTarget{}, nil
 	}
@@ -1303,50 +1289,7 @@ func (r *MemoryRepo) applyResourcePermissionPolicyToDescendantsLocked(input Enti
 	if len(targets) == 0 {
 		return targets, nil
 	}
-	if beforeDefault != afterDefault {
-		for _, target := range targets {
-			if err := r.setResourceDefaultAccessLocked(companyID, target.ResourceType, target.ResourceID, afterDefault); err != nil {
-				return nil, err
-			}
-		}
-	}
-	beforeByKey := resourcePermissionAssignmentMap(beforeAssignments)
-	afterByKey := resourcePermissionAssignmentMap(afterAssignments)
-	for assignmentKey, before := range beforeByKey {
-		if _, ok := afterByKey[assignmentKey]; ok {
-			continue
-		}
-		for _, target := range targets {
-			for permissionKey, permission := range r.entityPermissions {
-				if permission.CompanyID == companyID &&
-					permission.EntityType == target.ResourceType &&
-					permission.EntityID == target.ResourceID &&
-					permission.SubjectType == before.SubjectType &&
-					permission.SubjectID == before.SubjectID {
-					delete(r.entityPermissions, permissionKey)
-				}
-			}
-		}
-	}
-	now := time.Now().UTC()
-	for assignmentKey, after := range afterByKey {
-		if before, ok := beforeByKey[assignmentKey]; ok && before == after {
-			continue
-		}
-		for _, target := range targets {
-			permission := domain.EntityPermission{
-				CompanyID:        companyID,
-				EntityType:       target.ResourceType,
-				EntityID:         target.ResourceID,
-				SubjectType:      after.SubjectType,
-				SubjectID:        after.SubjectID,
-				Permission:       after.AccessLevel,
-				AccessLevel:      after.AccessLevel,
-				CreatedTimestamp: now,
-			}
-			r.entityPermissions[entityPermissionKey(companyID, target.ResourceType, target.ResourceID, after.SubjectType, after.SubjectID, "")] = permission
-		}
-	}
+	r.recordPermissionSubtreeApplicationsLocked(companyID, resourceType, resourceID, policySequence, beforeDefault, beforeAssignments, afterDefault, afterAssignments)
 	return targets, nil
 }
 
@@ -1364,20 +1307,18 @@ func (r *MemoryRepo) snapshotResourceAccessPolicyLocked(companyID, sourceType, s
 		!usesDefaultResourceAccessPolicy(sourceType) || !usesDefaultResourceAccessPolicy(targetType) {
 		return false, ErrInvalid
 	}
-	sourceDefaultAccess, ok := r.defaultAccessForResourceLocked(companyID, sourceType, sourceID)
+	sourcePolicy, ok := r.resolvedResourcePermissionPolicyLocked(companyID, sourceType, sourceID)
 	if !ok {
 		return false, ErrNotFound
 	}
-	targetDefaultAccess, ok := r.defaultAccessForResourceLocked(companyID, targetType, targetID)
+	targetPolicy, ok := r.resolvedResourcePermissionPolicyLocked(companyID, targetType, targetID)
 	if !ok {
 		return false, ErrNotFound
 	}
-	sourceAssignments := r.resourcePermissionAssignmentsLocked(companyID, sourceType, sourceID)
-	targetAssignments := r.resourcePermissionAssignmentsLocked(companyID, targetType, targetID)
-	if sourceDefaultAccess == targetDefaultAccess && orderedResourcePermissionAssignmentsEqual(sourceAssignments, targetAssignments) {
-		return false, nil
-	}
-	if err := r.setResourceDefaultAccessLocked(companyID, targetType, targetID, sourceDefaultAccess); err != nil {
+	sourceAssignments := sourcePolicy.Assignments
+	targetAssignments := targetPolicy.Assignments
+	changed := !(sourcePolicy.DefaultAccess == targetPolicy.DefaultAccess && orderedResourcePermissionAssignmentsEqual(sourceAssignments, targetAssignments))
+	if err := r.setResourceDefaultAccessLocked(companyID, targetType, targetID, sourcePolicy.DefaultAccess); err != nil {
 		return false, err
 	}
 	for permissionKey, permission := range r.entityPermissions {
@@ -1399,6 +1340,7 @@ func (r *MemoryRepo) snapshotResourceAccessPolicyLocked(companyID, sourceType, s
 		}
 		r.entityPermissions[entityPermissionKey(companyID, targetType, targetID, assignment.SubjectType, assignment.SubjectID, "")] = permission
 	}
+	r.setDirectResourcePolicySequenceLocked(companyID, targetType, targetID, r.nextResourcePolicySequenceLocked())
 	if err := r.recomputeDirectGrantEffectiveAccessForResourceLocked(companyID, targetType, targetID); err != nil {
 		return false, err
 	}
@@ -1407,5 +1349,5 @@ func (r *MemoryRepo) snapshotResourceAccessPolicyLocked(companyID, sourceType, s
 			return false, err
 		}
 	}
-	return true, nil
+	return changed, nil
 }

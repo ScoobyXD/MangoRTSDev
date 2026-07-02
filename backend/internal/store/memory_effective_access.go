@@ -296,11 +296,10 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 		if _, ok := r.memberships[membershipKey(companyID, userID)]; !ok {
 			return false
 		}
-		defaultAccess, ok := r.defaultAccessForResourceLocked(companyID, resourceType, resourceID)
+		resolvedAccess, ok := r.resolvedResourcePermissionAccessLevelForUserLocked(companyID, userID, resourceType, resourceID)
 		if !ok {
 			return false
 		}
-		resolvedAccess := r.resourcePermissionAccessLevelForUserLocked(companyID, userID, resourceType, resourceID, defaultAccess)
 		if EntityPermissionRank(resolvedAccess) == 0 {
 			return false
 		}

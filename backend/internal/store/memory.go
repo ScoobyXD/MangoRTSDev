@@ -25,6 +25,8 @@ type MemoryRepo struct {
 	logicGateGVIC                  map[string][]domain.LogicGateGVICAssignment
 	gvicAssignments                map[string]domain.ResourceGVICAssignment
 	gvicEffectiveAssignments       map[string]domain.ResourceGVICEffectiveAssignment
+	gvicPolicyRevisions            map[string]int64
+	gvicSubtreeApplications        []resourceGVICSubtreeApplication
 	projects                       map[string]domain.Project
 	projectAccountAssignments      map[string]bool
 	projectTeamAssignments         map[string]bool
@@ -59,6 +61,9 @@ type MemoryRepo struct {
 	userPins                       map[string]domain.UserPin
 	entityPermissions              map[string]domain.EntityPermission
 	effectiveAccess                map[string]domain.EffectiveResourceAccess
+	resourcePolicySequence         int64
+	resourcePermissionRevisions    map[string]int64
+	resourcePermissionApplications []resourcePermissionSubtreeApplication
 	invitations                    map[string]domain.Invitation
 	emailConnections               map[string]domain.UserEmailConnection
 	companyEmailConnections        map[string]domain.CompanyEmailConnection
@@ -99,6 +104,8 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateGVIC:                  map[string][]domain.LogicGateGVICAssignment{},
 		gvicAssignments:                map[string]domain.ResourceGVICAssignment{},
 		gvicEffectiveAssignments:       map[string]domain.ResourceGVICEffectiveAssignment{},
+		gvicPolicyRevisions:            map[string]int64{},
+		gvicSubtreeApplications:        []resourceGVICSubtreeApplication{},
 		projects:                       map[string]domain.Project{},
 		projectAccountAssignments:      map[string]bool{},
 		projectTeamAssignments:         map[string]bool{},
@@ -133,6 +140,8 @@ func NewMemoryRepo() *MemoryRepo {
 		userPins:                       map[string]domain.UserPin{},
 		entityPermissions:              map[string]domain.EntityPermission{},
 		effectiveAccess:                map[string]domain.EffectiveResourceAccess{},
+		resourcePermissionRevisions:    map[string]int64{},
+		resourcePermissionApplications: []resourcePermissionSubtreeApplication{},
 		invitations:                    map[string]domain.Invitation{},
 		emailConnections:               map[string]domain.UserEmailConnection{},
 		companyEmailConnections:        map[string]domain.CompanyEmailConnection{},

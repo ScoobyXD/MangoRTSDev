@@ -5,15 +5,23 @@ import (
 	"database/sql"
 	"errors"
 	"miraeopus/backend/internal/domain"
-	"sort"
 	"strings"
 )
 
-type postgresQueryRower interface {
+type postgresResourceAccessQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func postgresResourceDefaultAccess(ctx context.Context, q postgresQueryRower, companyID, resourceType, resourceID string) (string, error) {
+func postgresResourceDefaultAccess(ctx context.Context, q postgresResourceAccessQueryer, companyID, resourceType, resourceID string) (string, error) {
+	policy, err := postgresResolvedResourceAccessPolicy(ctx, q, companyID, resourceType, resourceID)
+	if err != nil {
+		return "", err
+	}
+	return policy.DefaultAccess, nil
+}
+
+func postgresDirectResourceDefaultAccess(ctx context.Context, q postgresResourceAccessQueryer, companyID, resourceType, resourceID string) (string, error) {
 	companyID = cleanUUIDText(companyID)
 	resourceID = cleanUUIDText(resourceID)
 	resourceType, ok := NormalizeEntityType(resourceType)
@@ -306,55 +314,59 @@ where company_id=$1::uuid and user_id=$2::uuid`, companyID, subjectID).Scan(&rol
 	return out, nil
 }
 
-func setPostgresResourceAccessPolicyTx(ctx context.Context, tx *sql.Tx, input EntityPermissionUpdateInput, entityType, entityID string) error {
+func setPostgresResourceAccessPolicyTx(ctx context.Context, tx *sql.Tx, input EntityPermissionUpdateInput, entityType, entityID string) (int64, error) {
 	if ctx == nil || tx == nil {
-		return ErrInvalid
+		return 0, ErrInvalid
 	}
 	companyID := cleanUUIDText(input.CompanyID)
 	entityID = cleanUUIDText(entityID)
 	entityType, ok := NormalizeEntityType(entityType)
 	if companyID == "" || entityID == "" || !ok || !usesDefaultResourceAccessPolicy(entityType) {
-		return ErrInvalid
+		return 0, ErrInvalid
 	}
 	defaultAccess, err := postgresResourceDefaultAccess(ctx, tx, companyID, entityType, entityID)
 	if err != nil {
-		return err
+		return 0, err
+	}
+	directDefaultAccess, err := postgresDirectResourceDefaultAccess(ctx, tx, companyID, entityType, entityID)
+	if err != nil {
+		return 0, err
 	}
 	oldDefaultAccess := defaultAccess
 	canMutateManagerOverrides, err := postgresActorCanMutateManagerOverrides(ctx, tx, companyID, input.ActorUserID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defaultAccessChanged := false
 	if input.DefaultAccessSet {
 		defaultAccess, ok = NormalizeResourceDefaultAccess(input.DefaultAccess)
 		if !ok {
-			return ErrInvalid
+			return 0, ErrInvalid
 		}
 		defaultAccessChanged = true
 	} else if len(input.OverrideUserIDs) == 0 {
 		inferredDefaultAccess, inferred, err := inferredResourceDefaultAccessFromPermissions(input.Permissions)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if inferred {
 			defaultAccess = inferredDefaultAccess
 			defaultAccessChanged = true
 		}
 	}
-	if defaultAccessChanged {
+	if defaultAccessChanged || directDefaultAccess != defaultAccess {
 		if err := setPostgresResourceDefaultAccessTx(ctx, tx, companyID, entityType, entityID, defaultAccess); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	assignments, err := postgresResourcePermissionAssignmentsFromInput(ctx, tx, input, defaultAccess, canMutateManagerOverrides)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !canMutateManagerOverrides {
 		preservedManagerAssignments, err := postgresPreservedManagerPermissionAssignments(ctx, tx, companyID, entityType, entityID, oldDefaultAccess, defaultAccess)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		seen := make(map[string]bool, len(assignments)+len(preservedManagerAssignments))
 		for _, assignment := range assignments {
@@ -369,14 +381,21 @@ func setPostgresResourceAccessPolicyTx(ctx context.Context, tx *sql.Tx, input En
 		}
 	}
 	if err := deletePostgresResourceOverridesTx(ctx, tx, companyID, entityType, entityID); err != nil {
-		return err
+		return 0, err
 	}
 	for _, assignment := range assignments {
 		if err := insertPostgresResourcePermissionTx(ctx, tx, companyID, entityType, entityID, assignment); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return nil
+	policySequence, err := nextPostgresResourcePolicySequenceTx(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if err := setPostgresResourcePermissionPolicyRevisionTx(ctx, tx, companyID, entityType, entityID, policySequence); err != nil {
+		return 0, err
+	}
+	return policySequence, nil
 }
 
 func postgresPreservedManagerPermissionAssignments(ctx context.Context, tx *sql.Tx, companyID, entityType, entityID, oldDefaultAccess, newDefaultAccess string) ([]resourcePermissionAssignment, error) {
@@ -419,46 +438,8 @@ order by membership.user_id::text`, companyID, entityType, entityID)
 	return out, rows.Err()
 }
 
-func postgresResourcePermissionAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID string) ([]resourcePermissionAssignment, error) {
-	companyID = cleanUUIDText(companyID)
-	resourceID = cleanUUIDText(resourceID)
-	resourceType, ok := NormalizeEntityType(resourceType)
-	if ctx == nil || tx == nil || companyID == "" || resourceID == "" || !ok || !usesDefaultResourceAccessPolicy(resourceType) {
-		return nil, ErrInvalid
-	}
-	rows, err := tx.QueryContext(ctx, `
-select subject_type, subject_id::text, access_level
-from resource_permissions
-where company_id=$1::uuid
-  and resource_type=$2
-  and resource_id=$3::uuid
-order by subject_type, subject_id::text`, companyID, resourceType, resourceID)
-	if err != nil {
-		return nil, err
-	}
-	assignments := []resourcePermissionAssignment{}
-	for rows.Next() {
-		var assignment resourcePermissionAssignment
-		if err := rows.Scan(&assignment.SubjectType, &assignment.SubjectID, &assignment.AccessLevel); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		assignments = append(assignments, assignment)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	sort.Slice(assignments, func(i, j int) bool {
-		if assignments[i].SubjectType != assignments[j].SubjectType {
-			return assignments[i].SubjectType < assignments[j].SubjectType
-		}
-		return assignments[i].SubjectID < assignments[j].SubjectID
-	})
-	return assignments, nil
+func postgresResourcePermissionAssignmentsTx(ctx context.Context, queryer postgresResourceAccessQueryer, companyID, resourceType, resourceID string) ([]resourcePermissionAssignment, error) {
+	return postgresResolvedResourcePermissionAssignments(ctx, queryer, companyID, resourceType, resourceID)
 }
 
 func snapshotPostgresResourceAccessPolicyTx(ctx context.Context, tx *sql.Tx, companyID, sourceType, sourceID, targetType, targetID string) (bool, error) {
@@ -504,6 +485,13 @@ func snapshotPostgresResourceAccessPolicyTx(ctx context.Context, tx *sql.Tx, com
 		if err := insertPostgresResourcePermissionTx(ctx, tx, companyID, targetType, targetID, assignment); err != nil {
 			return false, err
 		}
+	}
+	policySequence, err := nextPostgresResourcePolicySequenceTx(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	if err := setPostgresResourcePermissionPolicyRevisionTx(ctx, tx, companyID, targetType, targetID, policySequence); err != nil {
+		return false, err
 	}
 	if err := recomputeDirectGrantEffectiveAccessForResourceTx(ctx, tx, companyID, targetType, targetID); err != nil {
 		return false, err
@@ -774,7 +762,7 @@ where access.company_id=$1::uuid
 	})
 }
 
-func applyPostgresResourcePermissionPolicyToDescendantsTx(ctx context.Context, tx *sql.Tx, input EntityPermissionUpdateInput, beforeDefault string, beforeAssignments []resourcePermissionAssignment, afterDefault string, afterAssignments []resourcePermissionAssignment) ([]resourcePermissionTarget, error) {
+func applyPostgresResourcePermissionPolicyToDescendantsTx(ctx context.Context, tx *sql.Tx, input EntityPermissionUpdateInput, policySequence int64, beforeDefault string, beforeAssignments []resourcePermissionAssignment, afterDefault string, afterAssignments []resourcePermissionAssignment) ([]resourcePermissionTarget, error) {
 	if !input.ApplyToDescendants {
 		return []resourcePermissionTarget{}, nil
 	}
@@ -791,27 +779,8 @@ func applyPostgresResourcePermissionPolicyToDescendantsTx(ctx context.Context, t
 	if len(targets) == 0 {
 		return targets, nil
 	}
-	if beforeDefault != afterDefault {
-		if err := setPostgresResourceDefaultAccessForTargetsTx(ctx, tx, companyID, targets, afterDefault); err != nil {
-			return nil, err
-		}
-	}
-	beforeByKey := resourcePermissionAssignmentMap(beforeAssignments)
-	afterByKey := resourcePermissionAssignmentMap(afterAssignments)
-	for assignmentKey, before := range beforeByKey {
-		if _, ok := afterByKey[assignmentKey]; !ok {
-			if err := deletePostgresResourcePermissionForTargetsTx(ctx, tx, companyID, targets, before); err != nil {
-				return nil, err
-			}
-		}
-	}
-	for assignmentKey, after := range afterByKey {
-		if before, ok := beforeByKey[assignmentKey]; ok && before == after {
-			continue
-		}
-		if err := upsertPostgresResourcePermissionForTargetsTx(ctx, tx, companyID, targets, after); err != nil {
-			return nil, err
-		}
+	if _, err := postgresRecordPermissionSubtreeApplicationsTx(ctx, tx, companyID, resourceType, resourceID, policySequence, beforeDefault, beforeAssignments, afterDefault, afterAssignments); err != nil {
+		return nil, err
 	}
 	return targets, nil
 }
