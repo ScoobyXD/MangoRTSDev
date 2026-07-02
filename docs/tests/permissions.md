@@ -16,8 +16,8 @@ P5 - Default access participates in effective access calculation.
 P6 - Resource permissions support user and group source principals.
 P7 - A resource can have at most 1000 explicit permission assignments in one update.
 P8 - Dev admins and company admins receive admin-level effective access for company-managed resources.
-P9 - GVIC generated and verified roles contribute edit-level access.
-P10 - GVIC consulted and informed roles contribute view-level access.
+P9 - GVIC assignments do not grant resource permission access and must not satisfy view, edit, admin, delete, or mutation authorization checks.
+P10 - GVIC assignments must not elevate a user's permission level; for example, generated or verified GVIC plus view permission still does not allow edit/delete.
 P11 - If a user cannot view a resource, read-style access checks hide the resource instead of exposing it.
 P12 - If a user can view a resource but lacks the required edit/admin level, mutation checks return an access denied error.
 P13 - Invalid requested access levels return a bad request error.
@@ -76,7 +76,7 @@ Business logic covered:
 - P41
 
 Given:
-- A company has resources with default access, user source rows, group source rows, and GVIC assignments.
+- A company has resources with default access, user source rows, group source rows, and separate GVIC assignments.
 - A dev admin, company admin, company manager, group member, and direct user grantee access the same resource.
 - A user is added to a group after the group has already been assigned a resource permission.
 
@@ -84,7 +84,8 @@ Expected:
 - Company access is checked before resource access.
 - Permission ranking follows no access, view, edit, admin.
 - Blank input becomes view and manage becomes admin.
-- Default access, direct user rows, group rows, and GVIC-derived access all participate in effective access.
+- Default access, direct user rows, and group rows participate in effective permission access.
+- GVIC assignments do not participate in effective permission access and cannot grant or elevate view/edit/admin authorization.
 - Dev admins and company admins bypass resource permissions.
 - Company managers follow resource permissions.
 - `resource_permissions` stores user/group source rows with explicit access levels.
