@@ -48,8 +48,9 @@ const editorRichTextPrefix = "<!-- mango-editor-html-v1 -->"
 const editorNodeTextBlockPrefix = "<!-- mango-node-text-block-v1 -->"
 
 var (
-	editorHTMLBreakPattern = regexp.MustCompile(`(?i)<br\s*/?>`)
-	editorHTMLTagPattern   = regexp.MustCompile(`<[^>]+>`)
+	editorHTMLBlockBoundaryPattern = regexp.MustCompile(`(?i)</?(?:address|article|aside|blockquote|div|dl|dt|dd|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|table|tbody|td|tfoot|th|thead|tr|ul)[^>]*>`)
+	editorHTMLBreakPattern         = regexp.MustCompile(`(?i)<br\s*/?>`)
+	editorHTMLTagPattern           = regexp.MustCompile(`<[^>]+>`)
 )
 
 func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
@@ -533,6 +534,10 @@ func isMentionNotificationInformationType(infoType string) bool {
 }
 
 func editorMentionCommentPreview(infoType, information string) string {
+	return editorMentionPlainTextPreview(infoType, information)
+}
+
+func editorMentionSourceText(infoType, information string) string {
 	infoType = strings.TrimSpace(infoType)
 	text := strings.TrimSpace(information)
 	if infoType == "Text block chat" {
@@ -559,9 +564,137 @@ func editorMentionCommentPreview(infoType, information string) string {
 	if strings.HasPrefix(text, editorRichTextPrefix) {
 		text = strings.TrimPrefix(text, editorRichTextPrefix)
 	}
+	return text
+}
+
+func editorMentionPlainTextPreview(infoType, information string) string {
+	text := editorMentionSourceText(infoType, information)
 	text = editorHTMLBreakPattern.ReplaceAllString(text, "\n")
+	text = editorHTMLBlockBoundaryPattern.ReplaceAllString(text, "\n")
 	text = editorHTMLTagPattern.ReplaceAllString(text, " ")
-	return strings.TrimSpace(htmlpkg.UnescapeString(text))
+	return normalizeEditorMentionPreviewText(htmlpkg.UnescapeString(text))
+}
+
+func normalizeEditorMentionPreviewText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.Join(strings.Fields(line), " ")
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+func editorMentionCommentPreviewForOccurrence(infoType, information, mentionKind, userID string, occurrenceIndex int, users []domain.CompanyUser) string {
+	fullPreview := editorMentionCommentPreview(infoType, information)
+	if strings.TrimSpace(infoType) == "Text block chat" || occurrenceIndex < 0 {
+		return fullPreview
+	}
+	aliases := editorMentionAliasesForUser(users, userID)
+	if len(aliases) == 0 {
+		return fullPreview
+	}
+	text := editorMentionPlainTextPreview(infoType, information)
+	starts := editorMentionAliasOccurrenceStarts(text, aliases, editorMentionTriggerForKind(mentionKind))
+	if occurrenceIndex >= len(starts) {
+		return fullPreview
+	}
+	if line := editorMentionPreviewLineAt(text, starts[occurrenceIndex]); line != "" {
+		return line
+	}
+	return fullPreview
+}
+
+func editorMentionAliasesForUser(users []domain.CompanyUser, userID string) []string {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil
+	}
+	for _, user := range users {
+		if strings.TrimSpace(user.UserID) == userID {
+			return editorMentionAliases(user)
+		}
+	}
+	return []string{userID}
+}
+
+func editorMentionAliases(user domain.CompanyUser) []string {
+	aliases := []string{
+		strings.TrimSpace(user.DisplayName),
+		strings.ReplaceAll(strings.TrimSpace(user.DisplayName), " ", ""),
+		strings.TrimSpace(user.Email),
+		strings.TrimSpace(user.UserID),
+	}
+	if at := strings.Index(user.Email, "@"); at > 0 {
+		aliases = append(aliases, strings.TrimSpace(user.Email[:at]))
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		alias = strings.TrimSpace(alias)
+		key := strings.ToLower(alias)
+		if alias == "" || key == "@" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, alias)
+	}
+	return out
+}
+
+func editorMentionTriggerForKind(mentionKind string) string {
+	if strings.TrimSpace(mentionKind) == "urgent" {
+		return "!"
+	}
+	return "@"
+}
+
+func editorMentionAliasOccurrenceStarts(text string, aliases []string, trigger string) []int {
+	if trigger != "!" {
+		trigger = "@"
+	}
+	starts := map[int]struct{}{}
+	for _, alias := range aliases {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			continue
+		}
+		pattern := `(?i)(^|[^A-Za-z0-9_@!])` + regexp.QuoteMeta(trigger) + regexp.QuoteMeta(alias) + `($|[^A-Za-z0-9_@!])`
+		for _, match := range regexp.MustCompile(pattern).FindAllStringSubmatchIndex(text, -1) {
+			if len(match) < 4 || match[3] < 0 {
+				continue
+			}
+			starts[match[3]] = struct{}{}
+		}
+	}
+	out := make([]int, 0, len(starts))
+	for start := range starts {
+		out = append(out, start)
+	}
+	sort.Ints(out)
+	return out
+}
+
+func editorMentionPreviewLineAt(text string, start int) string {
+	if start < 0 || start > len(text) {
+		return ""
+	}
+	lineStart := 0
+	if before := strings.LastIndex(text[:start], "\n"); before >= 0 {
+		lineStart = before + 1
+	}
+	lineEnd := len(text)
+	if after := strings.Index(text[start:], "\n"); after >= 0 {
+		lineEnd = start + after
+	}
+	return strings.Join(strings.Fields(strings.TrimSpace(text[lineStart:lineEnd])), " ")
 }
 
 func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityType, entityID, informationID, infoType, information string) {
@@ -578,7 +711,10 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 		return
 	}
 	actorUserID, actorLabel := notificationActorPayload(r)
-	comment := editorMentionCommentPreview(infoType, information)
+	mentionableUsers, mentionableUsersErr := s.repo.ListMentionableCompanyUsers(companyID)
+	if mentionableUsersErr != nil {
+		mentionableUsers = nil
+	}
 	eventType := ""
 	streamID := ""
 	idempotencyEntityKey := ""
@@ -611,6 +747,7 @@ func (s *Server) recordMentionNotifications(r *http.Request, companyID, entityTy
 			}
 			occurrenceIndex := mentionOccurrenceByUserID[userID]
 			mentionOccurrenceByUserID[userID] = occurrenceIndex + 1
+			comment := editorMentionCommentPreviewForOccurrence(infoType, information, mentionKind, userID, occurrenceIndex, mentionableUsers)
 			idempotencyKey := "mention:" + mentionKind + ":" + idempotencyEntityKey + ":" + entityID + ":" + informationID + ":" + userID + ":" + strconv.Itoa(occurrenceIndex+1)
 			event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
 				CompanyID:      companyID,

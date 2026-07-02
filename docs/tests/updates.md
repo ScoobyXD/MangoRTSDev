@@ -72,6 +72,7 @@ U61 - Seeing a single update removes that notification from Updates for the curr
 U62 - The Updates header has a Seen all action that asks for confirmation before removing all current-user Updates notifications in the current company.
 U63 - Updates rows support Company Explorer-style multi-selection: normal click selects one row and activates it, Ctrl-click or Command-click toggles one row, and Shift-click additively selects the visible range from the selection anchor.
 U64 - Right-clicking an Updates row opens an Updates context menu with seen actions for the selected rows and for all rows; destructive multi-row seen actions ask for confirmation before removing notifications.
+U65 - Text editor mention row previews show the text block containing the specific new @ or ! mention occurrence; older mention blocks or unrelated editor text in the same saved document must not appear in that new row preview.
 
 ## Update Row Copy And Visual Language
 
@@ -322,6 +323,7 @@ Business logic covered:
 - U62
 - U63
 - U64
+- U65
 
 Given:
 - A user inserts an @ mention or ! mention into a node text editor or Logic Gate text editor.
@@ -334,6 +336,7 @@ Expected:
 - Later typing near the committed mention chip does not change the mentioned user or urgent/normal mention kind.
 - Autosaves and character edits around an existing committed mention do not create duplicate mention notifications.
 - Adding a genuinely new committed mention occurrence creates one new notification for that new occurrence.
+- The new mention row's preview is scoped to the block containing that occurrence, not earlier mention blocks or unrelated editor text in the same saved document.
 - Clicking Seen on one row removes that notification permanently from the Updates feed for that user.
 - Clicking Seen all asks for confirmation, then removes all current-user Updates notifications for the company.
 - Ctrl-click or Command-click toggles row selection, and Shift-click additively selects the visible range from the selection anchor.
