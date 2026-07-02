@@ -818,6 +818,12 @@ func resourcePermissionSubjectKeyForTest(subjectType, subjectID string) string {
 
 func memoryResourceDefaultAccessForTest(t *testing.T, repo *MemoryRepo, companyID, entityType, entityID string) string {
 	t.Helper()
+	repo.mu.RLock()
+	if policy, ok := repo.resolvedResourcePermissionPolicyLocked(companyID, entityType, entityID); ok {
+		repo.mu.RUnlock()
+		return policy.DefaultAccess
+	}
+	repo.mu.RUnlock()
 	switch entityType {
 	case EntityTypeNode:
 		node, err := repo.GetNode(companyID, entityID)
@@ -851,12 +857,8 @@ func memoryResourceDefaultAccessForTest(t *testing.T, repo *MemoryRepo, companyI
 
 func assertMemoryNodeResourcePolicyForTest(t *testing.T, repo *MemoryRepo, companyID, nodeID, wantDefault string, wantRows map[string]string) {
 	t.Helper()
-	node, err := repo.GetNode(companyID, nodeID)
-	if err != nil {
-		t.Fatalf("GetNode: %v", err)
-	}
-	if node.DefaultAccess != wantDefault {
-		t.Fatalf("node default_access = %q, want %q", node.DefaultAccess, wantDefault)
+	if gotDefault := memoryResourceDefaultAccessForTest(t, repo, companyID, EntityTypeNode, nodeID); gotDefault != wantDefault {
+		t.Fatalf("node default_access = %q, want %q", gotDefault, wantDefault)
 	}
 	permissions, err := repo.ListEntityPermissions(companyID, EntityTypeNode, nodeID)
 	if err != nil {

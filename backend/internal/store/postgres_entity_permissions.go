@@ -530,30 +530,50 @@ func (r *PostgresRepo) ListEntityPermissions(companyID, entityType, entityID str
 	}
 
 	if usesDefaultResourceAccessPolicy(entityType) {
+		assignments, err := postgresResourcePermissionAssignmentsTx(ctx, r.db, companyID, entityType, entityID)
+		if err != nil {
+			return nil, err
+		}
+		if len(assignments) == 0 {
+			return []domain.EntityPermission{}, nil
+		}
+		subjectTypes := make([]string, 0, len(assignments))
+		subjectIDs := make([]string, 0, len(assignments))
+		accessLevels := make([]string, 0, len(assignments))
+		for _, assignment := range assignments {
+			subjectTypes = append(subjectTypes, assignment.SubjectType)
+			subjectIDs = append(subjectIDs, assignment.SubjectID)
+			accessLevels = append(accessLevels, assignment.AccessLevel)
+		}
 		rows, err := r.db.QueryContext(ctx, `
-select access.company_id::text,
-       access.resource_type,
-       access.resource_id::text,
+with access as (
+  select *
+  from unnest(
+    string_to_array($4, ',')::text[],
+    string_to_array($5, ',')::uuid[],
+    string_to_array($6, ',')::text[]
+  ) with ordinality as access(subject_type, subject_id, access_level, ordinal)
+)
+select $1::uuid::text,
+       $2::text,
+       $3::uuid::text,
        access.subject_type,
        access.subject_id::text,
        coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, '')),
        nullif(app_user.email, ''),
        access.access_level,
-       access.created_timestamp
-from resource_permissions access
+       now()
+from access
 left join users app_user
   on access.subject_type='user'
  and app_user.user_id=access.subject_id
 left join company_user_groups user_group
   on access.subject_type='group'
- and user_group.company_id=access.company_id
+ and user_group.company_id=$1::uuid
  and user_group.group_id=access.subject_id
-where access.company_id=$1::uuid
-  and access.resource_type=$2
-  and access.resource_id=$3::uuid
 order by access.subject_type asc,
          lower(coalesce(nullif(user_group.name, ''), nullif(app_user.display_name, ''), nullif(app_user.email, ''), access.subject_id::text)) asc,
-         access.subject_id::text asc`, companyID, entityType, entityID)
+         access.subject_id::text asc`, companyID, entityType, entityID, strings.Join(subjectTypes, ","), strings.Join(subjectIDs, ","), strings.Join(accessLevels, ","))
 		if err != nil {
 			return nil, err
 		}
@@ -599,7 +619,8 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 				return nil, err
 			}
 		}
-		if err := setPostgresResourceAccessPolicyTx(ctx, tx, input, entityType, entityID); err != nil {
+		policySequence, err := setPostgresResourceAccessPolicyTx(ctx, tx, input, entityType, entityID)
+		if err != nil {
 			return nil, err
 		}
 		changedTargets := []resourcePermissionTarget{{ResourceType: entityType, ResourceID: entityID}}
@@ -612,7 +633,7 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 			if err != nil {
 				return nil, err
 			}
-			descendantTargets, err := applyPostgresResourcePermissionPolicyToDescendantsTx(ctx, tx, input, beforeDefaultAccess, beforeAssignments, afterDefaultAccess, afterAssignments)
+			descendantTargets, err := applyPostgresResourcePermissionPolicyToDescendantsTx(ctx, tx, input, policySequence, beforeDefaultAccess, beforeAssignments, afterDefaultAccess, afterAssignments)
 			if err != nil {
 				return nil, err
 			}

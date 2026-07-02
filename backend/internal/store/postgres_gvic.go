@@ -6,7 +6,6 @@ import (
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"sort"
-	"strings"
 )
 
 func (r *PostgresRepo) ListResourceGVICAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICAssignment, error) {
@@ -71,6 +70,14 @@ func (r *PostgresRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssi
 	}
 	for _, assignment := range assignments {
 		if err := validatePostgresGVICPrincipalTx(ctx, tx, keyValue.companyID, assignment.principalType, assignment.principalID); err != nil {
+			return ResourceGVICAssignmentMutationResult{}, err
+		}
+	}
+
+	var beforeAssignments []domain.ResourceGVICAssignment
+	if input.ApplyToDescendants {
+		beforeAssignments, err = postgresResourceGVICAssignmentsForResource(ctx, tx, keyValue)
+		if err != nil {
 			return ResourceGVICAssignmentMutationResult{}, err
 		}
 	}
@@ -198,9 +205,25 @@ where company_id=$1::uuid
 		return ResourceGVICAssignmentMutationResult{}, ErrInvalid
 	}
 
+	policySequence, err := nextPostgresResourcePolicySequenceTx(ctx, tx)
+	if err != nil {
+		return ResourceGVICAssignmentMutationResult{}, err
+	}
+	if err := setPostgresResourceGVICPolicyRevisionTx(ctx, tx, keyValue.companyID, keyValue.resourceType, keyValue.resourceID, policySequence); err != nil {
+		return ResourceGVICAssignmentMutationResult{}, err
+	}
+
+	var afterAssignments []domain.ResourceGVICAssignment
+	if input.ApplyToDescendants {
+		afterAssignments, err = postgresResourceGVICAssignmentsForResource(ctx, tx, keyValue)
+		if err != nil {
+			return ResourceGVICAssignmentMutationResult{}, err
+		}
+	}
+
 	affected := []resourceGVICKey{keyValue}
 	if input.ApplyToDescendants {
-		descendantAffected, descendantChanged, err := applyPostgresResourceGVICCommandToDescendantsTx(ctx, tx, keyValue, assignments, operation)
+		descendantAffected, descendantChanged, err := applyPostgresResourceGVICCommandToDescendantsTx(ctx, tx, keyValue, policySequence, beforeAssignments, afterAssignments)
 		if err != nil {
 			return ResourceGVICAssignmentMutationResult{}, err
 		}
@@ -261,7 +284,7 @@ where company_id=$1::uuid
 	}, nil
 }
 
-func applyPostgresResourceGVICCommandToDescendantsTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey, assignments []normalizedGVICAssignmentInput, operation string) ([]resourceGVICKey, bool, error) {
+func applyPostgresResourceGVICCommandToDescendantsTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey, policySequence int64, beforeAssignments, afterAssignments []domain.ResourceGVICAssignment) ([]resourceGVICKey, bool, error) {
 	if keyValue.resourceType != EntityTypeLogicGate {
 		return []resourceGVICKey{}, false, nil
 	}
@@ -272,142 +295,9 @@ func applyPostgresResourceGVICCommandToDescendantsTx(ctx context.Context, tx *sq
 	if len(nodeIDs) == 0 {
 		return []resourceGVICKey{}, false, nil
 	}
-	nodeIDList := strings.Join(nodeIDs, ",")
-	changed := false
-	switch operation {
-	case GVICAssignmentCommandSet:
-		deleted, err := tx.ExecContext(ctx, `
-delete from resource_gvic_assignments
-where company_id=$1::uuid
-  and resource_type='node'
-  and resource_id = any(string_to_array($2, ',')::uuid[])`, keyValue.companyID, nodeIDList)
-		if err != nil {
-			return nil, false, err
-		}
-		if affected, err := deleted.RowsAffected(); err == nil && affected > 0 {
-			changed = true
-		} else if err != nil {
-			return nil, false, err
-		}
-		inserted, err := tx.ExecContext(ctx, `
-with target(node_id) as (
-  select unnest(string_to_array($3, ',')::uuid[])
-)
-insert into resource_gvic_assignments (
-  company_id,
-  resource_type,
-  resource_id,
-  role,
-  principal_type,
-  principal_id,
-  created_timestamp,
-  updated_timestamp
-)
-select assignment.company_id,
-       'node',
-       target.node_id,
-       assignment.role,
-       assignment.principal_type,
-       assignment.principal_id,
-       now(),
-       now()
-from target
-cross join resource_gvic_assignments assignment
-where assignment.company_id=$1::uuid
-  and assignment.resource_type='logic_gate'
-  and assignment.resource_id=$2::uuid
-on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id) do nothing`, keyValue.companyID, keyValue.resourceID, nodeIDList)
-		if err != nil {
-			return nil, false, err
-		}
-		if affected, err := inserted.RowsAffected(); err == nil && affected > 0 {
-			changed = true
-		} else if err != nil {
-			return nil, false, err
-		}
-	case GVICAssignmentCommandAdd:
-		for _, assignment := range assignments {
-			deleted, err := tx.ExecContext(ctx, `
-delete from resource_gvic_assignments
-where company_id=$1::uuid
-  and resource_type='node'
-  and resource_id = any(string_to_array($2, ',')::uuid[])
-  and principal_type=$3
-  and principal_id=$4::uuid
-  and role<>$5`, keyValue.companyID, nodeIDList, assignment.principalType, assignment.principalID, assignment.role)
-			if err != nil {
-				return nil, false, err
-			}
-			if affected, err := deleted.RowsAffected(); err == nil && affected > 0 {
-				changed = true
-			} else if err != nil {
-				return nil, false, err
-			}
-			if isSingleUserPrimaryGVICRole(assignment.role) {
-				deleted, err := tx.ExecContext(ctx, `
-delete from resource_gvic_assignments
-where company_id=$1::uuid
-  and resource_type='node'
-  and resource_id = any(string_to_array($2, ',')::uuid[])
-  and role=$3
-  and not (principal_type=$4 and principal_id=$5::uuid)`, keyValue.companyID, nodeIDList, assignment.role, assignment.principalType, assignment.principalID)
-				if err != nil {
-					return nil, false, err
-				}
-				if affected, err := deleted.RowsAffected(); err == nil && affected > 0 {
-					changed = true
-				} else if err != nil {
-					return nil, false, err
-				}
-			}
-			inserted, err := tx.ExecContext(ctx, `
-with target(node_id) as (
-  select unnest(string_to_array($5, ',')::uuid[])
-)
-insert into resource_gvic_assignments (
-  company_id,
-  resource_type,
-  resource_id,
-  role,
-  principal_type,
-  principal_id,
-  created_timestamp,
-  updated_timestamp
-)
-select $1::uuid, 'node', target.node_id, $2, $3, $4::uuid, now(), now()
-from target
-on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id) do nothing`,
-				keyValue.companyID, assignment.role, assignment.principalType, assignment.principalID, nodeIDList)
-			if err != nil {
-				return nil, false, err
-			}
-			if affected, err := inserted.RowsAffected(); err == nil && affected > 0 {
-				changed = true
-			} else if err != nil {
-				return nil, false, err
-			}
-		}
-	case GVICAssignmentCommandRemove:
-		for _, assignment := range assignments {
-			deleted, err := tx.ExecContext(ctx, `
-delete from resource_gvic_assignments
-where company_id=$1::uuid
-  and resource_type='node'
-  and resource_id = any(string_to_array($2, ',')::uuid[])
-  and role=$3
-  and principal_type=$4
-  and principal_id=$5::uuid`, keyValue.companyID, nodeIDList, assignment.role, assignment.principalType, assignment.principalID)
-			if err != nil {
-				return nil, false, err
-			}
-			if affected, err := deleted.RowsAffected(); err == nil && affected > 0 {
-				changed = true
-			} else if err != nil {
-				return nil, false, err
-			}
-		}
-	default:
-		return nil, false, ErrInvalid
+	changed, err := postgresRecordGVICSubtreeApplicationsTx(ctx, tx, keyValue.companyID, keyValue.resourceType, keyValue.resourceID, policySequence, beforeAssignments, afterAssignments)
+	if err != nil {
+		return nil, false, err
 	}
 	affected := make([]resourceGVICKey, 0, len(nodeIDs))
 	for _, nodeID := range nodeIDs {
@@ -483,6 +373,10 @@ func snapshotPostgresLogicGateGVICToNodeTx(ctx context.Context, tx *sql.Tx, comp
 	if ctx == nil || tx == nil || companyID == "" || logicGateID == "" || nodeID == "" {
 		return ErrInvalid
 	}
+	assignments, err := postgresResourceGVICAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID})
+	if err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_gvic_assignments
 where company_id=$1::uuid
@@ -490,7 +384,8 @@ where company_id=$1::uuid
   and resource_id=$2::uuid`, companyID, nodeID); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `
+	for _, assignment := range assignments {
+		if _, err := tx.ExecContext(ctx, `
 insert into resource_gvic_assignments (
   company_id,
   resource_type,
@@ -501,23 +396,28 @@ insert into resource_gvic_assignments (
   created_timestamp,
   updated_timestamp
 )
-select
-  assignment.company_id,
-  'node',
-  $3::uuid,
-  assignment.role,
-  assignment.principal_type,
-  assignment.principal_id,
-  now(),
-  now()
-from resource_gvic_assignments assignment
-where assignment.company_id=$1::uuid
-  and assignment.resource_type='logic_gate'
-  and assignment.resource_id=$2::uuid
-on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id) do nothing`, companyID, logicGateID, nodeID)
-	return err
+values ($1::uuid, 'node', $2::uuid, $3, $4, $5::uuid, now(), now())
+on conflict (company_id, resource_type, resource_id, role, principal_type, principal_id) do nothing`,
+			companyID,
+			nodeID,
+			assignment.Role,
+			assignment.PrincipalType,
+			assignment.PrincipalID,
+		); err != nil {
+			return err
+		}
+	}
+	policySequence, err := nextPostgresResourcePolicySequenceTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	return setPostgresResourceGVICPolicyRevisionTx(ctx, tx, companyID, EntityTypeNode, nodeID, policySequence)
 }
 func postgresResourceGVICAssignmentsForResource(ctx context.Context, queryer postgresGVICQueryer, keyValue resourceGVICKey) ([]domain.ResourceGVICAssignment, error) {
+	return postgresResolvedResourceGVICAssignmentsForResource(ctx, queryer, keyValue)
+}
+
+func postgresDirectResourceGVICAssignmentsForResource(ctx context.Context, queryer postgresGVICQueryer, keyValue resourceGVICKey) ([]domain.ResourceGVICAssignment, error) {
 	rows, err := queryer.QueryContext(ctx, `
 select
   assignment.company_id::text,
@@ -803,6 +703,17 @@ const postgresDerivedResourceGVICEffectiveAssignmentsCTE = `
 with requested as (
   select $1::uuid as company_id, $2::text as resource_type, $3::uuid as resource_id
 ),
+direct_sequence(policy_sequence) as (
+  select coalesce((
+    select revision.policy_sequence
+    from resource_gvic_policy_revisions revision
+    join requested req
+      on revision.company_id=req.company_id
+     and revision.resource_type=req.resource_type
+     and revision.resource_id=req.resource_id
+  ), 0)
+),
+` + postgresGVICPolicyAncestorsCTE + `,
 source_resource as (
   select
     req.company_id,
@@ -813,7 +724,7 @@ source_resource as (
     'direct'::text as inheritance_type
   from requested req
 ),
-configured as (
+direct_configured as (
   select
     source_resource.company_id,
     source_resource.resource_type,
@@ -829,6 +740,50 @@ configured as (
     on assignment.company_id=source_resource.company_id
    and assignment.resource_type=source_resource.source_resource_type
    and assignment.resource_id=source_resource.source_resource_id
+),
+application_rules as (
+  select distinct on (app.role, app.principal_type, app.principal_id)
+         app.role,
+         app.principal_type,
+         app.principal_id,
+         app.deleted,
+         app.role || ':' || app.principal_type || ':' || app.principal_id::text as rule_key
+  from resource_gvic_subtree_applications app
+  join resource_policy_ancestors ancestor
+    on ancestor.resource_type=app.ancestor_resource_type
+   and ancestor.resource_id=app.ancestor_resource_id
+  join requested req on app.company_id=req.company_id
+  join direct_sequence cutoff on app.policy_sequence > cutoff.policy_sequence
+  order by app.role, app.principal_type, app.principal_id, app.policy_sequence desc, app.application_id desc
+),
+configured as (
+  select direct.company_id,
+         direct.resource_type,
+         direct.resource_id,
+         direct.source_resource_type,
+         direct.source_resource_id,
+         direct.inheritance_type,
+         direct.role,
+         direct.principal_type,
+         direct.principal_id
+  from direct_configured direct
+  where not exists (
+    select 1
+    from application_rules app
+    where app.rule_key=direct.role || ':' || direct.principal_type || ':' || direct.principal_id::text
+  )
+  union all
+  select source_resource.company_id,
+         source_resource.resource_type,
+         source_resource.resource_id,
+         source_resource.source_resource_type,
+         source_resource.source_resource_id,
+         source_resource.inheritance_type,
+         app.role,
+         app.principal_type,
+         app.principal_id
+  from source_resource
+  join application_rules app on not app.deleted
 ),
 derived as (
   select
@@ -1013,14 +968,41 @@ func gvicResourceKeysForGroupPrincipalIDsTx(ctx context.Context, tx *sql.Tx, com
 	rows, err := tx.QueryContext(ctx, `
 with input_groups(group_id) as (
   select distinct unnest($2::text[])::uuid
+),
+direct_keys(company_id, resource_type, resource_id) as (
+  select assignment.company_id, assignment.resource_type, assignment.resource_id
+  from resource_gvic_assignments assignment
+  join input_groups input_group
+    on assignment.principal_id=input_group.group_id
+  where assignment.company_id=$1::uuid
+    and assignment.principal_type='group'
+),
+subtree_keys(company_id, resource_type, resource_id) as (
+  select app.company_id, app.ancestor_resource_type, app.ancestor_resource_id
+  from resource_gvic_subtree_applications app
+  join input_groups input_group
+    on app.principal_id=input_group.group_id
+  where app.company_id=$1::uuid
+    and app.principal_type='group'
+  union
+  select app.company_id, 'node'::text, assignment.node_id
+  from resource_gvic_subtree_applications app
+  join input_groups input_group
+    on app.principal_id=input_group.group_id
+  join node_logic_gate_assignments assignment
+    on app.ancestor_resource_type='logic_gate'
+   and assignment.company_id=app.company_id
+   and assignment.logic_gate_id=app.ancestor_resource_id
+  where app.company_id=$1::uuid
+    and app.principal_type='group'
 )
-select distinct assignment.company_id::text, assignment.resource_type, assignment.resource_id::text
-from resource_gvic_assignments assignment
-join input_groups input_group
-  on assignment.principal_id=input_group.group_id
-where assignment.company_id=$1::uuid
-  and assignment.principal_type='group'
-order by assignment.resource_type asc, assignment.resource_id::text asc`, companyID, groupIDs)
+select distinct company_id::text, resource_type, resource_id::text
+from (
+  select * from direct_keys
+  union
+  select * from subtree_keys
+) key
+order by resource_type asc, resource_id::text asc`, companyID, groupIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1048,9 +1030,26 @@ func gvicResourceKeysForAffectedGroupsTx(ctx context.Context, tx *sql.Tx, compan
 func gvicResourceKeysForAllGroupAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID string) ([]resourceGVICKey, error) {
 	rows, err := tx.QueryContext(ctx, `
 select distinct company_id::text, resource_type, resource_id::text
-from resource_gvic_assignments
-where company_id=$1::uuid
-  and principal_type='group'`, companyID)
+from (
+  select company_id, resource_type, resource_id
+  from resource_gvic_assignments
+  where company_id=$1::uuid
+    and principal_type='group'
+  union
+  select company_id, ancestor_resource_type, ancestor_resource_id
+  from resource_gvic_subtree_applications
+  where company_id=$1::uuid
+    and principal_type='group'
+  union
+  select app.company_id, 'node'::text, assignment.node_id
+  from resource_gvic_subtree_applications app
+  join node_logic_gate_assignments assignment
+    on app.ancestor_resource_type='logic_gate'
+   and assignment.company_id=app.company_id
+   and assignment.logic_gate_id=app.ancestor_resource_id
+  where app.company_id=$1::uuid
+    and app.principal_type='group'
+) key`, companyID)
 	if err != nil {
 		return nil, err
 	}

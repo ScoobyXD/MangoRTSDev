@@ -4,7 +4,7 @@ Last updated: 2026-07-01
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: partial backend coverage for role validation, Logic Gate-to-node GVIC snapshots, explicit Logic Gate GVIC apply-to-descendants, linked node editing, detach preservation, effective-delta stability, group membership deltas, and scoped projection sync. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: partial backend coverage for role validation, Logic Gate-to-node GVIC snapshots, explicit Logic Gate GVIC apply-to-descendants, linked node editing, detach preservation, effective-delta stability, group membership deltas, and scoped projection sync. Rule ID mapping is partial. Pointer-scaled descendant apply rules are documented as target behavior and are not yet proven by implementation tests.
 
 ## Business Logic
 
@@ -46,6 +46,18 @@ GVIC35 - My Work membership is based on node effective GVIC only; project and lo
 GVIC36 - Updates visibility is target-based: node events use node effective GVIC/access, logic gate events use logic gate GVIC/access, and project events use project GVIC/access.
 GVIC37 - Group membership, group parent moves, and group deletion update effective GVIC for any resource that directly references the affected group, including Logic Gate templates and node snapshots.
 GVIC38 - Logic Gate GVIC write commands can set apply-to-descendants to update nodes currently assigned to that Logic Gate; set replaces each assigned node snapshot, add applies the added source rows, and remove deletes the removed source rows.
+GVIC39 - GVIC inheritance, overrides, transfers, and apply-to-descendants follow the same business semantics as permissions for every supported parent-child GVIC relationship.
+GVIC40 - A parent GVIC policy is a template captured at create time or transfer time; existing children do not live-inherit future parent GVIC edits unless apply-to-descendants is set.
+GVIC41 - Creating or transferring a GVIC-managed resource copies the direct target parent's current GVIC policy, not the root ancestor's policy.
+GVIC42 - Editing a child resource's GVIC changes only that child; that edited child GVIC becomes the template for resources created or transferred directly under that child.
+GVIC43 - Editing a parent GVIC without apply-to-descendants changes only that parent and future direct children; existing descendants keep their current GVIC policies.
+GVIC44 - GVIC inheritance should be implementable as reusable policy/rule pointers or immutable rule versions, not as duplicated full GVIC assignment rows per descendant.
+GVIC45 - GVIC apply-to-descendants should record changed rule applications for the subtree instead of rewriting a full GVIC policy for every descendant; the operation must remain feasible for subtrees with hundreds of thousands of descendants.
+GVIC46 - Removing a GVIC rule with apply-to-descendants requires an explicit tombstone/delete application so older child or ancestor GVIC rules do not reappear.
+GVIC47 - Apply-to-descendants overwrites existing descendant special GVIC rules for the same changed rule keys as of that operation; later descendant edits can override again until a newer ancestor apply occurs.
+GVIC48 - Conflicting direct GVIC bindings and ancestor apply records resolve by a monotonic transaction sequence, not wall-clock time.
+GVIC49 - Group GVIC assignments remain group pointers and must not be expanded into one source row per user.
+GVIC50 - GVIC audit/explainability must identify whether a user's role came from a direct resource binding, create/transfer inheritance, ancestor apply-to-descendants, or group membership.
 
 ## Scenarios
 
@@ -202,3 +214,37 @@ Expected:
 - Detaching the node preserves the node-level GVIC snapshot.
 - Project GVIC does not flow down into logic gates or nodes.
 - Updates visibility uses the GVIC/access rules of the updated target: project updates use project GVIC, logic gate updates use logic gate GVIC, and node updates use node effective GVIC.
+
+### Scenario GVIC-S7: GVIC Parent Templates And Pointer-Scaled Descendant Apply
+
+Business logic covered:
+- GVIC39
+- GVIC40
+- GVIC41
+- GVIC42
+- GVIC43
+- GVIC44
+- GVIC45
+- GVIC46
+- GVIC47
+- GVIC48
+- GVIC49
+- GVIC50
+
+Given:
+- A parent resource has configured GVIC assignments.
+- Existing descendants have their own GVIC policies.
+- A child GVIC policy has been edited to differ from the parent.
+- A parent GVIC edit is saved once without apply-to-descendants and once with apply-to-descendants.
+
+Expected:
+- New or transferred resources receive the direct target parent's current GVIC policy.
+- Editing a child GVIC affects only that child and future resources directly created or transferred under that child.
+- Saving a parent GVIC edit without apply-to-descendants changes only the parent and future direct children.
+- Saving a parent GVIC edit with apply-to-descendants updates every current supported descendant for the changed GVIC rule keys.
+- A copied child GVIC policy may be represented by policy/rule pointers or immutable rule versions instead of duplicated GVIC assignment rows.
+- Apply-to-descendants records changed rule applications or tombstones for the subtree instead of materializing a full GVIC policy on every descendant.
+- The apply operation overwrites descendant GVIC rules for the same changed keys, while unrelated child-specific GVIC rules remain unless the saved change removes or replaces them.
+- Later descendant GVIC edits win over earlier ancestor applies until a newer ancestor apply is recorded.
+- Group GVIC assignments remain group pointers and are not expanded into one source row per user.
+- GVIC explanations identify whether a role came from a direct rule, create/transfer inheritance, descendant apply, or group membership.

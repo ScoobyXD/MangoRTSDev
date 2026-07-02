@@ -6,24 +6,14 @@ import (
 	"testing"
 )
 
-func TestPostgresResourcePermissionAssignmentsClosesPermissionRowsBeforeReturn(t *testing.T) {
+func TestPostgresResourcePermissionAssignmentsUseResolvedPointerRows(t *testing.T) {
 	raw, err := os.ReadFile("postgres_resource_access.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_resource_access.go: %v", err)
 	}
 	body := postgresResourceAccessFunctionBodyForTest(t, string(raw), "func postgresResourcePermissionAssignmentsTx")
-	if strings.Contains(body, "defer rows.Close()") {
-		t.Fatal("resource permission reads should close permission rows before returning buffered assignments")
-	}
-	appendIndex := strings.Index(body, "assignments = append(assignments, assignment)")
-	rowsErrIndex := strings.Index(body, "if err := rows.Err(); err != nil")
-	closeIndex := strings.Index(body, "if err := rows.Close(); err != nil")
-	returnIndex := strings.Index(body, "return assignments, nil")
-	if appendIndex < 0 || rowsErrIndex < 0 || closeIndex < 0 || returnIndex < 0 {
-		t.Fatal("resource permission reads should buffer assignments, check rows, close rows, then return assignments")
-	}
-	if !(appendIndex < rowsErrIndex && rowsErrIndex < closeIndex && closeIndex < returnIndex) {
-		t.Fatal("resource permission reads return before closing permission rows")
+	if !strings.Contains(body, "postgresResolvedResourcePermissionAssignments(ctx, queryer, companyID, resourceType, resourceID)") {
+		t.Fatal("resource permission assignment reads should use the pointer-aware resolver")
 	}
 }
 
@@ -77,12 +67,20 @@ func TestPostgresResourcePermissionGroupRowsAndDescendantApplyStaySourceShaped(t
 	applyBody := postgresResourceAccessFunctionBodyForTest(t, source, "func applyPostgresResourcePermissionPolicyToDescendantsTx")
 	for _, required := range []string{
 		"postgresResourcePermissionDescendantTargetsTx",
-		"setPostgresResourceDefaultAccessForTargetsTx",
-		"deletePostgresResourcePermissionForTargetsTx",
-		"upsertPostgresResourcePermissionForTargetsTx",
+		"policySequence",
+		"postgresRecordPermissionSubtreeApplicationsTx",
 	} {
 		if !strings.Contains(applyBody, required) {
 			t.Fatalf("descendant permission apply missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"setPostgresResourceDefaultAccessForTargetsTx(ctx, tx",
+		"deletePostgresResourcePermissionForTargetsTx(ctx, tx",
+		"upsertPostgresResourcePermissionForTargetsTx(ctx, tx",
+	} {
+		if strings.Contains(applyBody, forbidden) {
+			t.Fatalf("descendant permission apply should not fan out target rows, found %q", forbidden)
 		}
 	}
 
@@ -94,6 +92,7 @@ func TestPostgresResourcePermissionGroupRowsAndDescendantApplyStaySourceShaped(t
 	for _, required := range []string{
 		"changedTargets := []resourcePermissionTarget",
 		"descendantTargets, err := applyPostgresResourcePermissionPolicyToDescendantsTx",
+		"policySequence",
 		"changedTargets = append(changedTargets, descendantTargets...)",
 		"applyResourcePermissionProjectionDeltaDependenciesTx",
 		"PermissionChangedEventInput(companyID, target.ResourceType, target.ResourceID",

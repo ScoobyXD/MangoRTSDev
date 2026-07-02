@@ -4,7 +4,7 @@ Last updated: 2026-07-01
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: partial backend coverage for default/source-row semantics, group permission pointers, apply-to-descendants behavior, manager-preservation rules, Logic Gate-to-node permission snapshots, folder-to-child permission snapshots, same-parent preservation, cross-parent overwrite behavior, and direct node view denial. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: partial backend coverage for default/source-row semantics, group permission pointers, apply-to-descendants behavior, manager-preservation rules, Logic Gate-to-node permission snapshots, folder-to-child permission snapshots, same-parent preservation, cross-parent overwrite behavior, and direct node view denial. Rule ID mapping is partial. Pointer-scaled descendant apply rules are documented as target behavior and are not yet proven by implementation tests.
 
 ## Business Logic
 
@@ -37,11 +37,11 @@ P26 - Default access has only two states, edit and no access; `resource_permissi
 P27 - When a company manager changes a resource default, manager effective access is preserved while regular company users follow the new default and exceptions.
 P28 - Legacy `resource_access_grants` rows are migrated into `resource_permissions` exception rows before the legacy table is dropped.
 P29 - Runtime permission reads and writes use `resource_permissions` only; `resource_access_grants` and `entity_access_permissions` are not active permission sources.
-P30 - Parent permission policies are templates copied as snapshots; they are not live inherited after the child is created or transferred unless an explicit apply-to-descendants command is run.
-P31 - Creating a subfolder under a folder copies the parent folder's current permission policy to the new subfolder.
-P32 - Creating, placing, or moving a project or Logic Gate into a folder copies the target parent folder's current permission policy to that project or Logic Gate.
-P33 - Creating, assigning, or moving a node into a Logic Gate copies the target Logic Gate's current permission policy to that node.
-P34 - Editing a child resource's permissions changes only that child; later parent permission edits do not fan out to existing children unless apply-to-descendants is set.
+P30 - Parent permission policies are templates captured at create time or transfer time; they are not live inherited after the child enters the parent unless an explicit apply-to-descendants command is run.
+P31 - Creating a subfolder under a folder copies the direct parent folder's current permission policy to the new subfolder.
+P32 - Creating, placing, or moving a project or Logic Gate into a folder copies the direct target parent folder's current permission policy to that project or Logic Gate.
+P33 - Creating, assigning, or moving a node into a Logic Gate copies the direct target Logic Gate's current permission policy to that node.
+P34 - Editing a child resource's permissions changes only that child; that edited child policy becomes the template for resources created or transferred directly under that child.
 P35 - Reordering or re-saving a project, Logic Gate, or node under the same parent preserves that resource's current permissions.
 P36 - Detaching a resource from a parent or moving it to a non-template/root location preserves its current permission policy.
 P37 - Project permissions do not template Logic Gates or nodes through project relationships; folder templates apply to Explorer placement, and Logic Gate templates apply to node assignment.
@@ -49,10 +49,18 @@ P38 - Kanban board/card visibility follows the owning Logic Gate access, but ope
 P39 - Permission settings denial copy explains that only managers and admins can view or edit permissions.
 P40 - Group permission rows are pointers to the group or subgroup; adding a user to that group later makes the user's effective permission follow the group row without writing per-user rows.
 P41 - Direct user permission rows override group permission rows for that user; group rows override default access, and the nearest matching group row wins before same-depth access-rank tie breaking.
-P42 - On company Explorer folders, apply-to-descendants applies the changed permission setting to all descendant folders, contained projects, contained Logic Gates, and nodes assigned to those Logic Gates.
-P43 - On Logic Gates, apply-to-descendants applies the changed permission setting to nodes currently assigned to that Logic Gate.
+P42 - On company Explorer folders, apply-to-descendants applies the changed permission rule keys to all descendant folders, contained projects, contained Logic Gates, and nodes assigned to those Logic Gates.
+P43 - On Logic Gates, apply-to-descendants applies the changed permission rule keys to nodes currently assigned to that Logic Gate.
 P44 - The permissions dialog saves pending changes when it is closed with the X control; the dialog does not require a separate Save button.
 P45 - Runtime authorization resolves group permission rows from group source tables and group membership source rows; permission checks must not require a derived group closure/projection table to be populated.
+P46 - Editing a parent without apply-to-descendants changes only that parent and the template future direct children will receive; existing descendants keep their current permission policies.
+P47 - Permission policy inheritance should be implementable as reusable policy/rule pointers or immutable rule versions, not as duplicated full permission rows per descendant.
+P48 - Creating or transferring a resource may copy resolved permission rule pointers from the direct parent, but it must not leave the child live-linked to future parent edits.
+P49 - Apply-to-descendants should record changed rule applications for the subtree instead of rewriting a full permission policy for every descendant; the operation must remain feasible for subtrees with hundreds of thousands of descendants.
+P50 - Removing a permission rule with apply-to-descendants requires an explicit tombstone/delete application so older child or ancestor rules do not reappear.
+P51 - Apply-to-descendants overwrites existing descendant special rules for the same changed rule keys as of that operation; later descendant edits can override again until a newer ancestor apply occurs.
+P52 - Conflicting direct bindings and ancestor apply records resolve by a monotonic transaction sequence, not wall-clock time.
+P53 - Permission audit/explainability must identify whether a user's rule came from a direct resource binding, create/transfer inheritance, ancestor apply-to-descendants, or group membership, and must not report GVIC assignment as a resource-permission grant.
 
 ## Scenarios
 
@@ -169,6 +177,14 @@ Business logic covered:
 - P37
 - P42
 - P43
+- P46
+- P47
+- P48
+- P49
+- P50
+- P51
+- P52
+- P53
 
 Given:
 - A folder has a default access value and user/group permission source rows.
@@ -186,6 +202,13 @@ Expected:
 - Project permission changes do not cascade into related Logic Gates or nodes.
 - Applying a folder permission change to descendants updates descendant folders, contained projects, contained Logic Gates, and assigned nodes for that specific setting.
 - Applying a Logic Gate permission change to descendants updates nodes currently assigned to that Logic Gate for that specific setting.
+- A normal parent edit changes the parent and future direct children only; existing descendants are unchanged.
+- A copied child policy may be represented by policy/rule pointers or immutable rule versions instead of duplicated permission rows.
+- Apply-to-descendants records changed rule applications or tombstones for the subtree instead of materializing a full policy on every descendant.
+- The apply operation overwrites descendant rules for the same changed keys, while unrelated child-specific rules remain unless the saved change removes or replaces them.
+- Later descendant edits win over earlier ancestor applies until a newer ancestor apply is recorded.
+- Group permission rules remain group pointers and are not expanded into one source row per user.
+- Permission explanations identify whether access came from a direct rule, create/transfer inheritance, descendant apply, or group membership, and do not treat GVIC assignment as resource-permission access.
 
 ### Scenario P-S5: Permission Dialog Autosave
 
