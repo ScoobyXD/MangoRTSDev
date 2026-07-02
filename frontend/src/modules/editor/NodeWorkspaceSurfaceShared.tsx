@@ -6,6 +6,7 @@ import type { EditorChatAttachment, EditorTextBlockChatMessage } from "./editorP
 import { generateStableInformationID } from "./editorTypes";
 import type { NodeContentChange } from "./nodeContentChanges";
 import type { EditorOutlineStyleID } from "./plainTextEditing";
+import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState } from "./useEditorDocumentSurfaceHandlers";
 export type { MentionableCompanyUser } from "./editorMentions";
 export type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -32,6 +33,7 @@ export type NodeWorkspaceSurfaceProps = {
   scrollbarAccent: string;
   scrollbarTrack: string;
   outlineStyle: EditorOutlineStyleID;
+  formattingControllerRef?: React.MutableRefObject<EditorDocumentFormattingController | null>;
   requestJSON: RequestJSON;
   onProjectionMutation: () => void;
   onMarkChangeSeen: (changeID: string) => void;
@@ -39,6 +41,8 @@ export type NodeWorkspaceSurfaceProps = {
   onCreateNodeFromImage: (request: NodeImageNodeRequest) => Promise<void>;
   onAssignToLogicGate: (logicGateID: string) => Promise<void>;
   onRequireNodePriorityForLogicGateAssignment: () => void;
+  onSelectionFontSizeChange?: (fontSize: number) => void;
+  onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
   onError: (message: string) => void;
 };
 

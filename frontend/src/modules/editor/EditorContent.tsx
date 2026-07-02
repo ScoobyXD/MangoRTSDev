@@ -74,7 +74,14 @@ import {
   EDITOR_DOCUMENT_MIN_FONT_SIZE_PX,
   useEditorPreferences,
 } from "./useEditorPreferences";
-import { useEditorDocumentSurfaceHandlers } from "./useEditorDocumentSurfaceHandlers";
+import {
+  applyEditorInlineFormatToRoot,
+  readEditorSelectionFormatState,
+  useEditorDocumentSurfaceHandlers,
+  type EditorDocumentFormattingController,
+  type EditorInlineStyleCommand,
+  type EditorSelectionInlineFormatState,
+} from "./useEditorDocumentSurfaceHandlers";
 import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
 import { createEditorDocumentUndoHistory, recordEditorDocumentUndoChange, resetEditorDocumentUndoHistory, snapshotEditorDocumentHTML } from "./editorUndoHistory";
 import { getActiveCompanyID } from "../../auth/currentCompany";
@@ -442,6 +449,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(outlineStyleStorageKey);
   const [documentFontSize, setDocumentFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [selectionFontSize, setSelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
+  const [selectionInlineFormat, setSelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -471,6 +479,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const lastAppliedSelectionChangedAtRef = useRef(0);
   const shouldFocusEditorForSelectionRef = useRef(true);
   const pendingEditorFontSizeRef = useRef<number | null>(null);
+  const nodeFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
   const collaborationClientIDRef = useRef(createEditorCollaborationClientID());
   const collaborationSendTimerRef = useRef<number | null>(null);
   const collaborationStatusTimerRef = useRef<number | null>(null);
@@ -764,10 +773,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const applyEditorSelectionFontSizeValue = useCallback((nextFontSizeInput: number) => {
     if (!linkedEntityCanEdit) return;
+    const nextFontSize = clampEditorSelectionFontSize(nextFontSizeInput);
+    if (linkedEntityKind === "node") {
+      const applied = nodeFormattingControllerRef.current?.applyFontSizeValue(nextFontSize) ?? false;
+      if (applied) setSelectionFontSize(nextFontSize);
+      return;
+    }
     const element = editorDocumentRef.current;
     if (!element) return;
     const range = getSelectionRangeInsideElement(element);
-    const nextFontSize = clampEditorSelectionFontSize(nextFontSizeInput);
     setSelectionFontSize(nextFontSize);
 
     element.focus({ preventScroll: true });
@@ -792,20 +806,54 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     recordEditorDocumentUndoChange(documentUndoHistoryRef.current, undoBefore, snapshotEditorElementForUndo(element), "format");
     scheduleCollaborativeDocumentSave(serializeEditorDocumentHTML(element));
     scheduleIndentGuideUpdate(readEditorDocumentText(element));
-  }, [linkedEntityCanEdit, scheduleCollaborativeDocumentSave, scheduleIndentGuideUpdate]);
+  }, [linkedEntityCanEdit, linkedEntityKind, scheduleCollaborativeDocumentSave, scheduleIndentGuideUpdate]);
 
   const updateSelectionFontSize = useCallback((nextFontSize: number) => {
     setSelectionFontSize(clampEditorSelectionFontSize(nextFontSize));
   }, []);
 
+  const updateSelectionInlineFormat = useCallback((nextFormat: EditorSelectionInlineFormatState) => {
+    setSelectionInlineFormat(nextFormat);
+  }, []);
+
+  const toggleEditorInlineFormat = useCallback((command: EditorInlineStyleCommand) => {
+    if (!linkedEntityCanEdit) return;
+    if (linkedEntityKind === "node") {
+      const applied = nodeFormattingControllerRef.current?.toggleInlineFormat(command) ?? false;
+      const state = nodeFormattingControllerRef.current?.readFormatState();
+      if (applied && state) setSelectionInlineFormat({ bold: state.bold, underline: state.underline });
+      return;
+    }
+    const element = editorDocumentRef.current;
+    if (!element) return;
+    const applied = applyEditorInlineFormatToRoot(element, command, {
+      documentUndoHistory: documentUndoHistoryRef.current,
+      scheduleDocumentSave: scheduleCollaborativeDocumentSave,
+      scheduleIndentGuideUpdate,
+      onSelectionInlineFormatChange: updateSelectionInlineFormat,
+    });
+    if (applied) {
+      const state = readEditorSelectionFormatState(element, selectionFontSize);
+      if (state) setSelectionInlineFormat({ bold: state.bold, underline: state.underline });
+    }
+  }, [linkedEntityCanEdit, linkedEntityKind, scheduleCollaborativeDocumentSave, scheduleIndentGuideUpdate, selectionFontSize, updateSelectionInlineFormat]);
+
   const applyEditorSelectionFontSize = useCallback((delta: number) => {
+    if (linkedEntityKind === "node") {
+      const applied = nodeFormattingControllerRef.current?.adjustFontSize(delta) ?? false;
+      if (applied) {
+        const state = nodeFormattingControllerRef.current?.readFormatState();
+        if (state) setSelectionFontSize(state.fontSize);
+      }
+      return;
+    }
     const element = editorDocumentRef.current;
     const range = element ? getSelectionRangeInsideElement(element) : null;
     const currentFontSize = range?.collapsed && pendingEditorFontSizeRef.current !== null
       ? pendingEditorFontSizeRef.current
       : (range ? readRangeFontSize(range, selectionFontSize) : selectionFontSize);
     applyEditorSelectionFontSizeValue(currentFontSize + delta);
-  }, [applyEditorSelectionFontSizeValue, selectionFontSize]);
+  }, [applyEditorSelectionFontSizeValue, linkedEntityKind, selectionFontSize]);
 
   const selectTab = useCallback((tab: EditorTabID) => {
     rememberCurrentDocumentScroll();
@@ -836,6 +884,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     currentDocumentTargetKeyRef.current = targetKey;
     persistedDocumentTargetKeyRef.current = targetKey;
     setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
+    setSelectionInlineFormat({ bold: false, underline: false });
     pendingEditorFontSizeRef.current = null;
     const element = editorDocumentRef.current;
     restoringScrollRef.current = true;
@@ -975,6 +1024,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setDocumentInformationID("");
     pendingEditorFontSizeRef.current = null;
     setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
+    setSelectionInlineFormat({ bold: false, underline: false });
     restoringScrollRef.current = false;
     if (editorDocumentRef.current) {
       editorDocumentRef.current.innerHTML = "";
@@ -2109,6 +2159,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setDocumentInformationID("");
       pendingEditorFontSizeRef.current = null;
       setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
+      setSelectionInlineFormat({ bold: false, underline: false });
       if (editorDocumentRef.current) {
         editorDocumentRef.current.innerHTML = "";
         editorDocumentRef.current.scrollTop = 0;
@@ -2281,6 +2332,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     rememberCurrentDocumentScroll,
     flushPendingDocumentSave,
     onSelectionFontSizeChange: updateSelectionFontSize,
+    onSelectionInlineFormatChange: updateSelectionInlineFormat,
     mentionUsers: companyUsers,
     mentionAccent: accent,
     mentionSurfaceText: surfaceText,
@@ -2376,6 +2428,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onAdjustSelectionFontSize={applyEditorSelectionFontSize}
             documentFontSize={selectionFontSize}
             onSetSelectionFontSize={applyEditorSelectionFontSizeValue}
+            boldActive={selectionInlineFormat.bold}
+            underlineActive={selectionInlineFormat.underline}
+            onToggleBold={() => toggleEditorInlineFormat("bold")}
+            onToggleUnderline={() => toggleEditorInlineFormat("underline")}
             onOutlineStyleFocus={() => setActiveTab("outline-styles")}
             onOutlineStyleChange={(nextOutlineStyle) => {
               setOutlineStyle(nextOutlineStyle);
@@ -2530,6 +2586,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             scrollbarAccent={scrollbarAccent}
             scrollbarTrack={scrollbarTrack}
             outlineStyle={outlineStyle}
+            formattingControllerRef={nodeFormattingControllerRef}
             requestJSON={requestJSON}
             onProjectionMutation={handleNodeWorkspaceProjectionMutation}
             onMarkChangeSeen={markNodeContentChangeSeen}
@@ -2537,6 +2594,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onCreateNodeFromImage={createNodeFromImageDocument}
             onAssignToLogicGate={assignLinkedNodeToLogicGate}
             onRequireNodePriorityForLogicGateAssignment={showNodePriorityRequirementError}
+            onSelectionFontSizeChange={updateSelectionFontSize}
+            onSelectionInlineFormatChange={updateSelectionInlineFormat}
             onError={setError}
           />
         )}

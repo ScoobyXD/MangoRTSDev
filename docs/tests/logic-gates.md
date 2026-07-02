@@ -1,4 +1,4 @@
-Last updated: 2026-06-29
+Last updated: 2026-07-02
 
 # Logic Gates Tests
 
@@ -20,6 +20,12 @@ LG7 - The generated user for the logic gate sees accept and deny actions for req
 LG8 - Accepting a requested node moves it to pending and clears the request sender.
 LG9 - Denying a requested node moves it to backlog and clears the request sender.
 LG10 - The requesting user sees request-sent status on the requested card and can cancel the request back to backlog.
+LG11 - Pasted rich text in Logic Gate editor surfaces must normalize to the app/editor font family instead of preserving source document fonts.
+LG12 - Pasting selected inline text into a Logic Gate editor must not create extra blank rows above or below the pasted content from source boundary whitespace.
+LG13 - New Logic Gate editor documents default to alphanumerical numbering, and the editor outline dropdown lists alphanumerical numbering before indent guides.
+LG14 - The Logic Gate editor font-size control applies to highlighted text and, for a collapsed caret, becomes the sticky font size for subsequently typed characters until changed again.
+LG15 - Logic Gate editor bold and underline controls must toggle the selected text or sticky caret formatting and must visually reflect the formatting at the current caret or selection.
+LG16 - Inserting a table in a Logic Gate editor must insert the table at the current caret/selection location, not at the top-left or beginning of the editor.
 
 ## Scenarios
 
@@ -75,3 +81,28 @@ Expected:
 - Accept moves the card to pending.
 - Deny moves the card to backlog.
 - The requesting user sees request-sent status and can cancel the request to backlog.
+
+### Scenario LG-S4: Logic Gate Rich Text Editing Controls
+
+Business logic covered:
+- LG11
+- LG12
+- LG13
+- LG14
+- LG15
+- LG16
+
+Given:
+- A user edits a Logic Gate text body.
+- The user pastes styled text copied from another application.
+- The user changes font size, bold, underline, outline style, or inserts a table.
+
+Expected:
+- Pasted content renders in the Logic Gate editor's normal font family.
+- Pasted inline text does not gain empty rows above or below the copied text.
+- New Logic Gate editor text uses alphanumerical numbering by default, and alphanumerical numbering appears first in the outline dropdown.
+- Changing font size while text is highlighted changes that selected text.
+- Changing font size with only a caret sets the font size for the next typed characters.
+- Bold and underline buttons reflect the caret or selected text state and can be active at the same time.
+- Toggling bold or underline affects the selection or the next typed characters when the selection is collapsed.
+- Table insertion uses the current caret/selection position.

@@ -1,4 +1,4 @@
-Last updated: 2026-06-30
+Last updated: 2026-07-02
 
 # Kanban Board Tests
 
@@ -131,6 +131,7 @@ KB96 - Direct email-created Kanban cards can originate from My Triage or from a 
 KB97 - Email-card transfer uses the stored direct email-node provenance and board/card IDs; it must not require the actor to have a connected personal mailbox at transfer time.
 KB98 - When a local email-to-Logic-Gate conversion has already updated the board from the POST response, matching immediate communications/workspace events must not force repeated Home workspace panel reloads, and the source mail list must keep the source email row visible with patched Logic Gate icon state instead of being refreshed, row-removed, refilled from stale prefetched pages, or message-length-prefetched by broad communications cache invalidation.
 KB99 - The initial email-to-Logic-Gate conversion sets the source email to unstarred and returns `unstarred_message_ids` for local Home reconciliation; later direct email-card transfer between Kanban cards uses stored email-node provenance only and must not perform another mailbox star/unstar mutation.
+KB100 - Node editor popups opened from Kanban expose a fullscreen toggle in the popup header; fullscreen expands the popup close to the viewport while preserving a way to restore the previous popup size and position.
 
 ## Scenarios
 
@@ -382,3 +383,18 @@ Expected:
 - The transfer works from the stored email-node provenance even if the actor's personal mailbox is not connected.
 - The initial conversion sets the original source email to unstarred and reconciles Home from `unstarred_message_ids`; the later card-to-card transfer does not call the mailbox provider to star or unstar the email.
 - Matching workspace events from the original local conversion do not repeatedly reload the Home workspace panel or source mail list, do not remove the source email row, and do not refill the source list from stale prefetched pages, after the board has already been updated from the conversion response.
+
+### Scenario KB-S8: Kanban Node Popup Fullscreen
+
+Business logic covered:
+- KB100
+
+Given:
+- A user opens a node editor popup from a Kanban board card.
+- The popup header shows the close action.
+
+Expected:
+- A fullscreen toggle appears in the header immediately to the left of the close action.
+- Activating fullscreen expands the popup close to the viewport without hiding the header actions.
+- Deactivating fullscreen restores the previous popup size and position.
+- Manually resizing or dragging the popup exits fullscreen behavior and preserves normal popup movement.

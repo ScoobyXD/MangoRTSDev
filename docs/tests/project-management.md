@@ -1,4 +1,4 @@
-Last updated: 2026-06-20
+Last updated: 2026-07-02
 
 # Project Management Tests
 
@@ -38,6 +38,9 @@ PM27 - Timeline item duration is normalized into the supported range.
 PM28 - A user can create timeline items for themself when entity access allows it.
 PM29 - Creating timeline items for another user requires company manager authorization.
 PM30 - Updating or deleting a timeline item requires authorization for the timeline item's owner.
+PM31 - Adding an existing node to a project from the node workspace requires selecting the project and then selecting a Logic Gate that belongs to that project.
+PM32 - Confirming node-to-project assignment creates or updates the node/project relationship and assigns the node to the selected project Logic Gate using the normal project and Logic Gate access rules.
+PM33 - Opening a project from a node workspace Go to Project action navigates to the related project without changing the node/project relationship.
 
 ## Scenarios
 
@@ -133,3 +136,22 @@ Expected:
 - A user can create timeline items for themself when access allows.
 - Creating for another user requires company manager authorization.
 - Updating or deleting a timeline item requires authorization for the item owner's timeline.
+
+### Scenario PM-S5: Assign Existing Node From Node Workspace
+
+Business logic covered:
+- PM31
+- PM32
+- PM33
+
+Given:
+- A user edits an existing node.
+- The company has at least one project with one or more related Logic Gates.
+- The user opens the node workspace project assignment control.
+
+Expected:
+- The first assignment step lists accessible projects.
+- After a project is selected, the second step lists Logic Gates related to that project.
+- Confirming a Logic Gate creates or updates the node/project relationship.
+- The node is assigned or moved to the selected Logic Gate.
+- Go to Project opens the related project directly and does not mutate project relationships.

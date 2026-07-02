@@ -740,6 +740,35 @@ function defaultNodeEditorPopupRect(): NodeEditorPopupRect {
   });
 }
 
+function fullscreenNodeEditorPopupRect(): NodeEditorPopupRect {
+  if (typeof window === "undefined") return defaultNodeEditorPopupRect();
+  const padding = nodeEditorPopupViewportPadding();
+  return clampNodeEditorPopupRect({
+    left: padding.x,
+    top: padding.y,
+    width: window.innerWidth - (padding.x * 2),
+    height: window.innerHeight - (padding.y * 2),
+  });
+}
+
+function NodeEditorPopupFullscreenIcon({ active = false }: { active?: boolean }) {
+  return (
+    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
+      {active ? (
+        <>
+          <path d="M6.2 2.2v3.6H2.6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M9.8 13.8v-3.6h3.6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      ) : (
+        <>
+          <path d="M2.6 6V2.6H6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M13.4 10v3.4H10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab, onDeleteNode }: {
   nodeID: string;
   nodeTitle: string;
@@ -750,9 +779,11 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
   onDeleteNode?: (nodeID: string, confirmationDisplayName: string) => boolean | void | Promise<boolean | void>;
 }) {
   const [popupRect, setPopupRect] = useState(defaultNodeEditorPopupRect);
+  const [popupFullscreen, setPopupFullscreen] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ position?: ConfirmActionMenuPosition | null } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const popupRectRef = useRef(popupRect);
+  const restorePopupRectRef = useRef<NodeEditorPopupRect | null>(null);
 
   useEffect(() => {
     popupRectRef.current = popupRect;
@@ -769,10 +800,26 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
   }, [onClose]);
 
   useEffect(() => {
-    const onResize = () => setPopupRect((current) => clampNodeEditorPopupRect(current));
+    const onResize = () => setPopupRect((current) => (popupFullscreen ? fullscreenNodeEditorPopupRect() : clampNodeEditorPopupRect(current)));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, []);
+  }, [popupFullscreen]);
+
+  const togglePopupFullscreen = useCallback(() => {
+    setPopupRect((current) => {
+      if (popupFullscreen) {
+        const restored = restorePopupRectRef.current ? clampNodeEditorPopupRect(restorePopupRectRef.current) : defaultNodeEditorPopupRect();
+        restorePopupRectRef.current = null;
+        popupRectRef.current = restored;
+        return restored;
+      }
+      restorePopupRectRef.current = current;
+      const next = fullscreenNodeEditorPopupRect();
+      popupRectRef.current = next;
+      return next;
+    });
+    setPopupFullscreen((current) => !current);
+  }, [popupFullscreen]);
 
   const startPopupResize = useCallback((event: React.PointerEvent<HTMLDivElement>, handle: NodeEditorPopupResizeHandle) => {
     event.preventDefault();
@@ -805,6 +852,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
       });
       popupRectRef.current = nextRect;
       setPopupRect(nextRect);
+      setPopupFullscreen(false);
     };
     const finish = () => {
       ownerDocument.body.style.cursor = previousCursor;
@@ -879,7 +927,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
             data-frame-interactive="true"
             onMouseDown={(event) => event.stopPropagation()}
             onClick={requestDeleteNode}
-            style={{ ...nodeEditorPopupCollapseButtonStyle, right: onCollapseToTab ? 68 : 38, color: "#be123c" }}
+            style={{ ...nodeEditorPopupCollapseButtonStyle, right: onCollapseToTab ? 98 : 68, color: "#be123c" }}
           >
             <HeaderRecycleBinIcon />
           </button>
@@ -893,11 +941,24 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
             data-frame-interactive="true"
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onCollapseToTab}
-            style={nodeEditorPopupCollapseButtonStyle}
+            style={{ ...nodeEditorPopupCollapseButtonStyle, right: 68 }}
           >
             <MinimizeToLineIcon />
           </button>
         )}
+        <button
+          className="mango-elevated-action"
+          type="button"
+          title={popupFullscreen ? "Restore node editor" : "Fullscreen node editor"}
+          aria-label={popupFullscreen ? "Restore node editor" : "Fullscreen node editor"}
+          aria-pressed={popupFullscreen}
+          data-frame-interactive="true"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={togglePopupFullscreen}
+          style={{ ...nodeEditorPopupCollapseButtonStyle, right: 38 }}
+        >
+          <NodeEditorPopupFullscreenIcon active={popupFullscreen} />
+        </button>
         <button
           className="mango-elevated-action"
           type="button"

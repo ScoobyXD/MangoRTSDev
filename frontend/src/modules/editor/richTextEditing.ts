@@ -579,6 +579,20 @@ function collapseRedundantFontSizeSpans(root: HTMLElement) {
   }
 }
 
+function trimEditorPasteBoundaryWhitespace(root: HTMLElement) {
+  const first = root.firstChild;
+  if (first?.nodeType === Node.TEXT_NODE) {
+    first.textContent = (first.textContent ?? "").replace(/^\n+/, "");
+    if (!first.textContent) first.remove();
+  }
+
+  const last = root.lastChild;
+  if (last?.nodeType === Node.TEXT_NODE) {
+    last.textContent = (last.textContent ?? "").replace(/\n+$/, "");
+    if (!last.textContent) last.remove();
+  }
+}
+
 function normalizeSafeFontSizeValue(value: string): string {
   const parsed = Number.parseFloat(value);
   if (!Number.isFinite(parsed) || parsed < 6 || parsed > 96) return "";
@@ -608,6 +622,7 @@ export function sanitizeEditorDocumentHTML(html: string): string {
   wrapRootEditorListItems(template.content, document);
   const clean = document.createElement("div");
   appendSanitizedChildren(template.content, clean, document);
+  trimEditorPasteBoundaryWhitespace(clean);
   collapseRedundantFontSizeSpans(clean);
   applyEditorListMarkerStyles(clean);
   return collapseRedundantFontSizeSpanHTML(clean.innerHTML);

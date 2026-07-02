@@ -50,7 +50,6 @@ type CompanyExplorerTreeProps = {
   onOpenContextMenu: (event: React.MouseEvent, row?: ExplorerTreeNode | null) => void;
   onSelectExplorerSearchResult: (row: ExplorerTreeNode) => void;
   onSelectTreeRow: (row: ExplorerTreeNode, event?: React.MouseEvent, options?: { selectionIntent?: "activate" | "navigate" }) => void;
-  onStartRenamingRow: (row: ExplorerTreeNode) => void;
   onCommitRename: (draft?: ExplorerRenameDraft) => Promise<void>;
   onSetRenaming: React.Dispatch<React.SetStateAction<ExplorerRenameDraft | null>>;
   onSetExpanded: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -124,7 +123,6 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
   onOpenContextMenu,
   onSelectExplorerSearchResult,
   onSelectTreeRow,
-  onStartRenamingRow,
   onCommitRename,
   onSetRenaming,
   onSetExpanded,
@@ -289,7 +287,6 @@ export const CompanyExplorerTree: React.FC<CompanyExplorerTreeProps> = ({
           isSearchActive={explorerSearchActive}
           onSelectTreeRow={handleRowSelection}
           onOpenContextMenu={onOpenContextMenu}
-          onStartRenamingRow={onStartRenamingRow}
           onCommitRename={onCommitRename}
           onSetRenaming={onSetRenaming}
           onSetExpanded={onSetExpanded}

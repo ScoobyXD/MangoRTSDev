@@ -1,4 +1,4 @@
-Last updated: 2026-07-01
+Last updated: 2026-07-02
 
 # Shared Triage Tests
 
@@ -104,6 +104,9 @@ ST93 - Multiple Shared Triage mailbox work surfaces that point at the same compa
 ST94 - Nylas shared receipt support requires a public `/nylas/webhook` destination for the same Nylas app/client ID used by company-owned shared mailbox sends, and that webhook must subscribe to the Message tracking `message.opened` trigger.
 ST95 - The Nylas dashboard Message tracking group may be configured with all 3 triggers selected: `message.opened`, `message.link_clicked`, and `thread.replied`; the current Shared Triage receipt contract consumes only `message.opened`, so link-clicked and thread-replied webhook deliveries must not create or mutate shared read-receipt state unless a future feature explicitly adds that behavior.
 ST96 - The backend `NYLAS_WEBHOOK_SECRET` must match the secret returned by the configured Nylas webhook destination, and the Nylas app/environment must support message tracking; without that webhook secret and tracking-capable app, shared sends can request `tracking_options.opens = true` but the product will not receive usable receipt updates.
+ST97 - Selecting a mailbox-capable Shared Triage row must not clear the existing mail list, folder counts, Inbox count, or Starred count only because the selected shared-inbox metadata has not resolved yet.
+ST98 - When the selected Shared Triage row resolves to a mailbox-capable shared inbox, the UI must load that mailbox's folders, messages, Inbox count, and Starred count without requiring the user to select another shared inbox first.
+ST99 - Disconnecting a Shared Triage mailbox requires an explicit point-of-click confirmation popover before the shared mailbox disconnect mutation runs.
 
 ## Nylas Configuration Contract
 
@@ -443,3 +446,23 @@ Expected:
 - The Sent mailbox shows `Seen` only for messages with a stored receipt signal; messages without a signal do not show `Not opened`.
 - A `message.opened` event with a message ID updates the affected sent row/detail only and preserves the rest of the visible list and prefetched page state.
 - If more than one Shared Triage mailbox entry points at the same company email connection, those entries share the stored receipt summary for the same provider message while audience fanout remains tied to each linked shared inbox.
+
+### Scenario ST-S12: Shared Mailbox Activation And Disconnect Confirmation
+
+Business logic covered:
+- ST97
+- ST98
+- ST99
+
+Given:
+- A user selects a mailbox-capable Shared Triage inbox.
+- The Shared Triage tree row and mailbox metadata may resolve after the active view changes.
+- The shared mailbox exposes a disconnect action.
+
+Expected:
+- A transiently unresolved selected shared-inbox row does not blank the current mail list or folder/count state.
+- The selected row is not treated as a plain organizational folder unless the resolved row is actually a non-mailbox folder.
+- Once the selected row resolves to a mailbox-capable shared inbox, folders, messages, Inbox counts, and Starred counts load for that shared mailbox.
+- The user does not need to click a different shared inbox and then return to make the selected shared mailbox load.
+- Clicking disconnect opens a small confirmation popover near the clicked button.
+- The shared mailbox disconnect mutation runs only after the user confirms that popover.

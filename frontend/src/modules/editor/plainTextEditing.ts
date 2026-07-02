@@ -4,7 +4,7 @@ export type EditorOutlineStyleID = "automatic-outline-numbering" | "bullet-list"
 export type EditorTabDirection = "indent" | "outdent";
 export type EditorInlineFormatCommand = "bold" | "underline" | "hyperlink";
 
-export const DEFAULT_EDITOR_OUTLINE_STYLE: EditorOutlineStyleID = "indent-guides";
+export const DEFAULT_EDITOR_OUTLINE_STYLE: EditorOutlineStyleID = "automatic-outline-numbering";
 
 export type PlainTextEdit = {
   value: string;

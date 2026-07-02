@@ -9,6 +9,14 @@ import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/Com
 import type { CompanyExplorerV2Row } from "../company-explorer/companyExplorerLazyApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import {
+  fetchProjectView,
+  listProjectRelationshipsForResource,
+  listProjects,
+  upsertProjectRelationship,
+  type ProjectRecord,
+  type ProjectRelationshipProjection,
+} from "../project-management/projectManagementApi";
+import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockContentPayload,
   buildEditorTextBlockChatPayload,
@@ -307,6 +315,21 @@ function uniqueLogicGateOptions(items: LogicGateRecord[]): LogicGateRecord[] {
   return Array.from(byID.values());
 }
 
+function projectOptionLabel(project: ProjectRecord): string {
+  return humanLabelOrFallback(project.name, humanLabelOrFallback(project.project_id, "Project"));
+}
+
+function sortProjectOptions(items: ProjectRecord[]): ProjectRecord[] {
+  return [...items].sort((a, b) => (
+    projectOptionLabel(a).localeCompare(projectOptionLabel(b), undefined, { numeric: true, sensitivity: "base" })
+    || a.project_id.localeCompare(b.project_id)
+  ));
+}
+
+function projectRelationshipLabel(row: ProjectRelationshipProjection): string {
+  return row.project_name?.trim() || humanLabelOrFallback(row.project_id, "Project");
+}
+
 function companyExplorerRowsFromPayload(payload: { rows?: CompanyExplorerV2Row[] } | CompanyExplorerV2Row[]): CompanyExplorerV2Row[] {
   return Array.isArray(payload) ? payload : (payload.rows ?? []);
 }
@@ -352,6 +375,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   scrollbarAccent,
   scrollbarTrack,
   outlineStyle,
+  formattingControllerRef,
   requestJSON,
   onProjectionMutation,
   onMarkChangeSeen,
@@ -359,10 +383,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   onCreateNodeFromImage,
   onAssignToLogicGate,
   onRequireNodePriorityForLogicGateAssignment,
+  onSelectionFontSizeChange,
+  onSelectionInlineFormatChange,
   onError,
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
+  const projectAssignerRef = useRef<HTMLDivElement | null>(null);
   const saveTimersRef = useRef(new Map<string, number>());
   const logicGateAssignStatusTimerRef = useRef<number | null>(null);
   const logicGateAssignFlashTimerRef = useRef<number | null>(null);
@@ -408,6 +435,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [lastAssignedLogicGateLabel, setLastAssignedLogicGateLabel] = useState("");
   const [logicGateAssignStatus, setLogicGateAssignStatus] = useState("");
   const [logicGateAssignFlash, setLogicGateAssignFlash] = useState<"" | "success" | "error">("");
+  const [projectAssignerOpen, setProjectAssignerOpen] = useState(false);
+  const [projectOptions, setProjectOptions] = useState<ProjectRecord[]>([]);
+  const [projectOptionsLoading, setProjectOptionsLoading] = useState(false);
+  const [projectRelationshipRefreshKey, setProjectRelationshipRefreshKey] = useState(0);
+  const [nodeProjectRelationships, setNodeProjectRelationships] = useState<ProjectRelationshipProjection[]>([]);
+  const [selectedProjectForAssignment, setSelectedProjectForAssignment] = useState<ProjectRecord | null>(null);
+  const [projectLogicGateOptions, setProjectLogicGateOptions] = useState<LogicGateRecord[]>([]);
+  const [projectLogicGatesLoading, setProjectLogicGatesLoading] = useState(false);
+  const [assigningProjectLogicGateID, setAssigningProjectLogicGateID] = useState("");
+  const [projectAssignStatus, setProjectAssignStatus] = useState("");
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
   const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number; position: ConfirmActionMenuPosition } | null>(null);
@@ -500,6 +537,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const assignLogicGateButtonLabel = hasAssignedLogicGate
     ? `Assigned to Logic Gate: ${assignedLogicGateLabel}`
     : "Assign to Logic Gate";
+  const sortedNodeProjectRelationships = useMemo(() => (
+    [...nodeProjectRelationships].sort((a, b) => (
+      (b.relationship_updated_timestamp ?? "").localeCompare(a.relationship_updated_timestamp ?? "")
+      || projectRelationshipLabel(a).localeCompare(projectRelationshipLabel(b), undefined, { numeric: true, sensitivity: "base" })
+    ))
+  ), [nodeProjectRelationships]);
+  const primaryAssignedProject = sortedNodeProjectRelationships[0] ?? null;
+  const primaryAssignedProjectID = primaryAssignedProject?.project_id?.trim() ?? "";
+  const primaryAssignedProjectLabel = primaryAssignedProject ? projectRelationshipLabel(primaryAssignedProject) : "";
+  const assignProjectButtonLabel = primaryAssignedProject
+    ? `Project: ${primaryAssignedProjectLabel}`
+    : "Assign to Project";
   const nodePriorityUnassignedForLogicGate = useMemo(() => {
     const raw = nodePriorityDraft.trim();
     if (!raw || raw === "0") return true;
@@ -539,6 +588,21 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [assignedLogicGateLabel, companyID, nodeID, primaryAssignedLogicGateID]);
 
+  const goToAssignedProject = useCallback(() => {
+    const projectID = primaryAssignedProjectID.trim();
+    if (!projectID) return;
+    emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+      companyID,
+      sourceFrameID: "editor",
+      kind: "project",
+      id: projectID,
+      label: primaryAssignedProjectLabel || projectID,
+      nodeID,
+      selectedTreeID: `project-${projectID}`,
+      changedAt: Date.now(),
+    });
+  }, [companyID, nodeID, primaryAssignedProjectID, primaryAssignedProjectLabel]);
+
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -555,17 +619,23 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
   useEffect(() => {
     setLogicGateAssignerOpen(false);
+    setProjectAssignerOpen(false);
     setLogicGateSearch("");
     setAssigningLogicGateID("");
     setLastAssignedLogicGateID("");
     setLastAssignedLogicGateLabel("");
     setLogicGateAssignStatus("");
     setLogicGateAssignFlash("");
+    setSelectedProjectForAssignment(null);
+    setProjectLogicGateOptions([]);
+    setProjectAssignStatus("");
+    setAssigningProjectLogicGateID("");
   }, [nodeID]);
 
   useEffect(() => {
     if (canEdit) return;
     setLogicGateAssignerOpen(false);
+    setProjectAssignerOpen(false);
     setEmailPickerTargetBlockID(null);
     setDropActive(false);
     setDeleteTextBlockConfirmation(null);
@@ -587,6 +657,95 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [logicGateAssignerOpen]);
+
+  useEffect(() => {
+    if (!projectAssignerOpen) return;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (projectAssignerRef.current?.contains(event.target as Node)) return;
+      setProjectAssignerOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProjectAssignerOpen(false);
+    };
+    window.addEventListener("pointerdown", closeOnPointerDown);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnPointerDown);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [projectAssignerOpen]);
+
+  useEffect(() => {
+    if (!companyID || !nodeID) {
+      setNodeProjectRelationships([]);
+      return;
+    }
+    let cancelled = false;
+    void listProjectRelationshipsForResource({ companyID, resourceType: "node", resourceID: nodeID })
+      .then((payload) => {
+        if (!cancelled) setNodeProjectRelationships(payload.relationships ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setNodeProjectRelationships([]);
+      });
+    return () => { cancelled = true; };
+  }, [companyID, nodeID, projectRelationshipRefreshKey]);
+
+  useEffect(() => {
+    if (!projectAssignerOpen || !companyID) return;
+    let cancelled = false;
+    setProjectOptionsLoading(true);
+    void listProjects(companyID)
+      .then((payload) => {
+        if (!cancelled) setProjectOptions(sortProjectOptions(payload.projects ?? []));
+      })
+      .catch((cause) => {
+        if (!cancelled) onError(cause instanceof Error ? cause.message : "failed_to_load_projects");
+      })
+      .finally(() => {
+        if (!cancelled) setProjectOptionsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [companyID, onError, projectAssignerOpen]);
+
+  useEffect(() => {
+    const projectID = selectedProjectForAssignment?.project_id?.trim() ?? "";
+    if (!projectAssignerOpen || !companyID || !projectID) {
+      setProjectLogicGateOptions([]);
+      setProjectLogicGatesLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setProjectLogicGateOptions([]);
+    setProjectLogicGatesLoading(true);
+    void (async () => {
+      const view = await fetchProjectView(companyID, projectID);
+      if (cancelled) return;
+      const logicGateIDs = Array.from(new Set((view.relationships ?? [])
+        .filter((row) => row.resource_type === "logic_gate")
+        .map((row) => row.resource_id.trim())
+        .filter(Boolean)));
+      const records = await Promise.all(logicGateIDs.map(async (logicGateID) => {
+        try {
+          const details = await getLogicGateRecordSingleFlight(apiBase, companyID, logicGateID);
+          return details.logic_gate;
+        } catch {
+          return null;
+        }
+      }));
+      if (!cancelled) {
+        setProjectLogicGateOptions(sortLogicGateOptions(records.filter((record): record is LogicGateRecord => Boolean(record))));
+      }
+    })()
+      .catch((cause) => {
+        if (!cancelled) onError(cause instanceof Error ? cause.message : "failed_to_load_project_logic_gates");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setProjectLogicGatesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [apiBase, companyID, onError, projectAssignerOpen, selectedProjectForAssignment?.project_id]);
 
   useEffect(() => {
     const layout = readStoredTextPaneLayout(companyID, nodeID);
@@ -1477,6 +1636,44 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [assigningLogicGateID, canEdit, flashLogicGateAssignButton, lastAssignedLogicGateID, lastAssignedLogicGateLabel, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment]);
 
+  const assignToProjectLogicGate = useCallback(async (logicGate: LogicGateRecord) => {
+    if (!canEdit) return;
+    const project = selectedProjectForAssignment;
+    const projectID = project?.project_id?.trim() ?? "";
+    const logicGateID = logicGate.logic_gate_id.trim();
+    if (!companyID || !nodeID || !projectID || !logicGateID || assigningProjectLogicGateID) return;
+    if (nodePriorityUnassignedForLogicGate) {
+      setProjectAssignStatus("Must give node a priority");
+      onRequireNodePriorityForLogicGateAssignment();
+      return;
+    }
+    const projectLabel = project ? projectOptionLabel(project) : projectID;
+    const logicGateLabel = logicGateOptionLabel(logicGate);
+    setAssigningProjectLogicGateID(logicGateID);
+    setProjectAssignStatus(`Adding to ${projectLabel}`);
+    try {
+      await upsertProjectRelationship({
+        companyID,
+        projectID,
+        resourceType: "node",
+        resourceID: nodeID,
+      });
+      await onAssignToLogicGate(logicGateID);
+      setLastAssignedLogicGateID(logicGateID);
+      setLastAssignedLogicGateLabel(logicGateLabel);
+      setProjectAssignerOpen(false);
+      setSelectedProjectForAssignment(null);
+      setProjectAssignStatus(`Project: ${projectLabel}`);
+      setProjectRelationshipRefreshKey((key) => key + 1);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "failed_to_assign_project";
+      setProjectAssignStatus(message);
+      onError(message);
+    } finally {
+      setAssigningProjectLogicGateID("");
+    }
+  }, [assigningProjectLogicGateID, canEdit, companyID, nodeID, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment, selectedProjectForAssignment]);
+
   const onDropEmail = useCallback((event: React.DragEvent) => {
     if (!canEdit) return;
     const email = parseDraggedEmail(event.dataTransfer);
@@ -1840,6 +2037,94 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       {logicGateAssignStatus && <div style={{ justifySelf: "start", maxWidth: "100%", border: `1px solid ${logicGateAssignStatus.startsWith("Assigning") ? "rgba(59,130,246,0.24)" : logicGateAssignStatus.startsWith("Assigned") ? "rgba(100,116,139,0.22)" : "rgba(245,158,11,0.30)"}`, borderRadius: 9, background: logicGateAssignStatus.startsWith("Assigning") ? "rgba(239,246,255,0.82)" : logicGateAssignStatus.startsWith("Assigned") ? "rgba(248,250,252,0.9)" : "rgba(255,251,235,0.9)", color: logicGateAssignStatus.startsWith("Assigning") ? accent : logicGateAssignStatus.startsWith("Assigned") ? surfaceText : "#92400e", padding: "5px 8px", fontSize: 11, fontWeight: 800, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{logicGateAssignStatus}</div>}
     </div>
   ) : null;
+  const projectAssignerMenuWidth = Math.max(
+    280,
+    Math.min(compact ? 420 : 520, width > 0 ? width - 28 : compact ? 420 : 520),
+  );
+  const projectAssignerDropdown = canEdit && projectAssignerOpen ? (
+    <div
+      role="menu"
+      aria-label="Assign project"
+      onMouseDown={(event) => event.stopPropagation()}
+      style={{
+        position: "absolute",
+        top: "calc(100% - 1px)",
+        left: 0,
+        zIndex: 94,
+        width: projectAssignerMenuWidth,
+        minWidth: 0,
+        maxWidth: "calc(100vw - 44px)",
+        display: "grid",
+        gap: 9,
+        border: "1px solid transparent",
+        borderRadius: "0 0 14px 14px",
+        background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
+        padding: 10,
+        boxShadow: `${EDITOR_NEU_PANEL_SHADOW}, 0 18px 36px rgba(15,23,42,0.16)`,
+      }}
+    >
+      <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
+        <div style={{ color: surfaceText, opacity: 0.68, fontSize: 10.5, fontWeight: 900 }}>Project</div>
+        <div className="editor-document-scroll" style={{ maxHeight: 168, overflowY: "auto", display: "grid", gap: 5, padding: "2px 5px 6px 2px" }}>
+          {projectOptionsLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>Loading projects</div>}
+          {!projectOptionsLoading && projectOptions.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>No projects</div>}
+          {!projectOptionsLoading && projectOptions.map((project) => {
+            const projectID = project.project_id.trim();
+            const selected = selectedProjectForAssignment?.project_id === projectID;
+            return (
+              <button
+                key={projectID}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setSelectedProjectForAssignment(project);
+                  setProjectAssignStatus("");
+                }}
+                title={projectOptionLabel(project)}
+                style={{ minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr) 18px", alignItems: "center", gap: 7, border: selected ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: selected ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", padding: "5px 8px", font: "inherit", textAlign: "left", boxShadow: EDITOR_NEU_SHADOW }}
+              >
+                <ExplorerRowIcon kind="project" />
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 850 }}>{projectOptionLabel(project)}</span>
+                <span>{selected ? <RelationshipCheckIcon color={accent} /> : null}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {selectedProjectForAssignment && (
+        <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
+          <div style={{ color: surfaceText, opacity: 0.68, fontSize: 10.5, fontWeight: 900 }}>Logic Gate in Project</div>
+          {nodePriorityUnassignedForLogicGate && (
+            <div style={{ border: "1px solid rgba(245, 158, 11, 0.34)", borderRadius: 9, background: "rgba(255,251,235,0.9)", color: "#92400e", padding: "6px 8px", fontSize: 11, fontWeight: 800 }}>Give this node a priority before assigning it to a project logic gate.</div>
+          )}
+          <div className="editor-document-scroll" style={{ maxHeight: 190, overflowY: "auto", display: "grid", gap: 5, padding: "2px 5px 6px 2px" }}>
+            {projectLogicGatesLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>Loading logic gates</div>}
+            {!projectLogicGatesLoading && projectLogicGateOptions.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>This project has no logic gates</div>}
+            {!projectLogicGatesLoading && projectLogicGateOptions.map((logicGate) => {
+              const logicGateID = logicGate.logic_gate_id.trim();
+              const busy = assigningProjectLogicGateID === logicGateID;
+              return (
+                <button
+                  key={logicGateID}
+                  type="button"
+                  role="menuitem"
+                  disabled={Boolean(assigningProjectLogicGateID)}
+                  onClick={() => { void assignToProjectLogicGate(logicGate); }}
+                  title={logicGateOptionLabel(logicGate)}
+                  style={{ minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr) 18px", alignItems: "center", gap: 7, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: assigningProjectLogicGateID ? "default" : "pointer", padding: "5px 8px", font: "inherit", textAlign: "left", boxShadow: EDITOR_NEU_SHADOW }}
+                >
+                  <ExplorerRowIcon kind="logic_gate" />
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 850 }}>{logicGateOptionLabel(logicGate)}</span>
+                  <span>{busy ? "..." : null}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {projectAssignStatus && <div style={{ justifySelf: "start", maxWidth: "100%", border: `1px solid ${projectAssignStatus.startsWith("Project:") ? "rgba(100,116,139,0.22)" : "rgba(59,130,246,0.24)"}`, borderRadius: 9, background: projectAssignStatus.startsWith("Project:") ? "rgba(248,250,252,0.9)" : "rgba(239,246,255,0.82)", color: projectAssignStatus.startsWith("Project:") ? surfaceText : accent, padding: "5px 8px", fontSize: 11, fontWeight: 800, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{projectAssignStatus}</div>}
+    </div>
+  ) : null;
 
   return (
     <div
@@ -2011,6 +2296,71 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               }}
             >
               Go to Logic Gate
+            </button>
+          )}
+          {canEdit && (
+            <div ref={projectAssignerRef} style={{ position: "relative", display: "inline-flex", flex: "1 1 132px", minWidth: 0, maxWidth: compact ? "100%" : 360, overflow: "visible" }}>
+              <button
+                type="button"
+                title={assignProjectButtonLabel}
+                aria-haspopup="menu"
+                aria-expanded={projectAssignerOpen}
+                onClick={() => {
+                  setProjectAssignerOpen((open) => !open);
+                  setProjectAssignStatus("");
+                }}
+                style={{
+                  minHeight: 30,
+                  width: "100%",
+                  minWidth: 0,
+                  borderRadius: projectAssignerOpen ? "9px 9px 0 0" : 9,
+                  border: projectAssignerOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                  background: projectAssignerOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+                  color: surfaceText,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 7,
+                  padding: "0 10px",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  letterSpacing: 0,
+                  whiteSpace: "nowrap",
+                  boxShadow: EDITOR_NEU_SHADOW,
+                }}
+              >
+                <ExplorerRowIcon kind="project" />
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assignProjectButtonLabel}</span>
+              </button>
+              {projectAssignerDropdown}
+            </div>
+          )}
+          {primaryAssignedProjectID && (
+            <button
+              type="button"
+              title={`Go to ${primaryAssignedProjectLabel}`}
+              onClick={goToAssignedProject}
+              style={{
+                minHeight: 30,
+                borderRadius: 9,
+                border: "1px solid transparent",
+                background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box`,
+                color: accent,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 7,
+                padding: "0 10px",
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 900,
+                letterSpacing: 0,
+                whiteSpace: "nowrap",
+                flex: "0 0 auto",
+                boxShadow: EDITOR_NEU_SHADOW,
+              }}
+            >
+              Go to Project
             </button>
           )}
           </div>
@@ -2207,6 +2557,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               return next;
             });
           };
+          const clearSelectionAnchor = () => {
+            setChatSelectionAnchors((current) => {
+              if (!(block.id in current)) return current;
+              const next = { ...current };
+              delete next[block.id];
+              return next;
+            });
+          };
           return (
             <React.Fragment key={block.id}>
               <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
@@ -2317,6 +2675,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onSelectionChatRequest={openSelectionChat}
                     onImageChatRequest={addImageChatComment}
                     onImageNodeRequest={(image) => { void createNodeFromImage(image); }}
+                    formattingControllerRef={formattingControllerRef}
+                    onSelectionFontSizeChange={onSelectionFontSizeChange}
+                    onSelectionInlineFormatChange={onSelectionInlineFormatChange}
                   />
                 </div>
                 {emailPaneIsVisible && !stackedSidePanes && renderTextSidePaneResizeHandle(block.id, "email", emailPaneWidth, emailPaneMaxWidth)}
@@ -2353,6 +2714,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     onReply={replyToMessage}
                     onDeleteMessage={(messageID) => { void deleteChatMessage(messageID); }}
                     onClearReply={clearReplyTarget}
+                    onClearSelectionAnchor={clearSelectionAnchor}
                     onAttachFiles={(files) => { void addChatDraftAttachments(block.id, files); }}
                     onRemoveDraftAttachment={(attachmentID) => removeChatDraftAttachment(block.id, attachmentID)}
                     onSubmit={() => { void submitChat(block.id); }}
