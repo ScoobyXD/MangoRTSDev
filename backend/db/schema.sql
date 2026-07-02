@@ -869,30 +869,6 @@ returns boolean as $$
     ) candidate
     order by candidate.source_rank asc, candidate.group_depth asc, candidate.access_rank asc
     limit 1
-  ),
-  gvic_resource_lookup(resource_type, resource_id) as (
-    select
-      case
-        when normalized.resource_type='shared_inbox_folder' then 'shared_triage_folder'
-        else normalized.resource_type
-      end,
-      p_resource_id
-    from normalized_resource normalized
-  ),
-  gvic_access(max_rank) as (
-    select coalesce(max(case gvic.role
-      when 'generated' then 2
-      when 'verified' then 2
-      when 'consulted' then 1
-      when 'informed' then 1
-      else 0
-    end), 0)
-    from resource_gvic_effective_assignments gvic
-    join gvic_resource_lookup lookup
-      on lookup.resource_type = gvic.resource_type
-     and lookup.resource_id = gvic.resource_id
-    where gvic.company_id=p_company_id
-      and gvic.user_id=p_user_id
   )
   select case
     when requested.required_rank = 0 then false
@@ -900,7 +876,6 @@ returns boolean as $$
     when (select allowed from role_admin_actor) then true
     when not exists (select 1 from permission_access) then false
     when (select mangorts_access_level_rank(access_level) from permission_access limit 1) = 0 then false
-    when (select max_rank from gvic_access) >= requested.required_rank then true
     when exists (
         select 1
         from company_memberships membership

@@ -222,6 +222,33 @@ func TestMemoryVisibleExplorerSharedTriageAndWorkItemReadsDoNotLeak(t *testing.T
 	}
 }
 
+func TestMemorySharedTriageVisibilityUsesPermissionsNotGVIC(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "22222222-2222-4222-8222-222222222306"
+	repo.EnsureCompany(companyID, "Shared Triage Permission Co")
+
+	viewer := mustCreateInboxReadCompanyUser(t, repo, "shared-triage-gvic-viewer", companyID, "shared-triage-gvic-viewer@example.com", "Shared Triage GVIC Viewer")
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "GVIC-only shared folder", "")
+	if err != nil {
+		t.Fatalf("CreateCommunicationsSharedInboxFolder: %v", err)
+	}
+	mustSetVisibleQueryDefaultAccess(t, repo, companyID, EntityTypeSharedTriageFolder, folder.FolderID, ResourceDefaultAccessNoAccess)
+	mustSetInboxReadResourceGVIC(t, repo, companyID, EntityTypeSharedTriageFolder, folder.FolderID, domain.GVICRoleGenerated, viewer.UserID)
+
+	folders, err := repo.ListVisibleCommunicationsSharedInboxFolders(companyID, viewer.UserID)
+	if err != nil {
+		t.Fatalf("ListVisibleCommunicationsSharedInboxFolders GVIC-only: %v", err)
+	}
+	assertVisibleQueryFoldersDoNotContain(t, folders, folder.FolderID)
+
+	mustSetVisibleQueryPermission(t, repo, companyID, EntityTypeSharedTriageFolder, folder.FolderID, viewer.UserID, EntityPermissionView)
+	folders, err = repo.ListVisibleCommunicationsSharedInboxFolders(companyID, viewer.UserID)
+	if err != nil {
+		t.Fatalf("ListVisibleCommunicationsSharedInboxFolders permission view: %v", err)
+	}
+	assertVisibleQueryFolderIDs(t, folders, folder.FolderID)
+}
+
 func TestMemoryVisibleCompanyExplorerFoldersUseFolderPermissions(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "22222222-2222-4222-8222-222222222305"

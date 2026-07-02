@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	companyExplorerFinalCutoverMigration        = "20260620_company_explorer_final_cutover.sql"
-	companyExplorerNoNodeItemsMigration         = "20260626_company_explorer_no_node_items.sql"
-	companyExplorerAccessHelperCutoverMigration = "20260620_z_company_explorer_access_helper_cutover.sql"
+	companyExplorerFinalCutoverMigration   = "20260620_company_explorer_final_cutover.sql"
+	companyExplorerNoNodeItemsMigration    = "20260626_company_explorer_no_node_items.sql"
+	resourcePermissionsIgnoreGVICMigration = "20260701_resource_permissions_ignore_gvic.sql"
 )
 
 func TestCompanyExplorerFinalSchemaDefinesContainmentTables(t *testing.T) {
@@ -129,13 +129,13 @@ func TestCompanyExplorerFinalVerificationViewCoversCutoverInvariants(t *testing.
 func TestCompanyExplorerAccessHelperCutoverUsesFinalFolderStorage(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join("..", "..", "db", "schema.sql"),
-		filepath.Join("..", "..", "db", "migrations", companyExplorerAccessHelperCutoverMigration),
+		filepath.Join("..", "..", "db", "migrations", resourcePermissionsIgnoreGVICMigration),
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		normalized := normalizeSQLForCompanyExplorerV2Test(string(raw))
+		normalized := extractAccessHelperSQLForCompanyExplorerV2Test(t, normalizeSQLForCompanyExplorerV2Test(string(raw)))
 		for _, want := range []string{
 			"create or replace function mangorts_user_can_access_resource",
 			"from company_explorer_folders folder",
@@ -143,27 +143,17 @@ func TestCompanyExplorerAccessHelperCutoverUsesFinalFolderStorage(t *testing.T) 
 			"from shared_inbox_folders folder",
 			"from shared_inboxes inbox",
 			"from resource_permissions access",
-			"from resource_gvic_effective_assignments gvic",
+			"join company_user_group_closure closure",
 		} {
 			if !strings.Contains(normalized, want) {
 				t.Fatalf("%s missing access helper marker %q", path, want)
 			}
 		}
-		if strings.Contains(path, companyExplorerAccessHelperCutoverMigration) {
-			if !strings.Contains(normalized, "normalized.resource_type = 'shared_inbox_folder' and gvic.resource_type = 'shared_triage_folder'") {
-				t.Fatalf("%s missing legacy shared triage GVIC join marker", path)
-			}
-		} else {
-			for _, want := range []string{
-				"when normalized.resource_type='shared_inbox_folder' then 'shared_triage_folder'",
-				"join gvic_resource_lookup lookup",
-			} {
-				if !strings.Contains(normalized, want) {
-					t.Fatalf("%s missing pointer access helper marker %q", path, want)
-				}
-			}
-		}
 		for _, forbidden := range []string{
+			"gvic_access",
+			"gvic_resource_lookup",
+			"resource_gvic_effective_assignments",
+			"when (select max_rank from gvic_access) >= requested.required_rank",
 			"folder.folder_kind",
 			"folder.system_key",
 			"folder.scope_type",
@@ -175,6 +165,20 @@ func TestCompanyExplorerAccessHelperCutoverUsesFinalFolderStorage(t *testing.T) 
 			}
 		}
 	}
+}
+
+func extractAccessHelperSQLForCompanyExplorerV2Test(t *testing.T, sql string) string {
+	t.Helper()
+	start := strings.Index(sql, "create or replace function mangorts_user_can_access_resource")
+	if start < 0 {
+		t.Fatalf("missing mangorts_user_can_access_resource")
+	}
+	sql = sql[start:]
+	end := strings.Index(sql, "$$ language sql stable;")
+	if end < 0 {
+		t.Fatalf("missing mangorts_user_can_access_resource terminator")
+	}
+	return sql[:end]
 }
 
 func normalizeSQLForCompanyExplorerV2Test(sql string) string {

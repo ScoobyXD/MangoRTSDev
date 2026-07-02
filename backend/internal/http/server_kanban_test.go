@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
@@ -148,6 +150,110 @@ func TestKanbanProjectionCompatibilityFlow(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("GET %s status = %d body=%s, want disabled 404", target, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestKanbanCardDeleteRequiresEditPermissionNotGVIC(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServerWithOptions(repo, ServerOptions{})
+	companyID := "11111111-1111-4111-8111-444444444444"
+	repo.EnsureCompany(companyID, "Kanban Delete Co")
+	user, err := repo.UpsertAuthUser("kanban-delete-user", "kanban-delete@example.com", "Kanban Delete User")
+	if err != nil {
+		t.Fatalf("UpsertAuthUser: %v", err)
+	}
+	if _, err := repo.AddCompanyMembership("kanban-delete-user", companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatalf("AddCompanyMembership: %v", err)
+	}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		actor := ActorContext{
+			User: user,
+			Memberships: []domain.CompanyMembership{{
+				CompanyID: companyID,
+				UserID:    user.UserID,
+				Role:      domain.RoleCompanyUser,
+			}},
+			CompanyID:   companyID,
+			CompanyRole: domain.RoleCompanyUser,
+		}
+		server.Routes().ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), actorContextKey{}, actor)))
+	})
+
+	node, err := repo.CreateNode(companyID, "non-admin removable card")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	logicGate, err := repo.CreateLogicGate(companyID, "Non-admin delete gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions view: %v", err)
+	}
+	if _, err := repo.SetLogicGateGVICAssignments(store.LogicGateGVICAssignmentUpdateInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		Assignments: []store.LogicGateGVICAssignmentInput{{
+			Role:   domain.GVICRoleGenerated,
+			UserID: user.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+	}
+	priority := 3
+	result, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:      companyID,
+		LogicGateID:    logicGate.LogicGateID,
+		NodeID:         node.NodeID,
+		Status:         store.LogicGateWorkStatusPending,
+		Priority:       &priority,
+		PrioritySet:    true,
+		MutationOrigin: store.MutationOriginKanban,
+	})
+	if err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+
+	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/kanban/cards/"+result.Card.CardID+"?company_id="+companyID+"&board_id="+boardID, nil)
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusForbidden {
+		t.Fatalf("DELETE with view permission plus GVIC status = %d body=%s, want 403", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions edit: %v", err)
+	}
+	deleteReq = httptest.NewRequest(http.MethodDelete, "/v1/kanban/cards/"+result.Card.CardID+"?company_id="+companyID+"&board_id="+boardID, nil)
+	deleteRec = httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE with edit permission status = %d body=%s, want 200", deleteRec.Code, deleteRec.Body.String())
 	}
 }
 

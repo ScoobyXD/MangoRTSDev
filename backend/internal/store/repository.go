@@ -1986,21 +1986,6 @@ func NormalizeGVICRole(role string) (string, bool) {
 	}
 }
 
-func GVICRoleAccessLevel(role string) (string, bool) {
-	role, ok := NormalizeGVICRole(role)
-	if !ok {
-		return "", false
-	}
-	switch role {
-	case domain.GVICRoleGenerated, domain.GVICRoleVerified:
-		return EntityPermissionEdit, true
-	case domain.GVICRoleConsulted, domain.GVICRoleInformed:
-		return EntityPermissionView, true
-	default:
-		return "", false
-	}
-}
-
 func NormalizeGVICResourceType(resourceType string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(resourceType)) {
 	case EntityTypeNode:

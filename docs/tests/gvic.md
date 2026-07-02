@@ -13,13 +13,13 @@ GVIC2 - GVIC role input is normalized before validation.
 GVIC3 - GVIC resource types include node, logic gate, project, shared triage folder, and shared inbox resources where that surface supports GVIC.
 GVIC4 - GVIC principal types include user and group.
 GVIC5 - A GVIC assignment requires company, resource type, resource ID, principal type, principal ID, and role.
-GVIC6 - Generated and verified assignments imply edit-level access to the resource.
-GVIC7 - Consulted and informed assignments imply view-level access to the resource.
+GVIC6 - Generated and verified assignments identify GVIC responsibility/notification roles only; they do not imply edit permission, delete permission, or any other resource authorization.
+GVIC7 - Consulted and informed assignments identify GVIC visibility/notification roles only; they do not imply view permission or any other resource authorization.
 GVIC8 - Group GVIC assignments expand into effective user assignments for group members.
 GVIC9 - Effective GVIC assignment records preserve enough source/inheritance data to explain whether access came from a direct or group assignment.
 GVIC10 - Updating logic gate GVIC applies precise effective-assignment deltas for the logic gate; unchanged effective rows must not be deleted, rewritten, or retimestamped.
 GVIC11 - Updating logic gate GVIC updates the logic gate's GVIC template/effective rows only by default; it must not fan out to nodes that already have a node-level snapshot unless apply-to-descendants is set.
-GVIC12 - Updating project, node, or shared resource GVIC applies precise effective access and projection deltas for affected users without rebuilding unaffected rows.
+GVIC12 - Updating project, node, or shared resource GVIC applies precise effective GVIC and projection deltas for affected users without rebuilding unaffected rows.
 GVIC13 - My Work reads active work from the GVIC matrix projection table, not by guessing from UI state.
 GVIC14 - GVIC matrix projection sequences are tracked per company and scope so clients can process ordered deltas.
 GVIC15 - When a client detects a GVIC matrix sequence gap, it must fall back to a full reload.
@@ -69,8 +69,9 @@ Given:
 Expected:
 - Generated, verified, consulted, and informed are accepted after normalization.
 - Invalid roles, resource types, principal types, or missing IDs are rejected.
-- Generated and verified produce edit-level access.
-- Consulted and informed produce view-level access.
+- Generated and verified do not produce edit/delete permission access.
+- Consulted and informed do not produce view permission access.
+- Resource authorization remains controlled by permission policy: default access, direct user rows, and group rows.
 - Different principals can hold different GVIC roles on the same resource without losing the role meaning.
 - Node and logic gate generated and verified fields reject group principals and keep only one user for each role.
 
@@ -120,7 +121,7 @@ Expected:
 - Logic gate GVIC updates apply precise effective-assignment deltas for the gate template.
 - Without apply-to-descendants, existing assigned node snapshots and assigned-node matrix rows are not mutated.
 - With apply-to-descendants, currently assigned node snapshots are updated and affected node effective/projection rows are refreshed.
-- Project, node, and supported shared resource GVIC changes apply precise access/projection deltas for affected users.
+- Project, node, and supported shared resource GVIC changes apply precise GVIC/projection deltas for affected users.
 - My Work reads from the GVIC matrix projection table.
 - Projection sequence values are ordered per company and scope.
 - Sequence gaps cause a full reload.

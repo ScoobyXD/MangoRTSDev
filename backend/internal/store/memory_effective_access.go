@@ -304,15 +304,6 @@ func (r *MemoryRepo) userHasResourcePermissionLocked(companyID, userID, resource
 		if EntityPermissionRank(resolvedAccess) == 0 {
 			return false
 		}
-		for _, assignment := range r.gvicEffectiveAssignmentsForResourceLocked(companyID, resourceType, resourceID) {
-			if assignment.UserID != userID {
-				continue
-			}
-			gvicAccess, ok := GVICRoleAccessLevel(assignment.Role)
-			if ok && EntityPermissionSatisfies(gvicAccess, accessLevel) {
-				return true
-			}
-		}
 		return EntityPermissionSatisfies(resolvedAccess, accessLevel)
 	default:
 		return false

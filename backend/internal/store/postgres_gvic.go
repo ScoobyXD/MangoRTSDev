@@ -1105,44 +1105,6 @@ func syncPostgresGVICForAllGroupAssignmentsTx(ctx context.Context, tx *sql.Tx, c
 	return err
 }
 
-func postgresGVICEffectiveAssignmentsForAccess(ctx context.Context, queryer postgresGVICQueryer, companyID, resourceType, resourceID, userID string) ([]domain.ResourceGVICEffectiveAssignment, error) {
-	keyValue, err := normalizeResourceGVICKey(companyID, resourceType, resourceID)
-	if err != nil {
-		return nil, nil
-	}
-	userID = cleanUUIDText(userID)
-	if userID == "" {
-		return nil, nil
-	}
-	assignments, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, queryer, keyValue)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]domain.ResourceGVICEffectiveAssignment, 0, len(assignments))
-	for _, assignment := range assignments {
-		if assignment.UserID == userID {
-			items = append(items, assignment)
-		}
-	}
-	return items, nil
-}
-func userHasGVICAccess(ctx context.Context, queryer postgresGVICQueryer, companyID, userID, resourceType, resourceID, accessLevel string) (bool, error) {
-	assignments, err := postgresGVICEffectiveAssignmentsForAccess(ctx, queryer, companyID, resourceType, resourceID, userID)
-	if err != nil {
-		if isPostgresUndefinedTable(err, "resource_gvic_effective_assignments") {
-			return false, nil
-		}
-		return false, err
-	}
-	for _, assignment := range assignments {
-		gvicAccess, ok := GVICRoleAccessLevel(assignment.Role)
-		if ok && EntityPermissionSatisfies(gvicAccess, accessLevel) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func postgresGVICErrNotFound(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
