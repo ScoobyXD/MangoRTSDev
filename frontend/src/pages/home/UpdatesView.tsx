@@ -495,10 +495,12 @@ export function UpdatesView({
 
   const focusUpdateRow = useCallback((notificationKey: string) => {
     if (!notificationKey) return;
-    window.requestAnimationFrame(() => {
+    const focusSelectedRow = () => {
       const rows = Array.from(updatesListRef.current?.querySelectorAll<HTMLElement>("[data-update-key]") ?? []);
       rows.find((row) => row.dataset.updateKey === notificationKey)?.focus();
-    });
+    };
+    window.requestAnimationFrame(focusSelectedRow);
+    window.setTimeout(focusSelectedRow, 80);
   }, []);
 
   const openUpdateNodePanel = useCallback((row: UpdateFeedRow) => {
@@ -515,8 +517,9 @@ export function UpdatesView({
       notificationKey,
       row,
     });
+    focusUpdateRow(notificationKey);
     onOpenNode(nodeID, informationID);
-  }, [onOpenNode, resolveNodeDetails]);
+  }, [focusUpdateRow, onOpenNode, resolveNodeDetails]);
 
   const openNodePanelByResource = useCallback((nodeID: string, label = "") => {
     const cleanNodeID = nodeID.trim();
@@ -1183,6 +1186,7 @@ function UpdateCanonicalRowCopy({
   const nodeLabel = updateRowNodeLabel(row, nodeDetails);
   const logicGateLabel = updateRowLogicGateLabel(row);
   const statusLabel = updateRowStatusLabel(row, nodeDetails);
+  const chatMention = updateRowIsChatMention(row);
   const priorityValue = nodeDetails ? updatePriorityValue(nodeDetails.priority) : null;
   const statusToken = statusLabel ? <UpdateStatusToken status={statusLabel} /> : null;
   const priorityToken = priorityValue !== null ? <UpdatePriorityToken priority={priorityValue} /> : null;
@@ -1190,10 +1194,19 @@ function UpdateCanonicalRowCopy({
   const logicGateEntity = <UpdateInlineEntity kind="logic_gate" label={logicGateLabel} />;
 
   if (tone === "urgent" || tone === "mention") {
+    if (item.entity_type === "logic_gate") {
+      return (
+        <span style={updateRowCopyStyle}>
+          <span>{actor}</span>
+          <span>{tone === "urgent" ? "urgently mentioned you in" : "mentioned you in"}</span>
+          {logicGateEntity}
+        </span>
+      );
+    }
     return (
       <span style={updateRowCopyStyle}>
         <span>{actor}</span>
-        <span>{tone === "urgent" ? "urgently mentioned you in" : "mentioned you in"}</span>
+        <span>{tone === "urgent" ? (chatMention ? "urgently mentioned you in chat on" : "urgently mentioned you in") : (chatMention ? "mentioned you in chat on" : "mentioned you in")}</span>
         {nodeEntity}
         <span>in</span>
         {logicGateEntity}
@@ -1318,21 +1331,7 @@ function UpdatesNodePanel({
   const nodeTitle = details?.title?.trim() || panel.nodeTitle;
   const body = panel.row ? formatUpdateRowBody(panel.row) : "";
   return (
-    <aside style={updatesNodePanelStyle} aria-label="Selected update node">
-      <div style={updatesNodePanelHeaderStyle}>
-        <div style={updatesNodePanelTitleStackStyle}>
-          <span style={updatesNodePanelEyebrowStyle}>Selected update</span>
-          <span style={updatesNodePanelTitleStyle}>{nodeTitle}</span>
-        </div>
-        <div style={updatesNodePanelControlsStyle}>
-          <button type="button" title="Open node in new tab" style={updatesNodePanelIconButtonStyle} onClick={() => openAppPathInNewTab(buildNodeRoute(panel.nodeID))}>
-            <OpenInNewTabIcon />
-          </button>
-          <button type="button" title="Close node panel" style={updatesNodePanelIconButtonStyle} onClick={onClose}>
-            <MinimizeToLineIcon />
-          </button>
-        </div>
-      </div>
+    <aside style={updatesNodePanelStyle(Boolean(panel.row))} aria-label="Selected update node">
       {panel.row && (
         <div style={updatesNodePanelNotificationStyle}>
           <span style={updateRowIconStyle(updateRowTone(panel.row.item))}>{updateRowIcon(panel.row.item)}</span>
@@ -1344,6 +1343,14 @@ function UpdatesNodePanel({
         </div>
       )}
       <div style={updatesNodePanelEditorStyle}>
+        <div style={updatesNodePanelOverlayControlsStyle}>
+          <button type="button" title="Open node in new tab" style={updatesNodePanelIconButtonStyle} onClick={() => openAppPathInNewTab(buildNodeRoute(panel.nodeID))}>
+            <OpenInNewTabIcon />
+          </button>
+          <button type="button" title="Close node panel" style={updatesNodePanelIconButtonStyle} onClick={onClose}>
+            <MinimizeToLineIcon />
+          </button>
+        </div>
         <React.Suspense fallback={<div style={updatesNodePanelLoadingStyle}>Loading node</div>}>
           <LazyUpdatesEditorContent
             accent="#2563eb"
@@ -1364,14 +1371,21 @@ function UpdatesNodePanel({
 }
 
 function formatUpdateRowBody(row: UpdateFeedRow): string {
+  if (!updateRowShowsPreview(row)) return "";
   const body = (row.item.body_preview ?? "").trim();
   if (!body) return "";
-  if (updateRowTone(row.item) === "new") {
-    const addedIn = body.match(/\bwas added in ([^.]+)\./i);
-    if (addedIn?.[1]) return `Added in ${addedIn[1].trim()}.`;
-    if (/was added to logic gate work/i.test(body)) return "Added to Logic Gate work.";
-  }
   return body;
+}
+
+function updateRowShowsPreview(row: UpdateFeedRow): boolean {
+  const tone = updateRowTone(row.item);
+  return tone === "urgent" || tone === "mention" || tone === "comment";
+}
+
+function updateRowIsChatMention(row: UpdateFeedRow): boolean {
+  if (row.item.type !== NOTIFICATION_TYPE_MENTION && row.item.type !== NOTIFICATION_TYPE_URGENT_MENTION) return false;
+  const text = `${row.item.title} ${row.item.body_preview ?? ""}`.toLowerCase();
+  return /\bchat\b/.test(text);
 }
 
 function updateRowNodeID(row: UpdateFeedRow): string {
@@ -1389,7 +1403,9 @@ function updateRowNodeLabel(row: UpdateFeedRow, details?: UpdateNodeDetails | nu
 }
 
 function updateRowLogicGateLabel(row: UpdateFeedRow): string {
-  return row.logicGate?.label.trim() || "Logic Gate";
+  return row.logicGate?.label.trim()
+    || (row.item.entity_type === "logic_gate" ? extractMentionTargetLabel(row.item) : "")
+    || "Logic Gate";
 }
 
 function updateActorLabel(item: NotificationItem, resolveUserLabel?: (userID: string) => string): string {
@@ -1421,6 +1437,8 @@ function extractActorFromNotification(item: NotificationItem): string {
 
 function extractMentionTargetLabel(item: NotificationItem): string {
   const title = item.title.trim();
+  const chatMatch = title.match(/\bmentioned you in chat on\s+(.+)$/i);
+  if (chatMatch?.[1]) return chatMatch[1].trim();
   const match = title.match(/\bmentioned you in\s+(.+)$/i);
   return match?.[1]?.trim() ?? "";
 }
@@ -1736,7 +1754,7 @@ function updatesShellStyle(panelOpen: boolean): React.CSSProperties {
     minHeight: 0,
     height: "100%",
     display: "grid",
-    gridTemplateColumns: panelOpen ? "minmax(0, 1fr) clamp(390px, 44vw, 620px)" : "minmax(0, 1fr)",
+    gridTemplateColumns: panelOpen ? "minmax(720px, 840px) minmax(520px, 1fr)" : "minmax(0, 1fr)",
     gap: panelOpen ? 12 : 0,
     padding: "10px 14px 14px",
     background: "radial-gradient(circle at 18% 12%, rgba(20, 184, 166, 0.16), transparent 34%), radial-gradient(circle at 88% 18%, rgba(251, 146, 60, 0.12), transparent 30%), linear-gradient(135deg, rgba(240, 253, 250, 0.94), rgba(255, 247, 237, 0.78) 48%, rgba(248, 250, 252, 0.96))",
@@ -2169,7 +2187,7 @@ const updateRowsStyle: React.CSSProperties = { minWidth: 0, display: "grid", ali
 function updateRowStyle(depth: number, unread: boolean, tone: ReturnType<typeof updateRowTone>, selected: boolean, hovered: boolean): React.CSSProperties {
   const isUrgent = tone === "urgent";
   return {
-    width: "min(980px, calc(100% - 16px))",
+    width: "min(720px, calc(100% - 16px))",
     minHeight: 44,
     display: "grid",
     gridTemplateColumns: "18px minmax(180px, 1fr) 58px 78px",
@@ -2283,34 +2301,19 @@ const updateInlineTokenStyle: React.CSSProperties = {
   textOverflow: "ellipsis",
 };
 
-const updatesNodePanelStyle: React.CSSProperties = {
-  minWidth: 0,
-  minHeight: 0,
-  display: "grid",
-  gridTemplateRows: "auto auto minmax(0, 1fr)",
-  border: "1px solid rgba(15, 23, 42, 0.14)",
-  borderRadius: 8,
-  background: "rgba(255, 255, 255, 0.96)",
-  boxShadow: "0 18px 40px rgba(15, 23, 42, 0.14)",
-  overflow: "hidden",
-};
-
-const updatesNodePanelHeaderStyle: React.CSSProperties = {
-  minWidth: 0,
-  minHeight: 48,
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto",
-  alignItems: "center",
-  gap: 8,
-  borderBottom: "1px solid rgba(148, 163, 184, 0.22)",
-  background: "linear-gradient(90deg, rgba(239, 246, 255, 0.96), rgba(240, 253, 250, 0.88))",
-  padding: "8px 10px",
-};
-
-const updatesNodePanelTitleStackStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 2 };
-const updatesNodePanelEyebrowStyle: React.CSSProperties = { color: "#64748b", fontSize: 10, fontWeight: 850, textTransform: "uppercase" };
-const updatesNodePanelTitleStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#0f172a", fontSize: 13, fontWeight: 900 };
-const updatesNodePanelControlsStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 5 };
+function updatesNodePanelStyle(hasNotification: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: 0,
+    display: "grid",
+    gridTemplateRows: hasNotification ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)",
+    border: "1px solid rgba(15, 23, 42, 0.14)",
+    borderRadius: 8,
+    background: "rgba(255, 255, 255, 0.96)",
+    boxShadow: "0 18px 40px rgba(15, 23, 42, 0.14)",
+    overflow: "hidden",
+  };
+}
 
 const updatesNodePanelIconButtonStyle: React.CSSProperties = {
   width: 28,
@@ -2343,6 +2346,15 @@ const updatesNodePanelNotificationBodyStyle: React.CSSProperties = { minWidth: 0
 const updatesNodePanelNotificationTimeStyle: React.CSSProperties = { color: "#64748b", fontSize: 10, fontWeight: 750, whiteSpace: "nowrap" };
 const updatesNodePanelEditorStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden", background: "#f8fafc" };
 const updatesNodePanelLoadingStyle: React.CSSProperties = { minHeight: 180, display: "grid", placeItems: "center", color: "#64748b", fontSize: 12, fontWeight: 750 };
+const updatesNodePanelOverlayControlsStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 4,
+  right: 8,
+  zIndex: 12,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 5,
+};
 
 const updatesContextMenuStyle: React.CSSProperties = {
   position: "fixed",
