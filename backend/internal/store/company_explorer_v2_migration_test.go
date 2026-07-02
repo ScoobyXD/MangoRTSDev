@@ -11,6 +11,8 @@ const (
 	companyExplorerFinalCutoverMigration   = "20260620_company_explorer_final_cutover.sql"
 	companyExplorerNoNodeItemsMigration    = "20260626_company_explorer_no_node_items.sql"
 	resourcePermissionsIgnoreGVICMigration = "20260701_resource_permissions_ignore_gvic.sql"
+	resourcePolicyPointersMigration        = "20260701_resource_policy_pointers.sql"
+	resourcePolicyNoGVICMigration          = "20260702_resource_policy_access_helper_no_gvic.sql"
 )
 
 func TestCompanyExplorerFinalSchemaDefinesContainmentTables(t *testing.T) {
@@ -130,6 +132,8 @@ func TestCompanyExplorerAccessHelperCutoverUsesFinalFolderStorage(t *testing.T) 
 	for _, path := range []string{
 		filepath.Join("..", "..", "db", "schema.sql"),
 		filepath.Join("..", "..", "db", "migrations", resourcePermissionsIgnoreGVICMigration),
+		filepath.Join("..", "..", "db", "migrations", resourcePolicyPointersMigration),
+		filepath.Join("..", "..", "db", "migrations", resourcePolicyNoGVICMigration),
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -173,7 +177,7 @@ func TestCompanyExplorerAccessHelperCutoverUsesFinalFolderStorage(t *testing.T) 
 
 func extractAccessHelperSQLForCompanyExplorerV2Test(t *testing.T, sql string) string {
 	t.Helper()
-	start := strings.Index(sql, "create or replace function mangorts_user_can_access_resource")
+	start := strings.LastIndex(sql, "create or replace function mangorts_user_can_access_resource")
 	if start < 0 {
 		t.Fatalf("missing mangorts_user_can_access_resource")
 	}

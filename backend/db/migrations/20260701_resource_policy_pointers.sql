@@ -167,6 +167,24 @@ returns boolean as $$
       and inbox.company_id=p_company_id
       and inbox.shared_inbox_id=p_resource_id
   ),
+  group_tree(company_id, ancestor_group_id, descendant_group_id, depth) as (
+    select user_group.company_id,
+           user_group.group_id,
+           user_group.group_id,
+           0
+    from company_user_groups user_group
+    where user_group.company_id=p_company_id
+    union all
+    select parent.company_id,
+           parent.ancestor_group_id,
+           child.group_id,
+           parent.depth + 1
+    from group_tree parent
+    join company_user_groups child
+      on child.company_id=parent.company_id
+     and child.parent_group_id=parent.descendant_group_id
+    where parent.depth < 100
+  ),
   direct_sequence(policy_sequence) as (
     select coalesce((
       select revision.policy_sequence
@@ -292,7 +310,7 @@ returns boolean as $$
       union all
       select access.access_level, 1 as source_rank, min(closure.depth) as group_depth, mangorts_access_level_rank(access.access_level) as access_rank
       from resolved_permission_rows access
-      join company_user_group_closure closure
+      join group_tree closure
         on closure.company_id=p_company_id
        and closure.ancestor_group_id=access.subject_id
       join company_user_group_members member
@@ -307,30 +325,6 @@ returns boolean as $$
     ) candidate
     order by candidate.source_rank asc, candidate.group_depth asc, candidate.access_rank asc
     limit 1
-  ),
-  gvic_resource_lookup(resource_type, resource_id) as (
-    select
-      case
-        when normalized.resource_type='shared_inbox_folder' then 'shared_triage_folder'
-        else normalized.resource_type
-      end,
-      p_resource_id
-    from normalized_resource normalized
-  ),
-  gvic_access(max_rank) as (
-    select coalesce(max(case gvic.role
-      when 'generated' then 2
-      when 'verified' then 2
-      when 'consulted' then 1
-      when 'informed' then 1
-      else 0
-    end), 0)
-    from resource_gvic_effective_assignments gvic
-    join gvic_resource_lookup lookup
-      on lookup.resource_type = gvic.resource_type
-     and lookup.resource_id = gvic.resource_id
-    where gvic.company_id=p_company_id
-      and gvic.user_id=p_user_id
   )
   select case
     when requested.required_rank = 0 then false
@@ -338,7 +332,6 @@ returns boolean as $$
     when (select allowed from role_admin_actor) then true
     when not exists (select 1 from permission_access) then false
     when (select mangorts_access_level_rank(access_level) from permission_access limit 1) = 0 then false
-    when (select max_rank from gvic_access) >= requested.required_rank then true
     when exists (
         select 1
         from company_memberships membership
