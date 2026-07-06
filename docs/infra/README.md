@@ -1,18 +1,32 @@
-# MangoRTS Docs V2
+# MangoRTS Infra Docs
 
-This folder contains both current docs and older project history. For backend, auth, AWS, deployment, and database setup, future agents must start with the canonical MangoRTS docs below.
+This folder contains the current infra, auth, deployment, and production-readiness docs for MangoRTS.
 
-V2 means the `infra/aws-dev` platform: Cognito auth, ECS Fargate backend, S3 + CloudFront frontend, Route 53, WAF, the existing AWS PostgreSQL/Aurora database, and GitHub Actions OIDC deploys.
+The current live platform documentation is for dev only. MangoRTS does not yet have a production environment. Production must be created separately from dev for AWS resources, Terraform state, database, Cognito, Nylas, Secrets Manager, GitHub deploy environment, DNS, monitoring, and rollback.
 
-## Canonical Docs
+## Current Dev Docs
 
-- `docs/mangorts-dev-platform.md` - AWS dev architecture and service responsibilities.
-- `docs/mangorts-auth.md` - Cognito login, JWT validation, and company membership authorization.
-- `docs/mangorts-deploy-runbook.md` - GitHub-to-AWS deployment flow.
-- `docs/mangorts-infra-state.md` - Terraform ownership and manually reused AWS resources.
-- `docs/mangorts-database.md` - Current dev database assumptions and migration flow.
-- `docs/latency-obsession-architecture.md` - Product-scale latency and robustness principles.
-- `docs/agents/sacred-text.md` - Required agent operating context.
+- `docs/infra/mangorts-dev-platform.md` - AWS dev architecture and service responsibilities.
+- `docs/infra/mangorts-auth.md` - Cognito login, JWT validation, and company membership authorization.
+- `docs/infra/mangorts-deploy-runbook.md` - GitHub-to-AWS dev deployment flow.
+- `docs/infra/mangorts-infra-state.md` - Terraform ownership and manually reused AWS resources.
+
+Dev V2 means the `infra/aws-dev` platform: Cognito auth, ECS Fargate backend, S3 + CloudFront frontend, Route 53, WAF, the existing AWS PostgreSQL/Aurora database, and GitHub Actions OIDC deploys.
+
+## Production Readiness Docs
+
+- `docs/infra/mangorts-prod-platform.md` - Target production architecture and required separation from dev.
+- `docs/infra/mangorts-prod-deploy-runbook.md` - Safe production deploy flow, approval gates, smoke tests, and rollback notes.
+- `docs/infra/mangorts-prod-data-migration.md` - Selective dev-to-prod data migration approach and validation checks.
+- `docs/infra/mangorts-prod-nylas-email.md` - Production Nylas, SES, DNS, and Google OAuth readiness.
+
+These production docs are scaffolding and runbooks. They do not claim production resources already exist.
+
+## Related Docs
+
+- `docs/backend/mangorts-database.md` - Current database assumptions and migration flow.
+- `docs/developer-windows-setup.md` - Windows developer setup.
+- `docs/important tasks/version 1 prod creation.md` - Planning notes for the first production environment.
 
 ## Stale-Doc Policy
 
