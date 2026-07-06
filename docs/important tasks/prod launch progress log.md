@@ -1818,3 +1818,58 @@ Next action:
 - Keep `prod-scaffolding-v1` as the current primary prod launch branch.
 - Do not merge any of the worktrack branches to `main` until we intentionally review/open PRs or choose a merge strategy.
 - Next product milestone remains first prod admin/bootstrap login, then GitHub production secrets/vars for repeatable deploys.
+
+## Step 11 — Merge prod worktracks into `main`
+
+Status: complete.
+
+Updated on: 2026-07-06T16:28:50Z.
+
+Safety note:
+
+- No branch deletion, recursive deletion, reset, clean, force-push, or history rewrite was run.
+- Branches were merged into `main` with normal merge commits and then `main` was pushed to GitHub.
+- Feature/worktrack branches were left intact on GitHub.
+- Before merging, branch diffs were scanned again for obvious secret patterns; no AWS keys, private keys, GitHub PATs, AWS session token literals, or origin verification secret assignments were found.
+
+Merged branches:
+
+```text
+origin/feat/prod-docs-ci
+origin/feat/prod-infra-platform
+origin/prod-scaffolding-v1
+```
+
+Merge conflict note:
+
+- `feat/prod-docs-ci` merged cleanly.
+- `feat/prod-infra-platform` merged cleanly.
+- `prod-scaffolding-v1` conflicted with `feat/prod-infra-platform` on prod Terraform wrapper files.
+- Resolution: keep the already-deployed/current `prod-scaffolding-v1` versions for direct `infra/aws-prod/*` and `.github/workflows/deploy-prod.yml`, while keeping the reusable module files added by `feat/prod-infra-platform`.
+- A stray `infra/aws-prod/main.tf` module wrapper from the reusable-infra branch was removed from the merged `main` because it would incorrectly coexist with the direct deployed prod scaffold.
+
+Verification after merge:
+
+```text
+node scripts/run_all_tests.mjs -> passed
+terraform -chdir=infra/aws-prod init -backend=false with isolated TF_DATA_DIR -> passed
+terraform -chdir=infra/aws-prod validate -no-color -> Success! The configuration is valid.
+project conflict marker scan -> 0 project markers
+merged main secret scan -> OK
+```
+
+Current pushed heads after merge:
+
+```text
+main                       cd247dd1
+prod-scaffolding-v1        2e9865f4
+feat/prod-docs-ci          2934bf55
+feat/prod-infra-platform   a70fb42f
+feat/prod-migration-runner cecf0ff2
+feat/prod-v1-retry         682f65b7
+```
+
+Next action:
+
+- Continue prod launch from `main` or `prod-scaffolding-v1` as desired; `main` now contains the merged prod launch work.
+- Next product milestone remains first prod admin/bootstrap login, then GitHub production secrets/vars for repeatable deploys.
