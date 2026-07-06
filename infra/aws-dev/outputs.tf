@@ -1,89 +1,94 @@
 output "app_url" {
   description = "Protected MangoRTS dev frontend URL."
-  value       = "https://${local.app_domain}"
+  value       = module.platform.app_url
 }
 
 output "api_url" {
   description = "Protected MangoRTS dev API URL."
-  value       = "https://${local.api_domain}"
+  value       = module.platform.api_url
 }
 
 output "nylas_callback_url" {
   description = "Nylas Hosted OAuth callback URL to register in the Nylas dashboard."
-  value       = local.nylas_redirect_uri
+  value       = module.platform.nylas_callback_url
 }
 
 output "nylas_webhook_url" {
   description = "Nylas webhook destination URL for Communications realtime updates."
-  value       = local.nylas_webhook_url
+  value       = module.platform.nylas_webhook_url
 }
 
 output "nylas_frontend_redirect_url" {
   description = "Frontend URL the backend redirects to after a successful Nylas OAuth callback."
-  value       = local.nylas_frontend_redirect_url
+  value       = module.platform.nylas_frontend_redirect_url
 }
 
 output "frontend_bucket" {
   description = "Private S3 bucket for frontend build artifacts."
-  value       = aws_s3_bucket.frontend.bucket
+  value       = module.platform.frontend_bucket
 }
 
 output "cloudfront_distribution_id" {
   description = "CloudFront distribution ID for frontend/API invalidations."
-  value       = aws_cloudfront_distribution.app.id
+  value       = module.platform.cloudfront_distribution_id
 }
 
 output "backend_ecr_repository_url" {
   description = "Backend ECR repository URL."
-  value       = aws_ecr_repository.backend.repository_url
+  value       = module.platform.backend_ecr_repository_url
 }
 
 output "ecs_cluster_name" {
   description = "ECS cluster name."
-  value       = aws_ecs_cluster.main.name
+  value       = module.platform.ecs_cluster_name
 }
 
 output "ecs_service_name" {
   description = "Backend ECS service name."
-  value       = try(aws_ecs_service.backend[0].name, "")
+  value       = module.platform.ecs_service_name
 }
 
 output "ecs_subnet_ids" {
   description = "Private subnet IDs used by ECS tasks."
-  value       = local.ecs_subnet_ids
+  value       = module.platform.ecs_subnet_ids
 }
 
 output "managed_nat_gateway_ids" {
   description = "NAT gateways created for managed ECS private subnets."
-  value       = aws_nat_gateway.ecs[*].id
+  value       = module.platform.managed_nat_gateway_ids
 }
 
 output "cognito_user_pool_id" {
   description = "Cognito User Pool ID."
-  value       = aws_cognito_user_pool.main.id
+  value       = module.platform.cognito_user_pool_id
 }
 
 output "cognito_spa_client_id" {
   description = "Cognito SPA app client ID."
-  value       = aws_cognito_user_pool_client.spa.id
+  value       = module.platform.cognito_spa_client_id
 }
 
 output "cognito_region" {
   description = "Cognito User Pool region for custom frontend auth."
-  value       = var.aws_region
+  value       = module.platform.cognito_region
 }
 
 output "cognito_issuer" {
   description = "Cognito JWT issuer URL."
-  value       = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.main.id}"
+  value       = module.platform.cognito_issuer
+}
+
+output "default_company_id" {
+  description = "Default company ID for frontend builds."
+  value       = module.platform.default_company_id
 }
 
 output "dev_company_id" {
-  description = "Default dev company ID for frontend builds."
-  value       = var.dev_company_id
+  description = "Deprecated compatibility output for deploy-dev frontend builds."
+  value       = module.platform.default_company_id
 }
 
 output "github_deploy_role_arn" {
   description = "IAM role ARN for GitHub Actions OIDC dev deploys."
-  value       = aws_iam_role.github_deploy.arn
+  value       = module.platform.github_deploy_role_arn
 }

@@ -1,6 +1,6 @@
 resource "aws_security_group" "alb" {
   name        = "${local.name_prefix}-alb"
-  description = "MangoRTS dev ALB ingress from CloudFront"
+  description = "MangoRTS ${var.environment} ALB ingress from CloudFront"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -21,7 +21,7 @@ resource "aws_security_group" "alb" {
 
 resource "aws_security_group" "ecs" {
   name        = "${local.name_prefix}-ecs"
-  description = "MangoRTS dev ECS service ingress from ALB"
+  description = "MangoRTS ${var.environment} ECS service ingress from ALB"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -41,10 +41,10 @@ resource "aws_security_group" "ecs" {
 
 resource "aws_security_group_rule" "ecs_to_existing_db" {
   type                     = "ingress"
-  from_port                = var.existing_db_port
-  to_port                  = var.existing_db_port
+  from_port                = local.db_port
+  to_port                  = local.db_port
   protocol                 = "tcp"
-  security_group_id        = var.existing_db_security_group_id
+  security_group_id        = local.db_security_group_id
   source_security_group_id = aws_security_group.ecs.id
-  description              = "Allow MangoRTS dev ECS tasks to reach existing dev database"
+  description              = "Allow MangoRTS ${var.environment} ECS tasks to reach the database"
 }

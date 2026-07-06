@@ -94,7 +94,7 @@ resource "aws_ecs_task_definition" "backend" {
       }]
       environment = concat(
         [
-          { name = "APP_ENV", value = "staging" },
+          { name = "APP_ENV", value = var.environment },
           { name = "ALLOW_INMEMORY_FALLBACK", value = "false" },
           { name = "AUTH_MODE", value = "cognito" },
           { name = "AWS_REGION", value = var.aws_region },
@@ -108,12 +108,12 @@ resource "aws_ecs_task_definition" "backend" {
           { name = "MANGORTS_APP_URL", value = "https://${local.app_domain}" },
           { name = "MANGORTS_API_URL", value = "https://${local.api_domain}" },
           { name = "MANGORTS_EMAIL_FROM", value = var.email_from_address },
-          { name = "MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS", value = var.bootstrap_dev_admin_emails },
-          { name = "MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME", value = var.bootstrap_dev_company_name },
-          { name = "DB_HOST", value = var.existing_db_host },
-          { name = "DB_PORT", value = tostring(var.existing_db_port) },
-          { name = "DB_NAME", value = var.existing_db_name },
-          { name = "DB_USER", value = var.existing_db_user },
+          { name = "MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS", value = var.bootstrap_admin_emails },
+          { name = "MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME", value = var.bootstrap_company_name },
+          { name = "DB_HOST", value = local.db_host },
+          { name = "DB_PORT", value = tostring(local.db_port) },
+          { name = "DB_NAME", value = local.db_name },
+          { name = "DB_USER", value = local.db_user },
           { name = "DB_SSLMODE", value = "require" }
         ],
         local.nylas_enabled ? [
@@ -127,7 +127,7 @@ resource "aws_ecs_task_definition" "backend" {
       )
       secrets = concat(
         [
-          { name = "DB_PASSWORD", valueFrom = var.existing_db_password_secret_arn }
+          { name = "DB_PASSWORD", valueFrom = local.db_password_secret_arn }
         ],
         local.nylas_enabled ? [
           { name = "NYLAS_API_KEY", valueFrom = var.nylas_api_key_secret_arn },

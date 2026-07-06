@@ -1,0 +1,87 @@
+aws_region  = "us-west-1"
+project_name = "mangorts"
+environment  = "prod"
+
+root_domain_name = "example.com"
+app_subdomain    = "app"
+api_subdomain    = "api"
+origin_subdomain = "origin"
+
+# Use the VPC that contains or can reach the prod PostgreSQL/Aurora DB.
+vpc_id = "vpc-0123456789abcdef0"
+
+# Existing public subnets for ALB and NAT placement.
+public_subnet_ids = ["subnet-aaaaaaaaaaaaaaaaa", "subnet-bbbbbbbbbbbbbbbbb"]
+
+# Preferred when the existing VPC does not already have private app subnets.
+create_private_ecs_subnets = true
+ecs_private_subnet_cidrs   = ["10.20.128.0/20", "10.20.144.0/20"]
+ecs_nat_gateway_mode       = "per_az"
+private_subnet_ids         = []
+
+# If you already have private subnets with NAT/VPC-endpoint egress, use this instead:
+# create_private_ecs_subnets = false
+# private_subnet_ids = ["subnet-ccccccccccccccccc", "subnet-ddddddddddddddddd"]
+
+database_connection_mode = "existing"
+
+existing_db_host                = "prod-db.cluster-xxxxxxxx.us-west-1.rds.amazonaws.com"
+existing_db_port                = 5432
+existing_db_name                = "mangorts"
+existing_db_user                = "mangorts_app"
+existing_db_password_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/prod/db-password"
+existing_db_security_group_id   = "sg-0123456789abcdef0"
+
+# Future managed DB handoff. This root does not create RDS yet; these inputs are
+# for a later managed DB module or an externally managed DB output.
+# database_connection_mode = "managed"
+# managed_db_host = "prod-managed-db.cluster-xxxxxxxx.us-west-1.rds.amazonaws.com"
+# managed_db_port = 5432
+# managed_db_name = "mangorts"
+# managed_db_user = "mangorts_app"
+# managed_db_password_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/prod/managed-db-password"
+# managed_db_security_group_id = "sg-11111111111111111"
+
+# Phase-1 bootstrap should keep this empty. CI sets an immutable git-SHA image URI after ECR exists.
+backend_image_uri     = ""
+backend_desired_count = 2
+backend_cpu           = 1024
+backend_memory        = 2048
+
+default_company_id = "11111111-1111-1111-1111-111111111111"
+
+# Must be verified in SES in aws_region before signup confirmation emails are enabled.
+email_from_address = "no-reply@example.com"
+
+# Use only for the first prod admin bootstrap deploy, then clear it.
+bootstrap_admin_emails = ""
+bootstrap_company_name = "MangoRTS"
+
+# Nylas Communications. Keep secret values in AWS Secrets Manager and pass ARNs here.
+# Register https://api.example.com/nylas/oauth/callback as the Hosted OAuth callback.
+# Register https://api.example.com/nylas/webhook as a webhook destination, then store
+# the returned webhook_secret in Secrets Manager and set nylas_webhook_secret_arn.
+nylas_client_id          = "00000000-0000-0000-0000-000000000000"
+nylas_api_base_url       = "https://api.us.nylas.com"
+nylas_api_key_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/prod/nylas-api-key"
+nylas_state_secret_arn   = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/prod/nylas-state-secret"
+nylas_webhook_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/prod/nylas-webhook-secret"
+nylas_google_scopes      = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.labels"
+nylas_microsoft_scopes   = "offline_access User.Read Mail.ReadWrite Mail.Send"
+
+# Shared secret material used only for CloudFront-to-ALB origin verification.
+# Store the real value in GitHub environment secrets or an untracked local tfvars file.
+origin_verify_secret = "replace-with-prod-random-origin-secret"
+
+github_owner      = "your-github-owner"
+github_repository = "MangoRTSDev"
+github_branch     = "main"
+
+# Production workflow uses a GitHub environment gate, so the OIDC subject should
+# match the workflow job environment name rather than a branch ref.
+github_oidc_subjects = ["repo:your-github-owner/MangoRTSDev:environment:production"]
+
+extra_tags = {
+  owner = "you"
+  team  = "platform"
+}

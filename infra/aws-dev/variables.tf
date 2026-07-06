@@ -78,6 +78,17 @@ variable "ecs_nat_gateway_mode" {
   }
 }
 
+variable "database_connection_mode" {
+  description = "Database connection source. existing reuses existing_db_* inputs; managed uses managed_db_* inputs reserved for future managed DB work."
+  type        = string
+  default     = "existing"
+
+  validation {
+    condition     = contains(["existing", "managed"], var.database_connection_mode)
+    error_message = "database_connection_mode must be existing or managed."
+  }
+}
+
 variable "existing_db_host" {
   description = "Existing dev database writer endpoint."
   type        = string
@@ -107,6 +118,42 @@ variable "existing_db_password_secret_arn" {
 variable "existing_db_security_group_id" {
   description = "Security group attached to the existing dev DB. Terraform will allow ECS ingress from this stack."
   type        = string
+}
+
+variable "managed_db_host" {
+  description = "Managed database writer endpoint. Reserved for future managed DB work or an externally managed DB module."
+  type        = string
+  default     = ""
+}
+
+variable "managed_db_port" {
+  description = "Managed database port. Reserved for future managed DB work or an externally managed DB module."
+  type        = number
+  default     = 5432
+}
+
+variable "managed_db_name" {
+  description = "Managed database name. Reserved for future managed DB work or an externally managed DB module."
+  type        = string
+  default     = ""
+}
+
+variable "managed_db_user" {
+  description = "Managed database application user. Reserved for future managed DB work or an externally managed DB module."
+  type        = string
+  default     = ""
+}
+
+variable "managed_db_password_secret_arn" {
+  description = "Secrets Manager ARN containing the managed database password. Reserved for future managed DB work or an externally managed DB module."
+  type        = string
+  default     = ""
+}
+
+variable "managed_db_security_group_id" {
+  description = "Security group attached to the managed database. Reserved for future managed DB work or an externally managed DB module."
+  type        = string
+  default     = ""
 }
 
 variable "backend_image_uri" {
@@ -145,9 +192,16 @@ variable "backend_desired_count" {
   default     = 1
 }
 
-variable "dev_company_id" {
-  description = "Default dev company UUID used by the frontend until tenant selection exists."
+variable "default_company_id" {
+  description = "Default company UUID used by the frontend until tenant selection exists. Prefer this over dev_company_id for new config."
   type        = string
+  default     = ""
+}
+
+variable "dev_company_id" {
+  description = "Deprecated compatibility alias for default_company_id."
+  type        = string
+  default     = ""
 }
 
 variable "email_from_address" {
@@ -156,14 +210,26 @@ variable "email_from_address" {
   default     = ""
 }
 
+variable "bootstrap_admin_emails" {
+  description = "Comma- or space-separated Cognito emails that may be auto-granted dev_admin on first backend login. Prefer this over bootstrap_dev_admin_emails for new config."
+  type        = string
+  default     = ""
+}
+
 variable "bootstrap_dev_admin_emails" {
-  description = "Comma- or space-separated Cognito emails that may be auto-granted dev_admin on first backend login. Leave empty after bootstrap."
+  description = "Deprecated compatibility alias for bootstrap_admin_emails."
+  type        = string
+  default     = ""
+}
+
+variable "bootstrap_company_name" {
+  description = "Company name used when bootstrap_admin_emails creates the first dev_admin membership. Prefer this over bootstrap_dev_company_name for new config."
   type        = string
   default     = ""
 }
 
 variable "bootstrap_dev_company_name" {
-  description = "Company name used when bootstrap_dev_admin_emails creates the first dev_admin membership."
+  description = "Deprecated compatibility alias for bootstrap_company_name."
   type        = string
   default     = "MangoRTS Bootstrap"
 }
@@ -218,6 +284,7 @@ variable "nylas_microsoft_scopes" {
 variable "cognito_domain_prefix" {
   description = "Deprecated from the Hosted UI flow. Kept temporarily so older tfvars files continue to load."
   type        = string
+  default     = ""
 }
 
 variable "origin_verify_secret" {
@@ -251,9 +318,27 @@ variable "github_repository" {
 }
 
 variable "github_branch" {
-  description = "GitHub branch allowed to deploy dev."
+  description = "GitHub branch allowed to deploy dev when github_oidc_subjects is empty."
   type        = string
   default     = "main"
+}
+
+variable "github_oidc_subjects" {
+  description = "Explicit GitHub OIDC subject claims allowed to assume the deploy role. Leave empty to preserve the existing branch-ref subject."
+  type        = list(string)
+  default     = []
+}
+
+variable "create_github_oidc_provider" {
+  description = "Create the account-level GitHub OIDC provider. Set false when the account already has one and pass github_oidc_provider_arn."
+  type        = bool
+  default     = true
+}
+
+variable "github_oidc_provider_arn" {
+  description = "Existing GitHub OIDC provider ARN to use when create_github_oidc_provider is false."
+  type        = string
+  default     = ""
 }
 
 variable "extra_tags" {
