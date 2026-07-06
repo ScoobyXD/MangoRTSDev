@@ -1,0 +1,122 @@
+resource "aws_wafv2_web_acl" "cloudfront" {
+  provider = aws.us_east_1
+  name     = "${local.name_prefix}-cloudfront"
+  scope    = "CLOUDFRONT"
+
+  default_action {
+    allow {}
+  }
+
+  # /v1/* accepts authenticated JSON writes with editor rich text and future
+  # agent payloads. Let the backend auth and validators decide those requests;
+  # AWS managed body-inspection rules otherwise return CDN HTML 403s first.
+  rule {
+    name     = "AllowApplicationAPI"
+    priority = 1
+
+    action {
+      allow {}
+    }
+
+    statement {
+      byte_match_statement {
+        field_to_match {
+          uri_path {}
+        }
+        positional_constraint = "STARTS_WITH"
+        search_string         = "/v1/"
+
+        text_transformation {
+          priority = 0
+          type     = "NONE"
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}-application-api-allow"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "AllowNylasWebhook"
+    priority = 5
+
+    action {
+      allow {}
+    }
+
+    statement {
+      byte_match_statement {
+        field_to_match {
+          uri_path {}
+        }
+        positional_constraint = "EXACTLY"
+        search_string         = "/nylas/webhook"
+
+        text_transformation {
+          priority = 0
+          type     = "NONE"
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}-nylas-webhook-allow"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "AWSManagedRulesCommonRuleSet"
+    priority = 10
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}-common"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "AWSManagedRulesKnownBadInputsRuleSet"
+    priority = 20
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}-known-bad-inputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${local.name_prefix}-cloudfront"
+    sampled_requests_enabled   = true
+  }
+}

@@ -1,5 +1,5 @@
 variable "aws_region" {
-  description = "AWS region for regional prod resources."
+  description = "AWS region for regional prod resources. Use the same region as the existing prod database."
   type        = string
   default     = "us-west-1"
 }
@@ -24,7 +24,7 @@ variable "root_domain_name" {
 variable "app_subdomain" {
   description = "Frontend subdomain below root_domain_name."
   type        = string
-  default     = "app"
+  default     = ""
 }
 
 variable "api_subdomain" {
@@ -34,13 +34,13 @@ variable "api_subdomain" {
 }
 
 variable "origin_subdomain" {
-  description = "ALB origin hostname below root_domain_name."
+  description = "Private-ish ALB origin hostname below root_domain_name."
   type        = string
   default     = "origin"
 }
 
 variable "vpc_id" {
-  description = "Existing VPC ID that can reach the prod database."
+  description = "Existing VPC ID that can reach the existing prod database."
   type        = string
 }
 
@@ -68,9 +68,9 @@ variable "ecs_private_subnet_cidrs" {
 }
 
 variable "ecs_nat_gateway_mode" {
-  description = "NAT gateway mode for Terraform-managed ECS private subnets. Use per_az for production resilience."
+  description = "NAT gateway mode for Terraform-managed ECS private subnets. Use single for lower first-launch cost or per_az for AZ-local egress."
   type        = string
-  default     = "per_az"
+  default     = "single"
 
   validation {
     condition     = contains(["single", "per_az"], var.ecs_nat_gateway_mode)
@@ -78,21 +78,9 @@ variable "ecs_nat_gateway_mode" {
   }
 }
 
-variable "database_connection_mode" {
-  description = "Database connection source. existing reuses existing_db_* inputs; managed uses managed_db_* inputs reserved for future managed DB work."
-  type        = string
-  default     = "existing"
-
-  validation {
-    condition     = contains(["existing", "managed"], var.database_connection_mode)
-    error_message = "database_connection_mode must be existing or managed."
-  }
-}
-
 variable "existing_db_host" {
   description = "Existing prod database writer endpoint."
   type        = string
-  default     = ""
 }
 
 variable "existing_db_port" {
@@ -104,17 +92,20 @@ variable "existing_db_port" {
 variable "existing_db_name" {
   description = "Existing prod database name."
   type        = string
-  default     = ""
 }
 
 variable "existing_db_user" {
   description = "Existing prod database application user."
   type        = string
-  default     = ""
 }
 
 variable "existing_db_password_secret_arn" {
-  description = "Secrets Manager ARN containing the existing prod DB password."
+  description = "Secrets Manager ARN containing the existing prod DB password, or an RDS-managed JSON credential secret."
+  type        = string
+}
+
+variable "existing_db_password_secret_json_key" {
+  description = "Optional JSON key to select from existing_db_password_secret_arn for ECS DB_PASSWORD. Use password for RDS-managed credential secrets; leave empty for plaintext password secrets."
   type        = string
   default     = ""
 }
@@ -122,43 +113,6 @@ variable "existing_db_password_secret_arn" {
 variable "existing_db_security_group_id" {
   description = "Security group attached to the existing prod DB. Terraform will allow ECS ingress from this stack."
   type        = string
-  default     = ""
-}
-
-variable "managed_db_host" {
-  description = "Managed database writer endpoint. Reserved for future managed DB work or an externally managed DB module."
-  type        = string
-  default     = ""
-}
-
-variable "managed_db_port" {
-  description = "Managed database port. Reserved for future managed DB work or an externally managed DB module."
-  type        = number
-  default     = 5432
-}
-
-variable "managed_db_name" {
-  description = "Managed database name. Reserved for future managed DB work or an externally managed DB module."
-  type        = string
-  default     = ""
-}
-
-variable "managed_db_user" {
-  description = "Managed database application user. Reserved for future managed DB work or an externally managed DB module."
-  type        = string
-  default     = ""
-}
-
-variable "managed_db_password_secret_arn" {
-  description = "Secrets Manager ARN containing the managed database password. Reserved for future managed DB work or an externally managed DB module."
-  type        = string
-  default     = ""
-}
-
-variable "managed_db_security_group_id" {
-  description = "Security group attached to the managed database. Reserved for future managed DB work or an externally managed DB module."
-  type        = string
-  default     = ""
 }
 
 variable "backend_image_uri" {
@@ -198,7 +152,7 @@ variable "backend_desired_count" {
 }
 
 variable "default_company_id" {
-  description = "Default company UUID used by the frontend until tenant selection exists."
+  description = "Default production company UUID used by the frontend until tenant selection exists."
   type        = string
 }
 
@@ -209,15 +163,15 @@ variable "email_from_address" {
 }
 
 variable "bootstrap_admin_emails" {
-  description = "Comma- or space-separated Cognito emails that may be auto-granted dev_admin on first backend login. Leave empty after bootstrap."
+  description = "Comma- or space-separated Cognito emails that may be auto-granted prod_admin on first backend login. Leave empty after bootstrap."
   type        = string
   default     = ""
 }
 
 variable "bootstrap_company_name" {
-  description = "Company name used when bootstrap_admin_emails creates the first dev_admin membership."
+  description = "Company name used when bootstrap_admin_emails creates the first prod_admin membership."
   type        = string
-  default     = "MangoRTS"
+  default     = "MangoRTS Bootstrap"
 }
 
 variable "nylas_client_id" {
@@ -267,12 +221,15 @@ variable "nylas_microsoft_scopes" {
   default     = "offline_access User.Read Mail.ReadWrite Mail.Send"
 }
 
+
 variable "origin_verify_secret" {
   description = "Secret material used to derive the CloudFront-to-ALB origin verification header."
   type        = string
   default     = ""
   sensitive   = true
 }
+
+
 
 variable "github_owner" {
   description = "GitHub owner or organization allowed to assume the prod deploy role."
@@ -285,27 +242,9 @@ variable "github_repository" {
 }
 
 variable "github_branch" {
-  description = "GitHub branch allowed to deploy prod when github_oidc_subjects is empty."
+  description = "GitHub branch allowed to deploy prod."
   type        = string
   default     = "main"
-}
-
-variable "github_oidc_subjects" {
-  description = "Explicit GitHub OIDC subject claims allowed to assume the deploy role. Use an environment subject for production approval-gated workflows."
-  type        = list(string)
-  default     = []
-}
-
-variable "create_github_oidc_provider" {
-  description = "Create the account-level GitHub OIDC provider. Set false when the account already has one and pass github_oidc_provider_arn."
-  type        = bool
-  default     = true
-}
-
-variable "github_oidc_provider_arn" {
-  description = "Existing GitHub OIDC provider ARN to use when create_github_oidc_provider is false."
-  type        = string
-  default     = ""
 }
 
 variable "extra_tags" {

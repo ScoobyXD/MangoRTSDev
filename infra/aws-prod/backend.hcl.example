@@ -1,7 +1,6 @@
-bucket  = "replace-with-mangorts-prod-terraform-state-bucket"
-key     = "mangorts/prod/terraform.tfstate"
-region  = "us-west-1"
-encrypt = true
-
-# If your Terraform S3 backend version supports native S3 locking, enable it in backend.hcl.
-# use_lockfile = true
+bucket       = "mangorts-prod-terraform-state-828435022930"
+key          = "mangorts/prod/terraform.tfstate"
+region       = "us-west-1"
+profile      = "mangorts-prod"
+encrypt      = true
+use_lockfile = true

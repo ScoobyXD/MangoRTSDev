@@ -48,6 +48,7 @@ Required:
 - PostgreSQL 18 server or at least command-line tools / `psql`
 - AWS CLI v2
 - Terraform
+- DBeaver Community for database browsing/admin work
 
 Optional:
 
@@ -84,6 +85,7 @@ winget install --source winget --accept-source-agreements --accept-package-agree
 winget install --source winget --accept-source-agreements --accept-package-agreements --id OpenJS.NodeJS.LTS --exact
 winget install --source winget --accept-source-agreements --accept-package-agreements --id Amazon.AWSCLI --exact
 winget install --source winget --accept-source-agreements --accept-package-agreements --id Hashicorp.Terraform --exact
+winget install --source winget --accept-source-agreements --accept-package-agreements --id DBeaver.DBeaver.Community --exact
 ```
 
 Go 1.23.x may not be the current winget version. If winget only offers a newer Go, install Go 1.23.x directly from <https://go.dev/dl/>. The setup run for Jonat used:
@@ -317,12 +319,22 @@ go         go version go1.23.12 windows/amd64
 psql       psql (PostgreSQL) 18.4
 aws        aws-cli/2.35.15
 terraform Terraform v1.15.7
+DBeaver   DBeaver Community 26.1.2
 pwsh       PowerShell 7.6.3
 code       VS Code 1.127.0
 ```
 
-PostgreSQL:
+DBeaver:
 
+```text
+Package: DBeaver.DBeaver.Community
+Version: 26.1.2
+Install path: C:\Users\Jonat\AppData\Local\DBeaver\dbeaver.exe
+```
+
+Do not save production DB passwords in DBeaver unless Jonat explicitly chooses a local password-manager/storage policy. For prod, prefer controlled access paths and Secrets Manager metadata; never paste DB passwords into repo docs or chat.
+
+PostgreSQL:
 ```text
 Service name: postgresql-x64-18
 Display name: postgresql-x64-18 - PostgreSQL Server 18
