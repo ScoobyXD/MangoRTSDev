@@ -4,6 +4,8 @@
 
 This is the active agent handoff for getting the first real MangoRTS production server running.
 
+Progress is tracked in `docs/important tasks/prod launch progress log.md`.
+
 It deliberately narrows the scope to the first milestone: an empty-but-real production environment that runs separately from dev. Data migration, full Nylas production readiness, and broad production hardening come after the server exists and passes smoke tests.
 
 Future agents should start here when the user asks to "set up prod", "create the production server", or "continue V1 prod".
@@ -13,11 +15,18 @@ Future agents should start here when the user asks to "set up prod", "create the
 Confirmed by Jonat:
 
 - Prod should use a **separate AWS account** from dev.
+- Prod AWS account ID: `828435022930`.
 - Prod AWS profile should be kept separate from dev; preferred local profile name: `mangorts-prod`.
+- Prod AWS SSO profile `mangorts-prod` is configured and verified with `AdministratorAccess`.
+- Prod Terraform state bucket: `mangorts-prod-terraform-state-828435022930`.
 - AWS region: `us-west-1`.
-- Production domain: `mango-rts.com`.
-- Production API domain: `api.mango-rts.com`.
-- Production origin hostname can be `origin.mango-rts.com` unless the final Terraform runbook chooses a different hidden origin name.
+- Prod default VPC discovered: `vpc-058fed523b6e847bf`, CIDR `172.31.0.0/16`.
+- Prod public subnets discovered: `subnet-09be435bd9a9f6208` in `us-west-1c` and `subnet-0f07a73d47130fc8a` in `us-west-1a`.
+- Prod Route 53 hosted zone created for `mangorts.com`: `Z05521211GBNMIH6SBM5Z`; registered domain nameservers now point at the prod hosted zone.
+- No prod RDS DB or prod `mangorts/prod` Secrets Manager secrets existed during the latest discovery check.
+- Production domain: `mangorts.com`.
+- Production API domain: `api.mangorts.com`.
+- Production origin hostname can be `origin.mangorts.com` unless the final Terraform runbook chooses a different hidden origin name.
 - Prod should use real production UUIDs for companies. Do not use the dev UUID `11111111-1111-1111-1111-111111111111` unless Jonat explicitly reverses this decision.
 - First prod admin email will probably be Jonat's personal email, but the exact email must be confirmed before creating users or seeding membership.
 - Jonat wants to personally perform the most sensitive manual setup steps, especially AWS account setup, database/password setup, and any credential-bearing provider setup.
@@ -27,8 +36,8 @@ Confirmed by Jonat:
 
 V1 prod server is done when all of this is true:
 
-- A production URL exists at `https://mango-rts.com` or another explicitly approved production app hostname under `mango-rts.com`.
-- API routes work through `https://api.mango-rts.com` or the chosen app-origin API routing.
+- A production URL exists at `https://mangorts.com` or another explicitly approved production app hostname under `mangorts.com`.
+- API routes work through `https://api.mangorts.com` or the chosen app-origin API routing.
 - Prod backend runs separately from dev.
 - Prod frontend is deployed separately from dev.
 - Prod database is separate from dev.
@@ -235,7 +244,7 @@ Required infrastructure pieces:
 - S3 frontend bucket.
 - CloudFront distribution.
 - ACM certificates.
-- Route 53 DNS for `mango-rts.com`, `api.mango-rts.com`, and origin hostname.
+- Route 53 DNS for `mangorts.com`, `api.mangorts.com`, and origin hostname.
 - WAF if copying dev shape.
 - Origin verification secret between CloudFront and ALB.
 
@@ -290,8 +299,8 @@ Variables:
 - `TF_STATE_BUCKET`
 - `TF_STATE_KEY=mangorts/prod/terraform.tfstate`
 - `TF_STATE_REGION=us-west-1`
-- `TF_ROOT_DOMAIN_NAME=mango-rts.com`
-- `TF_APP_SUBDOMAIN` if app is subdomain-based; blank/root support must be explicitly tested if using apex `mango-rts.com`.
+- `TF_ROOT_DOMAIN_NAME=mangorts.com`
+- `TF_APP_SUBDOMAIN` if app is subdomain-based; blank/root support must be explicitly tested if using apex `mangorts.com`.
 - `TF_API_SUBDOMAIN=api`
 - `TF_ORIGIN_SUBDOMAIN=origin`
 - `TF_VPC_ID`
@@ -378,10 +387,10 @@ Jonat should prepare or provide these non-secret values.
 
 ### Domain/DNS
 
-- [ ] `mango-rts.com` owned/registered.
+- [ ] `mangorts.com` owned/registered.
 - [ ] Route 53 hosted zone exists in the prod account, or DNS delegation plan is clear.
-- [ ] Agent is told whether app should be apex `mango-rts.com` or a subdomain such as `app.mango-rts.com`.
-- [ ] API should be `api.mango-rts.com` unless changed.
+- [ ] Agent is told whether app should be apex `mangorts.com` or a subdomain such as `app.mangorts.com`.
+- [ ] API should be `api.mangorts.com` unless changed.
 
 ### Terraform state
 
@@ -441,16 +450,32 @@ Jonat should prepare or provide these non-secret values.
 - Start with conservative copy-and-adjust `infra/aws-prod`; refactor later.
 - Treat first prod as empty unless Jonat explicitly approves a data migration phase.
 
+## Current Repo-Only Scaffolding Status
+
+Initial repo-only scaffolding now exists on branch `prod-scaffolding-v1`:
+
+- `infra/aws-prod/` copied conservatively from `infra/aws-dev` and adjusted for prod defaults.
+- `.github/workflows/deploy-prod.yml` added as a manual `workflow_dispatch` deploy using GitHub Environment `production`.
+- `docs/important tasks/prod deploy runbook.md` added.
+- `.gitignore` updated for prod Terraform local files.
+
+Validation completed:
+
+- `terraform fmt -recursive infra/aws-prod`
+- `terraform init -backend=false`
+- `terraform validate`
+- `go test ./...` from `backend/`
+- `node scripts/run_all_tests.mjs`
+
+No prod cloud resources were created or modified.
+
 ## Recommended Next Agent Task
 
-Create one clean branch with repo-only changes:
+Review the repo-only diff with Jonat:
 
-1. Add conservative `infra/aws-prod` copied from `infra/aws-dev` and adjusted for prod defaults/placeholders.
-2. Add `.github/workflows/deploy-prod.yml` as manual-only production deploy workflow.
-3. Add `.gitignore` entries for prod Terraform local files.
-4. Add minimal prod deploy runbook if not already present.
-5. Validate Terraform with `terraform init -backend=false` and `terraform validate`.
-6. Run backend/frontend tests.
-7. Show Jonat the diff before any cloud action.
+1. Confirm the `infra/aws-prod` defaults are acceptable.
+2. Confirm the manual setup checklist.
+3. Do not run `terraform apply` or any prod cloud action yet.
+4. After Jonat approves the repo-only changes, move to manual AWS/prod setup.
 
 Do not merge large Codex-generated Terraform module refactors for this first milestone.

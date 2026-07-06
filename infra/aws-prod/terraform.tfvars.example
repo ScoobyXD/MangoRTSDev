@@ -1,0 +1,68 @@
+aws_region   = "us-west-1"
+project_name = "mangorts"
+environment  = "prod"
+
+root_domain_name = "mangorts.com"
+app_subdomain    = "" # Empty means apex: mangorts.com
+api_subdomain    = "api"
+origin_subdomain = "origin"
+
+# Use the VPC that contains the existing prod PostgreSQL/Aurora DB.
+vpc_id = "vpc-0123456789abcdef0"
+
+# Existing public subnets for ALB and NAT placement.
+public_subnet_ids = ["subnet-aaaaaaaaaaaaaaaaa", "subnet-bbbbbbbbbbbbbbbbb"]
+
+# Preferred when the existing VPC does not already have private app subnets.
+create_private_ecs_subnets = true
+ecs_private_subnet_cidrs   = ["10.0.128.0/20", "10.0.144.0/20"]
+ecs_nat_gateway_mode       = "single"
+private_subnet_ids         = []
+
+# If you already have private subnets with NAT/VPC-endpoint egress, use this instead:
+# create_private_ecs_subnets = false
+# private_subnet_ids = ["subnet-ccccccccccccccccc", "subnet-ddddddddddddddddd"]
+
+existing_db_host                = "prod-db.cluster-xxxxxxxx.us-west-1.rds.amazonaws.com"
+existing_db_port                = 5432
+existing_db_name                = "mangorts"
+existing_db_user                = "mangorts_app"
+existing_db_password_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/prod/db-password"
+existing_db_security_group_id   = "sg-0123456789abcdef0"
+
+# Phase-1 bootstrap should keep this empty. CI sets an immutable git-SHA image URI after ECR exists.
+backend_image_uri = ""
+
+default_company_id = "replace-with-prod-company-uuid"
+
+# Must be verified in SES in aws_region before signup confirmation emails are enabled.
+email_from_address = "" # Set after SES production sender/domain is ready.
+
+# Use only for the first prod admin bootstrap deploy, then clear it.
+bootstrap_admin_emails = "admin@example.com"
+bootstrap_company_name = "MangoRTS"
+
+# Nylas Communications. Keep secret values in AWS Secrets Manager and pass ARNs here.
+# Register https://api.mangorts.com/nylas/oauth/callback as the Hosted OAuth callback.
+# Register https://api.mangorts.com/nylas/webhook as a webhook destination, then store
+# the returned webhook_secret in Secrets Manager and set nylas_webhook_secret_arn.
+nylas_client_id          = "00000000-0000-0000-0000-000000000000"
+nylas_api_base_url       = "https://api.us.nylas.com"
+nylas_api_key_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/prod/nylas-api-key"
+nylas_state_secret_arn   = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/prod/nylas-state-secret"
+nylas_webhook_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/prod/nylas-webhook-secret"
+nylas_google_scopes      = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.labels"
+nylas_microsoft_scopes   = "offline_access User.Read Mail.ReadWrite Mail.Send"
+
+
+# Shared secret material used only for CloudFront-to-ALB origin verification.
+origin_verify_secret = "replace-with-a-random-origin-secret"
+
+github_owner      = "your-github-owner"
+github_repository = "MangoRTSDev"
+github_branch     = "main"
+
+extra_tags = {
+  owner = "you"
+  team  = "platform"
+}
