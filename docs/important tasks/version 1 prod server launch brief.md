@@ -537,9 +537,14 @@ Status: backend, frontend, and empty prod DB schema are deployed.
 
 Immediate next milestone work:
 
-1. Decide and configure first prod admin/bootstrap email.
-2. Verify first prod admin login.
-3. Verify authenticated `/v1/me` returns the prod user and prod membership.
-4. Configure GitHub production secrets/vars so GitHub Actions can repeat the deploy path.
+1. Refresh local AWS SSO for `mangorts-prod`.
+2. Apply the prepared one-time bootstrap configuration for first prod admin:
+   - admin email: `Jonathankim829@gmail.com`
+   - company display name: `180 Snacks`
+3. Create or verify the Cognito user in prod user pool `us-west-1_tddWJsjUA` without printing/storing passwords.
+4. Verify first prod admin login at `https://mangorts.com`.
+5. Verify authenticated `/v1/me` returns the prod user and `180 Snacks` membership.
+6. Clear `bootstrap_admin_emails` after success so the one-time bootstrap path is not left enabled.
+7. Configure GitHub production secrets/vars so GitHub Actions can repeat the deploy path.
 
-No recursive deletion was run during the backend/ECS/schema bootstrap continuation. No DB password or origin verification secret was printed or recorded.
+No recursive deletion was run during the backend/ECS/schema/bootstrap continuation. No DB password or origin verification secret was printed or recorded. The current blocker is only expired AWS SSO for `mangorts-prod`.

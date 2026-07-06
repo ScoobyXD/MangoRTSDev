@@ -1873,3 +1873,70 @@ Next action:
 
 - Continue prod launch from `main` or `prod-scaffolding-v1` as desired; `main` now contains the merged prod launch work.
 - Next product milestone remains first prod admin/bootstrap login, then GitHub production secrets/vars for repeatable deploys.
+
+## Step 12 — First prod admin/bootstrap preparation
+
+Status: blocked on AWS SSO sign-in.
+
+Updated on: 2026-07-06T17:30:12Z.
+
+User-approved prod bootstrap values:
+
+```text
+Prod admin email: Jonathankim829@gmail.com
+Prod company display name: 180 Snacks
+```
+
+Safety classification:
+
+- The admin email and company display name are operational setup metadata and are safe to record.
+- No password, MFA code, recovery code, DB password, origin verification secret, AWS access key, AWS session token, or GitHub token was requested or recorded.
+
+Code/path inspection:
+
+- The backend already supports first-login bootstrap through:
+  - `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS`
+  - `MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME`
+- These are wired into prod ECS task environment by `infra/aws-prod/ecs_alb.tf` using Terraform variables:
+  - `bootstrap_admin_emails`
+  - `bootstrap_company_name`
+- On an authenticated first login, `backend/internal/http/auth_middleware.go` calls `maybeBootstrapDevAdmin`, creates the bootstrap company if needed, and grants the matching email `dev_admin` membership.
+- This means we do not need to directly insert DB rows for the first admin unless the Cognito/login path fails.
+
+Local prod Terraform input update:
+
+- The gitignored local file `infra/aws-prod/terraform.tfvars` was updated to:
+
+```text
+bootstrap_admin_emails = "Jonathankim829@gmail.com"
+bootstrap_company_name = "180 Snacks"
+```
+
+This file remains local/gitignored and was not pushed to GitHub.
+
+Attempted AWS SSO refresh:
+
+```text
+aws sso login --profile mangorts-prod
+```
+
+Result:
+
+- The CLI opened/provided an AWS SSO browser authorization URL.
+- The command timed out after 300 seconds before sign-in completed.
+- Read-only AWS identity check still reports the `mangorts-prod` SSO token is expired.
+
+Blocked prod actions:
+
+- Cannot run `terraform plan/apply` to roll the updated bootstrap env vars into ECS until `mangorts-prod` SSO is refreshed.
+- Cannot create/verify the Cognito user until `mangorts-prod` SSO is refreshed.
+
+Next action after SSO is refreshed:
+
+1. Run `AWS_PROFILE=mangorts-prod AWS_SDK_LOAD_CONFIG=1 aws sts get-caller-identity` and verify account `828435022930`.
+2. Run `terraform -chdir=infra/aws-prod plan -out=tfplan -input=false` and confirm the plan only updates the ECS task definition/service environment for bootstrap vars.
+3. Apply the plan if safe.
+4. Create or verify Cognito user `Jonathankim829@gmail.com` in user pool `us-west-1_tddWJsjUA`, preferably with Cognito's temporary-password/new-password login flow and without printing any password.
+5. Have Jonat sign in at `https://mangorts.com`; the first successful authenticated request should bootstrap company `180 Snacks` and grant the user `dev_admin`.
+6. Verify `/v1/me` returns the user and membership.
+7. Remove or clear `bootstrap_admin_emails` after bootstrap so this one-time path is not left broadly enabled.

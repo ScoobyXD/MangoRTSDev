@@ -422,7 +422,19 @@ https://mangorts.com/nylas/webhook?challenge=deploy-smoke-nylas-webhook -> 200 d
 
 Next steps now:
 
-1. Decide and configure the first prod admin email/bootstrap path.
-2. Verify first prod admin login and authenticated `/v1/me` membership.
-3. Configure GitHub production secrets/vars for repeatable deploys.
-4. Later, replace this manual `ko`/local deploy path with the normal GitHub Actions production workflow.
+1. Refresh local AWS SSO for `mangorts-prod`.
+2. Roll the approved one-time bootstrap values into ECS:
+   - admin email: `Jonathankim829@gmail.com`
+   - company display name: `180 Snacks`
+3. Create or verify the Cognito user in prod user pool `us-west-1_tddWJsjUA` without printing or storing any password.
+4. Have Jonat complete the Cognito login/new-password flow at `https://mangorts.com`.
+5. Verify authenticated `/v1/me` returns the prod user and `180 Snacks` membership.
+6. Clear `bootstrap_admin_emails` after successful bootstrap so the allow-list is not left enabled.
+7. Configure GitHub production secrets/vars for repeatable deploys.
+8. Later, replace this manual `ko`/local deploy path with the normal GitHub Actions production workflow.
+
+First admin bootstrap note:
+
+- `infra/aws-prod/terraform.tfvars` is gitignored and has been locally prepared with `bootstrap_admin_emails = "Jonathankim829@gmail.com"` and `bootstrap_company_name = "180 Snacks"`.
+- This local input update has not been applied yet because `mangorts-prod` AWS SSO is expired.
+- Run `aws sso login --profile mangorts-prod`, then plan/apply only the ECS task definition/service update for these bootstrap environment variables.
