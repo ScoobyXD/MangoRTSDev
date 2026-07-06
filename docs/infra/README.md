@@ -10,6 +10,7 @@ The current live platform documentation is for dev only. MangoRTS does not yet h
 - `docs/infra/mangorts-auth.md` - Cognito login, JWT validation, and company membership authorization.
 - `docs/infra/mangorts-deploy-runbook.md` - GitHub-to-AWS dev deployment flow.
 - `docs/infra/mangorts-infra-state.md` - Terraform ownership and manually reused AWS resources.
+- `docs/infra/mangorts-database-migrations.md` - Native Go database migration runner for local and ECS one-off use.
 
 Dev V2 means the `infra/aws-dev` platform: Cognito auth, ECS Fargate backend, S3 + CloudFront frontend, Route 53, WAF, the existing AWS PostgreSQL/Aurora database, and GitHub Actions OIDC deploys.
 
@@ -27,6 +28,8 @@ These production docs are scaffolding and runbooks. They do not claim production
 - `docs/backend/mangorts-database.md` - Current database assumptions and migration flow.
 - `docs/developer-windows-setup.md` - Windows developer setup.
 - `docs/important tasks/version 1 prod creation.md` - Planning notes for the first production environment.
+- `docs/latency-obsession-architecture.md` - Product-scale latency and robustness principles.
+- `docs/agents/sacred-text.md` - Required agent operating context.
 
 ## Stale-Doc Policy
 
