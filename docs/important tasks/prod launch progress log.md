@@ -1385,3 +1385,377 @@ Next action:
 - Wait for DB instance `mangorts-prod-db-instance-1` to become `available`.
 - Then decide how Terraform/ECS should consume the DB password: create an app-compatible plaintext password secret without printing the value, or update Terraform to reference the RDS-managed JSON secret correctly.
 
+## Step 5M — Database, ECS hosting, and scaling model clarified
+
+Status: guidance documented; no AWS changes made.
+
+Updated on: 2026-07-06T04:05:25Z.
+
+Current verification:
+
+- RDS DB instance `mangorts-prod-db-instance-1` is now `available`.
+- DB instance class is `db.serverless`.
+- DB remains not publicly accessible.
+
+Architecture clarification:
+
+- The RDS database stores application data.
+- The application logic runs in the Go backend container on ECS Fargate.
+- Users reach CloudFront/ALB/API; ECS talks to private RDS.
+- ECS has not been applied/created for prod yet.
+
+Current prod Terraform backend compute defaults:
+
+```text
+backend_cpu: 1024 CPU units / 1 vCPU per task
+backend_memory: 2048 MiB / 2 GiB per task
+backend_desired_count: 2 tasks
+launch type: Fargate
+```
+
+Scaling model:
+
+- Backend/app scaling is easy after ECS exists: increase `backend_desired_count`, `backend_cpu`, and/or `backend_memory`, then redeploy/apply.
+- Current prod Terraform does not yet define ECS autoscaling policies, so scaling is manual/config-driven until autoscaling is added.
+- A 3x user spike can usually be handled by increasing desired backend tasks and, if needed, DB max ACUs.
+- A 10x spike may require increasing backend task count, increasing CPU/memory per task, raising Aurora max ACUs, adding a DB reader if read-heavy, and possibly adding autoscaling policies.
+
+Next action:
+
+- Update Terraform to consume the RDS-managed DB secret safely, fill `infra/aws-prod/terraform.tfvars`, then plan the prod ECS/CloudFront/Cognito/ECR stack before any apply.
+
+## Step 5N — Branch tracking and next Terraform task recorded
+
+Status: documented.
+
+Updated on: 2026-07-06T04:11:40Z.
+
+Branch tracking check:
+
+```text
+Current branch: prod-scaffolding-v1
+Upstream: origin/prod-scaffolding-v1
+Latest shared commit: 71a55e34 prod stuff
+Branch status before this documentation update: branch was tracking origin/prod-scaffolding-v1; only the progress log had local modifications from the current session.
+```
+
+User note:
+
+- Jonat said he pushed all branch changes to GitHub.
+- Hermes verified the local branch is `prod-scaffolding-v1` and has upstream `origin/prod-scaffolding-v1`.
+- New documentation edits after that push still need to be committed/pushed later if Jonat wants them on GitHub.
+
+Required next Terraform task, exact wording requested by Jonat:
+
+```text
+Update Terraform to reference the password field from the RDS-managed secret safely.
+```
+
+Why this is needed:
+
+- RDS created an AWS-managed Secrets Manager credential secret.
+- That secret is expected to be JSON-shaped.
+- Current ECS Terraform passes `existing_db_password_secret_arn` directly to the container `DB_PASSWORD` secret.
+- ECS needs to receive only the password field, not the full JSON secret.
+
+Next action:
+
+- Update prod Terraform secret handling before the prod ECS task definition is applied.
+
+## Step 6 — Terraform RDS-managed secret JSON-key handling
+
+Status: complete; repo-only change, no prod apply run.
+
+Updated on: 2026-07-06T04:23:15Z.
+
+Screen/AWS confirmation:
+
+- RDS console showed `mangorts-prod-db` and `mangorts-prod-db-instance-1` both `Available`.
+- Read-only AWS CLI confirmed cluster `mangorts-prod-db` is `available`.
+- Read-only AWS CLI confirmed instance `mangorts-prod-db-instance-1` is `available`.
+
+Changed files:
+
+```text
+.github/workflows/deploy-prod.yml
+infra/aws-prod/ecs_alb.tf
+infra/aws-prod/variables.tf
+infra/aws-prod/terraform.tfvars.example
+```
+
+What changed:
+
+- Added `existing_db_password_secret_json_key` Terraform variable.
+- Updated ECS `DB_PASSWORD` secret `valueFrom` to select a JSON key when configured.
+- Updated the prod GitHub workflow to pass `TF_EXISTING_DB_PASSWORD_SECRET_JSON_KEY` into Terraform inputs.
+- RDS-managed credential secrets should set:
+
+```hcl
+existing_db_password_secret_json_key = "password"
+```
+
+- Plain password-only secrets can leave the key empty.
+
+Validation:
+
+```text
+terraform -chdir=infra/aws-prod fmt
+terraform -chdir=infra/aws-prod validate
+```
+
+Result:
+
+```text
+Success! The configuration is valid.
+WORKFLOW_SECRET_JSON_KEY_CHECK_OK
+```
+
+Sensitive-info note:
+
+- No DB password was read, printed, or recorded.
+- Only the RDS-managed secret ARN metadata is recorded.
+
+Next action:
+
+- Create/update local gitignored `infra/aws-prod/terraform.tfvars` with the verified prod DB metadata and `existing_db_password_secret_json_key = "password"`, then run a Terraform plan for review before any apply.
+
+## Step 7 — Local prod Terraform inputs and first plan
+
+Status: plan complete; no apply run.
+
+Updated on: 2026-07-06T04:38:58Z.
+
+Actions:
+
+- Created local gitignored `infra/aws-prod/terraform.tfvars`.
+- Generated a local `origin_verify_secret` and wrote it only to the gitignored tfvars file.
+- Did not print or record the `origin_verify_secret` value.
+- Generated prod default company UUID:
+
+```text
+face60cd-27e2-4e5a-92b0-b2cdb78545c8
+```
+
+Initial plan attempt:
+
+- First `terraform plan` failed because Terraform did not have an explicit AWS credential source.
+- Reran with:
+
+```bash
+export AWS_PROFILE=mangorts-prod
+export AWS_SDK_LOAD_CONFIG=1
+```
+
+Successful plan command:
+
+```bash
+terraform -chdir=infra/aws-prod plan -out=tfplan -input=false
+```
+
+Plan result:
+
+```text
+Plan: 55 to add, 0 to change, 0 to destroy.
+```
+
+Safe plan summary:
+
+- Creates prod CloudFront/S3 frontend.
+- Creates prod ALB/listener/target group.
+- Creates prod Cognito user pool and clients.
+- Creates prod ECR repository.
+- Creates prod ECS cluster, but no ECS service/task yet because `backend_image_uri = ""` for phase-1 bootstrap.
+- Creates private ECS subnets, route tables, one NAT gateway, and DB ingress from ECS security group.
+- Creates Route 53 records for `mangorts.com`, `api.mangorts.com`, and `origin.mangorts.com`.
+- Creates ACM certificates and validation records.
+- Creates WAF for CloudFront.
+- Creates GitHub OIDC deploy role scoped to branch `prod-scaffolding-v1`.
+
+Notable outputs from the plan:
+
+```text
+app_url = https://mangorts.com
+api_url = https://api.mangorts.com
+default_company_id = face60cd-27e2-4e5a-92b0-b2cdb78545c8
+ecs_cluster_name = mangorts-prod-cluster
+ecs_service_name = "" because backend service is disabled until a backend image exists
+frontend_bucket = mangorts-prod-frontend-828435022930
+```
+
+Sensitive-info note:
+
+- `infra/aws-prod/terraform.tfvars` is gitignored.
+- `infra/aws-prod/tfplan` is gitignored.
+- The generated origin verification secret was not printed or recorded.
+- No DB password was read, printed, or recorded.
+
+Next action:
+
+- Review the plan summary with Jonat.
+- If Jonat explicitly approves, run `terraform apply tfplan` to create the prod skeleton resources.
+- Do not apply without explicit approval.
+
+## Step 8 — First prod Terraform apply completed
+
+Status: complete.
+
+Updated on: 2026-07-06T05:14:36Z.
+
+Approval:
+
+- Jonat explicitly approved running the first prod Terraform apply.
+
+Command:
+
+```bash
+export AWS_PROFILE=mangorts-prod
+export AWS_SDK_LOAD_CONFIG=1
+terraform -chdir=infra/aws-prod apply -input=false tfplan
+```
+
+Apply result:
+
+```text
+Apply complete! Resources: 55 added, 0 changed, 0 destroyed.
+```
+
+Created/confirmed outputs:
+
+```text
+app_url = https://mangorts.com
+api_url = https://api.mangorts.com
+backend_ecr_repository_url = 828435022930.dkr.ecr.us-west-1.amazonaws.com/mangorts-prod-backend
+cloudfront_distribution_id = E163LYR5A8EQMJ
+cloudfront_domain = d3pnjorzs8umb3.cloudfront.net
+cognito_issuer = https://cognito-idp.us-west-1.amazonaws.com/us-west-1_tddWJsjUA
+cognito_region = us-west-1
+cognito_spa_client_id = 5dds4k34vnt2n1ub8deg6m617h
+cognito_user_pool_id = us-west-1_tddWJsjUA
+default_company_id = face60cd-27e2-4e5a-92b0-b2cdb78545c8
+ecs_cluster_name = mangorts-prod-cluster
+ecs_service_name = "" because backend service is not created until a backend image exists
+ecs_subnet_ids = subnet-053756cc89d3dfc95, subnet-0985f76c72ad2f80d
+frontend_bucket = mangorts-prod-frontend-828435022930
+github_deploy_role_arn = arn:aws:iam::828435022930:role/mangorts-prod-github-deploy
+managed_nat_gateway_ids = nat-078f52f1357ee5442
+nylas_callback_url = https://api.mangorts.com/nylas/oauth/callback
+nylas_frontend_redirect_url = https://mangorts.com/communications
+nylas_webhook_url = https://api.mangorts.com/nylas/webhook
+```
+
+Read-only verification after apply:
+
+- CloudFront distribution `E163LYR5A8EQMJ` status is `Deployed` and enabled.
+- CloudFront aliases include `mangorts.com` and `api.mangorts.com`.
+- ECR repository `mangorts-prod-backend` exists.
+- ECS cluster `mangorts-prod-cluster` is `ACTIVE`.
+- ECS cluster has `0` running tasks and `0` active services, expected for phase-1 skeleton because no backend image/service exists yet.
+- Route 53 `mangorts.com` and `api.mangorts.com` A records alias to CloudFront.
+- Route 53 `origin.mangorts.com` A record aliases to the ALB.
+
+Sensitive-info note:
+
+- No DB password was printed or recorded.
+- The generated origin verification secret remains only in the local gitignored `infra/aws-prod/terraform.tfvars` and Terraform state.
+- `infra/aws-prod/terraform.tfvars` and `infra/aws-prod/tfplan` remain gitignored.
+
+Next action:
+
+- Build and push the first prod backend image to ECR.
+- Then run a second Terraform plan/apply with `backend_image_uri` set so the ECS service can be created.
+- Before GitHub Actions can deploy prod later, save `github_deploy_role_arn` as GitHub production secret `AWS_PROD_DEPLOY_ROLE_ARN` and store the origin verification secret as `PROD_ORIGIN_VERIFY_SECRET` without printing it.
+
+## Step 9 — Backend image, ECS service, frontend publish, and DB bootstrap
+
+Status: complete.
+
+Updated on: 2026-07-06T06:35:00Z.
+
+Safety note:
+
+- No recursive deletion was run in this step.
+- No DB password, origin verification secret, AWS session token, or GitHub token was printed or recorded.
+- Temporary ECR login entries created by `ko login` were removed from the local Docker config after each push.
+
+Backend image build/push:
+
+- Docker was not installed on the laptop, so the backend image was built and pushed with `ko` instead of Docker Desktop.
+- Backend image pushed to ECR:
+
+```text
+828435022930.dkr.ecr.us-west-1.amazonaws.com/mangorts-prod-backend@sha256:6dc68dc0a05072345a43b132982bff413485626883955a015cd3e3a34aaa4941
+```
+
+- Deploy revision used by Terraform/backend health:
+
+```text
+manual-71a55e34-20260706T053946Z
+```
+
+Second Terraform apply:
+
+```text
+Plan: 2 to add, 2 to change, 0 to destroy.
+Apply complete! Resources: 2 added, 1 changed, 0 destroyed.
+```
+
+Result:
+
+- ECS service `mangorts-prod-backend` was created.
+- ECS service reached `ACTIVE` with desired `2`, running `2`, pending `0`.
+- Target group had two healthy targets.
+
+Frontend publish:
+
+- Production frontend build initially failed because the bundle still contained the dev company UUID literal.
+- Fixed `frontend/src/auth/currentCompany.ts` so production requires `VITE_COMPANY_ID`; the dev fallback is now gated to `import.meta.env.DEV`.
+- Production frontend build passed after the fix.
+- Frontend assets were synced to `s3://mangorts-prod-frontend-828435022930`.
+- CloudFront invalidations completed for the frontend and deploy metadata.
+
+DB schema bootstrap:
+
+- Public/backend health worked before schema, but CloudWatch logs showed missing DB tables such as `event_rows`, `communications_email_archive_job_items`, and `companies`.
+- Because the prod DB is private, schema bootstrap was run through one-off ECS/Fargate tasks in the prod ECS private subnets using ECS Secrets Manager injection for the RDS-managed secret `password` field.
+- First bootstrap attempts failed safely inside transactions:
+  - canonical schema initially failed because PostgreSQL validated function bodies before later tables existed;
+  - fixed by setting `check_function_bodies = off` during bootstrap;
+  - applying every historical migration on top of canonical schema failed because old migrations expected legacy intermediate columns.
+- Final successful bootstrap applied the canonical schema, applied supplemental migration `20260629_communications_archive_jobs.sql`, and marked the 140 historical migration files as applied for this empty prod bootstrap.
+
+Successful bootstrap log:
+
+```text
+MANGORTS_PROD_DB_BOOTSTRAP_OK schema_applied=true supplemental_migrations_applied=1 migrations_marked=140
+```
+
+One-off task cleanup:
+
+- Temporary ECS task definitions were deregistered after use.
+- Failed bootstrap attempts exited non-zero and did not commit partial schema changes.
+
+Smoke verification after DB bootstrap:
+
+```text
+frontend deploy-info: HTTP 200
+frontend route rewrite: HTTP 200
+app health: HTTP 200
+api health: HTTP 200
+invite validate invalid token: HTTP 404 {"error":"invitation_bad_token"}
+me unauth: HTTP 401
+api me unauth: HTTP 401
+v2 node view unauth: HTTP 401
+v2 logic gate view unauth: HTTP 401
+nylas webhook challenge: HTTP 200
+PROD_SMOKE_OK
+```
+
+CloudWatch verification:
+
+- A recent filter for `relation does not exist` after bootstrap returned no matching backend log events.
+
+Next action:
+
+- Decide the first prod admin email and bootstrap/login path.
+- Configure GitHub production secrets/vars for repeatable GitHub Actions deploys.
+- Commit/push the local repo/doc changes when Jonat is ready.

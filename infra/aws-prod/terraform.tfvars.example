@@ -27,8 +27,10 @@ existing_db_host                = "prod-db.cluster-xxxxxxxx.us-west-1.rds.amazon
 existing_db_port                = 5432
 existing_db_name                = "mangorts"
 existing_db_user                = "mangorts_app"
-existing_db_password_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/prod/db-password"
-existing_db_security_group_id   = "sg-0123456789abcdef0"
+existing_db_password_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012:secret:rds!cluster-example"
+# Use "password" for RDS-managed JSON credential secrets. Leave empty for plaintext password-only secrets.
+existing_db_password_secret_json_key = "password"
+existing_db_security_group_id        = "sg-0123456789abcdef0"
 
 # Phase-1 bootstrap should keep this empty. CI sets an immutable git-SHA image URI after ECR exists.
 backend_image_uri = ""

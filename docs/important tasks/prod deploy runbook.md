@@ -161,6 +161,57 @@ Return only these values to the agent:
 
 Never return the DB password or a full password-bearing connection string.
 
+## Confirmed prod DB values
+
+Created through the AWS Console and verified with read-only AWS CLI calls:
+
+```text
+DB cluster identifier: mangorts-prod-db
+DB instance identifier: mangorts-prod-db-instance-1
+Writer endpoint: mangorts-prod-db.cluster-cpcceyaigiit.us-west-1.rds.amazonaws.com
+Reader endpoint: mangorts-prod-db.cluster-ro-cpcceyaigiit.us-west-1.rds.amazonaws.com
+Database name: mangorts
+Engine: aurora-postgresql
+Engine version: 17.7
+Port: 5432
+Master username: mangorts_app
+DB security group ID: sg-0ba84e2c327457f1e
+Publicly accessible: false
+RDS managed secret ARN: arn:aws:secretsmanager:us-west-1:828435022930:secret:rds!cluster-d26dab99-99bc-40c2-9465-4a67189b1177-2xZr7k
+```
+
+Do not record the DB password.
+
+## Immediate Terraform task
+
+Update Terraform to reference the password field from the RDS-managed secret safely.
+
+Status: complete in repo; no prod apply has been run for this change.
+
+Reason:
+
+- The RDS-managed DB credential secret is JSON-shaped.
+- The ECS container needs `DB_PASSWORD` to be only the password value.
+- Prod Terraform now supports `existing_db_password_secret_json_key`.
+- `.github/workflows/deploy-prod.yml` now supports GitHub variable `TF_EXISTING_DB_PASSWORD_SECRET_JSON_KEY`, defaulting to `password`.
+- For the current RDS-managed secret, set:
+
+```hcl
+existing_db_password_secret_json_key = "password"
+```
+
+- ECS will use the `:password::` JSON-key suffix in `DB_PASSWORD` secret `valueFrom`.
+- Plain password-only Secrets Manager secrets can leave `existing_db_password_secret_json_key` empty.
+
+Validation run:
+
+```text
+terraform -chdir=infra/aws-prod fmt
+terraform -chdir=infra/aws-prod validate
+```
+
+Result: valid. The prod workflow was also checked for the new JSON-key input wiring.
+
 ## Local Terraform files
 
 Create this file locally. Do not commit it:
@@ -228,3 +279,150 @@ After deploy:
 - First prod admin can log in.
 - Authenticated `/v1/me` returns prod membership.
 - Dev still works.
+
+## Current local Terraform plan
+
+Local-only files:
+
+- `infra/aws-prod/terraform.tfvars` exists locally and is gitignored.
+- `infra/aws-prod/tfplan` exists locally and is gitignored.
+- `terraform.tfvars` contains generated `origin_verify_secret`; do not print, commit, or screenshot it.
+- Default prod company UUID generated for first plan: `face60cd-27e2-4e5a-92b0-b2cdb78545c8`.
+
+Command:
+
+```bash
+export AWS_PROFILE=mangorts-prod
+export AWS_SDK_LOAD_CONFIG=1
+terraform -chdir=infra/aws-prod plan -out=tfplan -input=false
+```
+
+Result:
+
+```text
+Plan: 55 to add, 0 to change, 0 to destroy.
+```
+
+Important details:
+
+- No apply has been run.
+- ECS cluster is planned, but ECS service/task are not planned yet because `backend_image_uri = ""`.
+- First apply would create the prod skeleton: frontend bucket/CloudFront, ALB, Cognito, ECR, IAM/GitHub deploy role, private ECS networking, Route 53 records, ACM certs, and WAF.
+- GitHub deploy role is currently scoped to branch `prod-scaffolding-v1`.
+
+## First prod Terraform apply result
+
+Status: complete.
+
+Command:
+
+```bash
+export AWS_PROFILE=mangorts-prod
+export AWS_SDK_LOAD_CONFIG=1
+terraform -chdir=infra/aws-prod apply -input=false tfplan
+```
+
+Result:
+
+```text
+Apply complete! Resources: 55 added, 0 changed, 0 destroyed.
+```
+
+Important outputs:
+
+```text
+app_url = https://mangorts.com
+api_url = https://api.mangorts.com
+backend_ecr_repository_url = 828435022930.dkr.ecr.us-west-1.amazonaws.com/mangorts-prod-backend
+cloudfront_distribution_id = E163LYR5A8EQMJ
+cognito_user_pool_id = us-west-1_tddWJsjUA
+cognito_spa_client_id = 5dds4k34vnt2n1ub8deg6m617h
+default_company_id = face60cd-27e2-4e5a-92b0-b2cdb78545c8
+ecs_cluster_name = mangorts-prod-cluster
+ecs_service_name = ""
+frontend_bucket = mangorts-prod-frontend-828435022930
+github_deploy_role_arn = arn:aws:iam::828435022930:role/mangorts-prod-github-deploy
+managed_nat_gateway_ids = nat-078f52f1357ee5442
+```
+
+Verification:
+
+- CloudFront `E163LYR5A8EQMJ` is deployed and enabled.
+- ECR repo `mangorts-prod-backend` exists.
+- ECS cluster `mangorts-prod-cluster` is active.
+- ECS service is intentionally absent until a backend image exists.
+- Route 53 aliases exist for `mangorts.com`, `api.mangorts.com`, and `origin.mangorts.com`.
+
+Next steps:
+
+1. Build and push the first backend image to ECR.
+2. Run a second Terraform plan/apply with `backend_image_uri` set.
+3. Configure GitHub production secret `AWS_PROD_DEPLOY_ROLE_ARN` with the deploy role ARN.
+4. Configure GitHub production secret `PROD_ORIGIN_VERIFY_SECRET` from local `terraform.tfvars` without printing it.
+
+## Current prod deployed state
+
+Status: backend, frontend, and empty prod DB schema are deployed.
+
+Backend image currently deployed:
+
+```text
+828435022930.dkr.ecr.us-west-1.amazonaws.com/mangorts-prod-backend@sha256:6dc68dc0a05072345a43b132982bff413485626883955a015cd3e3a34aaa4941
+```
+
+Deploy revision:
+
+```text
+manual-71a55e34-20260706T053946Z
+```
+
+Current ECS state:
+
+```text
+ECS service: mangorts-prod-backend
+Desired tasks: 2
+Running tasks: 2
+Target health: 2 healthy targets
+```
+
+Prod frontend state:
+
+- Built with `VITE_API_BASE_URL=https://mangorts.com` so browser API calls stay on the app origin.
+- Built with `VITE_COMPANY_ID=face60cd-27e2-4e5a-92b0-b2cdb78545c8`.
+- Published to `s3://mangorts-prod-frontend-828435022930`.
+- CloudFront distribution `E163LYR5A8EQMJ` was invalidated after publish.
+- `frontend/src/auth/currentCompany.ts` now keeps the dev UUID fallback out of production bundles.
+
+Prod DB schema bootstrap:
+
+- The prod DB is private, so schema bootstrap was run by a one-off ECS/Fargate task in the prod ECS private subnets.
+- The task used ECS Secrets Manager injection for the RDS-managed secret JSON key `password`; no DB password was printed or recorded.
+- The successful bootstrap applied `backend/db/schema.sql`, applied supplemental migration `20260629_communications_archive_jobs.sql`, and marked all 140 historical migration files as applied for the empty prod bootstrap.
+
+Successful bootstrap marker:
+
+```text
+MANGORTS_PROD_DB_BOOTSTRAP_OK schema_applied=true supplemental_migrations_applied=1 migrations_marked=140
+```
+
+Current smoke result:
+
+```text
+https://mangorts.com/deploy-info.json -> 200
+https://mangorts.com/accept-invite -> 200
+https://mangorts.com/healthz -> 200
+https://api.mangorts.com/healthz -> 200
+POST https://mangorts.com/v1/invitations/validate with bad token -> 404 invitation_bad_token
+https://mangorts.com/v1/me without auth -> 401 unauthorized
+https://api.mangorts.com/v1/me without auth -> 401 unauthorized
+https://mangorts.com/v2/nodes/... without auth -> 401 unauthorized
+https://mangorts.com/v2/logic-gates/... without auth -> 401 unauthorized
+https://mangorts.com/nylas/webhook?challenge=deploy-smoke-nylas-webhook -> 200 deploy-smoke-nylas-webhook
+```
+
+Next steps now:
+
+1. Decide and configure the first prod admin email/bootstrap path.
+2. Verify first prod admin login and authenticated `/v1/me` membership.
+3. Configure GitHub production secrets/vars for repeatable deploys.
+4. Later, replace this manual `ko`/local deploy path with the normal GitHub Actions production workflow.

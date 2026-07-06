@@ -100,8 +100,14 @@ variable "existing_db_user" {
 }
 
 variable "existing_db_password_secret_arn" {
-  description = "Secrets Manager ARN containing the existing prod DB password."
+  description = "Secrets Manager ARN containing the existing prod DB password, or an RDS-managed JSON credential secret."
   type        = string
+}
+
+variable "existing_db_password_secret_json_key" {
+  description = "Optional JSON key to select from existing_db_password_secret_arn for ECS DB_PASSWORD. Use password for RDS-managed credential secrets; leave empty for plaintext password secrets."
+  type        = string
+  default     = ""
 }
 
 variable "existing_db_security_group_id" {

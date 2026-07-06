@@ -23,7 +23,8 @@ Confirmed by Jonat:
 - Prod default VPC discovered: `vpc-058fed523b6e847bf`, CIDR `172.31.0.0/16`.
 - Prod public subnets discovered: `subnet-09be435bd9a9f6208` in `us-west-1c` and `subnet-0f07a73d47130fc8a` in `us-west-1a`.
 - Prod Route 53 hosted zone created for `mangorts.com`: `Z05521211GBNMIH6SBM5Z`; registered domain nameservers now point at the prod hosted zone.
-- No prod RDS DB or prod `mangorts/prod` Secrets Manager secrets existed during the latest discovery check.
+- Prod RDS DB has been created and verified: cluster `mangorts-prod-db`, database `mangorts`, writer endpoint `mangorts-prod-db.cluster-cpcceyaigiit.us-west-1.rds.amazonaws.com`, security group `sg-0ba84e2c327457f1e`.
+- RDS created an AWS-managed credential secret: `arn:aws:secretsmanager:us-west-1:828435022930:secret:rds!cluster-d26dab99-99bc-40c2-9465-4a67189b1177-2xZr7k`. This ARN is metadata; do not record the secret value.
 - Production domain: `mangorts.com`.
 - Production API domain: `api.mangorts.com`.
 - Production origin hostname can be `origin.mangorts.com` unless the final Terraform runbook chooses a different hidden origin name.
@@ -175,21 +176,32 @@ Required for first prod server:
 - Prod DB deletion protection enabled if this is intended to be real prod.
 - Prod DB password stored in AWS Secrets Manager, not plaintext files.
 
-Recommended first prod sizing:
+Actual first prod DB created:
 
-- Aurora PostgreSQL / Aurora Serverless v2 if consistent with dev/current AWS approach.
-- Min ACU: 1-2.
-- Max ACU: 8-16.
-- No auto-pause for real prod.
+- Aurora PostgreSQL 17.7 / Aurora Serverless v2.
+- Min ACU: 0.5.
+- Max ACU: 2.
+- Public access: No.
+- DB cluster: `mangorts-prod-db`.
+- DB name: `mangorts`.
+- Master username: `mangorts_app`.
+- Security group: `sg-0ba84e2c327457f1e`.
+- RDS managed secret ARN: `arn:aws:secretsmanager:us-west-1:828435022930:secret:rds!cluster-d26dab99-99bc-40c2-9465-4a67189b1177-2xZr7k`.
+
+Immediate required Terraform task:
+
+- Update Terraform to reference the password field from the RDS-managed secret safely. Status: complete in repo; prod apply has not been run yet.
+- Use `existing_db_password_secret_json_key = "password"` for the RDS-managed credential secret.
+- GitHub prod deploy workflow now supports `TF_EXISTING_DB_PASSWORD_SECRET_JSON_KEY`, defaulting to `password`.
 
 Needed values from Jonat after manual DB setup:
 
-- DB writer endpoint hostname.
-- DB port, usually `5432`.
-- DB name.
-- DB app username.
-- Secrets Manager ARN containing the DB password.
-- DB security group ID that Terraform may allow ingress from prod ECS tasks into.
+- DB writer endpoint hostname: `mangorts-prod-db.cluster-cpcceyaigiit.us-west-1.rds.amazonaws.com`.
+- DB port: `5432`.
+- DB name: `mangorts`.
+- DB app username: `mangorts_app`.
+- RDS managed Secrets Manager ARN: `arn:aws:secretsmanager:us-west-1:828435022930:secret:rds!cluster-d26dab99-99bc-40c2-9465-4a67189b1177-2xZr7k`.
+- DB security group ID that Terraform may allow ingress from prod ECS tasks into: `sg-0ba84e2c327457f1e`.
 
 Do not paste DB passwords into chat or commit them. Secret ARN is okay.
 
@@ -479,3 +491,55 @@ Review the repo-only diff with Jonat:
 4. After Jonat approves the repo-only changes, move to manual AWS/prod setup.
 
 Do not merge large Codex-generated Terraform module refactors for this first milestone.
+
+### Current local Terraform input/plan status
+
+- Local gitignored `infra/aws-prod/terraform.tfvars` has been created.
+- It contains generated `origin_verify_secret`; do not print or commit this file.
+- Generated default prod company UUID: `face60cd-27e2-4e5a-92b0-b2cdb78545c8`.
+- First local plan succeeded with `Plan: 55 to add, 0 to change, 0 to destroy`.
+- No prod Terraform apply has been run yet.
+- Planned first apply creates the prod skeleton but not the backend ECS service, because `backend_image_uri = ""` until ECR has an image.
+- GitHub deploy role in the plan is scoped to branch `prod-scaffolding-v1`.
+
+### First prod Terraform apply result
+
+Status: complete.
+
+- First prod Terraform apply succeeded with `55 added, 0 changed, 0 destroyed`.
+- App URL output: `https://mangorts.com`.
+- API URL output: `https://api.mangorts.com`.
+- Backend ECR repository: `828435022930.dkr.ecr.us-west-1.amazonaws.com/mangorts-prod-backend`.
+- CloudFront distribution: `E163LYR5A8EQMJ` / `d3pnjorzs8umb3.cloudfront.net`.
+- Cognito user pool: `us-west-1_tddWJsjUA`.
+- Cognito SPA client: `5dds4k34vnt2n1ub8deg6m617h`.
+- ECS cluster: `mangorts-prod-cluster`.
+- ECS service output is empty because the backend image has not been built/pushed yet.
+- Frontend bucket: `mangorts-prod-frontend-828435022930`.
+- GitHub deploy role: `arn:aws:iam::828435022930:role/mangorts-prod-github-deploy`.
+- Managed NAT gateway: `nat-078f52f1357ee5442`.
+- Next required step is building/pushing the backend image and then applying a second Terraform plan with `backend_image_uri` set.
+
+### Current deployed prod status
+
+Status: backend, frontend, and empty prod DB schema are deployed.
+
+- Backend image deployed: `828435022930.dkr.ecr.us-west-1.amazonaws.com/mangorts-prod-backend@sha256:6dc68dc0a05072345a43b132982bff413485626883955a015cd3e3a34aaa4941`.
+- Deploy revision: `manual-71a55e34-20260706T053946Z`.
+- ECS service: `mangorts-prod-backend`.
+- ECS desired/running tasks: `2` / `2`.
+- Prod frontend has been built and published to `mangorts-prod-frontend-828435022930`.
+- Prod frontend now uses app-origin API routing with `VITE_API_BASE_URL=https://mangorts.com`.
+- Prod frontend build guard passes without the dev company UUID in the production bundle.
+- Prod DB schema bootstrap completed through one-off ECS/Fargate because the DB is private.
+- Successful DB bootstrap marker: `MANGORTS_PROD_DB_BOOTSTRAP_OK schema_applied=true supplemental_migrations_applied=1 migrations_marked=140`.
+- Current smoke tests pass for deploy info, frontend route rewrite, app/API health, unauthenticated 401 routes, invalid invitation token 404, and Nylas webhook challenge.
+
+Immediate next milestone work:
+
+1. Decide and configure first prod admin/bootstrap email.
+2. Verify first prod admin login.
+3. Verify authenticated `/v1/me` returns the prod user and prod membership.
+4. Configure GitHub production secrets/vars so GitHub Actions can repeat the deploy path.
+
+No recursive deletion was run during the backend/ECS/schema bootstrap continuation. No DB password or origin verification secret was printed or recorded.

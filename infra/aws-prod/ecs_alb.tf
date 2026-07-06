@@ -127,7 +127,10 @@ resource "aws_ecs_task_definition" "backend" {
       )
       secrets = concat(
         [
-          { name = "DB_PASSWORD", valueFrom = var.existing_db_password_secret_arn }
+          {
+            name      = "DB_PASSWORD"
+            valueFrom = var.existing_db_password_secret_json_key != "" ? "${var.existing_db_password_secret_arn}:${var.existing_db_password_secret_json_key}::" : var.existing_db_password_secret_arn
+          }
         ],
         local.nylas_enabled ? [
           { name = "NYLAS_API_KEY", valueFrom = var.nylas_api_key_secret_arn },
