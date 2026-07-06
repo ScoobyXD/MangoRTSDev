@@ -9,6 +9,7 @@ V2 means the `infra/aws-dev` platform: Cognito auth, ECS Fargate backend, S3 + C
 - `docs/mangorts-dev-platform.md` - AWS dev architecture and service responsibilities.
 - `docs/mangorts-auth.md` - Cognito login, JWT validation, and company membership authorization.
 - `docs/mangorts-deploy-runbook.md` - GitHub-to-AWS deployment flow.
+- `docs/mangorts-database-migrations.md` - Native Go database migration runner for local and ECS one-off use.
 - `docs/mangorts-infra-state.md` - Terraform ownership and manually reused AWS resources.
 - `docs/mangorts-database.md` - Current dev database assumptions and migration flow.
 - `docs/latency-obsession-architecture.md` - Product-scale latency and robustness principles.
