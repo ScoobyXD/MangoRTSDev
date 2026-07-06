@@ -2315,3 +2315,352 @@ go test ./...
 - The temporary verifier script was deleted after it ran.
 
 This is ad-hoc verification in addition to the normal suite output above, not a separate production deploy.
+
+## Step 12F — First prod admin login confirmed and cleanup plan prepared
+
+Status: first admin bootstrap verified; waiting for explicit approval to apply the scoped ECS cleanup.
+
+Updated on: 2026-07-06T19:16:10Z.
+
+User report:
+
+- Jonat completed the browser login/new-password flow.
+- Jonat confirmed the app shows the expected dev admin access and `180 Snacks` company data.
+
+Read-only verification:
+
+- AWS SSO profile `mangorts-prod` still resolves to prod account `828435022930`.
+- Cognito user `jonathankim829@gmail.com` is now `CONFIRMED`, enabled, and `email_verified=true`.
+- CloudWatch logs for `/ecs/mangorts-prod/backend` contain one recent `bootstrapped dev admin` event for the expected email.
+
+Cleanup preparation:
+
+- Local gitignored `infra/aws-prod/terraform.tfvars` was edited so `bootstrap_admin_emails` is empty.
+- A temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp` verified the tfvars file is ignored, untracked, and has an empty bootstrap allow-list; the script was deleted after use.
+- Full Terraform plan was inspected with `AWS_PROFILE=mangorts-prod`; it still includes unrelated CloudFront/S3 changes, so it must not be applied for this cleanup.
+- Scoped cleanup plan was created at ignored path `infra/aws-prod/tfplan` with only:
+
+```text
+aws_ecs_service.backend[0]: update
+aws_ecs_task_definition.backend[0]: delete/create replacement
+```
+
+- The scoped plan sets `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS` to an empty value. `MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME` remains `180 Snacks`, which is harmless without an allow-list email.
+
+Approval gate:
+
+- Do not apply `infra/aws-prod/tfplan` until Jonat explicitly approves the production ECS cleanup apply.
+- After approval, run `terraform -chdir=infra/aws-prod apply -input=false -no-color tfplan`, wait for ECS stability, verify the backend task definition has empty bootstrap emails, smoke-check prod, and update docs.
+
+## Step 12G — Bootstrap allow-list cleanup applied
+
+Status: complete.
+
+Updated on: 2026-07-06T19:22:00Z.
+
+Approval:
+
+- Jonat explicitly approved applying the scoped prod ECS cleanup plan: `approved go forth`.
+
+Pre-apply safeguards:
+
+- Re-checked local branch/status before apply: branch `main`; only prod launch docs were modified in tracked files.
+- Re-verified `mangorts-prod` resolves to prod AWS account `828435022930`.
+- Re-inspected saved `infra/aws-prod/tfplan` before apply.
+- Confirmed plan scope was only:
+
+```text
+aws_ecs_service.backend[0]: update
+aws_ecs_task_definition.backend[0]: delete/create replacement
+```
+
+- Confirmed the saved plan set `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS` to an empty value.
+
+Apply:
+
+```text
+terraform -chdir=infra/aws-prod apply -input=false -no-color infra/aws-prod/tfplan
+```
+
+Result:
+
+```text
+Apply complete! Resources: 1 added, 1 changed, 1 destroyed.
+```
+
+Post-apply verification:
+
+- ECS service reached stable state.
+- ECS service is `ACTIVE`.
+- Desired/running tasks: `2 / 2`.
+- Rollout state: `COMPLETED`.
+- Backend task definition is now `mangorts-prod-backend:3`.
+- Current backend task definition has `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS` present but empty.
+- `MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME` remains present, which is harmless without allow-listed emails.
+
+Smoke checks:
+
+```text
+https://mangorts.com/deploy-info.json -> HTTP 200
+https://mangorts.com/accept-invite -> HTTP 200
+https://mangorts.com/healthz -> HTTP 200
+https://api.mangorts.com/healthz -> HTTP 200
+unauthenticated https://api.mangorts.com/v1/me -> HTTP 401
+```
+
+Terraform warning noted:
+
+- Terraform warned that `-target` can leave unrelated changes pending.
+- This was expected and intentional because the full plan still had unrelated CloudFront/S3 changes that were not part of bootstrap cleanup.
+
+Sensitive-output note:
+
+- During pre-apply machine parsing of `terraform show -json`, Terraform emitted sensitive variable values into local terminal output before the parser summary.
+- No raw sensitive value was copied into docs or the final summary.
+- If Jonat wants maximum exposure hygiene, schedule a separate approved follow-up to rotate the prod origin verification secret and re-run the needed CloudFront/ALB update safely.
+
+Next action:
+
+- Commit/push the repo changes when Jonat is ready, after reviewing the tracked docs/test changes.
+- Do not delete the gitignored `infra/aws-prod/tfplan` unless cleanup of local generated files is explicitly requested.
+
+## Step 13A — Origin verification secret rotated after local terminal exposure
+
+Status: complete.
+
+Updated on: 2026-07-06T20:26:39Z.
+
+Approval:
+
+- Jonat approved rotating the prod origin verification secret and continuing with the next prod-launch tasks.
+
+Reason:
+
+- Earlier Terraform JSON diagnostics emitted the previous origin verification value into local terminal output.
+- No raw value was copied into docs or chat, but rotation removes the exposed value from live CloudFront/ALB use.
+
+Secret handling:
+
+- Replaced `origin_verify_secret` in local gitignored `infra/aws-prod/terraform.tfvars` without printing the new value.
+- Ran a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp` to verify the tfvars file is ignored/untracked and the origin secret was replaced; the verifier script was deleted after use.
+
+Planning:
+
+- Full Terraform plan was inspected with raw output suppressed to avoid secret exposure.
+- Full plan still has unrelated S3/CloudFront OAC policy drift, so it was not applied as a full plan.
+- Scoped plan was saved at ignored path `infra/aws-prod/tfplan`.
+- Scoped plan included these in-place updates:
+
+```text
+aws_cloudfront_distribution.app
+aws_cloudfront_function.basic_auth
+aws_lb_listener_rule.cloudfront_to_backend
+```
+
+- The CloudFront Function update was included by Terraform as dependency/CloudFront drift during the targeted distribution update. It is the existing route-rewrite function and was verified by smoke checks after apply.
+
+Apply result:
+
+```text
+Apply complete! Resources: 0 added, 3 changed, 0 destroyed.
+```
+
+Post-apply verification:
+
+- CloudFront distribution `E163LYR5A8EQMJ` is `Deployed`.
+- CloudFront backend custom header matches the newly derived origin verification value.
+- ALB listener rule header condition matches the same newly derived value.
+- Direct local access to `origin.mangorts.com` timed out, which is acceptable because the ALB/security group path is CloudFront-restricted.
+
+Smoke checks:
+
+```text
+https://mangorts.com/deploy-info.json -> HTTP 200
+https://mangorts.com/accept-invite -> HTTP 200
+https://mangorts.com/healthz -> HTTP 200
+https://api.mangorts.com/healthz -> HTTP 200
+unauthenticated https://api.mangorts.com/v1/me -> HTTP 401
+```
+
+Post-rotation plan caveat:
+
+- A raw-output-suppressed full plan still shows pending unrelated CloudFront/S3 OAC policy drift.
+- The remaining CloudFront distribution diff paths are unrelated to origin verification: `origin[0].origin_access_control_id` and `origin[1].s3_origin_config.length`.
+
+Next action:
+
+- Configure/prepare Nylas prod settings, then prepare the prod DB schema/value-copy package without applying DB changes.
+
+## Step 13B — Nylas prod prep started; provider secrets still needed
+
+Status: partially prepared; not enabled in ECS yet.
+
+Updated on: 2026-07-06T20:32:38Z.
+
+Approval:
+
+- Jonat approved configuring Nylas for prod.
+
+Current prod Nylas tfvars status before prep:
+
+- `nylas_client_id`: empty.
+- `nylas_api_base_url`: `https://api.us.nylas.com`.
+- `nylas_api_key_secret_arn`: empty.
+- `nylas_state_secret_arn`: empty.
+- `nylas_webhook_secret_arn`: empty.
+- Google/Microsoft scopes are set to the repo defaults.
+
+Actions taken:
+
+- Created AWS Secrets Manager secret `mangorts/prod/nylas-state-secret` in prod account `828435022930`.
+- Stored a generated random OAuth state-signing secret value without printing it.
+- Set local gitignored `infra/aws-prod/terraform.tfvars` `nylas_state_secret_arn` to the new secret ARN.
+- Verified the tfvars edit with a temporary `hermes-verify-*` script; the verifier script was deleted.
+
+Safe recorded secret metadata:
+
+```text
+arn:aws:secretsmanager:us-west-1:828435022930:secret:mangorts/prod/nylas-state-secret-aDkq2J
+```
+
+Route verification:
+
+```text
+https://api.mangorts.com/nylas/webhook?challenge=prod-nylas-smoke-20260706 -> HTTP 200 and echoed challenge
+https://api.mangorts.com/nylas/oauth/callback without OAuth params -> HTTP 302 with nylas_not_configured error
+```
+
+Important blocker:
+
+- No Nylas API key, client/application ID, or webhook secret is available in the local environment or AWS Secrets Manager yet.
+- Therefore Nylas Communications is not enabled in ECS yet.
+- Do not create placeholder API-key/webhook secrets with fake values.
+
+Needed next from Nylas dashboard/provider:
+
+- Prod Nylas application/client ID. This is operational metadata and can be recorded.
+- Prod Nylas API key. This is a secret; store it directly in AWS Secrets Manager, not chat/docs.
+- Register Hosted OAuth callback: `https://api.mangorts.com/nylas/oauth/callback`.
+- Register webhook destination: `https://api.mangorts.com/nylas/webhook`.
+- Store returned webhook secret directly in AWS Secrets Manager, not chat/docs.
+- Webhook triggers needed: `message.created`, `message.updated`, `message.deleted`, `message.opened`, `folder.created`, `folder.updated`, `folder.deleted`. Message tracking `message.link_clicked` and `thread.replied` are acceptable but currently ignored by product behavior.
+
+Terraform note:
+
+- Adding only `nylas_state_secret_arn` may cause an IAM policy diff, but Nylas remains disabled until `nylas_client_id` and `nylas_api_key_secret_arn` are also set.
+- Do not apply a Nylas Terraform change until the real provider values/secrets are present.
+
+## Step 13C — Prod DB schema/value-copy preparation package created
+
+Status: prepare-only artifact created; no DB schema or row changes applied.
+
+Updated on: 2026-07-06T20:32:38Z.
+
+User requirement:
+
+- Prepare to copy the right prod DB schema from dev/prod canonical sources.
+- Include all tables, functions/procedures, indexes, triggers, enum/custom types, constraints, defaults, and other schema objects.
+- Include table values only where they are metadata/reference-safe.
+- Do not copy dev company UUIDs or actual tenant/user/work rows into prod.
+
+Actions taken:
+
+- Added prepare-only helper script: `scripts/prepare_prod_db_schema_copy.py`.
+- Generated manifest doc: `docs/important tasks/prod db schema copy prep.md`.
+- Ran the helper with output JSON to a temp path and Markdown to the docs path.
+- Verified the helper with `python -m py_compile scripts/prepare_prod_db_schema_copy.py`.
+- Follow-up ad-hoc verification on 2026-07-06T20:43:15Z used a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp`. It ran `git diff --check` for the helper, executed the helper against the repo, verified the manifest counts and row-copy exclusions, then deleted the temporary verifier and generated temp manifest files.
+
+Manifest summary:
+
+```text
+schema_sha256 = 2c0e6d2a331b4b5c6202365b308b1d9db67d7a17c59ae059161a5fa02bf844c9
+tables = 62
+indexes = 108
+functions/procedures = 8
+triggers = 2
+enum/custom types = 3
+migrations = 140
+latest migration = 20260702_resource_policy_access_helper_no_gvic.sql
+metadata row tables eligible by default = schema_migrations
+tenant/user/work data row tables excluded by default = 62
+```
+
+Important DB-copy rule:
+
+- Do not use a broad `pg_dump --data-only` from dev to prod.
+- `backend/db/schema.sql` is the canonical schema source unless a live dev `pg_dump --schema-only` diff proves drift.
+- `schema_migrations` is metadata only and can be marked deliberately after a reviewed canonical-schema bootstrap.
+- Company-specific default folders, projections, permissions, and workspace versions must be generated against the prod company UUID by app/bootstrap logic or reviewed idempotent SQL, not copied as dev rows.
+
+## Step 13D — Prod DB schema-only apply completed
+
+Status: completed and verified; no dev rows copied.
+
+Updated on: 2026-07-06T21:23:35Z.
+
+Approval:
+
+- Jonat explicitly approved applying schema objects to the new prod database now, with no row copy.
+
+Important scope decision:
+
+- Applied schema objects only: tables, indexes, functions/procedures, triggers, enum/custom types, constraints/defaults.
+- Did not run a broad dev-to-prod dump.
+- Did not copy users, companies, nodes, logic gates, project/work rows, or dev company UUIDs.
+- Did not insert migration baseline rows. `schema_migrations` remains a metadata topic for a separate deliberate baseline step if needed.
+
+Implementation path:
+
+- Local direct PostgreSQL access was not available because the RDS DB is private.
+- Built a temporary one-off schema-apply image with an embedded DDL-only schema file.
+- The DDL-only schema was generated from `backend/db/schema.sql` after removing top-level data/repair DML blocks:
+  - `kanban_board_projection` data backfill.
+  - `logic_gate_projection_table` data cleanup.
+  - `workspace_read_versions` static row seed.
+  - `workspace_read_versions` event replay.
+- The task used the existing backend ECS DB env/secrets path and did not print the DB password.
+- The task used a row-count guard inside the transaction: existing table counts had to remain unchanged, and newly-created tables had to be empty before commit.
+
+Apply image:
+
+```text
+828435022930.dkr.ecr.us-west-1.amazonaws.com/mangorts-prod-backend:schema-only-20260706212022@sha256:ca1b3fd2813dfbf45d4c08675fdea13bc5c84861b15c93085fe6d748590e5859
+```
+
+Dry-run ECS task:
+
+```text
+task = arn:aws:ecs:us-west-1:828435022930:task/mangorts-prod-cluster/93a60339a9d64b5ebc71198c6192b680
+exit = 0
+result = {"mode":"dry-run","committed":false,"schema_only":true,"rows_unchanged":true,"tables":65,"indexes":190,"functions":8,"triggers":2,"types":69,"existing_tables_checked":65,"new_tables_checked_empty":0}
+```
+
+Apply ECS task:
+
+```text
+task = arn:aws:ecs:us-west-1:828435022930:task/mangorts-prod-cluster/0b3fe7c5ede8406ab7243afdf8097d89
+exit = 0
+result = {"mode":"apply","committed":true,"schema_only":true,"rows_unchanged":true,"tables":65,"indexes":190,"functions":8,"triggers":2,"types":69,"existing_tables_checked":65,"new_tables_checked_empty":0}
+```
+
+Cleanup:
+
+- Temporary ECS task definition registered: `arn:aws:ecs:us-west-1:828435022930:task-definition/mangorts-prod-schema-only-apply:1`.
+- It was deregistered after the apply task stopped successfully.
+- ECR login auth written by `ko login` was removed from `C:/Users/Jonat/.docker/config.json` after publish.
+- The pushed schema-apply image remains in ECR as a production apply artifact.
+
+Post-apply smoke checks:
+
+```text
+https://api.mangorts.com/healthz -> 200
+https://mangorts.com/healthz -> 200
+https://api.mangorts.com/v1/me unauthenticated -> 401
+```
+
+Notes:
+
+- The prod DB already had 65 public base tables before this apply path; the task's row guard confirms all 65 existing table row counts stayed unchanged.
+- Object counts after apply were above the manifest minimum because the live prod schema already includes supplemental objects beyond the canonical manifest's table/type counts.
+- No DB password, connection string, API key, reset/MFA code, AWS token, or GitHub token was printed or recorded.

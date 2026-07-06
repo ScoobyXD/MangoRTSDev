@@ -554,5 +554,16 @@ Current first-admin bootstrap status:
 - Repo regression tests now cover mixed-case email normalization through Cognito admin create, invitation create, and first-admin bootstrap. `node scripts/run_all_tests.mjs` passed after the tests were added.
 - A fresh ad-hoc `hermes-verify-*` temp script also verified the changed backend test snippets and ran `go test ./internal/auth ./internal/http` plus `go test ./...`; it reported `HERMES_VERIFY_OK` and was deleted after use.
 - Product expectation: users may capitalize email however they want; MangoRTS should normalize internally and should not require users to manually lowercase emails.
+- Jonat completed first prod login and confirmed dev admin/company access in the app.
+- Read-only AWS checks verified the Cognito user is now `CONFIRMED` and CloudWatch has the expected bootstrap event.
+- Bootstrap cleanup has been applied after explicit approval. ECS is stable on backend task definition `mangorts-prod-backend:3`, and `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS` is empty in the current backend task definition.
+- Post-cleanup smoke checks passed for `mangorts.com`, `api.mangorts.com/healthz`, and unauthenticated `/v1/me` returning 401.
+- Sensitive-output caveat: a Terraform JSON diagnostic emitted sensitive variable values into local terminal output during pre-apply parsing. No raw sensitive value was copied into docs. Consider a separate approved origin verification secret rotation if Jonat wants maximum exposure hygiene.
+- Origin verification secret rotation is now complete after explicit approval. CloudFront and the ALB listener rule both match the newly derived origin header value, and post-rotation smoke checks passed.
+- A full plan still has unrelated CloudFront/S3 OAC policy drift; avoid applying it casually during Nylas or DB prep.
+- Nylas prod prep has started: a prod state-signing secret exists in Secrets Manager and local gitignored tfvars references it. Nylas is not enabled yet because the real Nylas client/application ID, API key secret ARN, and webhook secret ARN are still needed.
+- DB schema-copy prep has started: `scripts/prepare_prod_db_schema_copy.py` and `docs/important tasks/prod db schema copy prep.md` define a prepare-only manifest. The rule is schema yes, broad dev row copy no; only reviewed metadata such as `schema_migrations` may be handled by default.
+- The DB prep helper has ad-hoc verification evidence from a temporary `hermes-verify-*` script that checked syntax/diff cleanliness, manifest counts, and row-copy exclusions, then cleaned up temp outputs.
+- Prod DB schema-only apply is now complete after explicit approval. A one-off ECS task applied DDL-only schema objects with top-level row backfills/cleanup omitted. Dry-run and apply tasks both exited 0; row counts stayed unchanged; post-apply smoke checks passed.
 
-No recursive deletion was run during the backend/ECS/schema/bootstrap continuation. No DB password, origin verification secret, temporary password, reset code, MFA code, AWS token, or GitHub token was printed or recorded.
+No recursive deletion was run during the backend/ECS/schema/bootstrap continuation. No DB password, temporary password, reset code, MFA code, AWS token, or GitHub token was printed or recorded in docs.

@@ -461,3 +461,56 @@ First-login case-sensitivity pitfall:
 - Follow-up repo verification added regression coverage for mixed-case email handling in Cognito admin create, invitation create, and first-admin bootstrap. `node scripts/run_all_tests.mjs` passed after the tests were added.
 - For normal users, do not nag them to type lowercase. The app/backend should normalize email casing internally.
 - Hermes follow-up ad-hoc verification also created a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp`, verified the mixed-case email regression snippets, ran `go test ./internal/auth ./internal/http` and `go test ./...`, reported `HERMES_VERIFY_OK`, and deleted the temporary script.
+
+Post-login cleanup status:
+
+- Jonat completed the first browser login/new-password flow and saw dev admin/company access.
+- Read-only checks verified Cognito user `jonathankim829@gmail.com` is `CONFIRMED`, enabled, and verified, and CloudWatch contains a recent `bootstrapped dev admin` event.
+- Local gitignored `terraform.tfvars` has `bootstrap_admin_emails` cleared.
+- A scoped cleanup plan is saved at ignored path `infra/aws-prod/tfplan`; it only updates the ECS service and replaces the backend task definition.
+- Do not apply the plan without explicit approval, because this mutates prod ECS.
+
+Cleanup apply result:
+
+- Jonat approved the prod ECS cleanup apply.
+- The scoped ECS-only plan was applied.
+- ECS stabilized on backend task definition `mangorts-prod-backend:3` with desired/running `2 / 2` and rollout `COMPLETED`.
+- The current backend task definition has `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS` present but empty, so the one-time first-admin allow-list is no longer active.
+- Smoke checks passed for frontend deploy info, accept-invite page, frontend health, API health, and unauthenticated `/v1/me` returning 401.
+- Note: a Terraform JSON diagnostic emitted sensitive variable values into local terminal output during pre-apply parsing. No raw sensitive value was copied into docs. Consider a separate approved origin verification secret rotation if maximum exposure hygiene is desired.
+
+Origin verification secret rotation result:
+
+- Jonat approved rotation after the local terminal exposure caveat.
+- `origin_verify_secret` was replaced in local gitignored `infra/aws-prod/terraform.tfvars` without printing the new value.
+- A scoped Terraform apply updated CloudFront, the existing CloudFront route-rewrite function, and the ALB listener rule.
+- Apply result: `0 added, 3 changed, 0 destroyed`.
+- Verified CloudFront and ALB now match the newly derived origin header value.
+- Smoke checks passed for frontend deploy info, accept-invite, frontend health, API health, and unauthenticated `/v1/me` returning 401.
+- Remaining full-plan drift is unrelated CloudFront/S3 OAC policy drift; do not apply it casually as part of Nylas or DB prep.
+
+Nylas prod prep status:
+
+- `mangorts/prod/nylas-state-secret` now exists in prod Secrets Manager and is referenced in local gitignored prod tfvars.
+- Nylas public routes are wired through CloudFront/backend: webhook challenge echoes successfully; OAuth callback reaches backend and currently redirects with `nylas_not_configured` because provider values are not set.
+- Nylas is not enabled in ECS yet. Missing real provider values: Nylas client/application ID, Nylas API key secret ARN, and Nylas webhook secret ARN.
+- Do not store Nylas API key or webhook secret in docs/chat. Store those directly in AWS Secrets Manager.
+
+Prod DB schema-copy prep status:
+
+- Prepare-only helper added: `scripts/prepare_prod_db_schema_copy.py`.
+- Manifest doc generated: `docs/important tasks/prod db schema copy prep.md`.
+- The manifest treats `backend/db/schema.sql` as canonical unless a live dev schema-only dump proves drift.
+- Broad dev-to-prod data dumps are explicitly disallowed. Only `schema_migrations` is metadata-eligible by default; all tenant/user/work tables are excluded from row copying unless reviewed one by one.
+- Ad-hoc verification used a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp` to run the helper, verify manifest counts/exclusions, run `git diff --check` on the helper, and clean up the temp files.
+
+Prod DB schema-only apply result:
+
+- Jonat later approved applying schema objects to prod with no row copy.
+- Because the DB is private, a one-off ECS/Fargate task was used.
+- The apply used a DDL-only schema derived from `backend/db/schema.sql`; top-level row backfill/cleanup statements were omitted.
+- Dry-run task exited 0 and rolled back with row guard passing.
+- Apply task exited 0 and committed with row guard passing.
+- Verified result: `schema_only=true`, `rows_unchanged=true`, `tables=65`, `indexes=190`, `functions=8`, `triggers=2`, `types=69`.
+- Post-apply smoke checks passed for API health, frontend health, and unauthenticated `/v1/me` returning 401.
+- No migration baseline rows were inserted during this schema-only apply. If future migration automation is enabled, decide separately how to baseline `schema_migrations` without replaying old migrations into an already-current schema.

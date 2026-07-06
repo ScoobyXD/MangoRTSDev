@@ -8,6 +8,11 @@ MangoRTS is a Windows-friendly Go + Vite/React app with a Go API backend and fro
 - Do not run `terraform apply` against prod or modify prod Route53, Cognito, RDS, ECS, ECR, Secrets Manager, GitHub environments, or Nylas settings without explicit confirmation.
 - Do not store production secrets in plaintext local files. Prod secrets belong in AWS Secrets Manager, GitHub environment secrets, or provider dashboards.
 - Use AWS SSO profiles, not long-lived static AWS access keys. Keep `mangorts-dev` and `mangorts-prod` separate.
+- Database access boundary is physical, not trust-based. Agents (Hermes, Codex, Claude, OpenCode, CI helpers) must not have direct database write access or prod writer secrets. The backend app may keep its writer DB credential, and Jonat may use human-only writer/admin DBeaver access, but agents must use only read-only DB credentials/tunnels or scoped MangoRTS app API permissions.
+- Before any agent performs AWS or database work, run `python scripts/verify_agent_db_access_boundary.py`. If it reports active `mangorts-prod`/`mangorts-dev` admin access, static AWS keys, or another write-enabling path, stop and ask Jonat to switch to a physically read-only agent profile/session.
+- Do not retrieve, print, copy, or store prod/dev DB writer passwords, password-bearing connection strings, RDS-managed secret values, Nylas/provider secrets, origin verification secrets, AWS session tokens, or GitHub tokens. Do not run `aws secretsmanager get-secret-value` for writer/app secrets from an agent session.
+- Do not run `psql`, migration tools, schema apply tools, one-off ECS tasks, `ecs:RunTask`, `ecs:RegisterTaskDefinition`, `ecs:UpdateService`, or `iam:PassRole` against prod with writer/admin DB credentials from an agent session. Any future prod DB change must be performed by Jonat through a human-only admin path or via explicitly scoped app/API permissions.
+- Full policy lives in `docs/security/database-agent-access-contract.md`; follow it for DBeaver, AWS SSO/IAM, Secrets Manager, and DB role setup.
 
 ## Repo layout
 

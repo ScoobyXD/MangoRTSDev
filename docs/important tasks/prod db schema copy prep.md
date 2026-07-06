@@ -1,0 +1,241 @@
+# MangoRTS prod DB schema copy preparation manifest
+
+This is a prepare-only manifest. It does not apply SQL to prod.
+
+Update 2026-07-06T21:23:35Z: Jonat approved applying schema objects to prod with no row copy. The actual apply used a DDL-only schema derived from `backend/db/schema.sql`, omitted top-level row backfill/cleanup statements, ran through a one-off ECS/Fargate task, and verified `rows_unchanged=true` before commit. This document remains the prep manifest and row-copy rule reference.
+
+## Canonical schema summary
+
+- Schema SHA-256: `2c0e6d2a331b4b5c6202365b308b1d9db67d7a17c59ae059161a5fa02bf844c9`
+- Tables: 62
+- Indexes: 108
+- Functions/procedures: 8
+- Triggers: 2
+- Enum/custom types: 3
+- Insert statements inside canonical schema: 8
+- Migration files: 140
+- Latest migration: `20260702_resource_policy_access_helper_no_gvic.sql`
+
+## Row-copy rule
+
+Only these metadata tables are eligible for row-level handling by default:
+
+- `schema_migrations`
+
+All other tables are excluded from dev-to-prod row copying by default:
+
+- `users`
+- `companies`
+- `company_memberships`
+- `company_user_groups`
+- `company_user_group_members`
+- `saved_views`
+- `pins`
+- `company_user_group_closure`
+- `invitations`
+- `user_email_connections`
+- `company_email_connections`
+- `communications_message_read_statuses`
+- `communications_message_read_receipt_summaries`
+- `auth_external_identity_deletions`
+- `communications_triage_items`
+- `nodes`
+- `account_folders`
+- `accounts`
+- `node_account_assignments`
+- `node_relationships`
+- `node_information`
+- `node_projection_table`
+- `node_content_changes`
+- `node_content_change_seen`
+- `node_projection_seen_snapshots`
+- `node_map_positions`
+- `logic_gates`
+- `projects`
+- `project_account_assignments`
+- `project_team_assignments`
+- `project_information`
+- `project_projection_table`
+- `project_relationships`
+- `project_relationship_projection`
+- `resource_gvic_assignments`
+- `resource_gvic_effective_assignments`
+- `resource_permissions`
+- `logic_gate_relationships`
+- `logic_gate_information`
+- `logic_gate_projection_table`
+- `logic_gate_map_positions`
+- `user_logic_gate_shortcuts`
+- `node_logic_gate_assignments`
+- `kanban_board_projection`
+- `company_projection_sequences`
+- `gvic_matrix_projection_table`
+- `communications_email_nodes`
+- `company_explorer_folders`
+- `shared_inbox_folders`
+- `shared_inboxes`
+- `company_explorer_items`
+- `recycle_bin_items`
+- `domain_events`
+- `event_rows`
+- `workspace_read_versions`
+- `notification_domain_event_projection_checkpoints`
+- `workspace_derived_domain_event_projection_checkpoints`
+- `notifications`
+- `resource_permission_policy_revisions`
+- `resource_permission_subtree_applications`
+- `resource_gvic_policy_revisions`
+- `resource_gvic_subtree_applications`
+
+## Notes
+
+- This manifest is prepare-only; it does not connect to dev or prod and does not apply SQL.
+- Use backend/db/schema.sql as the canonical schema source unless a live dev pg_dump diff proves drift.
+- Copy schema objects: tables, indexes, enum types, functions, triggers, constraints, and column defaults.
+- Do not bulk-copy tenant/user/work rows from dev into prod.
+- Do not copy company UUIDs from dev; prod company IDs must remain prod-specific.
+- schema_migrations is metadata only; after a reviewed canonical-schema bootstrap it may be marked deliberately, not blindly imported from dev.
+- Company-specific default folders, projections, permissions, and workspace versions should be generated against the prod company UUID by app/bootstrap logic or reviewed idempotent SQL, not dumped from dev rows.
+
+## Migration manifest
+
+- `20260424_node_relationship_guards.sql`
+- `20260501_company_explorer_folders.sql`
+- `20260501_kanban_board_tables.sql`
+- `20260501_logic_gate_projection_table.sql`
+- `20260501_logic_gate_relationship_guards.sql`
+- `20260501_nonblank_information_guards.sql`
+- `20260502_company_explorer_cleanup.sql`
+- `20260502_kanban_column_width.sql`
+- `20260502_map_layout_positions.sql`
+- `20260503_company_explorer_positions.sql`
+- `20260503_item_delete_cleanup.sql`
+- `20260503_kanban_query_metadata.sql`
+- `20260503_z_kanban_column_height_and_query_cleanup.sql`
+- `20260503_zzz_kanban_column_item_color.sql`
+- `20260503_zzzz_kanban_node_only_cards.sql`
+- `20260503_zzzzz_kanban_saved_boards.sql`
+- `20260504_company_explorer_kanban_items.sql`
+- `20260504_company_explorer_move_relationship_cleanup.sql`
+- `20260504_editor_text_projection_canonical.sql`
+- `20260505_auth_identity_and_memberships.sql`
+- `20260505_company_explorer_kanban_folder_items_compat.sql`
+- `20260506_logic_gate_arena.sql`
+- `20260507_auth_accounts_mvp.sql`
+- `20260507_company_explorer_default_folder_seeds.sql`
+- `20260507_kanban_column_resize_limits.sql`
+- `20260507_latest_invitation_token.sql`
+- `20260507_lowercase_auth_emails.sql`
+- `20260507_nodes_status_and_user_display_names.sql`
+- `20260507_password_reset_codes.sql`
+- `20260507_remove_company_viewer.sql`
+- `20260507_remove_custom_resets_and_resource_assignments.sql`
+- `20260508_company_explorer_system_folders.sql`
+- `20260508_nylas_user_email_connections.sql`
+- `20260509_auth_external_identity_deletions.sql`
+- `20260509_mango_kanban_column_color_default.sql`
+- `20260510_company_explorer_folder_shares.sql`
+- `20260511_node_editor_blocks_and_email.sql`
+- `20260512_communications_shared_inbox_folders.sql`
+- `20260512_communications_triage_logic_gates.sql`
+- `20260512_drop_operations.sql`
+- `20260512_fix_triage_conversion_constraints.sql`
+- `20260512_logic_gate_arena_default_column_repair.sql`
+- `20260514_logic_gate_raci_assignments.sql`
+- `20260515_communications_shared_inbox_raci_assignments.sql`
+- `20260517_notifications.sql`
+- `20260518_communications_shared_inbox_account_email.sql`
+- `20260518_notification_type_unread_index.sql`
+- `20260518_remove_kanban_from_company_explorer.sql`
+- `20260519_domain_events_outbox.sql`
+- `20260519_hot_path_read_discipline.sql`
+- `20260519_node_logic_gate_assignments.sql`
+- `20260519_work_item_inbox_entries.sql`
+- `20260519_workspace_read_versions.sql`
+- `20260520_responsible_inbox_raci_nodes.sql`
+- `20260520_user_groups_entity_permissions.sql`
+- `20260521_node_content_changes.sql`
+- `20260521_resource_access_grants.sql`
+- `20260521_shared_inbox_raci_group_assignments.sql`
+- `20260521_z_node_logic_gate_default_full_access.sql`
+- `20260521_zz_shared_triage_default_edit_access.sql`
+- `20260521_zzz_admin_role_default_resource_access.sql`
+- `20260521_zzzz_resource_access_no_access.sql`
+- `20260521_zzzzz_assignment_edit_access.sql`
+- `20260521_zzzzzz_hot_read_visibility_versions.sql`
+- `20260521_zzzzzzz_node_content_changes_actor_display_name.sql`
+- `20260522_effective_resource_access.sql`
+- `20260522_notification_other_role.sql`
+- `20260523_drop_logic_gate_raci_access_trigger.sql`
+- `20260523_drop_node_assignee_access_trigger.sql`
+- `20260523_notification_domain_event_projection_checkpoints.sql`
+- `20260523_remove_notification_source_anchor.sql`
+- `20260523_zz_notification_information_id.sql`
+- `20260523_zzz_node_logic_gate_default_company_edit_access.sql`
+- `20260524_active_logic_gates_system_folder.sql`
+- `20260524_effective_resource_access_single_row.sql`
+- `20260524_node_logic_gate_assignment_priority_guard.sql`
+- `20260524_node_projection_seen_snapshots.sql`
+- `20260524_resource_raci_assignments.sql`
+- `20260524_zz_backfill_legacy_entity_access_permissions.sql`
+- `20260526_logic_gate_verify_status.sql`
+- `20260527_email_node_attachments.sql`
+- `20260527_invitation_onboarding_status.sql`
+- `20260527_zz_admin_effective_access_priority.sql`
+- `20260529_resource_access_defaults.sql`
+- `20260530_racio_projection_resource_permissions.sql`
+- `20260601_kanban_board_projection.sql`
+- `20260601_workspace_derived_projection_checkpoints.sql`
+- `20260602_drop_legacy_kanban_tables.sql`
+- `20260602_projection_sequence_scopes.sql`
+- `20260602_racio_projection_sequences.sql`
+- `20260603_event_rows.sql`
+- `20260606_project_management_timeline_projection.sql`
+- `20260608_accounts.sql`
+- `20260610_projects.sql`
+- `20260611_communications_message_read_statuses.sql`
+- `20260611_company_explorer_folder_permissions.sql`
+- `20260611_recycle_bin.sql`
+- `20260612_project_multi_assignments.sql`
+- `20260612_z_drop_project_scalar_assignments.sql`
+- `20260614_company_explorer_folder_scope.sql`
+- `20260615_aa_user_email_connection_scope.sql`
+- `20260615_logic_gate_resource_raci_assignments.sql`
+- `20260615_user_email_connections_per_account.sql`
+- `20260615_z_ensure_user_email_connections_per_account.sql`
+- `20260615_zz_shared_triage_dedicated_folders.sql`
+- `20260616_shared_inbox_split.sql`
+- `20260617_company_explorer_v2_tables.sql`
+- `20260618_gvic_node_phase1.sql`
+- `20260618_z_gvic_node_phase2_cleanup.sql`
+- `20260619_company_explorer_single_tree_subscriptions.sql`
+- `20260619_notifications_gvic_roles.sql`
+- `20260619_project_health_critical_path.sql`
+- `20260620_company_explorer_final_cutover.sql`
+- `20260620_saved_views.sql`
+- `20260620_z_company_explorer_access_helper_cutover.sql`
+- `20260621_gvic_matrix_flat_my_work_projection.sql`
+- `20260621_z_gvic_matrix_projection_rebuild_relationship_rows.sql`
+- `20260621_zz_gvic_matrix_projection_clean_leaf_paths.sql`
+- `20260622_gvic_logic_gate_pointer_access.sql`
+- `20260622_logic_gate_requested_by.sql`
+- `20260624_company_email_connections.sql`
+- `20260624_gvic_logic_gate_snapshot_nodes.sql`
+- `20260624_pins.sql`
+- `20260624_user_email_connections_personal_only.sql`
+- `20260626_company_explorer_no_node_items.sql`
+- `20260626_company_manager_role.sql`
+- `20260626_hard_resource_permissions_cutover.sql`
+- `20260626_recycle_bin_user_scope.sql`
+- `20260629_communications_archive_jobs.sql`
+- `20260629_logic_gate_kanban_grouping_preferences.sql`
+- `20260629_require_user_display_name.sql`
+- `20260630_communications_message_read_receipt_summaries.sql`
+- `20260630_fix_logic_gate_assignment_membership_fks.sql`
+- `20260630_logic_gate_kanban_saved_view_singleton.sql`
+- `20260630_resource_permission_group_subjects.sql`
+- `20260630_saved_view_settings.sql`
+- `20260630_zz_drop_saved_view_preferences.sql`
+- `20260701_resource_permissions_ignore_gvic.sql`
+- `20260701_resource_policy_pointers.sql`
+- `20260702_resource_policy_access_helper_no_gvic.sql`
