@@ -97,17 +97,18 @@ func TestAuthMiddlewareBootstrapsAllowedDevAdmin(t *testing.T) {
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "first-dev-admin-subject"
-	const email = "first-admin@example.com"
+	const allowlistedEmail = "First-Admin@Example.COM"
+	const claimEmail = "FIRST-ADMIN@example.com"
 
 	handler := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
 		BootstrapDevAdmin: BootstrapDevAdminConfig{
-			Emails:      []string{email},
+			Emails:      []string{allowlistedEmail},
 			CompanyName: "MangoRTS Bootstrap",
 		},
 	}).Routes()
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
-	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, email))
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, claimEmail))
 	res := httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
 
@@ -115,11 +116,15 @@ func TestAuthMiddlewareBootstrapsAllowedDevAdmin(t *testing.T) {
 		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusOK, strings.TrimSpace(res.Body.String()))
 	}
 	var payload struct {
+		User        domain.User                `json:"user"`
 		IsDevAdmin  bool                       `json:"is_dev_admin"`
 		Memberships []domain.CompanyMembership `json:"memberships"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
+	}
+	if payload.User.Email != "first-admin@example.com" {
+		t.Fatalf("user email = %q, want lowercased email", payload.User.Email)
 	}
 	if !payload.IsDevAdmin {
 		t.Fatal("is_dev_admin = false, want true")

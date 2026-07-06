@@ -435,6 +435,29 @@ Next steps now:
 
 First admin bootstrap note:
 
-- `infra/aws-prod/terraform.tfvars` is gitignored and has been locally prepared with `bootstrap_admin_emails = "Jonathankim829@gmail.com"` and `bootstrap_company_name = "180 Snacks"`.
-- This local input update has not been applied yet because `mangorts-prod` AWS SSO is expired.
-- Run `aws sso login --profile mangorts-prod`, then plan/apply only the ECS task definition/service update for these bootstrap environment variables.
+- `infra/aws-prod/terraform.tfvars` is gitignored and has local bootstrap values for `Jonathankim829@gmail.com` and `180 Snacks`.
+- `mangorts-prod` AWS SSO was refreshed and verified against prod account `828435022930`.
+- A scoped Terraform target plan was used to avoid unrelated CloudFront/S3 drift during this narrow bootstrap step.
+- The scoped ECS bootstrap apply completed with `1 added, 1 changed, 1 destroyed`.
+- ECS service `mangorts-prod-backend` is stable on task definition revision `2` with desired/running tasks `2` / `2`.
+- The task definition now has `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS=Jonathankim829@gmail.com` and `MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME=180 Snacks`.
+- Cognito user `Jonathankim829@gmail.com` exists in user pool `us-west-1_tddWJsjUA`, is enabled, has verified email, and is in `FORCE_CHANGE_PASSWORD` status.
+- No temporary password, reset code, MFA code, DB password, origin verification secret, AWS token, or GitHub token was printed or recorded.
+
+Next first-admin action:
+
+1. Jonat signs in at `https://mangorts.com/login` using the Cognito invitation / temporary-password flow from his private email.
+2. Jonat completes the new-password flow privately.
+3. The first authenticated `/v1/me` request should bootstrap company `180 Snacks` and grant `dev_admin` membership.
+4. After verifying membership, clear `bootstrap_admin_emails` and roll ECS again so the one-time allow-list is not left enabled.
+
+First-login case-sensitivity pitfall:
+
+- The frontend lowercases the email before calling Cognito.
+- The first Cognito user was initially created with mixed-case email `Jonathankim829@gmail.com`.
+- That caused login to report incorrect email/password even when Jonat copied the temporary password exactly.
+- The Cognito email alias was normalized to lowercase `jonathankim829@gmail.com`, with `email_verified=true`, and `admin-get-user` now resolves the lowercase email.
+- Retry login with lowercase email and the same private temporary password. Do not paste the password or any code into chat/docs.
+- Follow-up repo verification added regression coverage for mixed-case email handling in Cognito admin create, invitation create, and first-admin bootstrap. `node scripts/run_all_tests.mjs` passed after the tests were added.
+- For normal users, do not nag them to type lowercase. The app/backend should normalize email casing internally.
+- Hermes follow-up ad-hoc verification also created a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp`, verified the mixed-case email regression snippets, ran `go test ./internal/auth ./internal/http` and `go test ./...`, reported `HERMES_VERIFY_OK`, and deleted the temporary script.

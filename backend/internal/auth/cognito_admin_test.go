@@ -37,6 +37,9 @@ func TestCognitoAdminCreateUserSendsInitialInvite(t *testing.T) {
 	if username := stringField(t, transport.requests[0], "Username"); username != "user@example.com" {
 		t.Fatalf("Username = %q, want lowercased email", username)
 	}
+	if email := userAttributeField(t, transport.requests[0], "email"); email != "user@example.com" {
+		t.Fatalf("email attribute = %q, want lowercased email", email)
+	}
 	if action := stringField(t, transport.requests[0], "MessageAction"); action != "SUPPRESS" {
 		t.Fatalf("MessageAction = %q, want SUPPRESS", action)
 	}
@@ -201,4 +204,20 @@ func stringField(t *testing.T, payload map[string]any, name string) string {
 	t.Helper()
 	value, _ := payload[name].(string)
 	return value
+}
+
+func userAttributeField(t *testing.T, payload map[string]any, name string) string {
+	t.Helper()
+	attributes, ok := payload["UserAttributes"].([]any)
+	if !ok {
+		t.Fatalf("UserAttributes = %#v, want list", payload["UserAttributes"])
+	}
+	for _, item := range attributes {
+		attribute, _ := item.(map[string]any)
+		if attribute["Name"] == name {
+			value, _ := attribute["Value"].(string)
+			return value
+		}
+	}
+	return ""
 }

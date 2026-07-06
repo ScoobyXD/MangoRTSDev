@@ -1940,3 +1940,378 @@ Next action after SSO is refreshed:
 5. Have Jonat sign in at `https://mangorts.com`; the first successful authenticated request should bootstrap company `180 Snacks` and grant the user `dev_admin`.
 6. Verify `/v1/me` returns the user and membership.
 7. Remove or clear `bootstrap_admin_emails` after bootstrap so this one-time path is not left broadly enabled.
+
+## Step 12A — First prod admin bootstrap resumed from `main`
+
+Status: still blocked on AWS SSO sign-in; local prep verified.
+
+Updated on: 2026-07-06T18:11:52Z.
+
+Branch/state check:
+
+```text
+Current branch: main
+Upstream: origin/main
+Latest local commit: 337cb12a docs(prod): record first admin bootstrap prep
+Working tree before this documentation update: clean
+```
+
+Safe local verification:
+
+- Confirmed `infra/aws-prod/terraform.tfvars` exists locally.
+- Confirmed it is gitignored.
+- Confirmed it is not tracked by Git.
+- Confirmed the prepared bootstrap values are still:
+
+```text
+bootstrap_admin_emails = "Jonathankim829@gmail.com"
+bootstrap_company_name = "180 Snacks"
+```
+
+- Scoped scan of only those bootstrap lines found no obvious secret patterns.
+- Confirmed current repo code still wires the Terraform variables into ECS env vars:
+  - `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS`
+  - `MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME`
+- Confirmed backend first-login bootstrap still runs from `maybeBootstrapDevAdmin` when an authenticated user has no memberships.
+
+AWS SSO status:
+
+```text
+aws sts get-caller-identity --profile mangorts-prod
+```
+
+Result:
+
+```text
+Token has expired and refresh failed
+```
+
+Refresh attempt:
+
+```text
+aws sso login --profile mangorts-prod
+```
+
+Result:
+
+- The AWS CLI opened/provided an SSO browser authorization URL.
+- The command timed out after 600 seconds before authorization completed.
+- No prod AWS resource was created, changed, deleted, or applied in this step.
+
+Follow-up SSO helper started at 2026-07-06T18:13:05Z:
+
+- Started `aws sso login --profile mangorts-prod --use-device-code` in a tracked background terminal process.
+- The one-time device code was shown only in the local terminal output and is not recorded in this doc.
+- No prod AWS resource was created, changed, deleted, or applied by starting this login helper.
+Next action after Jonat completes SSO authorization:
+
+1. Verify `aws sts get-caller-identity --profile mangorts-prod` returns prod account `828435022930`.
+2. Run a Terraform plan from `main` and verify it only updates the ECS task definition/service for the bootstrap env vars.
+3. Ask for explicit approval before applying the ECS/bootstrap update.
+4. After apply, create or verify the Cognito user `Jonathankim829@gmail.com` without printing or storing any password.
+5. Have Jonat sign in at `https://mangorts.com` and verify `/v1/me` returns membership for `180 Snacks`.
+6. Clear `bootstrap_admin_emails` after success.
+
+## Step 12B — SSO refreshed and bootstrap Terraform plan prepared
+
+Status: ready for explicit approval before ECS update apply.
+
+Updated on: 2026-07-06T18:22:31Z.
+
+SSO verification:
+
+```text
+aws sts get-caller-identity --profile mangorts-prod --output json
+```
+
+Result:
+
+```text
+Account: 828435022930
+Assumed role: AWSReservedSSO_AdministratorAccess
+SSO identity: ScoobyXD
+```
+
+Meaning:
+
+- Local `mangorts-prod` SSO is refreshed and points to the correct prod AWS account.
+- This was read-only identity verification.
+
+Initial full plan:
+
+```text
+terraform -chdir=infra/aws-prod plan -out=tfplan -input=false -no-color
+```
+
+Result:
+
+```text
+Plan: 1 to add, 4 to change, 1 to destroy.
+```
+
+Important finding:
+
+- The full plan included the desired ECS task definition/service bootstrap env var update.
+- It also included unrelated CloudFront/S3 policy updates, including a CloudFront Function line-ending-only code diff from the Windows checkout and provider/config drift around the frontend S3 origin block.
+- Because this step should only roll the one-time first-admin bootstrap env vars into ECS, the full `tfplan` should not be applied for this bootstrap step.
+
+Scoped bootstrap plan:
+
+```text
+terraform -chdir=infra/aws-prod plan \
+  -target='aws_ecs_task_definition.backend[0]' \
+  -target='aws_ecs_service.backend[0]' \
+  -out=tfplan \
+  -input=false \
+  -no-color
+```
+
+Result:
+
+```text
+Plan: 1 to add, 1 to change, 1 to destroy.
+```
+
+Planned scoped changes:
+
+- Register a replacement ECS task definition revision for `mangorts-prod-backend`.
+- Update ECS service `mangorts-prod-backend` to use the new task definition revision.
+- Set only these bootstrap env vars in the container definition:
+
+```text
+MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS: "" -> "Jonathankim829@gmail.com"
+MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME: "MangoRTS" -> "180 Snacks"
+```
+
+Safety note:
+
+- The scoped plan uses Terraform `-target`, which Terraform warns is not for routine use.
+- It is being used here to avoid unrelated CloudFront/S3 changes during a narrow first-admin bootstrap rollout.
+- No prod mutation has been applied yet.
+
+Next action:
+
+- Ask Jonat for explicit approval before running:
+
+```text
+terraform -chdir=infra/aws-prod apply -input=false tfplan
+```
+
+- After that ECS rollout is healthy, create or verify Cognito user `Jonathankim829@gmail.com` and continue the first login bootstrap flow.
+
+## Step 12C — Bootstrap ECS rollout applied and first Cognito user created
+
+Status: waiting on Jonat first login/new-password flow.
+
+Updated on: 2026-07-06T18:30:57Z.
+
+Approval:
+
+- Jonat explicitly approved applying the scoped prod ECS bootstrap update.
+- Jonat reminded Hermes not to expose sensitive material digitally, to keep docs updated, and to stay mindful of branches/worktrees.
+
+Pre-apply branch/worktree check:
+
+```text
+Current branch: main
+Upstream: origin/main
+Known worktrees:
+- C:/Users/Jonat/MangoRTSDev                           [main]
+- C:/Users/Jonat/MangoRTSDev-worktrees/prod-docs-ci    [feat/prod-docs-ci]
+- C:/Users/Jonat/MangoRTSDev-worktrees/prod-infra      [feat/prod-infra-platform]
+- C:/Users/Jonat/MangoRTSDev-worktrees/prod-migrations [feat/prod-migration-runner]
+- C:/Users/Jonat/MangoRTSDev-worktrees/prod-v1-retry   [feat/prod-v1-retry]
+```
+
+Applied command:
+
+```text
+terraform -chdir=infra/aws-prod apply -input=false -no-color tfplan
+```
+
+Apply result:
+
+```text
+Apply complete! Resources: 1 added, 1 changed, 1 destroyed.
+```
+
+Terraform warning:
+
+- The applied plan was created with `-target`, so it intentionally ignored unrelated pending changes.
+- This was expected for this narrow bootstrap rollout.
+
+ECS verification:
+
+```text
+ECS service: mangorts-prod-backend
+Task definition: mangorts-prod-backend:2
+Rollout state: COMPLETED
+Desired tasks: 2
+Running tasks: 2
+Pending tasks: 0
+```
+
+Task definition env verification:
+
+```text
+MANGORTS_DEPLOY_ENV=prod
+MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME=180 Snacks
+MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS=Jonathankim829@gmail.com
+```
+
+Target health:
+
+- Two current targets are healthy.
+- Two old targets are draining from the replaced task definition revision, expected during deregistration.
+
+Smoke verification after ECS rollout:
+
+```text
+https://mangorts.com/deploy-info.json -> HTTP 200
+https://mangorts.com/accept-invite -> HTTP 200
+https://mangorts.com/healthz -> HTTP 200
+https://api.mangorts.com/healthz -> HTTP 200
+https://mangorts.com/v1/me without auth -> HTTP 401
+```
+
+CloudWatch check:
+
+- Recent backend logs matched no events for `failed_to_bootstrap`, `relation does not exist`, or `panic`.
+
+Cognito user creation:
+
+```text
+User pool: us-west-1_tddWJsjUA
+Email: Jonathankim829@gmail.com
+Status: FORCE_CHANGE_PASSWORD
+Enabled: true
+Email verified: true
+```
+
+Sensitive-info note:
+
+- No temporary password, reset code, MFA code, DB password, origin verification secret, AWS token, or GitHub token was printed or recorded.
+- The Cognito user was created with email delivery requested through AWS/Cognito; any temporary password or code is for Jonat only and should not be pasted into chat/docs/screenshots.
+
+Next action:
+
+1. Jonat should check `Jonathankim829@gmail.com` for the Cognito invitation / temporary-password email.
+2. Jonat should sign in at `https://mangorts.com/login` with that email and complete the new-password flow privately.
+3. After login, the first authenticated `/v1/me` request should create company `180 Snacks` and grant the user `dev_admin` membership.
+4. Hermes should then verify the authenticated user/membership only with a non-secret token path or a browser session Jonat controls.
+5. After success, clear `bootstrap_admin_emails` and roll ECS again so the one-time allow-list is not left enabled.
+
+## Step 12D — First login failed due Cognito email case mismatch; alias normalized
+
+Status: retry login needed.
+
+Updated on: 2026-07-06T18:36:06Z.
+
+User report:
+
+- Jonat copied the temporary Cognito password exactly but the MangoRTS login page showed `Login failed: Incorrect email or password.`
+- The screenshot showed the email entered as `Jonathankim829@gmail.com`.
+- No password or code was transcribed or recorded.
+
+Read-only finding:
+
+- The frontend normalizes login email to lowercase before sending Cognito `USER_PASSWORD_AUTH`.
+- The Cognito user had been created with mixed-case email `Jonathankim829@gmail.com`.
+- `admin-get-user` worked for the mixed-case email but failed for lowercase `jonathankim829@gmail.com`.
+- This likely made the app's lowercased login username not match the Cognito email alias.
+
+Fix applied:
+
+```text
+Cognito user email attribute normalized to: jonathankim829@gmail.com
+email_verified remains: true
+User status remains: FORCE_CHANGE_PASSWORD
+```
+
+Verification after fix:
+
+- `admin-get-user` now works for lowercase `jonathankim829@gmail.com`.
+- `admin-get-user` no longer works for the mixed-case alias, expected after the email alias change.
+
+Sensitive-info note:
+
+- No temporary password, new password, reset code, MFA code, DB password, origin verification secret, AWS token, or GitHub token was printed or recorded.
+
+Next action:
+
+- Jonat should retry `https://mangorts.com/login` with `jonathankim829@gmail.com` and the same Cognito temporary password from the private email.
+- The app also lowercases internally, so this should reach the correct Cognito user now.
+- If it still fails, do not paste the password; Hermes should resend/recreate the Cognito invitation flow without printing a password.
+
+## Step 12E — Email-case normalization regression coverage added
+
+Status: repo verification complete; waiting on Jonat login retry.
+
+Updated on: 2026-07-06T18:52:43Z.
+
+User requirement:
+
+- Users must be allowed to capitalize login/invite emails however they want.
+- MangoRTS should normalize email casing internally instead of asking users to type lowercase.
+
+Code inspection result:
+
+- Frontend login already normalizes submitted email to lowercase before Cognito auth.
+- Backend store paths already normalize auth users, invitations, password-reset lookup, and email comparisons to lowercase.
+- Backend Cognito admin client already lowercases email before Cognito admin create/accept/delete calls.
+- Backend bootstrap allow-list config already normalizes configured emails to lowercase.
+
+Repo changes made:
+
+- Added regression coverage that Cognito admin user creation sends a lowercase email attribute, not just a lowercase username.
+- Added regression coverage that creating an invitation with mixed-case email stores/passes lowercase email before Cognito user creation.
+- Strengthened the first-admin bootstrap middleware test so mixed-case allow-list and mixed-case Cognito claim still bootstrap, while the recorded app user email is lowercase.
+
+Changed files:
+
+```text
+backend/internal/auth/cognito_admin_test.go
+backend/internal/http/auth_handlers_test.go
+backend/internal/http/auth_middleware_test.go
+```
+
+Verification:
+
+```text
+cd backend && go test ./internal/auth ./internal/http
+cd backend && go test ./...
+node scripts/run_all_tests.mjs
+```
+
+Result:
+
+```text
+All passed.
+```
+
+Sensitive-info note:
+
+- No temporary password, new password, reset code, MFA code, DB password, origin verification secret, AWS token, or GitHub token was printed or recorded.
+
+Next action:
+
+- Jonat should retry login with any email casing. The app will lowercase before Cognito.
+- Since prod Cognito alias has already been normalized to lowercase, the temporary-password login should now match the correct user.
+- After successful login/new-password flow, verify authenticated `/v1/me`, then clear `bootstrap_admin_emails` from ECS.
+
+Verifier follow-up on 2026-07-06T18:55:05Z:
+
+- Hermes required a fresh ad-hoc verifier after the backend test edits.
+- Created a temporary verifier script under `C:/Users/Jonat/AppData/Local/Temp` with `hermes-verify-` filename prefix.
+- The verifier checked the mixed-case email regression snippets in the three changed backend test files.
+- The verifier ran:
+
+```text
+go test ./internal/auth ./internal/http
+go test ./...
+```
+
+- Result: `HERMES_VERIFY_OK mixed-case email normalization regression checks passed`.
+- The temporary verifier script was deleted after it ran.
+
+This is ad-hoc verification in addition to the normal suite output above, not a separate production deploy.

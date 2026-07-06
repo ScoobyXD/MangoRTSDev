@@ -537,14 +537,22 @@ Status: backend, frontend, and empty prod DB schema are deployed.
 
 Immediate next milestone work:
 
-1. Refresh local AWS SSO for `mangorts-prod`.
-2. Apply the prepared one-time bootstrap configuration for first prod admin:
-   - admin email: `Jonathankim829@gmail.com`
-   - company display name: `180 Snacks`
-3. Create or verify the Cognito user in prod user pool `us-west-1_tddWJsjUA` without printing/storing passwords.
-4. Verify first prod admin login at `https://mangorts.com`.
-5. Verify authenticated `/v1/me` returns the prod user and `180 Snacks` membership.
-6. Clear `bootstrap_admin_emails` after success so the one-time bootstrap path is not left enabled.
-7. Configure GitHub production secrets/vars so GitHub Actions can repeat the deploy path.
+1. Jonat signs in at `https://mangorts.com/login` using the Cognito invitation / temporary-password flow sent privately to `Jonathankim829@gmail.com`.
+2. Jonat completes the new-password flow privately. Do not paste the temporary password, new password, reset code, MFA code, or screenshots containing them into chat/docs.
+3. The first authenticated `/v1/me` request should bootstrap company `180 Snacks` and grant `dev_admin` membership.
+4. Verify authenticated `/v1/me` returns the prod user and `180 Snacks` membership.
+5. Clear `bootstrap_admin_emails` after success so the one-time bootstrap path is not left enabled.
+6. Configure GitHub production secrets/vars so GitHub Actions can repeat the deploy path.
 
-No recursive deletion was run during the backend/ECS/schema/bootstrap continuation. No DB password or origin verification secret was printed or recorded. The current blocker is only expired AWS SSO for `mangorts-prod`.
+Current first-admin bootstrap status:
+
+- Local AWS SSO for `mangorts-prod` is refreshed and verified against prod account `828435022930`.
+- The scoped ECS bootstrap apply completed and ECS is stable on task definition `mangorts-prod-backend:2`.
+- The prod backend task definition now includes the one-time bootstrap email/company env vars for `Jonathankim829@gmail.com` and `180 Snacks`.
+- Cognito user `jonathankim829@gmail.com` exists in prod user pool `us-west-1_tddWJsjUA`, is enabled, has verified email, and is in `FORCE_CHANGE_PASSWORD` status.
+- First login initially failed because the frontend lowercased the email while the Cognito email alias had mixed-case casing. The Cognito alias was normalized to lowercase. Jonat should retry with lowercase email and the same private temporary password.
+- Repo regression tests now cover mixed-case email normalization through Cognito admin create, invitation create, and first-admin bootstrap. `node scripts/run_all_tests.mjs` passed after the tests were added.
+- A fresh ad-hoc `hermes-verify-*` temp script also verified the changed backend test snippets and ran `go test ./internal/auth ./internal/http` plus `go test ./...`; it reported `HERMES_VERIFY_OK` and was deleted after use.
+- Product expectation: users may capitalize email however they want; MangoRTS should normalize internally and should not require users to manually lowercase emails.
+
+No recursive deletion was run during the backend/ECS/schema/bootstrap continuation. No DB password, origin verification secret, temporary password, reset code, MFA code, AWS token, or GitHub token was printed or recorded.
