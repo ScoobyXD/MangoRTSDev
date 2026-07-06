@@ -30,7 +30,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
 
 resource "aws_cloudfront_origin_access_control" "frontend" {
   name                              = "${local.name_prefix}-frontend"
-  description                       = "MangoRTS dev frontend S3 origin access"
+  description                       = "MangoRTS ${var.environment} frontend S3 origin access"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
@@ -65,7 +65,7 @@ JS
 
 resource "aws_cloudfront_distribution" "app" {
   enabled             = true
-  comment             = "MangoRTS dev app and API edge"
+  comment             = "MangoRTS ${var.environment} app and API edge"
   default_root_object = "index.html"
   aliases             = [local.app_domain, local.api_domain]
   price_class         = "PriceClass_100"
@@ -188,7 +188,7 @@ resource "aws_cloudfront_distribution" "app" {
   lifecycle {
     precondition {
       condition     = local.effective_origin_verify_secret != ""
-      error_message = "Set origin_verify_secret. During migration, the deprecated dev_basic_auth_password can be used as the same secret material."
+      error_message = "Set origin_verify_secret."
     }
   }
 }

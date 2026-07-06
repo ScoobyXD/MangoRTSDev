@@ -23,7 +23,7 @@ data "aws_iam_policy_document" "ecs_execution_secrets" {
   statement {
     actions = ["secretsmanager:GetSecretValue"]
     resources = compact([
-      var.existing_db_password_secret_arn,
+      local.db_password_secret_arn,
       var.nylas_api_key_secret_arn,
       var.nylas_state_secret_arn,
       var.nylas_webhook_secret_arn
@@ -82,7 +82,7 @@ data "aws_iam_policy_document" "github_oidc_assume_role" {
 
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
+      identifiers = [local.github_oidc_provider_arn]
     }
 
     condition {
@@ -94,12 +94,14 @@ data "aws_iam_policy_document" "github_oidc_assume_role" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_owner}/${var.github_repository}:ref:refs/heads/${var.github_branch}"]
+      values   = local.github_oidc_subjects
     }
   }
 }
 
 resource "aws_iam_openid_connect_provider" "github" {
+  count = var.create_github_oidc_provider ? 1 : 0
+
   url            = "https://token.actions.githubusercontent.com"
   client_id_list = ["sts.amazonaws.com"]
 }
@@ -107,6 +109,13 @@ resource "aws_iam_openid_connect_provider" "github" {
 resource "aws_iam_role" "github_deploy" {
   name               = "${local.name_prefix}-github-deploy"
   assume_role_policy = data.aws_iam_policy_document.github_oidc_assume_role.json
+
+  lifecycle {
+    precondition {
+      condition     = var.create_github_oidc_provider || trimspace(var.github_oidc_provider_arn) != ""
+      error_message = "Set github_oidc_provider_arn when create_github_oidc_provider is false."
+    }
+  }
 }
 
 data "aws_iam_policy_document" "github_deploy" {
