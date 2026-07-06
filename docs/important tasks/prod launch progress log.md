@@ -1759,3 +1759,62 @@ Next action:
 - Decide the first prod admin email and bootstrap/login path.
 - Configure GitHub production secrets/vars for repeatable GitHub Actions deploys.
 - Commit/push the local repo/doc changes when Jonat is ready.
+
+## Step 10 — GitHub safety upload of prod worktracks
+
+Status: complete.
+
+Updated on: 2026-07-06T16:18:47Z.
+
+Safety note:
+
+- No branch deletion, recursive deletion, reset, clean, force-push, or history rewrite was run.
+- Secret/local-only files were checked before upload and remained untracked/ignored:
+  - `infra/aws-prod/backend.hcl`
+  - `infra/aws-prod/terraform.tfvars`
+  - `infra/aws-prod/tfplan`
+  - `frontend/.env.local`
+- A diff/content scan of the active prod worktree and prod worktrack worktrees found no AWS access keys, private keys, GitHub PATs, AWS session token literals, or origin verification secret assignments to upload.
+- A migration-runner test fixture includes fake password strings only; no real credential was recorded.
+
+Branches/worktracks found locally:
+
+```text
+main                       -> origin/main at ace4ce4c
+prod-scaffolding-v1        -> origin/prod-scaffolding-v1, current live prod scaffold track
+feat/prod-docs-ci          -> docs/CI worktree
+feat/prod-infra-platform   -> reusable prod infra/module worktree
+feat/prod-migration-runner -> migration runner worktree
+feat/prod-v1-retry         -> retry marker branch; no local uncommitted changes
+```
+
+Commits created before push:
+
+```text
+cf01a176 prod-scaffolding-v1        feat(prod): finalize production scaffold deployment docs
+2934bf55 feat/prod-docs-ci          docs(prod): add production launch docs and CI workflow
+a70fb42f feat/prod-infra-platform   feat(prod): scaffold reusable production infrastructure
+cecf0ff2 feat/prod-migration-runner feat(prod): add database migration runner
+```
+
+Branches pushed to the main GitHub repository `https://github.com/ScoobyXD/MangoRTSDev.git`:
+
+```text
+prod-scaffolding-v1        -> cf01a176
+feat/prod-docs-ci          -> 2934bf55
+feat/prod-infra-platform   -> a70fb42f
+feat/prod-migration-runner -> cecf0ff2
+feat/prod-v1-retry         -> 682f65b7
+```
+
+Verification:
+
+- `node scripts/run_all_tests.mjs` passed on `prod-scaffolding-v1` before the upload.
+- `go test ./...` passed in the `feat/prod-migration-runner` backend worktree.
+- `git ls-remote --heads origin ...` confirmed all five branch heads exist on GitHub after push.
+
+Next action:
+
+- Keep `prod-scaffolding-v1` as the current primary prod launch branch.
+- Do not merge any of the worktrack branches to `main` until we intentionally review/open PRs or choose a merge strategy.
+- Next product milestone remains first prod admin/bootstrap login, then GitHub production secrets/vars for repeatable deploys.
