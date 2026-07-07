@@ -67,6 +67,10 @@ jobs:
           TF_CREATE_PRIVATE_ECS_SUBNETS: ${{ vars.TF_CREATE_PRIVATE_ECS_SUBNETS || 'false' }}
           TF_ECS_PRIVATE_SUBNET_CIDRS: ${{ vars.TF_ECS_PRIVATE_SUBNET_CIDRS || '[]' }}
           TF_ECS_NAT_GATEWAY_MODE: ${{ vars.TF_ECS_NAT_GATEWAY_MODE || 'single' }}
+          TF_ENABLE_DB_TUNNEL_HOST: ${{ vars.TF_ENABLE_DB_TUNNEL_HOST || 'false' }}
+          TF_DB_TUNNEL_INSTANCE_TYPE: ${{ vars.TF_DB_TUNNEL_INSTANCE_TYPE || 't3.nano' }}
+          TF_DB_TUNNEL_SUBNET_ID: ${{ vars.TF_DB_TUNNEL_SUBNET_ID || '' }}
+          TF_DB_TUNNEL_LOCAL_PORT: ${{ vars.TF_DB_TUNNEL_LOCAL_PORT || '15432' }}
           TF_EXISTING_DB_HOST: ${{ vars.TF_EXISTING_DB_HOST }}
           TF_EXISTING_DB_PORT: ${{ vars.TF_EXISTING_DB_PORT || '5432' }}
           TF_EXISTING_DB_NAME: ${{ vars.TF_EXISTING_DB_NAME }}
@@ -102,6 +106,10 @@ jobs:
           : "${TF_ORIGIN_VERIFY_SECRET:?Set GitHub secret PROD_ORIGIN_VERIFY_SECRET.}"
           if [[ "$TF_CREATE_PRIVATE_ECS_SUBNETS" != "true" && "$TF_CREATE_PRIVATE_ECS_SUBNETS" != "false" ]]; then
             echo "TF_CREATE_PRIVATE_ECS_SUBNETS must be true or false" >&2
+            exit 1
+          fi
+          if [[ "$TF_ENABLE_DB_TUNNEL_HOST" != "true" && "$TF_ENABLE_DB_TUNNEL_HOST" != "false" ]]; then
+            echo "TF_ENABLE_DB_TUNNEL_HOST must be true or false" >&2
             exit 1
           fi
           NYLAS_CONFIGURED_COUNT=0
@@ -154,6 +162,10 @@ jobs:
           create_private_ecs_subnets = $TF_CREATE_PRIVATE_ECS_SUBNETS
           ecs_private_subnet_cidrs = $TF_ECS_PRIVATE_SUBNET_CIDRS_NORMALIZED
           ecs_nat_gateway_mode = $(json_string "$TF_ECS_NAT_GATEWAY_MODE")
+          enable_db_tunnel_host = $TF_ENABLE_DB_TUNNEL_HOST
+          db_tunnel_instance_type = $(json_string "$TF_DB_TUNNEL_INSTANCE_TYPE")
+          db_tunnel_subnet_id = $(json_string "$TF_DB_TUNNEL_SUBNET_ID")
+          db_tunnel_local_port = $TF_DB_TUNNEL_LOCAL_PORT
           existing_db_host = $(json_string "$TF_EXISTING_DB_HOST")
           existing_db_port = $TF_EXISTING_DB_PORT
           existing_db_name = $(json_string "$TF_EXISTING_DB_NAME")
@@ -181,7 +193,7 @@ jobs:
           EOF
           {
             echo "Generated non-secret Terraform inputs:"
-            grep -E '^(aws_region|root_domain_name|vpc_id|public_subnet_ids|private_subnet_ids|create_private_ecs_subnets|ecs_private_subnet_cidrs|ecs_nat_gateway_mode|deploy_revision|github_owner|github_repository|github_branch) =' ci.auto.tfvars
+            grep -E '^(aws_region|root_domain_name|vpc_id|public_subnet_ids|private_subnet_ids|create_private_ecs_subnets|ecs_private_subnet_cidrs|ecs_nat_gateway_mode|enable_db_tunnel_host|db_tunnel_instance_type|db_tunnel_subnet_id|db_tunnel_local_port|deploy_revision|github_owner|github_repository|github_branch) =' ci.auto.tfvars
           }
           while IFS= read -r subnet_id; do
             if ! aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "$subnet_id" --filters "Name=vpc-id,Values=$TF_VPC_ID" >/dev/null; then

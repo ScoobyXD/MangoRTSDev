@@ -94,7 +94,10 @@ data "aws_iam_policy_document" "github_oidc_assume_role" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_owner}/${var.github_repository}:ref:refs/heads/${var.github_branch}"]
+      values = [
+        "repo:${var.github_owner}/${var.github_repository}:environment:production",
+        "repo:${var.github_owner}/${var.github_repository}:ref:refs/heads/${var.github_branch}"
+      ]
     }
   }
 }
