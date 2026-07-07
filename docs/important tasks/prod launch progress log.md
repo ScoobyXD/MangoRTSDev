@@ -2899,7 +2899,7 @@ Repo changes prepared:
 
 ```text
 backend/db/schema.sql
-docs/infra/mangorts-prod-schema-repair-20260707.sql
+temporary DBeaver repair SQL, later promoted to backend/db/migrations/20260707_repair_missing_canonical_schema_objects.sql
 ```
 
 The repair SQL:
@@ -2917,7 +2917,7 @@ The repair SQL:
 Validation run:
 
 ```text
-git diff --check -- backend/db/schema.sql docs/infra/mangorts-prod-schema-repair-20260707.sql
+git diff --check -- backend/db/schema.sql
 rg checks for the repaired schema objects
 go test ./internal/store ./cmd/miraeopus-migrate
 ```
@@ -2931,7 +2931,7 @@ ok miraeopus/backend/cmd/miraeopus-migrate
 
 Next action:
 
-1. Jonat reviews `docs/infra/mangorts-prod-schema-repair-20260707.sql`.
+1. Jonat reviews the temporary DBeaver repair SQL.
 2. Jonat runs the repair SQL in human-only prod DBeaver if approved.
 3. Verify the four tables exist in prod after the repair.
 4. Verify `projects.health` exists in prod.
@@ -2945,7 +2945,7 @@ Updated on: 2026-07-07T06:21:07Z.
 
 Execution:
 
-- Jonat ran `docs/infra/mangorts-prod-schema-repair-20260707.sql` through the human-only prod DBeaver connection.
+- Jonat ran the temporary repair SQL through the human-only prod DBeaver connection. The runnable SQL was later promoted into `backend/db/migrations/20260707_repair_missing_canonical_schema_objects.sql` and removed from `docs/infra`.
 - The agent did not connect to prod DB or run SQL.
 
 Observed DDL notices:
@@ -3001,7 +3001,7 @@ Repo follow-up:
 - Added `backend/db/migrations/20260707_repair_missing_canonical_schema_objects.sql`.
 - The migration carries the same durable DDL as the human DBeaver repair: `projects.health`, `projects_health_chk`, the missing communications attachment table, the missing critical-path table, the timeline source/projection tables, current timeline projection `accounts`, and all related indexes.
 - It is idempotent so it can run against prod after the manual repair, dev where the older migrations already succeeded, or a fresh DB built from the current schema snapshot.
-- `docs/infra/mangorts-prod-schema-repair-20260707.sql` remains as the human-readable DBeaver repair/audit file, but the real long-term schema history now lives in `backend/db/migrations/`.
+- The temporary DBeaver repair SQL was promoted into `backend/db/migrations/20260707_repair_missing_canonical_schema_objects.sql`; do not keep a separate runnable schema-repair SQL source under `docs/infra`.
 - Added `-baseline-migrations` to the Go migration runner so a reviewed fresh DB created from `backend/db/schema.sql` can record the migration filenames in the same transaction instead of relying on manual `schema_migrations` edits.
 
 Schema standard going forward:

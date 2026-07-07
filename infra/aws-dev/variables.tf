@@ -177,19 +177,19 @@ variable "container_port" {
 variable "backend_cpu" {
   description = "Fargate task CPU units."
   type        = number
-  default     = 512
+  default     = 2048
 }
 
 variable "backend_memory" {
   description = "Fargate task memory MiB."
   type        = number
-  default     = 1024
+  default     = 4096
 }
 
 variable "backend_desired_count" {
   description = "Number of backend tasks for dev."
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "default_company_id" {
