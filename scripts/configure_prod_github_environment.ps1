@@ -125,9 +125,15 @@ function Set-GitHubVariable {
     throw "Variable $Name is blank."
   }
 
-  Invoke-Gh `
-    -Arguments @("variable", "set", $Name, "--repo", $Repository, "--env", $Environment, "--body", $Value) `
-    -Display "variable set $Name --repo $Repository --env $Environment --body <value>"
+  if ($DryRun) {
+    Write-Host "DRY_RUN gh variable set $Name --repo $Repository --env $Environment <stdin-value>"
+    return
+  }
+
+  $Value | gh variable set $Name --repo $Repository --env $Environment
+  if ($LASTEXITCODE -ne 0) {
+    throw "gh variable set failed for $Name"
+  }
 }
 
 function Set-GitHubSecret {
