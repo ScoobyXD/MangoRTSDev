@@ -29,6 +29,51 @@ jobs:
           terraform_version: 1.6.6
           terraform_wrapper: false
 
+      - name: Preflight production AWS identity
+        env:
+          AWS_PROD_DEPLOY_ROLE_ARN: ${{ secrets.AWS_PROD_DEPLOY_ROLE_ARN }}
+          EXPECTED_DEPLOY_ROLE_ARN: arn:aws:iam::828435022930:role/mangorts-prod-github-deploy
+          EXPECTED_OIDC_AUD: sts.amazonaws.com
+          EXPECTED_OIDC_SUB: repo:ScoobyXD/MangoRTSDev:environment:production
+        run: |
+          set -euo pipefail
+          : "${AWS_PROD_DEPLOY_ROLE_ARN:?Set GitHub production secret AWS_PROD_DEPLOY_ROLE_ARN.}"
+          if [[ "$AWS_PROD_DEPLOY_ROLE_ARN" != "$EXPECTED_DEPLOY_ROLE_ARN" ]]; then
+            echo "AWS_PROD_DEPLOY_ROLE_ARN does not match the expected prod deploy role." >&2
+            echo "Expected AWS account 828435022930 and role mangorts-prod-github-deploy." >&2
+            exit 1
+          fi
+
+          oidc_response="$(curl --silent --show-error --fail-with-body \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${EXPECTED_OIDC_AUD}")"
+          oidc_token="$(jq -r '.value' <<< "$oidc_response")"
+          oidc_claims="$(python3 - "$oidc_token" <<'PY'
+          import base64
+          import json
+          import sys
+
+          token = sys.argv[1]
+          payload = token.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          print(json.dumps({
+              "aud": claims.get("aud"),
+              "sub": claims.get("sub"),
+              "repository": claims.get("repository"),
+              "ref": claims.get("ref"),
+              "environment": claims.get("environment"),
+          }, sort_keys=True))
+          PY
+          )"
+          actual_aud="$(jq -r '.aud' <<< "$oidc_claims")"
+          actual_sub="$(jq -r '.sub' <<< "$oidc_claims")"
+          if [[ "$actual_aud" != "$EXPECTED_OIDC_AUD" || "$actual_sub" != "$EXPECTED_OIDC_SUB" ]]; then
+            echo "GitHub OIDC claims do not match the AWS deploy-role trust policy." >&2
+            echo "$oidc_claims" >&2
+            exit 1
+          fi
+          echo "Production AWS identity preflight passed for ${EXPECTED_OIDC_SUB}."
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
