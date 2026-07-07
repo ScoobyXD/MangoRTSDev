@@ -62,11 +62,12 @@ create table if not exists companies (
 create table if not exists company_memberships (
   company_id uuid not null,
   user_id uuid not null,
-  role text not null default 'company_user',
+  role text not null default 'member',
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
     constraint company_memberships_role_chk check (role in ('dev_admin', 'company_admin', 'company_manager', 'company_user')),
   primary key (company_id, user_id),
+  constraint company_memberships_company_id_fkey foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (user_id) references users (user_id) on delete cascade
 );
 
@@ -193,6 +194,7 @@ create table if not exists invitations (
   constraint invitations_invite_email_status_chk check (invite_email_status in ('not_started', 'not_configured', 'sent', 'failed')),
   primary key (invitation_id),
   unique (token_hash),
+  constraint invitations_company_id_fkey foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (invited_by_user_id) references users (user_id),
   foreign key (accepted_by_user_id) references users (user_id)
 );
@@ -639,7 +641,6 @@ create table if not exists project_relationships (
   constraint project_relationships_resource_type_chk check (resource_type in ('logic_gate', 'node')),
   primary key (company_id, relationship_id),
   unique (company_id, project_id, resource_type, resource_id),
-  unique (company_id, resource_type, resource_id),
   foreign key (company_id, project_id) references projects(company_id, project_id) on delete cascade
 );
 
@@ -800,6 +801,10 @@ create index if not exists idx_resource_gvic_assignments_principal_role_resource
 create index if not exists idx_resource_gvic_assignments_resource_role_principal
   on resource_gvic_assignments(company_id, resource_type, resource_id, role, principal_type, principal_id);
 
+create unique index if not exists idx_resource_gvic_assignments_one_role_per_principal
+  on resource_gvic_assignments(company_id, resource_type, resource_id, principal_type, principal_id)
+  where resource_type in ('node', 'logic_gate');
+
 create table if not exists resource_gvic_effective_assignments (
   company_id uuid not null,
   resource_type text not null,
@@ -857,12 +862,15 @@ create table if not exists resource_permissions (
   constraint resource_permissions_access_level_chk check (access_level in ('no_access', 'view', 'edit', 'admin')),
   constraint resource_permissions_user_subject_chk check ((subject_type = 'user' and user_id = subject_id) or (subject_type = 'group' and user_id is null)),
   primary key (company_id, resource_type, resource_id, subject_type, subject_id),
-  foreign key (company_id) references companies (company_id) on delete cascade,
-  foreign key (user_id) references users (user_id) on delete cascade
+  constraint resource_access_company_id_fkey foreign key (company_id) references companies (company_id) on delete cascade,
+  constraint resource_access_user_id_fkey foreign key (user_id) references users (user_id) on delete cascade
 );
 
 create index if not exists idx_resource_permissions_user_resource
   on resource_permissions(company_id, user_id, resource_type, resource_id);
+
+create index if not exists idx_resource_permissions_resource_user
+  on resource_permissions(company_id, resource_type, resource_id, user_id);
 
 create index if not exists idx_resource_permissions_subject_resource
   on resource_permissions(company_id, subject_type, subject_id, resource_type, resource_id);
@@ -1210,8 +1218,8 @@ create table if not exists node_logic_gate_assignments (
   primary key (company_id, assignment_id),
   foreign key (company_id, node_id) references nodes (company_id, node_id) on delete cascade,
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id) on delete cascade,
-  foreign key (company_id, requested_by_user_id) references company_memberships (company_id, user_id) on delete set null (requested_by_user_id),
-  foreign key (company_id, placed_by_user_id) references company_memberships (company_id, user_id) on delete set null (placed_by_user_id)
+  constraint node_logic_gate_assignments_requested_by_user_id_fkey foreign key (company_id, requested_by_user_id) references company_memberships (company_id, user_id) on delete set null (requested_by_user_id),
+  constraint node_logic_gate_assignments_placed_by_user_id_fkey foreign key (company_id, placed_by_user_id) references company_memberships (company_id, user_id) on delete set null (placed_by_user_id)
 );
 
 create unique index if not exists idx_node_logic_gate_assignments_one_active_node
@@ -1579,7 +1587,7 @@ create table if not exists shared_inboxes (
   primary key (company_id, shared_inbox_id),
   foreign key (company_id) references companies (company_id) on delete cascade,
   foreign key (company_id, parent_folder_id) references shared_inbox_folders (company_id, folder_id),
-  foreign key (company_id, company_email_connection_id) references company_email_connections(company_id, company_email_connection_id)
+  constraint shared_inboxes_company_email_connection_fkey foreign key (company_id, company_email_connection_id) references company_email_connections(company_id, company_email_connection_id)
 );
 
 create index if not exists idx_shared_inboxes_parent
@@ -1590,6 +1598,67 @@ create index if not exists idx_shared_inboxes_account_email
 
 create index if not exists idx_shared_inboxes_company_email_connection
   on shared_inboxes(company_id, company_email_connection_id);
+
+create table if not exists communications_email_archive_jobs (
+  archive_job_id uuid primary key,
+  actor_user_id uuid not null references users(user_id) on delete cascade,
+  company_id uuid references companies(company_id) on delete cascade,
+  shared_inbox_id uuid,
+  connection_scope text not null,
+  provider text not null,
+  account_email text not null,
+  grant_id text not null,
+  company_email_connection_id uuid,
+  status text not null default 'pending',
+  requested_count integer not null default 0,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  completed_timestamp timestamptz,
+  constraint communications_email_archive_jobs_scope_chk check (connection_scope in ('personal', 'shared')),
+  constraint communications_email_archive_jobs_provider_chk check (provider in ('google', 'microsoft')),
+  constraint communications_email_archive_jobs_account_email_chk check (btrim(account_email) <> '' and account_email = lower(btrim(account_email))),
+  constraint communications_email_archive_jobs_grant_id_chk check (btrim(grant_id) <> ''),
+  constraint communications_email_archive_jobs_status_chk check (status in ('pending', 'processing', 'completed', 'failed')),
+  constraint communications_email_archive_jobs_shared_scope_chk check (
+    (connection_scope = 'personal' and shared_inbox_id is null)
+    or
+    (connection_scope = 'shared' and company_id is not null and shared_inbox_id is not null)
+  ),
+  foreign key (company_id, shared_inbox_id) references shared_inboxes(company_id, shared_inbox_id) on delete cascade,
+  foreign key (company_email_connection_id) references company_email_connections(company_email_connection_id) on delete set null
+);
+
+create index if not exists idx_communications_email_archive_jobs_actor_created
+  on communications_email_archive_jobs(actor_user_id, created_timestamp desc);
+
+create index if not exists idx_communications_email_archive_jobs_shared_inbox
+  on communications_email_archive_jobs(company_id, shared_inbox_id, created_timestamp desc)
+  where shared_inbox_id is not null;
+
+create table if not exists communications_email_archive_job_items (
+  job_item_id uuid primary key,
+  archive_job_id uuid not null references communications_email_archive_jobs(archive_job_id) on delete cascade,
+  message_id text not null,
+  status text not null default 'pending',
+  attempt_count integer not null default 0,
+  last_error text not null default '',
+  available_at timestamptz not null default now(),
+  processing_started_at timestamptz,
+  archived_timestamp timestamptz,
+  failed_timestamp timestamptz,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint communications_email_archive_job_items_message_chk check (btrim(message_id) <> ''),
+  constraint communications_email_archive_job_items_status_chk check (status in ('pending', 'processing', 'retry', 'archived', 'failed')),
+  unique (archive_job_id, message_id)
+);
+
+create index if not exists idx_communications_email_archive_job_items_claim
+  on communications_email_archive_job_items(status, available_at, created_timestamp, job_item_id)
+  where status in ('pending', 'processing', 'retry');
+
+create index if not exists idx_communications_email_archive_job_items_job
+  on communications_email_archive_job_items(archive_job_id, created_timestamp, job_item_id);
 
 create table if not exists company_explorer_items (
   company_id uuid not null,
@@ -1780,6 +1849,35 @@ create table if not exists workspace_read_versions (
 create index if not exists idx_workspace_read_versions_scope_company
   on workspace_read_versions(scope, company_id, resource_key);
 
+-- Match the current dev database validation state for legacy backfill constraints.
+alter table logic_gate_information
+  drop constraint if exists logic_gate_information_nonblank_chk;
+alter table logic_gate_information
+  add constraint logic_gate_information_nonblank_chk check (btrim(information) <> '') not valid;
+
+alter table logic_gate_relationships
+  drop constraint if exists logic_gate_relationships_not_self_chk;
+alter table logic_gate_relationships
+  add constraint logic_gate_relationships_not_self_chk check (logic_gate_id_a <> logic_gate_id_b) not valid;
+
+alter table logic_gate_relationships
+  drop constraint if exists logic_gate_relationships_position_pair_chk;
+alter table logic_gate_relationships
+  add constraint logic_gate_relationships_position_pair_chk check (
+    (a_position = 'Input'::logic_gate_relationship_position and b_position = 'Output'::logic_gate_relationship_position)
+    or (a_position = 'Output'::logic_gate_relationship_position and b_position = 'Input'::logic_gate_relationship_position)
+  ) not valid;
+
+alter table node_information
+  drop constraint if exists node_information_nonblank_chk;
+alter table node_information
+  add constraint node_information_nonblank_chk check (btrim(information) <> '') not valid;
+
+alter table node_projection_table
+  drop constraint if exists node_projection_table_nonblank_chk;
+alter table node_projection_table
+  add constraint node_projection_table_nonblank_chk check (btrim(information) <> '') not valid;
+
 create or replace function workspace_static_read_version_keys()
 returns table(scope text, resource_key text) as $$
   select *
@@ -1790,9 +1888,13 @@ returns table(scope text, resource_key text) as $$
     ('workspace-snapshot:logic_gate_map', ''),
     ('workspace-snapshot:logic_gate_map_window', ''),
     ('workspace-snapshot:company_explorer', ''),
-    ('workspace-snapshot:shared_triage', ''),
+    ('workspace-snapshot:company_explorer', 'folder_kind:node'),
+    ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
+    ('workspace-snapshot:company_explorer', 'folder_kind:communications'),
+    ('company-explorer-folder-items', ''),
+    ('company-explorer-folder-items', 'item_type:node'),
+    ('company-explorer-folder-items', 'item_type:logic_gate'),
     ('nodes', ''),
-    ('projects', ''),
     ('node-relationships', ''),
     ('logic-gates', ''),
     ('logic-gate-relationships', ''),
@@ -1808,6 +1910,8 @@ create or replace function workspace_read_version_keys_for_domain_event(p_event_
 returns table(scope text, resource_key text) as $$
 declare
   board_id text := btrim(coalesce(p_payload->>'board_id', ''));
+  folder_kind text := btrim(coalesce(p_payload->>'folder_kind', ''));
+  item_type text := btrim(coalesce(p_payload->>'item_type', ''));
 begin
   return query select v.scope, v.resource_key from (values
     ('workspace-snapshot:full', '')
@@ -1832,7 +1936,15 @@ begin
       ('nodes', ''),
       ('workspace-snapshot:node_map', ''),
       ('workspace-snapshot:node_map_window', ''),
-      ('workspace-snapshot:company_explorer', '')
+      ('workspace-snapshot:company_explorer', ''),
+      ('workspace-snapshot:company_explorer', 'folder_kind:node')
+    ) as v(scope, resource_key);
+  end if;
+
+  if p_event_type = any(array['node_deleted', 'node_permissions_updated']::text[]) then
+    return query select v.scope, v.resource_key from (values
+      ('company-explorer-folder-items', ''),
+      ('company-explorer-folder-items', 'item_type:node')
     ) as v(scope, resource_key);
   end if;
 
@@ -1860,12 +1972,44 @@ begin
     ) as v(scope, resource_key);
   end if;
 
-  if p_event_type = any(array['logic_gate_created', 'logic_gate_updated', 'logic_gate_deleted', 'logic_gate_gvic_updated', 'logic_gate_permissions_updated']::text[]) then
+  if p_event_type = any(array['logic_gate_created', 'logic_gate_updated', 'logic_gate_deleted', 'logic_gate_raci_updated', 'logic_gate_permissions_updated']::text[]) then
     return query select v.scope, v.resource_key from (values
       ('logic-gates', ''),
       ('workspace-snapshot:logic_gate_map', ''),
       ('workspace-snapshot:logic_gate_map_window', ''),
-      ('workspace-snapshot:company_explorer', '')
+      ('workspace-snapshot:company_explorer', ''),
+      ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate')
+    ) as v(scope, resource_key);
+  end if;
+
+  if p_event_type = any(array['logic_gate_deleted', 'logic_gate_permissions_updated']::text[]) then
+    return query select v.scope, v.resource_key from (values
+      ('company-explorer-folder-items', ''),
+      ('company-explorer-folder-items', 'item_type:logic_gate')
+    ) as v(scope, resource_key);
+  end if;
+
+  if p_event_type = any(array[
+    'project_created',
+    'project_updated',
+    'project_deleted',
+    'project_information_created',
+    'project_information_deleted',
+    'project_relationship_upserted',
+    'project_relationship_deleted',
+    'project_permissions_updated'
+  ]::text[]) then
+    return query select v.scope, v.resource_key from (values
+      ('projects', ''),
+      ('workspace-snapshot:company_explorer', ''),
+      ('workspace-snapshot:company_explorer', 'folder_kind:project')
+    ) as v(scope, resource_key);
+  end if;
+
+  if p_event_type = any(array['project_deleted', 'project_permissions_updated']::text[]) then
+    return query select v.scope, v.resource_key from (values
+      ('company-explorer-folder-items', ''),
+      ('company-explorer-folder-items', 'item_type:project')
     ) as v(scope, resource_key);
   end if;
 
@@ -1894,38 +2038,75 @@ begin
   end if;
 
   if p_event_type = any(array[
-    'project_created',
-    'project_updated',
-    'project_deleted',
-    'project_information_created',
-    'project_information_deleted',
-    'project_relationship_upserted',
-    'project_relationship_deleted',
-    'project_permissions_updated'
-  ]::text[]) then
-    return query select v.scope, v.resource_key from (values
-      ('projects', ''),
-      ('workspace-snapshot:company_explorer', '')
-    ) as v(scope, resource_key);
-  end if;
-
-  if p_event_type = any(array[
     'company_explorer_folder_created',
     'company_explorer_folder_updated',
     'company_explorer_folder_deleted',
-    'company_explorer_folder_permissions_updated',
-    'company_explorer_item_placed',
-    'company_explorer_item_removed'
+    'communications_shared_inbox_raci_updated',
+    'shared_triage_access_updated'
   ]::text[]) then
-    return query select v.scope, v.resource_key from (values
-      ('workspace-snapshot:company_explorer', '')
-    ) as v(scope, resource_key);
+    if folder_kind = 'node' then
+      return query select v.scope, v.resource_key from (values
+        ('workspace-snapshot:node_map', ''),
+        ('workspace-snapshot:node_map_window', ''),
+        ('map-layout:node-window', ''),
+        ('workspace-snapshot:company_explorer', ''),
+        ('workspace-snapshot:company_explorer', 'folder_kind:node'),
+        ('company-explorer-folder-items', ''),
+        ('company-explorer-folder-items', 'item_type:node')
+      ) as v(scope, resource_key);
+    elsif folder_kind = 'logic_gate' then
+      return query select v.scope, v.resource_key from (values
+        ('workspace-snapshot:logic_gate_map', ''),
+        ('workspace-snapshot:logic_gate_map_window', ''),
+        ('map-layout:logic_gate-window', ''),
+        ('workspace-snapshot:company_explorer', ''),
+        ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
+        ('company-explorer-folder-items', ''),
+        ('company-explorer-folder-items', 'item_type:logic_gate')
+      ) as v(scope, resource_key);
+    elsif folder_kind = 'project' then
+      return query select v.scope, v.resource_key from (values
+        ('workspace-snapshot:company_explorer', ''),
+        ('workspace-snapshot:company_explorer', 'folder_kind:project'),
+        ('company-explorer-folder-items', ''),
+        ('company-explorer-folder-items', 'item_type:project')
+      ) as v(scope, resource_key);
+    elsif folder_kind = 'communications' then
+      return query select v.scope, v.resource_key from (values
+        ('workspace-snapshot:company_explorer', 'folder_kind:communications')
+      ) as v(scope, resource_key);
+    end if;
   end if;
 
-  if p_event_type = any(array['communications_shared_inbox_gvic_updated', 'shared_triage_access_updated']::text[]) then
-    return query select v.scope, v.resource_key from (values
-      ('workspace-snapshot:shared_triage', '')
-    ) as v(scope, resource_key);
+  if p_event_type = any(array['company_explorer_folder_item_assigned', 'company_explorer_folder_item_removed']::text[]) then
+    if item_type = 'node' then
+      return query select v.scope, v.resource_key from (values
+        ('workspace-snapshot:node_map', ''),
+        ('workspace-snapshot:node_map_window', ''),
+        ('map-layout:node-window', ''),
+        ('workspace-snapshot:company_explorer', ''),
+        ('workspace-snapshot:company_explorer', 'folder_kind:node'),
+        ('company-explorer-folder-items', ''),
+        ('company-explorer-folder-items', 'item_type:node')
+      ) as v(scope, resource_key);
+    elsif item_type = 'logic_gate' then
+      return query select v.scope, v.resource_key from (values
+        ('workspace-snapshot:logic_gate_map', ''),
+        ('workspace-snapshot:logic_gate_map_window', ''),
+        ('map-layout:logic_gate-window', ''),
+        ('workspace-snapshot:company_explorer', ''),
+        ('workspace-snapshot:company_explorer', 'folder_kind:logic_gate'),
+        ('company-explorer-folder-items', ''),
+        ('company-explorer-folder-items', 'item_type:logic_gate')
+      ) as v(scope, resource_key);
+    elsif item_type = 'project' then
+      return query select v.scope, v.resource_key from (values
+        ('workspace-snapshot:company_explorer', ''),
+        ('workspace-snapshot:company_explorer', 'folder_kind:project'),
+        ('company-explorer-folder-items', ''),
+        ('company-explorer-folder-items', 'item_type:project')
+      ) as v(scope, resource_key);
+    end if;
   end if;
 
   if p_event_type = any(array['kanban_board_saved', 'kanban_board_updated', 'kanban_board_deleted', 'logic_gate_deleted']::text[]) then
@@ -1938,11 +2119,32 @@ begin
     'kanban_column_created',
     'kanban_column_updated',
     'kanban_column_deleted',
+    'kanban_board_deleted',
+    'logic_gate_deleted'
+  ]::text[]) then
+    return query select v.scope, v.resource_key from (values
+      ('kanban-columns', 'board_id:' || board_id),
+      ('workspace-snapshot:kanban', 'board_id:' || board_id)
+    ) as v(scope, resource_key);
+  end if;
+
+  if board_id <> '' and p_event_type = any(array[
     'kanban_card_upserted',
     'kanban_card_moved',
-    'kanban_card_deleted'
+    'kanban_card_deleted',
+    'work_item.logic_gate_assignment_saved',
+    'work_item.logic_gate_assignment_moved',
+    'work_item.logic_gate_assignment_removed',
+    'work_item.logic_gate_issue_toggled',
+    'kanban_column_deleted',
+    'kanban_board_deleted',
+    'node_deleted',
+    'logic_gate_deleted'
   ]::text[]) then
-    return query select 'kanban-board'::text, board_id;
+    return query select v.scope, v.resource_key from (values
+      ('kanban-cards', 'board_id:' || board_id),
+      ('workspace-snapshot:kanban', 'board_id:' || board_id)
+    ) as v(scope, resource_key);
   end if;
 end;
 $$ language plpgsql immutable;
