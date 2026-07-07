@@ -1,4 +1,9 @@
 import {
+  convertTriageMessagesToExplorerTarget,
+  type CommunicationsTriageConversionResult,
+  type CommunicationsTriageConversionTarget,
+} from "../communications/communicationsApi.js";
+import {
   assignNodeToLogicGateStatus,
   createKanbanColumn,
   deleteKanbanCard,
@@ -45,6 +50,7 @@ export type KanbanCommandClient = {
   moveLogicGateAssignment: typeof moveLogicGateAssignment;
   removeLogicGateAssignment: typeof removeLogicGateAssignment;
   setLogicGateAssignmentIssue: typeof setLogicGateAssignmentIssue;
+  convertTriageMessagesToExplorerTarget: typeof convertTriageMessagesToExplorerTarget;
 };
 
 const defaultKanbanCommandClient: KanbanCommandClient = {
@@ -58,6 +64,7 @@ const defaultKanbanCommandClient: KanbanCommandClient = {
   moveLogicGateAssignment,
   removeLogicGateAssignment,
   setLogicGateAssignmentIssue,
+  convertTriageMessagesToExplorerTarget,
 };
 
 function logicGateIDForCard(context: KanbanCommandContext, card?: Pick<KanbanCard, "logic_gate_id" | "board_id"> | null): string {
@@ -344,6 +351,34 @@ export async function addExplorerNodesToKanbanColumnCommand(args: {
   }));
 
   return { optimisticCards, optimisticCardIDs, nodeIDs, savedCards };
+}
+
+export async function convertTriageMessagesToKanbanColumnCommand(args: {
+  context: KanbanCommandContext;
+  logicGateID?: string;
+  columnID: string;
+  messageIDs: string[];
+  sharedInboxID?: string;
+  priority?: number;
+  client?: KanbanCommandClient;
+}): Promise<CommunicationsTriageConversionResult> {
+  const { context, client = defaultKanbanCommandClient } = args;
+  const logicGateID = args.logicGateID?.trim() || logicGateIDFromKanbanBoardID(context.boardID);
+  const columnID = args.columnID.trim();
+  const messageIDs = Array.from(new Set(args.messageIDs.map((messageID) => messageID.trim()).filter(Boolean)));
+  if (!logicGateID || !columnID || messageIDs.length === 0) {
+    throw new Error("invalid_triage_kanban_drop");
+  }
+
+  const target: CommunicationsTriageConversionTarget = { mode: "existing_logic_gate", logicGateID };
+  return client.convertTriageMessagesToExplorerTarget({
+    companyID: context.companyID,
+    sharedInboxID: args.sharedInboxID?.trim() || undefined,
+    target,
+    messageIDs,
+    priority: args.priority,
+    columnID,
+  });
 }
 
 export async function toggleKanbanCardIssueCommand(args: {
