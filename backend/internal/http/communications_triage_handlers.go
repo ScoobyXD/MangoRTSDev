@@ -179,9 +179,15 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		!s.requireEntityEdit(w, r, conversionInput.CompanyID, store.EntityTypeProject, conversionInput.Target.ProjectID, "project_not_found") {
 		return
 	}
-	if conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetFolder && conversionInput.Target.ParentEntityID == "" && conversionInput.Target.FolderID != "" &&
-		!s.requireEntityEdit(w, r, conversionInput.CompanyID, store.EntityTypeCompanyExplorerFolder, conversionInput.Target.FolderID, "company_explorer_folder_not_found") {
-		return
+	if conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetFolder {
+		parentEntityID := strings.TrimSpace(conversionInput.Target.ParentEntityID)
+		if parentEntityID == "" {
+			parentEntityID = strings.TrimSpace(conversionInput.Target.FolderID)
+		}
+		if parentEntityID != "" && parentEntityID != conversionInput.CompanyID &&
+			!s.requireEntityEdit(w, r, conversionInput.CompanyID, store.EntityTypeCompanyExplorerFolder, parentEntityID, "company_explorer_folder_not_found") {
+			return
+		}
 	}
 	sourceMessagesByID := make(map[string]NylasMessage, len(conversionInput.MessageIDs))
 	for _, messageID := range conversionInput.MessageIDs {

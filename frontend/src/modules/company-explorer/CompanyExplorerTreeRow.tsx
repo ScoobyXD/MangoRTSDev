@@ -90,6 +90,11 @@ const TREE_GUIDE_CONNECTOR_END_OFFSET_PX = TREE_ROW_PILL_LEFT_PADDING_PX + TREE_
 function getTriageMessageDropTarget(row: ExplorerTreeNode, treeRows: ExplorerTreeNode[]): CompanyExplorerTriageMessageDropTarget | null {
   void treeRows;
   const parentEntityID = row.entityID?.trim() ?? "";
+  if (row.kind === "folder") {
+    const folderID = row.folderID?.trim() ?? "";
+    const targetParentEntityID = parentEntityID || folderID;
+    return targetParentEntityID ? { kind: "folder", folderID: folderID || undefined, parentEntityID: targetParentEntityID, label: row.label } : null;
+  }
   if (row.kind === "project") {
     const projectID = row.projectID?.trim() || (row.entityType === "project" ? row.resourceID?.trim() ?? "" : "");
     return projectID ? { kind: "project", projectID, parentEntityID: parentEntityID || undefined, label: row.label } : null;

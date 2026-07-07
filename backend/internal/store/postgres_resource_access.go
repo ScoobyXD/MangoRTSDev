@@ -575,7 +575,7 @@ direct_targets(resource_type, resource_id) as (
   join folder_scope
     on folder_scope.folder_id=item.parent_folder_id
   where item.company_id=$1::uuid
-    and item.target_type in ('`+EntityTypeProject+`', '`+EntityTypeLogicGate+`')
+    and item.target_type in ('`+EntityTypeProject+`', '`+EntityTypeLogicGate+`', '`+EntityTypeNode+`')
 ),
 node_targets(resource_type, resource_id) as (
   select '`+EntityTypeNode+`'::text, assignment.node_id

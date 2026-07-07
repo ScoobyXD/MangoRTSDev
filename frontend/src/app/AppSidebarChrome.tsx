@@ -138,6 +138,15 @@ function sidebarExplorerTriageConversionTarget(target: Parameters<CompanyExplore
       const logicGateID = target.logicGateID.trim();
       return logicGateID ? { mode: "existing_logic_gate", logicGateID } : null;
     }
+    case "folder": {
+      const parentEntityID = target.parentEntityID?.trim() ?? "";
+      const folderID = target.folderID?.trim() ?? "";
+      return parentEntityID || folderID ? {
+        mode: "folder",
+        parentEntityID: parentEntityID || undefined,
+        folderID: folderID || undefined,
+      } : null;
+    }
     default:
       return null;
   }
@@ -389,7 +398,8 @@ export function AppSidebar({
         cardIDs: (conversion?.result.cards ?? []).map((card) => card.card_id),
         unstarredMessageIDs: conversion?.unstarredMessageIDs ?? [],
       });
-      setExplorerDropSuccess(convertedMessageIDs.length === 1 ? "Email added to Logic Gate." : `${convertedMessageIDs.length} emails added to Logic Gate.`);
+      const targetLabel = target.mode === "existing_logic_gate" ? "Logic Gate" : "Explorer";
+      setExplorerDropSuccess(convertedMessageIDs.length === 1 ? `Email added to ${targetLabel}.` : `${convertedMessageIDs.length} emails added to ${targetLabel}.`);
     } catch (error) {
       console.error("Failed to assign triage email from sidebar Explorer", error);
       setExplorerDropSuccess("");

@@ -37,7 +37,7 @@ folder_seeds(folder_id) as (
     on item.company_id=req.company_id
    and item.target_type=req.resource_type
    and item.target_id=req.resource_id
-  where req.resource_type in ('project', 'logic_gate')
+  where req.resource_type in ('project', 'logic_gate', 'node')
   union
   select item.parent_folder_id
   from company_explorer_items item

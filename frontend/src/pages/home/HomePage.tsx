@@ -3388,7 +3388,7 @@ export function HomePage({
     setMessageContextMenu({ x: event.clientX, y: event.clientY, messageIDs: nextIDs });
   }, [selectedMessageIDs]);
   const startMessageDrag = useCallback((message: EmailMessage, event: React.DragEvent<HTMLElement>) => {
-    const triageView = activeViewID === "my-triage" || activeViewID === "shared-root" || activeViewID.startsWith("shared:");
+    const triageView = isArchivableHomeViewID(activeViewID);
     if (!triageView || !canDragTriageMessageFromMailbox(mailboxRef.current)) return;
     const messageIDs = selectedMessageIDs.has(message.id) ? Array.from(selectedMessageIDs) : [message.id];
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);

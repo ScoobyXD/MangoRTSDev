@@ -585,6 +585,19 @@ func (r *PostgresRepo) convertCommunicationsTriageItemsToExplorerTargetTx(ctx co
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
 	}
+	var folderParentID any
+	folderParentEntityID := ""
+	if input.Target.Mode == CommunicationsEmailConversionTargetFolder {
+		var err error
+		folderParentID, folderParentEntityID, err = r.companyExplorerFinalContainerTarget(ctx, input.CompanyID, input.Target.ParentEntityID, input.PermissionUserID)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		input.Target.ParentEntityID = folderParentEntityID
+		if folderParentEntityID != input.CompanyID {
+			input.Target.FolderID = folderParentEntityID
+		}
+	}
 
 	result := CommunicationsTriageConversionResult{Target: input.Target}
 	for index, messageID := range input.MessageIDs {
@@ -632,6 +645,17 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
 			result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
 		}
+		if input.Target.Mode == CommunicationsEmailConversionTargetFolder {
+			position := 0
+			if input.Target.Position > 0 {
+				position = input.Target.Position + index*1000
+			}
+			row, err := r.placeConvertedEmailNodeInCompanyExplorerTx(ctx, tx, input, folderParentID, folderParentEntityID, nodeID, nodeTitle, position)
+			if err != nil {
+				return CommunicationsTriageConversionResult{}, err
+			}
+			result.ExplorerV2Rows = append(result.ExplorerV2Rows, row)
+		}
 		node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
 from nodes n
@@ -651,6 +675,60 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
 	return result, nil
+}
+
+func (r *PostgresRepo) placeConvertedEmailNodeInCompanyExplorerTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, parentFolderID any, parentEntityID, nodeID, nodeTitle string, position int) (CompanyExplorerV2Row, error) {
+	if position <= 0 {
+		nextPosition, err := nextCompanyExplorerFinalPositionSQL(ctx, tx, input.CompanyID, parentFolderID)
+		if err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+		position = nextPosition
+	}
+	var itemID string
+	var createdTimestamp time.Time
+	var updatedTimestamp time.Time
+	if err := tx.QueryRowContext(ctx, `
+insert into company_explorer_items (
+  company_id,
+  item_id,
+  parent_folder_id,
+  target_type,
+  target_id,
+  position,
+  created_by_user_id,
+  created_timestamp,
+  updated_timestamp
+) values ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, nullif($7, '')::uuid, now(), now())
+returning item_id::text, created_timestamp, updated_timestamp`,
+		input.CompanyID, newUUIDv7String(), parentFolderID, EntityTypeNode, nodeID, position, input.ActorUserID,
+	).Scan(&itemID, &createdTimestamp, &updatedTimestamp); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	if parentEntityID != "" && parentEntityID != input.CompanyID {
+		if _, err := snapshotPostgresResourceAccessPolicyTx(ctx, tx, input.CompanyID, EntityTypeCompanyExplorerFolder, parentEntityID, EntityTypeNode, nodeID); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
+	visibleParentEntityID := parentEntityID
+	if visibleParentEntityID == input.CompanyID {
+		visibleParentEntityID = ""
+	}
+	return CompanyExplorerV2Row{
+		CompanyID:        input.CompanyID,
+		EntityID:         nodeID,
+		EntityType:       EntityTypeNode,
+		ResourceID:       nodeID,
+		Name:             nodeTitle,
+		ParentEntityID:   visibleParentEntityID,
+		EdgeID:           itemID,
+		Position:         position,
+		HasChildren:      false,
+		EffectiveAccess:  EntityPermissionEdit,
+		NativeContext:    companyExplorerV2NativeContext(EntityTypeNode, nodeID, nodeID),
+		CreatedTimestamp: createdTimestamp,
+		UpdatedTimestamp: updatedTimestamp,
+	}, nil
 }
 
 func upsertCommunicationsTriageProjectRelationshipTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, nodeID string) (domain.ProjectRelationshipProjection, []ProjectionDelta, error) {
