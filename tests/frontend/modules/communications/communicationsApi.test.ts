@@ -7,6 +7,7 @@ import {
   createFolderQuery,
   createCommunicationsSharedInbox,
   createMessageQuery,
+  convertTriageMessagesToExplorerTarget,
   deleteCommunicationsSharedInbox,
   emailMessageMatchesListFilters,
   getEmailMessage,
@@ -49,6 +50,48 @@ test("communications message query omits empty values and encodes filters", () =
 test("communications folder query scopes shared inbox folder reads", () => {
   assert.equal(createFolderQuery({}), "");
   assert.equal(createFolderQuery({ companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?company_id=company-1&shared_inbox_id=shared-1");
+});
+
+test("triage conversion payload can target a specific Kanban column", async () => {
+  invalidateCommunicationsCache();
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      path: input.toString(),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return jsonResponse({
+      target: { mode: "existing_logic_gate", logic_gate_id: "gate-1" },
+      board: { company_id: "company-1", board_id: "logic-gate:gate-1", logic_gate_id: "gate-1", title: "Gate", position: 1000, created_timestamp: "2026-05-20T00:00:00.000Z", updated_timestamp: "2026-05-20T00:00:00.000Z" },
+      cards: [],
+      nodes: [],
+      deleted_message_ids: ["msg-1"],
+    }, 201);
+  };
+  try {
+    await convertTriageMessagesToExplorerTarget({
+      companyID: "company-1",
+      sharedInboxID: " shared-1 ",
+      target: { mode: "existing_logic_gate", logicGateID: "gate-1" },
+      messageIDs: [" msg-1 "],
+      columnID: " review ",
+    });
+    assert.deepEqual(calls, [{
+      path: "/v1/communications/triage/convert",
+      method: "POST",
+      body: {
+        company_id: "company-1",
+        shared_inbox_id: "shared-1",
+        target: { mode: "existing_logic_gate", logic_gate_id: "gate-1" },
+        message_ids: ["msg-1"],
+        column_id: "review",
+      },
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("shared inbox helpers use communications shared inbox endpoints", async () => {

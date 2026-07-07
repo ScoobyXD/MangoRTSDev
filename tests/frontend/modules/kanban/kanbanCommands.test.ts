@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   addExplorerNodesToKanbanColumnCommand,
+  convertTriageMessagesToKanbanColumnCommand,
   createKanbanColumnCommand,
   deleteKanbanCardsCommand,
   moveKanbanCardsToPriorityGroupCommand,
@@ -70,6 +71,7 @@ function createClient(): {
     moveLogicGateAssignment: unknown[];
     removeLogicGateAssignment: unknown[];
     setLogicGateAssignmentIssue: unknown[];
+    convertTriageMessagesToExplorerTarget: unknown[];
   };
 } {
   const calls = {
@@ -83,6 +85,7 @@ function createClient(): {
     moveLogicGateAssignment: [] as unknown[],
     removeLogicGateAssignment: [] as unknown[],
     setLogicGateAssignmentIssue: [] as unknown[],
+    convertTriageMessagesToExplorerTarget: [] as unknown[],
   };
   const client: KanbanCommandClient = {
     async createColumn(apiBase, companyID, boardID, title, position, widthPx, heightPx, itemColor) {
@@ -198,6 +201,23 @@ function createClient(): {
           created_timestamp: "2026-05-01T00:00:00.000Z",
         },
         gvic_projection_rows: [],
+      };
+    },
+    async convertTriageMessagesToExplorerTarget(args) {
+      calls.convertTriageMessagesToExplorerTarget.push(args);
+      return {
+        board: {
+          company_id: args.companyID,
+          board_id: logicGateKanbanBoardID(args.target.mode === "existing_logic_gate" ? args.target.logicGateID : "gate-1"),
+          logic_gate_id: args.target.mode === "existing_logic_gate" ? args.target.logicGateID : "gate-1",
+          title: "Logic Gate",
+          position: 1000,
+          created_timestamp: "2026-05-01T00:00:00.000Z",
+          updated_timestamp: "2026-05-01T00:00:00.000Z",
+        },
+        cards: [],
+        nodes: [],
+        deleted_message_ids: args.messageIDs,
       };
     },
   };
@@ -371,6 +391,28 @@ test("addExplorerNodesToKanbanColumnCommand sends priority for Logic Gate assign
   assert.equal(calls.upsertCard.length, 0);
   assert.equal(calls.assignNodeToLogicGateStatus.length, 1);
   assert.equal((calls.assignNodeToLogicGateStatus[0] as { priority?: number }).priority, 2);
+});
+
+test("convertTriageMessagesToKanbanColumnCommand targets a Logic Gate column", async () => {
+  const { client, calls } = createClient();
+  const result = await convertTriageMessagesToKanbanColumnCommand({
+    context: { ...context, boardID: logicGateKanbanBoardID("gate-1") },
+    columnID: " review ",
+    messageIDs: [" msg-1 ", "msg-1", "msg-2"],
+    sharedInboxID: " shared-1 ",
+    priority: 4,
+    client,
+  });
+
+  assert.deepEqual(result.deleted_message_ids, ["msg-1", "msg-2"]);
+  assert.deepEqual(calls.convertTriageMessagesToExplorerTarget[0], {
+    companyID: "company-1",
+    sharedInboxID: "shared-1",
+    target: { mode: "existing_logic_gate", logicGateID: "gate-1" },
+    messageIDs: ["msg-1", "msg-2"],
+    priority: 4,
+    columnID: "review",
+  });
 });
 
 test("toggleKanbanCardIssueCommand persists issue status without moving the card", async () => {

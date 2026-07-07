@@ -253,6 +253,12 @@ Kanban multi-drag update (2026-05-03):
 - Non-node rows can stay selected for Explorer navigation, but Kanban batch payloads include node rows only.
 - A linked Kanban card click can target this Explorer with `node-map-explorer-context-v1:<companyID>:<explorerFrameID>` so the matching node row highlights.
 
+Email-to-work drag update (2026-07-07):
+- Company Explorer and Logic Gate Kanban both consume the Home triage email drag payload `application/x-mangorts-communications-triage-messages`.
+- Dropping the payload on a Company Explorer Logic Gate converts the email into that Logic Gate through the existing priority picker.
+- Dropping the same payload directly on a Logic Gate Kanban column converts the email into that board and column through `POST /v1/communications/triage/convert` with `target.mode = existing_logic_gate` and `column_id`.
+- Both surfaces dispatch `mangorts:home-triage-conversion-applied` so Home reconciles source mail rows, Logic Gate placement, and unstarred state consistently.
+
 ---
 
 ## 6) Data/backend stance

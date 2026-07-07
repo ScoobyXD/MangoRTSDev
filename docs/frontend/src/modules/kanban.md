@@ -15,6 +15,7 @@ Users can:
 - resize columns horizontally and vertically,
 - drag nodes from Company Explorer into a column,
 - drag a selected batch of Company Explorer node rows into a column,
+- drag email rows from My Triage or mailbox-capable Shared Triage directly into a Logic Gate Kanban column,
 - drag cards between columns and vertically reorder cards inside a column,
 - see when a Kanban card was created directly from an email,
 - drag a direct email-created card onto another node card to transfer the email attachment and remove the source email node,
@@ -90,6 +91,27 @@ Company Explorer can also write a node-only batch for multi-row drags:
 
 Kanban de-dupes node IDs in the payload and upserts each card into the target column.
 
+Home mail and Shared Triage rows write email conversion drags using:
+
+```text
+application/x-mangorts-communications-triage-messages
+```
+
+Payload:
+
+```json
+{
+  "kind": "triage_messages",
+  "company_id": "company-id",
+  "message_ids": ["message-id"],
+  "shared_inbox_id": "shared-inbox-id"
+}
+```
+
+`shared_inbox_id` is omitted for personal mailbox/My Triage sources. Logic Gate Kanban columns accept this payload directly. A drop converts the messages through `/v1/communications/triage/convert` with `target.mode = existing_logic_gate` and `column_id` set to the dropped column. Dropping on an ordinary card or blank column space targets that card's/column's status lane and uses the backend default priority. Dropping on a supported priority group header or grouped card also sends that priority.
+
+Kanban dispatches the same `mangorts:home-triage-conversion-applied` local event as Company Explorer email drops before and after the conversion. This keeps Home's source mail list, local freshness suppression, Logic Gate placement marker, and `unstarred_message_ids` reconciliation consistent across direct Kanban drops and Explorer drops.
+
 Kanban card drags use:
 
 ```text
@@ -152,11 +174,14 @@ Endpoints:
 - `DELETE /v1/kanban/cards/:card_id?company_id=...&board_id=...`
 - `POST /v1/communications/email-nodes/transfer`
   - `{ company_id, source_board_id, source_card_id, target_board_id, target_card_id }`
+- `POST /v1/communications/triage/convert`
+  - `{ company_id, shared_inbox_id?, target: { mode: "existing_logic_gate", logic_gate_id }, message_ids, column_id?, priority? }`
 
 `POST /v1/kanban/cards` is idempotent per board and node. If the same node is dropped again, the existing card moves instead of duplicating.
 `PUT /v1/kanban/cards/:card_id` is also used for vertical card reordering and selected-card batch moves by writing new sparse `position` values.
 The card write API has no item-type field; Kanban board cards are node-only.
 Direct email-created cards expose `created_from_email = true` in Kanban card reads whether the source email came from My Triage or a mailbox-capable Shared Triage inbox. The email transfer endpoint accepts a source card backed by `communications_email_nodes`; it writes the destination attachment into `communications_email_node_attachments`, adds an `Attached email` projection to the target node, and deletes the source email node/card. Transfer uses stored email-node provenance and does not require the actor to have a connected personal mailbox. It does not restore the email to My Triage.
+Direct email-to-Kanban column conversion uses the same triage conversion endpoint with `column_id` so the backend creates the email node/card in the dropped Logic Gate status column instead of always using the default pending lane.
 Saved board rows are metadata only. Columns/cards remain the source of board contents, column order, dimensions, colors, and card positions.
 Kanban boards can be placed in Company Explorer through `company_explorer_folder_items` with `item_type=kanban`. This makes board organization API-first for agents while keeping board display out of maps and editors.
 

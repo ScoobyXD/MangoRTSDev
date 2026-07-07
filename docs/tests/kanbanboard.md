@@ -1,4 +1,4 @@
-Last updated: 2026-07-02
+Last updated: 2026-07-07
 
 # Kanban Board Tests
 
@@ -132,6 +132,9 @@ KB97 - Email-card transfer uses the stored direct email-node provenance and boar
 KB98 - When a local email-to-Logic-Gate conversion has already updated the board from the POST response, matching immediate communications/workspace events must not force repeated Home workspace panel reloads, and the source mail list must keep the source email row visible with patched Logic Gate icon state instead of being refreshed, row-removed, refilled from stale prefetched pages, or message-length-prefetched by broad communications cache invalidation.
 KB99 - The initial email-to-Logic-Gate conversion sets the source email to unstarred and returns `unstarred_message_ids` for local Home reconciliation; later direct email-card transfer between Kanban cards uses stored email-node provenance only and must not perform another mailbox star/unstar mutation.
 KB100 - Node editor popups opened from Kanban expose a fullscreen toggle in the popup header; fullscreen expands the popup close to the viewport while preserving a way to restore the previous popup size and position.
+KB101 - Dragging a triage/mailbox email directly onto a Logic Gate Kanban column converts it into a direct email-created node card on that Logic Gate board and in that target column.
+KB102 - Direct email-to-Kanban column drops use the same triage drag payload and Home conversion reconciliation event as Company Explorer email drops so source mail rows, local freshness suppression, Logic Gate icons, and unstarred state are reconciled consistently.
+KB103 - Dropping an email onto a supported priority group inside a Logic Gate Kanban column applies that priority while still using the column as the assignment status target; dropping onto ordinary column or card space uses the backend default priority.
 
 ## Scenarios
 
@@ -398,3 +401,30 @@ Expected:
 - Activating fullscreen expands the popup close to the viewport without hiding the header actions.
 - Deactivating fullscreen restores the previous popup size and position.
 - Manually resizing or dragging the popup exits fullscreen behavior and preserves normal popup movement.
+
+### Scenario KB-S9: Direct Email Drop Into Logic Gate Kanban Column
+
+Business logic covered:
+- KB16
+- KB63
+- KB89
+- KB96
+- KB98
+- KB99
+- KB101
+- KB102
+- KB103
+
+Given:
+- A user has an email row from My Triage or a mailbox-capable Shared Triage inbox.
+- A Logic Gate Kanban board is open in another browser window for the same user.
+- The board has multiple status columns.
+
+Expected:
+- Dropping the email on any visible Logic Gate Kanban column converts the email into a direct email-created node card on that same Logic Gate board.
+- The created card lands in the dropped column, not only the default Pending column.
+- The card exposes `created_from_email = true` and shows the email-created marker.
+- The conversion records the actor as the placed-by user.
+- If the drop target is a supported priority group, the created node/card uses that priority; otherwise the backend default priority is used.
+- The source Home mail row is reconciled through the local conversion event, including Logic Gate placement and `unstarred_message_ids`.
+- Matching workspace or communications events do not force a broad Home reload after the board has already been updated from the conversion response.

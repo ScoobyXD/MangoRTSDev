@@ -7,6 +7,8 @@ import { entityMatchesAccountFilter, setNodeAccountAssignments } from "../accoun
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
 import { listCompanyUsers, transferEmailNodeCardToNode } from "../communications/communicationsApi";
+import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, type HomeTriageConversionAppliedDetail } from "../../pages/home/homeConstants";
+import { cleanIDList, hasTriageMessageDrag, readTriageMessageDrag } from "../../pages/home/homeUtils";
 import { getNodeTitle, type NodeRecord } from "../node-map/shared";
 import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../node-map/NodeRelationshipGraph";
 import { invalidateNodeRecordStoreCaches } from "../node-map/NodeRecordStore";
@@ -30,6 +32,7 @@ import {
 } from "./KanbanBoardContentStore";
 import {
   addExplorerNodesToKanbanColumnCommand,
+  convertTriageMessagesToKanbanColumnCommand,
   createKanbanColumnCommand,
   deleteKanbanCardsCommand,
   moveKanbanCardsToPriorityGroupCommand,
@@ -163,6 +166,11 @@ function sortSavedViewsForKanban(savedViews: SavedView[]): SavedView[] {
     || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" })
     || left.saved_view_id.localeCompare(right.saved_view_id)
   ));
+}
+
+function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<HomeTriageConversionAppliedDetail>(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, { detail }));
 }
 
 function normalizeKanbanDateAddedSortDirection(value: unknown): KanbanDateAddedSortDirection {
@@ -2183,6 +2191,82 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     if (shouldRefresh) void refreshBoard(mutationBoardID);
   }, [applyCards, beginLocalBoardMutation, boardID, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
 
+  const convertTriageMessagesToColumn = useCallback(async (columnID: string, drag: ReturnType<typeof readTriageMessageDrag>, priority?: number) => {
+    setDragOverCard(null);
+    setDragOverColumnID("");
+    setError("");
+    const messageIDs = cleanIDList(drag.messageIDs);
+    if (messageIDs.length === 0) return;
+    const dragCompanyID = drag.companyID?.trim() ?? "";
+    if (dragCompanyID && dragCompanyID !== companyID) {
+      setError("Email drop belongs to another company");
+      return;
+    }
+    const logicGateID = activeLogicGateID.trim() || activeBoard?.logic_gate_id?.trim() || logicGateIDFromKanbanBoardID(boardID);
+    const cleanColumnID = columnID.trim();
+    if (!logicGateID || !cleanColumnID) {
+      setError("Drop emails on a Logic Gate board");
+      return;
+    }
+
+    const sharedInboxID = drag.sharedInboxID?.trim() || undefined;
+    dispatchHomeTriageConversionApplied({ companyID, messageIDs, sharedInboxID });
+    const mutationBoardID = boardID;
+    const endMutation = beginLocalBoardMutation(mutationBoardID, logicGateID);
+    let shouldRefresh = false;
+    try {
+      const result = await convertTriageMessagesToKanbanColumnCommand({
+        context: kanbanCommandContext,
+        logicGateID,
+        columnID: cleanColumnID,
+        messageIDs,
+        sharedInboxID,
+        priority,
+      });
+      const savedCards = result.cards ?? [];
+      const savedCardIDs = new Set(savedCards.map((card) => card.card_id));
+      const savedNodeIDs = new Set(savedCards.map((card) => card.node_id));
+      if (savedCards.length > 0) {
+        applyCards((previous) => [...previous.filter((card) => !savedCardIDs.has(card.card_id) && !savedNodeIDs.has(card.node_id)), ...savedCards]);
+        syncNodeStatusesFromCards(savedCards);
+        setSelectedCardIDs(new Set(savedCards.map((card) => card.card_id)));
+        setSelectionAnchorCardID(savedCards[0]?.card_id ?? "");
+        setHighlightedEntity({ nodeID: savedCards[0]?.node_id ?? "" });
+      }
+      for (const node of result.nodes ?? []) {
+        invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
+        upsertNodeRelationshipGraphNode(apiBase, companyID, node);
+      }
+      const resultBoardID = result.board?.board_id?.trim() || mutationBoardID;
+      const resultLogicGateID = result.board?.logic_gate_id?.trim() || logicGateID;
+      invalidateKanbanBoardContentsCache(apiBase, companyID, resultBoardID);
+      window.dispatchEvent(new CustomEvent<KanbanBoardContentsUpdatedDetail>(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, {
+        detail: { companyID, boardID: resultBoardID, logicGateID: resultLogicGateID },
+      }));
+      const convertedMessageIDs = cleanIDList(result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs);
+      const boardIDs = Array.from(new Set([
+        resultBoardID,
+        ...savedCards.map((card) => card.board_id),
+      ].map((id) => id.trim()).filter(Boolean)));
+      dispatchHomeTriageConversionApplied({
+        companyID,
+        messageIDs: convertedMessageIDs,
+        sharedInboxID,
+        logicGateID: resultLogicGateID,
+        nodeIDs: result.nodes.map((node) => node.node_id),
+        boardIDs,
+        cardIDs: savedCards.map((card) => card.card_id),
+        unstarredMessageIDs: cleanIDList(result.unstarred_message_ids ?? []),
+      });
+    } catch (err) {
+      setError(err instanceof Error && err.message.trim() ? err.message : "Email drop failed");
+      shouldRefresh = true;
+    } finally {
+      endMutation();
+    }
+    if (shouldRefresh) void refreshBoard(mutationBoardID);
+  }, [activeBoard?.logic_gate_id, activeLogicGateID, apiBase, applyCards, beginLocalBoardMutation, boardID, companyID, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
+
   const createNodeInColumn = useCallback(async (columnID: string, priority: number) => {
     setError("");
     const logicGateID = logicGateIDFromKanbanBoardID(boardID);
@@ -2282,8 +2366,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const explorerItems = parseExplorerEntityDragItems(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
     if (explorerItems.length > 0) {
       requestAddEntitiesToColumn(columnID, explorerItems, { x: event.clientX, y: event.clientY });
+      return;
     }
-  }, [draggedCardsNeedColumnMove, kanbanDateAddedSortEnabled, reorderCards, reorderColumn, requestAddEntitiesToColumn]);
+    const triageMessageDrag = readTriageMessageDrag(event.dataTransfer);
+    if (triageMessageDrag.messageIDs.length > 0) {
+      void convertTriageMessagesToColumn(columnID, triageMessageDrag);
+    }
+  }, [convertTriageMessagesToColumn, draggedCardsNeedColumnMove, kanbanDateAddedSortEnabled, reorderCards, reorderColumn, requestAddEntitiesToColumn]);
 
   const onDropAtEnd = useCallback((event: React.DragEvent) => {
     const columnPayload = parseKanbanColumnDragPayload(event.dataTransfer.getData(KANBAN_COLUMN_DRAG_MIME));
@@ -2498,7 +2587,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onDragOver={(event) => {
           const hasCardPayload = dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME) || draggingKanbanCardIDsRef.current.length > 0;
           const hasExplorerPayload = dataTransferIncludes(event, EXPLORER_ENTITY_DRAG_MIME);
-          if (!hasCardPayload && !hasExplorerPayload) return;
+          const hasTriagePayload = hasTriageMessageDrag(event.dataTransfer);
+          if (!hasCardPayload && !hasExplorerPayload && !hasTriagePayload) return;
           event.preventDefault();
           event.stopPropagation();
           if (hasCardPayload) {
@@ -2548,11 +2638,19 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
             return;
           }
           const explorerItems = parseExplorerEntityDragItems(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
-          if (explorerItems.length === 0) return;
+          if (explorerItems.length > 0) {
+            event.preventDefault();
+            event.stopPropagation();
+            setDragOverCard(null);
+            requestAddEntitiesToColumn(card.column_id, explorerItems, { x: event.clientX, y: event.clientY });
+            return;
+          }
+          const triageMessageDrag = readTriageMessageDrag(event.dataTransfer);
+          if (triageMessageDrag.messageIDs.length === 0) return;
           event.preventDefault();
           event.stopPropagation();
           setDragOverCard(null);
-          requestAddEntitiesToColumn(card.column_id, explorerItems, { x: event.clientX, y: event.clientY });
+          void convertTriageMessagesToColumn(card.column_id, triageMessageDrag, kanbanPriorityFromGroupTargets(groupTargets) ?? undefined);
         }}
         requestedActions={isRequestedForCurrentUser ? {
           busy: requestedCardActionID === card.card_id,
@@ -2585,17 +2683,22 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         <div
           key={`group-header:${group.id}`}
           onDragOver={(event) => {
-            if (groupPriority === null || !dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME)) return;
+            if (groupPriority === null || (!dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME) && !hasTriageMessageDrag(event.dataTransfer))) return;
             event.preventDefault();
             event.stopPropagation();
             setDragOverCard(null);
           }}
           onDrop={(event) => {
             const cardPayload = parseKanbanCardDragPayload(event.dataTransfer.getData(KANBAN_CARD_DRAG_MIME));
-            if (!cardPayload || groupPriority === null) return;
+            if (groupPriority === null) return;
             event.preventDefault();
             event.stopPropagation();
-            void moveCardsToPriorityGroup(cardPayload.cardIDs, columnID, groupPriority, null, "after");
+            if (cardPayload) {
+              void moveCardsToPriorityGroup(cardPayload.cardIDs, columnID, groupPriority, null, "after");
+              return;
+            }
+            const triageMessageDrag = readTriageMessageDrag(event.dataTransfer);
+            if (triageMessageDrag.messageIDs.length > 0) void convertTriageMessagesToColumn(columnID, triageMessageDrag, groupPriority);
           }}
           style={{
             gridColumn: layout === "backlog" ? "1 / -1" : undefined,
@@ -2651,7 +2754,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
               requestCreateNodeInColumn(column.column_id, { x: event.clientX, y: event.clientY });
             }}
             onDragOver={(event) => {
-              if (!dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME) && !dataTransferIncludes(event, EXPLORER_ENTITY_DRAG_MIME)) return;
+              if (!dataTransferIncludes(event, KANBAN_CARD_DRAG_MIME) && !dataTransferIncludes(event, EXPLORER_ENTITY_DRAG_MIME) && !hasTriageMessageDrag(event.dataTransfer)) return;
               event.preventDefault();
               event.stopPropagation();
             }}
@@ -2667,10 +2770,17 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
                 return;
               }
               const explorerItems = parseExplorerEntityDragItems(event.dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
-              if (explorerItems.length === 0) return;
+              if (explorerItems.length > 0) {
+                event.preventDefault();
+                event.stopPropagation();
+                requestAddEntitiesToColumn(column.column_id, explorerItems, { x: event.clientX, y: event.clientY });
+                return;
+              }
+              const triageMessageDrag = readTriageMessageDrag(event.dataTransfer);
+              if (triageMessageDrag.messageIDs.length === 0) return;
               event.preventDefault();
               event.stopPropagation();
-              requestAddEntitiesToColumn(column.column_id, explorerItems, { x: event.clientX, y: event.clientY });
+              void convertTriageMessagesToColumn(column.column_id, triageMessageDrag);
             }}
             style={{
               gridColumn: layout === "backlog" ? "1 / -1" : undefined,

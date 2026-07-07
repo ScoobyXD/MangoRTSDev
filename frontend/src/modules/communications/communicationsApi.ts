@@ -987,9 +987,13 @@ export async function convertTriageMessagesToExplorerTarget(input: {
   sharedInboxID?: string;
   target: CommunicationsTriageConversionTarget;
   messageIDs: string[];
-  priority: number;
+  priority?: number;
+  columnID?: string;
+  status?: string;
 }): Promise<CommunicationsTriageConversionResult> {
   const cleanSharedInboxID = input.sharedInboxID?.trim() ?? "";
+  const cleanColumnID = input.columnID?.trim() ?? "";
+  const cleanStatus = input.status?.trim() ?? "";
   const result = await apiFetchJSON<CommunicationsTriageConversionResult>("/v1/communications/triage/convert", {
     method: "POST",
     body: JSON.stringify({
@@ -998,6 +1002,8 @@ export async function convertTriageMessagesToExplorerTarget(input: {
       target: communicationsTriageConversionTargetPayload(input.target),
       message_ids: cleanIDs(input.messageIDs),
       priority: input.priority,
+      column_id: cleanColumnID || undefined,
+      status: cleanStatus || undefined,
     }),
   });
   invalidateWorkspacePanelCache(input.companyID);
@@ -1015,7 +1021,9 @@ export async function convertTriageMessagesToLogicGate(input: {
   logicGateID: string;
   nodeID?: string;
   messageIDs: string[];
-  priority: number;
+  priority?: number;
+  columnID?: string;
+  status?: string;
 }): Promise<CommunicationsTriageConversionResult> {
   const cleanNodeID = input.nodeID?.trim() ?? "";
   return convertTriageMessagesToExplorerTarget({
@@ -1026,6 +1034,8 @@ export async function convertTriageMessagesToLogicGate(input: {
       : { mode: "existing_logic_gate", logicGateID: input.logicGateID },
     messageIDs: input.messageIDs,
     priority: input.priority,
+    columnID: input.columnID,
+    status: input.status,
   });
 }
 
