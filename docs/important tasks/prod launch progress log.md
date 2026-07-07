@@ -2664,3 +2664,63 @@ Notes:
 - The prod DB already had 65 public base tables before this apply path; the task's row guard confirms all 65 existing table row counts stayed unchanged.
 - Object counts after apply were above the manifest minimum because the live prod schema already includes supplemental objects beyond the canonical manifest's table/type counts.
 - No DB password, connection string, API key, reset/MFA code, AWS token, or GitHub token was printed or recorded.
+
+## Step 14 — Agent database-access boundary documented and prepared
+
+Status: repo rules and verifier created; physical AWS/IAM enforcement still needs human setup.
+
+Updated on: 2026-07-07T00:02:51Z.
+
+User requirement:
+
+- Jonat clarified that human DBeaver/admin access may remain writer/admin.
+- Hermes/Codex/AI agents must be physically prevented from direct DB writes, not merely instructed to avoid them.
+- Agents must not retrieve DB writer passwords or use ECS/one-off-task paths that inherit backend writer DB secrets.
+- Agents may write only through the MangoRTS app API with a real app account and explicit product permissions; broad delete/destructive access should not be available by default.
+
+Repo changes:
+
+- Updated root `AGENTS.md` so future Hermes/Codex sessions see the database-access boundary immediately.
+- Created `docs/security/database-agent-access-contract.md` as the durable policy and setup checklist.
+- Created `scripts/verify_agent_db_access_boundary.py` to verify the current agent shell lacks active human/admin AWS profiles and static AWS env credentials before AWS/database work.
+- Created `docs/security/aws-prod-agent-readonly-permission-set-policy.template.json` as the intended AWS IAM Identity Center inline policy for `mangorts-prod-agent-readonly`.
+- Created `docs/important tasks/prod launch next-agent handoff prompt.md` with a copy-paste prompt for the next agent.
+
+Current verifier result:
+
+```text
+BOUNDARY_OK admin profile 'mangorts-prod' not active
+BOUNDARY_OK admin profile 'mangorts-dev' not active
+BOUNDARY_INFO readonly profile 'mangorts-prod-agent-readonly' not active/configured
+BOUNDARY_INFO readonly profile 'mangorts-dev-agent-readonly' not active/configured
+BOUNDARY_WARNING Sensitive local config exists in workspace: infra/aws-prod/terraform.tfvars
+BOUNDARY_WARNING Sensitive local config exists in workspace: infra/aws-dev/terraform.tfvars
+BOUNDARY_RESULT PASS current session lacks active human/admin AWS profiles and static AWS env credentials
+```
+
+Policy-template scope after tightening:
+
+- Allows read-only infrastructure inspection: identity, RDS/ECS/EC2/ELB/CloudWatch/Logs descriptions.
+- Denies all Secrets Manager access, including secret values, secret listing, and secret metadata.
+- Denies DB/cloud mutation paths including ECS run/register/update, IAM PassRole, RDS create/modify/delete, RDS Data API SQL execution, Route53 changes, CloudFormation changes, Cognito admin changes, CloudFront changes, EC2 security-group mutation, and related write actions.
+
+Ad-hoc verification:
+
+- Temporary `hermes-verify-*` scripts under `C:/Users/Jonat/AppData/Local/Temp` verified the boundary script, contract text, and AWS permission-set policy template.
+- Latest policy-template check verified JSON parsing, required allow/deny statements, no Secrets Manager allow, full `secretsmanager:*` deny, required mutation denies, and `git diff --check`; temp verifier was deleted.
+
+Not physically enforced yet:
+
+- The AWS Identity Center permission set/profile `mangorts-prod-agent-readonly` has not been created/applied yet.
+- The agent profile does not exist in local AWS CLI config yet.
+- Human-only `infra/aws-prod/terraform.tfvars` and `infra/aws-dev/terraform.tfvars` are still inside the Hermes workspace.
+- DBeaver writer credentials may be accessible if saved in the same Windows profile that Hermes can control.
+- No separate DB read-only user/secret has been created; default agent profile now intentionally has no Secrets Manager access at all.
+
+Next safe actions:
+
+1. Jonat should create the `mangorts-prod-agent-readonly` IAM Identity Center permission set from `docs/security/aws-prod-agent-readonly-permission-set-policy.template.json` in a human AWS Console/admin session.
+2. Configure local AWS CLI profile `mangorts-prod-agent-readonly` only after that assignment exists.
+3. Move/protect human-only tfvars and DBeaver writer passwords outside Hermes-accessible paths, or use a separate Windows user/profile for human writer/admin access.
+4. Continue prod DBeaver setup through a human-only private tunnel; do not make prod RDS public just for DBeaver.
+5. Continue Nylas prod setup and ECS/cost review after the agent boundary is enforced.

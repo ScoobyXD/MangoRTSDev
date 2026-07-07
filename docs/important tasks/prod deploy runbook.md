@@ -514,3 +514,13 @@ Prod DB schema-only apply result:
 - Verified result: `schema_only=true`, `rows_unchanged=true`, `tables=65`, `indexes=190`, `functions=8`, `triggers=2`, `types=69`.
 - Post-apply smoke checks passed for API health, frontend health, and unauthenticated `/v1/me` returning 401.
 - No migration baseline rows were inserted during this schema-only apply. If future migration automation is enabled, decide separately how to baseline `schema_migrations` without replaying old migrations into an already-current schema.
+
+Agent database-access boundary:
+
+- Root `AGENTS.md` now says database access boundaries are physical, not trust-based.
+- Durable policy: `docs/security/database-agent-access-contract.md`.
+- Verifier: `scripts/verify_agent_db_access_boundary.py`.
+- AWS permission-set template: `docs/security/aws-prod-agent-readonly-permission-set-policy.template.json`.
+- Default prod agent role should be `mangorts-prod-agent-readonly`; it must have no Secrets Manager access and must deny ECS run/register/update, IAM PassRole, RDS mutation, RDS Data API SQL execution, Route53/CloudFormation/Cognito/CloudFront mutation paths, and related write actions.
+- Current Hermes session verifier passes because no `mangorts-prod`/`mangorts-dev` admin SSO token or static AWS credentials are active.
+- Full physical enforcement is not complete until Jonat creates/assigns the IAM Identity Center permission set, configures the read-only AWS CLI profile, and keeps human-only tfvars/DBeaver writer credentials outside Hermes-accessible paths.

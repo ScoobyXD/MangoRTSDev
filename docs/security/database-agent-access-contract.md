@@ -82,7 +82,37 @@ cloudwatch:Get*
 cloudwatch:List*
 ```
 
-Only add `secretsmanager:GetSecretValue` for an agent if the target secret is a read-only credential, for example `mangorts/prod/db-readonly-password`, and the user has explicitly approved that agent read access.
+Default agent access must have no Secrets Manager access at all: no secret values, no secret listing, and no secret metadata. If an agent ever needs DB reads later, create a separate explicitly approved DB-readonly agent profile with access only to a read-only DB credential; do not add that access to the general prod agent profile.
+
+An inline-policy template for the prod agent permission set lives here:
+
+```text
+docs/security/aws-prod-agent-readonly-permission-set-policy.template.json
+```
+
+That template is not applied by committing it. A human admin must create/assign the AWS IAM Identity Center permission set, or deliberately apply equivalent Terraform from a human-only admin session.
+
+## Current implementation status
+
+Implemented in repo:
+
+- Root `AGENTS.md` tells future Hermes/Codex sessions to enforce this boundary.
+- `scripts/verify_agent_db_access_boundary.py` checks for active human/admin AWS profiles and static AWS credentials before agent AWS/database work.
+- `docs/security/aws-prod-agent-readonly-permission-set-policy.template.json` provides the intended AWS permission-set policy shape for `mangorts-prod-agent-readonly`.
+
+Physically verified now:
+
+- The current Hermes session has no active `mangorts-prod` or `mangorts-dev` SSO token.
+- The current Hermes session has no static AWS access-key environment variables.
+
+Still required for full enforcement:
+
+- Create the AWS IAM Identity Center permission set/profile `mangorts-prod-agent-readonly` using the policy template or equivalent.
+- Assign future agent sessions only to that read-only profile, never to Jonat's human admin profile.
+- Create and use a DB read-only credential if agents ever need direct DB reads.
+- Move or protect human-only `infra/aws-prod/terraform.tfvars`, `infra/aws-dev/terraform.tfvars`, DBeaver writer passwords, and any password-manager material so Hermes/Codex processes cannot read or operate them.
+
+Important OS caveat: if Hermes runs as the same Windows user as Jonat, normal Windows file permissions do not separate Hermes from Jonat's files. For true local-secret isolation, use a separate Windows account/profile for Hermes or keep human writer credentials out of files/tools that Hermes can read or operate.
 
 ## Database roles
 
