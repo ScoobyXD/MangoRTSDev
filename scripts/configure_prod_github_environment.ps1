@@ -139,11 +139,11 @@ function Set-GitHubSecret {
   Assert-NonBlank -Name $Name -Value $Value
 
   if ($DryRun) {
-    Write-Host "DRY_RUN gh secret set $Name --repo $Repository --env $Environment --body-file <redacted>"
+    Write-Host "DRY_RUN gh secret set $Name --repo $Repository --env $Environment <redacted-stdin>"
     return
   }
 
-  $Value | gh secret set $Name --repo $Repository --env $Environment --body-file -
+  $Value | gh secret set $Name --repo $Repository --env $Environment
   if ($LASTEXITCODE -ne 0) {
     throw "gh secret set failed for $Name"
   }
