@@ -333,7 +333,7 @@ func TestMemoryEmailNodeTransferAttachesEmailAndDeletesSourceNode(t *testing.T) 
 	}
 }
 
-func TestMemoryEmailConversionCommandCreatesNodeInExplorerFolderTarget(t *testing.T) {
+func TestMemoryEmailConversionCommandRejectsExplorerFolderTarget(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-111111111107"
 	repo.EnsureCompany(companyID, "Email Conversion Company")
@@ -360,7 +360,7 @@ func TestMemoryEmailConversionCommandCreatesNodeInExplorerFolderTarget(t *testin
 		t.Fatalf("UpsertCommunicationsTriageItem: %v", err)
 	}
 
-	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
+	_, err = repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
 		UserID:    user.UserID,
 		CompanyID: companyID,
 		Target: CommunicationsTriageConversionTarget{
@@ -369,23 +369,17 @@ func TestMemoryEmailConversionCommandCreatesNodeInExplorerFolderTarget(t *testin
 		},
 		MessageIDs: []string{message.ID},
 	})
-	if err != nil {
-		t.Fatalf("ConvertCommunicationsTriageItems folder target: %v", err)
-	}
-	if len(result.Nodes) != 1 || result.Nodes[0].Title != message.Subject {
-		t.Fatalf("nodes = %+v, want one created email node", result.Nodes)
-	}
-	if len(result.ExplorerV2Rows) != 1 {
-		t.Fatalf("explorer rows = %+v, want one node placement row", result.ExplorerV2Rows)
-	}
-	row := result.ExplorerV2Rows[0]
-	if row.EntityType != EntityTypeNode || row.ResourceID != result.Nodes[0].NodeID || row.ParentEntityID != targetFolder.EntityID {
-		t.Fatalf("explorer row = %+v, want node row under folder %s", row, targetFolder.EntityID)
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("ConvertCommunicationsTriageItems folder target err = %v, want ErrInvalid", err)
 	}
 
 	triageItems, err := repo.ListCommunicationsTriageItems(user.UserID)
-	if err != nil || len(triageItems) != 0 {
-		t.Fatalf("triage items after folder conversion = %+v err=%v, want none", triageItems, err)
+	if err != nil || len(triageItems) != 1 || triageItems[0].MessageID != message.ID {
+		t.Fatalf("triage items after rejected folder conversion = %+v err=%v, want original message", triageItems, err)
+	}
+	nodes, err := repo.ListNodes(companyID)
+	if err != nil || len(nodes) != 0 {
+		t.Fatalf("nodes after rejected folder conversion = %+v err=%v, want none", nodes, err)
 	}
 	children, err := repo.ListCompanyExplorerV2ChildRows(CompanyExplorerV2RowsQuery{
 		CompanyID:        companyID,
@@ -395,17 +389,15 @@ func TestMemoryEmailConversionCommandCreatesNodeInExplorerFolderTarget(t *testin
 	if err != nil {
 		t.Fatalf("ListCompanyExplorerV2ChildRows: %v", err)
 	}
-	placed := findCompanyExplorerV2Row(children.Rows, EntityTypeNode, result.Nodes[0].NodeID)
-	if placed == nil {
-		t.Fatalf("folder children = %+v, want placed node %s", children.Rows, result.Nodes[0].NodeID)
+	if len(children.Rows) != 0 {
+		t.Fatalf("folder children after rejected folder conversion = %+v, want none", children.Rows)
 	}
 	durable, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: afterSequence, Limit: 20})
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	wantTypes := []string{WorkItemEmailConvertedEventType, "node_created", "node_updated", "company_explorer_item_placed"}
-	if got := domainEventTypes(durable); !reflect.DeepEqual(got, wantTypes) {
-		t.Fatalf("durable event types = %+v, want %+v", got, wantTypes)
+	if len(durable) != 0 {
+		t.Fatalf("durable event types = %+v, want none", domainEventTypes(durable))
 	}
 }
 

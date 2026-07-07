@@ -315,27 +315,6 @@ function applyWorkspaceEnvelope(
   if (envelope.company_id !== companyID) return state;
   const data = envelope.data ?? {};
 
-  if (envelope.type === "node_created" || envelope.type === "node_updated") {
-    const node = asNodeRecord(data.node);
-    if (!node) return state;
-    return {
-      ...state,
-      nodes: upsertByID(state.nodes, node, (item) => item.node_id),
-      rows: updateCompanyExplorerV2ResourceRows(state.rows, "node", node.node_id, node.name),
-    };
-  }
-  if (envelope.type === "node_deleted") {
-    const nodeID = typeof data.node_id === "string" ? data.node_id : "";
-    if (!nodeID) return state;
-    return removeDeletedEntities(state, {
-      type: "removeDeletedEntities",
-      deletedFolderIDs: new Set(),
-      deletedNodeIDs: new Set([nodeID]),
-      deletedLogicGateIDs: new Set(),
-      deletedProjectIDs: new Set(),
-      deletedKanbanBoardIDs: new Set(),
-    });
-  }
   if (envelope.type === "logic_gate_created" || envelope.type === "logic_gate_updated") {
     const logicGate = asLogicGateApiRecord(data.logic_gate);
     if (!logicGate) return state;
@@ -479,28 +458,11 @@ function upsertFolderItems(
 }
 
 function filterCompanyExplorerFolderItemsForExplorer(items: CompanyExplorerFolderItem[]): CompanyExplorerFolderItem[] {
-  return items;
+  return items.filter((item) => item.item_type !== "node");
 }
 
 function filterCompanyExplorerV2RowsForExplorer(rows: CompanyExplorerV2Row[]): CompanyExplorerV2Row[] {
-  return rows;
-}
-
-function updateCompanyExplorerV2ResourceRows(
-  rows: CompanyExplorerV2Row[],
-  entityType: CompanyExplorerV2Row["entity_type"],
-  resourceID: string,
-  name: string,
-): CompanyExplorerV2Row[] {
-  const cleanResourceID = resourceID.trim();
-  if (!cleanResourceID) return rows;
-  let changed = false;
-  const next = rows.map((row) => {
-    if (row.entity_type !== entityType || (row.resource_id ?? "").trim() !== cleanResourceID || row.name === name) return row;
-    changed = true;
-    return { ...row, name };
-  });
-  return changed ? next : rows;
+  return rows.filter((row) => row.entity_type !== "node");
 }
 
 function companyExplorerV2RowKey(row: CompanyExplorerV2Row): string {
@@ -571,11 +533,6 @@ function cleanStringList(value: unknown): string[] {
 function asLogicGateApiRecord(value: unknown): LogicGateApiRecord | null {
   if (!isObjectRecord(value) || typeof value.logic_gate_id !== "string" || typeof value.header !== "string" || typeof value.created_timestamp !== "string") return null;
   return value as LogicGateApiRecord;
-}
-
-function asNodeRecord(value: unknown): NodeRecord | null {
-  if (!isObjectRecord(value) || typeof value.node_id !== "string" || typeof value.name !== "string" || typeof value.created_timestamp !== "string") return null;
-  return value as NodeRecord;
 }
 
 function asProjectRecord(value: unknown): ProjectRecord | null {

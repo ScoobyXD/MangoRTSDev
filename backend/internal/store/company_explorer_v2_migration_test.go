@@ -10,7 +10,6 @@ import (
 const (
 	companyExplorerFinalCutoverMigration   = "20260620_company_explorer_final_cutover.sql"
 	companyExplorerNoNodeItemsMigration    = "20260626_company_explorer_no_node_items.sql"
-	companyExplorerEmailNodeItemsMigration = "20260706_company_explorer_email_node_items.sql"
 	resourcePermissionsIgnoreGVICMigration = "20260701_resource_permissions_ignore_gvic.sql"
 	resourcePolicyPointersMigration        = "20260701_resource_policy_pointers.sql"
 	resourcePolicyNoGVICMigration          = "20260702_resource_policy_access_helper_no_gvic.sql"
@@ -30,7 +29,7 @@ func TestCompanyExplorerFinalSchemaDefinesContainmentTables(t *testing.T) {
 		"create table if not exists company_explorer_items",
 		"target_type text not null",
 		"target_id uuid not null",
-		"constraint company_explorer_items_target_type_chk check (target_type in ('project', 'logic_gate', 'node'))",
+		"constraint company_explorer_items_target_type_chk check (target_type in ('project', 'logic_gate'))",
 		"unique (company_id, target_type, target_id)",
 		"foreign key (company_id, parent_folder_id) references company_explorer_folders(company_id, folder_id) on delete cascade",
 		"create index if not exists idx_company_explorer_items_parent_position",
@@ -53,22 +52,6 @@ func TestCompanyExplorerFinalSchemaDefinesContainmentTables(t *testing.T) {
 	} {
 		if strings.Contains(normalized, forbidden) {
 			t.Fatalf("schema kept removed company explorer storage marker %q", forbidden)
-		}
-	}
-}
-
-func TestCompanyExplorerEmailNodeItemsMigrationAllowsNodePlacement(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", companyExplorerEmailNodeItemsMigration))
-	if err != nil {
-		t.Fatalf("read migration: %v", err)
-	}
-	normalized := normalizeSQLForCompanyExplorerV2Test(string(raw))
-	for _, want := range []string{
-		"drop constraint if exists company_explorer_items_target_type_chk",
-		"check (target_type in ('project', 'logic_gate', 'node'))",
-	} {
-		if !strings.Contains(normalized, want) {
-			t.Fatalf("email node item migration missing marker %q", want)
 		}
 	}
 }

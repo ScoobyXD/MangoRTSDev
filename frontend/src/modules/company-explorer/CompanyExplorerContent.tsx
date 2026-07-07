@@ -251,23 +251,8 @@ function cleanExplorerIDs(values: string[]): string[] {
 }
 
 function companyExplorerTriageConversionTarget(target: CompanyExplorerTriageMessageDropTarget): CommunicationsTriageConversionTarget | null {
-  switch (target.kind) {
-    case "project": {
-      const projectID = cleanExplorerID(target.projectID);
-      return projectID ? { mode: "project", projectID } : null;
-    }
-    case "logic_gate": {
-      const logicGateID = cleanExplorerID(target.logicGateID);
-      return logicGateID ? { mode: "existing_logic_gate", logicGateID } : null;
-    }
-    case "folder": {
-      const parentEntityID = cleanExplorerID(target.parentEntityID);
-      const folderID = cleanExplorerID(target.folderID);
-      return parentEntityID || folderID ? { mode: "folder", parentEntityID: parentEntityID || undefined, folderID: folderID || undefined } : null;
-    }
-    default:
-      return null;
-  }
+  const logicGateID = cleanExplorerID(target.logicGateID);
+  return logicGateID ? { mode: "existing_logic_gate", logicGateID } : null;
 }
 
 function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
@@ -3636,7 +3621,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         messageIDs: menu.messageIDs,
         priority,
       });
-      if (result.nodes.length > 0) dispatchExplorerStore({ type: "mergeSnapshot", snapshot: { nodes: result.nodes } });
       if (result.folder_items && result.folder_items.length > 0) dispatchExplorerStore({ type: "upsertFolderItems", folderItems: result.folder_items });
       if (result.explorer_v2_rows && result.explorer_v2_rows.length > 0) dispatchExplorerStore({ type: "upsertV2Rows", rows: result.explorer_v2_rows });
       const convertedMessageIDs = result.deleted_message_ids.length > 0 ? result.deleted_message_ids : menu.messageIDs;
@@ -3654,8 +3638,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         cardIDs: (result.cards ?? []).map((card) => card.card_id),
         unstarredMessageIDs: cleanExplorerIDs(result.unstarred_message_ids ?? []),
       });
-      const targetLabel = target.mode === "existing_logic_gate" ? "Logic Gate" : "Explorer";
-      setInternalTriageDropSuccess(convertedMessageIDs.length === 1 ? `Email added to ${targetLabel}.` : `${convertedMessageIDs.length} emails added to ${targetLabel}.`);
+      setInternalTriageDropSuccess(convertedMessageIDs.length === 1 ? "Email added to Logic Gate." : `${convertedMessageIDs.length} emails added to Logic Gate.`);
       setInternalTriageDropMenu(null);
     } catch (err) {
       setInternalTriageDropSuccess("");

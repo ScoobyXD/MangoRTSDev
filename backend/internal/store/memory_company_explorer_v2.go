@@ -85,7 +85,7 @@ func (r *MemoryRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQ
 	rows := CompanyExplorerV2Rows{Rows: []CompanyExplorerV2Row{}}
 	for _, edge := range r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, parent.EntityID) {
 		child, ok := r.companyExplorerV2Entities[key(query.CompanyID, edge.ChildEntityID)]
-		if !ok || !r.companyExplorerV2EntityVisibleLocked(query, child) {
+		if !ok || !companyExplorerV2EntityIsFinalTreeRow(child.EntityType) || !r.companyExplorerV2EntityVisibleLocked(query, child) {
 			continue
 		}
 		rowEdge := edge.memoryEdge()
@@ -100,7 +100,7 @@ func (r *MemoryRepo) listCompanyExplorerV2RootRowsLocked(query CompanyExplorerV2
 	companyRootID := companyExplorerV2NativeEntityID(query.CompanyID, CompanyExplorerV2EntityCompany, query.CompanyID)
 	for _, edge := range r.companyExplorerV2DirectChildEdgesLocked(query.CompanyID, companyRootID) {
 		child, ok := r.companyExplorerV2Entities[key(query.CompanyID, edge.ChildEntityID)]
-		if !ok || !r.companyExplorerV2EntityVisibleLocked(query, child) {
+		if !ok || !companyExplorerV2EntityIsFinalTreeRow(child.EntityType) || !r.companyExplorerV2EntityVisibleLocked(query, child) {
 			continue
 		}
 		rowEdge := edge.memoryEdge()
@@ -110,6 +110,15 @@ func (r *MemoryRepo) listCompanyExplorerV2RootRowsLocked(query CompanyExplorerV2
 	}
 	sortCompanyExplorerV2Rows(rows.Rows)
 	return rows
+}
+
+func companyExplorerV2EntityIsFinalTreeRow(entityType string) bool {
+	switch entityType {
+	case CompanyExplorerV2EntityFolder, CompanyExplorerV2EntityProject, CompanyExplorerV2EntityLogicGate:
+		return true
+	default:
+		return false
+	}
 }
 
 func (edge memoryCompanyExplorerV2TreeEdge) memoryEdge() memoryCompanyExplorerV2Edge {
@@ -761,7 +770,7 @@ func (r *MemoryRepo) ensureCompanyExplorerV2CompanyGraphLocked(companyID string)
 		r.companyExplorerV2Edges[key(companyID, edge.EdgeID)] = edge
 	}
 	for _, item := range r.folderItems {
-		if item.CompanyID != companyID || item.ItemType == "kanban" {
+		if item.CompanyID != companyID || item.ItemType == "kanban" || item.ItemType == EntityTypeNode {
 			continue
 		}
 		child, ok := r.companyExplorerV2EntityForNativeLocked(companyID, item.ItemType, item.ItemID)

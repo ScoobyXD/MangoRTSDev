@@ -411,7 +411,7 @@ with folder_rows as (
          item.target_id as entity_id,
          item.target_type as entity_type,
          item.target_id as resource_id,
-         coalesce(project.name, logic_gate.header, node.name, item.target_id::text) as name,
+         coalesce(project.name, logic_gate.header, item.target_id::text) as name,
          null::uuid as parent_entity_id,
          item.item_id as edge_id,
          item.position,
@@ -426,16 +426,11 @@ with folder_rows as (
     on item.target_type='logic_gate'
    and logic_gate.company_id=item.company_id
    and logic_gate.logic_gate_id=item.target_id
-  left join nodes node
-    on item.target_type='node'
-   and node.company_id=item.company_id
-   and node.node_id=item.target_id
   where item.company_id=$1::uuid
     and item.parent_folder_id is null
     and (
       (item.target_type='project' and project.project_id is not null)
       or (item.target_type='logic_gate' and logic_gate.logic_gate_id is not null)
-      or (item.target_type='node' and node.node_id is not null)
     )
 ), all_rows as (
   select * from folder_rows
@@ -489,7 +484,7 @@ with folder_rows as (
          item.target_id as entity_id,
          item.target_type as entity_type,
          item.target_id as resource_id,
-         coalesce(project.name, logic_gate.header, node.name, item.target_id::text) as name,
+         coalesce(project.name, logic_gate.header, item.target_id::text) as name,
          `+parentEntityExpr+` as parent_entity_id,
          item.item_id as edge_id,
          item.position,
@@ -504,16 +499,11 @@ with folder_rows as (
     on item.target_type='logic_gate'
    and logic_gate.company_id=item.company_id
    and logic_gate.logic_gate_id=item.target_id
-  left join nodes node
-    on item.target_type='node'
-   and node.company_id=item.company_id
-   and node.node_id=item.target_id
   where item.company_id=$1::uuid
     and `+itemParentPredicate+`
     and (
       (item.target_type='project' and project.project_id is not null)
       or (item.target_type='logic_gate' and logic_gate.logic_gate_id is not null)
-      or (item.target_type='node' and node.node_id is not null)
     )
 ), all_rows as (
   select * from folder_rows

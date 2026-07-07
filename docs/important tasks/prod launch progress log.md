@@ -2724,3 +2724,59 @@ Next safe actions:
 3. Move/protect human-only tfvars and DBeaver writer passwords outside Hermes-accessible paths, or use a separate Windows user/profile for human writer/admin access.
 4. Continue prod DBeaver setup through a human-only private tunnel; do not make prod RDS public just for DBeaver.
 5. Continue Nylas prod setup and ECS/cost review after the agent boundary is enforced.
+
+## Step 15 — Optional human-only prod DB tunnel scaffolded
+
+Status: repo-only Terraform/docs prepared; no AWS resources created or changed.
+
+Updated on: 2026-07-07T04:32:51Z.
+
+Context:
+
+- Jonat tried DBeaver against `localhost:15432`.
+- Local checks showed `localhost:15432` was not listening, so the failure was a missing tunnel, not a DB password failure.
+- Local `localhost:5432` was already occupied by a local PostgreSQL process and should not be used for prod DBeaver.
+- Prod runs on ECS Fargate, not EC2. The app backend can reach private RDS because ECS tasks run inside the prod VPC; Jonat's laptop cannot reach private RDS directly.
+
+Decision:
+
+- Do not make prod RDS public.
+- Do not use ECS app tasks as a human/admin DB proxy.
+- Prepare a small optional private EC2 managed node only as an SSM Session Manager tunnel target for Jonat's human DBeaver access.
+- This instance is not an app server and does not replace ECS.
+
+Repo changes:
+
+```text
+infra/aws-prod/db_tunnel.tf
+infra/aws-prod/variables.tf
+infra/aws-prod/locals.tf
+infra/aws-prod/outputs.tf
+infra/aws-prod/terraform.tfvars.example
+docs/infra/mangorts-prod-db-tunnel.md
+docs/infra/README.md
+```
+
+Terraform shape:
+
+- New tunnel host is disabled by default with `enable_db_tunnel_host = false`.
+- When enabled, Terraform creates a tiny private EC2 instance, IAM role/instance profile with `AmazonSSMManagedInstanceCore`, a no-inbound security group, egress for SSM HTTPS, egress to prod DB `5432`, and prod DB security group ingress from the tunnel host security group.
+- The host uses Amazon Linux 2023 x86_64 from AWS's public AMI SSM parameter.
+- The host gets no public IP and no SSH key.
+- Terraform outputs the instance ID and a PowerShell `aws ssm start-session` command for Jonat's human-admin terminal.
+
+Safety:
+
+- No AWS command, Terraform plan, Terraform apply, DB connection, or SSM session was run for this change.
+- No DB password, AWS token, GitHub token, origin secret, Nylas secret, or connection string was printed or recorded.
+- This tunnel is human-only. Agents must not operate Jonat's DBeaver writer connection or use human-admin AWS credentials to start SSM sessions.
+
+Next action:
+
+1. Jonat reviews `docs/infra/mangorts-prod-db-tunnel.md`.
+2. In a human-admin local `infra/aws-prod/terraform.tfvars`, set `enable_db_tunnel_host = true`.
+3. From a human-admin PowerShell session, run a Terraform plan and confirm only the tunnel resources are changing.
+4. Apply only after explicit approval.
+5. Wait for SSM to show the tunnel host as online.
+6. Start the SSM remote-host port forward to local `15432`.
+7. Connect DBeaver to `localhost:15432`, database `mangorts`, username `mangorts_app`, SSL mode `require`, with `Save password` unchecked.

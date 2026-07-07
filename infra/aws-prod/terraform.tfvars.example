@@ -32,6 +32,14 @@ existing_db_password_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012
 existing_db_password_secret_json_key = "password"
 existing_db_security_group_id        = "sg-0123456789abcdef0"
 
+# Optional human-only DBeaver access path. This creates a tiny private EC2
+# managed node for SSM port forwarding to the private prod DB. It is not an app
+# server and should stay disabled unless Jonat wants a DBeaver tunnel.
+enable_db_tunnel_host  = false
+db_tunnel_instance_type = "t3.nano"
+db_tunnel_subnet_id    = "" # Empty means use the first ECS private subnet.
+db_tunnel_local_port   = 15432
+
 # Phase-1 bootstrap should keep this empty. CI sets an immutable git-SHA image URI after ECR exists.
 backend_image_uri = ""
 

@@ -103,8 +103,8 @@ run("snapshot reducer replaces explorer snapshot and preserves board list", () =
   assert.deepEqual(state.nodes.map((item) => item.name), ["Alpha"]);
   assert.deepEqual(state.logicGates.map((item) => [item.logic_gate_id, item.node_id, item.title]), [["gate-a", "gate-a", "Gate A"]]);
   assert.deepEqual(state.folders.map((item) => item.folder_id), ["folder-a"]);
-  assert.deepEqual(state.folderItems.map((item) => `${item.item_type}:${item.item_id}`), ["node:node-a", "logic_gate:gate-a"]);
-  assert.deepEqual(state.rows.map((row) => `${row.entity_type}:${row.resource_id}:${row.edge_id ?? ""}`), ["node:node-a:edge-node-a"]);
+  assert.deepEqual(state.folderItems.map((item) => `${item.item_type}:${item.item_id}`), ["logic_gate:gate-a"]);
+  assert.deepEqual(state.rows.map((row) => `${row.entity_type}:${row.resource_id}:${row.edge_id ?? ""}`), []);
   assert.deepEqual(state.kanbanBoards.map((item) => item.board_id), ["board-a"]);
 });
 
@@ -128,15 +128,15 @@ run("workspace stream reducer upserts and removes explorer entities", () => {
     companyID: "c",
     envelope: { company_id: "c", type: "node_updated", data: { node: node("node-a", "New") } },
   });
-  assert.equal(state.nodes[0]?.name, "New");
-  assert.equal(state.rows[0]?.name, "New");
+  assert.equal(state.nodes[0]?.name, "Old");
+  assert.deepEqual(state.rows, []);
 
   state = reduceCompanyExplorerStore(state, {
     type: "applyWorkspaceEnvelope",
     companyID: "c",
     envelope: { company_id: "c", type: "node_deleted", data: { node_id: "node-a" } },
   });
-  assert.deepEqual(state.nodes.map((item) => item.name), []);
+  assert.deepEqual(state.nodes.map((item) => item.name), ["Old"]);
   assert.deepEqual(state.folderItems.map((item) => `${item.item_type}:${item.item_id}`), ["logic_gate:gate-a"]);
   assert.deepEqual(state.rows, []);
 

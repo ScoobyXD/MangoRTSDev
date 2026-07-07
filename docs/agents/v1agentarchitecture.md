@@ -1,226 +1,387 @@
-# V1 Agent Architecture Prototype
+# Agent Service V1 Project Doc
 
-This document records the first simple decision for adding Hermes-style agents to MangoRTS.
+This document is the architecture note, project document, and lightweight tracker
+for adding the MangoRTS Agent Service.
 
-The goal is not to design the final agent system yet. The goal is to get a basic prototype working.
-
-## Core idea
-
-Agents are not always-on workers.
-
-For V1, an agent is a short-lived run:
-
-1. A user clicks an agent icon on a node card.
-2. MangoRTS creates an agent run record.
-3. A temporary Hermes agent session starts.
-4. The agent reads the Logic Gate SOP and the node card.
-5. The agent either asks for more information or does the work.
-6. The agent writes a summary of what happened.
-7. The agent session ends.
-
-The agent disappears after the run, but MangoRTS keeps the durable record of what happened.
-
-## First user flow
-
-The first prototype use case is a coding agent for a Logic Gate Kanban board.
-
-1. A user creates or receives a node card on a Logic Gate Kanban board.
-2. The card shows an agent icon.
-3. The user clicks the agent icon.
-4. MangoRTS starts an agent run for that one card.
-5. The agent reads:
-   - the Logic Gate SOP
-   - the node card title and details
-   - the node chat/history
-   - any useful linked context
-6. If the request is unclear, the agent posts a question in the node chat and stops.
-7. If the request is clear, the agent moves the card to `In Progress`.
-8. The agent attempts the work.
-9. When done, the agent posts a summary and moves the card to `Verify`/`Review`.
-10. A human verifies the result.
-
-For now, the user can click the agent icon again after replying to a question. We do not need a permanently running agent waiting for replies.
-
-## Agent identity
-
-For the first prototype, all temporary agent sessions can use one MangoRTS agent account.
-
-Example account:
+The goal is simple:
 
 ```text
-hermes-agent@mangorts.com
+User clicks the agent icon on a node
+-> MangoRTS gathers the node and Logic Gate context
+-> Agent Service starts a Codex worker in an isolated branch/worktree
+-> Codex does the requested code work or asks a clarification question
+-> MangoRTS shows the agent status, chat, branch/worktree, and final summary
+-> A human verifies and merges
 ```
 
-This account is the API identity used by Hermes when it needs to read or write MangoRTS data.
+Use **Agent Service** in product language, code, docs, and prompts.
 
-The account can:
+## Core Decisions
 
-- read the relevant Logic Gate
-- read the relevant node card
-- read and write node chat messages
-- move the node card between allowed statuses
-- write agent summaries
+- Agent Service is a separate service from the main MangoRTS app.
+- Agent Service has zero database credentials.
+- Agent Service interacts with MangoRTS like a normal user through MangoRTS APIs.
+- Agent Service may read broad MangoRTS context through API permissions.
+- Agent Service may create and update allowed MangoRTS records through APIs.
+- Agent Service must not have delete permissions in V1.
+- Agent Service must not directly write to the database.
+- Codex is the worker that reads the repo, edits code, runs checks, and reports back.
+- The node that launched the agent is the origin of the work, not a hard silo.
+- The first useful milestone is node -> context bundle -> isolated worktree -> Codex running.
 
-This keeps V1 simple. We do not need a new email/account for every agent run.
+## Mental Model
 
-## Agent runs are still separate
+Agent Service automates the current manual Codex workflow.
 
-Even if all agents use one account, each temporary session needs its own agent run record.
+Today, a human can:
 
-An agent run should record:
+1. Look at a MangoRTS Logic Gate board for feature or bug requests.
+2. Open a node.
+3. Read the request, chats, emails, files, and screenshots.
+4. Create a separate branch/worktree/IDE session.
+5. Paste the request into Codex.
+6. Let Codex implement the change.
+7. Review and merge the result.
 
-- which company it belongs to
-- which Logic Gate it belongs to
-- which node/card it belongs to
-- who started it
-- when it started
-- when it ended
-- current status
+V1 should do the same thing without the human copy/paste step.
+
+The service should not become a complicated multi-agent router. It should be a
+thin execution service that knows how to:
+
+- receive a launch request from MangoRTS
+- fetch the latest context through MangoRTS APIs
+- create an isolated Git branch/worktree
+- start Codex with the context
+- relay clarification questions and final summaries back to MangoRTS
+
+## Product Flow
+
+The agent icon can appear in either place:
+
+- the node header
+- the node card on the Kanban board
+
+When a user clicks the icon:
+
+1. MangoRTS creates or updates an agent run for that node.
+2. MangoRTS moves the node from `requested` to `pending`.
+3. MangoRTS sends the agent run to Agent Service.
+4. Agent Service fetches the context bundle through MangoRTS APIs.
+5. Agent Service creates an isolated branch/worktree from local `main`.
+6. Agent Service injects the context into Codex.
+7. Codex decides whether it can work immediately.
+8. If Codex needs clarification, it posts a node chat question and the node stays `pending`.
+9. If Codex can work, the node moves to `in_progress`.
+10. Codex edits the repo, runs appropriate checks, and writes a final summary.
+11. MangoRTS moves the node to `verify`.
+12. A human reviews the branch/worktree and decides whether to merge.
+
+V1 should not auto-merge to `main`.
+
+## Status Flow
+
+Use the board statuses the app already understands as much as possible.
+
+```text
+requested -> pending -> in_progress -> verify
+```
+
+Meanings:
+
+- `requested`: user-created feature request or bug report is waiting for action.
+- `pending`: agent run exists, context is being gathered, or Codex is asking clarifying questions.
+- `in_progress`: Codex is actively working in an isolated branch/worktree.
+- `verify`: Codex says the work is complete and a human should review it.
+
+If the backend currently uses a different status key for the human review column,
+do not start with a status migration. Map to the existing key and keep the
+product label as needed.
+
+## Context Bundle
+
+Latency matters. Agent launch should avoid many slow round trips where possible.
+Prefer one context-bundle API endpoint or a very small number of API calls.
+
+The context bundle should include:
+
+- latest projection of the Logic Gate
+- latest projection of the launching node
+- node title, body, fields, status, and metadata
+- Logic Gate SOP or operating instructions
+- all node text editor content
+- all node chats/history
+- all relevant emails connected to the node
+- all node files and attachments
+- screenshots and image attachments in a form Codex can read
+- any useful linked context available through the app
+- a MangoRTS explanation file for agents
+- agent run id, launching user, company id, Logic Gate id, node id, and timestamps
+
+The bundle should explicitly tell Codex:
+
+- it is working inside MangoRTS
+- the current workspace is a Logic Gate
+- the launching node is the origin request
+- it may inspect related app context through provided tools/API context
+- it must not delete app data
+- it should ask a node-chat question if the request is unclear
+- it should write a final summary and branch/worktree details when done
+
+Screenshots matter for UI bug reports and UI feature requests. V1 should treat
+images as first-class context, not as optional decoration.
+
+## Agent Identity And Permissions
+
+Use a shared MangoRTS agent user for V1, for example:
+
+```text
+agent-service@mangorts.com
+```
+
+This is an application user, not a database user.
+
+Allowed through MangoRTS APIs:
+
+- read Logic Gates the agent user can access
+- read nodes/cards the agent user can access
+- read node chats, text editors, files, attachments, screenshots, and emails
+- append node chat messages
+- create/update agent run records
+- move node status through allowed transitions
+- write final summaries and branch/worktree metadata
+
+Not allowed in V1:
+
+- direct database credentials
+- direct database writes
+- deleting nodes
+- deleting chats
+- deleting files or attachments
+- deleting Logic Gates
+- deleting users or companies
+- changing production cloud resources
+- auto-merging to `main`
+
+The Agent Service should look powerful from a product perspective, but boring
+from a database perspective. It is just another app user that reads fast, writes
+fast, and runs Codex in a repo workspace.
+
+## Agent Run Record
+
+MangoRTS should keep a durable run record even though the actual Codex session is
+temporary.
+
+The run record should track:
+
+- company id
+- Logic Gate id
+- launching node id
+- launching user id
+- agent user id
+- run status
+- created at
+- started at
+- finished at
+- branch name
+- worktree path
+- context bundle id or snapshot reference
 - final summary
 - error message, if any
-- link to the Hermes session/task, if available
+- whether the run asked for clarification
 
-This lets MangoRTS answer:
+The run record is the birth certificate. The final summary is the death
+certificate.
 
-> What was this agent asked to do, what did it do, and when did it do it?
+Codex should also write a short starting note after it receives context:
 
-## Important distinction
+- what it thinks the task is
+- whether it needs clarification
+- what it is going to inspect or change
 
-There are two identities involved:
+## Worktree Behavior
 
-### Agent account
+Agent Service should create an isolated branch/worktree instead of working in the
+main repo checkout.
 
-The shared MangoRTS account that authenticates API calls.
+The workflow should be similar in spirit to the existing human helper:
 
-Example:
-
-```text
-hermes-agent@mangorts.com
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\new_codex_vscode.ps1 "<purpose>"
 ```
 
-### Agent run
+But the Agent Service does not need to open VS Code.
 
-The specific temporary session working on one node card.
+Expected V1 behavior:
 
-Example:
+- base the worker from local `main`
+- fetch `origin/main` only to verify local `main` contains GitHub's latest `main`
+- allow local `main` to be ahead of GitHub
+- create a unique branch name from the agent run and node title
+- create a separate worktree under a predictable local path
+- write the context bundle into the worktree in an ignored agent/context location
+- start Codex headlessly in that worktree
+- capture branch, worktree path, checks run, and final summary
 
-```text
-Agent run 1842 on node "Fix login redirect bug"
-```
-
-Many agent runs can use the same agent account.
-
-## V1 authentication approach
-
-For the basic prototype, Hermes can call MangoRTS APIs using the shared agent account.
-
-That is enough to prove the loop:
-
-1. click agent icon
-2. start Hermes
-3. Hermes reads MangoRTS data
-4. Hermes writes chat/status updates
-5. Hermes exits
-6. MangoRTS shows the result
-
-## V2 safety direction
-
-The shared account should not stay broad forever.
-
-Later, MangoRTS should issue short-lived scoped agent-run tokens.
-
-A scoped token would say something like:
+Possible branch format:
 
 ```text
-This token belongs to agent run 1842.
-It may only read Logic Gate A.
-It may only read/write Node B chat.
-It may only move Node B through allowed statuses.
-It expires soon.
+agent/0001234-fix-login-redirect
 ```
 
-This protects the app if an agent makes a bad decision or a token leaks.
-
-But this is not required for the first prototype.
-
-## Node chat
-
-The agent needs a durable place to ask questions and leave summaries.
-
-For V1, the simplest acceptable behavior is:
-
-- agent questions appear in the node chat
-- user replies appear in the same node chat
-- final agent summary appears in the same node chat
-
-If the current node chat is not durable enough, we should add a simple server-side agent message table.
-
-The important point is that the agent should not hold context forever. It should be able to reconstruct context from the node, the Logic Gate SOP, and the stored chat history.
-
-## Card status behavior
-
-The agent should use the same statuses the board already understands.
-
-Expected V1 transitions:
+Possible worktree root:
 
 ```text
-Requested/Pending -> In Progress -> Verify/Review -> Done
+C:\tmp\mangorts-agent-worktrees\0001234-fix-login-redirect
 ```
 
-If the agent needs more information, the card can stay where it is and the agent run can be marked as waiting for user input.
+Do not open a new IDE for V1 Agent Service runs.
 
-The product may call the human-check column `Verify`, while the backend may still use the existing `review` status key. We should avoid a status migration until needed.
+## Clarification Loop
 
-## Backend pieces needed for the prototype
+If Codex does not understand the request, it should not guess.
 
-Minimum V1 backend pieces:
+Instead:
 
-1. An `agent_runs` table.
-2. A way to create an agent run when the user clicks the card icon.
-3. A way for Hermes to read the Logic Gate SOP and node/card context.
-4. A way for Hermes to write node chat messages.
-5. A way for Hermes to move the card status.
-6. A way to store the final agent run summary.
+1. Codex posts a concise question in the node chat.
+2. The node remains `pending`.
+3. The agent run is marked as waiting for user input.
+4. The user answers in node chat.
+5. The user clicks the agent icon again, or MangoRTS resumes the run if resume is easy.
 
-Optional but useful:
+For V1, clicking the icon again after a user reply is acceptable. Do not build a
+permanently running agent listener just to wait for replies.
 
-- agent run logs
-- current run status on the card
-- cancel button
-- retry button
-- link to Hermes session/task
+## Implementation Phases
 
-## Frontend pieces needed for the prototype
+There are exactly two implementation phases for V1.
 
-Minimum V1 frontend pieces:
+### Phase 1: MangoRTS Launch And Context
 
-1. Show an agent icon on node cards.
-2. Let the user click it to start an agent run.
-3. Show a simple running/waiting/done indicator.
-4. Show agent messages in node chat.
-5. Refresh the card when the agent moves it.
+Status: not started
 
-## Prototype principle
+Goal: clicking the agent icon creates a durable run and gives Agent Service the
+context it needs.
 
-Keep the first version simple.
+Tasks:
 
-Do not start with:
+- [ ] Add an agent icon/action to node headers and/or Kanban node cards.
+- [ ] Add or reuse an `agent_runs` persistence model.
+- [ ] Add a backend endpoint to start an agent run from a node.
+- [ ] Move the node from `requested` to `pending` when a run starts.
+- [ ] Add a context-bundle API for the launching node.
+- [ ] Include Logic Gate projection, node projection, chats, editors, emails, files, and screenshots.
+- [ ] Include the MangoRTS agent explanation text in the context bundle.
+- [ ] Add APIs for Agent Service to append node chat messages.
+- [ ] Add APIs for Agent Service to update allowed node statuses.
+- [ ] Show agent run status and branch/worktree metadata in the UI when available.
 
-- always-on agents
-- agents automatically watching every card
-- one email per agent run
-- a complex multi-agent router
-- production-level scoped tokens
+Acceptance criteria:
 
-Start with:
+- Clicking the icon creates an agent run.
+- The node moves to `pending`.
+- A context bundle can be fetched through MangoRTS APIs with no DB credentials.
+- The context includes screenshots/attachments in a Codex-readable form.
+- Agent Service can post a chat message as the agent user through the API.
+
+### Phase 2: Agent Service Codex Runner
+
+Status: not started
+
+Goal: Agent Service receives a run, creates an isolated worktree, starts Codex
+with the context, and reports back to MangoRTS.
+
+Tasks:
+
+- [ ] Create the separate Agent Service.
+- [ ] Configure Agent Service with MangoRTS API base URL and agent-user auth.
+- [ ] Do not configure database credentials.
+- [ ] Receive or poll for agent runs.
+- [ ] Fetch the context bundle through MangoRTS APIs.
+- [ ] Create a unique branch/worktree from local `main`.
+- [ ] Write the context bundle into the worktree.
+- [ ] Start Codex headlessly with the context.
+- [ ] Move the node to `in_progress` when Codex begins code work.
+- [ ] Relay clarification questions to node chat and leave the node `pending`.
+- [ ] Capture final summary, branch, worktree path, and checks.
+- [ ] Move the node to `verify` when Codex finishes.
+
+Acceptance criteria:
+
+- A real node launch can start Agent Service.
+- Agent Service creates an isolated branch/worktree.
+- Codex receives the node and Logic Gate context.
+- Codex can ask a clarification question in node chat.
+- Codex can complete work and report branch/worktree details.
+- MangoRTS shows enough information for a human to review and merge manually.
+
+## Do Not Build In V1
+
+- Always-on agents watching every node.
+- One app account per agent run.
+- Direct DB credentials in Agent Service.
+- Agent-side delete permissions.
+- Automatic merge to `main`.
+- Automatic production deploy.
+- Complex multi-agent routing.
+- Production-level scoped agent-run tokens.
+- A new VS Code IDE per agent run.
+
+## Prompt For The Next Codex Instance
+
+Copy/paste this into the new Codex instance that will implement the project:
 
 ```text
-one shared agent account
-one clicked card
-one temporary Hermes run
-one durable run record
-one node chat thread
-one final summary
-```
+You are working in C:\Users\Jonat\MangoRTSDev on MangoRTS.
 
-That is the foundation.
+Read docs/agents/v1agentarchitecture.md first. It is the project doc and tracker
+for Agent Service V1. Follow it closely.
+
+Important project decisions:
+- Use the name Agent Service in new code, docs, and product language.
+- Agent Service is separate from the main MangoRTS app.
+- Agent Service has zero database credentials.
+- Agent Service acts like a normal MangoRTS user through MangoRTS APIs.
+- Agent Service must not have delete permissions in V1.
+- Codex is the worker that edits code in an isolated branch/worktree.
+- The node that launched the agent is the origin request, not a hard scope silo.
+- V1 must not auto-merge to main.
+- Screenshots and image attachments are first-class context.
+
+Implement this in exactly two V1 phases:
+
+Phase 1: MangoRTS Launch And Context
+- Add the app/backend pieces for clicking an agent icon on a node.
+- Create a durable agent run.
+- Move the node from requested to pending.
+- Add a context-bundle API with Logic Gate projection, node projection, chats,
+  editors, emails, files, screenshots, and MangoRTS agent explanation text.
+- Let the agent user append chat messages and update allowed node statuses
+  through MangoRTS APIs.
+- Surface agent run status and branch/worktree metadata in the UI when available.
+
+Phase 2: Agent Service Codex Runner
+- Create the separate Agent Service.
+- Configure it with MangoRTS API access only, never DB credentials.
+- Receive or poll for agent runs.
+- Fetch context through MangoRTS APIs.
+- Create an isolated branch/worktree from local main.
+- Write the context bundle into the worktree.
+- Start Codex headlessly with that context.
+- Relay clarification questions to node chat.
+- Move nodes through pending, in_progress, and verify.
+- Report final summary, checks, branch, and worktree path back to MangoRTS.
+
+Repo notes:
+- Backend is in backend/ and is Go module miraeopus/backend.
+- Frontend is in frontend/ and is a Vite/React app.
+- There is no root package.json.
+- Use existing repo patterns before inventing new abstractions.
+- Do not run destructive commands, reset Git history, delete databases, or use
+  database writer/admin access.
+- Before any AWS or database work, follow AGENTS.md and run the access-boundary
+  check described there.
+
+Start by inspecting the existing backend/frontend patterns for nodes, Logic
+Gates, chats, attachments, emails, statuses, and auth. Then update the tracker
+checkboxes in docs/agents/v1agentarchitecture.md as work is completed.
+```

@@ -87,3 +87,25 @@ output "github_deploy_role_arn" {
   description = "IAM role ARN for GitHub Actions OIDC prod deploys."
   value       = aws_iam_role.github_deploy.arn
 }
+
+output "db_tunnel_instance_id" {
+  description = "Optional human-only SSM DB tunnel EC2 instance ID. Empty when enable_db_tunnel_host is false."
+  value       = try(aws_instance.db_tunnel[0].id, "")
+}
+
+output "db_tunnel_local_port" {
+  description = "Suggested localhost port for DBeaver when the optional SSM DB tunnel is enabled."
+  value       = var.enable_db_tunnel_host ? var.db_tunnel_local_port : null
+}
+
+output "db_tunnel_start_session_command_powershell" {
+  description = "PowerShell command for Jonat's human-admin terminal to start the optional DBeaver tunnel. Empty when enable_db_tunnel_host is false."
+  value = var.enable_db_tunnel_host ? format(
+    "aws ssm start-session --profile mangorts-prod --region %s --target %s --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters host=\"%s\",portNumber=\"%s\",localPortNumber=\"%s\"",
+    var.aws_region,
+    aws_instance.db_tunnel[0].id,
+    var.existing_db_host,
+    tostring(var.existing_db_port),
+    tostring(var.db_tunnel_local_port),
+  ) : ""
+}

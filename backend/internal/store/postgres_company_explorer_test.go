@@ -77,7 +77,6 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLeafItems(t *testing.T) 
 		"from company_explorer_items item",
 		"case companyexplorerv2entityproject, companyexplorerv2entitylogicgate: rows = []companyexplorerv2row{}",
 		"insert into company_explorer_items",
-		"item.target_type='node'",
 		"update company_explorer_items",
 		"delete from company_explorer_items",
 	} {
@@ -94,6 +93,7 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLeafItems(t *testing.T) 
 		"querycompanyexplorerfinalprojectchildren",
 		"querycompanyexplorerfinallogicgatechildren",
 		"companyexplorernativechildren",
+		"item.target_type='node'",
 		"from project_relationship_projection projection",
 		"from node_logic_gate_assignments assignment",
 	} {

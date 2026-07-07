@@ -2,7 +2,7 @@
 
 This folder contains the current infra, auth, deployment, and production-readiness docs for MangoRTS.
 
-The current live platform documentation is for dev only. MangoRTS does not yet have a production environment. Production must be created separately from dev for AWS resources, Terraform state, database, Cognito, Nylas, Secrets Manager, GitHub deploy environment, DNS, monitoring, and rollback.
+The current live platform documentation covers dev and the first V1 production environment. Production is separate from dev for AWS resources, Terraform state, database, Cognito, Secrets Manager, DNS, and deployment controls.
 
 ## Current Dev Docs
 
@@ -18,10 +18,11 @@ Dev V2 means the `infra/aws-dev` platform: Cognito auth, ECS Fargate backend, S3
 
 - `docs/infra/mangorts-prod-platform.md` - Target production architecture and required separation from dev.
 - `docs/infra/mangorts-prod-deploy-runbook.md` - Safe production deploy flow, approval gates, smoke tests, and rollback notes.
+- `docs/infra/mangorts-prod-db-tunnel.md` - Human-only SSM/DBeaver tunnel for private prod database access.
 - `docs/infra/mangorts-prod-data-migration.md` - Selective dev-to-prod data migration approach and validation checks.
 - `docs/infra/mangorts-prod-nylas-email.md` - Production Nylas, SES, DNS, and Google OAuth readiness.
 
-These production docs are scaffolding and runbooks. They do not claim production resources already exist.
+Some production docs began as scaffolding. Confirm current state in `docs/important tasks/prod launch progress log.md` before operating production resources.
 
 ## Related Docs
 

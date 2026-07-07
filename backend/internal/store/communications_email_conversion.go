@@ -102,19 +102,7 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 		input.Target.ProjectID = ""
 		input.Target.ParentEntityID = ""
 	case CommunicationsEmailConversionTargetFolder:
-		if input.Target.ParentEntityID == "" {
-			input.Target.ParentEntityID = input.Target.FolderID
-		}
-		if input.Target.ParentEntityID == "" {
-			return CommunicationsTriageConversionInput{}, ErrInvalid
-		}
-		input.LogicGateID = ""
-		input.NodeID = ""
-		input.NewLogicGateHeader = ""
-		input.Target.LogicGateID = ""
-		input.Target.NodeID = ""
-		input.Target.Header = ""
-		input.Target.ProjectID = ""
+		return CommunicationsTriageConversionInput{}, ErrInvalid
 	case CommunicationsEmailConversionTargetProject:
 		if input.Target.ProjectID == "" {
 			return CommunicationsTriageConversionInput{}, ErrInvalid
@@ -208,9 +196,6 @@ func communicationsEmailConversionWorkspaceEventInputs(result CommunicationsTria
 			inputs = append(inputs, kanbanCardWorkspaceEventInput(card.CompanyID, "kanban_card_upserted", card, true, meta))
 		}
 		inputs = append(inputs, nodeUpdatedWorkspaceEventInputWithMetadata(node, meta))
-	}
-	for _, row := range result.ExplorerV2Rows {
-		inputs = append(inputs, companyExplorerV2EdgeUpsertedWorkspaceEventInput(row, meta))
 	}
 	for _, relationship := range result.ProjectRelationships {
 		inputs = append(inputs, projectRelationshipUpsertedWorkspaceEventInput(relationship, meta.ActorUserID))

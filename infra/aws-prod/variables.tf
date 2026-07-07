@@ -115,6 +115,35 @@ variable "existing_db_security_group_id" {
   type        = string
 }
 
+variable "enable_db_tunnel_host" {
+  description = "Create a private, human-only EC2 host for SSM Session Manager port forwarding from DBeaver to the prod DB."
+  type        = bool
+  default     = false
+}
+
+variable "db_tunnel_instance_type" {
+  description = "EC2 instance type for the optional SSM DB tunnel host. Keep this tiny; it is not an app server."
+  type        = string
+  default     = "t3.nano"
+}
+
+variable "db_tunnel_subnet_id" {
+  description = "Optional private subnet ID for the SSM DB tunnel host. Leave empty to use the first ECS private subnet."
+  type        = string
+  default     = ""
+}
+
+variable "db_tunnel_local_port" {
+  description = "Suggested local laptop port for DBeaver when using the SSM DB tunnel output command."
+  type        = number
+  default     = 15432
+
+  validation {
+    condition     = var.db_tunnel_local_port > 0 && var.db_tunnel_local_port <= 65535
+    error_message = "db_tunnel_local_port must be a valid TCP port."
+  }
+}
+
 variable "backend_image_uri" {
   description = "Backend image URI. Leave empty for phase-1 bootstrap before ECR contains an image."
   type        = string
