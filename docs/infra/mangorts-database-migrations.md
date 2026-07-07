@@ -41,7 +41,7 @@ For a brand-new database, prefer one of these two reviewed paths:
 1. Apply `backend/db/schema.sql` with `-baseline-migrations` after confirming the snapshot is the intended current schema.
 2. Replay all migrations from empty and compare the resulting schema to `backend/db/schema.sql`.
 
-Do not create production by cloning dev schema drift or by blindly importing dev `schema_migrations`. Before calling a new database ready, compare the actual object inventory against the canonical schema: tables, columns, primary keys, foreign keys, check constraints, unique constraints, indexes, functions, triggers, enum/custom types, defaults, nullability, and extensions.
+Do not create production by cloning dev schema drift or by blindly importing dev `schema_migrations`. Before calling a new database ready, compare the actual object inventory against the canonical schema: tables, columns, primary keys, foreign keys, check constraints, unique constraints, indexes, functions, triggers, enum/custom types, defaults, nullability, and extensions. Use `backend/db/schema_inventory.sql` and `scripts/compare_schema_inventory.py`; the runbook is `docs/infra/mangorts-schema-audit.md`.
 
 Available flags:
 
