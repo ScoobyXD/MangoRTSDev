@@ -456,11 +456,11 @@ function upsertFolderItems(
 }
 
 function filterCompanyExplorerFolderItemsForExplorer(items: CompanyExplorerFolderItem[]): CompanyExplorerFolderItem[] {
-  return items.filter((item) => item.item_type !== "node");
+  return items;
 }
 
 function filterCompanyExplorerV2RowsForExplorer(rows: CompanyExplorerV2Row[]): CompanyExplorerV2Row[] {
-  return rows.filter((row) => row.entity_type !== "node");
+  return rows;
 }
 
 function companyExplorerV2RowKey(row: CompanyExplorerV2Row): string {

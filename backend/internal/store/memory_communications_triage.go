@@ -395,6 +395,18 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
 	}
+	var folderParent memoryCompanyExplorerV2Entity
+	if input.Target.Mode == CommunicationsEmailConversionTargetFolder {
+		parent, parentEntityID, err := r.resolveCommunicationsTriageFolderTargetLocked(input)
+		if err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		folderParent = parent
+		input.Target.ParentEntityID = parentEntityID
+		if parent.EntityType == CompanyExplorerV2EntityFolder {
+			input.Target.FolderID = parent.EntityID
+		}
+	}
 
 	now := time.Now().UTC()
 	result := CommunicationsTriageConversionResult{Target: input.Target}
@@ -430,6 +442,17 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
 			result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
 		}
+		if input.Target.Mode == CommunicationsEmailConversionTargetFolder {
+			position := 0
+			if input.Target.Position > 0 {
+				position = input.Target.Position + index*1000
+			}
+			row, err := r.placeConvertedEmailNodeInCompanyExplorerLocked(input, folderParent, nodeID, node.Title, position, now)
+			if err != nil {
+				return CommunicationsTriageConversionResult{}, err
+			}
+			result.ExplorerV2Rows = append(result.ExplorerV2Rows, row)
+		}
 		node = r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, nodeID)])
 		result.Nodes = append(result.Nodes, node)
 		result.EmailProvenance = append(result.EmailProvenance, CommunicationsEmailConversionProvenance{
@@ -442,6 +465,55 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 		result.DeletedMessageIDs = append(result.DeletedMessageIDs, messageID)
 	}
 	return result, nil
+}
+
+func (r *MemoryRepo) resolveCommunicationsTriageFolderTargetLocked(input CommunicationsTriageConversionInput) (memoryCompanyExplorerV2Entity, string, error) {
+	parentEntityID := strings.TrimSpace(input.Target.ParentEntityID)
+	if parentEntityID == "" {
+		parentEntityID = strings.TrimSpace(input.Target.FolderID)
+	}
+	if parentEntityID == "" {
+		return memoryCompanyExplorerV2Entity{}, "", ErrInvalid
+	}
+	r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
+	parent, ok := r.companyExplorerV2Entities[key(input.CompanyID, parentEntityID)]
+	if !ok {
+		return memoryCompanyExplorerV2Entity{}, "", ErrNotFound
+	}
+	if parent.EntityType != CompanyExplorerV2EntityCompany && parent.EntityType != CompanyExplorerV2EntityFolder {
+		return memoryCompanyExplorerV2Entity{}, "", ErrInvalid
+	}
+	if input.PermissionUserID != "" && !r.companyExplorerV2EntityCanEditLocked(input.CompanyID, input.PermissionUserID, parent) {
+		return memoryCompanyExplorerV2Entity{}, "", ErrNotFound
+	}
+	return parent, parentEntityID, nil
+}
+
+func (r *MemoryRepo) placeConvertedEmailNodeInCompanyExplorerLocked(input CommunicationsTriageConversionInput, parent memoryCompanyExplorerV2Entity, nodeID, title string, position int, now time.Time) (CompanyExplorerV2Row, error) {
+	child := r.ensureCompanyExplorerV2NativeEntityLocked(input.CompanyID, CompanyExplorerV2EntityNode, nodeID, title, now, now)
+	if position <= 0 {
+		position = r.nextCompanyExplorerV2EdgePositionLocked(input.CompanyID, parent.EntityID)
+	}
+	edge := memoryCompanyExplorerV2Edge{
+		CompanyID:        input.CompanyID,
+		EdgeID:           companyExplorerV2EdgeID(input.CompanyID, parent.EntityID, child.EntityID),
+		ParentEntityID:   parent.EntityID,
+		ChildEntityID:    child.EntityID,
+		Position:         position,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.companyExplorerV2Edges[key(edge.CompanyID, edge.EdgeID)] = edge
+	if parent.EntityType == CompanyExplorerV2EntityFolder {
+		if _, err := r.snapshotResourceAccessPolicyLocked(input.CompanyID, EntityTypeCompanyExplorerFolder, parent.EntityID, child.EntityType, child.ResourceID); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
+	row := r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{
+		CompanyID:        input.CompanyID,
+		PermissionUserID: input.PermissionUserID,
+	}, child, &edge)
+	return row, nil
 }
 
 func (r *MemoryRepo) nextProjectRelationshipPositionLocked(companyID, projectID string) int {

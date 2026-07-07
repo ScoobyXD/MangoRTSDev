@@ -102,7 +102,19 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 		input.Target.ProjectID = ""
 		input.Target.ParentEntityID = ""
 	case CommunicationsEmailConversionTargetFolder:
-		return CommunicationsTriageConversionInput{}, ErrInvalid
+		if input.Target.ParentEntityID == "" {
+			input.Target.ParentEntityID = input.Target.FolderID
+		}
+		if input.Target.ParentEntityID == "" {
+			return CommunicationsTriageConversionInput{}, ErrInvalid
+		}
+		input.LogicGateID = ""
+		input.NodeID = ""
+		input.NewLogicGateHeader = ""
+		input.Target.LogicGateID = ""
+		input.Target.NodeID = ""
+		input.Target.Header = ""
+		input.Target.ProjectID = ""
 	case CommunicationsEmailConversionTargetProject:
 		if input.Target.ProjectID == "" {
 			return CommunicationsTriageConversionInput{}, ErrInvalid

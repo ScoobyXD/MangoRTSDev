@@ -102,7 +102,8 @@ export type CompanyExplorerSearchSelectionRequest = {
 
 export type CompanyExplorerTriageMessageDropTarget =
   | { kind: "project"; projectID: string; parentEntityID?: string; label: string }
-  | { kind: "logic_gate"; logicGateID: string; parentEntityID?: string; label: string };
+  | { kind: "logic_gate"; logicGateID: string; parentEntityID?: string; label: string }
+  | { kind: "folder"; folderID?: string; parentEntityID?: string; label: string };
 
 export type CompanyExplorerTriageMessageDropHandler = (
   target: CompanyExplorerTriageMessageDropTarget,

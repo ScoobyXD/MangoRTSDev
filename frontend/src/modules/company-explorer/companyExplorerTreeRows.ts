@@ -383,7 +383,7 @@ export function buildCompanyExplorerV2TreeRows({
     if (!rowKey) continue;
     rowByKey.set(rowKey, row);
   }
-  const uniqueRows = [...rowByKey.values()].filter((row) => row.entity_type !== "node");
+  const uniqueRows = [...rowByKey.values()];
   const rowByEntityID = new Map<string, CompanyExplorerV2Row>();
   const rowCountByEntityID = new Map<string, number>();
   for (const row of uniqueRows) {
@@ -426,6 +426,7 @@ export function buildCompanyExplorerV2TreeRows({
   };
 
   const rowKindForEntity = (row: CompanyExplorerV2Row): ExplorerTreeNode["kind"] => {
+    if (row.entity_type === "node") return "node";
     if (row.entity_type === "logic_gate") return "logic_gate";
     if (row.entity_type === "project") return "project";
     return "folder";
@@ -453,6 +454,7 @@ export function buildCompanyExplorerV2TreeRows({
       edgeID: row.edge_id,
       parentEntityID: row.parent_entity_id ?? "",
       resourceID: resourceID || undefined,
+      nodeID: row.entity_type === "node" && resourceID ? resourceID : undefined,
       logicGateID: row.entity_type === "logic_gate" && resourceID ? resourceID : undefined,
       projectID: row.entity_type === "project" && resourceID ? resourceID : undefined,
       folderID: kind === "folder" ? row.entity_id : row.parent_entity_id,

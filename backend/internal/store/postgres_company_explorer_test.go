@@ -77,6 +77,7 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLeafItems(t *testing.T) 
 		"from company_explorer_items item",
 		"case companyexplorerv2entityproject, companyexplorerv2entitylogicgate: rows = []companyexplorerv2row{}",
 		"insert into company_explorer_items",
+		"item.target_type='node'",
 		"update company_explorer_items",
 		"delete from company_explorer_items",
 	} {
@@ -95,7 +96,6 @@ func TestPostgresCompanyExplorerV2RowsUseFinalStorageAndLeafItems(t *testing.T) 
 		"companyexplorernativechildren",
 		"from project_relationship_projection projection",
 		"from node_logic_gate_assignments assignment",
-		"item.target_type='node'",
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("final company explorer rows kept removed V2 copy-graph marker %q", forbidden)
