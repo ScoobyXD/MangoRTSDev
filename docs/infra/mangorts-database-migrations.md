@@ -26,6 +26,23 @@ Production tasks should set all database values explicitly and source `DB_PASSWO
 
 Default mode is `migrate`. This is intentionally conservative for existing production databases: it creates `schema_migrations` if needed, reads applied filenames, and applies only pending files from `db/migrations` in filename order.
 
+## Source Of Truth Standard
+
+MangoRTS uses both migration history and a current schema snapshot:
+
+- `backend/db/migrations/` is the append-only change history. Every durable schema repair belongs here, even if the same SQL also exists in a DBeaver/runbook file.
+- `backend/db/schema.sql` is the current canonical schema snapshot for reviewed fresh-database bootstrap and object inventory.
+- `schema_migrations` is only a ledger of recorded filenames. It is not proof that the live database physically has every expected table, column, constraint, index, function, trigger, and type.
+
+For a normal existing database, run pending migrations.
+
+For a brand-new database, prefer one of these two reviewed paths:
+
+1. Apply `backend/db/schema.sql` with `-baseline-migrations` after confirming the snapshot is the intended current schema.
+2. Replay all migrations from empty and compare the resulting schema to `backend/db/schema.sql`.
+
+Do not create production by cloning dev schema drift or by blindly importing dev `schema_migrations`. Before calling a new database ready, compare the actual object inventory against the canonical schema: tables, columns, primary keys, foreign keys, check constraints, unique constraints, indexes, functions, triggers, enum/custom types, defaults, nullability, and extensions.
+
 Available flags:
 
 ```text
@@ -33,11 +50,14 @@ Available flags:
 -migrations db/migrations
 -mode schema|migrate|all
 -dry-run
+-baseline-migrations
 -start-at 20260701_example.sql
 -start-after 20260701_example.sql
 ```
 
 Use `-mode schema` for a fresh empty database bootstrap from the canonical schema. It executes `schema.sql` in one transaction and ensures `schema_migrations` exists afterward.
+
+Use `-mode schema -baseline-migrations` only for a reviewed fresh empty database when `schema.sql` already represents all migrations currently in `backend/db/migrations/`. This records the current migration filenames in `schema_migrations` in the same transaction, so the next normal deploy only runs future migrations.
 
 Use `-mode migrate` for normal deploys. Each pending `.sql` file is applied in its own transaction and then recorded in `schema_migrations`.
 
@@ -62,7 +82,7 @@ go run ./cmd/miraeopus-migrate -mode migrate
 Fresh empty database bootstrap:
 
 ```powershell
-go run ./cmd/miraeopus-migrate -mode schema
+go run ./cmd/miraeopus-migrate -mode schema -baseline-migrations
 ```
 
 Anchor a migration reconciliation after validating the existing schema state:
@@ -105,10 +125,10 @@ Then, after review:
 ["-mode", "migrate"]
 ```
 
-For a confirmed fresh empty production database, use:
+For a confirmed fresh empty production database built from the canonical schema snapshot, use:
 
 ```json
-["-mode", "schema"]
+["-mode", "schema", "-baseline-migrations"]
 ```
 
 The command uses PostgreSQL advisory locking during execution, skips filenames already present in `schema_migrations`, and does not require `psql` in the container.

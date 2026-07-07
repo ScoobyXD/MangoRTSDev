@@ -19,6 +19,7 @@ Dev V2 means the `infra/aws-dev` platform: Cognito auth, ECS Fargate backend, S3
 - `docs/infra/mangorts-prod-platform.md` - Target production architecture and required separation from dev.
 - `docs/infra/mangorts-prod-deploy-runbook.md` - Safe production deploy flow, approval gates, smoke tests, and rollback notes.
 - `docs/infra/mangorts-prod-db-tunnel.md` - Human-only SSM/DBeaver tunnel for private prod database access.
+- `docs/infra/mangorts-prod-schema-repair-20260707.sql` - Reviewed DBeaver repair SQL for prod tables missing from the schema-only bootstrap; durable migration is `backend/db/migrations/20260707_repair_missing_canonical_schema_objects.sql`.
 - `docs/infra/mangorts-prod-data-migration.md` - Selective dev-to-prod data migration approach and validation checks.
 - `docs/infra/mangorts-prod-nylas-email.md` - Production Nylas, SES, DNS, and Google OAuth readiness.
 

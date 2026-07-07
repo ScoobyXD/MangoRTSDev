@@ -2,19 +2,19 @@
 
 This is a prepare-only manifest. It does not apply SQL to prod.
 
-Update 2026-07-06T21:23:35Z: Jonat approved applying schema objects to prod with no row copy. The actual apply used a DDL-only schema derived from `backend/db/schema.sql`, omitted top-level row backfill/cleanup statements, ran through a one-off ECS/Fargate task, and verified `rows_unchanged=true` before commit. This document remains the prep manifest and row-copy rule reference.
+Update 2026-07-07T06:37:00Z: DBeaver comparison found prod was missing `communications_email_node_attachments`, `project_critical_path_steps`, `project_management_timeline_items`, and `project_management_timeline_projection` even though their migrations were marked applied. `backend/db/schema.sql` was repaired to include those canonical objects and `projects.health`; `backend/db/migrations/20260707_repair_missing_canonical_schema_objects.sql` is the durable migration record; `docs/infra/mangorts-prod-schema-repair-20260707.sql` remains the reviewed human DBeaver repair SQL.
 
 ## Canonical schema summary
 
-- Schema SHA-256: `2c0e6d2a331b4b5c6202365b308b1d9db67d7a17c59ae059161a5fa02bf844c9`
-- Tables: 62
-- Indexes: 108
+- Schema SHA-256: `c10d36de14190a23857aae13cf4f926b4a314ef2d1b984e24041379b40406521`
+- Tables: 66
+- Indexes: 119
 - Functions/procedures: 8
 - Triggers: 2
 - Enum/custom types: 3
 - Insert statements inside canonical schema: 8
-- Migration files: 140
-- Latest migration: `20260702_resource_policy_access_helper_no_gvic.sql`
+- Migration files: 141
+- Latest migration: `20260707_repair_missing_canonical_schema_objects.sql`
 
 ## Row-copy rule
 
@@ -52,12 +52,15 @@ All other tables are excluded from dev-to-prod row copying by default:
 - `node_map_positions`
 - `logic_gates`
 - `projects`
+- `project_critical_path_steps`
 - `project_account_assignments`
 - `project_team_assignments`
 - `project_information`
 - `project_projection_table`
 - `project_relationships`
 - `project_relationship_projection`
+- `project_management_timeline_items`
+- `project_management_timeline_projection`
 - `resource_gvic_assignments`
 - `resource_gvic_effective_assignments`
 - `resource_permissions`
@@ -71,6 +74,7 @@ All other tables are excluded from dev-to-prod row copying by default:
 - `company_projection_sequences`
 - `gvic_matrix_projection_table`
 - `communications_email_nodes`
+- `communications_email_node_attachments`
 - `company_explorer_folders`
 - `shared_inbox_folders`
 - `shared_inboxes`
@@ -90,7 +94,9 @@ All other tables are excluded from dev-to-prod row copying by default:
 ## Notes
 
 - This manifest is prepare-only; it does not connect to dev or prod and does not apply SQL.
-- Use backend/db/schema.sql as the canonical schema source unless a live dev pg_dump diff proves drift.
+- Use backend/db/migrations as the append-only change history and backend/db/schema.sql as the current canonical snapshot.
+- A fresh database should be created from a reviewed canonical schema snapshot with -baseline-migrations or from a full migration replay, then audited before traffic.
+- Do not trust schema_migrations by itself; it proves which filenames were recorded, not that every table, column, constraint, index, function, trigger, and type exists.
 - Copy schema objects: tables, indexes, enum types, functions, triggers, constraints, and column defaults.
 - Do not bulk-copy tenant/user/work rows from dev into prod.
 - Do not copy company UUIDs from dev; prod company IDs must remain prod-specific.
@@ -239,3 +245,4 @@ All other tables are excluded from dev-to-prod row copying by default:
 - `20260701_resource_permissions_ignore_gvic.sql`
 - `20260701_resource_policy_pointers.sql`
 - `20260702_resource_policy_access_helper_no_gvic.sql`
+- `20260707_repair_missing_canonical_schema_objects.sql`

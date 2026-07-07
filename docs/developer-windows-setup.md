@@ -382,3 +382,6 @@ AWS SSO profile mangorts-dev is not configured yet; needs SSO start URL/region/a
 Cloud-integrated dev backend was not started yet because AWS SSO/local dev cloud config are pending.
 Docker Desktop was not installed because it requires explicit approval.
 ```
+
+Later download: https://s3.amazonaws.com/session-manager-downloads/plugin/latest/windows/SessionManagerPluginSetup.exe 
+this lets us make a tunnel to connect our local to the database to see prod data in our local laptop

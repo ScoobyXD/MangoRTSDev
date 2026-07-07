@@ -52,11 +52,24 @@ func TestParseCommandConfigDefaultsAndAnchors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseCommandConfig returned error: %v", err)
 	}
-	if cfg.SchemaPath != defaultSchemaPath || cfg.MigrationsDir != defaultMigrationsDir || cfg.Mode != defaultMode {
+	if cfg.SchemaPath != defaultSchemaPath || cfg.MigrationsDir != defaultMigrationsDir || cfg.Mode != defaultMode || cfg.BaselineMigrations {
 		t.Fatalf("defaults not applied: %+v", cfg)
 	}
 	if cfg.StartAfter != "20260701_previous.sql" {
 		t.Fatalf("StartAfter = %q", cfg.StartAfter)
+	}
+
+	cfg, err = parseCommandConfig([]string{"-mode", "schema", "-baseline-migrations"}, testEnv(nil))
+	if err != nil {
+		t.Fatalf("parseCommandConfig baseline returned error: %v", err)
+	}
+	if !cfg.BaselineMigrations || cfg.Mode != "schema" {
+		t.Fatalf("baseline config not applied: %+v", cfg)
+	}
+
+	_, err = parseCommandConfig([]string{"-baseline-migrations"}, testEnv(nil))
+	if err == nil || !strings.Contains(err.Error(), "requires -mode schema") {
+		t.Fatalf("expected baseline mode error, got %v", err)
 	}
 
 	_, err = parseCommandConfig([]string{"-start-at", "a.sql", "-start-after", "b.sql"}, testEnv(nil))

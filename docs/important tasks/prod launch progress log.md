@@ -2780,3 +2780,239 @@ Next action:
 5. Wait for SSM to show the tunnel host as online.
 6. Start the SSM remote-host port forward to local `15432`.
 7. Connect DBeaver to `localhost:15432`, database `mangorts`, username `mangorts_app`, SSL mode `require`, with `Save password` unchecked.
+
+## Step 16 — Human-only prod DBeaver tunnel created and verified
+
+Status: complete.
+
+Updated on: 2026-07-07T06:04:10Z.
+
+Approval/execution model:
+
+- Jonat ran the Terraform plan/apply from a human-admin PowerShell session.
+- The agent did not run AWS or DB commands for this step.
+- The apply used a scoped tunnel-only plan to avoid unrelated pending CloudFront/S3/IAM drift.
+
+Scoped plan:
+
+```text
+Plan: 8 to add, 0 to change, 0 to destroy.
+```
+
+Resources created:
+
+```text
+aws_iam_instance_profile.db_tunnel[0]
+aws_iam_role.db_tunnel[0]
+aws_iam_role_policy_attachment.db_tunnel_ssm[0]
+aws_instance.db_tunnel[0]
+aws_security_group.db_tunnel[0]
+aws_security_group_rule.db_tunnel_https_egress[0]
+aws_security_group_rule.db_tunnel_to_existing_db_egress[0]
+aws_security_group_rule.db_tunnel_to_existing_db_ingress[0]
+```
+
+Apply result:
+
+```text
+Apply complete! Resources: 8 added, 0 changed, 0 destroyed.
+```
+
+Tunnel host:
+
+```text
+Instance ID: i-0f0f55610c97596b3
+Private IP: 172.31.140.16
+SSM PingStatus: Online
+Platform: Amazon Linux
+```
+
+SSM tunnel command used by Jonat:
+
+```powershell
+aws ssm start-session `
+  --profile mangorts-prod `
+  --region us-west-1 `
+  --target i-0f0f55610c97596b3 `
+  --document-name AWS-StartPortForwardingSessionToRemoteHost `
+  --parameters host="mangorts-prod-db.cluster-cpcceyaigiit.us-west-1.rds.amazonaws.com",portNumber="5432",localPortNumber="15432"
+```
+
+Successful tunnel state:
+
+```text
+Port 15432 opened for sessionId ...
+Waiting for connections...
+```
+
+DBeaver:
+
+- Jonat confirmed the prod database is visible in DBeaver through `localhost:15432`.
+- DBeaver is using the human-only writer/app credential path.
+- Do not save the prod writer password in an agent-accessible DBeaver profile.
+- Close the tunnel with `Ctrl+C` in the SSM terminal when done.
+
+Safety:
+
+- Prod RDS remained private.
+- No public SSH or public DB exposure was added.
+- The EC2 instance is a private SSM tunnel target only; it is not an app server and does not replace ECS.
+- No DB password, AWS token, GitHub token, origin secret, Nylas secret, or password-bearing connection string was recorded.
+
+## Step 17 — Prod/dev schema drift found from DBeaver; repair prepared
+
+Status: repair SQL prepared; not applied by agent.
+
+Updated on: 2026-07-07T06:04:10Z.
+
+Finding:
+
+- Jonat compared table names in dev and prod through DBeaver.
+- Prod is missing four tables that exist in dev:
+
+```text
+communications_email_node_attachments
+project_critical_path_steps
+project_management_timeline_items
+project_management_timeline_projection
+```
+
+Migration ledger check:
+
+```text
+20260527_email_node_attachments.sql
+20260606_project_management_timeline_projection.sql
+20260608_accounts.sql
+20260618_z_gvic_node_phase2_cleanup.sql
+20260619_project_health_critical_path.sql
+```
+
+Meaning:
+
+- `schema_migrations` says the relevant migrations are applied, so the normal migration runner will skip them.
+- The missing tables are real app tables referenced by backend code.
+- The canonical `backend/db/schema.sql` was also missing these definitions, which explains how a schema-only prod bootstrap could omit them.
+- `project_critical_path_steps` also implies the `projects.health` column/constraint must be present.
+- The project management timeline projection needs the current post-follow-up shape: `accounts` column present, older assignee/status_color columns absent.
+
+Repo changes prepared:
+
+```text
+backend/db/schema.sql
+docs/infra/mangorts-prod-schema-repair-20260707.sql
+```
+
+The repair SQL:
+
+- Adds `projects.health` if missing.
+- Adds/repairs `projects_health_chk`.
+- Creates the four missing tables and indexes if missing.
+- Ensures `project_management_timeline_projection.accounts` exists.
+- Drops old timeline projection assignee/status_color columns if present.
+- Does not copy dev rows.
+- Does not insert tenant/user/work rows.
+- Does not delete data.
+- Does not change `schema_migrations`.
+
+Validation run:
+
+```text
+git diff --check -- backend/db/schema.sql docs/infra/mangorts-prod-schema-repair-20260707.sql
+rg checks for the repaired schema objects
+go test ./internal/store ./cmd/miraeopus-migrate
+```
+
+Result:
+
+```text
+ok miraeopus/backend/internal/store
+ok miraeopus/backend/cmd/miraeopus-migrate
+```
+
+Next action:
+
+1. Jonat reviews `docs/infra/mangorts-prod-schema-repair-20260707.sql`.
+2. Jonat runs the repair SQL in human-only prod DBeaver if approved.
+3. Verify the four tables exist in prod after the repair.
+4. Verify `projects.health` exists in prod.
+5. Smoke test prod app health and relevant project/communications paths.
+
+## Step 17A — Prod schema repair applied through human DBeaver
+
+Status: applied through human-only DBeaver; follow-up schema audit still needed.
+
+Updated on: 2026-07-07T06:21:07Z.
+
+Execution:
+
+- Jonat ran `docs/infra/mangorts-prod-schema-repair-20260707.sql` through the human-only prod DBeaver connection.
+- The agent did not connect to prod DB or run SQL.
+
+Observed DDL notices:
+
+```text
+constraint "projects_health_chk" of relation "projects" does not exist, skipping
+column "accounts" of relation "project_management_timeline_projection" already exists, skipping
+column "status_color" of relation "project_management_timeline_projection" does not exist, skipping
+column "assignee_user_id" of relation "project_management_timeline_projection" does not exist, skipping
+column "assignee_display_name" of relation "project_management_timeline_projection" does not exist, skipping
+column "assignee_email" of relation "project_management_timeline_projection" does not exist, skipping
+```
+
+Meaning:
+
+- These notices are expected/idempotent for the repair SQL.
+- `projects_health_chk` was missing before repair and was then added.
+- `project_management_timeline_projection.accounts` already existed after table creation/current shape handling.
+- Old timeline projection assignee/status-color columns were already absent, which matches the current backend expectation.
+
+Final table-count result from the repair script:
+
+```text
+communications_email_node_attachments: 0
+project_critical_path_steps: 0
+project_management_timeline_items: 0
+project_management_timeline_projection: 0
+```
+
+Safety:
+
+- No dev rows were copied.
+- No tenant/user/work rows were inserted.
+- No data was deleted.
+- `schema_migrations` was not changed.
+
+Next action:
+
+1. Run a small post-repair verification query in DBeaver to confirm object names and `projects.health`.
+2. Smoke test prod app health.
+3. Build a fuller dev/prod schema audit so table names, columns, indexes, constraints, functions, triggers, and types are compared mechanically instead of by eye.
+
+## Step 17B - Prod schema repair promoted to a real migration
+
+Status: repo repair prepared; not applied by agent.
+
+Updated on: 2026-07-07T06:37:00Z.
+
+Jonat confirmed the remaining post-repair query only returned `projects_health_chk`, which is the expected repaired check constraint.
+
+Repo follow-up:
+
+- Added `backend/db/migrations/20260707_repair_missing_canonical_schema_objects.sql`.
+- The migration carries the same durable DDL as the human DBeaver repair: `projects.health`, `projects_health_chk`, the missing communications attachment table, the missing critical-path table, the timeline source/projection tables, current timeline projection `accounts`, and all related indexes.
+- It is idempotent so it can run against prod after the manual repair, dev where the older migrations already succeeded, or a fresh DB built from the current schema snapshot.
+- `docs/infra/mangorts-prod-schema-repair-20260707.sql` remains as the human-readable DBeaver repair/audit file, but the real long-term schema history now lives in `backend/db/migrations/`.
+- Added `-baseline-migrations` to the Go migration runner so a reviewed fresh DB created from `backend/db/schema.sql` can record the migration filenames in the same transaction instead of relying on manual `schema_migrations` edits.
+
+Schema standard going forward:
+
+- `backend/db/migrations/` is the append-only schema history.
+- `backend/db/schema.sql` is the current canonical snapshot.
+- `schema_migrations` must never be treated as complete proof that the live DB has all objects; it only records filenames.
+- New DB readiness needs a mechanical schema audit covering tables, columns, nullability, defaults, primary keys, foreign keys, check constraints, unique constraints, indexes, functions, triggers, enum/custom types, and extensions.
+
+Next action:
+
+1. Refresh the prod DB schema copy manifest so it sees `20260707_repair_missing_canonical_schema_objects.sql` as the latest migration.
+2. Build a schema-audit query/script that Jonat can run from human-only DBeaver or against schema-only dumps.
+3. Smoke test prod app health and the project/communications paths touched by the repaired tables.

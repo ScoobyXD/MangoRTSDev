@@ -34,12 +34,13 @@ const (
 )
 
 type commandConfig struct {
-	SchemaPath    string
-	MigrationsDir string
-	Mode          string
-	DryRun        bool
-	StartAt       string
-	StartAfter    string
+	SchemaPath         string
+	MigrationsDir      string
+	Mode               string
+	DryRun             bool
+	BaselineMigrations bool
+	StartAt            string
+	StartAfter         string
 }
 
 type dbConfig struct {
@@ -128,6 +129,7 @@ func parseCommandConfig(args []string, getenv envLookup) (commandConfig, error) 
 	flags.StringVar(&cfg.MigrationsDir, "migrations", defaultMigrationsDir, "directory containing .sql migration files")
 	flags.StringVar(&cfg.Mode, "mode", defaultMode, "schema, migrate, or all")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print planned work without applying changes")
+	flags.BoolVar(&cfg.BaselineMigrations, "baseline-migrations", false, "with -mode schema, record current migration filenames after applying the schema snapshot")
 	flags.StringVar(&cfg.StartAt, "start-at", strings.TrimSpace(getenv("DB_MIGRATION_START_AT")), "first migration filename to consider")
 	flags.StringVar(&cfg.StartAfter, "start-after", strings.TrimSpace(getenv("DB_MIGRATION_START_AFTER")), "start after this migration filename")
 
@@ -155,6 +157,9 @@ func parseCommandConfig(args []string, getenv envLookup) (commandConfig, error) 
 	}
 	switch cfg.Mode {
 	case "schema", "migrate", "all":
+		if cfg.BaselineMigrations && cfg.Mode != "schema" {
+			return commandConfig{}, errors.New("-baseline-migrations requires -mode schema")
+		}
 		return cfg, nil
 	default:
 		return commandConfig{}, fmt.Errorf("invalid -mode %q; expected schema, migrate, or all", cfg.Mode)
@@ -245,18 +250,47 @@ func releaseMigrationLock(ctx context.Context, conn *sql.Conn) error {
 }
 
 func runSchemaMode(ctx context.Context, conn *sql.Conn, cfg commandConfig) error {
+	var baselineFiles []migrationFile
+	if cfg.BaselineMigrations {
+		files, err := listMigrationFiles(cfg.MigrationsDir)
+		if err != nil {
+			return err
+		}
+		baselineFiles = files
+	}
 	if cfg.DryRun {
 		log.Printf("dry run: would apply schema %s", cfg.SchemaPath)
+		if cfg.BaselineMigrations {
+			log.Printf("dry run: would baseline %d migration files from %s", len(baselineFiles), cfg.MigrationsDir)
+		}
 		return nil
 	}
 	log.Printf("applying schema %s", cfg.SchemaPath)
 	if err := execSQLFileInTransaction(ctx, conn, cfg.SchemaPath, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, schemaMigrationsTableSQL)
-		return err
+		if _, err := tx.ExecContext(ctx, schemaMigrationsTableSQL); err != nil {
+			return err
+		}
+		if cfg.BaselineMigrations {
+			return recordMigrationBaseline(ctx, tx, baselineFiles)
+		}
+		return nil
 	}); err != nil {
 		return fmt.Errorf("apply schema %s: %w", cfg.SchemaPath, err)
 	}
-	log.Printf("schema applied")
+	if cfg.BaselineMigrations {
+		log.Printf("schema applied and %d migration files baselined", len(baselineFiles))
+	} else {
+		log.Printf("schema applied")
+	}
+	return nil
+}
+
+func recordMigrationBaseline(ctx context.Context, tx *sql.Tx, files []migrationFile) error {
+	for _, migration := range files {
+		if _, err := tx.ExecContext(ctx, `insert into schema_migrations(version) values ($1) on conflict (version) do nothing`, migration.Name); err != nil {
+			return fmt.Errorf("baseline migration %s: %w", migration.Name, err)
+		}
+	}
 	return nil
 }
 

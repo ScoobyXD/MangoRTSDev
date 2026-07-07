@@ -103,7 +103,9 @@ def build_manifest(repo_root: Path) -> SchemaManifest:
 
     notes = [
         "This manifest is prepare-only; it does not connect to dev or prod and does not apply SQL.",
-        "Use backend/db/schema.sql as the canonical schema source unless a live dev pg_dump diff proves drift.",
+        "Use backend/db/migrations as the append-only change history and backend/db/schema.sql as the current canonical snapshot.",
+        "A fresh database should be created from a reviewed canonical schema snapshot with -baseline-migrations or from a full migration replay, then audited before traffic.",
+        "Do not trust schema_migrations by itself; it proves which filenames were recorded, not that every table, column, constraint, index, function, trigger, and type exists.",
         "Copy schema objects: tables, indexes, enum types, functions, triggers, constraints, and column defaults.",
         "Do not bulk-copy tenant/user/work rows from dev into prod.",
         "Do not copy company UUIDs from dev; prod company IDs must remain prod-specific.",
