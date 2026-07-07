@@ -153,7 +153,7 @@ aws ssm start-session `
   --region us-west-1 `
   --target i-REPLACE_WITH_REAL_INSTANCE_ID `
   --document-name AWS-StartPortForwardingSessionToRemoteHost `
-  --parameters host="mangorts-prod-db.cluster-cpcceyaigiit.us-west-1.rds.amazonaws.com",portNumber="5432",localPortNumber="15432"
+  --parameters host="<prod-rds-writer-endpoint>",portNumber="5432",localPortNumber="15432"
 ```
 
 Keep this terminal open while DBeaver is connected.
