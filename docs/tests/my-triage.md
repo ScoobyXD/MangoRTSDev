@@ -1,4 +1,4 @@
-Last updated: 2026-07-02
+Last updated: 2026-07-06
 
 # My Triage Tests
 
@@ -15,12 +15,12 @@ MT4 - Adding the same user/message pair again refreshes the stored message snaps
 MT5 - Removing a My Triage item only removes the current user's row for that message.
 MT6 - Converting triage messages requires a company, at least one triage message, and a valid conversion target.
 MT7 - Conversion must read or refresh the latest mailbox message snapshot before creating workspace records from the email.
-MT8 - If the conversion mode is not explicit, the target mode is inferred from the provided node, logic gate, project, folder, parent entity, or new gate header fields.
+MT8 - If the conversion mode is not explicit, the target mode is inferred from the provided node, logic gate, project, or new gate header fields; folder or parent entity fields do not make Company Explorer folder conversion valid.
 MT9 - Converting into an existing logic gate requires edit access to that logic gate.
 MT10 - Converting into an existing node requires edit access to the node and edit access to any provided logic gate context.
 MT11 - Converting into a new logic gate requires a header/title and creates the logic gate, board/card records, and email-derived work item records together.
-MT12 - Converting into a folder or project creates email-derived node records and places or relates them to the selected target.
-MT13 - Converting into a legacy folder requires edit access to that folder, and converting into a V2 Explorer parent requires edit access to the parent container.
+MT12 - Converting into a Company Explorer folder or parent entity is invalid for email-derived node creation; conversion into a project may create email-derived node records and project relationship/projection records.
+MT13 - Folder conversion targets, including legacy folder IDs and Company Explorer V2 parent entities, are rejected before node creation and must not create `company_explorer_items`, Explorer V2 rows, or folder item placements.
 MT14 - Converting into a project requires project edit access and creates the project relationship/projection records needed for the new work item.
 MT15 - Conversion defaults the status to Pending and priority to 3 when those values are not provided.
 MT16 - Explicit conversion priority must be between 1 and 5.
@@ -68,10 +68,10 @@ MT57 - Accepted background archive job IDs are pending work, not confirmed archi
 MT58 - Transferring a direct email-created Kanban card into another node is not a revert; the email remains out of My Triage.
 MT59 - A successful email-card transfer deletes the source email-created workspace node/card and creates or updates an email attachment on the target node.
 MT60 - My Triage revert is only for restoring the original direct email-created card back to triage; once that email is transferred into another node, the transferred email is represented as a target-node attachment instead of a triage row.
-MT61 - Drag payloads from My Triage and Shared Triage must carry message IDs plus source mailbox scope; Shared Triage drags include `shared_inbox_id`, while My Triage drags leave that scope empty.
+MT61 - Drag payloads from My Triage and Shared Triage must carry message IDs plus source mailbox scope; Shared Triage drags include `shared_inbox_id`, while My Triage drags leave that scope empty. The supported cross-window boundary for these email drag payloads is Chrome window/tab to Chrome window/tab; cross-browser application drag/drop is not a documented business requirement unless a separate compatibility rule and test are added.
 MT62 - Successful local email conversion into a Logic Gate or Company Explorer Logic Gate must keep the source email row visible in Inbox, All, My Triage, and Shared Triage mailbox lists, patch the row/detail/cache with the returned Logic Gate placement so the Logic Gate icon changes immediately, and suppress the matching local `triage.converted` echo. It must not remove the row from visible state, invalidate all communications message page/detail caches, reuse stale prefetched pages, trigger post-removal fill or message-length prefetch, blank the email list, or repeatedly issue mail GETs. This is a regression-prone path: any change to conversion, communications cache invalidation, realtime echo handling, pagination prefetch/refill, row-removal logic, or star/unstar mutation must preserve this keep-row/no-blank/no-refill/no-repeat-GET behavior.
 MT63 - Successful local email conversion into a Company Explorer Logic Gate must show a temporary green success banner over the Company Explorer section; other Logic Gate conversion surfaces must show a temporary success banner or notice.
-MT64 - When a dragged email is converted into a Logic Gate, Company Explorer Logic Gate, pinned Logic Gate, or eligible node target, the source email is set to unstarred through the same source mailbox scope after the workspace conversion succeeds. The conversion response returns `unstarred_message_ids`, and Home applies those IDs as a local star mutation so Inbox, All, Starred, My Triage, and Shared Triage views do not refill, blink, or reload.
+MT64 - When a dragged email is converted into a Logic Gate, Company Explorer Logic Gate, pinned Logic Gate, or non-Explorer eligible node target, the source email is set to unstarred through the same source mailbox scope after the workspace conversion succeeds. The conversion response returns `unstarred_message_ids`, and Home applies those IDs as a local star mutation so Inbox, All, Starred, My Triage, and Shared Triage views do not refill, blink, or reload.
 MT65 - Unread My Triage email rows keep their outer unread outline/highlight, but the small top-left colored dot is reserved for the currently selected email only; unread but unselected rows must not show that dot.
 MT66 - Sent email read receipts use Nylas open tracking on outbound personal sends and replies by sending `tracking_options.opens = true`; inbound messages do not create read receipts.
 MT67 - The authoritative personal receipt signal is the Nylas `message.opened` webhook for the sender's personal grant; the signal is image/pixel based and can be blocked, proxied, delayed, or generated by privacy systems, so the product treats it as a `Seen` open-tracking signal rather than guaranteed human reading.
@@ -94,6 +94,7 @@ MT83 - Links in received personal email bodies, forwarded/replied original-messa
 MT84 - Node editor, logic-gate editor, and inline comment/chat text must auto-detect plain HTTP(S) or `www.` links, render them as blue underlined link text, and open them on a normal left click.
 MT85 - The My Triage All mailbox control is a dropdown with All and Spam folder options; the selected option is visually highlighted and marked, and Spam loads the provider spam/junk mailbox.
 MT86 - Spam mailbox reads are scoped to the same personal connection and filters as the current My Triage mailbox view; Spam messages must not leak into the primary inbox filter.
+MT87 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
 
 ## Nylas Configuration Contract
 
@@ -157,7 +158,7 @@ Expected:
 - Missing priority defaults to 3, and priority outside 1 through 5 is rejected.
 - Successful conversion returns converted/deleted triage IDs for backend reconciliation, emits refresh events, and keeps the source mailbox email row visible with updated Logic Gate placement state.
 
-### Scenario MT-S3: Convert To New Gate, Folder, Or Project
+### Scenario MT-S3: Convert To New Gate Or Project, Reject Folder Target
 
 Business logic covered:
 - MT6
@@ -178,7 +179,8 @@ Given:
 
 Expected:
 - A new logic gate conversion requires a title/header and creates the gate plus related work records together.
-- A folder conversion places the new work item under the selected folder or V2 parent only when the user can edit that parent.
+- A folder or Company Explorer parent conversion is rejected before creating or deleting any workspace/triage records.
+- Rejected folder conversion must not place a node in Company Explorer, create a folder item, or insert a node row into `company_explorer_items`.
 - A project conversion requires project edit access and creates the project relationship/projection records.
 - Successful conversion returns converted/deleted source triage IDs, emits refresh events, and keeps source mailbox email rows visible with updated Logic Gate placement state.
 

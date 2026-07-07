@@ -1,6 +1,6 @@
 # Company Explorer Module — Product & Interaction Specification
 
-Status: Draft v1 (2026-04-21)
+Status: Draft v1 (2026-04-21); final tree contract updated 2026-07-06
 
 ---
 
@@ -10,9 +10,10 @@ Status: Draft v1 (2026-04-21)
 
 It is intended to be the master browsing experience for:
 
-- nodes,
+- folders,
 - logic gates,
-- and related company artifacts.
+- projects,
+- and open-only search access to nodes through their source-of-truth relationships.
 
 The UI intent is explicitly "tree explorer first" (similar mental model to DBeaver/IDE explorers), with hierarchical affordances and connector guide-lines for nested rows.
 
@@ -32,18 +33,20 @@ In standalone mode:
 
 ### 2.2 Entity model for "files"
 
-Each explorer row represents one company "file" entity with a normalized type:
+Each final Explorer tree row represents one company "file" entity with a normalized type:
 
-- `node`
+- `folder`
 - `logic_gate`
 - `project`
-- `kanban`
+
+Node resources are not normal Company Explorer tree rows. They remain source-of-truth workspace resources and may appear in Company Explorer search results as open-only rows when they are reachable through visible Logic Gate assignment or project relationship context.
 
 Golden rule:
 
-- Company Explorer shows one visible instance of each folder, project, logic gate, and node resource.
-- `company_explorer_items` owns placement for canonical project, logic-gate, and node resources.
-- Project relationships belong to the Project UI and project read models; they do not create nested Project children in Company Explorer.
+- Company Explorer shows folders, projects, and Logic Gates as final tree rows.
+- `company_explorer_items` owns placement for canonical project and logic-gate resources only. Its `target_type` constraint is `project` or `logic_gate`; `node` is not allowed.
+- Nodes are not placed in Company Explorer folders, are not written to `company_explorer_items`, and are ignored by final Explorer tree reads/live refresh.
+- Project relationships and Logic Gate node assignments belong to their source-of-truth surfaces and read models; they do not create nested Project or Logic Gate child rows in Company Explorer.
 
 ### 2.3 Tree UX rules
 
@@ -161,28 +164,28 @@ Selection sync hardening update (2026-05-03):
 
 Folder runtime update (2026-05-02):
 - Explorer folders are now durable backend rows, not local-only UI state.
-- `company_explorer_folders` stores nested folders separately for `node` and `logic_gate` trees. A folder can only contain matching node or logic-gate items, which keeps UI behavior and headless API writes aligned.
-- Map folder-scope traversal also guards by folder kind. The backend already rejects mixed-kind parents, but this client-side guard keeps imported or repaired data from bleeding logic-gate folders into node maps, or node folders into logic-gate maps.
-- `company_explorer_folder_items` stores one placement per node or logic gate, matching file-explorer move semantics.
+- The final Company Explorer tree stores nested folders and project/Logic Gate placements. Nodes are deliberately excluded from Explorer placement storage.
+- Map folder-scope traversal must not treat Company Explorer folders as node-placement containers; non-root folder-scoped node-map queries return no nodes from Explorer placement.
+- Legacy `company_explorer_folder_items` node rows, if present in old data, are ignored by the final tree. Current placement storage for the final tree is `company_explorer_items` with `target_type in ('project', 'logic_gate')`.
 - Folder and folder-item rows carry sparse integer `position` values. New API-created rows append after both folder and item siblings in the same parent, so the backend preserves the mixed order users see instead of maintaining separate folder/item queues. Reorder writes usually update one row; compaction is limited to the visible sibling set only when adjacent positions no longer have numeric room.
-- The tree has one `Company` root row. It is collapsible, and a brand-new company renders no child rows until folders, nodes, or logic gates are created.
-- Direct nodes or logic gates render immediately under their expanded folder. Placed items and child folders share the same sparse ordering inside that folder, so users can vertically reorder folders, nodes, and logic gates together.
+- The tree has one `Company` root row. It is collapsible, and a brand-new company renders no child rows until folders, projects, or Logic Gates are created.
+- Direct project and Logic Gate rows render immediately under their expanded folder. Placed items and child folders share the same sparse ordering inside that folder, so users can vertically reorder folders, projects, and Logic Gates together.
 - The old virtual `Nodes`, `Logic Gates`, `All Nodes`, `All Logic Gates`, Knowledge, and Knowledge Nodes rows are removed from the Explorer tree.
-- Folder rows use fixed yellow icons, node rows use fixed black-and-white document icons, and logic-gate rows use fixed green circuitry AND-gate icons. These icon colors do not follow frame colorways.
+- Folder rows use fixed yellow icons, project rows use project icons, and logic-gate rows use fixed green circuitry AND-gate icons. Node icons are reserved for open-only search results and non-Explorer node surfaces. These icon colors do not follow frame colorways.
 - Explorer row labels do not include live item counts. Count queries belong in bounded API/read models, not in every tree row render.
 - Explorer renders faint vertical hierarchy guide lines for ancestor depth rails. The rails align with the expand/collapse arrow column for each ancestor level. The lines are a human scanning aid only; placement, ownership, permissions, map scope, drag/drop behavior, and API writes still come from the existing folder/item/assignment data model.
-- Explorer rows show a small lock marker when the row has explicit permission rules. This marker applies to folders, logic gates, and projects from the same `has_permission_rules` read-model flag; it is not rendered for nodes or Kanban boards.
+- Explorer rows show a small lock marker when the row has explicit permission rules. This marker applies to folders, logic gates, and projects from the same `has_permission_rules` read-model flag; it is not rendered for normal node rows because nodes are not final Company Explorer rows.
 - Folder creation is now a Company Explorer context-menu action, not an inline plus button. Right-clicking the tree body opens Explorer actions, while frame-level actions remain scoped to the frame/module title plate.
-- When the right-click context has no folder type, the menu order is `Create node folder`, `Create node`, `Create logic gate folder`, `Create logic gate`. Typed folder creation keeps empty folders aligned with the backend item-type invariant. Right-clicking typed rows uses the compatible single `Create folder` action.
-- Right-clicking a concrete folder, node, or logic gate exposes `Rename` and `Delete`, backed by folder/node/logic-gate APIs.
-- Right-clicking a concrete node or logic gate also exposes `Find Node` or `Find Logic Gate`. The action emits a lightweight focus request to the linked map frame, selects the entity on the map, and pans the map so the card is centered without issuing a new graph read.
-- Double-clicking the title text of a concrete folder, node, or logic gate starts inline rename with the full current title selected. Double-clicks on the disclosure control, icon, indent, or blank row area only select/toggle and never start rename.
+- The final Explorer context menu creates Explorer folders and supported Explorer resources without offering node placement into the tree.
+- Right-clicking a concrete folder, project, or logic gate exposes the actions allowed for that resource. Node search results are open-only and do not expose Explorer mutation affordances.
+- Right-clicking a concrete logic gate can expose `Find Logic Gate`. Node search results can be opened, but they are not Explorer placement rows.
+- Double-clicking a Company Explorer row label must not enter inline rename mode; rename is available only through explicit actions for folders, projects, and Logic Gates.
 - Left-clicking elsewhere inside Company Explorer closes the Explorer context menu before applying the new selection.
-- New folders are created inside the right-clicked compatible folder/tree. New nodes and logic gates are created through their canonical APIs and then assigned to the compatible right-clicked folder through `company_explorer_folder_items` when a folder target exists.
-- After any create action, the newly created folder, node, or logic gate becomes the selected highlighted row.
+- New folders are created inside the right-clicked Explorer folder/tree. New Logic Gates and projects are created through canonical APIs and placed through final Explorer placement storage when a folder target exists. New nodes are created from node/work surfaces, not placed into Company Explorer folders.
+- After any Explorer create action, the newly created folder, project, or Logic Gate becomes the selected highlighted row.
 - Plain click selects one row, Shift-click adds the visible range from the anchor row without clearing previous selections, and Ctrl/Cmd-click toggles individual rows. This selection state is UI-local until a concrete action consumes it, keeping linked map broadcasts focused on the active row.
-- Node, logic-gate, and folder moves still use the existing folder APIs (`POST /v1/company-explorer/folder-items` and `PUT /v1/company-explorer/folders/{folder_id}`), so headless agents can perform the same placement changes without a browser.
-- Drag-and-drop now accepts any compatible row inside a folder section. Dropping a folder, node, or logic gate on a child row resolves to that row's containing folder, while dropping directly on a compatible folder still targets that folder.
+- Project, logic-gate, and folder moves use the Company Explorer APIs, so headless callers can perform the same placement changes without a browser.
+- Drag-and-drop accepts supported Explorer rows inside a folder section. Dropping a project or Logic Gate on a child row resolves to that row's containing folder, while dropping directly on a compatible folder still targets that folder. Dropping a node into Company Explorer is rejected.
 - Dragging over the top or bottom half of a sibling row reorders the dragged folder/item before or after that row, using the same sparse-position pattern as Kanban cards. Folders and items participate in the same visible sibling order for their compatible parent.
 - Dragging a folder across folder levels can now land before or after a row in the target folder instead of only appending inside the target. The UI sends the same sparse `position` writes that headless callers can send through the folder APIs.
 - Dropping a folder on the `Company` root moves that folder back to the root of its node or logic-gate tree.
@@ -191,17 +194,14 @@ Folder runtime update (2026-05-02):
 - Row hover shows a visual selection preview only. It does not publish linked-map context or write API state, which keeps accidental mouse movement off the hot synchronization path.
 - Expanded rows, tree scroll position, and root-level order for unplaced rows persist in localStorage per company/frame on the user's own machine. This state is intentionally not propagated through backend or company-wide sync.
 - The Explorer tree owns its vertical overflow and uses the same thin scrollbar treatment as Editor surfaces. The scrollbar is browser-native, appears only when the tree exceeds the frame height, and keeps rendering virtualized for large company trees. Light frames use the Editor light-mode cyan scrollbar color.
-- Selecting a node folder broadcasts `selectedFolderID`/`selectedFolderKind=node`; linked Node Map filters its cached graph to nodes placed in that folder or any descendant folder.
-- Selecting a logic-gate folder broadcasts `selectedFolderID`/`selectedFolderKind=logic_gate`; linked Logic Gate Map applies the same folder-scope rule for gates.
-- Selecting an individual node or logic gate inside a folder keeps that folder scope in the broadcast, so linked maps can select the item without expanding back to the whole company.
-- Relationships are displayed only when both endpoints are inside the active folder scope. Existing cross-folder relationships are hidden in scoped map views; moving a node or logic gate to a different Explorer folder level through the `POST /v1/company-explorer/folder-items` API deletes relationships touching that entity, and local graph caches prune those edges immediately so the map matches the new folder context.
+- Selecting a logic-gate folder broadcasts the folder context for Logic Gate Map. Company Explorer folders do not define node-map node membership.
+- Selecting an individual Logic Gate inside a folder keeps that folder scope in the broadcast, so linked maps can select the item without expanding back to the whole company.
+- Relationships are displayed from source-of-truth relationship/assignment read models, not from Company Explorer node placement. Moving a project or Logic Gate in Company Explorer does not create node placement edges.
 - Node Map and Logic Gate Map can emit `mangorts:company-explorer-find-requested`
   with `{ companyID, targetFrameIDs, entities: [{ kind, id }] }`. Explorer
-  applies that local API by selecting every matching node/logic-gate row,
-  expanding the containing folder path from `company_explorer_folder_items` and
-  `company_explorer_folders`, and scrolling the first requested row into view.
-  This uses entity IDs and indexed folder data, not DOM scanning, so the cost is
-  bounded by the requested batch and folder ancestry.
+  applies that local API by selecting every matching visible Logic Gate row, or
+  by opening node search results through source-of-truth node context. It does
+  not require node folder placement in Company Explorer.
 
 Project leaf update (2026-06-24):
 - Project rows are standalone Company Explorer resources and do not expose nested project-relationship children.
@@ -209,9 +209,17 @@ Project leaf update (2026-06-24):
 - Explorer placement remains single-parent/single-instance: moving a resource changes its `company_explorer_items` placement rather than adding another visible location.
 
 Explorer move/search update (2026-06-24):
-- Dragging a node onto a logic gate in Company Explorer uses logic-gate assignment semantics, not the work-state change endpoint used by My Work/GVIC cell moves.
-- When a folder-placement node is assigned to a logic gate from Company Explorer, the old Explorer placement is removed so the node keeps one visible Explorer instance.
-- Company Explorer search is limited to resources reachable through visible Explorer paths; hidden folder ancestry must hide the search result even when the underlying resource has direct view access.
+- Dragging or placing nodes through the normal Company Explorer tree is rejected. Logic Gate assignment is handled by Logic Gate/Kanban/Home/My Work command paths, not by Explorer placement storage.
+- Company Explorer search can still return node matches from source-of-truth node storage. Node search result rows are open-only and do not become Explorer tree rows.
+- Hidden folder ancestry must hide search result paths even when the underlying resource has direct view access; standalone accessible node results may still appear with an empty Explorer path.
+
+Email-to-Explorer business rule (2026-07-06):
+- Drag payloads from My Triage or mailbox-capable Shared Triage can cross Chrome windows/tabs and carry message IDs plus source mailbox scope. Cross-browser application drag/drop is not part of the documented Company Explorer requirement unless a separate compatibility rule and test are added.
+- Company Explorer accepts those email drops only on Logic Gate rows.
+- The drop invokes the communications conversion target for that Logic Gate and creates a Pending direct email-created node/card on the Logic Gate's Kanban/work path.
+- The created node/card shows the normal email/source icon/state expected by email-created Kanban cards.
+- The created node/card must not be rendered as a Company Explorer entity, must not create an Explorer V2 row, and must not insert a `node` target into `company_explorer_items`.
+- Company Explorer folder and project rows are not email conversion targets. Dropping an email on a Company Explorer folder must not create a node in that folder.
 
 Visual hierarchy update (2026-06-29):
 - Company Explorer row indentation may allocate extra horizontal room so nested rows read clearly at sidebar widths.
@@ -227,31 +235,25 @@ Permission marker update (2026-06-29):
 Bug history (2026-07-01):
 - A previously opened lazy folder could later reopen with only the disclosure arrow changing to expanded and no child rows appearing. The stale state was a branch marked loaded while its V2 child rows were no longer materialized. Expanded `has_children` folders now refetch when their loaded marker has no visible child rows behind it.
 
-Kanban Explorer update (2026-05-04):
-- Kanban boards are durable Explorer items with `item_type=kanban` and a fixed three-column board icon.
-- Kanban boards can be placed in either node folders or logic-gate folders. Folder kinds remain `node` and `logic_gate`; Kanban is an item type, not a third map scope.
-- Explorer now groups all boards under the automatic `Kanban Boards` folder. Board creation and renaming are owned by the Kanban module, not the Explorer context menu.
-- Kanban board rows support selection, drag/drop placement, and delete through the Explorer interaction model.
-- Selecting a Kanban board broadcasts a `kanban` live-selection event to linked Kanban frames so they open that board. Map and Editor modules explicitly ignore `kanban` selections, because boards are not displayable map/editor entities.
-- Selecting a card in Kanban can target Explorer with all selected node IDs. Explorer expands the containing folders for those node rows so `Find on company explorer` works for deeply nested cards.
+Legacy Kanban Explorer note (superseded by final tree contract):
+- Earlier drafts explored Kanban boards as Explorer items. The final Company Explorer tree is now folders, projects, and Logic Gates only.
+- Kanban board state and direct email-created cards belong to Kanban/Logic Gate work surfaces. They do not create Company Explorer item rows.
+- Selecting or finding Kanban cards may still open source nodes or Logic Gates through their own surfaces/search, but it must not depend on node or Kanban placement inside Company Explorer.
 
 Unified map/linking update (2026-05-03):
-- The module picker now exposes one `Map` module. The map switches between node and logic-gate views from the latest Explorer context: node folders/items show nodes, logic-gate folders/items show logic gates.
+- The module picker now exposes one `Map` module. The map switches between node and logic-gate views from source-of-truth context; Company Explorer folders do not define node placement membership.
 - Legacy `nodes-map` and `logic-map` frame kinds still load for existing saved layouts, but new workspaces should use `map`.
 - Explorer context is broadcast to every connected frame in the link graph, not just directly linked neighbors. If Explorer is linked to Map and Map is linked to Editor, Explorer context reaches the Editor as well.
 - Folder, node, and logic-gate rename responses patch the shared graph caches immediately so Explorer, Map, and Editor converge without waiting for a full workspace snapshot refresh.
 
 Kanban drag update (2026-05-01):
-- Node and Logic Gate rows are draggable.
-- Drag payloads use `application/x-mango-explorer-entity` with `{ itemType: "node", nodeID, label }`.
-- Kanban consumes node payloads through its API-first board contract so the same operation can be performed by headless agents. Logic gates are intentionally not exported as Kanban drag payloads.
+- Legacy drafts allowed node rows to drag from Explorer into Kanban. The final Company Explorer tree no longer renders normal node rows.
+- Kanban consumes node payloads from node-capable surfaces through its API-first board contract so the same operation can be performed by headless agents.
 
 Kanban multi-drag update (2026-05-03):
-- Explorer rows support click, Ctrl/Cmd-click, and continuous Shift-click selection for drag batching.
-- Dragging from any selected node row exports all selected node rows as `{ itemType: "node_batch", nodes: [...] }` on `application/x-mango-explorer-entity`.
-- The browser drag image for a selected node batch shows the batch rows and count so the cursor preview matches the transfer intent.
-- Non-node rows can stay selected for Explorer navigation, but Kanban batch payloads include node rows only.
-- A linked Kanban card click can target this Explorer with `node-map-explorer-context-v1:<companyID>:<explorerFrameID>` so the matching node row highlights.
+- Explorer rows support click, Ctrl/Cmd-click, and continuous Shift-click selection for navigation and supported Explorer actions.
+- Node batch drags belong to node-capable surfaces, not final Company Explorer tree rows.
+- A linked Kanban card click may use source-of-truth node context or search to open the matching node, but it must not require a node row in Company Explorer.
 
 Email-to-work drag update (2026-07-07):
 - Company Explorer and Logic Gate Kanban both consume the Home triage email drag payload `application/x-mangorts-communications-triage-messages`.
@@ -270,17 +272,17 @@ Implementation principle:
 - keep existing node/relationship/information contracts,
 - store folder hierarchy and item placement with small indexed tables,
 - keep map filtering against the existing workspace snapshot cache for current runtime,
-- expose direct folder APIs so agents can create folders and move nodes/gates without a browser.
+- expose direct Explorer APIs so agents can create folders and move projects/Logic Gates without a browser.
 
 Headless API surface:
 - `GET/POST /v1/company-explorer/folders`
 - `PUT /v1/company-explorer/folders/{folder_id}` for folder rename, move, and/or `position` reorder
 - `DELETE /v1/company-explorer/folders/{folder_id}`
-- `GET/POST/DELETE /v1/company-explorer/folder-items`
+- final placement APIs for project and Logic Gate items only
 
 This keeps source-of-truth entity IDs and persistence semantics intact while making Explorer organization durable.
-Folder move writes reject self/descendant parents so the folder tree remains safe for recursive scope filtering. `position` is part of the API contract so agents can reorder Explorer rows without relying on browser-only drag state. Folder-item assignment is also the relationship-boundary API: if a node or logic gate changes folder level, relationships touching that entity are removed in the same canonical write.
-Folder item `item_type` accepts `node`, `logic_gate`, and `kanban`; folder `folder_kind` remains limited to `node` and `logic_gate`.
+Folder move writes reject self/descendant parents so the folder tree remains safe for recursive scope filtering. `position` is part of the API contract so agents can reorder Explorer rows without relying on browser-only drag state.
+Final placement storage accepts project and Logic Gate targets only. Nodes stay in source-of-truth node, project relationship, Logic Gate assignment, search, Kanban, and editor surfaces rather than Company Explorer placement rows.
 
 ---
 

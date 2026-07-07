@@ -186,6 +186,8 @@ For existing databases that were created before Company Explorer row ordering wa
 psql "host=$env:DB_HOST port=$env:DB_PORT user=$env:DB_USER dbname=$env:DB_NAME sslmode=$env:DB_SSLMODE" -f .\db\migrations\20260503_company_explorer_positions.sql
 ```
 
+Company Explorer final-tree storage must not allow node placements. The current `company_explorer_items.target_type` constraint is `project` or `logic_gate` only; nodes are source-of-truth workspace resources that may appear in search or Logic Gate/Kanban work views, not as Company Explorer rows. If a database ever received the removed `20260706_company_explorer_email_node_items.sql` migration, remove any `target_type='node'` rows and restore `company_explorer_items_target_type_chk` to `('project', 'logic_gate')` before using final Explorer reads.
+
 For existing databases that were created before shared map layout persistence was added, run:
 
 ```powershell

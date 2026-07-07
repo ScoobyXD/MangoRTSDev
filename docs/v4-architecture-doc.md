@@ -197,6 +197,8 @@ company_explorer:user:{userID}
 
 Scoped workspace-domain updates for explorer tree/folder/item surfaces.
 
+Final Company Explorer tree updates are for folders, projects, and Logic Gates only. Node source events and node relationship events do not refresh Company Explorer branches, because nodes are not Company Explorer placement rows. Email drops onto Company Explorer are accepted only on Logic Gate rows and create direct email-created node/cards on that Logic Gate's Kanban/work path, not `company_explorer_items` node rows.
+
 ### Node Graph
 
 ```text
@@ -404,7 +406,6 @@ Examples:
 node_updated with node.logic_gate_ids = [gate-1]
   affects:
     node_graph
-    company_explorer item=node
     kanban_board boardID=logic-gate:gate-1
     racio_matrix
 

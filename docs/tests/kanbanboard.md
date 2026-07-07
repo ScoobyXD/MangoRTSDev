@@ -127,7 +127,7 @@ KB92 - Dropping a direct email-created card onto a different target node card tr
 KB93 - After a successful email-card transfer, the source email-created Kanban card and its temporary source node are deleted.
 KB94 - Email-card transfer does not restore the email to My Triage and does not delete the target node or target card.
 KB95 - Multi-card drags, non-email-created source cards, same-card drops, and same-node drops must not run email-card transfer semantics.
-KB96 - Direct email-created Kanban cards can originate from My Triage or from a mailbox-capable Shared Triage inbox; the visible email-origin marker and transfer behavior are the same after creation.
+KB96 - Direct email-created Kanban cards can originate from My Triage or from a mailbox-capable Shared Triage inbox, including when the email is dropped onto a Company Explorer Logic Gate row; the created card belongs to the Logic Gate/Kanban work path, not Company Explorer placement storage, and the visible email-origin marker and transfer behavior are the same after creation.
 KB97 - Email-card transfer uses the stored direct email-node provenance and board/card IDs; it must not require the actor to have a connected personal mailbox at transfer time.
 KB98 - When a local email-to-Logic-Gate conversion has already updated the board from the POST response, matching immediate communications/workspace events must not force repeated Home workspace panel reloads, and the source mail list must keep the source email row visible with patched Logic Gate icon state instead of being refreshed, row-removed, refilled from stale prefetched pages, or message-length-prefetched by broad communications cache invalidation.
 KB99 - The initial email-to-Logic-Gate conversion sets the source email to unstarred and returns `unstarred_message_ids` for local Home reconciliation; later direct email-card transfer between Kanban cards uses stored email-node provenance only and must not perform another mailbox star/unstar mutation.
@@ -135,6 +135,9 @@ KB100 - Node editor popups opened from Kanban expose a fullscreen toggle in the 
 KB101 - Dragging a triage/mailbox email directly onto a Logic Gate Kanban column converts it into a direct email-created node card on that Logic Gate board and in that target column.
 KB102 - Direct email-to-Kanban column drops use the same triage drag payload and Home conversion reconciliation event as Company Explorer email drops so source mail rows, local freshness suppression, Logic Gate icons, and unstarred state are reconciled consistently.
 KB103 - Dropping an email onto a supported priority group inside a Logic Gate Kanban column applies that priority while still using the column as the assignment status target; dropping onto ordinary column or card space uses the backend default priority.
+
+### New node insertion
+KB104 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
 
 ## Scenarios
 

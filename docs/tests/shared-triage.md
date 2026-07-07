@@ -1,4 +1,4 @@
-Last updated: 2026-07-02
+Last updated: 2026-07-06
 
 # Shared Triage Tests
 
@@ -86,13 +86,13 @@ ST75 - Duplicate active Shared Triage archive submissions for the same actor, sh
 ST76 - Shared Triage archive jobs must preserve company/shared-inbox scope and use the company-owned shared mailbox grant, not the actor's personal mailbox grant.
 ST77 - Accepted background Shared Triage archive job IDs are pending work, not confirmed archive mutations; they must not be applied to the current visible shared-inbox message-list cache until an explicit user action or later full reload reconciles provider state.
 ST78 - Removing a mailbox-capable shared inbox from Shared Triage without deleting the email connection is a separate remove action: it removes the Shared Triage work surface and shared inbox permissions/GVIC rows while preserving the company_email_connections credential.
-ST79 - Dragging a Shared Triage mailbox email into a Logic Gate or eligible Explorer target must preserve `shared_inbox_id` through the drag payload and conversion API request.
+ST79 - Dragging a Shared Triage mailbox email into a Logic Gate or Company Explorer Logic Gate row must preserve `shared_inbox_id` through the drag payload and conversion API request; the supported cross-window boundary is Chrome window/tab to Chrome window/tab, and cross-browser application drag/drop is not a documented business requirement unless a separate compatibility rule and test are added. Company Explorer folders and projects are not Shared Triage email conversion targets.
 ST80 - Shared Triage email conversion uses the company-owned shared mailbox grant for message detail reads; it must not require or fall back to the actor's personal mailbox connection.
 ST81 - A successful Shared Triage email conversion creates the same direct email-created Kanban node/card semantics as My Triage, including the visible email-origin marker and later email-transfer behavior.
 ST82 - Local Shared Triage conversion echoes from communications realtime and workspace realtime must be reconciled from the conversion response; they must not blank, fully reload, reuse stale prefetched pages, or repeatedly refetch the shared mailbox message list or Home workspace panel.
 ST83 - Successful local Shared Triage email conversion keeps converted source email rows visible, patches their Logic Gate icon state from the conversion result, suppresses matching local `triage.converted` echoes by `shared_inbox_id`, and tolerates a matching unscoped realtime echo without invalidating all communications message page/detail caches, removing rows, or triggering post-removal fill/message-length prefetch. This conversion/cache/realtime/prefetch path is regression-prone and must be protected whenever email conversion, star/unstar, row-removal, or pagination refill behavior changes.
 ST84 - Successful local Shared Triage email conversion into a Company Explorer Logic Gate must show a temporary green success banner over the Company Explorer section; other Logic Gate conversion surfaces must show a temporary success banner or notice.
-ST85 - When a dragged Shared Triage email is converted into a Logic Gate, Company Explorer Logic Gate, pinned Logic Gate, or eligible node target, the source email is set to unstarred through the company-owned shared mailbox grant after workspace conversion succeeds. The response returns `unstarred_message_ids`, and Shared Triage applies those IDs locally without full-list replacement, stale prefetched-page top-up, or repeated shared mailbox GETs.
+ST85 - When a dragged Shared Triage email is converted into a Logic Gate, Company Explorer Logic Gate, pinned Logic Gate, or non-Explorer eligible node target, the source email is set to unstarred through the company-owned shared mailbox grant after workspace conversion succeeds. The response returns `unstarred_message_ids`, and Shared Triage applies those IDs locally without full-list replacement, stale prefetched-page top-up, or repeated shared mailbox GETs.
 ST86 - Conversion-driven Shared Triage unstar reconciliation must use the same local echo discipline as conversion: the Starred source card de-stars immediately, the local mutation is remembered under both the scoped `shared_inbox_id` key and a fallback unscoped key, and later backend/provider confirmations must not blank, refill, or fully reload the active Shared Triage list when the realtime payload omits `shared_inbox_id`.
 ST87 - Unread Shared Triage email rows keep their outer unread outline/highlight, but the small top-left colored dot is reserved for the currently selected email only; unread but unselected rows must not show that dot.
 ST88 - Sent email read receipts from Shared Triage use Nylas open tracking on outbound shared mailbox sends by sending `tracking_options.opens = true` through the company-owned shared grant.
@@ -120,6 +120,7 @@ ST109 - Node editor, logic-gate editor, and inline comment/chat text opened from
 ST110 - The Shared Triage All mailbox control is a dropdown with All and Spam folder options; the selected option is visually highlighted and marked, and Spam loads the provider spam/junk mailbox through the selected shared grant.
 ST111 - Shared Triage Spam mailbox reads are scoped by `shared_inbox_id` and the company-owned shared mailbox connection; Spam messages must not leak between shared inboxes or into the primary inbox filter.
 ST112 - View-only Shared Triage users may read Spam when they can view the mailbox, but sending, scheduled sending, reply, reply-all, forward, Bcc, and draft send actions still require edit access to that shared inbox.
+ST113 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
 
 ## Nylas Configuration Contract
 
@@ -422,12 +423,13 @@ Business logic covered:
 Given:
 - A user has edit access to a mailbox-capable Shared Triage inbox.
 - That shared inbox has a connected company-owned mailbox grant.
-- The user drags an email from that Shared Triage mailbox into a Logic Gate or eligible Explorer Logic Gate target.
+- The user drags an email from that Shared Triage mailbox into a Logic Gate or Company Explorer Logic Gate row.
 
 Expected:
 - The drag payload and conversion request include the selected `shared_inbox_id`.
 - The backend reads the message through the shared mailbox grant and authorizes the mutation as the actor.
 - The resulting Kanban card is marked as directly email-created and can later transfer its email attachment into another node card.
+- Company Explorer folder and project rows are not email conversion targets and must not create Explorer node rows, folder items, or `company_explorer_items` rows.
 - The visible Shared Triage email list and app-level communications live-freshness bridge handle the local conversion by keeping converted rows visible, patching the row/detail/cache Logic Gate icon state from the conversion result, and suppressing the matching `shared_inbox_id` scoped realtime echo, plus a matching unscoped echo if the realtime payload omits `shared_inbox_id`, without full-list replacement, communications message cache invalidation, stale prefetched-page top-up, post-removal fill, message-length prefetch, or repeated workspace/mail GET bursts.
 - The backend sets converted shared source emails to unstarred through the shared mailbox grant, returns successfully updated IDs in `unstarred_message_ids`, and the Shared Triage Starred count/list reconcile locally without loading replacement Starred rows.
 - A converted email dragged from Shared Triage Starred visually de-stars immediately and matching scoped or unscoped star/unstar confirmations are treated as local reconciliation, not as a reason to clear caches, refill from prefetched pages, or reload the active Shared Triage message list.
