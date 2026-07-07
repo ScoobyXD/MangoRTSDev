@@ -115,6 +115,11 @@ resource "aws_instance" "db_tunnel" {
   }
 
   lifecycle {
+    prevent_destroy = true
+    ignore_changes = [
+      ami,
+    ]
+
     precondition {
       condition     = local.db_tunnel_subnet_id != ""
       error_message = "enable_db_tunnel_host requires at least one private subnet, or an explicit db_tunnel_subnet_id."
