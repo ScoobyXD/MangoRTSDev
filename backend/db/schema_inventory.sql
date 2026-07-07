@@ -16,7 +16,7 @@
 --   as separate objects so the comparator can ignore or include them explicitly.
 
 with included_namespaces as (
-  select namespace.oid, namespace.nspname
+  select namespace.oid, namespace.nspname, namespace.nspowner, namespace.nspacl
   from pg_namespace namespace
   where namespace.nspname <> 'information_schema'
     and namespace.nspname !~ '^pg_'
