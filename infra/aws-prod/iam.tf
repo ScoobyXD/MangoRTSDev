@@ -136,6 +136,13 @@ data "aws_iam_policy_document" "github_deploy" {
     ]
     resources = ["*"]
   }
+
+  statement {
+    actions = ["ssm:GetParameter"]
+    resources = [
+      "arn:aws:ssm:${var.aws_region}::parameter/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+    ]
+  }
 }
 
 resource "aws_iam_policy" "github_deploy" {
