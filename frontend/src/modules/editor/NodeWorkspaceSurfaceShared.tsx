@@ -10,6 +10,10 @@ import type { EditorDocumentFormattingController, EditorSelectionInlineFormatSta
 export type { MentionableCompanyUser } from "./editorMentions";
 export type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
 
+export type NodeWorkspaceSaveController = {
+  flushPendingProjectionSaves: () => Promise<void>;
+};
+
 export type NodeWorkspaceSurfaceProps = {
   apiBase: string;
   companyID: string;
@@ -22,6 +26,7 @@ export type NodeWorkspaceSurfaceProps = {
   unseenChanges: NodeContentChange[];
   companyUsers: MentionableCompanyUser[];
   projectionsLoaded: boolean;
+  hidden?: boolean;
   focusInformationID?: string;
   focusRequestID?: number;
   focusInformationMode?: "focus" | "scroll";
@@ -44,6 +49,7 @@ export type NodeWorkspaceSurfaceProps = {
   onRequireNodePriorityForLogicGateAssignment: () => void;
   onSelectionFontSizeChange?: (fontSize: number) => void;
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
+  onRegisterSaveController?: (controller: NodeWorkspaceSaveController | null) => void;
   onError: (message: string) => void;
 };
 

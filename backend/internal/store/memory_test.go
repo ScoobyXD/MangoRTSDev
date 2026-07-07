@@ -93,6 +93,99 @@ func TestMemoryRepo_AddNodeInformation_ProjectionKeyStaysStableWhenInformationID
 	}
 }
 
+func TestMemoryRepo_NodeProjectionAutosaveDoesNotAppendInformationAndSaveVersionRestoresProjection(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+	actorID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	const informationID = "22222222-2222-4222-8222-222222222222"
+
+	node, err := repo.CreateNode(companyID, "Projection-only autosave node")
+	if err != nil {
+		t.Fatalf("CreateNode failed: %v", err)
+	}
+	if _, err := repo.UpsertNodeProjectionWithActor(NodeInformationInput{
+		CompanyID:        companyID,
+		NodeID:           node.NodeID,
+		Type:             "Text box",
+		Information:      memoryNodeTextBlockInformation(t, "alpha"),
+		InformationID:    informationID,
+		ActorUserID:      actorID,
+		ActorDisplayName: "Ada Lovelace",
+	}); err != nil {
+		t.Fatalf("initial UpsertNodeProjectionWithActor failed: %v", err)
+	}
+	if _, err := repo.UpsertNodeProjectionWithActor(NodeInformationInput{
+		CompanyID:        companyID,
+		NodeID:           node.NodeID,
+		Type:             "Text box",
+		Information:      memoryNodeTextBlockInformation(t, "beta"),
+		InformationID:    informationID,
+		ActorUserID:      actorID,
+		ActorDisplayName: "Ada Lovelace",
+	}); err != nil {
+		t.Fatalf("second UpsertNodeProjectionWithActor failed: %v", err)
+	}
+
+	details, err := repo.GetNodeDetails(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNodeDetails failed: %v", err)
+	}
+	if len(details.Information) != 0 {
+		t.Fatalf("projection autosaves appended %d information rows, want 0", len(details.Information))
+	}
+
+	version, err := repo.CreateNodeEditorSaveVersion(EditorSaveVersionInput{
+		CompanyID:        companyID,
+		ResourceID:       node.NodeID,
+		SaveKind:         "manual",
+		ActorUserID:      actorID,
+		ActorDisplayName: "Ada Lovelace",
+	})
+	if err != nil {
+		t.Fatalf("CreateNodeEditorSaveVersion failed: %v", err)
+	}
+	if version.SaveKind != "manual" || version.ItemCount != 1 || version.SavedByUserID != actorID || version.SavedByDisplayName != "Ada Lovelace" {
+		t.Fatalf("save version metadata = %+v, want one manual save by actor", version)
+	}
+	if version.Items[0].SourceInformationID != informationID || version.Items[0].Information != memoryNodeTextBlockInformation(t, "beta") {
+		t.Fatalf("saved version item = %+v, want beta snapshot from projection %s", version.Items[0], informationID)
+	}
+
+	if _, err := repo.UpsertNodeProjectionWithActor(NodeInformationInput{
+		CompanyID:     companyID,
+		NodeID:        node.NodeID,
+		Type:          "Text box",
+		Information:   memoryNodeTextBlockInformation(t, "gamma"),
+		InformationID: informationID,
+		ActorUserID:   actorID,
+	}); err != nil {
+		t.Fatalf("third UpsertNodeProjectionWithActor failed: %v", err)
+	}
+	if _, err := repo.RestoreNodeEditorSaveVersion(EditorSaveVersionRestoreInput{
+		CompanyID:   companyID,
+		ResourceID:  node.NodeID,
+		SaveID:      version.SaveID,
+		ActorUserID: actorID,
+	}); err != nil {
+		t.Fatalf("RestoreNodeEditorSaveVersion failed: %v", err)
+	}
+	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("ListNodeProjections failed: %v", err)
+	}
+	if len(projections) != 1 || projections[0].InformationID != informationID || projections[0].Information != memoryNodeTextBlockInformation(t, "beta") {
+		t.Fatalf("restored projections = %+v, want beta projection restored at stable ID", projections)
+	}
+
+	details, err = repo.GetNodeDetails(companyID, node.NodeID)
+	if err != nil {
+		t.Fatalf("GetNodeDetails after save failed: %v", err)
+	}
+	if len(details.Information) != 1 || details.Information[0].SaveBatchID != version.SaveID {
+		t.Fatalf("saved information rows = %+v, want exactly one saved-version row", details.Information)
+	}
+}
+
 func TestMemoryRepo_NodeContentChangesTrackUnseenAdditionsDeletionsAndSeenState(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"
@@ -616,6 +709,96 @@ func TestMemoryRepo_AddLogicGateInformation_ProjectionKeyStaysStableAndHistoryAp
 	}
 	if projections[0].Information != "second logic snapshot" {
 		t.Fatalf("expected latest projection information to be updated, got %q", projections[0].Information)
+	}
+}
+
+func TestMemoryRepo_LogicGateProjectionAutosaveDoesNotAppendInformationAndSaveVersionRestoresProjection(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-1111-1111-111111111111"
+	actorID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	const informationID = "44444444-4444-4444-8444-444444444444"
+
+	logicGate, err := repo.CreateLogicGate(companyID, "Projection-only autosave gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate failed: %v", err)
+	}
+	if _, err := repo.UpsertLogicGateProjection(LogicGateProjectionInput{
+		CompanyID:        companyID,
+		LogicGateID:      logicGate.LogicGateID,
+		Type:             "Text box",
+		Information:      "<p>alpha</p>",
+		InformationID:    informationID,
+		ActorUserID:      actorID,
+		ActorDisplayName: "Ada Lovelace",
+	}); err != nil {
+		t.Fatalf("initial UpsertLogicGateProjection failed: %v", err)
+	}
+	if _, err := repo.UpsertLogicGateProjection(LogicGateProjectionInput{
+		CompanyID:        companyID,
+		LogicGateID:      logicGate.LogicGateID,
+		Type:             "Text box",
+		Information:      "<p>beta</p>",
+		InformationID:    informationID,
+		ActorUserID:      actorID,
+		ActorDisplayName: "Ada Lovelace",
+	}); err != nil {
+		t.Fatalf("second UpsertLogicGateProjection failed: %v", err)
+	}
+
+	details, err := repo.GetLogicGateDetails(companyID, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("GetLogicGateDetails failed: %v", err)
+	}
+	if len(details.Information) != 0 {
+		t.Fatalf("projection autosaves appended %d logic gate information rows, want 0", len(details.Information))
+	}
+
+	version, err := repo.CreateLogicGateEditorSaveVersion(EditorSaveVersionInput{
+		CompanyID:        companyID,
+		ResourceID:       logicGate.LogicGateID,
+		SaveKind:         "auto",
+		ActorUserID:      actorID,
+		ActorDisplayName: "Ada Lovelace",
+	})
+	if err != nil {
+		t.Fatalf("CreateLogicGateEditorSaveVersion failed: %v", err)
+	}
+	if version.SaveKind != "auto" || version.ItemCount != 1 || version.Items[0].Information != "<p>beta</p>" {
+		t.Fatalf("save version = %+v, want one auto beta snapshot", version)
+	}
+
+	if _, err := repo.UpsertLogicGateProjection(LogicGateProjectionInput{
+		CompanyID:     companyID,
+		LogicGateID:   logicGate.LogicGateID,
+		Type:          "Text box",
+		Information:   "<p>gamma</p>",
+		InformationID: informationID,
+		ActorUserID:   actorID,
+	}); err != nil {
+		t.Fatalf("third UpsertLogicGateProjection failed: %v", err)
+	}
+	if _, err := repo.RestoreLogicGateEditorSaveVersion(EditorSaveVersionRestoreInput{
+		CompanyID:   companyID,
+		ResourceID:  logicGate.LogicGateID,
+		SaveID:      version.SaveID,
+		ActorUserID: actorID,
+	}); err != nil {
+		t.Fatalf("RestoreLogicGateEditorSaveVersion failed: %v", err)
+	}
+	projections, err := repo.ListLogicGateProjections(companyID, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("ListLogicGateProjections failed: %v", err)
+	}
+	if len(projections) != 1 || projections[0].InformationID != informationID || projections[0].Information != "<p>beta</p>" {
+		t.Fatalf("restored logic gate projections = %+v, want beta projection restored at stable ID", projections)
+	}
+
+	details, err = repo.GetLogicGateDetails(companyID, logicGate.LogicGateID)
+	if err != nil {
+		t.Fatalf("GetLogicGateDetails after save failed: %v", err)
+	}
+	if len(details.Information) != 1 || details.Information[0].SaveBatchID != version.SaveID {
+		t.Fatalf("saved logic gate information rows = %+v, want exactly one saved-version row", details.Information)
 	}
 }
 

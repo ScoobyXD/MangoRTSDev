@@ -1,4 +1,4 @@
-export type EditorTabID = "editor" | "format" | "outline-styles" | "metadata" | "history" | "relationships" | "permissions";
+export type EditorTabID = "editor" | "format" | "outline-styles" | "metadata" | "history" | "save-settings" | "relationships" | "permissions";
 export type EditorRelatedNodeCreationKind = "parent" | "peer" | "child";
 
 export const EDITOR_TAB_ITEMS: ReadonlyArray<{ id: EditorTabID; label: string }> = [
@@ -9,6 +9,7 @@ export const EDITOR_TAB_ITEMS: ReadonlyArray<{ id: EditorTabID; label: string }>
   { id: "outline-styles", label: "Outline Styles" },
   { id: "metadata", label: "Metadata" },
   { id: "history", label: "History" },
+  { id: "save-settings", label: "Save Settings" },
 ];
 
 export type EditorDocumentIsolationState = {

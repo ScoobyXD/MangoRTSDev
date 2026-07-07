@@ -305,6 +305,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   unseenChanges,
   companyUsers,
   projectionsLoaded,
+  hidden = false,
   focusInformationID,
   focusRequestID,
   focusInformationMode = "focus",
@@ -327,6 +328,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   onRequireNodePriorityForLogicGateAssignment,
   onSelectionFontSizeChange,
   onSelectionInlineFormatChange,
+  onRegisterSaveController,
   onError,
 }) => {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -859,7 +861,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     try {
       const information = buildEditorTextBlockContentPayload(content);
       if (information.trim()) {
-        await requestJSON<unknown>(`/v1/nodes/${nodeID}/information`, {
+        await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection`, {
           method: "POST",
           body: JSON.stringify({
             company_id: companyID,
@@ -878,6 +880,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, pending: false } : block));
     }
   }, [canEdit, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+
+  const flushAllTextBlockProjectionSaves = useCallback(async () => {
+    if (!canEdit) return;
+    for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
+    saveTimersRef.current.clear();
+    const entries = Array.from(contentByBlockRef.current.entries());
+    await Promise.all(entries.map(([blockID, content]) => persistTextBlock(blockID, content)));
+  }, [canEdit, persistTextBlock]);
+
+  useEffect(() => {
+    if (!onRegisterSaveController) return undefined;
+    onRegisterSaveController({ flushPendingProjectionSaves: flushAllTextBlockProjectionSaves });
+    return () => onRegisterSaveController(null);
+  }, [flushAllTextBlockProjectionSaves, onRegisterSaveController]);
 
   const flushTextBlockSave = useCallback((blockID: string) => {
     if (!canEdit) return;
@@ -1986,6 +2002,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         left: 0,
         overflowY: "auto",
         overflowX: "hidden",
+        visibility: hidden ? "hidden" : "visible",
+        pointerEvents: hidden ? "none" : "auto",
         scrollbarGutter: "stable",
         padding: "0 14px 38px 14px",
         cursor: "default",

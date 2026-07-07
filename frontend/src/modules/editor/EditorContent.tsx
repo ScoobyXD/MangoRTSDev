@@ -49,6 +49,7 @@ import {
   EDITOR_NEU_PANEL_BACKGROUND,
   EDITOR_NEU_SOFT_BORDER,
   EDITOR_NEU_SURFACE,
+  type NodeWorkspaceSaveController,
 } from "./NodeWorkspaceSurfaceShared";
 import {
   deserializeEditorDocumentHTML,
@@ -221,6 +222,87 @@ const EDITOR_COLLABORATION_SEND_DELAY_MS = 140;
 const EDITOR_REMOTE_APPLY_IDLE_MS = 900;
 const EDITOR_RELATIONSHIP_WORLD_W = 12800;
 const EDITOR_RELATIONSHIP_WORLD_H = 8800;
+const EDITOR_SAVE_VERSION_INTERVAL_OPTIONS = [5, 10, 30, 60] as const;
+const EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES = 10;
+
+type EditorSaveVersionItem = {
+  information_id: string;
+  source_information_id: string;
+  type: string;
+  information: string;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+type EditorSaveVersion = {
+  company_id: string;
+  resource_type: "node" | "logic_gate";
+  resource_id: string;
+  save_id: string;
+  save_kind: "manual" | "auto" | "legacy";
+  saved_by_user_id?: string;
+  saved_by_display_name?: string;
+  created_timestamp: string;
+  updated_timestamp: string;
+  item_count: number;
+  items?: EditorSaveVersionItem[];
+};
+
+type EditorSaveVersionsPayload = {
+  versions?: EditorSaveVersion[];
+};
+
+function editorSaveVersionsPath(resourceType: "node" | "logic_gate", resourceID: string): string {
+  return resourceType === "node" ? `/v1/nodes/${resourceID}/save-versions` : `/v1/logic-gates/${resourceID}/save-versions`;
+}
+
+function editorSaveSettingsStorageKey(companyID: string, resourceType: "node" | "logic_gate", resourceID: string): string {
+  return `mango-editor-save-settings-v1:${companyID}:${resourceType}:${resourceID}`;
+}
+
+function readEditorSaveIntervalMinutes(companyID: string, resourceType: "node" | "logic_gate", resourceID: string): number {
+  if (typeof localStorage === "undefined") return EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES;
+  const raw = localStorage.getItem(editorSaveSettingsStorageKey(companyID, resourceType, resourceID));
+  const parsed = Number.parseInt(raw ?? "", 10);
+  return EDITOR_SAVE_VERSION_INTERVAL_OPTIONS.includes(parsed as typeof EDITOR_SAVE_VERSION_INTERVAL_OPTIONS[number])
+    ? parsed
+    : EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES;
+}
+
+function writeEditorSaveIntervalMinutes(companyID: string, resourceType: "node" | "logic_gate", resourceID: string, minutes: number) {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(editorSaveSettingsStorageKey(companyID, resourceType, resourceID), String(minutes));
+}
+
+function formatEditorSaveVersionTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "Unknown time";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function editorSaveVersionKindLabel(kind: string): string {
+  return kind === "auto" ? "Auto save" : kind === "manual" ? "Manual save" : "Legacy save";
+}
+
+function editorSaveVersionPreview(version: EditorSaveVersion | null): string {
+  if (!version) return "";
+  const items = version.items ?? [];
+  if (items.length === 0) return "";
+  return items.map((item, index) => {
+    const label = items.length > 1 ? `Text box ${index + 1}` : item.type || "Text box";
+    return `${label}\n${item.information}`;
+  }).join("\n\n");
+}
+
+function editorSaveVersionSignature(version: EditorSaveVersion): string {
+  return JSON.stringify((version.items ?? []).map((item) => [item.source_information_id || item.information_id, item.information]));
+}
 
 function logicGateGVICAssignmentPrincipalType(assignment: LogicGateGVICAssignment): LogicGateGVICPrincipalType {
   return (assignment.principal_type?.trim() || "user") as LogicGateGVICPrincipalType;
@@ -407,6 +489,153 @@ const ProjectRelationshipsSurface: React.FC<{
   );
 };
 
+const EditorSaveSettingsSurface: React.FC<{
+  topPx: number;
+  resourceTitle: string;
+  intervalMinutes: number;
+  versions: EditorSaveVersion[];
+  selectedSaveID: string;
+  loading: boolean;
+  saving: boolean;
+  restoring: boolean;
+  sortAscending: boolean;
+  status: string;
+  canEdit: boolean;
+  accent: string;
+  surfaceText: string;
+  panelBackground: string;
+  strokeColor: string;
+  ruleColor: string;
+  scrollbarAccent: string;
+  scrollbarTrack: string;
+  onIntervalChange: (minutes: number) => void;
+  onSaveNow: () => void;
+  onSelectSave: (saveID: string) => void;
+  onToggleSort: () => void;
+  onRestore: (saveID: string) => void;
+}> = ({
+  topPx,
+  resourceTitle,
+  intervalMinutes,
+  versions,
+  selectedSaveID,
+  loading,
+  saving,
+  restoring,
+  sortAscending,
+  status,
+  canEdit,
+  accent,
+  surfaceText,
+  panelBackground,
+  strokeColor,
+  ruleColor,
+  scrollbarAccent,
+  scrollbarTrack,
+  onIntervalChange,
+  onSaveNow,
+  onSelectSave,
+  onToggleSort,
+  onRestore,
+}) => {
+  const sortedVersions = useMemo(() => {
+    return [...versions].sort((left, right) => {
+      const compared = left.created_timestamp.localeCompare(right.created_timestamp);
+      return sortAscending ? compared : -compared;
+    });
+  }, [sortAscending, versions]);
+  const selectedVersion = sortedVersions.find((version) => version.save_id === selectedSaveID) ?? sortedVersions[0] ?? null;
+  const preview = editorSaveVersionPreview(selectedVersion);
+
+  return (
+    <div className="mango-editor-hover-highlight" style={{ position: "absolute", top: topPx, left: 12, right: 12, bottom: 12, zIndex: 3, pointerEvents: "auto", minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", border: `1px solid ${strokeColor}`, borderRadius: 12, background: panelBackground, color: surfaceText, overflow: "hidden" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 12, padding: "12px 14px", borderBottom: `1px solid ${ruleColor}` }}>
+        <div style={{ minWidth: 0, display: "grid", gap: 3 }}>
+          <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 950 }}>Save Settings</div>
+          <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 11, fontWeight: 760 }}>{resourceTitle || "Editor"}</div>
+        </div>
+        <button
+          type="button"
+          disabled={!canEdit || saving}
+          onClick={onSaveNow}
+          style={{ minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: canEdit ? accent : "rgba(100,116,139,0.62)", cursor: canEdit && !saving ? "pointer" : "default", padding: "0 12px", fontSize: 12, fontWeight: 900 }}
+        >
+          {saving ? "Saving" : "Save"}
+        </button>
+      </div>
+      <div className="editor-document-scroll" style={{ minHeight: 0, overflow: "auto", padding: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: 12, alignItems: "start", ["--editor-document-scroll-accent" as string]: scrollbarAccent, ["--editor-document-scroll-track" as string]: scrollbarTrack }}>
+        <section style={{ display: "grid", gap: 10, minWidth: 0 }}>
+          <label style={{ display: "grid", gap: 5, border: `1px solid ${strokeColor}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, padding: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 900 }}>We auto save this every certain amount of time</span>
+            <select
+              value={intervalMinutes}
+              disabled={!canEdit}
+              onChange={(event) => onIntervalChange(Number.parseInt(event.currentTarget.value, 10))}
+              style={{ minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 7, background: "#ffffff", color: "#111827", font: "inherit", fontSize: 12, fontWeight: 760, padding: "4px 7px" }}
+            >
+              {EDITOR_SAVE_VERSION_INTERVAL_OPTIONS.map((minutes) => (
+                <option key={minutes} value={minutes}>{minutes === 60 ? "Every hour" : `Every ${minutes} minutes`}</option>
+              ))}
+            </select>
+          </label>
+          <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <strong style={{ fontSize: 11 }}>Saved versions</strong>
+              <button type="button" onClick={onToggleSort} style={{ border: `1px solid ${strokeColor}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", padding: "4px 7px", fontSize: 11, fontWeight: 800 }}>
+                {sortAscending ? "Oldest first" : "Newest first"}
+              </button>
+            </div>
+            <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
+              {loading ? (
+                <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, padding: 10, fontSize: 12, opacity: 0.7 }}>Loading saves</div>
+              ) : sortedVersions.length === 0 ? (
+                <div style={{ border: `1px dashed ${strokeColor}`, borderRadius: 8, padding: 10, fontSize: 12, opacity: 0.7 }}>No saved versions yet</div>
+              ) : sortedVersions.map((version) => {
+                const selected = selectedVersion?.save_id === version.save_id;
+                return (
+                  <button
+                    key={version.save_id}
+                    type="button"
+                    onClick={() => onSelectSave(version.save_id)}
+                    style={{ minHeight: 46, display: "grid", gap: 2, border: `1px solid ${selected ? accent : strokeColor}`, borderRadius: 8, background: selected ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", textAlign: "left", padding: "7px 9px", font: "inherit" }}
+                  >
+                    <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minWidth: 0 }}>
+                      <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>{formatEditorSaveVersionTimestamp(version.created_timestamp)}</strong>
+                      <span style={{ color: accent, fontSize: 10, fontWeight: 900 }}>{editorSaveVersionKindLabel(version.save_kind)}</span>
+                    </span>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.86)", fontSize: 10.5, fontWeight: 700 }}>
+                      {version.saved_by_display_name || "Unknown user"} - {version.item_count} text box{version.item_count === 1 ? "" : "es"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+        <section style={{ minWidth: 0, display: "grid", gap: 10, alignContent: "start" }}>
+          <div style={{ border: `1px solid ${strokeColor}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, padding: 10, display: "grid", gap: 8, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minWidth: 0 }}>
+              <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>
+                {selectedVersion ? formatEditorSaveVersionTimestamp(selectedVersion.created_timestamp) : "No save selected"}
+              </strong>
+              <button
+                type="button"
+                disabled={!canEdit || !selectedVersion || restoring}
+                onClick={() => { if (selectedVersion) onRestore(selectedVersion.save_id); }}
+                style={{ minHeight: 30, border: `1px solid ${strokeColor}`, borderRadius: 8, background: EDITOR_NEU_ACTIVE_SURFACE, color: canEdit && selectedVersion ? accent : "rgba(100,116,139,0.62)", cursor: canEdit && selectedVersion && !restoring ? "pointer" : "default", padding: "0 10px", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap" }}
+              >
+                {restoring ? "Restoring" : "Overwrite with this save"}
+              </button>
+            </div>
+            <pre style={{ margin: 0, minHeight: 220, maxHeight: 420, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", border: `1px solid ${ruleColor}`, borderRadius: 8, background: "#ffffff", color: "#111827", padding: 10, font: "11px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace" }}>{preview || "Select a saved version to view it."}</pre>
+          </div>
+          {status && <div style={{ justifySelf: "start", border: `1px solid ${strokeColor}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: surfaceText, padding: "6px 8px", fontSize: 11, fontWeight: 800 }}>{status}</div>}
+        </section>
+      </div>
+    </div>
+  );
+};
+
 // Editor module: linked document canvas for node or logic-gate context.
 export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID, focusInformationMode = "focus", suppressLegacyWorkspaceStream = false, compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
@@ -447,6 +676,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [error, setError] = useState("");
   const [linkedEntityAccessDeniedMessage, setLinkedEntityAccessDeniedMessage] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
+  const [saveVersions, setSaveVersions] = useState<EditorSaveVersion[]>([]);
+  const [saveVersionsLoading, setSaveVersionsLoading] = useState(false);
+  const [selectedSaveVersionID, setSelectedSaveVersionID] = useState("");
+  const [saveVersionIntervalMinutes, setSaveVersionIntervalMinutes] = useState(EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES);
+  const [saveVersionsSortAscending, setSaveVersionsSortAscending] = useState(false);
+  const [saveVersionSaving, setSaveVersionSaving] = useState(false);
+  const [saveVersionRestoring, setSaveVersionRestoring] = useState(false);
+  const [saveVersionStatus, setSaveVersionStatus] = useState("");
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(outlineStyleStorageKey);
   const [documentFontSize, setDocumentFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [selectionFontSize, setSelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
@@ -481,6 +718,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const shouldFocusEditorForSelectionRef = useRef(true);
   const pendingEditorFontSizeRef = useRef<number | null>(null);
   const nodeFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
+  const nodeWorkspaceSaveControllerRef = useRef<NodeWorkspaceSaveController | null>(null);
+  const autoSaveVersionTimerRef = useRef<number | null>(null);
+  const saveVersionStatusTimerRef = useRef<number | null>(null);
+  const autoSaveVersionBusyRef = useRef(false);
+  const lastAutoSaveVersionSignatureRef = useRef("");
   const collaborationClientIDRef = useRef(createEditorCollaborationClientID());
   const collaborationSendTimerRef = useRef<number | null>(null);
   const collaborationStatusTimerRef = useRef<number | null>(null);
@@ -633,7 +875,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     else invalidateNodeRecordStoreCaches(apiBase, companyID, target.entityID);
   }, [apiBase, companyID]);
 
-  const { scheduleDocumentSave, flushPendingDocumentSave } = useEditorDocumentPersistence({
+  const { scheduleDocumentSave, flushPendingDocumentSave, saveDocumentNow } = useEditorDocumentPersistence({
     companyID,
     linkedEntityKind,
     linkedEntityID: linkedNodeID,
@@ -651,6 +893,68 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     requestJSON,
     invalidateDocumentTargetCaches,
   });
+
+  const showSaveVersionStatus = useCallback((message: string) => {
+    setSaveVersionStatus(message);
+    if (saveVersionStatusTimerRef.current !== null) window.clearTimeout(saveVersionStatusTimerRef.current);
+    saveVersionStatusTimerRef.current = window.setTimeout(() => {
+      saveVersionStatusTimerRef.current = null;
+      setSaveVersionStatus("");
+    }, 3_000);
+  }, []);
+
+  const loadEditorSaveVersions = useCallback(async () => {
+    const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
+    const resourceID = linkedNodeID.trim();
+    if (!companyID || !resourceType || !resourceID) {
+      setSaveVersions([]);
+      setSelectedSaveVersionID("");
+      return;
+    }
+    setSaveVersionsLoading(true);
+    try {
+      const payload = await requestJSON<EditorSaveVersionsPayload>(`${editorSaveVersionsPath(resourceType, resourceID)}?company_id=${encodeURIComponent(companyID)}`);
+      const versions = payload.versions ?? [];
+      setSaveVersions(versions);
+      setSelectedSaveVersionID((current) => {
+        if (current && versions.some((version) => version.save_id === current)) return current;
+        return versions[0]?.save_id ?? "";
+      });
+    } catch (cause) {
+      setSaveVersions([]);
+      setSelectedSaveVersionID("");
+      setError(cause instanceof Error ? cause.message : "failed_to_load_save_versions");
+    } finally {
+      setSaveVersionsLoading(false);
+    }
+  }, [companyID, linkedEntityKind, linkedNodeID, requestJSON]);
+
+  useEffect(() => {
+    const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
+    const resourceID = linkedNodeID.trim();
+    if (!companyID || !resourceType || !resourceID || linkedEntityAccessDenied) {
+      setSaveVersions([]);
+      setSelectedSaveVersionID("");
+      setSaveVersionStatus("");
+      setSaveVersionIntervalMinutes(EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES);
+      return;
+    }
+    setSaveVersionIntervalMinutes(readEditorSaveIntervalMinutes(companyID, resourceType, resourceID));
+    lastAutoSaveVersionSignatureRef.current = "";
+    void loadEditorSaveVersions();
+  }, [companyID, linkedEntityAccessDenied, linkedEntityKind, linkedNodeID, loadEditorSaveVersions]);
+
+  const updateSaveVersionInterval = useCallback((minutes: number) => {
+    const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
+    const resourceID = linkedNodeID.trim();
+    const nextMinutes = EDITOR_SAVE_VERSION_INTERVAL_OPTIONS.includes(minutes as typeof EDITOR_SAVE_VERSION_INTERVAL_OPTIONS[number])
+      ? minutes
+      : EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES;
+    setSaveVersionIntervalMinutes(nextMinutes);
+    if (companyID && resourceType && resourceID) {
+      writeEditorSaveIntervalMinutes(companyID, resourceType, resourceID, nextMinutes);
+    }
+  }, [companyID, linkedEntityKind, linkedNodeID]);
 
   const publishCollaborationEvent = useCallback((eventType: EditorCollaborationEventPayload["eventType"], documentHTML?: string) => {
     if (!companyID || !linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) return;
@@ -1234,7 +1538,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const node = response.nodes?.[0];
     if (!node) throw new Error("image_node_batch_create_missing_node");
     const informationID = generateStableInformationID();
-    await requestJSON<unknown>(`/v1/nodes/${node.node_id}/information`, {
+    await requestJSON<unknown>(`/v1/nodes/${node.node_id}/projection`, {
       method: "POST",
       body: JSON.stringify({
         company_id: companyID,
@@ -1807,6 +2111,104 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
   }, [apiBase, applyLoadedDocument, companyID, focusInformationID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence]);
 
+  const currentEditorVersionSignature = useCallback(() => {
+    if (linkedEntityKind === "node") {
+      return JSON.stringify(nodeWorkspaceProjectionsRef.current
+        .filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE)
+        .map((item) => [item.information_id, item.information]));
+    }
+    if (linkedEntityKind === "logic_gate") {
+      const element = editorDocumentRef.current;
+      return element ? serializeEditorDocumentHTML(element) : documentDraftRef.current;
+    }
+    return "";
+  }, [linkedEntityKind]);
+
+  const flushCurrentEditorProjection = useCallback(async () => {
+    if (linkedEntityKind === "node") {
+      await nodeWorkspaceSaveControllerRef.current?.flushPendingProjectionSaves();
+      return;
+    }
+    if (linkedEntityKind === "logic_gate") {
+      await saveDocumentNow(editorDocumentRef.current ? serializeEditorDocumentHTML(editorDocumentRef.current) : documentDraftRef.current);
+    }
+  }, [linkedEntityKind, saveDocumentNow]);
+
+  const saveCurrentEditorVersion = useCallback(async (saveKind: "manual" | "auto" = "manual") => {
+    const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
+    const resourceID = linkedNodeID.trim();
+    if (!companyID || !resourceType || !resourceID || !linkedEntityCanEdit) return;
+    setSaveVersionSaving(true);
+    try {
+      setError("");
+      await flushCurrentEditorProjection();
+      const version = await requestJSON<EditorSaveVersion>(editorSaveVersionsPath(resourceType, resourceID), {
+        method: "POST",
+        body: JSON.stringify({ company_id: companyID, save_kind: saveKind }),
+      });
+      setSaveVersions((current) => [version, ...current.filter((item) => item.save_id !== version.save_id)]);
+      setSelectedSaveVersionID(version.save_id);
+      lastAutoSaveVersionSignatureRef.current = editorSaveVersionSignature(version) || currentEditorVersionSignature();
+      showSaveVersionStatus(`${editorSaveVersionKindLabel(saveKind)} saved at ${formatEditorSaveVersionTimestamp(version.created_timestamp)}`);
+      void loadEditorSaveVersions();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "failed_to_save_version";
+      if (saveKind === "manual") setError(message);
+    } finally {
+      setSaveVersionSaving(false);
+    }
+  }, [companyID, currentEditorVersionSignature, flushCurrentEditorProjection, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, loadEditorSaveVersions, requestJSON, showSaveVersionStatus]);
+
+  const restoreEditorSaveVersion = useCallback(async (saveID: string) => {
+    const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
+    const resourceID = linkedNodeID.trim();
+    const cleanSaveID = saveID.trim();
+    if (!companyID || !resourceType || !resourceID || !cleanSaveID || !linkedEntityCanEdit) return;
+    if (!window.confirm("Are you sure you want to overwrite the current editor with this saved version?")) return;
+    setSaveVersionRestoring(true);
+    try {
+      setError("");
+      await requestJSON<EditorSaveVersion>(`${editorSaveVersionsPath(resourceType, resourceID)}/${cleanSaveID}/restore`, {
+        method: "POST",
+        body: JSON.stringify({ company_id: companyID }),
+      });
+      lastAutoSaveVersionSignatureRef.current = "";
+      showSaveVersionStatus("Current editor overwritten with saved version");
+      await refreshEditorSnapshot();
+      void loadEditorSaveVersions();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "failed_to_restore_save_version");
+    } finally {
+      setSaveVersionRestoring(false);
+    }
+  }, [companyID, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, loadEditorSaveVersions, refreshEditorSnapshot, requestJSON, showSaveVersionStatus]);
+
+  useEffect(() => {
+    if (autoSaveVersionTimerRef.current !== null) {
+      window.clearInterval(autoSaveVersionTimerRef.current);
+      autoSaveVersionTimerRef.current = null;
+    }
+    const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
+    const resourceID = linkedNodeID.trim();
+    if (!companyID || !resourceType || !resourceID || !linkedEntityCanEdit || linkedEntityAccessDenied) return;
+    const intervalMs = Math.max(1, saveVersionIntervalMinutes) * 60_000;
+    autoSaveVersionTimerRef.current = window.setInterval(() => {
+      if (autoSaveVersionBusyRef.current) return;
+      const signature = currentEditorVersionSignature();
+      if (!signature || signature === lastAutoSaveVersionSignatureRef.current) return;
+      autoSaveVersionBusyRef.current = true;
+      void saveCurrentEditorVersion("auto").finally(() => {
+        autoSaveVersionBusyRef.current = false;
+      });
+    }, intervalMs);
+    return () => {
+      if (autoSaveVersionTimerRef.current !== null) {
+        window.clearInterval(autoSaveVersionTimerRef.current);
+        autoSaveVersionTimerRef.current = null;
+      }
+    };
+  }, [companyID, currentEditorVersionSignature, linkedEntityAccessDenied, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, saveCurrentEditorVersion, saveVersionIntervalMinutes]);
+
   const applyRealtimeEditorProjectionDelta = useCallback((message: RealtimeProjectionDeltaMessage) => {
     const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
     const resourceID = linkedNodeID.trim();
@@ -1938,6 +2340,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (collaborationStatusTimerRef.current !== null) window.clearTimeout(collaborationStatusTimerRef.current);
     if (nodePriorityRequirementTimerRef.current !== null) window.clearTimeout(nodePriorityRequirementTimerRef.current);
     if (remoteCollaborationTimerRef.current !== null) window.clearTimeout(remoteCollaborationTimerRef.current);
+    if (saveVersionStatusTimerRef.current !== null) window.clearTimeout(saveVersionStatusTimerRef.current);
+    if (autoSaveVersionTimerRef.current !== null) window.clearInterval(autoSaveVersionTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -2314,7 +2718,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const documentIsolation = getEditorDocumentIsolationState(activeTab);
   const emptyMessage = forcedEntityKind && !hasLinkedDocument ? forcedEmptyMessage : "";
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
-  const fullFrameTabActive = activeTab === "relationships" || activeTab === "permissions";
+  const fullFrameTabActive = activeTab === "relationships" || activeTab === "permissions" || activeTab === "save-settings";
   const fallbackDocumentTopPx = fullFrameTabActive ? 46 : linkedEntityKind === "node" ? 128 : linkedEntityKind === "logic_gate" ? 188 : EDITOR_DOCUMENT_TOP_PX;
   const documentTopPx = hasLinkedDocument && editorHeaderHeightPx > 0 ? editorHeaderHeightPx + 6 : fallbackDocumentTopPx;
   const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
@@ -2440,6 +2844,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             }}
             onCreateRelatedNode={linkedEntityKind === "node" && linkedEntityCanEdit ? createRelatedNode : undefined}
             onInsertTable={linkedEntityKind !== "node" && linkedEntityCanEdit ? () => insertDocumentTable(editorDocumentRef.current) : undefined}
+            onSaveCurrentVersion={linkedEntityCanEdit ? () => { void saveCurrentEditorVersion("manual"); } : undefined}
+            saveCurrentVersionDisabled={!linkedEntityCanEdit || saveVersionRestoring}
+            saveCurrentVersionBusy={saveVersionSaving}
             onRelationshipTabAnchorChange={updateRelationshipTabAnchor}
             reserveHeaderOffset={!forcedEntityKind}
           />
@@ -2563,6 +2970,33 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             />
           </div>
         )}
+        {hasLinkedDocument && (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && activeTab === "save-settings" && (
+          <EditorSaveSettingsSurface
+            topPx={documentTopPx}
+            resourceTitle={linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "Logic Gate" : "Node")}
+            intervalMinutes={saveVersionIntervalMinutes}
+            versions={saveVersions}
+            selectedSaveID={selectedSaveVersionID}
+            loading={saveVersionsLoading}
+            saving={saveVersionSaving}
+            restoring={saveVersionRestoring}
+            sortAscending={saveVersionsSortAscending}
+            status={saveVersionStatus}
+            canEdit={linkedEntityCanEdit}
+            accent={accent}
+            surfaceText={surfaceText}
+            panelBackground={panelBackground}
+            strokeColor={strokeColor}
+            ruleColor={ruleColor}
+            scrollbarAccent={scrollbarAccent}
+            scrollbarTrack={scrollbarTrack}
+            onIntervalChange={updateSaveVersionInterval}
+            onSaveNow={() => { void saveCurrentEditorVersion("manual"); }}
+            onSelectSave={setSelectedSaveVersionID}
+            onToggleSort={() => setSaveVersionsSortAscending((current) => !current)}
+            onRestore={(saveID) => { void restoreEditorSaveVersion(saveID); }}
+          />
+        )}
         {hasLinkedDocument && linkedEntityKind === "node" && activeTab !== "relationships" && activeTab !== "permissions" && (
           <NodeWorkspaceSurface
             apiBase={apiBase}
@@ -2576,6 +3010,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             unseenChanges={nodeContentChangesLoadedNodeID === linkedNodeID ? nodeContentChanges : []}
             companyUsers={companyUsers}
             projectionsLoaded={nodeWorkspaceLoadedNodeID === linkedNodeID}
+            hidden={activeTab === "save-settings"}
             focusInformationID={focusInformationID}
             focusRequestID={focusRequestID}
             focusInformationMode={focusInformationMode}
@@ -2598,6 +3033,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onRequireNodePriorityForLogicGateAssignment={showNodePriorityRequirementError}
             onSelectionFontSizeChange={updateSelectionFontSize}
             onSelectionInlineFormatChange={updateSelectionInlineFormat}
+            onRegisterSaveController={(controller) => {
+              nodeWorkspaceSaveControllerRef.current = controller;
+            }}
             onError={setError}
           />
         )}

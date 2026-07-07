@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -74,7 +75,7 @@ func (s *Server) handleEditorCollaborationEvents(w http.ResponseWriter, r *http.
 		}
 	}
 
-	s.publishWorkspaceEvent(req.CompanyID, "editor_collaboration_event", map[string]any{
+	s.publishTransientEditorCollaborationEvent(req.CompanyID, req.Revision, map[string]any{
 		"event_type":     req.EventType,
 		"entity_kind":    req.EntityKind,
 		"entity_id":      req.EntityID,
@@ -88,4 +89,44 @@ func (s *Server) handleEditorCollaborationEvents(w http.ResponseWriter, r *http.
 		"status":   "published",
 		"revision": req.Revision,
 	})
+}
+
+func (s *Server) publishTransientEditorCollaborationEvent(companyID string, revision int64, data map[string]any) {
+	if s == nil || s.realtimeRegistry == nil {
+		return
+	}
+	companyID = strings.TrimSpace(companyID)
+	entityKind := workspaceEnvelopeDataString(data, "entity_kind")
+	entityID := workspaceEnvelopeDataString(data, "entity_id")
+	scope := realtimeEditorScope(entityKind, entityID)
+	if companyID == "" || scope == "" {
+		return
+	}
+	if !s.realtimeRegistry.hasSubscribers(companyID, scope) {
+		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
+		return
+	}
+	envelope := workspaceEventEnvelope{
+		CompanyID: companyID,
+		Type:      "editor_collaboration_event",
+		TS:        time.Now().UTC(),
+		Data:      data,
+	}
+	payload, err := json.Marshal(realtimeWorkspaceEventMessage{
+		Type:      realtimeMessageWorkspaceEvent,
+		CompanyID: companyID,
+		Scope:     scope,
+		Sequence:  revision,
+		Event:     envelope,
+	})
+	if err != nil {
+		log.Printf("failed to marshal transient editor collaboration event company_id=%s scope=%s revision=%d: %v", companyID, scope, revision, err)
+		return
+	}
+	published := s.realtimeRegistry.publish(companyID, scope, payload)
+	if published == 0 {
+		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
+		return
+	}
+	s.recordOperationalMetric("realtime.workspace_events_published", realtimeScopeType(scope), int64(published), 0)
 }

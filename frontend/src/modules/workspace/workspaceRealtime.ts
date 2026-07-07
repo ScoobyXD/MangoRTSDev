@@ -407,9 +407,12 @@ function messageToWorkspaceEvent(message: RealtimeWorkspaceEventMessage): Worksp
 function updateWorkspaceCursor(apiBase: string, companyID: string, key: string, event: WorkspaceRealtimeEvent): { deliver: boolean; context: WorkspaceStreamEventContext } {
   const sequence = workspaceEventSequence(event);
   if (sequence === undefined) return { deliver: true, context: { scopes: [] } };
+  const envelope = parseWorkspaceEnvelope(event);
+  if (cleanString(envelope?.type) === "editor_collaboration_event") {
+    return { deliver: true, context: { sequence, previousSequence: workspaceCursors.get(key), envelope, scopes: [] } };
+  }
   const cursor = workspaceCursors.get(key);
   if (cursor !== undefined && sequence <= cursor) return { deliver: false, context: { sequence, previousSequence: cursor, scopes: [] } };
-  const envelope = parseWorkspaceEnvelope(event);
   const scopes = envelope ? deriveWorkspaceReconciliationScopes(envelope) : fallbackWorkspaceScope();
   const gap = cursor !== undefined && sequence > cursor + 1
     ? {

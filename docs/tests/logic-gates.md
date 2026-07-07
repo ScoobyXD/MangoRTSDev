@@ -1,4 +1,4 @@
-Last updated: 2026-07-02
+Last updated: 2026-07-07
 
 # Logic Gates Tests
 
@@ -26,6 +26,11 @@ LG13 - New Logic Gate editor documents default to alphanumerical numbering, and 
 LG14 - The Logic Gate editor font-size control applies to highlighted text and, for a collapsed caret, becomes the sticky font size for subsequently typed characters until changed again.
 LG15 - Logic Gate editor bold and underline controls must toggle the selected text or sticky caret formatting and must visually reflect the formatting at the current caret or selection.
 LG16 - Inserting a table in a Logic Gate editor must insert the table at the current caret/selection location, not at the top-left or beginning of the editor.
+LG17 - Live Logic Gate editor typing writes the current text state to the Logic Gate editor projection table and must not append a full rich-text document row to `logic_gate_information` on every keystroke autosave.
+LG18 - Logic Gate Save Settings exposes a mandatory auto-save interval setting and lists saved editor versions sorted by saved timestamp, including manual/auto save kind, saving user, save time, and saved text box count.
+LG19 - Clicking Save in the Logic Gate editor flushes pending projection saves first, then creates a manual saved editor version in `logic_gate_information`.
+LG20 - Logic Gate auto-save versions use the selected interval and create auto saved editor versions in `logic_gate_information` only when the current editor projection changed since the last saved version.
+LG21 - Restoring a Logic Gate saved version requires confirmation and overwrites the current Logic Gate editor projection row from that saved version without creating another saved-version row.
 
 ## Scenarios
 
@@ -106,3 +111,24 @@ Expected:
 - Bold and underline buttons reflect the caret or selected text state and can be active at the same time.
 - Toggling bold or underline affects the selection or the next typed characters when the selection is collapsed.
 - Table insertion uses the current caret/selection position.
+
+### Scenario LG-S5: Logic Gate Editor Projection Saves And Saved Versions
+
+Business logic covered:
+- LG17
+- LG18
+- LG19
+- LG20
+- LG21
+
+Given:
+- A user has edit access to a Logic Gate.
+- The user types in the Logic Gate editor.
+- The user opens Save Settings, changes the auto-save interval, manually saves, or waits for an auto-save interval.
+
+Expected:
+- Regular typing updates `logic_gate_projection_table` for the current editor state instead of appending repeated full-document rows to `logic_gate_information`.
+- Save Settings shows manual and auto saved versions with save kind, saving user, timestamp, and text box count.
+- Manual Save first flushes pending projection updates, then writes one saved-version batch to `logic_gate_information`.
+- Auto save writes a saved-version batch only when the current projection differs from the last saved version.
+- Restoring a saved version asks for confirmation and replaces the current Logic Gate editor projection with the selected saved content.

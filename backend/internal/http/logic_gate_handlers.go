@@ -232,6 +232,58 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 	}
 
 	if len(parts) == 2 && parts[1] == "projection" {
+		if r.Method == http.MethodPost {
+			var req struct {
+				CompanyID     string `json:"company_id"`
+				Type          string `json:"type"`
+				Information   string `json:"information"`
+				InformationID string `json:"information_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Type) == "" || strings.TrimSpace(req.InformationID) == "" {
+				writeError(w, http.StatusBadRequest, "company_id_type_and_information_id_required")
+				return
+			}
+			if isNodeEditorOnlyInformationType(req.Type) {
+				writeError(w, http.StatusBadRequest, "logic_gate_information_type_not_supported")
+				return
+			}
+			if strings.TrimSpace(req.Information) == "" {
+				writeError(w, http.StatusBadRequest, "information_required")
+				return
+			}
+			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+				return
+			}
+			actorUserID, actorLabel := nodeChangeActorPayload(r)
+			item, err := s.repo.UpsertLogicGateProjection(store.LogicGateProjectionInput{
+				CompanyID:        req.CompanyID,
+				LogicGateID:      logicGateID,
+				Type:             req.Type,
+				Information:      req.Information,
+				InformationID:    req.InformationID,
+				ActorUserID:      actorUserID,
+				ActorDisplayName: actorLabel,
+			})
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "logic_gate_not_found")
+				return
+			}
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "invalid_projection")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_save_logic_gate_projection")
+				return
+			}
+			s.recordMentionNotifications(r, req.CompanyID, "logic_gate", logicGateID, req.InformationID, req.Type, req.Information)
+			writeJSON(w, http.StatusOK, item)
+			return
+		}
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
@@ -258,6 +310,121 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			"logic_gate_id": logicGateID,
 			"items":         items,
 		})
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "save-versions" {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if r.Method == http.MethodPost {
+			var req struct {
+				CompanyID string `json:"company_id"`
+				SaveKind  string `json:"save_kind"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			if strings.TrimSpace(req.CompanyID) == "" {
+				writeError(w, http.StatusBadRequest, "company_id_required")
+				return
+			}
+			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+				return
+			}
+			actorUserID, actorLabel := nodeChangeActorPayload(r)
+			version, err := s.repo.CreateLogicGateEditorSaveVersion(store.EditorSaveVersionInput{
+				CompanyID:        req.CompanyID,
+				ResourceID:       logicGateID,
+				SaveKind:         req.SaveKind,
+				ActorUserID:      actorUserID,
+				ActorDisplayName: actorLabel,
+			})
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "no_editor_projection_to_save")
+				return
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "logic_gate_not_found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_save_logic_gate_version")
+				return
+			}
+			s.publishWorkspaceEvent(req.CompanyID, "logic_gate_editor_save_version_created", map[string]any{"logic_gate_id": logicGateID, "save_id": version.SaveID, "save_kind": version.SaveKind})
+			writeJSON(w, http.StatusCreated, version)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+			return
+		}
+		versions, err := s.repo.ListLogicGateEditorSaveVersions(companyID, logicGateID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "logic_gate_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_save_versions")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+			"company_id":    companyID,
+			"logic_gate_id": logicGateID,
+			"versions":      versions,
+		})
+		return
+	}
+
+	if len(parts) == 4 && parts[1] == "save-versions" && parts[3] == "restore" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		saveID := strings.TrimSpace(parts[2])
+		var req struct {
+			CompanyID string `json:"company_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		if strings.TrimSpace(req.CompanyID) == "" || saveID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_save_id_required")
+			return
+		}
+		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+			return
+		}
+		actorUserID, actorLabel := nodeChangeActorPayload(r)
+		version, err := s.repo.RestoreLogicGateEditorSaveVersion(store.EditorSaveVersionRestoreInput{
+			CompanyID:        req.CompanyID,
+			ResourceID:       logicGateID,
+			SaveID:           saveID,
+			ActorUserID:      actorUserID,
+			ActorDisplayName: actorLabel,
+		})
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "save_version_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_save_version")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_restore_logic_gate_save_version")
+			return
+		}
+		s.publishWorkspaceEvent(req.CompanyID, "logic_gate_editor_save_version_restored", map[string]any{"logic_gate_id": logicGateID, "save_id": version.SaveID})
+		writeJSON(w, http.StatusOK, version)
 		return
 	}
 
