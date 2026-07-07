@@ -130,6 +130,7 @@ data "aws_iam_policy_document" "github_deploy" {
       "ec2:Describe*",
       "ec2:GetManagedPrefixListEntries",
       "ec2:RevokeSecurityGroupIngress",
+      "ec2:UpdateSecurityGroupRuleDescriptionsIngress",
       "ecr:*",
       "ecs:*",
       "elasticloadbalancing:*",
