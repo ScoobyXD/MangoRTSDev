@@ -3016,3 +3016,62 @@ Next action:
 1. Refresh the prod DB schema copy manifest so it sees `20260707_repair_missing_canonical_schema_objects.sql` as the latest migration.
 2. Build a schema-audit query/script that Jonat can run from human-only DBeaver or against schema-only dumps.
 3. Smoke test prod app health and the project/communications paths touched by the repaired tables.
+
+## Step 18 - Schema parity repair committed; GitHub/Nylas execution plan started
+
+Status: repo prep in progress; cloud/provider mutations blocked from this agent session.
+
+Updated on: 2026-07-07.
+
+Current state reported by Jonat:
+
+- Jonat ran the full `backend/db/migrations/20260707_zz_align_prod_to_dev_schema.sql` contents in human-only prod DBeaver.
+- Jonat inserted `20260707_zz_align_prod_to_dev_schema.sql` into prod `schema_migrations`.
+- Jonat committed and pushed the schema parity repo changes to GitHub.
+- Working tree was clean at the start of this step.
+
+Safety boundary check:
+
+```text
+BOUNDARY_FAIL Human/admin AWS profile 'mangorts-prod' is active in this session
+BOUNDARY_FAIL Human/admin AWS profile 'mangorts-dev' is active in this session
+BOUNDARY_RESULT FAIL current session has direct admin/write-enabling access paths
+```
+
+Result:
+
+- The agent did not run AWS, Terraform, ECS, DB, Secrets Manager, or Nylas-provider mutation commands.
+- The agent did not read `infra/aws-prod/terraform.tfvars` or `infra/aws-dev/terraform.tfvars`.
+- `gh auth status` reported that GitHub CLI is not logged in, so the agent also did not mutate GitHub environment variables or secrets.
+
+Repo/helper work:
+
+- Added `scripts/configure_prod_github_environment.ps1`.
+- The helper configures GitHub Environment `production` variables/secrets expected by `.github/workflows/deploy-prod.yml`.
+- The helper does not read local tfvars files.
+- The helper sets `PROD_ORIGIN_VERIFY_SECRET` through `gh secret set --body-file -`, so the secret value does not need to appear in shell history.
+- The helper supports Nylas variables once the prod Nylas client ID and Secrets Manager ARNs exist.
+
+Plan for requested steps 2, 3, and 4:
+
+1. Configure GitHub production environment so deploys are repeatable:
+   - Human logs into GitHub CLI with `gh auth login`.
+   - Human runs `scripts/configure_prod_github_environment.ps1` with reviewed prod non-secret values and `-PromptForSecrets`.
+   - Required GitHub secret values are `AWS_PROD_DEPLOY_ROLE_ARN` and `PROD_ORIGIN_VERIFY_SECRET`.
+2. Configure prod Nylas:
+   - Human creates or confirms a production Nylas app.
+   - Human stores the prod Nylas API key directly in AWS Secrets Manager.
+   - Human records only the prod Nylas client/application ID and Secrets Manager ARNs in GitHub Environment variables.
+   - Run the production deploy workflow once with core Nylas values set.
+3. Configure prod Nylas webhook:
+   - Create the Nylas webhook destination pointed at `https://mangorts.com/nylas/webhook`.
+   - Store the returned webhook secret directly in AWS Secrets Manager.
+   - Add `TF_NYLAS_WEBHOOK_SECRET_ARN` and rerun the production deploy workflow.
+4. Reconnect mailboxes in prod:
+   - Users connect personal mailboxes through prod Hosted OAuth.
+   - Authorized user connects shared inboxes through the prod app.
+   - Do not copy dev Nylas grant IDs, provider tokens, webhook state, archive cursors, or dev email connection rows into prod.
+
+Next action:
+
+- Jonat either logs `gh auth login` and runs the helper manually, or creates a physically read-only/no-admin agent session before asking an agent to continue with any AWS-adjacent work.

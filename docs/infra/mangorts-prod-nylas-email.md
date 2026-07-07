@@ -234,3 +234,25 @@ Stop production email launch when:
 - DKIM/SPF/DMARC records are missing or unreviewed.
 - Google OAuth remains in a test-only state for users who need production access.
 - A migrated `user_email_connections` or `company_email_connections` row contains a dev grant ID.
+
+## Current Prod Status
+
+Updated on: 2026-07-07.
+
+- Production app and backend routes exist at `https://mangorts.com`.
+- The Nylas webhook challenge route already reaches the backend and echoes the raw challenge body.
+- The OAuth callback route reaches the backend but redirects with `nylas_not_configured` until provider values are deployed.
+- The prod Nylas state-signing secret exists in AWS Secrets Manager.
+- Prod Nylas is not enabled in ECS yet because the real prod Nylas client/application ID, API key secret ARN, and webhook secret ARN still need to be provided.
+- Do not copy dev Nylas grants, webhook secrets, provider tokens, archive cursors, or email connection rows into prod.
+
+Recommended execution order from here:
+
+1. Create or confirm a separate production Nylas application.
+2. Store the prod Nylas API key directly in AWS Secrets Manager.
+3. Configure GitHub Environment `production` with the Nylas client ID, API key secret ARN, and state secret ARN.
+4. Run the prod deploy workflow once so ECS receives core Nylas OAuth settings.
+5. Create the production Nylas webhook destination pointed at `https://mangorts.com/nylas/webhook`.
+6. Store the returned webhook secret directly in AWS Secrets Manager.
+7. Add the webhook secret ARN to GitHub Environment `production` and rerun the prod deploy workflow.
+8. Reconnect personal and shared mailboxes through the production app.

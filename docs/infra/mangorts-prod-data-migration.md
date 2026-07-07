@@ -212,3 +212,24 @@ Stop the migration when:
 - Row counts differ from the approved inventory without explanation.
 - A derived/projection table is copied without a rebuild/copy decision.
 - The migration cannot be rerun cleanly in scratch.
+
+## Current Nylas Reconnection Status
+
+Updated on: 2026-07-07.
+
+The production schema is now assumed close enough to dev after Jonat's full human-run schema parity script and `schema_migrations` marker insert. Data migration remains a separate selective import; do not treat the schema parity work as approval to copy dev rows wholesale.
+
+For Communications launch, reconnect mailboxes before importing any shared inbox or Communications-related business rows:
+
+1. Enable prod Nylas through the production deploy path.
+2. Reconnect personal mailboxes through prod Hosted OAuth.
+3. Reconnect company/shared inboxes through the prod app.
+4. Verify prod `user_email_connections` and `company_email_connections` contain only prod grants.
+5. Only then decide whether any `shared_inboxes`, `shared_inbox_folders`, or business-level email artifacts should be mapped into prod.
+
+Still forbidden:
+
+- Dev Nylas `grant_id` values.
+- Dev provider tokens or webhook secrets.
+- Dev archive jobs, provider sync cursors, webhook delivery state, and environment-bound email connection rows.
+- Pending dev invitations or reset tokens.

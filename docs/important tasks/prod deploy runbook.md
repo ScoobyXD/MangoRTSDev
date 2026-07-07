@@ -524,3 +524,54 @@ Agent database-access boundary:
 - Default prod agent role should be `mangorts-prod-agent-readonly`; it must have no Secrets Manager access and must deny ECS run/register/update, IAM PassRole, RDS mutation, RDS Data API SQL execution, Route53/CloudFormation/Cognito/CloudFront mutation paths, and related write actions.
 - Current Hermes session verifier passes because no `mangorts-prod`/`mangorts-dev` admin SSO token or static AWS credentials are active.
 - Full physical enforcement is not complete until Jonat creates/assigns the IAM Identity Center permission set, configures the read-only AWS CLI profile, and keeps human-only tfvars/DBeaver writer credentials outside Hermes-accessible paths.
+
+## GitHub production environment setup
+
+Status: helper prepared; values still need to be applied by a human GitHub CLI session.
+
+Use `scripts/configure_prod_github_environment.ps1` to configure the GitHub Environment named `production` for `.github/workflows/deploy-prod.yml`.
+
+Safety rules:
+
+- Do not put `PROD_ORIGIN_VERIFY_SECRET` in command history.
+- Prefer `-PromptForSecrets` so the origin secret is pasted into a secure prompt and passed to `gh secret set --body-file -`.
+- Do not read or paste prod DB passwords, AWS session tokens, Nylas API keys, or Nylas webhook secrets into docs or chat.
+- This helper does not read `infra/aws-prod/terraform.tfvars`; pass reviewed values explicitly.
+
+Example shape:
+
+```powershell
+cd C:\Users\Jonat\MangoRTSDev
+
+gh auth login
+
+.\scripts\configure_prod_github_environment.ps1 `
+  -Repository "ScoobyXD/MangoRTSDev" `
+  -Environment "production" `
+  -PromptForSecrets `
+  -TFStateBucket "mangorts-prod-terraform-state-828435022930" `
+  -TFVpcId "<prod-vpc-id>" `
+  -TFPublicSubnetIds '["<public-subnet-1>","<public-subnet-2>"]' `
+  -TFPrivateSubnetIds '["<private-subnet-1>","<private-subnet-2>"]' `
+  -TFExistingDbHost "mangorts-prod-db.cluster-cpcceyaigiit.us-west-1.rds.amazonaws.com" `
+  -TFExistingDbUser "<prod-db-app-user>" `
+  -TFExistingDbPasswordSecretArn "<prod-db-password-secret-arn>" `
+  -TFExistingDbSecurityGroupId "sg-0ba84e2c327457f1e" `
+  -TFDefaultCompanyId "face60cd-27e2-4e5a-92b0-b2cdb78545c8" `
+  -AWSProdDeployRoleArn "arn:aws:iam::828435022930:role/mangorts-prod-github-deploy"
+```
+
+Add these Nylas flags only after the real prod provider values exist:
+
+```powershell
+  -TFNylasClientId "<prod-nylas-client-id>" `
+  -TFNylasApiKeySecretArn "<prod-nylas-api-key-secret-arn>" `
+  -TFNylasStateSecretArn "<prod-nylas-state-secret-arn>" `
+  -TFNylasWebhookSecretArn "<prod-nylas-webhook-secret-arn>"
+```
+
+Current blocker from the 2026-07-07 Codex session:
+
+- `scripts/verify_agent_db_access_boundary.py` failed because active human/admin AWS profiles were available in the agent shell.
+- `gh auth status` reported no GitHub login.
+- Therefore the agent prepared docs/tooling only and did not mutate GitHub, AWS, DB, ECS, Secrets Manager, or Nylas.
