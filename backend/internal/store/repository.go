@@ -146,8 +146,12 @@ type WorkGraphRepository interface {
 	AddNodeInformation(companyID, nodeID, infoType, information, informationID string) (domain.NodeInformation, error)
 	AddNodeInformationWithActor(input NodeInformationInput) (domain.NodeInformation, error)
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
+	UpsertNodeProjectionWithActor(input NodeInformationInput) (domain.NodeProjection, error)
 	DeleteNodeProjection(companyID, nodeID, informationID string) error
 	DeleteNodeProjectionWithActor(input NodeProjectionDeleteInput) error
+	CreateNodeEditorSaveVersion(input EditorSaveVersionInput) (domain.EditorSaveVersion, error)
+	ListNodeEditorSaveVersions(companyID, nodeID string) ([]domain.EditorSaveVersion, error)
+	RestoreNodeEditorSaveVersion(input EditorSaveVersionRestoreInput) (domain.EditorSaveVersion, error)
 	ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error)
 	MarkNodeContentChangeSeen(input NodeContentChangeSeenInput) (int, error)
 	CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error)
@@ -175,7 +179,11 @@ type LogicGateRepository interface {
 	GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error)
 	AddLogicGateInformation(companyID, logicGateID, infoType, information, informationID string) (domain.LogicGateInformation, error)
 	ListLogicGateProjections(companyID, logicGateID string) ([]domain.LogicGateProjection, error)
+	UpsertLogicGateProjection(input LogicGateProjectionInput) (domain.LogicGateProjection, error)
 	DeleteLogicGateProjection(companyID, logicGateID, informationID string) error
+	CreateLogicGateEditorSaveVersion(input EditorSaveVersionInput) (domain.EditorSaveVersion, error)
+	ListLogicGateEditorSaveVersions(companyID, logicGateID string) ([]domain.EditorSaveVersion, error)
+	RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRestoreInput) (domain.EditorSaveVersion, error)
 	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
 }
 
@@ -1835,11 +1843,40 @@ type UpdateNodeInput struct {
 }
 
 type NodeInformationInput struct {
+	CompanyID           string
+	NodeID              string
+	Type                string
+	Information         string
+	InformationID       string
+	ActorUserID         string
+	ActorDisplayName    string
+	SaveBatchID         string
+	SaveKind            string
+	SourceInformationID string
+}
+
+type LogicGateProjectionInput struct {
 	CompanyID        string
-	NodeID           string
+	LogicGateID      string
 	Type             string
 	Information      string
 	InformationID    string
+	ActorUserID      string
+	ActorDisplayName string
+}
+
+type EditorSaveVersionInput struct {
+	CompanyID        string
+	ResourceID       string
+	SaveKind         string
+	ActorUserID      string
+	ActorDisplayName string
+}
+
+type EditorSaveVersionRestoreInput struct {
+	CompanyID        string
+	ResourceID       string
+	SaveID           string
 	ActorUserID      string
 	ActorDisplayName string
 }

@@ -438,10 +438,17 @@ create table if not exists node_information (
   node_id uuid not null,
   type information_type not null,
   information text not null,
+  save_batch_id uuid,
+  save_kind text not null default 'legacy',
+  saved_by_user_id uuid,
+  saved_by_display_name text not null default '',
+  source_information_id uuid,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
+  constraint node_information_save_kind_chk check (save_kind in ('legacy', 'manual', 'auto')),
   constraint node_information_nonblank_chk check (btrim(information) <> ''),
   primary key (company_id, information_id),
+  foreign key (saved_by_user_id) references users (user_id) on delete set null,
   foreign key (company_id, node_id) references nodes (company_id, node_id)
 );
 
@@ -1048,10 +1055,17 @@ create table if not exists logic_gate_information (
   logic_gate_id uuid not null,
   type information_type not null,
   information text not null,
+  save_batch_id uuid,
+  save_kind text not null default 'legacy',
+  saved_by_user_id uuid,
+  saved_by_display_name text not null default '',
+  source_information_id uuid,
   created_timestamp timestamptz not null,
   updated_timestamp timestamptz not null,
+  constraint logic_gate_information_save_kind_chk check (save_kind in ('legacy', 'manual', 'auto')),
   constraint logic_gate_information_nonblank_chk check (btrim(information) <> ''),
   primary key (company_id, information_id),
+  foreign key (saved_by_user_id) references users (user_id) on delete set null,
   foreign key (company_id, logic_gate_id) references logic_gates (company_id, logic_gate_id)
 );
 
@@ -1430,6 +1444,9 @@ create index if not exists idx_gvic_matrix_projection_leaf_project
 create index if not exists idx_gvic_matrix_projection_leaf_logic_gate
   on gvic_matrix_projection_table(company_id, logic_gate_id);
 create index if not exists idx_node_information_node on node_information(company_id, node_id);
+create index if not exists idx_node_information_save_batch
+  on node_information(company_id, node_id, save_batch_id, created_timestamp desc)
+  where save_batch_id is not null;
 create index if not exists idx_node_projection_table_node_updated on node_projection_table(company_id, node_id, updated_timestamp desc);
 drop index if exists idx_node_projection_table_one_text_box;
 create index if not exists idx_node_projection_table_node_type_created
@@ -1444,6 +1461,9 @@ create index if not exists idx_node_map_positions_company_updated on node_map_po
 create index if not exists idx_node_relationships_a on node_relationships(company_id, node_id_a);
 create index if not exists idx_node_relationships_b on node_relationships(company_id, node_id_b);
 create index if not exists idx_logic_gate_information_logic_gate on logic_gate_information(company_id, logic_gate_id);
+create index if not exists idx_logic_gate_information_save_batch
+  on logic_gate_information(company_id, logic_gate_id, save_batch_id, created_timestamp desc)
+  where save_batch_id is not null;
 create index if not exists idx_logic_gate_projection_table_logic_gate_updated on logic_gate_projection_table(company_id, logic_gate_id, updated_timestamp desc);
 with ranked_logic_gate_text as (
   select ctid,

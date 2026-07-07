@@ -361,13 +361,18 @@ type NodeRelationship struct {
 }
 
 type NodeInformation struct {
-	CompanyID        string    `json:"company_id"`
-	InformationID    string    `json:"information_id"`
-	NodeID           string    `json:"node_id"`
-	Type             string    `json:"type"`
-	Information      string    `json:"information"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+	CompanyID           string    `json:"company_id"`
+	InformationID       string    `json:"information_id"`
+	NodeID              string    `json:"node_id"`
+	Type                string    `json:"type"`
+	Information         string    `json:"information"`
+	SaveBatchID         string    `json:"save_batch_id,omitempty"`
+	SaveKind            string    `json:"save_kind,omitempty"`
+	SavedByUserID       string    `json:"saved_by_user_id,omitempty"`
+	SavedByDisplayName  string    `json:"saved_by_display_name,omitempty"`
+	SourceInformationID string    `json:"source_information_id,omitempty"`
+	CreatedTimestamp    time.Time `json:"created_timestamp"`
+	UpdatedTimestamp    time.Time `json:"updated_timestamp"`
 }
 
 type NodeProjection struct {
@@ -503,13 +508,18 @@ type LogicGateRelationship struct {
 }
 
 type LogicGateInformation struct {
-	CompanyID        string    `json:"company_id"`
-	InformationID    string    `json:"information_id"`
-	LogicGateID      string    `json:"logic_gate_id"`
-	Type             string    `json:"type"`
-	Information      string    `json:"information"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+	CompanyID           string    `json:"company_id"`
+	InformationID       string    `json:"information_id"`
+	LogicGateID         string    `json:"logic_gate_id"`
+	Type                string    `json:"type"`
+	Information         string    `json:"information"`
+	SaveBatchID         string    `json:"save_batch_id,omitempty"`
+	SaveKind            string    `json:"save_kind,omitempty"`
+	SavedByUserID       string    `json:"saved_by_user_id,omitempty"`
+	SavedByDisplayName  string    `json:"saved_by_display_name,omitempty"`
+	SourceInformationID string    `json:"source_information_id,omitempty"`
+	CreatedTimestamp    time.Time `json:"created_timestamp"`
+	UpdatedTimestamp    time.Time `json:"updated_timestamp"`
 }
 
 type LogicGateProjection struct {
@@ -526,6 +536,29 @@ type LogicGateDetails struct {
 	LogicGate     LogicGate               `json:"logic_gate"`
 	Information   []LogicGateInformation  `json:"information"`
 	Relationships []LogicGateRelationship `json:"relationships"`
+}
+
+type EditorSaveVersionItem struct {
+	InformationID       string    `json:"information_id"`
+	SourceInformationID string    `json:"source_information_id"`
+	Type                string    `json:"type"`
+	Information         string    `json:"information"`
+	CreatedTimestamp    time.Time `json:"created_timestamp"`
+	UpdatedTimestamp    time.Time `json:"updated_timestamp"`
+}
+
+type EditorSaveVersion struct {
+	CompanyID          string                  `json:"company_id"`
+	ResourceType       string                  `json:"resource_type"`
+	ResourceID         string                  `json:"resource_id"`
+	SaveID             string                  `json:"save_id"`
+	SaveKind           string                  `json:"save_kind"`
+	SavedByUserID      string                  `json:"saved_by_user_id,omitempty"`
+	SavedByDisplayName string                  `json:"saved_by_display_name,omitempty"`
+	CreatedTimestamp   time.Time               `json:"created_timestamp"`
+	UpdatedTimestamp   time.Time               `json:"updated_timestamp"`
+	ItemCount          int                     `json:"item_count"`
+	Items              []EditorSaveVersionItem `json:"items,omitempty"`
 }
 
 type LogicGateView struct {

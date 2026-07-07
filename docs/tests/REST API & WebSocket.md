@@ -1,4 +1,4 @@
-Last updated: 2026-06-30
+Last updated: 2026-07-07
 
 # REST API & WebSocket Tests
 
@@ -10,8 +10,8 @@ Coverage Status:
 
 RW1 - Durable editor saves for nodes and logic gates use HTTP API write routes, not WebSocket messages.
 RW2 - WebSocket messages may notify clients that editor data changed, but WebSocket messages are not the source of truth for persisted editor content.
-RW3 - A successful editor save requires the HTTP write route to commit the durable backend state before the editor treats the save as confirmed.
-RW4 - Editor collaboration updates are opportunistic realtime updates and must not replace the durable HTTP autosave path.
+RW3 - A successful live editor autosave requires the HTTP projection write route to commit the current editor projection before the editor treats the live save as confirmed.
+RW4 - Editor collaboration updates are opportunistic realtime updates and must not replace the durable HTTP projection autosave path or append durable workspace domain events per keystroke.
 RW5 - A frontend API timeout means the browser stopped waiting for an HTTP response; it does not by itself prove whether the backend committed or failed the write.
 RW6 - Timed-out, failed, pending, and confirmed editor saves must be distinguishable in the user-visible editor state.
 RW7 - A timed-out editor save must leave enough information to retry or reconcile the latest local document value.
@@ -23,6 +23,8 @@ RW12 - WebSocket reconnects or subscription failures must not be reported as suc
 RW13 - Browser-side API request timing should make status=error timeout cases visible with the route that timed out.
 RW14 - Dev or production timeout triage must consider backend, database, and cache-refetch load before changing the client timeout threshold.
 RW15 - Logic gate header renames are committed through `PUT /v1/logic-gates/{logic_gate_id}` and must reconcile the active Logic Gate Arena title, arena app target, and Company Explorer label from the committed response or `logic_gate_updated` workspace event without requiring a full page refresh.
+RW16 - Explicit editor saved versions are created through HTTP save-version routes after pending projection writes are flushed; the information tables store those saved versions, not every live typing update.
+RW17 - Restoring an editor saved version is an HTTP restore route that overwrites the current editor projection after user confirmation and publishes the normal committed projection/update signals.
 
 ## Scenarios
 
@@ -41,10 +43,31 @@ Given:
 - The frontend has access to the normal HTTP API.
 
 Expected:
-- The editor sends the durable document update through the node or logic gate HTTP information route.
-- The backend commits the editor document to durable state before the save is treated as confirmed.
+- The editor sends live document updates through the node or logic gate HTTP projection route.
+- The backend commits the editor projection before the live save is treated as confirmed.
 - WebSocket messages may notify other clients or local caches after the committed change.
 - Collaboration WebSocket updates do not replace the durable HTTP save.
+
+### Scenario RW-S1B: Editor Saved Versions Use Explicit HTTP Version Routes
+
+Business logic covered:
+- RW1
+- RW2
+- RW3
+- RW4
+- RW16
+- RW17
+
+Given:
+- A user edits a node or logic gate editor document.
+- Pending projection autosaves may still be queued.
+- The user clicks Save, an interval auto-save fires, or the user restores an existing saved version.
+
+Expected:
+- Manual and interval saved versions flush pending projection writes before creating the saved-version batch.
+- Saved-version creation writes to the node or logic gate information table only through the save-version route.
+- Per-keystroke collaboration WebSocket traffic does not create durable workspace domain events.
+- Restoring a saved version asks for confirmation, then overwrites the current editor projection through the restore route.
 
 ### Scenario RW-S2: API Timeout Does Not Automatically Prove Save Failure
 

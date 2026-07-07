@@ -346,6 +346,55 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 2 && parts[1] == "projection" {
+		if r.Method == http.MethodPost {
+			var req struct {
+				CompanyID     string `json:"company_id"`
+				Type          string `json:"type"`
+				Information   string `json:"information"`
+				InformationID string `json:"information_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			if strings.TrimSpace(req.CompanyID) == "" || strings.TrimSpace(req.Type) == "" || strings.TrimSpace(req.InformationID) == "" {
+				writeError(w, http.StatusBadRequest, "company_id_type_and_information_id_required")
+				return
+			}
+			if strings.TrimSpace(req.Information) == "" {
+				writeError(w, http.StatusBadRequest, "information_required")
+				return
+			}
+			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
+				return
+			}
+			actorUserID, actorLabel := nodeChangeActorPayload(r)
+			item, err := s.repo.UpsertNodeProjectionWithActor(store.NodeInformationInput{
+				CompanyID:        req.CompanyID,
+				NodeID:           nodeID,
+				Type:             req.Type,
+				Information:      req.Information,
+				InformationID:    req.InformationID,
+				ActorUserID:      actorUserID,
+				ActorDisplayName: actorLabel,
+			})
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "node_not_found")
+				return
+			}
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "invalid_projection")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_save_node_projection")
+				return
+			}
+			s.recordMentionNotifications(r, req.CompanyID, "node", nodeID, req.InformationID, req.Type, req.Information)
+			s.recordNodeChatNotification(r, req.CompanyID, nodeID, req.InformationID, req.Type, req.Information)
+			writeJSON(w, http.StatusOK, item)
+			return
+		}
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
@@ -372,6 +421,121 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			"node_id":    nodeID,
 			"items":      items,
 		})
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "save-versions" {
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		if r.Method == http.MethodPost {
+			var req struct {
+				CompanyID string `json:"company_id"`
+				SaveKind  string `json:"save_kind"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			if strings.TrimSpace(req.CompanyID) == "" {
+				writeError(w, http.StatusBadRequest, "company_id_required")
+				return
+			}
+			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
+				return
+			}
+			actorUserID, actorLabel := nodeChangeActorPayload(r)
+			version, err := s.repo.CreateNodeEditorSaveVersion(store.EditorSaveVersionInput{
+				CompanyID:        req.CompanyID,
+				ResourceID:       nodeID,
+				SaveKind:         req.SaveKind,
+				ActorUserID:      actorUserID,
+				ActorDisplayName: actorLabel,
+			})
+			if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "no_editor_projection_to_save")
+				return
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "node_not_found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_save_node_version")
+				return
+			}
+			s.publishWorkspaceEvent(req.CompanyID, "node_editor_save_version_created", map[string]any{"node_id": nodeID, "save_id": version.SaveID, "save_kind": version.SaveKind})
+			writeJSON(w, http.StatusCreated, version)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if !s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
+			return
+		}
+		versions, err := s.repo.ListNodeEditorSaveVersions(companyID, nodeID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "node_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_node_save_versions")
+			return
+		}
+		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
+			"company_id": companyID,
+			"node_id":    nodeID,
+			"versions":   versions,
+		})
+		return
+	}
+
+	if len(parts) == 4 && parts[1] == "save-versions" && parts[3] == "restore" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		saveID := strings.TrimSpace(parts[2])
+		var req struct {
+			CompanyID string `json:"company_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		if strings.TrimSpace(req.CompanyID) == "" || saveID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_and_save_id_required")
+			return
+		}
+		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
+			return
+		}
+		actorUserID, actorLabel := nodeChangeActorPayload(r)
+		version, err := s.repo.RestoreNodeEditorSaveVersion(store.EditorSaveVersionRestoreInput{
+			CompanyID:        req.CompanyID,
+			ResourceID:       nodeID,
+			SaveID:           saveID,
+			ActorUserID:      actorUserID,
+			ActorDisplayName: actorLabel,
+		})
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "save_version_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_save_version")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_restore_node_save_version")
+			return
+		}
+		s.publishWorkspaceEvent(req.CompanyID, "node_editor_save_version_restored", map[string]any{"node_id": nodeID, "save_id": version.SaveID})
+		writeJSON(w, http.StatusOK, version)
 		return
 	}
 

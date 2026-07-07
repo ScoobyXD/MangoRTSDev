@@ -94,12 +94,12 @@ export function useEditorDocumentPersistence({
         information_id: request.target.informationID,
       };
       if (request.target.entityKind === "logic_gate") {
-        await requestJSON<unknown>(`/v1/logic-gates/${request.target.entityID}/information`, {
+        await requestJSON<unknown>(`/v1/logic-gates/${request.target.entityID}/projection`, {
           method: "POST",
           body: JSON.stringify(informationPayload),
         });
       } else {
-        await requestJSON<unknown>(`/v1/nodes/${request.target.entityID}/information`, {
+        await requestJSON<unknown>(`/v1/nodes/${request.target.entityID}/projection`, {
           method: "POST",
           body: JSON.stringify(informationPayload),
         });
@@ -150,6 +150,42 @@ export function useEditorDocumentPersistence({
     })();
   }, [persistDocumentRequest, queuedSaveRef, saveInFlightRef]);
 
+  const waitForSaveQueue = useCallback(async () => {
+    while (saveInFlightRef.current || queuedSaveRef.current) {
+      await new Promise((resolve) => window.setTimeout(resolve, 40));
+    }
+  }, [queuedSaveRef, saveInFlightRef]);
+
+  const saveDocumentNow = useCallback(async (nextText: string) => {
+    documentDraftRef.current = nextText;
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const request = buildDocumentSaveRequest(nextText);
+    pendingSaveRef.current = null;
+    if (!request) return;
+    if (saveInFlightRef.current) {
+      queuedSaveRef.current = request;
+      await waitForSaveQueue();
+      return;
+    }
+
+    saveInFlightRef.current = true;
+    try {
+      let nextRequest: DocumentSaveRequest | null = request;
+      while (nextRequest) {
+        const activeRequest: DocumentSaveRequest = nextRequest;
+        queuedSaveRef.current = null;
+        await persistDocumentRequest(activeRequest);
+        const queued = queuedSaveRef.current;
+        nextRequest = queued && !sameSaveRequest(queued, activeRequest) ? queued : null;
+      }
+    } finally {
+      saveInFlightRef.current = false;
+    }
+  }, [buildDocumentSaveRequest, documentDraftRef, pendingSaveRef, persistDocumentRequest, queuedSaveRef, saveInFlightRef, saveTimerRef, waitForSaveQueue]);
+
   const scheduleDocumentSave = useCallback((nextText: string, immediate = false) => {
     documentDraftRef.current = nextText;
     if (saveTimerRef.current) {
@@ -189,5 +225,6 @@ export function useEditorDocumentPersistence({
     buildDocumentSaveRequest,
     scheduleDocumentSave,
     flushPendingDocumentSave,
+    saveDocumentNow,
   };
 }

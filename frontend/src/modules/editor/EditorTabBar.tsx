@@ -112,6 +112,9 @@ type EditorTabBarProps = {
   onOutlineStyleChange: (outlineStyle: EditorOutlineStyleID) => void;
   onCreateRelatedNode?: (kind: EditorRelatedNodeCreationKind) => void;
   onInsertTable?: () => void;
+  onSaveCurrentVersion?: () => void;
+  saveCurrentVersionDisabled?: boolean;
+  saveCurrentVersionBusy?: boolean;
   onRelationshipTabAnchorChange?: (anchor: { left: number; width: number } | null) => void;
   reserveHeaderOffset?: boolean;
 };
@@ -137,6 +140,9 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   onOutlineStyleChange,
   onCreateRelatedNode,
   onInsertTable,
+  onSaveCurrentVersion,
+  saveCurrentVersionDisabled = false,
+  saveCurrentVersionBusy = false,
   onRelationshipTabAnchorChange,
   reserveHeaderOffset = true,
 }) => {
@@ -486,6 +492,29 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
           style={{ ...tabStyleFor(false, false), width: 30, height: 26, display: "grid", placeItems: "center", padding: 0 }}
         >
           <EditorTableIcon color={surfaceText} />
+        </button>
+      )}
+      {onSaveCurrentVersion && (
+        <button
+          type="button"
+          aria-label="Save version"
+          title="Save version"
+          disabled={saveCurrentVersionDisabled || saveCurrentVersionBusy}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onSaveCurrentVersion}
+          style={{
+            ...tabStyleFor(false, false),
+            minWidth: 58,
+            height: 26,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "0 10px",
+            color: saveCurrentVersionDisabled || saveCurrentVersionBusy ? colorWithAlpha(surfaceText, 0.46) : accent,
+            cursor: saveCurrentVersionDisabled || saveCurrentVersionBusy ? "default" : "pointer",
+          }}
+        >
+          {saveCurrentVersionBusy ? "Saving" : "Save"}
         </button>
       )}
       {onCreateRelatedNode && (

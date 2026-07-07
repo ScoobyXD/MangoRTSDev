@@ -1,4 +1,4 @@
-Last updated: 2026-07-02
+Last updated: 2026-07-07
 
 # Nodes Tests
 
@@ -30,6 +30,11 @@ N19 - A node header can show and edit the node's project placement: the project 
 N20 - Assigning a node to a project from the node header requires selecting a project and then selecting a Logic Gate within that project; the assignment creates the node/project relationship and moves or assigns the node to the chosen Logic Gate.
 N21 - A node with a known project relationship exposes a Go to Project action that opens the related project directly.
 N22 - When selected node text is sent to chat as a quote/prefill, the quote preview must expose a cancel action that clears the selected-text prefill without sending a message.
+N23 - Live node editor typing writes the current text-block state to the node editor projection table and must not append a full rich-text document row to `node_information` on every keystroke autosave.
+N24 - Node Save Settings exposes a mandatory auto-save interval setting and lists saved editor versions sorted by saved timestamp, including manual/auto save kind, saving user, save time, and saved text box count.
+N25 - Clicking Save in the node editor flushes pending projection saves first, then creates a manual saved editor version in `node_information`.
+N26 - Node auto-save versions use the selected interval and create auto saved editor versions in `node_information` only when the current editor projection changed since the last saved version.
+N27 - Restoring a node saved version requires confirmation and overwrites the current node editor projection rows from that saved version without creating another saved-version row.
 
 ## Scenarios
 
@@ -162,3 +167,24 @@ Expected:
 - Go to Project opens the related project directly.
 - The selected-text chat quote includes a cancel action next to the quoted text.
 - Canceling the quote clears the prefill and leaves the chat draft otherwise intact.
+
+### Scenario N-S8: Node Editor Projection Saves And Saved Versions
+
+Business logic covered:
+- N23
+- N24
+- N25
+- N26
+- N27
+
+Given:
+- A user has edit access to a node.
+- The user types in one or more node text boxes.
+- The user opens Save Settings, changes the auto-save interval, manually saves, or waits for an auto-save interval.
+
+Expected:
+- Regular typing updates `node_projection_table` for the current text box state instead of appending repeated full-document rows to `node_information`.
+- Save Settings shows manual and auto saved versions with save kind, saving user, timestamp, and text box count.
+- Manual Save first flushes pending projection updates, then writes one saved-version batch to `node_information`.
+- Auto save writes a saved-version batch only when the current projection differs from the last saved version.
+- Restoring a saved version asks for confirmation and replaces the current node editor projection with the selected saved content.
