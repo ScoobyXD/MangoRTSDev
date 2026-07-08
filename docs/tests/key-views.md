@@ -12,11 +12,11 @@ KV4 - Under the My Work sidebar entry, saved grouping rows behave like child row
 
 KV5 - Under the Updates sidebar entry, saved grouping rows behave like child rows in a tree-like list. Clicking a row activates Updates with that row's saved grouping stack selected.
 
-KV6 - Add new + under either surface creates a new saved grouping row, selects it, opens the floating grouping editor, and persists the row through the saved-views API.
+KV6 - + Add new under either surface creates a new saved grouping row, selects it for that surface, opens the floating grouping editor, and persists the row through the saved-views API without navigating the main content area to that surface.
 
-KV7 - A saved grouping row can be renamed, reordered, edited, or deleted from its sidebar row context menu. At least one row must remain.
+KV7 - A saved grouping row can be edited, renamed, or deleted from its sidebar row context menu, and can be reordered by dragging it in the Key Views sidebar. A surface may have zero saved grouping rows.
 
-KV8 - The floating grouping editor controls the grouping stack for the selected row. Users can add grouping levels, remove grouping levels, change a grouping field, toggle Asc/Desc direction, and move grouping levels up or down.
+KV8 - The floating grouping editor controls the grouping stack for the selected row. Users can add grouping levels with + Add grouping, remove grouping levels, change a grouping field, toggle Asc/Desc direction, and reorder grouping levels by dragging them. Removing every grouping level is valid and leaves the saved view ungrouped.
 
 KV9 - Reloading the app or returning to a surface restores the user's last selected saved grouping row for the current company and current user.
 

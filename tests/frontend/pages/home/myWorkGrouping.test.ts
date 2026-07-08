@@ -57,6 +57,7 @@ test("normalizes My Work selected scope and grouping stack", () => {
     { field: "logic_gate", direction: "desc" },
     { field: "status", direction: "asc" },
   ]);
+  assert.deepEqual(normalizeMyWorkGroupingStack([]), []);
 });
 
 test("groups My Work rows by project, logic gate, person, and status with missing fallbacks", () => {

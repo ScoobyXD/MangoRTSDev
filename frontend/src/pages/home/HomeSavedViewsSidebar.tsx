@@ -76,8 +76,8 @@ export function HomeSavedViewsSidebarSection({
     () => createDefaultSavedView(surface, companyID, currentUserID),
     [companyID, currentUserID, surface],
   );
-  const [settings, setSettings] = useState<HomeSavedGroupingSetting[]>(() => [fallbackSetting]);
-  const [selectedSettingID, setSelectedSettingID] = useState(fallbackSetting.setting_id);
+  const [settings, setSettings] = useState<HomeSavedGroupingSetting[]>(() => []);
+  const [selectedSettingID, setSelectedSettingID] = useState("");
   const [contextMenu, setContextMenu] = useState<{ settingID: string; x: number; y: number } | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorPosition, setEditorPosition] = useState({ left: 320, top: 92 });
@@ -139,8 +139,8 @@ export function HomeSavedViewsSidebarSection({
 
   useEffect(() => {
     if (!apiBase || !companyID.trim()) {
-      setSettings([fallbackSetting]);
-      setSelectedSettingID(fallbackSetting.setting_id);
+      setSettings([]);
+      setSelectedSettingID("");
       return undefined;
     }
     let cancelled = false;
@@ -153,7 +153,7 @@ export function HomeSavedViewsSidebarSection({
           || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" })
           || left.saved_view_id.localeCompare(right.saved_view_id))
         .map((view) => savedViewToSetting(view, fallbackSetting, surface, currentUserID));
-      const nextSettings = loaded.length > 0 ? loaded : [fallbackSetting];
+      const nextSettings = loaded;
       const preferredSettingID = readSelectedSavedViewID(surface, companyID, storageUserID);
       const nextSelectedSettingID = nextSettings.find((setting) => setting.setting_id === preferredSettingID)?.setting_id
         ?? nextSettings[0]?.setting_id
@@ -161,10 +161,12 @@ export function HomeSavedViewsSidebarSection({
       setSettings(nextSettings);
       setSelectedSettingID(nextSelectedSettingID);
       if (nextSelectedSettingID) storeSelectedSavedViewID(surface, companyID, storageUserID, nextSelectedSettingID);
+      else clearSelectedSavedViewID(surface, companyID, storageUserID);
     }).catch((loadError) => {
       if (cancelled) return;
-      setSettings([fallbackSetting]);
-      setSelectedSettingID(fallbackSetting.setting_id);
+      setSettings([]);
+      setSelectedSettingID("");
+      clearSelectedSavedViewID(surface, companyID, storageUserID);
       setError(savedViewErrorMessage(loadError, "Failed to load saved views"));
     });
     return () => { cancelled = true; };
@@ -227,7 +229,7 @@ export function HomeSavedViewsSidebarSection({
     if (navigate) onSelectSurface();
   }, [companyID, onSelectSurface, storageUserID, surface]);
 
-  const persistSetting = useCallback((setting: HomeSavedGroupingSetting) => {
+  const persistSetting = useCallback((setting: HomeSavedGroupingSetting, emitChange = true) => {
     if (!apiBase || !companyID.trim() || !currentUserID.trim()) {
       setError("Sign in required to save views");
       return;
@@ -239,7 +241,7 @@ export function HomeSavedViewsSidebarSection({
     }).then((savedView) => {
       const normalized = savedViewToSetting(savedView, setting, surface, currentUserID);
       setSettings((current) => current.map((item) => (item.setting_id === setting.setting_id ? normalized : item)));
-      emitHomeSavedViewsChanged(surface, normalized.setting_id);
+      if (emitChange) emitHomeSavedViewsChanged(surface, normalized.setting_id);
     }).catch((saveError) => {
       setError(savedViewErrorMessage(saveError, "Failed to save view"));
     });
@@ -270,10 +272,11 @@ export function HomeSavedViewsSidebarSection({
     };
     setContextMenu(null);
     setSettings((current) => [...current, setting]);
-    selectSetting(setting.setting_id, true);
+    setSelectedSettingID(setting.setting_id);
+    storeSelectedSavedViewID(surface, companyID, storageUserID, setting.setting_id);
     setEditorOpen(true);
-    persistSetting(setting);
-  }, [currentUserID, persistSetting, selectSetting, selectedSetting, settings]);
+    persistSetting(setting, false);
+  }, [companyID, currentUserID, persistSetting, selectedSetting, settings, storageUserID, surface]);
 
   const renameSavedView = useCallback((settingID: string) => {
     const setting = settings.find((item) => item.setting_id === settingID);
@@ -296,7 +299,7 @@ export function HomeSavedViewsSidebarSection({
 
   const deleteSavedView = useCallback((settingID: string) => {
     const setting = settings.find((item) => item.setting_id === settingID);
-    if (settings.length <= 1 || !setting) return;
+    if (!setting) return;
     const nextSettings = settings.filter((item) => item.setting_id !== settingID);
     const nextSelectedSettingID = selectedSettingID === settingID
       ? nextSettings[0]?.setting_id ?? ""
@@ -308,6 +311,10 @@ export function HomeSavedViewsSidebarSection({
       setSelectedSettingID(nextSelectedSettingID);
       storeSelectedSavedViewID(surface, companyID, storageUserID, nextSelectedSettingID);
       emitHomeSavedViewsChanged(surface, nextSelectedSettingID);
+    } else {
+      setSelectedSettingID("");
+      clearSelectedSavedViewID(surface, companyID, storageUserID);
+      emitHomeSavedViewsChanged(surface, "");
     }
     if (apiBase && companyID.trim()) {
       void deleteSavedViewRequest({ apiBase, companyID, savedViewID: setting.setting_id }).catch((deleteError) => {
@@ -491,14 +498,14 @@ export function HomeSavedViewsSidebarSection({
           <button
             ref={addGroupingButtonRef}
             type="button"
-            style={savedViewAddGroupingButtonStyle(addableFields.length === 0)}
+            style={savedViewAddGroupingButtonStyle(surface, addableFields.length === 0)}
             disabled={addableFields.length === 0}
             onClick={() => {
               updateAddGroupingMenuPosition();
               setAddGroupingMenuOpen(true);
             }}
           >
-            Add grouping +
+            + Add grouping
           </button>
         </div>
       </div>
@@ -602,7 +609,7 @@ export function HomeSavedViewsSidebarSection({
         onBlur={() => setAddButtonRaised(false)}
         onClick={addSavedView}
       >
-        Add new +
+        + Add new
       </button>
       {error && <div style={savedViewErrorStyle}>{error}</div>}
       {contextMenu && contextSetting && (
@@ -615,8 +622,7 @@ export function HomeSavedViewsSidebarSection({
           </button>
           <button
             type="button"
-            style={{ ...savedViewContextMenuButtonStyle, color: settings.length <= 1 ? "#94a3b8" : "#dc2626" }}
-            disabled={settings.length <= 1}
+            style={{ ...savedViewContextMenuButtonStyle, color: "#dc2626" }}
             onClick={() => deleteSavedView(contextSetting.setting_id)}
           >
             Delete
@@ -659,6 +665,12 @@ function storeSelectedSavedViewID(surface: HomeSavedViewsSurface, companyID: str
   } catch {}
 }
 
+function clearSelectedSavedViewID(surface: HomeSavedViewsSurface, companyID: string, userID: string): void {
+  try {
+    localStorage.removeItem(savedViewStorageKey(surface, companyID, userID));
+  } catch {}
+}
+
 function homeSavedViewGroupingFields(surface: HomeSavedViewsSurface): ReadonlyArray<{ value: string; label: string }> {
   return surface === "my_work" ? MY_WORK_GROUPING_FIELDS : UPDATES_GROUPING_FIELDS;
 }
@@ -685,7 +697,7 @@ function normalizeHomeSavedGroupingStack(surface: HomeSavedViewsSurface, value: 
     seen.add(field);
     out.push({ field, direction: candidate.direction === "desc" ? "desc" : "asc" });
   }
-  return out.length > 0 ? out : defaultGroupings(surface);
+  return out;
 }
 
 function createDefaultSavedView(surface: HomeSavedViewsSurface, companyID: string, currentUserID: string): HomeSavedGroupingSetting {
@@ -1005,20 +1017,21 @@ const savedViewAddGroupingShellStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-function savedViewAddGroupingButtonStyle(disabled: boolean): React.CSSProperties {
+function savedViewAddGroupingButtonStyle(surface: HomeSavedViewsSurface, disabled: boolean): React.CSSProperties {
+  const accent = savedViewSurfaceAccent(surface);
   return {
     width: "100%",
     minHeight: 28,
-    border: "1px dashed rgba(0, 163, 255, 0.54)",
+    border: `1px solid ${disabled ? "rgba(148, 163, 184, 0.30)" : colorWithAlpha(accent.strong, 0.52)}`,
     borderRadius: 8,
-    background: disabled ? "rgba(226, 232, 240, 0.46)" : "linear-gradient(145deg, #ffffff, rgba(224, 242, 254, 0.82))",
-    color: disabled ? "#94a3b8" : "#006fbf",
+    background: disabled ? "rgba(226, 232, 240, 0.46)" : `linear-gradient(145deg, #ffffff, ${accent.soft})`,
+    color: disabled ? "#94a3b8" : accent.text,
     cursor: disabled ? "default" : "pointer",
     font: "inherit",
     fontSize: 11,
     fontWeight: 820,
     padding: "0 8px",
-    boxShadow: disabled ? "none" : "4px 4px 10px rgba(148, 163, 184, 0.14), -3px -3px 10px rgba(255, 255, 255, 0.80)",
+    boxShadow: disabled ? "none" : `${accent.glow}, 4px 4px 10px rgba(148, 163, 184, 0.14), -3px -3px 10px rgba(255, 255, 255, 0.80)`,
   };
 }
 
