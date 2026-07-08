@@ -1041,6 +1041,14 @@ const HOME_DEFAULT_UPDATE_GROUPINGS: SavedViewGrouping[] = [
 ];
 const HOME_MY_WORK_SELECTED_VIEW_STORAGE_KEY = "mangorts.myWork.selectedView.v1";
 const HOME_UPDATES_SELECTED_VIEW_STORAGE_KEY = "mangorts.updates.selectedView.v1";
+const HOME_SAVED_VIEWS_CHANGED_EVENT = "mangorts:home-saved-views-changed";
+
+function emitHomeSavedViewsChanged(surface: HomeSidebarSavedViewsSurface, settingID: string): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(HOME_SAVED_VIEWS_CHANGED_EVENT, {
+    detail: { surface, settingID: settingID.trim() },
+  }));
+}
 
 function homeSidebarSavedViewStorageKey(surface: HomeSidebarSavedViewsSurface, companyID: string, userID: string): string {
   const prefix = surface === "my_work" ? HOME_MY_WORK_SELECTED_VIEW_STORAGE_KEY : HOME_UPDATES_SELECTED_VIEW_STORAGE_KEY;
@@ -1242,6 +1250,7 @@ function HomeSidebarSavedViewsFallback({
     }).then((savedView) => {
       const normalized = homeSidebarSavedViewToSetting(savedView, setting, surface, currentUserID);
       setSettings((current) => current.map((item) => (item.setting_id === setting.setting_id ? normalized : item)));
+      emitHomeSavedViewsChanged(surface, normalized.setting_id);
     }).catch((saveError) => {
       setError(saveError instanceof Error && saveError.message.trim() ? saveError.message.trim() : "Failed to save view");
     });
@@ -1250,6 +1259,7 @@ function HomeSidebarSavedViewsFallback({
   const selectSetting = useCallback((settingID: string, navigate = false) => {
     setSelectedSettingID(settingID);
     storeHomeSidebarSelectedViewID(surface, companyID, currentUserID, settingID);
+    emitHomeSavedViewsChanged(surface, settingID);
     if (navigate) onSelectSurface();
   }, [companyID, currentUserID, onSelectSurface, surface]);
 
@@ -1295,6 +1305,9 @@ function HomeSidebarSavedViewsFallback({
 
   const deleteSavedView = useCallback((settingID: string) => {
     const setting = settings.find((item) => item.setting_id === settingID);
+    const nextSelectedSettingID = selectedSettingID === settingID
+      ? settings.find((item) => item.setting_id !== settingID)?.setting_id ?? ""
+      : selectedSettingID;
     setSettings((current) => {
       if (current.length <= 1) return current;
       const next = current.filter((item) => item.setting_id !== settingID);
@@ -1307,6 +1320,7 @@ function HomeSidebarSavedViewsFallback({
     });
     setContextMenu(null);
     if (setting?.setting_id === selectedSetting.setting_id) setEditorOpen(false);
+    if (settings.length > 1) emitHomeSavedViewsChanged(surface, nextSelectedSettingID);
     if (apiBase && companyID.trim() && setting) {
       void deleteSavedViewRequest({ apiBase, companyID, savedViewID: setting.setting_id }).catch((deleteError) => {
         setError(deleteError instanceof Error && deleteError.message.trim() ? deleteError.message.trim() : "Failed to delete view");
@@ -1329,11 +1343,12 @@ function HomeSidebarSavedViewsFallback({
         : { ...setting, position, updated_timestamp: now };
     });
     setSettings(nextSettings);
+    emitHomeSavedViewsChanged(surface, selectedSettingID);
     for (const setting of nextSettings) {
       const previous = settings.find((item) => item.setting_id === setting.setting_id);
       if (previous?.position !== setting.position) persistSetting(setting);
     }
-  }, [persistSetting, settings]);
+  }, [persistSetting, selectedSettingID, settings, surface]);
 
   const moveSelectedGrouping = useCallback((index: number, direction: -1 | 1) => {
     setFieldMenuIndex(null);
@@ -2440,15 +2455,13 @@ export function HomeSidebar({
         <section style={sidebarSectionStyle}>
           <HomeNavButton label="My Work" active={activeViewID === "my-work"} onClick={() => onSelectView("my-work", "all")} />
           <div id={HOME_MY_WORK_SAVED_VIEWS_SLOT_ID} style={homeSidebarSavedViewsSlotStyle}>
-            {activeViewID !== "my-work" && (
-              <HomeSidebarSavedViewsFallback
-                apiBase={apiBase}
-                companyID={companyID}
-                currentUserID={currentUserID}
-                surface="my_work"
-                onSelectSurface={() => onSelectView("my-work", "all")}
-              />
-            )}
+            <HomeSidebarSavedViewsFallback
+              apiBase={apiBase}
+              companyID={companyID}
+              currentUserID={currentUserID}
+              surface="my_work"
+              onSelectSurface={() => onSelectView("my-work", "all")}
+            />
           </div>
         </section>
         <section style={sidebarSectionStyle}>
@@ -2459,15 +2472,13 @@ export function HomeSidebar({
             onClick={() => onSelectView("updates", "all")}
           />
           <div id={HOME_UPDATES_SAVED_VIEWS_SLOT_ID} style={homeSidebarSavedViewsSlotStyle}>
-            {activeViewID !== "updates" && (
-              <HomeSidebarSavedViewsFallback
-                apiBase={apiBase}
-                companyID={companyID}
-                currentUserID={currentUserID}
-                surface="updates"
-                onSelectSurface={() => onSelectView("updates", "all")}
-              />
-            )}
+            <HomeSidebarSavedViewsFallback
+              apiBase={apiBase}
+              companyID={companyID}
+              currentUserID={currentUserID}
+              surface="updates"
+              onSelectSurface={() => onSelectView("updates", "all")}
+            />
           </div>
         </section>
       </nav>
