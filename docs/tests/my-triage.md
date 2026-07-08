@@ -1,4 +1,4 @@
-Last updated: 2026-07-06
+Last updated: 2026-07-08
 
 # My Triage Tests
 
@@ -95,6 +95,10 @@ MT84 - Node editor, logic-gate editor, and inline comment/chat text must auto-de
 MT85 - The My Triage All mailbox control is a dropdown with All and Spam folder options; the selected option is visually highlighted and marked, and Spam loads the provider spam/junk mailbox.
 MT86 - Spam mailbox reads are scoped to the same personal connection and filters as the current My Triage mailbox view; Spam messages must not leak into the primary inbox filter.
 MT87 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
+MT88 - My Triage mailbox rows group messages by provider/Nylas `thread_id` when present so replies in the same conversation appear as one visible inbox item instead of duplicate rows; messages without a thread ID remain single-message rows.
+MT89 - A grouped My Triage row uses the newest loaded message as the visible row representative while unread, starred, attachment, and thread-count indicators roll up from the loaded messages in that thread.
+MT90 - Selecting a My Triage thread row opens a scrollable, full-height conversation detail pane that hydrates the thread through Nylas thread `message_ids` plus individual message-detail reads for HTML bodies; the thread endpoint alone must not be treated as containing full message bodies.
+MT91 - Personal rich compose send must preserve sanitized block indentation, including indent/outdent and blockquote-style indents, so sent email HTML does not flatten intended paragraph indentation.
 
 ## Nylas Configuration Contract
 
@@ -105,6 +109,10 @@ Personal read receipts depend on both outbound send tracking and webhook deliver
 - Accepted full Message tracking selection: `message.opened`, `message.link_clicked`, and `thread.replied` selected together.
 - Backend secret: `NYLAS_WEBHOOK_SECRET` set to the webhook secret returned by that Nylas destination.
 - Current product behavior: only `message.opened` writes personal read-receipt summaries; `message.link_clicked` and `thread.replied` are allowed in Nylas but are ignored for read receipts.
+
+## Email Threading Contract
+
+My Triage uses Nylas `thread_id` and thread `message_ids` to group related messages into one inbox row and to load the selected conversation history. Message bodies still come from single-message detail reads because list/thread responses can omit full HTML bodies.
 
 ## Scenarios
 
@@ -356,3 +364,23 @@ Expected:
 - Once the selected shared-inbox metadata resolves, the active mailbox loads folders, messages, Inbox counts, and Starred counts for that mailbox.
 - Clicking disconnect opens a small confirmation popover near the clicked button.
 - The mailbox disconnect mutation runs only after the user confirms that popover.
+
+### Scenario MT-S8: Threaded Inbox Rows And Conversation Detail
+
+Business logic covered:
+- MT88
+- MT89
+- MT90
+- MT91
+
+Given:
+- A personal mailbox has multiple provider messages with the same Nylas `thread_id`.
+- The newest loaded message is visible in My Triage.
+- The user selects that row or sends a rich formatted reply with indented content.
+
+Expected:
+- The My Triage list shows one row for the thread, not one row per reply.
+- The row preview comes from the newest loaded message while unread/starred/thread-count indicators roll up from the loaded messages in that thread.
+- The right-side detail pane fills the available detail area and shows a chronological conversation history for the thread.
+- Thread history bodies are loaded through individual message-detail reads scoped to the personal mailbox, using Nylas thread `message_ids` only as the grouping/index source.
+- Sent rich HTML preserves block indentation instead of flattening indented paragraphs.

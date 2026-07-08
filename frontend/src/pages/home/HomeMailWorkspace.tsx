@@ -167,6 +167,12 @@ function MessageAttachmentCount({ message }: { message: EmailMessage }) {
   return <span style={messageReadStatusStyle}>{count === 1 ? "1 file" : `${count} files`}</span>;
 }
 
+function MessageThreadCount({ message }: { message: EmailMessage }) {
+  const count = message.thread_message_count ?? 0;
+  if (count <= 1) return null;
+  return <span style={messageReadStatusStyle} title={`${count} messages in this thread`}>{count} msgs</span>;
+}
+
 function isDraftMessage(message: EmailMessage): boolean {
   return (message.folders ?? []).some((folder) => {
     const value = folder.trim().toLowerCase();
@@ -209,6 +215,7 @@ export function HomeMailWorkspace({
   selectedMessage,
   selectedMessageID,
   selectedMessageIDs,
+  selectedThreadMessages,
   sharedInboxSettings,
   unassignedSharedInbox,
   showDetailResizeHandle,
@@ -278,6 +285,7 @@ export function HomeMailWorkspace({
   selectedMessage: EmailMessage | null;
   selectedMessageID: string;
   selectedMessageIDs: Set<string>;
+  selectedThreadMessages: EmailMessage[];
   sharedInboxSettings?: { onOpen: () => void; onOpenGVIC?: () => void };
   unassignedSharedInbox?: { folderName: string; message?: string; onAssignEmail?: () => void };
   showDetailResizeHandle: boolean;
@@ -625,6 +633,7 @@ export function HomeMailWorkspace({
                       <span style={triageMessageMetaStyle}>
                         <span style={messageTimestampStatusRowStyle}>
                           <MessageAttachmentCount message={message} />
+                          <MessageThreadCount message={message} />
                           <span style={triageDateStyle}>{formatMessageDate(message.date)}</span>
                         </span>
                         {!draftRow && (
@@ -660,6 +669,7 @@ export function HomeMailWorkspace({
                         <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{rowAddressLabel}</strong>
                         <span style={messageTimestampStatusRowStyle}>
                           <MessageAttachmentCount message={message} />
+                          <MessageThreadCount message={message} />
                           <span>{formatMessageDate(message.date)}</span>
                         </span>
                       </span>
@@ -700,6 +710,7 @@ export function HomeMailWorkspace({
         ) : selectedMessage ? (
           <MessageDetail
             message={selectedMessage}
+            threadMessages={selectedThreadMessages}
             companyID={companyID}
             sharedInboxID={activeViewID.startsWith("shared:") ? activeViewID.slice("shared:".length).trim() : undefined}
             loading={loadingDetail}

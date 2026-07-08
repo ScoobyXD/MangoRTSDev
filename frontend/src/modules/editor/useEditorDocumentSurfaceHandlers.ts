@@ -2941,7 +2941,7 @@ export function useEditorDocumentSurfaceHandlers({
           position: "fixed",
           inset: 0,
           zIndex: 2400,
-          background: "rgba(17,24,39,0.46)",
+          background: "rgba(15,23,42,0.98)",
           display: "grid",
           placeItems: "center",
           padding: 12,
