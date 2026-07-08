@@ -269,6 +269,38 @@ Write-Host ("Started Code.exe PID {0}" -f `$p.Id)
 "@
 }
 
+function Set-CodexSidebarOpenOnStartup {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$UserData
+  )
+
+  $userSettingsDir = Join-Path $UserData "User"
+  $settingsPath = Join-Path $userSettingsDir "settings.json"
+
+  New-Item -ItemType Directory -Path $userSettingsDir -Force | Out-Null
+
+  $settings = [pscustomobject]@{}
+  if (Test-Path -LiteralPath $settingsPath) {
+    $rawSettings = Get-Content -LiteralPath $settingsPath -Raw
+    if (-not [string]::IsNullOrWhiteSpace($rawSettings)) {
+      $settings = $rawSettings | ConvertFrom-Json
+      if (($null -eq $settings) -or ($settings -isnot [pscustomobject])) {
+        throw "VS Code settings file is not a JSON object: $settingsPath"
+      }
+    }
+  }
+
+  $existing = $settings.PSObject.Properties | Where-Object { $_.Name -eq "chatgpt.openOnStartup" } | Select-Object -First 1
+  if ($existing) {
+    $settings."chatgpt.openOnStartup" = $true
+  } else {
+    $settings | Add-Member -NotePropertyName "chatgpt.openOnStartup" -NotePropertyValue $true
+  }
+
+  $settings | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $settingsPath -Encoding UTF8
+}
+
 function Get-VsCodeProcessForUserData {
   param(
     [Parameter(Mandatory = $true)]
@@ -382,6 +414,8 @@ $extensions = Join-Path $env:USERPROFILE ".vscode\extensions"
 $code = Get-VsCodeExe
 $launcherPid = ""
 $codePid = ""
+
+Set-CodexSidebarOpenOnStartup -UserData $userData
 
 if (-not $NoStart) {
   $script = New-VsCodeLauncherScript -Slug $slug -Worktree $workerPath -UserData $userData -Extensions $extensions -Code $code
