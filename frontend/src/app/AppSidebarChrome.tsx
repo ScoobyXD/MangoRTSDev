@@ -31,6 +31,7 @@ import {
 import { assignNodeToLogicGateStatus } from "../modules/kanban/kanbanApi";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, INBOX_PRIORITIES, type HomeTriageConversionAppliedDetail } from "../pages/home/homeConstants";
 import { convertMessagesToExplorerTargetCommand } from "../pages/home/homeCommands";
+import { HomeSavedViewsSidebarSection } from "../pages/home/HomeSavedViewsSidebar";
 import {
   buildSharedInboxRows,
   cleanIDList,
@@ -104,7 +105,7 @@ const SIDEBAR_ACTIVE_TEXT = "#111111";
 
 type SidebarSectionID = "shared-triage";
 
-export type HomeSidebarView = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "my-work" | "updates" | `shared:${string}`;
+export type HomeKeyViewID = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "my-work" | "updates" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
 type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams";
@@ -112,11 +113,12 @@ type AppSidebarPrimaryPage = "map" | "home" | "logic-gate-arena" | "project-mana
 type AppSidebarProps = {
   accountChrome?: React.ReactNode;
   activePage: AppSidebarPrimaryPage | null;
-  activeHomeView: HomeSidebarView;
+  activeHomeView: HomeKeyViewID;
+  currentUserID: string;
   pins: SidebarPin[];
   pinDropActive: boolean;
   explorerSelectionTargetFrameIDs: string[];
-  onHomeViewSelect: (view: HomeSidebarView) => void;
+  onHomeViewSelect: (view: HomeKeyViewID) => void;
   onPageSelect: (page: AppSidebarPrimaryPage) => void;
   onPinOpen: (pin: SidebarPin) => void;
   onPinOpenInNewTab: (pin: SidebarPin) => void;
@@ -233,6 +235,7 @@ export function AppSidebar({
   accountChrome,
   activePage,
   activeHomeView,
+  currentUserID,
   pins,
   pinDropActive,
   explorerSelectionTargetFrameIDs,
@@ -249,6 +252,7 @@ export function AppSidebar({
 }: AppSidebarProps): React.ReactElement {
   const homeActive = activePage === "home";
   const companyID = getActiveCompanyID();
+  const apiBase = readAuthConfig().apiBase;
   const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", false);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [connectedAccountEmail, setConnectedAccountEmail] = useState("");
@@ -300,7 +304,7 @@ export function AppSidebar({
   const [hoveredSharedFolderID, setHoveredSharedFolderID] = useState("");
   useEffect(() => {
     const onHomeUnreadCountsUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ companyID?: string; viewID?: HomeSidebarView; unreadCount?: number }>).detail;
+      const detail = (event as CustomEvent<{ companyID?: string; viewID?: HomeKeyViewID; unreadCount?: number }>).detail;
       if (detail?.companyID && detail.companyID !== companyID) return;
       const count = normalizeSidebarNotificationCount(detail?.unreadCount);
       if (detail?.viewID === "my-triage") {
@@ -327,7 +331,7 @@ export function AppSidebar({
     return () => window.clearTimeout(timerID);
   }, [explorerDropSuccess]);
 
-  const openMailBadgeView = useCallback((view: HomeSidebarView) => {
+  const openMailBadgeView = useCallback((view: HomeKeyViewID) => {
     onPageSelect("home");
     onHomeViewSelect(view);
   }, [onHomeViewSelect, onPageSelect]);
@@ -920,7 +924,7 @@ export function AppSidebar({
     const primaryTreeID = (selected.selectedIDs.has(row.treeID) ? row.treeID : nextSelectedIDs[0]) ?? row.treeID;
     const primaryRow = sharedRows.find((item) => item.treeID === primaryTreeID) ?? row;
     if (primaryRow.folder.entry_type === "shared_inbox") {
-      onHomeViewSelect(primaryTreeID as HomeSidebarView);
+      onHomeViewSelect(primaryTreeID as HomeKeyViewID);
     }
   }, [onHomeViewSelect, selectedSharedTreeIDs, sharedRows, sharedSelectionAnchorTreeID]);
   const handleSharedRootDragOver = useCallback((event: React.DragEvent<HTMLElement>) => {
@@ -943,7 +947,7 @@ export function AppSidebar({
     const isSharedInbox = folder.entry_type === "shared_inbox";
     const isRenaming = renamingSharedFolderID === folder.folder_id;
     const rowDropPlacement = dropTarget?.folderID === folder.folder_id ? dropTarget.placement : null;
-    const treeID = row.treeID as HomeSidebarView;
+    const treeID = row.treeID as HomeKeyViewID;
     const active = homeActive && (activeHomeView === treeID || selectedSharedTreeIDs.has(row.treeID));
     const hovered = hoveredSharedFolderID === folder.folder_id;
     return (
@@ -1168,6 +1172,14 @@ export function AppSidebar({
           elevated
           onClick={() => onHomeViewSelect("updates")}
         />
+        <HomeSavedViewsSidebarSection
+          apiBase={apiBase}
+          companyID={companyID}
+          currentUserID={currentUserID}
+          surface="updates"
+          active={homeActive && activeHomeView === "updates"}
+          onSelectSurface={() => onHomeViewSelect("updates")}
+        />
       </section>
 
       <section style={appSidebarNavSectionStyle} aria-label="Tower">
@@ -1178,6 +1190,14 @@ export function AppSidebar({
           icon={<HeaderMyWorkIcon color="#10b981" />}
           elevated
           onClick={() => onHomeViewSelect("my-work")}
+        />
+        <HomeSavedViewsSidebarSection
+          apiBase={apiBase}
+          companyID={companyID}
+          currentUserID={currentUserID}
+          surface="my_work"
+          active={homeActive && activeHomeView === "my-work"}
+          onSelectSurface={() => onHomeViewSelect("my-work")}
         />
       </section>
 

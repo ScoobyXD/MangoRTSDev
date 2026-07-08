@@ -7,7 +7,6 @@ export type HomePageProps = {
   me?: CurrentUserResponse;
   onNavigate?: (path: string, options?: { replace?: boolean }) => void;
   embedded?: boolean;
-  hideNavigation?: boolean;
   initialViewID?: HomeViewID;
   onActiveViewChange?: (viewID: HomeViewID) => void;
   deepLinkNodeID?: string;
