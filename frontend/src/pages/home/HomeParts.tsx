@@ -7095,8 +7095,100 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   );
 }
 
-export function MessageDetail({ message, companyID, sharedInboxID, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, onReply, onReplyAll, onForward, onArchive, onDelete, onToggleRead, onToggleStar }: {
+function emailDetailSortTimestamp(message: EmailMessage): number {
+  const date = message.date ?? 0;
+  return Number.isFinite(date) ? date : 0;
+}
+
+function conversationMessagesForDetail(message: EmailMessage, threadMessages: EmailMessage[]): EmailMessage[] {
+  const byID = new Map<string, EmailMessage>();
+  const upsert = (candidate: EmailMessage) => {
+    const id = candidate.id.trim();
+    if (!id) return;
+    const existing = byID.get(id);
+    byID.set(id, existing ? {
+      ...existing,
+      ...candidate,
+      local_replies: candidate.local_replies ?? existing.local_replies,
+    } : candidate);
+  };
+
+  const sourceMessages = threadMessages.length > 0 ? threadMessages : [message];
+  for (const candidate of [...sourceMessages, message]) {
+    upsert(candidate);
+    for (const reply of candidate.local_replies ?? []) {
+      upsert({ ...reply, local_replies: undefined });
+    }
+  }
+
+  return Array.from(byID.values()).sort((a, b) => {
+    const dateDelta = emailDetailSortTimestamp(a) - emailDetailSortTimestamp(b);
+    return dateDelta || a.id.localeCompare(b.id);
+  });
+}
+
+function EmailConversationMessage({ message, companyID, sharedInboxID, fill }: {
   message: EmailMessage;
+  companyID: string;
+  sharedInboxID?: string;
+  fill: boolean;
+}) {
+  const attachments = (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || attachment.id?.trim());
+  const hasAttachments = attachments.length > 0;
+  const messageDate = formatMessageDate(message.date);
+  const frameStyle: React.CSSProperties = fill
+    ? { ...iframeStyle, minHeight: hasAttachments ? 320 : 0, height: "100%" }
+    : { ...iframeStyle, minHeight: 260, height: 320, boxShadow: "none" };
+  const itemStyle: React.CSSProperties = {
+    minHeight: fill ? "100%" : undefined,
+    minWidth: 0,
+    display: "grid",
+    gridTemplateRows: hasAttachments ? "auto auto minmax(0, 1fr)" : "auto minmax(0, 1fr)",
+    gap: 8,
+    paddingTop: fill ? 0 : 10,
+    borderTop: fill ? "none" : "1px solid rgba(148, 163, 184, 0.28)",
+  };
+  return (
+    <article style={itemStyle}>
+      <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+        <div style={mutedSmallStyle}>
+          From {formatAddressList(message.from) || "Unknown sender"} to {formatAddressList(message.to) || "me"}
+          {messageDate && <span> - {messageDate}</span>}
+        </div>
+        {formatAddressList(message.cc) && <div style={mutedSmallStyle}>Cc {formatAddressList(message.cc)}</div>}
+        {formatAddressList(message.bcc) && <div style={mutedSmallStyle}>Bcc {formatAddressList(message.bcc)}</div>}
+        {messageIsSent(message) && (
+          <div style={{ ...messageTimestampStatusRowStyle, justifyContent: "flex-start" }}>
+            <MessageReadStatusText message={message} />
+          </div>
+        )}
+      </div>
+      {hasAttachments && (
+        <div style={mailAttachmentSectionStyle}>
+          <div style={mailAttachmentHeaderStyle}>
+            <span>{attachments.length === 1 ? "1 attachment" : `${attachments.length} attachments`}</span>
+          </div>
+          <div style={mailAttachmentGridStyle}>
+            {attachments.map((attachment, index) => (
+              <EmailAttachmentTile
+                key={attachment.id?.trim() || `${attachment.filename}:${index}`}
+                messageID={message.id}
+                attachment={attachment}
+                companyID={companyID}
+                sharedInboxID={sharedInboxID}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      <iframe title="Email body" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={messageDocument(message.body || message.snippet || "")} style={frameStyle} />
+    </article>
+  );
+}
+
+export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, onReply, onReplyAll, onForward, onArchive, onDelete, onToggleRead, onToggleStar }: {
+  message: EmailMessage;
+  threadMessages?: EmailMessage[];
   companyID: string;
   sharedInboxID?: string;
   loading: boolean;
@@ -7113,19 +7205,16 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
   onToggleStar: () => void;
 }) {
   const messageDate = formatMessageDate(message.date);
-  const localReplies = message.local_replies ?? [];
-  const hasLocalReplies = localReplies.length > 0;
-  const attachments = (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || attachment.id?.trim());
-  const hasAttachments = attachments.length > 0;
-  const bodyFrameStyle = hasLocalReplies || hasAttachments ? { ...iframeStyle, minHeight: 320, height: 360 } : iframeStyle;
-  const replyFrameStyle = { ...iframeStyle, minHeight: 220, height: 220, boxShadow: "none" };
-  const bodyContainerStyle = hasLocalReplies || hasAttachments ? {
+  const conversationMessages = conversationMessagesForDetail(message, threadMessages);
+  const singleMessage = conversationMessages.length <= 1;
+  const bodyContainerStyle: React.CSSProperties = {
     minHeight: 0,
     overflow: "auto",
     display: "grid",
-    gap: 10,
-    alignContent: "start",
-  } : { minHeight: 0 };
+    gridTemplateRows: singleMessage ? "minmax(0, 1fr)" : undefined,
+    gap: 12,
+    alignContent: singleMessage ? "stretch" : "start",
+  };
   return (
     <div style={detailStyle}>
       <div style={panelHeaderStyle}>
@@ -7152,50 +7241,16 @@ export function MessageDetail({ message, companyID, sharedInboxID, loading, arch
         <button style={{ ...mailPanelSmallButtonStyle, ...dangerButtonStyle }} disabled={busy || !deleteAvailable} onClick={onDelete}>Delete</button>
       </div>
       <div style={bodyContainerStyle}>
-        {hasAttachments && (
-          <div style={mailAttachmentSectionStyle}>
-            <div style={mailAttachmentHeaderStyle}>
-              <span>{attachments.length === 1 ? "1 attachment" : `${attachments.length} attachments`}</span>
-            </div>
-            <div style={mailAttachmentGridStyle}>
-              {attachments.map((attachment, index) => (
-                <EmailAttachmentTile
-                  key={attachment.id?.trim() || `${attachment.filename}:${index}`}
-                  messageID={message.id}
-                  attachment={attachment}
-                  companyID={companyID}
-                  sharedInboxID={sharedInboxID}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-        <iframe title="Email body" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={messageDocument(message.body || message.snippet || "")} style={bodyFrameStyle} />
-        {localReplies.map((reply) => (
-          <div key={reply.id} style={{
-            display: "grid",
-            gap: 6,
-            paddingTop: 10,
-            borderTop: "1px solid rgba(148, 163, 184, 0.28)",
-          }}>
-            <div style={mutedSmallStyle}>
-              From {formatAddressList(reply.from) || "me"} to {formatAddressList(reply.to) || "recipient"}
-              {formatMessageDate(reply.date) && (
-                <span style={{ ...messageTimestampStatusRowStyle, display: "inline-flex", marginLeft: 4 }}>
-                  <span>- {formatMessageDate(reply.date)}</span>
-                  <MessageReadStatusText message={reply} />
-                </span>
-              )}
-            </div>
-            <iframe title="Sent reply body" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={messageDocument(reply.body || reply.snippet || "")} style={replyFrameStyle} />
-          </div>
+        {conversationMessages.map((conversationMessage) => (
+          <EmailConversationMessage
+            key={conversationMessage.id}
+            message={conversationMessage}
+            companyID={companyID}
+            sharedInboxID={sharedInboxID}
+            fill={singleMessage}
+          />
         ))}
       </div>
-      {messageIsSent(message) && (
-        <div style={{ ...messageTimestampStatusRowStyle, justifyContent: "flex-end" }}>
-          <MessageReadStatusText message={message} />
-        </div>
-      )}
     </div>
   );
 }

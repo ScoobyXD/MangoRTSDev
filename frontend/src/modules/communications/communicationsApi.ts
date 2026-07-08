@@ -80,6 +80,8 @@ export type EmailMessage = {
   folder_ids?: string[];
   logic_gate_ids?: string[];
   logic_gate_count?: number;
+  thread_message_count?: number;
+  thread_unread_count?: number;
   read_status?: EmailReadStatus;
   local_replies?: EmailMessage[];
 };

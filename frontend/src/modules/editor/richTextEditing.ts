@@ -446,6 +446,44 @@ function appendSanitizedChildren(source: Node, target: Node, ownerDocument: Docu
   source.childNodes.forEach((child) => appendSanitizedNode(child, target, ownerDocument));
 }
 
+function formatSafeCSSNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
+}
+
+function normalizeSafeIndentLength(value: string): string {
+  const match = /^([0-9]+(?:\.[0-9]+)?)(px|pt|em|rem|ch|%)$/i.exec(value.trim());
+  if (!match) return "";
+  const parsed = Number.parseFloat(match[1]);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "";
+  const unit = match[2].toLowerCase();
+  const maxByUnit: Record<string, number> = {
+    px: 320,
+    pt: 240,
+    em: 24,
+    rem: 24,
+    ch: 48,
+    "%": 70,
+  };
+  const clamped = Math.min(parsed, maxByUnit[unit] ?? 0);
+  if (clamped <= 0) return "";
+  return `${formatSafeCSSNumber(clamped)}${unit}`;
+}
+
+function safeBlockIndentForElement(element: HTMLElement, tagName: string): string {
+  const indent = normalizeSafeIndentLength(element.style.marginLeft)
+    || normalizeSafeIndentLength(element.style.paddingLeft);
+  if (indent) return indent;
+  return tagName === "blockquote" ? "40px" : "";
+}
+
+function appendSanitizedIndentedBlock(element: HTMLElement, target: Node, ownerDocument: Document, indent: string) {
+  const block = ownerDocument.createElement("div");
+  block.style.marginLeft = indent;
+  appendSanitizedChildren(element, block, ownerDocument);
+  target.appendChild(block);
+  target.appendChild(ownerDocument.createTextNode("\n"));
+}
+
 function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document) {
   if (source.nodeType === Node.TEXT_NODE) {
     target.appendChild(ownerDocument.createTextNode(normalizeEditorArrowLigatureText(source.textContent ?? "")));
@@ -566,7 +604,12 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
     return;
   }
 
-  if (tagName === "div" || tagName === "p") {
+  if (tagName === "blockquote" || tagName === "div" || tagName === "p") {
+    const indent = safeBlockIndentForElement(element, tagName);
+    if (indent) {
+      appendSanitizedIndentedBlock(element, target, ownerDocument, indent);
+      return;
+    }
     appendSanitizedChildren(element, target, ownerDocument);
     target.appendChild(ownerDocument.createTextNode("\n"));
     return;

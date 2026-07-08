@@ -1,4 +1,4 @@
-Last updated: 2026-07-06
+Last updated: 2026-07-08
 
 # Shared Triage Tests
 
@@ -121,6 +121,10 @@ ST110 - The Shared Triage All mailbox control is a dropdown with All and Spam fo
 ST111 - Shared Triage Spam mailbox reads are scoped by `shared_inbox_id` and the company-owned shared mailbox connection; Spam messages must not leak between shared inboxes or into the primary inbox filter.
 ST112 - View-only Shared Triage users may read Spam when they can view the mailbox, but sending, scheduled sending, reply, reply-all, forward, Bcc, and draft send actions still require edit access to that shared inbox.
 ST113 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
+ST114 - Shared Triage mailbox rows group messages by provider/Nylas `thread_id` when present so replies in the same shared conversation appear as one visible inbox item instead of duplicate rows; messages without a thread ID remain single-message rows.
+ST115 - A grouped Shared Triage row uses the newest loaded message as the visible row representative while unread, starred, attachment, and thread-count indicators roll up from the loaded messages in that thread.
+ST116 - Selecting a Shared Triage thread row opens a scrollable, full-height conversation detail pane that hydrates the thread through Nylas thread `message_ids` plus individual message-detail reads for HTML bodies, all scoped to the selected `shared_inbox_id` and company-owned shared grant.
+ST117 - Shared Triage rich compose send must preserve sanitized block indentation, including indent/outdent and blockquote-style indents, so sent shared email HTML does not flatten intended paragraph indentation.
 
 ## Nylas Configuration Contract
 
@@ -131,6 +135,10 @@ Shared mailbox read receipts depend on both outbound send tracking and webhook d
 - Accepted full Message tracking selection: `message.opened`, `message.link_clicked`, and `thread.replied` selected together.
 - Backend secret: `NYLAS_WEBHOOK_SECRET` set to the webhook secret returned by that Nylas destination.
 - Current product behavior: only `message.opened` writes shared read-receipt summaries and fans out shared-inbox realtime updates; `message.link_clicked` and `thread.replied` are allowed in Nylas but are ignored for read receipts.
+
+## Email Threading Contract
+
+Shared Triage uses Nylas `thread_id` and thread `message_ids` to group related messages into one inbox row and to load the selected conversation history. Message bodies still come from single-message detail reads because list/thread responses can omit full HTML bodies. Every thread, message, and body read must remain scoped to the selected `shared_inbox_id` and company-owned shared mailbox grant.
 
 ## Scenarios
 
@@ -506,3 +514,23 @@ Expected:
 - The user does not need to click a different shared inbox and then return to make the selected shared mailbox load.
 - Clicking disconnect opens a small confirmation popover near the clicked button.
 - The shared mailbox disconnect mutation runs only after the user confirms that popover.
+
+### Scenario ST-S13: Shared Threaded Inbox Rows And Conversation Detail
+
+Business logic covered:
+- ST114
+- ST115
+- ST116
+- ST117
+
+Given:
+- A mailbox-capable Shared Triage inbox has multiple provider messages with the same Nylas `thread_id`.
+- The current user has view access to that shared inbox.
+- The user with edit access sends a rich formatted shared reply with indented content.
+
+Expected:
+- The Shared Triage list shows one row for the thread, not one row per reply.
+- The row preview comes from the newest loaded message while unread/starred/thread-count indicators roll up from the loaded messages in that thread.
+- The right-side detail pane fills the available detail area and shows a chronological conversation history for the thread.
+- Thread IDs and message bodies are loaded only through the selected `shared_inbox_id` and company-owned shared grant; the UI must not fall back to the actor's personal mailbox.
+- Sent shared rich HTML preserves block indentation instead of flattening indented paragraphs.

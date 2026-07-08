@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { CommunicationsSharedInbox } from "../../../../frontend/src/modules/communications/communicationsApi.js";
+import type { CommunicationsSharedInbox, EmailMessage } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 import type { LogicGateRecord } from "../../../../frontend/src/modules/logic-gate-map/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
@@ -11,6 +11,7 @@ import {
   buildSharedInboxRows,
   communicationStreamEventIsArchiveConfirmation,
   communicationStreamEventIsStarConfirmation,
+  condenseEmailThreadMessages,
   fitHomeColumnWidthsToAvailableWidth,
   getHomeColumnMinimumTrackWidth,
   getHomeGridTemplateColumns,
@@ -97,6 +98,19 @@ function explorerFolderItem(folderID: string, itemID: string, itemType: "node" |
   };
 }
 
+function emailMessage(id: string, threadID: string, date: number, overrides: Partial<EmailMessage> = {}): EmailMessage {
+  return {
+    id,
+    thread_id: threadID,
+    subject: "Subject",
+    snippet: "Preview",
+    unread: false,
+    starred: false,
+    date,
+    ...overrides,
+  };
+}
+
 test("Home view helpers map labels and mailboxes without changing backend mailbox names", () => {
   const shared = [sharedInbox("shared-a", "Team Triage", 1000)];
 
@@ -149,6 +163,23 @@ test("message select dot only appears for the selected email while unread rows k
   const unreadRow = triageMessageRowStyle(false, true, true);
   assert.equal(unreadRow.border, "1px solid transparent");
   assert.match(String(unreadRow.background), /border-box/);
+});
+
+test("triage email list condenses messages from the same Nylas thread into one visible row", () => {
+  const messages = [
+    emailMessage("latest-thread-message", "thread-1", 300, { unread: false }),
+    emailMessage("solo-message", "", 200, { unread: false }),
+    emailMessage("older-thread-message", "thread-1", 100, { unread: true, starred: true }),
+  ];
+
+  const condensed = condenseEmailThreadMessages(messages);
+
+  assert.deepEqual(condensed.map((message) => message.id), ["latest-thread-message", "solo-message"]);
+  assert.equal(condensed[0].thread_message_count, 2);
+  assert.equal(condensed[0].thread_unread_count, 1);
+  assert.equal(condensed[0].unread, true);
+  assert.equal(condensed[0].starred, true);
+  assert.equal(condensed[1].thread_message_count, 1);
 });
 
 test("communications archive stream events are identified without treating generic updates as archive confirmations", () => {
