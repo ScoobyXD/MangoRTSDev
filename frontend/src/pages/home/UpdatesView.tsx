@@ -502,12 +502,20 @@ export function UpdatesView({
     selectUpdateRow(visibleUpdateRows[nextIndex], undefined, { open: true, focus: true });
   }, [selectUpdateRow, selectedNotificationKey, visibleUpdateRows]);
 
-  const removeSeenUpdates = useCallback((items: NotificationItem[], confirmMessage = "") => {
+  const removeSeenUpdates = useCallback((items: NotificationItem[], confirmMessage = "", options: { advanceToNext?: boolean } = {}) => {
     const uniqueItems = Array.from(new Map(items.map((item) => [updateNotificationSelectionKey(item), item])).values());
     const notificationIDs = uniqueItems.map((item) => item.notification_id?.trim() ?? "").filter(Boolean);
     if (notificationIDs.length === 0) return;
     if (confirmMessage && typeof window !== "undefined" && !window.confirm(confirmMessage)) return;
     const hiddenKeys = uniqueItems.map(updateNotificationSelectionKey);
+    const hiddenKeySet = new Set(hiddenKeys);
+    const primaryHiddenKey = hiddenKeys.includes(selectedNotificationKey) ? selectedNotificationKey : (hiddenKeys[0] ?? "");
+    const hiddenRowIndex = visibleUpdateRows.findIndex((row) => updateNotificationSelectionKey(row.item) === primaryHiddenKey);
+    const nextRow = options.advanceToNext && hiddenRowIndex >= 0
+      ? visibleUpdateRows.slice(hiddenRowIndex + 1).find((row) => !hiddenKeySet.has(updateNotificationSelectionKey(row.item)))
+        ?? visibleUpdateRows.slice(0, hiddenRowIndex).reverse().find((row) => !hiddenKeySet.has(updateNotificationSelectionKey(row.item)))
+        ?? null
+      : null;
     setHiddenNotificationIDs((current) => {
       const next = new Set(current);
       for (const key of hiddenKeys) next.add(key);
@@ -518,7 +526,16 @@ export function UpdatesView({
       for (const key of hiddenKeys) next.delete(key);
       return next;
     });
-    if (hiddenKeys.includes(selectedNotificationKey)) setSelectedNotificationKey("");
+    if (nextRow) {
+      const nextKey = updateNotificationSelectionKey(nextRow.item);
+      setSelectedNotificationKey(nextKey);
+      setSelectedNotificationKeys(new Set([nextKey]));
+      setSelectionAnchorNotificationKey(nextKey);
+      openUpdateNodePanel(nextRow);
+    } else if (hiddenKeys.includes(selectedNotificationKey)) {
+      setSelectedNotificationKey("");
+      setActiveNodePanel(null);
+    }
     setContextMenu(null);
     void Promise.all(notificationIDs.map((notificationID) => deleteNotification(notificationID, companyID, { source: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN }))).catch((nextError) => {
       setHiddenNotificationIDs((current) => {
@@ -528,10 +545,10 @@ export function UpdatesView({
       });
       setError(nextError instanceof Error ? nextError.message : "Failed to mark update as seen");
     });
-  }, [companyID, selectedNotificationKey]);
+  }, [companyID, openUpdateNodePanel, selectedNotificationKey, visibleUpdateRows]);
 
   const markUpdateSeen = useCallback((item: NotificationItem) => {
-    removeSeenUpdates([item]);
+    removeSeenUpdates([item], "", { advanceToNext: true });
   }, [removeSeenUpdates]);
 
   const markSelectedUpdatesSeen = useCallback(() => {

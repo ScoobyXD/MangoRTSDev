@@ -14,6 +14,8 @@ import {
   EDITOR_LIST_ATTRIBUTE,
   EDITOR_LIST_ITEM_ATTRIBUTE,
   EDITOR_TABLE_ATTRIBUTE,
+  EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE,
+  EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE,
   EDITOR_TABLE_CELL_ATTRIBUTE,
   EDITOR_TABLE_COLUMNS_ATTRIBUTE,
   EDITOR_TABLE_HEADER_ATTRIBUTE,
@@ -22,6 +24,8 @@ import {
   applyEditorListMarkerStyles,
   applyEditorTableColumnWidths,
   applyEditorTableLayout,
+  applyEditorTableTextAlign,
+  ensureEditorTableAlignmentControls,
   EDITOR_TERMINAL_BREAK_ATTRIBUTE,
   EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE,
   createEditorTableElement,
@@ -30,12 +34,14 @@ import {
   linkifyEditorPlainTextToHTML,
   readEditorTableColumnWidths,
   readEditorTableOffsetPercent,
+  readEditorTableTextAlign,
   readEditorTableWidthPercent,
   readEditorListKind,
   readEditorDocumentText,
   sanitizeEditorDocumentHTML,
   serializeEditorDocumentHTML,
   type EditorListKind,
+  type EditorTableTextAlign,
 } from "./richTextEditing";
 import {
   recordEditorDocumentUndoChange,
@@ -544,6 +550,7 @@ function updateEditorTableColumnAttribute(table: HTMLTableElement) {
   const columns = getEditorTableColumnCount(table);
   applyEditorTableColumnWidths(table, readEditorTableColumnWidths(table, columns));
   applyEditorTableLayout(table, readEditorTableWidthPercent(table), readEditorTableOffsetPercent(table));
+  applyEditorTableTextAlign(table, readEditorTableTextAlign(table));
 }
 
 function editorTableHeaderValue(rowIndex: number, columnIndex: number): "corner" | "column" | "row" | null {
@@ -558,6 +565,7 @@ function createEmptyEditorTableCell(ownerDocument: Document, rowIndex: number, c
   const cell = ownerDocument.createElement(headerValue ? "th" : "td") as HTMLTableCellElement;
   cell.setAttribute(EDITOR_TABLE_CELL_ATTRIBUTE, "true");
   if (headerValue) cell.setAttribute(EDITOR_TABLE_HEADER_ATTRIBUTE, headerValue);
+  ensureEditorTableAlignmentControls(cell, rowIndex, columnIndex);
   cell.appendChild(ownerDocument.createElement("br"));
   return cell;
 }
@@ -585,6 +593,7 @@ function ensureEditorTableCellKind(cell: HTMLTableCellElement, rowIndex: number,
   nextCell.setAttribute(EDITOR_TABLE_CELL_ATTRIBUTE, "true");
   if (headerValue) nextCell.setAttribute(EDITOR_TABLE_HEADER_ATTRIBUTE, headerValue);
   else nextCell.removeAttribute(EDITOR_TABLE_HEADER_ATTRIBUTE);
+  ensureEditorTableAlignmentControls(nextCell, rowIndex, columnIndex);
   if (nextCell.childNodes.length === 0) nextCell.appendChild(nextCell.ownerDocument.createElement("br"));
   return nextCell;
 }
@@ -643,6 +652,36 @@ function clearEditorTableCellSelections(root: HTMLElement) {
   root.querySelectorAll(`[data-mango-editor-table-selected]`).forEach((cell) => {
     if (cell instanceof HTMLElement) cell.removeAttribute("data-mango-editor-table-selected");
   });
+}
+
+function getEditorTableAlignmentAction(root: HTMLElement, node: Node | EventTarget | null): { table: HTMLTableElement; align: EditorTableTextAlign } | null {
+  const element = node instanceof Element
+    ? node
+    : node instanceof Node ? node.parentElement : null;
+  const action = element?.closest?.(`[${EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE}]`) ?? null;
+  if (!(action instanceof HTMLElement)) return null;
+  const rawAlign = action.getAttribute(EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE);
+  const align = rawAlign === "left" || rawAlign === "center" || rawAlign === "right" ? rawAlign : null;
+  const table = align ? getClosestEditorTable(root, action) : null;
+  return align && table ? { table, align } : null;
+}
+
+function applyEditorTableAlignmentAction(
+  root: HTMLElement,
+  table: HTMLTableElement,
+  align: EditorTableTextAlign,
+  documentUndoHistory: EditorDocumentUndoHistory,
+  scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
+  scheduleIndentGuideUpdate: (text: string) => void,
+): boolean {
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  normalizeEditorTable(table);
+  applyEditorTableTextAlign(table, align);
+  const cornerCell = getEditorTableCellAt(table, 0, 0);
+  if (cornerCell) setSelectionInEditorTableCell(root, cornerCell);
+  recordEditorDocumentMutation(documentUndoHistory, root, undoBefore, "format");
+  commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
+  return true;
 }
 
 function markEditorTableHeaderSelection(root: HTMLElement, table: HTMLTableElement, coordinates: { rowIndex: number; columnIndex: number }): boolean {
@@ -1341,6 +1380,66 @@ function insertEditorListItemAfter(root: HTMLElement, item: HTMLLIElement): bool
   item.after(nextItem);
   selectEditorListItem(root, nextItem, "start");
   return true;
+}
+
+function isEditorTableAlignmentControlElement(node: Node): boolean {
+  return node instanceof HTMLElement && node.getAttribute(EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE) === "true";
+}
+
+function isEditorTableCellPlaceholderNode(node: Node): boolean {
+  if (node instanceof HTMLBRElement) return true;
+  return node.nodeType === Node.TEXT_NODE && !(node.textContent ?? "").trim();
+}
+
+function editorTableCellEditableNodes(cell: HTMLTableCellElement): Node[] {
+  return Array.from(cell.childNodes).filter((node) => !isEditorTableAlignmentControlElement(node));
+}
+
+function editorTableCellEditableContentIsEmpty(cell: HTMLTableCellElement): boolean {
+  return editorTableCellEditableNodes(cell).every(isEditorTableCellPlaceholderNode);
+}
+
+function replaceEditorTableCellEditableContentWithList(
+  root: HTMLElement,
+  cell: HTMLTableCellElement,
+  kind: EditorListKind,
+  options: { initialText?: string; appendEmptyItem?: boolean } = {},
+): HTMLLIElement | null {
+  const list = root.ownerDocument.createElement("ul");
+  list.setAttribute(EDITOR_LIST_ATTRIBUTE, kind);
+  const firstItem = createEditorListItem(root.ownerDocument, kind);
+  firstItem.replaceChildren();
+  if (options.initialText !== undefined) {
+    if (options.initialText) firstItem.appendChild(root.ownerDocument.createTextNode(options.initialText));
+  } else {
+    const contentNodes = editorTableCellEditableNodes(cell).filter((node) => !isEditorTableCellPlaceholderNode(node));
+    contentNodes.forEach((node) => firstItem.appendChild(node));
+  }
+  ensureEditorListItemEditableContent(firstItem);
+  list.appendChild(firstItem);
+  const targetItem = options.appendEmptyItem ? createEditorListItem(root.ownerDocument, kind) : firstItem;
+  if (options.appendEmptyItem) list.appendChild(targetItem);
+  editorTableCellEditableNodes(cell).forEach((node) => node.parentNode?.removeChild(node));
+  cell.appendChild(list);
+  applyEditorListMarkerStyles(list);
+  selectEditorListItem(root, targetItem, "start");
+  return targetItem;
+}
+
+function startEditorTableCellListFromText(root: HTMLElement, cell: HTMLTableCellElement, kind: EditorListKind, text: string): boolean {
+  const range = getEditorSelectionRange(root);
+  if (!range || !range.collapsed || !cell.contains(range.startContainer)) return false;
+  if (!editorTableCellEditableContentIsEmpty(cell)) return false;
+  return replaceEditorTableCellEditableContentWithList(root, cell, kind, { initialText: text }) !== null;
+}
+
+function insertEditorTableCellListFromEnter(root: HTMLElement, cell: HTMLTableCellElement, kind: EditorListKind): boolean {
+  const range = getEditorSelectionRange(root);
+  if (!range || !cell.contains(range.startContainer) || !cell.contains(range.endContainer)) return false;
+  if (editorTableCellEditableContentIsEmpty(cell)) {
+    return replaceEditorTableCellEditableContentWithList(root, cell, kind) !== null;
+  }
+  return replaceEditorTableCellEditableContentWithList(root, cell, kind, { appendEmptyItem: true }) !== null;
 }
 
 function exitEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean {
@@ -3165,6 +3264,19 @@ export function useEditorDocumentSurfaceHandlers({
           return;
         }
 
+        const activeTableCell = getCurrentEditorTableCell(root);
+        const tableEditorListKind = activeTableCell ? editorListKindForOutlineStyle(outlineStyle) : null;
+        if (activeTableCell && tableEditorListKind) {
+          const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
+          if (startEditorTableCellListFromText(root, activeTableCell, tableEditorListKind, inputEvent.data)) {
+            event.preventDefault();
+            pendingEditorFontSizeRef.current = null;
+            recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "typing");
+            commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+            return;
+          }
+        }
+
         const activeEditorListItem = getCurrentEditorListItem(root);
         if (activeEditorListItem && editorListItemContentIsEmpty(activeEditorListItem)) {
           event.preventDefault();
@@ -3394,6 +3506,21 @@ export function useEditorDocumentSurfaceHandlers({
       }
       pendingEditorFontSizeRef.current = null;
       syncSelectionFontSize(root, onSelectionFontSizeChange, onSelectionInlineFormatChange);
+      const tableAlignmentAction = getEditorTableAlignmentAction(root, event.target);
+      if (tableAlignmentAction) {
+        event.preventDefault();
+        event.stopPropagation();
+        applyEditorTableAlignmentAction(
+          root,
+          tableAlignmentAction.table,
+          tableAlignmentAction.align,
+          documentUndoHistoryRef.current,
+          scheduleDocumentSave,
+          scheduleIndentGuideUpdate,
+        );
+        clearEditorTableCellSelections(root);
+        return;
+      }
       const checklistItem = getChecklistItemForPointer(root, event);
       if (checklistItem) {
         event.preventDefault();
@@ -3438,6 +3565,15 @@ export function useEditorDocumentSurfaceHandlers({
       openTableContextMenu(event.currentTarget, event);
     },
     onPointerDown(event) {
+      const tableAlignmentAction = getEditorTableAlignmentAction(event.currentTarget, event.target);
+      if (tableAlignmentAction) {
+        event.preventDefault();
+        event.stopPropagation();
+        pendingEditorFontSizeRef.current = null;
+        clearEditorImageSelection(event.currentTarget);
+        event.currentTarget.focus({ preventScroll: true });
+        return;
+      }
       const frame = findEditorImageFrame(event.currentTarget, event.target);
       if (!frame) {
         setActiveTableContextMenu(null);
@@ -3594,7 +3730,38 @@ export function useEditorDocumentSurfaceHandlers({
           pendingEditorFontSizeRef.current = null;
           pendingNativeUndoSnapshotRef.current = null;
           clearEditorImageSelection(root);
-          insertEditorTableCellLineBreak(root, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          const tableListItem = getCurrentEditorListItem(root);
+          if (!event.shiftKey && tableListItem && activeTableCell.contains(tableListItem)) {
+            const mentionUndoBefore = breakEditorMentionsForInput(root, "insertParagraph");
+            if (mentionUndoBefore) {
+              activeMentionRootRef.current = null;
+              setActiveMentionDraft(null);
+            }
+            const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
+            const changed = editorListItemContentIsEmpty(tableListItem)
+              ? exitEditorListItem(root, tableListItem)
+              : insertEditorListItemAfter(root, tableListItem);
+            if (changed) {
+              recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "lineBreak");
+              commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+            }
+          } else {
+            const tableEditorListKind = !event.shiftKey ? editorListKindForOutlineStyle(outlineStyle) : null;
+            if (tableEditorListKind) {
+              const mentionUndoBefore = breakEditorMentionsForInput(root, "insertParagraph");
+              if (mentionUndoBefore) {
+                activeMentionRootRef.current = null;
+                setActiveMentionDraft(null);
+              }
+              const undoBefore = mentionUndoBefore ?? snapshotEditorDocumentRoot(root);
+              if (insertEditorTableCellListFromEnter(root, activeTableCell, tableEditorListKind)) {
+                recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "lineBreak");
+                commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+              }
+            } else {
+              insertEditorTableCellLineBreak(root, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+            }
+          }
           setActiveTableContextMenu(null);
           clearEditorTableCellSelections(root);
           return;
