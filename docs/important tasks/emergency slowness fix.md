@@ -502,3 +502,69 @@ Implement:
 
 Do not implement partial text patching yet. Do not change backend DB semantics unless needed for compile/tests.
 ```
+
+# Me the human am writing this 10:06 AM July 8th 2026
+Three Methods Compared
+1. Old-old method
+Typing saved too much to source-of-truth tables.
+Flow:
+user types
+frontend sends save
+backend writes full editor content into node_information / logic_gate_information
+also updates projection-ish state/events
+lots of DB write/history churn
+Problem:
+every typing save was expensive
+source-of-truth tables got spammed
+very high write pressure
+2. Current deployed method
+This is your recent improvement.
+Flow:
+user types
+frontend sends POST /v1/nodes/:id/projection
+backend writes current editor state to node_projection_table
+source-of-truth saved versions happen manual/auto later
+This is better because:
+typing no longer constantly writes full source-of-truth history
+normal typing mostly hits projection table
+But still bad because:
+frontend can still send overlapping saves
+forced flush can save every text block at once
+auto-version can trigger flushes
+each projection save still does DB transaction + projection upsert + content-change rows + realtime event row
+websocket/realtime noise still exists separately
+3. New proposed method
+Same projection-table idea, but with smarter sending.
+Flow:
+user types
+mark block has changed
+wait briefly
+send one save
+while save is running, do not send another save
+keep newest text in memory
+when save finishes, send one follow-up only if newer text exists
+This fixes the request spam/dogpile.
+Will this fix CPU hitting 100%?
+Honest answer: it should significantly reduce one major cause, but I cannot promise it fixes every 100% spike.
+It should help with:
+editor save storms
+projection save dogpiling
+DB write bursts from overlapping saves
+network spikes from repeated save requests
+API timeouts caused by queued/competing saves
+It will not automatically fix:
+websocket ticket/reconnect 401 storms
+deployment/task replacement spikes
+repeated 404/refetch loops
+expensive non-editor endpoints
+normal ECS max CPU spikes where one task briefly hits 100%
+
+so even after making our changes with better in-flight safety and smarter timing on save requests, we still have these issues with:
+
+websocket ticket/reconnect 401 storms
+deployment/task replacement spikes
+repeated 404/refetch loops
+expensive non-editor endpoints
+normal ECS max CPU spikes where one task briefly hits 100%
+
+so keep that in mind
