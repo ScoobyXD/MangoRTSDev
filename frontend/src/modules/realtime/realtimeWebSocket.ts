@@ -1,5 +1,9 @@
-import { getApiAccessToken } from "../../auth/cognitoAuth.js";
-import { requestJSON } from "../api/requestJSON.js";
+import {
+  addAuthTerminalFailureListener,
+  getApiAccessToken,
+  isTerminalAuthFailureActive,
+} from "../../auth/cognitoAuth.js";
+import { isTerminalAuthFailureError, requestJSON } from "../api/requestJSON.js";
 import type { NotificationItem } from "../notifications/notificationsApi.js";
 
 export type RealtimeMessageType =
@@ -187,6 +191,21 @@ type RealtimeTicketResponse = {
 };
 
 const realtimeClients = new Map<string, MangoRealtimeClient>();
+let terminalAuthFailureRealtimeUnsubscribe: (() => void) | null = null;
+
+export function computeRealtimeReconnectDelayMs(
+  attemptIndex: number,
+  options: { baseDelayMs?: number; maxDelayMs?: number; random?: () => number } = {},
+): number {
+  const baseDelayMs = Math.max(250, Math.round(options.baseDelayMs ?? 1_000));
+  const maxDelayMs = Math.max(baseDelayMs, Math.round(options.maxDelayMs ?? 60_000));
+  const random = options.random ?? Math.random;
+  const safeAttempt = Math.max(0, Math.min(16, Math.floor(attemptIndex)));
+  const exponentialDelayMs = Math.min(maxDelayMs, baseDelayMs * (2 ** safeAttempt));
+  const minimumDelayMs = Math.min(exponentialDelayMs, Math.max(250, Math.round(exponentialDelayMs * 0.5)));
+  const jitter = Math.max(0, Math.min(1, random()));
+  return Math.min(maxDelayMs, Math.round(minimumDelayMs + jitter * (exponentialDelayMs - minimumDelayMs)));
+}
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -436,8 +455,10 @@ export class MangoRealtimeClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private subscriptionsSentForSocket = false;
   private openAttemptID = 0;
+  private reconnectAttempts = 0;
 
   constructor(apiBase: string, companyID: string, options: RealtimeClientOptions = {}) {
+    ensureTerminalAuthFailureRealtimeListener();
     this.apiBase = apiBase;
     this.companyID = companyID;
     this.getAccessToken = options.getAccessToken ?? getApiAccessToken;
@@ -478,6 +499,7 @@ export class MangoRealtimeClient {
   }
 
   ensureOpen(): void {
+    if (isTerminalAuthFailureActive()) return;
     if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING || this.opening) return;
     this.manualClose = false;
     this.opening = true;
@@ -495,6 +517,7 @@ export class MangoRealtimeClient {
             return;
           }
           this.opening = false;
+          this.reconnectAttempts = 0;
           this.sendSubscriptionsForCurrentSocket();
         };
         socket.onmessage = (event) => {
@@ -513,9 +536,13 @@ export class MangoRealtimeClient {
           if (!this.manualClose && (this.keepAliveRefs > 0 || this.subscriptions.size > 0)) this.scheduleReconnect();
         };
       })
-      .catch(() => {
+      .catch((cause) => {
         if (attemptID !== this.openAttemptID) return;
         this.opening = false;
+        if (isTerminalAuthFailureError(cause) || isTerminalAuthFailureActive()) {
+          this.stopForTerminalAuthFailure();
+          return;
+        }
         this.dispatchError({ type: "error", error: "websocket_auth_failed" });
         this.scheduleReconnect();
       });
@@ -538,11 +565,25 @@ export class MangoRealtimeClient {
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectTimer !== undefined || this.manualClose) return;
+    if (this.reconnectTimer !== undefined || this.manualClose || isTerminalAuthFailureActive()) return;
+    const delayMs = computeRealtimeReconnectDelayMs(this.reconnectAttempts, { baseDelayMs: this.reconnectDelayMs });
+    this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
       this.ensureOpen();
-    }, this.reconnectDelayMs);
+    }, delayMs);
+  }
+
+  stopForTerminalAuthFailure(): void {
+    this.manualClose = true;
+    this.openAttemptID += 1;
+    if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+    this.socket?.close();
+    this.socket = null;
+    this.opening = false;
+    this.subscriptionsSentForSocket = false;
+    this.reconnectAttempts = 0;
   }
 
   private sendSubscriptions(): void {
@@ -643,6 +684,13 @@ export class MangoRealtimeClient {
   private dispatchError(message: RealtimeErrorMessage): void {
     for (const sub of this.allSubscriptions()) sub.onError?.(message);
   }
+}
+
+function ensureTerminalAuthFailureRealtimeListener(): void {
+  if (terminalAuthFailureRealtimeUnsubscribe || typeof window === "undefined") return;
+  terminalAuthFailureRealtimeUnsubscribe = addAuthTerminalFailureListener(() => {
+    for (const client of realtimeClients.values()) client.stopForTerminalAuthFailure();
+  });
 }
 
 export function getMangoRealtimeClient(apiBase: string, companyID: string, options: RealtimeClientOptions = {}): MangoRealtimeClient {

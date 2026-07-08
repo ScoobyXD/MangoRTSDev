@@ -57,10 +57,17 @@ const TOKEN_KEY = "mangorts:cognito-token-v2";
 const COGNITO_PASSWORD_RESET_SECONDS = 60 * 60;
 const PUBLIC_AUTH_PATHS = new Set(["/v1/invitations/validate", "/v1/invitations/accept", "/v1/password-resets/request"]);
 const CURRENT_USER_CACHE_TTL_MS = 30_000;
+export const AUTH_TERMINAL_FAILURE_EVENT = "mangorts:auth-terminal-failure";
 
 let currentUserCache: { value: CurrentUserResponse; fetchedAt: number } | null = null;
 let currentUserInflight: Promise<CurrentUserResponse> | null = null;
 let currentUserCacheGeneration = 0;
+let terminalAuthFailureActive = false;
+let tokenRefreshInflight: Promise<TokenSet | null> | null = null;
+
+export type AuthTerminalFailureDetail = {
+  reason: string;
+};
 
 export function readAuthConfig(): CognitoConfig {
   const env = import.meta.env ?? {};
@@ -212,6 +219,7 @@ export async function fetchCurrentUser(): Promise<CurrentUserResponse> {
 
 export function logout(): void {
   clearToken();
+  markTerminalAuthFailure("logout");
 }
 
 export function getAuthSessionCacheGeneration(): number {
@@ -252,9 +260,35 @@ export async function apiFetchJSON<T>(path: string, init?: RequestInit): Promise
   const response = await fetch(apiRequestURL(config, path), { ...init, headers });
   if (!response.ok) {
     const text = await response.text();
+    if (response.status === 401 && !PUBLIC_AUTH_PATHS.has(path)) {
+      markTerminalAuthFailure("api_401");
+    }
     throw new Error(apiErrorMessage(response, text));
   }
   return response.json() as Promise<T>;
+}
+
+export function isTerminalAuthFailureActive(): boolean {
+  return terminalAuthFailureActive;
+}
+
+export function resetTerminalAuthFailure(): void {
+  terminalAuthFailureActive = false;
+}
+
+export function markTerminalAuthFailure(reason = "terminal_auth_failure"): void {
+  const wasActive = terminalAuthFailureActive;
+  terminalAuthFailureActive = true;
+  clearToken();
+  if (wasActive || typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<AuthTerminalFailureDetail>(AUTH_TERMINAL_FAILURE_EVENT, { detail: { reason } }));
+}
+
+export function addAuthTerminalFailureListener(listener: (detail: AuthTerminalFailureDetail) => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  const handler = (event: Event) => listener((event as CustomEvent<AuthTerminalFailureDetail>).detail ?? { reason: "terminal_auth_failure" });
+  window.addEventListener(AUTH_TERMINAL_FAILURE_EVENT, handler);
+  return () => window.removeEventListener(AUTH_TERMINAL_FAILURE_EVENT, handler);
 }
 
 function apiRequestURL(config: CognitoConfig, path: string): string {
@@ -298,9 +332,18 @@ async function getFreshTokenSet(config: CognitoConfig): Promise<TokenSet | null>
     return token;
   }
   if (!token.refresh_token) {
-    clearToken();
+    markTerminalAuthFailure("missing_refresh_token");
     return null;
   }
+  if (tokenRefreshInflight) return tokenRefreshInflight;
+  tokenRefreshInflight = refreshTokenSet(config, token)
+    .finally(() => {
+      tokenRefreshInflight = null;
+    });
+  return tokenRefreshInflight;
+}
+
+async function refreshTokenSet(config: CognitoConfig, token: TokenSet): Promise<TokenSet | null> {
   try {
     const response = await cognitoRequest<InitiateAuthResponse>(config, "InitiateAuth", {
       AuthFlow: "REFRESH_TOKEN_AUTH",
@@ -310,7 +353,7 @@ async function getFreshTokenSet(config: CognitoConfig): Promise<TokenSet | null>
       },
     });
     if (!response.AuthenticationResult) {
-      clearToken();
+      markTerminalAuthFailure("refresh_failed");
       return null;
     }
     writeAuthResult({
@@ -319,7 +362,7 @@ async function getFreshTokenSet(config: CognitoConfig): Promise<TokenSet | null>
     });
     return readToken();
   } catch {
-    clearToken();
+    markTerminalAuthFailure("refresh_failed");
     return null;
   }
 }
@@ -526,6 +569,7 @@ function isApiRequestPath(pathname: string): boolean {
 }
 
 function writeAuthResult(result: CognitoAuthResult): void {
+  resetTerminalAuthFailure();
   clearCurrentUserCache();
   const token: TokenSet = {
     access_token: result.AccessToken,

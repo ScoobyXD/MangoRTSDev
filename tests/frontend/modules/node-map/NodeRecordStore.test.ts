@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { clearResourceMissing, isTerminalResourceNotFoundError } from "../../../../frontend/src/modules/api/missingResources.js";
 import {
   getNodeInformationProjectionSingleFlight,
   invalidateNodeRecordStoreCaches,
@@ -23,8 +24,9 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-function jsonResponse(payload: unknown): Response {
+function jsonResponse(payload: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(payload), {
+    ...init,
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -91,5 +93,36 @@ test("node projection invalidation prevents stale in-flight view responses from 
   } finally {
     globalThis.fetch = originalFetch;
     invalidateNodeRecordStoreCaches(apiBase, "company-1", "node-1");
+  }
+});
+
+test("node view 404 is terminal for that resource until explicit clear", async () => {
+  const apiBase = "https://api.example.test/node-record-404";
+  const companyID = "company-1";
+  const nodeID = "missing-node";
+  const requests: string[] = [];
+  const originalFetch = globalThis.fetch;
+  clearResourceMissing({ apiBase, companyID, resourceType: "node", resourceID: nodeID });
+  invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
+
+  globalThis.fetch = (async (input) => {
+    requests.push(String(input));
+    return jsonResponse({ error: "node_not_found" }, { status: 404, statusText: "Not Found" });
+  }) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      getNodeInformationProjectionSingleFlight(apiBase, companyID, nodeID),
+      (error: unknown) => isTerminalResourceNotFoundError(error),
+    );
+    await assert.rejects(
+      getNodeInformationProjectionSingleFlight(apiBase, companyID, nodeID),
+      (error: unknown) => isTerminalResourceNotFoundError(error),
+    );
+    assert.equal(requests.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearResourceMissing({ apiBase, companyID, resourceType: "node", resourceID: nodeID });
+    invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
   }
 });

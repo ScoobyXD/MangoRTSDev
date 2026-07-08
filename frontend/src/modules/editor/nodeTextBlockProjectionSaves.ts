@@ -33,11 +33,13 @@ export type TextBlockProjectionSaveController<TContent> = {
   getSnapshot: (blockID: string) => TextBlockProjectionSaveStateSnapshot<TContent> | null;
   startLatestContentSave: (blockID: string) => void;
   saveLatestContent: (blockID: string) => Promise<void>;
+  waitForInProgressSaveThenRemoveBlock: (blockID: string) => Promise<void>;
   flushChangedBlocks: () => Promise<void>;
 };
 
 type TextBlockProjectionSaveState<TContent> = TextBlockProjectionSaveStateSnapshot<TContent> & {
   savePromise?: Promise<void>;
+  deleteRequested?: boolean;
 };
 
 export function createTextBlockProjectionSaveController<TContent>(): TextBlockProjectionSaveController<TContent> {
@@ -86,6 +88,7 @@ export function createTextBlockProjectionSaveController<TContent>(): TextBlockPr
 
   function markHasChanged(blockID: string, content: TContent): number {
     const state = ensureBlock(blockID, content);
+    if (state.deleteRequested) return state.localVersion;
     state.latestContent = content;
     state.localVersion += 1;
     state.hasChanged = true;
@@ -133,6 +136,11 @@ export function createTextBlockProjectionSaveController<TContent>(): TextBlockPr
         await saveBlock({ blockID, content, sentVersion });
         const latestState = blockSaves.get(blockID);
         if (!latestState) return;
+        if (latestState.deleteRequested) {
+          latestState.hasChanged = false;
+          latestState.saveNeededAfterCurrentSave = false;
+          return;
+        }
         if (latestState.localVersion === sentVersion) {
           latestState.hasChanged = false;
           latestState.saveNeededAfterCurrentSave = false;
@@ -163,10 +171,12 @@ export function createTextBlockProjectionSaveController<TContent>(): TextBlockPr
     while (true) {
       const state = blockSaves.get(blockID);
       if (!state) return;
+      if (state.deleteRequested) return;
       if (state.saveInProgress) {
         if (state.savePromise) await state.savePromise;
         continue;
       }
+      if (state.deleteRequested) return;
       if (!state.hasChanged && !state.saveNeededAfterCurrentSave) return;
       await startOneSave(blockID, state);
     }
@@ -185,6 +195,22 @@ export function createTextBlockProjectionSaveController<TContent>(): TextBlockPr
     }
   }
 
+  async function waitForInProgressSaveThenRemoveBlock(blockID: string): Promise<void> {
+    const state = blockSaves.get(blockID);
+    if (!state) return;
+    state.deleteRequested = true;
+    state.hasChanged = false;
+    state.saveNeededAfterCurrentSave = false;
+    if (state.savePromise) {
+      try {
+        await state.savePromise;
+      } catch {
+        // Delete still needs to remove the stale projection after the active POST settles.
+      }
+    }
+    blockSaves.delete(blockID);
+  }
+
   return {
     configure,
     replaceBlocksAsHasNotChanged,
@@ -195,6 +221,7 @@ export function createTextBlockProjectionSaveController<TContent>(): TextBlockPr
     getSnapshot,
     startLatestContentSave,
     saveLatestContent,
+    waitForInProgressSaveThenRemoveBlock,
     flushChangedBlocks,
   };
 }

@@ -1,3 +1,10 @@
+import {
+  clearResourceMissing,
+  markResourceMissing,
+  TerminalResourceNotFoundError,
+  throwIfResourceMarkedMissing,
+} from "../api/missingResources.js";
+import { isHTTPNotFoundError } from "../api/requestJSON.js";
 import { getLogicGateArenaView } from "./kanbanApi.js";
 import type { KanbanCard, KanbanColumn } from "./shared.js";
 import { logicGateIDFromKanbanBoardID } from "./shared.js";
@@ -40,6 +47,7 @@ export function hasKanbanBoardContentsCache(apiBase: string, companyID: string, 
 
 export function primeKanbanBoardContentsCache(apiBase: string, companyID: string, boardID: string, contents: KanbanBoardContents): void {
   const cacheKey = key(apiBase, companyID, boardID);
+  clearResourceMissing({ apiBase, companyID, resourceType: "kanban_board", resourceID: boardID });
   bumpContentVersion(cacheKey);
   contentInflight.delete(cacheKey);
   contentCache.set(cacheKey, cloneContents(contents));
@@ -54,6 +62,7 @@ export function invalidateKanbanBoardContentsCache(apiBase: string, companyID: s
 
 export async function getKanbanBoardContentsSingleFlight(apiBase: string, companyID: string, boardID: string, cardLimit = 500): Promise<KanbanBoardContents> {
   const cacheKey = key(apiBase, companyID, boardID);
+  throwIfResourceMarkedMissing({ apiBase, companyID, resourceType: "kanban_board", resourceID: boardID });
   const cached = contentCache.get(cacheKey);
   if (cached) return cloneContents(cached);
   const inflight = contentInflight.get(cacheKey);
@@ -72,8 +81,16 @@ export async function getKanbanBoardContentsSingleFlight(apiBase: string, compan
     })
     : Promise.resolve({ columns: [], cards: [], projectionSequence: undefined })
   ).then((contents) => {
+    clearResourceMissing({ apiBase, companyID, resourceType: "kanban_board", resourceID: boardID });
     if (contentVersion(cacheKey) === version) contentCache.set(cacheKey, cloneContents(contents));
     return contents;
+  }).catch((cause) => {
+    if (isHTTPNotFoundError(cause)) {
+      markResourceMissing({ apiBase, companyID, resourceType: "kanban_board", resourceID: boardID });
+      invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
+      throw new TerminalResourceNotFoundError("kanban_board", boardID);
+    }
+    throw cause;
   }).finally(() => {
     if (contentInflight.get(cacheKey) === promise) contentInflight.delete(cacheKey);
   });

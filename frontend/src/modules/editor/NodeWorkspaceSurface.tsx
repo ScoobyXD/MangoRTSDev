@@ -1030,10 +1030,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       window.clearTimeout(timer);
       saveTimersRef.current.delete(blockID);
     }
+    await textBlockProjectionSaveController.waitForInProgressSaveThenRemoveBlock(blockID);
     const relatedChatIDs = chatMessages.filter((message) => message.blockID === blockID).map((message) => message.id);
     const deletedInformationIDs = [blockID, ...relatedChatIDs];
     contentByBlockRef.current.delete(blockID);
-    textBlockProjectionSaveController.removeBlock(blockID);
     setBlocks((current) => current.filter((block) => block.id !== blockID));
     setChatMessages((current) => current.filter((message) => message.blockID !== blockID));
     setChatDrafts((current) => {

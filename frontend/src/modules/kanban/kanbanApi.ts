@@ -1,4 +1,6 @@
 import { requestJSON } from "../api/requestJSON.js";
+import { clearResourceMissing, markResourceMissing, TerminalResourceNotFoundError, throwIfResourceMarkedMissing } from "../api/missingResources.js";
+import { isHTTPNotFoundError } from "../api/requestJSON.js";
 import type { Account } from "../accounts/accountsApi.js";
 import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import type { LogicGateGVICRole, LogicGateRecord } from "../logic-gate-map/shared.js";
@@ -59,9 +61,20 @@ export async function listKanbanBoards(apiBase: string, companyID: string, limit
 export async function getLogicGateArenaView(apiBase: string, companyID: string, logicGateID: string): Promise<LogicGateArenaView> {
   const params = query({ company_id: companyID });
   const cacheKey = `${apiBase}:company_id=${encodeURIComponent(companyID)}&logic_gate_id=${encodeURIComponent(logicGateID)}`;
+  const resourceKey = { apiBase, companyID, resourceType: "logic_gate" as const, resourceID: logicGateID };
+  throwIfResourceMarkedMissing(resourceKey);
   const cached = readCache(logicGateArenaViewCache.get(cacheKey) ?? null, LOGIC_GATE_ARENA_VIEW_TTL_MS, cloneLogicGateArenaView);
   if (cached) return cached;
-  const view = await requestJSON<LogicGateArenaView>(apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/work?${params}`);
+  const view = await requestJSON<LogicGateArenaView>(apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/work?${params}`)
+    .catch((cause) => {
+      if (isHTTPNotFoundError(cause)) {
+        markResourceMissing(resourceKey);
+        logicGateArenaViewCache.delete(cacheKey);
+        throw new TerminalResourceNotFoundError("logic_gate", logicGateID);
+      }
+      throw cause;
+    });
+  clearResourceMissing(resourceKey);
   logicGateArenaViewCache.set(cacheKey, { value: cloneLogicGateArenaView(view), fetchedAt: Date.now() });
   return view;
 }

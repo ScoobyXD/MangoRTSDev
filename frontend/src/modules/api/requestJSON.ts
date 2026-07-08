@@ -1,4 +1,9 @@
-import { getApiAccessToken } from "../../auth/cognitoAuth.js";
+import {
+  getApiAccessToken,
+  isAuthEnabled,
+  isTerminalAuthFailureActive,
+  markTerminalAuthFailure,
+} from "../../auth/cognitoAuth.js";
 
 export type RequestJSONInit = RequestInit & {
   json?: unknown;
@@ -23,6 +28,30 @@ export type RequestJSONResponse<T> = {
 
 const DEFAULT_API_TIMEOUT_MS = 15_000;
 const MAX_API_ERROR_MESSAGE_CHARS = 280;
+
+export class APIHTTPError extends Error {
+  readonly status: number;
+  readonly statusText: string;
+  readonly bodyText: string;
+
+  constructor(status: number, statusText: string, bodyText: string) {
+    super(sanitizeAPIErrorMessage(status, statusText, bodyText));
+    this.name = "APIHTTPError";
+    this.status = status;
+    this.statusText = statusText;
+    this.bodyText = bodyText;
+  }
+}
+
+export class TerminalAuthFailureError extends Error {
+  readonly reason: string;
+
+  constructor(reason = "terminal_auth_failure") {
+    super("Your session expired. Sign in again.");
+    this.name = "TerminalAuthFailureError";
+    this.reason = reason;
+  }
+}
 
 export async function requestJSON<T>(apiBase: string, path: string, init: RequestJSONInit = {}): Promise<T> {
   const response = await requestJSONWithMeta<T>(apiBase, path, init);
@@ -50,8 +79,16 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
   }
   if (!headers.has("Accept")) headers.set("Accept", "application/json");
   if (auth && !headers.has("Authorization")) {
+    if (isAuthEnabled() && isTerminalAuthFailureActive()) {
+      throw new TerminalAuthFailureError("terminal_auth_failure_active");
+    }
     const token = await getAccessToken();
-    if (token) headers.set("Authorization", `Bearer ${token}`);
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    } else if (isAuthEnabled()) {
+      markTerminalAuthFailure("missing_access_token");
+      throw new TerminalAuthFailureError("missing_access_token");
+    }
   }
 
   const { signal, cleanup } = timeoutSignal(requestInit.signal, timeoutMs);
@@ -64,8 +101,12 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
     const notModified = response.status === 304;
     const ok = response.ok || notModified;
     if (!ok) {
+      if (auth && response.status === 401) {
+        markTerminalAuthFailure("http_401");
+        throw new TerminalAuthFailureError("http_401");
+      }
       if (throwOnHTTPError) {
-        throw new Error(sanitizeAPIErrorMessage(response.status, response.statusText, await response.text()));
+        throw new APIHTTPError(response.status, response.statusText, await response.text());
       }
       return {
         body: undefined,
@@ -91,6 +132,18 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
     logBenchmarkRequestTiming(method, path, responseStatus, requestTimingNow() - startedAt);
     cleanup();
   }
+}
+
+export function isTerminalAuthFailureError(cause: unknown): cause is TerminalAuthFailureError {
+  return cause instanceof TerminalAuthFailureError
+    || (cause instanceof Error && cause.name === "TerminalAuthFailureError");
+}
+
+export function isHTTPNotFoundError(cause: unknown): boolean {
+  if (cause instanceof APIHTTPError) return cause.status === 404;
+  if (!(cause instanceof Error)) return false;
+  const message = cause.message.toLowerCase();
+  return message.includes("404") || message.includes("not_found") || message.includes("not found");
 }
 
 export function createRequestJSON(apiBase: string): BoundRequestJSON {

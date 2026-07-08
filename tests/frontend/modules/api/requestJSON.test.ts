@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { requestJSON, requestJSONWithMeta } from "../../../../frontend/src/modules/api/requestJSON.js";
+import { isTerminalAuthFailureActive, resetTerminalAuthFailure } from "../../../../frontend/src/auth/cognitoAuth.js";
+import { isTerminalAuthFailureError, requestJSON, requestJSONWithMeta } from "../../../../frontend/src/modules/api/requestJSON.js";
 
 function jsonResponse(payload: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
@@ -59,6 +60,22 @@ test("requestJSON parses structured API errors", async () => {
     }),
     /widget_not_found/,
   );
+});
+
+test("requestJSON treats authenticated 401 responses as terminal auth failures", async () => {
+  resetTerminalAuthFailure();
+  try {
+    await assert.rejects(
+      requestJSON("https://api.example.test", "/v1/widgets", {
+        fetchImpl: async () => jsonResponse({ error: "unauthorized" }, { status: 401, statusText: "Unauthorized" }),
+        getAccessToken: async () => "expired-token",
+      }),
+      (error: unknown) => isTerminalAuthFailureError(error),
+    );
+    assert.equal(isTerminalAuthFailureActive(), true);
+  } finally {
+    resetTerminalAuthFailure();
+  }
 });
 
 test("requestJSON returns undefined for 204 responses", async () => {
