@@ -57,6 +57,10 @@ const DEFAULT_UPDATE_GROUPINGS: SavedViewGrouping[] = [
 ];
 const MY_WORK_SELECTED_VIEW_STORAGE_KEY = "mangorts.myWork.selectedView.v1";
 const UPDATES_SELECTED_VIEW_STORAGE_KEY = "mangorts.updates.selectedView.v1";
+const HOME_SAVED_VIEW_DRAG_MIME = "application/x-mangorts-home-saved-view";
+const HOME_SAVED_VIEW_GROUPING_DRAG_MIME = "application/x-mangorts-home-saved-view-grouping";
+
+type SavedViewDropPlacement = "before" | "after";
 
 export function HomeSavedViewsSidebarSection({
   apiBase,
@@ -77,11 +81,13 @@ export function HomeSavedViewsSidebarSection({
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorPosition, setEditorPosition] = useState({ left: 320, top: 92 });
   const [nameDraft, setNameDraft] = useState(fallbackSetting.name);
+  const [savedViewDropTarget, setSavedViewDropTarget] = useState<{ settingID: string; placement: SavedViewDropPlacement } | null>(null);
+  const [groupingDropTarget, setGroupingDropTarget] = useState<{ index: number; placement: SavedViewDropPlacement } | null>(null);
+  const [addGroupingMenuOpen, setAddGroupingMenuOpen] = useState(false);
   const [error, setError] = useState("");
   const panelRef = useRef<HTMLDivElement | null>(null);
   const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
   const contextSetting = contextMenu ? settings.find((setting) => setting.setting_id === contextMenu.settingID) ?? null : null;
-  const contextSettingIndex = contextMenu ? settings.findIndex((setting) => setting.setting_id === contextMenu.settingID) : -1;
   const groupingFields = homeSavedViewGroupingFields(surface);
   const activeFieldSet = new Set(selectedSetting.groupings.map((grouping) => grouping.field));
   const addableFields = groupingFields.filter((field) => !activeFieldSet.has(field.value));
@@ -99,7 +105,16 @@ export function HomeSavedViewsSidebarSection({
 
   useEffect(() => {
     setNameDraft(selectedSetting.name);
+    setAddGroupingMenuOpen(false);
+    setGroupingDropTarget(null);
   }, [selectedSetting.name, selectedSetting.setting_id]);
+
+  useEffect(() => {
+    if (!editorOpen) {
+      setAddGroupingMenuOpen(false);
+      setGroupingDropTarget(null);
+    }
+  }, [editorOpen]);
 
   useEffect(() => {
     if (!apiBase || !companyID.trim()) {
@@ -245,12 +260,16 @@ export function HomeSavedViewsSidebarSection({
     }
   }, [apiBase, companyID, selectedSetting.setting_id, selectedSettingID, settings, storageUserID, surface]);
 
-  const moveSavedView = useCallback((settingID: string, direction: -1 | 1) => {
-    const currentIndex = settings.findIndex((item) => item.setting_id === settingID);
-    const targetIndex = currentIndex + direction;
-    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= settings.length) return;
-    const reordered = [...settings];
-    [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
+  const reorderSavedView = useCallback((sourceSettingID: string, targetSettingID: string | null, placement: SavedViewDropPlacement) => {
+    const moving = settings.find((item) => item.setting_id === sourceSettingID);
+    if (!moving) return;
+    const withoutMoving = settings.filter((item) => item.setting_id !== sourceSettingID);
+    const targetIndex = targetSettingID ? withoutMoving.findIndex((item) => item.setting_id === targetSettingID) : withoutMoving.length;
+    if (targetIndex < 0) return;
+    const insertIndex = targetSettingID ? targetIndex + (placement === "after" ? 1 : 0) : withoutMoving.length;
+    const reordered = [...withoutMoving];
+    reordered.splice(insertIndex, 0, moving);
+    if (reordered.every((setting, index) => setting.setting_id === settings[index]?.setting_id)) return;
     const now = new Date().toISOString();
     const nextSettings = reordered.map((setting, index) => {
       const previous = settings.find((item) => item.setting_id === setting.setting_id);
@@ -265,15 +284,53 @@ export function HomeSavedViewsSidebarSection({
     }
   }, [persistSetting, selectedSettingID, settings, surface]);
 
-  const moveSelectedGrouping = useCallback((index: number, direction: -1 | 1) => {
+  const reorderSelectedGrouping = useCallback((sourceIndex: number, targetIndex: number, placement: SavedViewDropPlacement) => {
     updateSelectedSetting((setting) => {
-      const targetIndex = index + direction;
-      if (index < 0 || targetIndex < 0 || targetIndex >= setting.groupings.length) return setting;
-      const groupings = [...setting.groupings];
-      [groupings[index], groupings[targetIndex]] = [groupings[targetIndex], groupings[index]];
+      const moving = setting.groupings[sourceIndex];
+      if (sourceIndex === targetIndex) return setting;
+      if (!moving || !setting.groupings[targetIndex]) return setting;
+      const withoutMoving = setting.groupings.filter((_, index) => index !== sourceIndex);
+      const adjustedTargetIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+      const insertIndex = adjustedTargetIndex + (placement === "after" ? 1 : 0);
+      const groupings = [...withoutMoving];
+      groupings.splice(insertIndex, 0, moving);
+      if (groupings.every((grouping, index) => grouping === setting.groupings[index])) return setting;
       return { ...setting, groupings };
     });
   }, [updateSelectedSetting]);
+
+  const readDraggedSavedViewID = useCallback((dataTransfer: DataTransfer): string => {
+    try {
+      const parsed = JSON.parse(dataTransfer.getData(HOME_SAVED_VIEW_DRAG_MIME)) as { settingID?: unknown; surface?: unknown };
+      if (parsed.surface !== surface) return "";
+      return typeof parsed.settingID === "string" ? parsed.settingID.trim() : "";
+    } catch {
+      return "";
+    }
+  }, [surface]);
+
+  const readDraggedGroupingIndex = useCallback((dataTransfer: DataTransfer): number => {
+    try {
+      const parsed = JSON.parse(dataTransfer.getData(HOME_SAVED_VIEW_GROUPING_DRAG_MIME)) as { settingID?: unknown; index?: unknown };
+      if (parsed.settingID !== selectedSetting.setting_id || typeof parsed.index !== "number") return -1;
+      return Number.isInteger(parsed.index) ? parsed.index : -1;
+    } catch {
+      return -1;
+    }
+  }, [selectedSetting.setting_id]);
+
+  const hasSavedViewDrag = useCallback((dataTransfer: DataTransfer): boolean => (
+    Array.from(dataTransfer.types).includes(HOME_SAVED_VIEW_DRAG_MIME)
+  ), []);
+
+  const hasGroupingDrag = useCallback((dataTransfer: DataTransfer): boolean => (
+    Array.from(dataTransfer.types).includes(HOME_SAVED_VIEW_GROUPING_DRAG_MIME)
+  ), []);
+
+  const getDropPlacement = useCallback((event: React.DragEvent<HTMLElement>): SavedViewDropPlacement => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return event.clientY > bounds.top + bounds.height / 2 ? "after" : "before";
+  }, []);
 
   const editor = editorOpen && typeof document !== "undefined" ? createPortal(
     <div style={savedViewEditorStyle(editorPosition)}>
@@ -297,8 +354,42 @@ export function HomeSavedViewsSidebarSection({
         <button type="button" title="Close editor" style={savedViewEditorCloseStyle} onClick={() => setEditorOpen(false)}>x</button>
       </div>
       <div style={savedViewGroupingStackStyle}>
-        {selectedSetting.groupings.map((grouping, index) => (
-          <div key={`${grouping.field}:${index}`} style={savedViewGroupingRowStyle(index)}>
+        {selectedSetting.groupings.map((grouping, index) => {
+          const dropPlacement = groupingDropTarget?.index === index ? groupingDropTarget.placement : null;
+          return (
+          <div
+            key={`${grouping.field}:${index}`}
+            draggable
+            style={savedViewGroupingRowStyle(index, dropPlacement)}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData(HOME_SAVED_VIEW_GROUPING_DRAG_MIME, JSON.stringify({ settingID: selectedSetting.setting_id, index }));
+              event.dataTransfer.setData("text/plain", grouping.field);
+              setGroupingDropTarget(null);
+              setAddGroupingMenuOpen(false);
+            }}
+            onDragEnd={() => setGroupingDropTarget(null)}
+            onDragLeave={(event) => {
+              const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+              if (related && event.currentTarget.contains(related)) return;
+              setGroupingDropTarget((current) => current?.index === index ? null : current);
+            }}
+            onDragOver={(event) => {
+              if (!hasGroupingDrag(event.dataTransfer)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = "move";
+              setGroupingDropTarget({ index, placement: getDropPlacement(event) });
+            }}
+            onDrop={(event) => {
+              const sourceIndex = readDraggedGroupingIndex(event.dataTransfer);
+              if (sourceIndex < 0) return;
+              event.preventDefault();
+              event.stopPropagation();
+              reorderSelectedGrouping(sourceIndex, index, getDropPlacement(event));
+              setGroupingDropTarget(null);
+            }}
+          >
             <select
               value={grouping.field}
               style={savedViewFieldSelectStyle}
@@ -328,24 +419,6 @@ export function HomeSavedViewsSidebarSection({
             </button>
             <button
               type="button"
-              title="Move grouping up"
-              disabled={index === 0}
-              style={savedViewMoveButtonStyle(index === 0)}
-              onClick={() => moveSelectedGrouping(index, -1)}
-            >
-              Up
-            </button>
-            <button
-              type="button"
-              title="Move grouping down"
-              disabled={index >= selectedSetting.groupings.length - 1}
-              style={savedViewMoveButtonStyle(index >= selectedSetting.groupings.length - 1)}
-              onClick={() => moveSelectedGrouping(index, 1)}
-            >
-              Dn
-            </button>
-            <button
-              type="button"
               title="Remove grouping"
               style={savedViewRemoveButtonStyle}
               onClick={() => updateSelectedSetting((setting) => ({
@@ -356,19 +429,35 @@ export function HomeSavedViewsSidebarSection({
               x
             </button>
           </div>
-        ))}
-        <button
-          type="button"
-          style={savedViewAddGroupingButtonStyle(addableFields.length === 0)}
-          disabled={addableFields.length === 0}
-          onClick={() => {
-            const nextField = addableFields[0]?.value;
-            if (!nextField) return;
-            updateSelectedSetting((setting) => ({ ...setting, groupings: [...setting.groupings, { field: nextField, direction: "asc" }] }));
-          }}
-        >
-          Add grouping +
-        </button>
+          );
+        })}
+        <div style={savedViewAddGroupingShellStyle}>
+          <button
+            type="button"
+            style={savedViewAddGroupingButtonStyle(addableFields.length === 0)}
+            disabled={addableFields.length === 0}
+            onClick={() => setAddGroupingMenuOpen(true)}
+          >
+            Add grouping +
+          </button>
+          {addGroupingMenuOpen && addableFields.length > 0 && (
+            <div style={savedViewAddGroupingMenuStyle}>
+              {addableFields.map((field) => (
+                <button
+                  key={field.value}
+                  type="button"
+                  style={savedViewAddGroupingMenuOptionStyle}
+                  onClick={() => {
+                    updateSelectedSetting((setting) => ({ ...setting, groupings: [...setting.groupings, { field: field.value, direction: "asc" }] }));
+                    setAddGroupingMenuOpen(false);
+                  }}
+                >
+                  {field.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>,
     document.body,
@@ -377,8 +466,42 @@ export function HomeSavedViewsSidebarSection({
   return (
     <div ref={panelRef} style={savedViewPanelStyle(active)}>
       <div style={savedViewListStyle}>
-        {settings.map((item) => (
-          <div key={item.setting_id} style={savedViewRowShellStyle(item.setting_id === selectedSetting.setting_id)}>
+        {settings.map((item) => {
+          const dropPlacement = savedViewDropTarget?.settingID === item.setting_id ? savedViewDropTarget.placement : null;
+          return (
+          <div
+            key={item.setting_id}
+            draggable
+            style={savedViewRowShellStyle(item.setting_id === selectedSetting.setting_id, dropPlacement)}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData(HOME_SAVED_VIEW_DRAG_MIME, JSON.stringify({ surface, settingID: item.setting_id }));
+              event.dataTransfer.setData("text/plain", item.name);
+              setSavedViewDropTarget(null);
+              setContextMenu(null);
+            }}
+            onDragEnd={() => setSavedViewDropTarget(null)}
+            onDragLeave={(event) => {
+              const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+              if (related && event.currentTarget.contains(related)) return;
+              setSavedViewDropTarget((current) => current?.settingID === item.setting_id ? null : current);
+            }}
+            onDragOver={(event) => {
+              if (!hasSavedViewDrag(event.dataTransfer)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = "move";
+              setSavedViewDropTarget({ settingID: item.setting_id, placement: getDropPlacement(event) });
+            }}
+            onDrop={(event) => {
+              const sourceSettingID = readDraggedSavedViewID(event.dataTransfer);
+              if (!sourceSettingID) return;
+              event.preventDefault();
+              event.stopPropagation();
+              reorderSavedView(sourceSettingID, item.setting_id, getDropPlacement(event));
+              setSavedViewDropTarget(null);
+            }}
+          >
             <button
               type="button"
               style={savedViewRowButtonStyle}
@@ -405,39 +528,18 @@ export function HomeSavedViewsSidebarSection({
               ...
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
       <button type="button" style={savedViewAddButtonStyle} onClick={addSavedView}>Add new +</button>
       {error && <div style={savedViewErrorStyle}>{error}</div>}
       {contextMenu && contextSetting && (
-        <FrameRightClickMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)} minWidth={170}>
+        <FrameRightClickMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)} width={118} minWidth={118} maxWidth={118}>
           <button type="button" style={savedViewContextMenuButtonStyle} onClick={() => { selectSetting(contextSetting.setting_id); setContextMenu(null); setEditorOpen(true); }}>
             Edit
           </button>
           <button type="button" style={savedViewContextMenuButtonStyle} onClick={() => { renameSavedView(contextSetting.setting_id); setContextMenu(null); }}>
             Rename
-          </button>
-          <button
-            type="button"
-            style={savedViewContextMenuButtonStyle}
-            disabled={contextSettingIndex <= 0}
-            onClick={() => {
-              moveSavedView(contextSetting.setting_id, -1);
-              setContextMenu(null);
-            }}
-          >
-            Move up
-          </button>
-          <button
-            type="button"
-            style={savedViewContextMenuButtonStyle}
-            disabled={contextSettingIndex >= settings.length - 1}
-            onClick={() => {
-              moveSavedView(contextSetting.setting_id, 1);
-              setContextMenu(null);
-            }}
-          >
-            Move down
           </button>
           <button
             type="button"
@@ -585,20 +687,36 @@ const savedViewListStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   alignContent: "start",
-  gap: 4,
+  gap: 5,
 };
 
-function savedViewRowShellStyle(active: boolean): React.CSSProperties {
+function savedViewRowShellStyle(active: boolean, dropPlacement: SavedViewDropPlacement | null): React.CSSProperties {
+  const surface = active
+    ? "linear-gradient(145deg, #ffffff 0%, #f8fbff 100%)"
+    : "linear-gradient(145deg, #ffffff 0%, #f7f8fb 100%)";
+  const dropShadow = dropPlacement === "before"
+    ? "inset 0 2px 0 #00a3ff"
+    : dropPlacement === "after"
+      ? "inset 0 -2px 0 #00a3ff"
+      : "";
   return {
     minWidth: 0,
-    minHeight: 26,
+    minHeight: 27,
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) 28px",
     alignItems: "center",
-    border: active ? "1px solid rgba(15, 118, 110, 0.34)" : "1px solid transparent",
-    borderRadius: 7,
-    background: active ? "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(153,246,228,0.54))" : "transparent",
-    boxShadow: active ? "inset 3px 0 0 rgba(15, 118, 110, 0.72)" : "none",
+    border: active ? "1px solid transparent" : "1px solid rgba(255, 255, 255, 0.78)",
+    borderRadius: 8,
+    background: active
+      ? `${surface} padding-box, linear-gradient(135deg, rgba(56, 189, 248, 0.92), rgba(139, 92, 246, 0.78), rgba(20, 184, 166, 0.84)) border-box`
+      : surface,
+    boxShadow: [
+      active
+        ? "7px 7px 16px rgba(174, 174, 192, 0.30), -6px -6px 14px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.92)"
+        : "4px 4px 10px rgba(174, 174, 192, 0.22), -4px -4px 10px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255, 255, 255, 0.90)",
+      dropShadow,
+    ].filter(Boolean).join(", "),
+    cursor: "grab",
     overflow: "hidden",
   };
 }
@@ -629,9 +747,9 @@ const savedViewSettingsButtonStyle: React.CSSProperties = {
   width: 28,
   height: 25,
   border: "none",
-  borderLeft: "1px solid rgba(15, 23, 42, 0.08)",
-  background: "rgba(255, 255, 255, 0.4)",
-  color: "#64748b",
+  borderLeft: "1px solid rgba(148, 163, 184, 0.16)",
+  background: "rgba(255, 255, 255, 0.72)",
+  color: "#475569",
   cursor: "pointer",
   font: "inherit",
   fontSize: 11,
@@ -642,15 +760,16 @@ const savedViewSettingsButtonStyle: React.CSSProperties = {
 const savedViewAddButtonStyle: React.CSSProperties = {
   width: "100%",
   minHeight: 26,
-  border: "1px solid rgba(15, 118, 110, 0.18)",
-  borderRadius: 7,
-  background: "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(204,251,241,0.48))",
-  color: "#0f766e",
+  border: "1px solid rgba(255, 255, 255, 0.78)",
+  borderRadius: 8,
+  background: "linear-gradient(145deg, #ffffff 0%, #f7f8fb 100%)",
+  color: "#087f5b",
   cursor: "pointer",
   font: "inherit",
   fontSize: 11,
   fontWeight: 820,
   padding: "0 8px",
+  boxShadow: "4px 4px 10px rgba(174, 174, 192, 0.20), -4px -4px 10px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
 };
 
 const savedViewErrorStyle: React.CSSProperties = {
@@ -675,10 +794,10 @@ function savedViewEditorStyle(position: { left: number; top: number }): React.CS
     display: "grid",
     gap: 10,
     minWidth: 0,
-    border: "1px solid rgba(37, 99, 235, 0.14)",
-    borderRadius: 10,
-    background: "linear-gradient(145deg, rgba(248, 252, 255, 0.98), rgba(240, 247, 250, 0.94) 48%, rgba(236, 253, 245, 0.88))",
-    boxShadow: "12px 12px 28px rgba(148, 163, 184, 0.24), -8px -8px 22px rgba(255, 255, 255, 0.86), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
+    border: "1px solid rgba(255, 255, 255, 0.74)",
+    borderRadius: 12,
+    background: "linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94))",
+    boxShadow: "14px 14px 32px rgba(148, 163, 184, 0.24), -9px -9px 24px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255, 255, 255, 0.94)",
     backdropFilter: "blur(18px) saturate(1.14)",
     padding: 10,
   };
@@ -695,22 +814,23 @@ const savedViewEditorHeaderStyle: React.CSSProperties = {
 const savedViewNameInputStyle: React.CSSProperties = {
   minWidth: 0,
   height: 28,
-  border: "1px solid rgba(15, 23, 42, 0.14)",
-  borderRadius: 7,
-  background: "rgba(255, 255, 255, 0.86)",
+  border: "1px solid rgba(148, 163, 184, 0.18)",
+  borderRadius: 8,
+  background: "#ffffff",
   color: "#0f172a",
   font: "inherit",
   fontSize: 12,
   fontWeight: 850,
   padding: "0 8px",
+  boxShadow: "inset 2px 2px 5px rgba(174, 174, 192, 0.16), inset -2px -2px 5px rgba(255, 255, 255, 0.94)",
 };
 
 const savedViewEditorCloseStyle: React.CSSProperties = {
   width: 26,
   height: 24,
-  border: "1px solid rgba(15, 23, 42, 0.12)",
-  borderRadius: 6,
-  background: "rgba(255, 255, 255, 0.84)",
+  border: "1px solid rgba(148, 163, 184, 0.18)",
+  borderRadius: 7,
+  background: "#ffffff",
   color: "#64748b",
   cursor: "pointer",
   font: "inherit",
@@ -728,24 +848,34 @@ const savedViewGroupingStackStyle: React.CSSProperties = {
   gap: 6,
 };
 
-function savedViewGroupingRowStyle(index: number): React.CSSProperties {
-  const accent = ["#0891b2", "#d97706", "#7c3aed", "#059669", "#be123c"][index % 5] ?? "#475569";
+function savedViewGroupingRowStyle(index: number, dropPlacement: SavedViewDropPlacement | null): React.CSSProperties {
+  const accent = ["#00a3ff", "#ff8a00", "#8b5cf6", "#14b8a6", "#f43f5e"][index % 5] ?? "#475569";
   const indent = Math.min(index * 12, 30);
+  const dropShadow = dropPlacement === "before"
+    ? "inset 0 2px 0 #00a3ff"
+    : dropPlacement === "after"
+      ? "inset 0 -2px 0 #00a3ff"
+      : "";
   return {
     position: "relative",
     width: `calc(100% - ${indent}px)`,
     minWidth: 0,
     minHeight: 30,
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 46px 32px 32px 22px",
+    gridTemplateColumns: "minmax(0, 1fr) 50px 22px",
     alignItems: "center",
     gap: 5,
     marginLeft: indent,
-    border: `1px solid ${colorWithAlpha(accent, 0.18)}`,
-    borderRadius: 7,
-    background: `linear-gradient(145deg, rgba(255,255,255,0.92), ${colorWithAlpha(accent, 0.12)})`,
-    boxShadow: "4px 4px 12px rgba(148, 163, 184, 0.13), -3px -3px 10px rgba(255, 255, 255, 0.72), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
+    border: `1px solid ${colorWithAlpha(accent, 0.44)}`,
+    borderRadius: 8,
+    background: `linear-gradient(145deg, rgba(255,255,255,0.98), ${colorWithAlpha(accent, 0.18)})`,
+    boxShadow: [
+      `4px 4px 12px rgba(148, 163, 184, 0.14), -3px -3px 10px rgba(255, 255, 255, 0.78), 0 0 0 1px ${colorWithAlpha(accent, 0.08)}, inset 1px 1px 0 rgba(255, 255, 255, 0.90)`,
+      dropShadow,
+    ].filter(Boolean).join(", "),
+    cursor: "grab",
     padding: "0 4px 0 7px",
+    boxSizing: "border-box",
   };
 }
 
@@ -765,9 +895,9 @@ const savedViewFieldSelectStyle: React.CSSProperties = {
 
 const savedViewDirectionButtonStyle: React.CSSProperties = {
   height: 22,
-  border: "1px solid rgba(37, 99, 235, 0.16)",
-  borderRadius: 5,
-  background: "rgba(255, 255, 255, 0.78)",
+  border: "1px solid rgba(37, 99, 235, 0.30)",
+  borderRadius: 6,
+  background: "linear-gradient(145deg, #ffffff, #eff6ff)",
   color: "#1d4ed8",
   cursor: "pointer",
   font: "inherit",
@@ -775,21 +905,6 @@ const savedViewDirectionButtonStyle: React.CSSProperties = {
   fontWeight: 820,
   padding: 0,
 };
-
-function savedViewMoveButtonStyle(disabled: boolean): React.CSSProperties {
-  return {
-    height: 22,
-    border: "1px solid rgba(15, 23, 42, 0.12)",
-    borderRadius: 5,
-    background: disabled ? "rgba(226, 232, 240, 0.54)" : "rgba(255, 255, 255, 0.78)",
-    color: disabled ? "#94a3b8" : "#334155",
-    cursor: disabled ? "default" : "pointer",
-    font: "inherit",
-    fontSize: 10,
-    fontWeight: 820,
-    padding: 0,
-  };
-}
 
 const savedViewRemoveButtonStyle: React.CSSProperties = {
   height: 22,
@@ -803,20 +918,57 @@ const savedViewRemoveButtonStyle: React.CSSProperties = {
   padding: 0,
 };
 
+const savedViewAddGroupingShellStyle: React.CSSProperties = {
+  position: "relative",
+  width: "100%",
+  minWidth: 0,
+};
+
 function savedViewAddGroupingButtonStyle(disabled: boolean): React.CSSProperties {
   return {
+    width: "100%",
     minHeight: 28,
-    border: "1px dashed rgba(14, 165, 233, 0.38)",
-    borderRadius: 7,
-    background: disabled ? "rgba(226, 232, 240, 0.46)" : "linear-gradient(135deg, rgba(255,255,255,0.90), rgba(224,242,254,0.56))",
-    color: disabled ? "#94a3b8" : "#0369a1",
+    border: "1px dashed rgba(0, 163, 255, 0.54)",
+    borderRadius: 8,
+    background: disabled ? "rgba(226, 232, 240, 0.46)" : "linear-gradient(145deg, #ffffff, rgba(224, 242, 254, 0.82))",
+    color: disabled ? "#94a3b8" : "#006fbf",
     cursor: disabled ? "default" : "pointer",
     font: "inherit",
     fontSize: 11,
     fontWeight: 820,
     padding: "0 8px",
+    boxShadow: disabled ? "none" : "4px 4px 10px rgba(148, 163, 184, 0.14), -3px -3px 10px rgba(255, 255, 255, 0.80)",
   };
 }
+
+const savedViewAddGroupingMenuStyle: React.CSSProperties = {
+  position: "absolute",
+  left: 0,
+  top: "calc(100% + 5px)",
+  zIndex: 4,
+  width: "min(220px, 100%)",
+  display: "grid",
+  gap: 3,
+  padding: 6,
+  border: "1px solid rgba(0, 163, 255, 0.26)",
+  borderRadius: 9,
+  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(240, 249, 255, 0.96))",
+  boxShadow: "0 14px 30px rgba(15, 23, 42, 0.16), inset 1px 1px 0 rgba(255, 255, 255, 0.92)",
+};
+
+const savedViewAddGroupingMenuOptionStyle: React.CSSProperties = {
+  minHeight: 29,
+  border: "none",
+  borderRadius: 7,
+  background: "transparent",
+  color: "#0f172a",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 12,
+  fontWeight: 760,
+  textAlign: "left",
+  padding: "0 8px",
+};
 
 const savedViewContextMenuButtonStyle: React.CSSProperties = {
   minHeight: 30,
