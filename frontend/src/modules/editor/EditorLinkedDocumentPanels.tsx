@@ -50,7 +50,7 @@ type EditorLinkedDocumentPanelsProps = {
     inherited?: boolean;
     readOnlyReason?: string;
   } | null;
-  logicGateGVICApplyToDescendants?: boolean;
+  logicGateGVICApplyToAssignedNodesBusy?: boolean;
   companyUsers: Array<{ user_id: string; email?: string; display_name?: string }>;
   companyUserGroups: Array<{ group_id: string; parent_group_id?: string; name: string; position: number }>;
   companyUserGroupMembers: Array<{ group_id: string; user_id: string }>;
@@ -69,7 +69,7 @@ type EditorLinkedDocumentPanelsProps = {
   onCommitNodeAccountIDs: (accountIDs: string[]) => void;
   onSetNodeDueDateDraft: React.Dispatch<React.SetStateAction<string>>;
   onCommitNodeDueDateDraft: (draft: string) => void;
-  onSetLogicGateGVICApplyToDescendants?: (next: boolean) => void;
+  onApplyLogicGateGVICToAssignedNodes?: () => void;
   onAddGVICPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
   onRemoveGVICPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
 };
@@ -302,7 +302,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   compactHeader = false,
   nodePresetFields,
   gvicFields,
-  logicGateGVICApplyToDescendants = false,
+  logicGateGVICApplyToAssignedNodesBusy = false,
   companyUsers,
   companyUserGroups,
   companyUserGroupMembers,
@@ -321,7 +321,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   onCommitNodeAccountIDs,
   onSetNodeDueDateDraft,
   onCommitNodeDueDateDraft,
-  onSetLogicGateGVICApplyToDescendants,
+  onApplyLogicGateGVICToAssignedNodes,
   onAddGVICPrincipal,
   onRemoveGVICPrincipal,
 }) => {
@@ -423,8 +423,8 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
       ruleColor={ruleColor}
       canEdit={canEditGVIC}
       disabledReason={gvicFields.readOnlyReason}
-      applyToDescendants={linkedEntityKind === "logic_gate" ? logicGateGVICApplyToDescendants : false}
-      onApplyToDescendantsChange={linkedEntityKind === "logic_gate" ? onSetLogicGateGVICApplyToDescendants : undefined}
+      applyToAssignedNodesBusy={linkedEntityKind === "logic_gate" ? logicGateGVICApplyToAssignedNodesBusy : false}
+      onApplyToAssignedNodes={linkedEntityKind === "logic_gate" ? onApplyLogicGateGVICToAssignedNodes : undefined}
       onAddPrincipal={onAddGVICPrincipal}
       onRemovePrincipal={onRemoveGVICPrincipal}
     />
@@ -877,8 +877,8 @@ function GVICAssignmentBoard({
   ruleColor,
   canEdit,
   disabledReason,
-  applyToDescendants,
-  onApplyToDescendantsChange,
+  applyToAssignedNodesBusy,
+  onApplyToAssignedNodes,
   onAddPrincipal,
   onRemovePrincipal,
 }: {
@@ -892,43 +892,13 @@ function GVICAssignmentBoard({
   ruleColor: string;
   canEdit: boolean;
   disabledReason?: string;
-  applyToDescendants?: boolean;
-  onApplyToDescendantsChange?: (next: boolean) => void;
+  applyToAssignedNodesBusy?: boolean;
+  onApplyToAssignedNodes?: () => void;
   onAddPrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
   onRemovePrincipal: (role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => void;
 }) {
   return (
     <div style={{ minWidth: 0, width: "100%", display: "grid", gap: 6 }}>
-      {linkedEntityKind === "logic_gate" && onApplyToDescendantsChange && (
-        <label
-          style={{
-            justifySelf: "start",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            minWidth: 0,
-            maxWidth: "100%",
-            padding: "3px 6px",
-            border: `1px solid ${ruleColor}`,
-            borderRadius: 6,
-            background: panelBackground,
-            color: "#374151",
-            fontSize: 11,
-            fontWeight: 600,
-            lineHeight: 1.2,
-            cursor: canEdit ? "pointer" : "default",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={Boolean(applyToDescendants)}
-            disabled={!canEdit}
-            onChange={(event) => onApplyToDescendantsChange(event.currentTarget.checked)}
-            style={{ width: 13, height: 13, margin: 0, accentColor: accent, flex: "0 0 auto" }}
-          />
-          <span style={{ overflowWrap: "anywhere" }}>Apply to assigned nodes</span>
-        </label>
-      )}
       <div
         aria-label="GVIC assignments"
         style={{
@@ -960,6 +930,40 @@ function GVICAssignmentBoard({
             onRemovePrincipal={onRemovePrincipal}
           />
         ))}
+        {linkedEntityKind === "logic_gate" && onApplyToAssignedNodes && (
+          <button
+            type="button"
+            disabled={!canEdit || Boolean(applyToAssignedNodesBusy)}
+            onClick={onApplyToAssignedNodes}
+            title="Apply current Logic Gate GVIC to assigned nodes"
+            style={{
+              minWidth: 0,
+              minHeight: 60,
+              alignSelf: "stretch",
+              display: "grid",
+              alignContent: "center",
+              justifyItems: "start",
+              gap: 3,
+              border: `1px solid ${hexWithAlpha(accent, "35")}`,
+              borderRadius: 9,
+              background: applyToAssignedNodesBusy ? EDITOR_NEU_ACTIVE_SURFACE : panelBackground || EDITOR_NEU_SURFACE,
+              color: canEdit ? accent : "#64748b",
+              cursor: canEdit && !applyToAssignedNodesBusy ? "pointer" : "default",
+              font: "inherit",
+              padding: "7px 9px",
+              opacity: canEdit ? 1 : 0.58,
+              boxShadow: "2px 2px 8px rgba(174,174,192,0.16), -2px -2px 8px rgba(255,255,255,0.76), inset 1px 1px 0 rgba(255,255,255,0.84)",
+              textAlign: "left",
+            }}
+          >
+            <span style={{ fontSize: 11, fontWeight: 900, lineHeight: 1.1, color: canEdit ? accent : "#64748b" }}>
+              {applyToAssignedNodesBusy ? "Updating nodes" : "Apply to assigned nodes"}
+            </span>
+            <span style={{ fontSize: 9.5, fontWeight: 700, lineHeight: 1.15, color: "#64748b" }}>
+              Current GVIC
+            </span>
+          </button>
+        )}
       </div>
     </div>
   );

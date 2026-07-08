@@ -1,4 +1,4 @@
-Last updated: 2026-07-01
+Last updated: 2026-07-08
 
 # GVIC Tests
 
@@ -45,7 +45,7 @@ GVIC34 - Projects have their own GVIC for project visibility and updates, but lo
 GVIC35 - My Work membership is based on node effective GVIC only; project and logic gate data decorate and group visible node rows but do not hide or reveal node rows.
 GVIC36 - Updates visibility is target-based: node events use node effective GVIC/access, logic gate events use logic gate GVIC/access, and project events use project GVIC/access.
 GVIC37 - Group membership, group parent moves, and group deletion update effective GVIC for any resource that directly references the affected group, including Logic Gate templates and node snapshots.
-GVIC38 - Logic Gate GVIC write commands can set apply-to-descendants to update nodes currently assigned to that Logic Gate; set replaces each assigned node snapshot, add applies the added source rows, and remove deletes the removed source rows.
+GVIC38 - Logic Gate GVIC apply-to-descendants is an explicit one-shot bulk action, not a persistent toggle on regular GVIC edits. The action applies the Logic Gate's current GVIC template to nodes currently assigned to that Logic Gate by replacing each assigned node snapshot and refreshing affected node effective/projection rows.
 GVIC39 - GVIC inheritance, overrides, transfers, and apply-to-descendants follow the same business semantics as permissions for every supported parent-child GVIC relationship.
 GVIC40 - A parent GVIC policy is a template captured at create time or transfer time; existing children do not live-inherit future parent GVIC edits unless apply-to-descendants is set.
 GVIC41 - Creating or transferring a GVIC-managed resource copies the direct target parent's current GVIC policy, not the root ancestor's policy.
@@ -125,14 +125,15 @@ Business logic covered:
 
 Given:
 - A logic gate has assigned nodes, node GVIC snapshots, and GVIC template assignments.
-- A logic gate GVIC write is run once without apply-to-descendants and once with apply-to-descendants.
+- A regular logic gate GVIC edit is saved.
+- The user separately runs the one-shot apply-to-descendants action for that logic gate.
 - A user has My Work open while GVIC assignments change.
 - A client receives matrix deltas with and without sequence gaps.
 
 Expected:
 - Logic gate GVIC updates apply precise effective-assignment deltas for the gate template.
-- Without apply-to-descendants, existing assigned node snapshots and assigned-node matrix rows are not mutated.
-- With apply-to-descendants, currently assigned node snapshots are updated and affected node effective/projection rows are refreshed.
+- Regular logic gate GVIC edits do not mutate existing assigned node snapshots or assigned-node matrix rows.
+- The one-shot apply-to-descendants action updates currently assigned node snapshots and refreshes affected node effective/projection rows.
 - Project, node, and supported shared resource GVIC changes apply precise GVIC/projection deltas for affected users.
 - My Work reads from the GVIC matrix projection table.
 - Projection sequence values are ordered per company and scope.
@@ -164,7 +165,8 @@ Business logic covered:
 
 Given:
 - A logic gate has generated, verified, consulted, and informed GVIC assignments.
-- A user adds or removes one assignment through POST or PUT, optionally with apply-to-descendants.
+- A user adds or removes one assignment through POST or PUT.
+- The user separately invokes the one-shot apply-to-descendants action for the current Logic Gate GVIC template.
 - A broad Logic Gate payload or workspace list request may already be cached or in flight.
 - A node is assigned to the logic gate and receives a node-level GVIC snapshot from the logic gate's current template.
 
@@ -177,7 +179,8 @@ Expected:
 - Stale broad Logic Gate payloads, stale workspace list cache entries, and stale in-flight reads cannot overwrite newer Logic Gate GVIC assignments.
 - Logic Gate and Node GVIC follow the same freshness contract.
 - Linked node effective access resolves through the node's own copied snapshot rows after the node enters the logic gate.
-- When apply-to-descendants is set on a Logic Gate GVIC command, the same source-shaped write response remains authoritative for the edited Logic Gate and affected node snapshots refresh through projection/realtime deltas.
+- Regular Logic Gate GVIC add, remove, and set edits are template edits only for existing assigned nodes.
+- When the explicit apply-to-descendants action runs, the same source-shaped write response remains authoritative for the edited Logic Gate and affected node snapshots refresh through projection/realtime deltas.
 
 ### Scenario GVIC-S6: Node Logic Gate GVIC Snapshots, My Work, And Updates
 
@@ -198,7 +201,8 @@ Given:
 - A standalone node has its own GVIC assignments.
 - The node is placed into a logic gate that has different GVIC assignments.
 - The logic gate GVIC changes after the node has entered.
-- The logic gate GVIC change may be saved with or without apply-to-descendants.
+- The logic gate GVIC change is saved as a regular template edit.
+- The one-shot apply-to-descendants action may be run after the template edit.
 - A second node enters after the logic gate GVIC changes.
 - The node is later detached from the logic gate.
 - Project, logic gate, and node updates are shown in Updates.
@@ -207,8 +211,8 @@ Expected:
 - Before placement, the standalone node GVIC is editable and controls the node's My Work visibility.
 - When the node is placed into the logic gate, the node's GVIC assignments are replaced with a snapshot of the logic gate's current GVIC template.
 - While the node is inside the logic gate, the node GVIC editor shows editable node-level assignments.
-- Changing the parent logic gate GVIC without apply-to-descendants does not change the existing node's GVIC or My Work visibility.
-- Changing the parent logic gate GVIC with apply-to-descendants updates existing assigned node snapshots and My Work visibility for affected users.
+- Changing the parent logic gate GVIC as a regular template edit does not change the existing node's GVIC or My Work visibility.
+- Running the explicit apply-to-descendants action updates existing assigned node snapshots and My Work visibility for affected users.
 - Nodes created in or transferred into the logic gate after that change receive the logic gate's new GVIC template.
 - My Work shows the node only when the user's effective node GVIC includes that node; parent project or logic gate GVIC only provides grouping and context.
 - Detaching the node preserves the node-level GVIC snapshot.

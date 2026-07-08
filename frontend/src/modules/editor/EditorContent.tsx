@@ -670,7 +670,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [nodeAccounts, setNodeAccounts] = useState<Account[]>([]);
   const [nodeGVICAssignments, setNodeGVICAssignments] = useState<LogicGateGVICAssignment[]>([]);
   const [logicGateGVICAssignments, setLogicGateGVICAssignments] = useState<LogicGateGVICAssignment[]>([]);
-  const [logicGateGVICApplyToDescendants, setLogicGateGVICApplyToDescendants] = useState(false);
+  const [logicGateGVICApplyToAssignedNodesBusy, setLogicGateGVICApplyToAssignedNodesBusy] = useState(false);
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [companyUserGroups, setCompanyUserGroups] = useState<CompanyUserGroup[]>([]);
   const [companyUserGroupMembers, setCompanyUserGroupMembers] = useState<CompanyUserGroupMember[]>([]);
@@ -741,6 +741,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const logicGateWorkspaceProjectionsRef = useRef<LogicGateProjectionItem[]>([]);
   const logicGateGVICAssignmentsRef = useRef<LogicGateGVICAssignment[]>([]);
   const logicGateGVICMutationSequenceRef = useRef(0);
+  const logicGateGVICApplyToAssignedNodesRequestRef = useRef(0);
   const editorProjectionSequenceByScopeRef = useRef(new Map<string, number>());
   const editorSnapshotRefreshTokenRef = useRef(0);
   const nodeContentChangesRefreshTokenRef = useRef(0);
@@ -1774,10 +1775,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const previousAssignments = logicGateGVICAssignmentsRef.current;
     const mutationSequence = ++logicGateGVICMutationSequenceRef.current;
     editorSnapshotRefreshTokenRef.current += 1;
-    const applyToDescendants = logicGateGVICApplyToDescendants;
     applyLogicGateGVICAssignments(optimisticAssignments, logicGateID);
     setError("");
-    void commandResourceGVICAssignments("logic_gate", logicGateID, operation, [assignment], applyToDescendants).then((assignments) => {
+    void commandResourceGVICAssignments("logic_gate", logicGateID, operation, [assignment]).then((assignments) => {
       const currentTarget = linkedEditorTargetRef.current;
       if (logicGateGVICMutationSequenceRef.current !== mutationSequence || currentTarget.kind !== "logic_gate" || currentTarget.id !== logicGateID) return;
       applyLogicGateGVICAssignments(assignments, logicGateID);
@@ -1791,7 +1791,33 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
       setError(err instanceof Error ? err.message : "failed_to_update_logic_gate_gvic");
     });
-  }, [apiBase, applyLogicGateGVICAssignments, commandResourceGVICAssignments, companyID, linkedEntityKind, linkedNodeID, logicGateGVICApplyToDescendants]);
+  }, [apiBase, applyLogicGateGVICAssignments, commandResourceGVICAssignments, companyID, linkedEntityKind, linkedNodeID]);
+
+  const applyLogicGateGVICToAssignedNodes = useCallback(() => {
+    const logicGateID = linkedNodeID.trim();
+    if (!logicGateID || linkedEntityKind !== "logic_gate" || logicGateGVICApplyToAssignedNodesBusy) return;
+    const confirmed = typeof window === "undefined" || window.confirm("Are you sure you want to apply this Logic Gate GVIC to all nodes currently assigned to this Logic Gate?");
+    if (!confirmed) return;
+    const mutationSequence = ++logicGateGVICMutationSequenceRef.current;
+    const applyRequestID = ++logicGateGVICApplyToAssignedNodesRequestRef.current;
+    editorSnapshotRefreshTokenRef.current += 1;
+    setLogicGateGVICApplyToAssignedNodesBusy(true);
+    setError("");
+    void saveResourceGVICAssignments("logic_gate", logicGateID, logicGateGVICAssignmentsRef.current, true).then((assignments) => {
+      const currentTarget = linkedEditorTargetRef.current;
+      if (logicGateGVICMutationSequenceRef.current !== mutationSequence || currentTarget.kind !== "logic_gate" || currentTarget.id !== logicGateID) return;
+      applyLogicGateGVICAssignments(assignments, logicGateID);
+      patchLogicGateRecordStoreGVICAssignments(apiBase, companyID, logicGateID, assignments);
+      patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache(companyID, logicGateID, assignments);
+      invalidateWorkspaceSnapshot(apiBase, companyID);
+    }).catch((err) => {
+      setError(err instanceof Error ? err.message : "failed_to_apply_logic_gate_gvic_to_nodes");
+    }).finally(() => {
+      if (logicGateGVICApplyToAssignedNodesRequestRef.current === applyRequestID) {
+        setLogicGateGVICApplyToAssignedNodesBusy(false);
+      }
+    });
+  }, [apiBase, applyLogicGateGVICAssignments, companyID, linkedEntityKind, linkedNodeID, logicGateGVICApplyToAssignedNodesBusy, saveResourceGVICAssignments]);
 
   const addNodeGVICPrincipal = useCallback((role: LogicGateGVICRole, principalType: LogicGateGVICPrincipalType, principalID: string) => {
     if (nodeGVICIsInherited) return;
@@ -1964,7 +1990,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   useEffect(() => {
     setIsEditingTitle(false);
     editingTitleDraftRef.current = "";
-    setLogicGateGVICApplyToDescendants(false);
+    logicGateGVICApplyToAssignedNodesRequestRef.current += 1;
+    setLogicGateGVICApplyToAssignedNodesBusy(false);
   }, [linkedEntityKind, linkedNodeID]);
 
   useEffect(() => {
@@ -2893,7 +2920,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             } : linkedEntityKind === "logic_gate" ? {
               assignments: logicGateGVICAssignments,
             } : null}
-            logicGateGVICApplyToDescendants={logicGateGVICApplyToDescendants}
+            logicGateGVICApplyToAssignedNodesBusy={logicGateGVICApplyToAssignedNodesBusy}
             companyUsers={companyUsers}
             companyUserGroups={companyUserGroups}
             companyUserGroupMembers={companyUserGroupMembers}
@@ -2912,7 +2939,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onCommitNodeAccountIDs={commitNodeAccountIDs}
             onSetNodeDueDateDraft={setNodeDueDateDraft}
             onCommitNodeDueDateDraft={commitNodeDueDateDraft}
-            onSetLogicGateGVICApplyToDescendants={setLogicGateGVICApplyToDescendants}
+            onApplyLogicGateGVICToAssignedNodes={applyLogicGateGVICToAssignedNodes}
             onAddGVICPrincipal={linkedEntityKind === "node" ? addNodeGVICPrincipal : addLogicGateGVICPrincipal}
             onRemoveGVICPrincipal={linkedEntityKind === "node" ? removeNodeGVICPrincipal : removeLogicGateGVICPrincipal}
           />

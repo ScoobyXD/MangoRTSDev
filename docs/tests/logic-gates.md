@@ -33,6 +33,8 @@ LG20 - Logic Gate automatic saved-version creation must not run in the backgroun
 LG21 - Restoring a Logic Gate saved version requires confirmation and overwrites the current Logic Gate editor projection row from that saved version without creating another saved-version row.
 LG22 - Logic Gate editor projection saves must use one-save-at-a-time latest-content behavior: while a save is in progress, later edits update the latest in-memory content and mark that another save is needed, but they must not start overlapping `POST /v1/logic-gates/{logic_gate_id}/projection` requests for the same editor document.
 LG23 - Logic Gate editor save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. The editor is marked `has not changed` only when the completed request's version matches the latest local version.
+LG24 - The Logic Gate editor exposes applying the current GVIC template to already assigned nodes as a one-shot action next to the GVIC role fields, not as a persistent checkbox or vertical control between the title and GVIC fields.
+LG25 - Pressing the Logic Gate editor's apply-to-assigned-nodes action asks for confirmation; canceling makes no write, and confirming applies the current Logic Gate GVIC template to nodes currently assigned to that Logic Gate. Ordinary GVIC role edits remain template-only for existing assigned nodes.
 
 ## Scenarios
 
@@ -141,3 +143,22 @@ Expected:
 - If the user keeps typing while that save is in progress, the editor keeps the newest content in memory, marks `save needed after current save`, and does not start overlapping saves.
 - When the in-progress save finishes, the editor marks the projection `has not changed` only if the completed save version is still the latest local version.
 - If newer edits arrived while the save was in progress, the editor sends exactly one follow-up projection save using the newest in-memory content.
+
+### Scenario LG-S6: Logic Gate GVIC Apply To Assigned Nodes Action
+
+Business logic covered:
+- LG24
+- LG25
+
+Given:
+- A user is editing a Logic Gate that has generated, verified, consulted, and informed GVIC fields.
+- The Logic Gate has nodes already assigned to it.
+- The user changes the Logic Gate's GVIC template.
+- The user presses the apply-to-assigned-nodes action.
+
+Expected:
+- The apply-to-assigned-nodes control is displayed as an action beside the GVIC role fields, not as a checkbox or separate row above them.
+- Pressing the action opens a confirmation prompt before any bulk node GVIC update is sent.
+- Canceling the confirmation leaves the current Logic Gate GVIC template saved but does not update existing assigned node snapshots.
+- Confirming applies the current Logic Gate GVIC template to nodes currently assigned to that Logic Gate.
+- Changing Generated, Verified, Consulted, or Informed directly does not implicitly apply that change to existing assigned nodes.
