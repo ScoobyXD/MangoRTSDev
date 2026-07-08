@@ -260,7 +260,31 @@ export function MyWorkView({
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-    setSavedViewsSidebarSlot(document.getElementById(HOME_MY_WORK_SAVED_VIEWS_SLOT_ID));
+    let cancelled = false;
+    let retryTimer: number | null = null;
+    const syncSidebarSlot = () => {
+      if (cancelled) return;
+      const nextSlot = document.getElementById(HOME_MY_WORK_SAVED_VIEWS_SLOT_ID);
+      setSavedViewsSidebarSlot((current) => (current === nextSlot ? current : nextSlot));
+      if (nextSlot && retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      if (!nextSlot && retryTimer === null) {
+        retryTimer = window.setTimeout(() => {
+          retryTimer = null;
+          syncSidebarSlot();
+        }, 120);
+      }
+    };
+    const observer = new MutationObserver(syncSidebarSlot);
+    syncSidebarSlot();
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      cancelled = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      observer.disconnect();
+    };
   }, []);
 
   useEffect(() => {
