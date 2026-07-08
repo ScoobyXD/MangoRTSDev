@@ -1,4 +1,4 @@
-Last updated: 2026-07-07
+Last updated: 2026-07-08
 
 # Logic Gates Tests
 
@@ -27,10 +27,12 @@ LG14 - The Logic Gate editor font-size control applies to highlighted text and, 
 LG15 - Logic Gate editor bold and underline controls must toggle the selected text or sticky caret formatting and must visually reflect the formatting at the current caret or selection.
 LG16 - Inserting a table in a Logic Gate editor must insert the table at the current caret/selection location, not at the top-left or beginning of the editor.
 LG17 - Live Logic Gate editor typing writes the current text state to the Logic Gate editor projection table and must not append a full rich-text document row to `logic_gate_information` on every keystroke autosave.
-LG18 - Logic Gate Save Settings exposes a mandatory auto-save interval setting and lists saved editor versions sorted by saved timestamp, including manual/auto save kind, saving user, save time, and saved text box count.
+LG18 - Logic Gate Save Settings lists saved editor versions sorted by saved timestamp, including save kind, saving user, save time, and saved text box count; automatic saved-version creation is disabled during the emergency slowness fix.
 LG19 - Clicking Save in the Logic Gate editor flushes pending projection saves first, then creates a manual saved editor version in `logic_gate_information`.
-LG20 - Logic Gate auto-save versions use the selected interval and create auto saved editor versions in `logic_gate_information` only when the current editor projection changed since the last saved version.
+LG20 - Logic Gate automatic saved-version creation must not run in the background during the emergency slowness fix. If auto saved versions are re-enabled later, they must only consider active Logic Gates, must only save Logic Gates whose editor projection has changed, and must never scan or save every Logic Gate in the system.
 LG21 - Restoring a Logic Gate saved version requires confirmation and overwrites the current Logic Gate editor projection row from that saved version without creating another saved-version row.
+LG22 - Logic Gate editor projection saves must use one-save-at-a-time latest-content behavior: while a save is in progress, later edits update the latest in-memory content and mark that another save is needed, but they must not start overlapping `POST /v1/logic-gates/{logic_gate_id}/projection` requests for the same editor document.
+LG23 - Logic Gate editor save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. The editor is marked `has not changed` only when the completed request's version matches the latest local version.
 
 ## Scenarios
 
@@ -120,6 +122,8 @@ Business logic covered:
 - LG19
 - LG20
 - LG21
+- LG22
+- LG23
 
 Given:
 - A user has edit access to a Logic Gate.
@@ -128,7 +132,12 @@ Given:
 
 Expected:
 - Regular typing updates `logic_gate_projection_table` for the current editor state instead of appending repeated full-document rows to `logic_gate_information`.
-- Save Settings shows manual and auto saved versions with save kind, saving user, timestamp, and text box count.
+- Save Settings shows saved versions with save kind, saving user, timestamp, and text box count.
 - Manual Save first flushes pending projection updates, then writes one saved-version batch to `logic_gate_information`.
-- Auto save writes a saved-version batch only when the current projection differs from the last saved version.
+- Automatic saved-version creation does not run in the background during the emergency slowness fix.
 - Restoring a saved version asks for confirmation and replaces the current Logic Gate editor projection with the selected saved content.
+- When a user types a paragraph, the editor updates immediately and marks the editor projection as `has changed`.
+- After the debounce delay, the editor starts at most one projection save for that Logic Gate editor document.
+- If the user keeps typing while that save is in progress, the editor keeps the newest content in memory, marks `save needed after current save`, and does not start overlapping saves.
+- When the in-progress save finishes, the editor marks the projection `has not changed` only if the completed save version is still the latest local version.
+- If newer edits arrived while the save was in progress, the editor sends exactly one follow-up projection save using the newest in-memory content.

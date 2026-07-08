@@ -1,4 +1,4 @@
-Last updated: 2026-07-07
+Last updated: 2026-07-08
 
 # Nodes Tests
 
@@ -31,10 +31,13 @@ N20 - Assigning a node to a project from the node header requires selecting a pr
 N21 - A node with a known project relationship exposes a Go to Project action that opens the related project directly.
 N22 - When selected node text is sent to chat as a quote/prefill, the quote preview must expose a cancel action that clears the selected-text prefill without sending a message.
 N23 - Live node editor typing writes the current text-block state to the node editor projection table and must not append a full rich-text document row to `node_information` on every keystroke autosave.
-N24 - Node Save Settings exposes a mandatory auto-save interval setting and lists saved editor versions sorted by saved timestamp, including manual/auto save kind, saving user, save time, and saved text box count.
+N24 - Node Save Settings lists saved editor versions sorted by saved timestamp, including save kind, saving user, save time, and saved text box count; automatic saved-version creation is disabled during the emergency slowness fix.
 N25 - Clicking Save in the node editor flushes pending projection saves first, then creates a manual saved editor version in `node_information`.
-N26 - Node auto-save versions use the selected interval and create auto saved editor versions in `node_information` only when the current editor projection changed since the last saved version.
+N26 - Node automatic saved-version creation must not run in the background during the emergency slowness fix. If auto saved versions are re-enabled later, they must only consider active nodes, must only save nodes whose editor projection has changed, and must never scan or save every node in the system.
 N27 - Restoring a node saved version requires confirmation and overwrites the current node editor projection rows from that saved version without creating another saved-version row.
+N28 - Node editor text-block projection saves must use one-save-at-a-time latest-content behavior per node text block: while a save is in progress, later edits update the latest in-memory content and mark that another save is needed, but they must not start overlapping `POST /v1/nodes/{node_id}/projection` requests for the same text block.
+N29 - Node editor text-block save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. A block is marked `has not changed` only when the completed request's version matches the latest local version.
+N30 - Node editor forced projection flushes must save only blocks that have changed and must not `Promise.all` every text block in the node. The flush must preserve all user characters by waiting for in-progress saves and then saving the latest content if newer edits arrived.
 
 ## Scenarios
 
@@ -176,6 +179,9 @@ Business logic covered:
 - N25
 - N26
 - N27
+- N28
+- N29
+- N30
 
 Given:
 - A user has edit access to a node.
@@ -184,7 +190,13 @@ Given:
 
 Expected:
 - Regular typing updates `node_projection_table` for the current text box state instead of appending repeated full-document rows to `node_information`.
-- Save Settings shows manual and auto saved versions with save kind, saving user, timestamp, and text box count.
+- Save Settings shows saved versions with save kind, saving user, timestamp, and text box count.
 - Manual Save first flushes pending projection updates, then writes one saved-version batch to `node_information`.
-- Auto save writes a saved-version batch only when the current projection differs from the last saved version.
+- Automatic saved-version creation does not run in the background during the emergency slowness fix.
 - Restoring a saved version asks for confirmation and replaces the current node editor projection with the selected saved content.
+- When a user types a paragraph, the editor updates immediately and marks the affected text block as `has changed`.
+- After the debounce delay, the editor starts at most one projection save for that node text block.
+- If the user keeps typing while that save is in progress, the editor keeps the newest content in memory, marks `save needed after current save`, and does not start overlapping saves.
+- When the in-progress save finishes, the editor marks the block `has not changed` only if the completed save version is still the latest local version.
+- If newer edits arrived while the save was in progress, the editor sends exactly one follow-up projection save using the newest in-memory content.
+- Forced flushes save only changed text blocks and complete without dropping characters typed during in-progress saves.
