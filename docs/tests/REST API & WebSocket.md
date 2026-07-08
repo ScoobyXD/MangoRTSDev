@@ -30,6 +30,7 @@ RW19 - WebSocket reconnects after backend replacement/deploy must use randomized
 RW20 - WebSocket reconnect recovery must be scoped: reconnecting must not refetch the whole app by default, and should request only data that may be stale for the affected subscriptions.
 RW21 - A `404` for a node, Logic Gate, or other resource is terminal for that resource until explicit user navigation or an authoritative event says the resource exists; the client must stop refetching that exact missing resource and unsubscribe from its realtime scope.
 RW22 - Failure handling for `401`, `404`, and WebSocket disconnects must reduce frontend/backend work rather than creating retry, reconnect, or fallback-refetch storms.
+RW23 - Realtime WebSocket tickets must be short-lived, HTTP-only, and valid across backend worker instances in the same environment so a ticket issued by one ECS task can be accepted by another task during WebSocket upgrade.
 
 ## Scenarios
 
@@ -207,3 +208,20 @@ Expected:
 - Reconnect behavior is capped or becomes very slow instead of retrying aggressively forever.
 - A reconnect does not refetch the whole app by default.
 - After reconnect, the client requests only the scoped data that may be stale for active subscriptions.
+
+### Scenario RW-S9: Realtime Tickets Work Across Backend Workers
+
+Business logic covered:
+- RW18
+- RW19
+- RW23
+
+Given:
+- The dev or production backend is running more than one worker/task.
+- A browser requests a realtime ticket from one backend worker.
+- The subsequent WebSocket upgrade is routed to a different backend worker.
+
+Expected:
+- The ticket is accepted by the upgrade worker when it is unexpired and scoped to the requested company.
+- The ticket is not exposed as a query parameter or normal JavaScript-readable credential.
+- Cross-worker routing does not create repeated `401` WebSocket upgrade failures for a still-authenticated user.

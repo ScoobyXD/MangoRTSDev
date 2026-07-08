@@ -2483,8 +2483,8 @@ func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 body=%s", rec.Code, rec.Body.String())
 	}
 	connection, err := repo.GetUserEmailConnection(user.UserID)
 	if err != nil {
@@ -2492,6 +2492,40 @@ func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {
 	}
 	if connection.Status != "reauth_required" {
 		t.Fatalf("connection status = %q, want reauth_required", connection.Status)
+	}
+}
+
+func TestCommunicationsStoredReauthRequiredReturnsConflict(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "reauth_required",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   &fakeNylasClient{},
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages", nil)
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -2557,8 +2591,8 @@ func TestCommunicationsSharedNylasAuthErrorMarksCompanyConnectionReauthRequired(
 	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 body=%s", rec.Code, rec.Body.String())
 	}
 	updatedCompanyConnection, err := repo.GetCompanyEmailConnectionByID(companyID, companyConnection.CompanyEmailConnectionID)
 	if err != nil {
@@ -2573,6 +2607,76 @@ func TestCommunicationsSharedNylasAuthErrorMarksCompanyConnectionReauthRequired(
 	}
 	if personal.Status != "connected" {
 		t.Fatalf("personal status = %q, want connected", personal.Status)
+	}
+}
+
+func TestCommunicationsStoredSharedReauthRequiredReturnsConflict(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const companyID = "company-shared-stored-reauth"
+	repo.EnsureCompany(companyID, "Shared Stored Reauth Company")
+	const subject = "shared-stored-reauth-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "personal-grant",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	companyConnection, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID:         companyID,
+		Provider:          "google",
+		AccountEmail:      "support@example.com",
+		GrantID:           "shared-grant",
+		Status:            "connected",
+		ConnectedByUserID: user.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", companyConnection.AccountEmail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateCompanyEmailConnectionStatus(companyID, companyConnection.CompanyEmailConnectionID, "reauth_required"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:  companyID,
+		EntityType: store.EntityTypeSharedInbox,
+		EntityID:   folder.FolderID,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   user.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   &fakeNylasClient{},
+	}).Routes()
+
+	path := "/v1/communications/messages?company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 body=%s", rec.Code, rec.Body.String())
 	}
 }
 

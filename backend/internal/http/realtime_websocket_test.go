@@ -72,6 +72,29 @@ func TestRealtimeWebSocketTicketHandshakeSendsReady(t *testing.T) {
 	}
 }
 
+func TestRealtimeWebSocketSignedTicketWorksAcrossServerInstances(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "88888888-8888-4888-8888-888888888012"
+	token := "signed-ticket-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "signed-ticket-user", domain.RoleCompanyUser)
+	validator := &tokenClaimsValidator{claims: map[string]auth.Claims{
+		token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
+	}}
+	serverA := NewServerWithOptions(repo, ServerOptions{AuthValidator: validator, RealtimeTicketSecret: "shared-realtime-ticket-secret"})
+	defer serverA.Close()
+	serverB := NewServerWithOptions(repo, ServerOptions{AuthValidator: validator, RealtimeTicketSecret: "shared-realtime-ticket-secret"})
+	defer serverB.Close()
+
+	ticketCookie := mintRealtimeTicketCookieForTest(t, serverA.Routes(), companyID, token)
+	client := openRealtimeWebSocketWithCookieForTest(t, serverB.Routes(), "/v1/realtime/ws?company_id="+companyID, ticketCookie)
+	defer client.close()
+
+	ready := client.readJSON(t)
+	if ready["type"] != realtimeMessageReady || ready["company_id"] != companyID || ready["user_id"] != user.UserID {
+		t.Fatalf("cross-server ticket ready = %+v, want ready for company/user", ready)
+	}
+}
+
 func TestRealtimeWebSocketNormalAccessTokenQueryRejected(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "88888888-8888-4888-8888-888888888011"

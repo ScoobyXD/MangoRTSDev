@@ -92,6 +92,7 @@ type ServerOptions struct {
 	BootstrapDevAdmin                       BootstrapDevAdminConfig
 	NylasClient                             NylasClient
 	NylasConfig                             NylasConfig
+	RealtimeTicketSecret                    string
 	MaxRequestBodyBytes                     int64
 	LegacyMapRoutesEnabled                  bool
 	WorkspaceEventFanout                    store.WorkspaceEventFanout
@@ -184,12 +185,16 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	if metrics == nil {
 		metrics = NewInMemoryMetricsRecorder()
 	}
+	realtimeTicketSecret := strings.TrimSpace(options.RealtimeTicketSecret)
+	if realtimeTicketSecret == "" {
+		realtimeTicketSecret = strings.TrimSpace(options.NylasConfig.StateSecret)
+	}
 	server := &Server{
 		repo:                                    repo,
 		workspaceEvents:                         newLocalWorkspaceEventBus(),
 		projectionHub:                           newProjectionDeltaHub(),
 		realtimeRegistry:                        newRealtimeSubscriptionRegistry(),
-		realtimeTickets:                         newRealtimeTicketStore(),
+		realtimeTickets:                         newRealtimeTicketStore(realtimeTicketSecret),
 		notifications:                           notifications.NewService(repo),
 		kanban:                                  kanban.NewService(repo),
 		workspaceFanout:                         options.WorkspaceEventFanout,

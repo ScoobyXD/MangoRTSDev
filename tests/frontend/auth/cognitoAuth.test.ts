@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasStoredToken, logout } from "../../../frontend/src/auth/cognitoAuth.js";
+import { apiFetchJSON, hasStoredToken, isTerminalAuthFailureActive, logout, resetTerminalAuthFailure } from "../../../frontend/src/auth/cognitoAuth.js";
 
 const TOKEN_KEY = "mangorts:cognito-token-v2";
 
@@ -71,5 +71,24 @@ test("auth token migrates a legacy sessionStorage token into localStorage", () =
   } finally {
     restoreLocal();
     restoreSession();
+  }
+});
+
+test("communications provider reauth responses do not mark Mango auth terminal", async () => {
+  resetTerminalAuthFailure();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: "nylas_reauth_required" }), {
+    status: 409,
+    headers: { "Content-Type": "application/json" },
+  });
+  try {
+    await assert.rejects(
+      apiFetchJSON("/v1/communications/messages"),
+      /Email access expired. Disconnect and reconnect your mailbox./,
+    );
+    assert.equal(isTerminalAuthFailureActive(), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTerminalAuthFailure();
   }
 });

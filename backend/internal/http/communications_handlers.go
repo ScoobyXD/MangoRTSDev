@@ -1209,7 +1209,7 @@ func (s *Server) requireConnectedEmail(w http.ResponseWriter, r *http.Request) (
 		return domain.UserEmailConnection{}, false
 	}
 	if connection.Status == "reauth_required" {
-		writeError(w, http.StatusUnauthorized, "nylas_reauth_required")
+		writeError(w, http.StatusConflict, "nylas_reauth_required")
 		return domain.UserEmailConnection{}, false
 	}
 	if connection.Status != "connected" || strings.TrimSpace(connection.GrantID) == "" {
@@ -1293,7 +1293,7 @@ func (s *Server) requireCommunicationsConnection(w http.ResponseWriter, r *http.
 
 func requireConnectedEmailStatus(w http.ResponseWriter, connection domain.UserEmailConnection) (domain.UserEmailConnection, bool) {
 	if connection.Status == "reauth_required" {
-		writeError(w, http.StatusUnauthorized, "nylas_reauth_required")
+		writeError(w, http.StatusConflict, "nylas_reauth_required")
 		return domain.UserEmailConnection{}, false
 	}
 	if connection.Status != "connected" || strings.TrimSpace(connection.GrantID) == "" {
@@ -1355,7 +1355,7 @@ func (s *Server) writeNylasError(w http.ResponseWriter, r *http.Request, connect
 		log.Printf("nylas API error user_id=%s provider=%s path=%s status=%d code=%s message=%s", connection.UserID, connection.Provider, r.URL.Path, apiErr.StatusCode, apiErr.Code, apiErr.Message)
 		if apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden {
 			s.markCommunicationsConnectionReauthRequired(connection)
-			writeError(w, http.StatusUnauthorized, "nylas_reauth_required")
+			writeError(w, http.StatusConflict, "nylas_reauth_required")
 			return
 		}
 		if apiErr.StatusCode == http.StatusNotFound {
