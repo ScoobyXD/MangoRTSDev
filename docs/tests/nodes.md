@@ -38,6 +38,7 @@ N27 - Restoring a node saved version requires confirmation and overwrites the cu
 N28 - Node editor text-block projection saves must use one-save-at-a-time latest-content behavior per node text block: while a save is in progress, later edits update the latest in-memory content and mark that another save is needed, but they must not start overlapping `POST /v1/nodes/{node_id}/projection` requests for the same text block.
 N29 - Node editor text-block save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. A block is marked `has not changed` only when the completed request's version matches the latest local version.
 N30 - Node editor forced projection flushes must save only blocks that have changed and must not `Promise.all` every text block in the node. The flush must preserve all user characters by waiting for in-progress saves and then saving the latest content if newer edits arrived.
+N31 - Deleting a node text block must not race with an in-flight projection save. If a projection save is already in progress for that block, deletion must wait for that save to finish or otherwise cancel/ignore it before issuing the projection DELETE, so a late POST cannot recreate the deleted block.
 
 ## Scenarios
 
@@ -182,11 +183,12 @@ Business logic covered:
 - N28
 - N29
 - N30
+- N31
 
 Given:
 - A user has edit access to a node.
 - The user types in one or more node text boxes.
-- The user opens Save Settings, changes the auto-save interval, manually saves, or waits for an auto-save interval.
+- The user opens Save Settings, changes the auto-save interval, manually saves, waits for an auto-save interval, or deletes a text box while a save may still be in progress.
 
 Expected:
 - Regular typing updates `node_projection_table` for the current text box state instead of appending repeated full-document rows to `node_information`.
@@ -200,3 +202,5 @@ Expected:
 - When the in-progress save finishes, the editor marks the block `has not changed` only if the completed save version is still the latest local version.
 - If newer edits arrived while the save was in progress, the editor sends exactly one follow-up projection save using the newest in-memory content.
 - Forced flushes save only changed text blocks and complete without dropping characters typed during in-progress saves.
+- If the user deletes a text block while a projection save for that block is in progress, the delete path waits for the in-progress save to finish or prevents its result from applying before issuing the projection DELETE.
+- A late projection POST must not recreate a deleted text block after the DELETE succeeds.

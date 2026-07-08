@@ -307,7 +307,55 @@ Options:
 - enable target stickiness as a mitigation
 - add proactive websocket heartbeat below ALB idle timeout
 
-### 7. Add read-only Performance Insights permission
+### 7. Stop auth failure storms
+
+Do not make access tokens last 12 or 24 hours. A leaked access token would then be usable for that whole period.
+
+The intended model is:
+- access tokens stay short-lived, roughly 30-60 minutes
+- the browser app session may last 12-24 hours while the app is open
+- the app silently refreshes access tokens while the session is valid
+- auth refresh means the app asks Cognito/AWS auth for a fresh access token, not that the user manually logs in again
+
+If auth refresh fails or the app receives a terminal auth failure:
+- stop all product fetches
+- stop all realtime ticket requests
+- stop all websocket reconnects
+- stop fallback/refetch behavior
+- stop editor saves
+- force the normal Mango logout/login flow
+- show the existing Mango login page, not a tiny websocket/auth badge while the user keeps typing
+
+This matters because a backend CPU spike can plausibly create a feedback loop:
+1. backend gets slow
+2. auth/realtime/API requests time out or return 401
+3. frontend retries tickets, websockets, and fallback refetches
+4. retries add more backend load
+5. more load causes more failures
+
+Failures must become quieter, not louder.
+
+### 8. Stop repeated 404/refetch loops
+
+A 404 for a node, Logic Gate, or other resource should be treated as terminal for that resource until the user explicitly navigates there again.
+
+Expected behavior:
+- stop refetching the missing resource
+- unsubscribe from its realtime scope
+- clear or close stale UI references
+- do not turn "not found" into a fallback loop
+
+### 9. Calm reconnects during backend replacement
+
+Plain English definition: an ECS deploy is what happens when a GitHub Action deploys a new backend version to the dev site. AWS starts new backend containers and stops old backend containers. Existing websocket connections to old backend containers are expected to drop.
+
+Expected behavior during backend replacement:
+- websocket reconnects use random delay and exponential backoff
+- reconnect attempts are capped or become very slow after repeated failures
+- reconnect does not refetch the whole app
+- after reconnect, request only the scoped data that may be stale
+
+### 10. Add read-only Performance Insights permission
 
 The read-only agent role could not call `pi:GetResourceMetrics`.
 
@@ -366,9 +414,13 @@ Recommended order:
 1. Disable automatic saved-version creation for nodes and Logic Gates.
 2. Add one-save-at-a-time latest-content behavior for node text-block projection saves.
 3. Make node text-block forced flush save only changed blocks without unbounded `Promise.all`.
-4. Add backend phase timing for node projection and node information writes.
-5. Fix websocket ticket/heartbeat issue.
-6. Use Performance Insights/top SQL during the next spike once read-only permission allows it.
+4. Fix node text-block deletion so an in-progress projection POST cannot recreate a block after DELETE.
+5. On terminal auth failure, stop fetches/websockets/fallbacks/editor saves and force the normal Mango login page.
+6. Treat 404 for a missing resource as terminal for that resource instead of refetching forever.
+7. Make backend replacement websocket reconnects staggered, backed off, and scoped.
+8. Add backend phase timing for node projection and node information writes.
+9. Fix websocket ticket/heartbeat issue.
+10. Use Performance Insights/top SQL during the next spike once read-only permission allows it.
 
 ## Final Agreed Save Flow
 
@@ -475,7 +527,9 @@ Important safety rule:
 
 Never mark a text block `has not changed` merely because a request returned. Mark it `has not changed` only when the returned request's `sentVersion` equals the current `localVersion`.
 
-## Prompt For Next Codex Instance
+## Historical Prompt For First Editor Save Fix
+
+This prompt was for the first editor dogpile fix and is kept only as history. Use the follow-up prompt below for the next implementation pass.
 
 ```text
 We are in C:\Users\Jonat\MangoRTSDev. Read AGENTS.md and follow the AWS/DB safety rules. Do not do AWS or DB work for this task unless I explicitly ask.
@@ -568,3 +622,80 @@ expensive non-editor endpoints
 normal ECS max CPU spikes where one task briefly hits 100%
 
 so keep that in mind
+
+## Follow-Up Reliability Conclusions
+
+Agreed auth behavior:
+- Keep the browser app session alive while the app is open, preferably 12-24 hours, using silent token refresh.
+- Do not make the access token itself last 12-24 hours.
+- If silent refresh works, the user does not manually log in again.
+- If silent refresh fails or the app reaches a terminal 401/auth failure, stop everything product-facing and force the existing Mango login page.
+- Stop all fetches, websocket reconnects, realtime ticket requests, fallback refetches, editor saves, and background retries until the user logs back in.
+- Do not show only a tiny websocket/auth error while the user continues typing into a dead session.
+
+Agreed feedback-loop diagnosis:
+- It is plausible that CPU saturation delayed or broke auth/realtime/API calls.
+- Broken auth/realtime calls then triggered retries and fallback refetches.
+- Those retries added more backend load and made the incident worse.
+- The fix is not just "retry better"; the fix is that auth failure must make the app quiet and logged out.
+
+Agreed 404 behavior:
+- A 404 for a node, Logic Gate, or other resource is terminal for that resource.
+- The app must stop refetching that exact missing resource, unsubscribe from its realtime scope, and clear or close the stale UI reference.
+- It may retry only after explicit user navigation or a new authoritative event says the resource exists.
+
+Agreed backend replacement behavior:
+- "ECS deploy" means a GitHub Action or deploy process shipped a new backend version to the dev site and AWS replaced old backend workers with new backend workers.
+- Websocket disconnects during backend replacement are normal.
+- Reconnects must be staggered with random delay and exponential backoff.
+- Reconnects must not refetch the whole app by default.
+- After reconnect, fetch only the scoped data that may be stale.
+
+Remaining known editor edge case:
+- Deleting a node text block can race with an in-flight projection save.
+- `NodeWorkspaceSurface.tsx` removes the block from the save controller and then DELETEs the projection.
+- An already-started POST from `nodeTextBlockProjectionSaves.ts` can still finish after that DELETE and recreate the block.
+- Fix by waiting for any in-progress save for that block before issuing the DELETE, then add a focused test.
+
+## Prompt For Next Codex Instance: Auth/Reconnection And Delete Race
+
+```text
+We are in C:\Users\Jonat\MangoRTSDev. Read AGENTS.md first and follow the repo safety rules. Do not do AWS or DB work for this task unless I explicitly ask.
+
+Task: implement the follow-up emergency slowness reliability fixes documented in docs/important tasks/emergency slowness fix.md and docs/tests.
+
+Scope:
+1. Fix terminal auth failure behavior.
+2. Fix 404 refetch loops for missing resources.
+3. Make websocket reconnects calm during backend replacement/deploys.
+4. Fix the node text-block delete race with in-flight projection saves.
+
+Product decisions already made:
+- Keep app sessions alive while the browser app is open using silent token refresh; do not make access tokens themselves last 12-24 hours.
+- Auth refresh means the app silently obtains a new access token. It does not mean the user manually logs in again.
+- If auth refresh fails or the app gets a terminal 401/auth failure, immediately force the normal Mango logout/login flow and show the existing Mango login page.
+- On terminal auth failure, stop all product fetches, realtime ticket requests, websocket reconnects, fallback/refetch behavior, editor saves, and background retries until login.
+- Do not leave the user typing into a dead session with only a tiny websocket/auth error.
+- A 404 for a node, Logic Gate, or other resource is terminal for that resource: stop refetching it, unsubscribe from its realtime scope, and clear or close stale UI references until explicit user navigation or a new authoritative event says it exists.
+- Backend replacement/deploy means GitHub Actions or another deploy shipped a new backend version and AWS replaced old backend workers. Websocket drops are normal, but reconnects must use random delay, exponential backoff, and scoped recovery. Do not refetch the whole app by default.
+
+Also fix this editor edge case:
+- Deleting a node text block can race with an in-flight projection save.
+- NodeWorkspaceSurface.tsx removes the block from the text-block save controller and then DELETEs the projection.
+- An already-started POST from nodeTextBlockProjectionSaves.ts startOneSave can finish after the DELETE and recreate the block.
+- Add a controller method or use an existing one so delete waits for any in-progress save for that block before issuing DELETE, then removes the block and deletes the projection.
+- Add a focused test proving an in-flight save cannot recreate a deleted text block or that delete waits for in-flight save completion before DELETE.
+
+Docs/tests contracts to honor:
+- docs/tests/auth.md
+- docs/tests/REST API & WebSocket.md
+- docs/tests/nodes.md
+- docs/important tasks/emergency slowness fix.md
+
+Implementation guidance:
+- Search first for requestJSON auth handling, realtimeWebSocket ticket/reconnect logic, fallback/refetch handlers, and 404 handling around logic gate/node/workspace fetches.
+- Prefer one central auth-failure path over scattered one-off logout behavior.
+- Prefer bounded retry/backoff helpers over local setTimeout loops.
+- Keep changes scoped and add focused tests for auth terminal failure behavior, 404 terminal behavior, websocket reconnect backoff, and the node text-block delete race where practical.
+- Run the relevant frontend tests, then the full repo gate if practical: node scripts\run_all_tests.mjs.
+```

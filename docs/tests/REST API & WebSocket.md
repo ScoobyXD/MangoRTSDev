@@ -1,4 +1,4 @@
-Last updated: 2026-07-07
+Last updated: 2026-07-08
 
 # REST API & WebSocket Tests
 
@@ -25,6 +25,11 @@ RW14 - Dev or production timeout triage must consider backend, database, and cac
 RW15 - Logic gate header renames are committed through `PUT /v1/logic-gates/{logic_gate_id}` and must reconcile the active Logic Gate Arena title, arena app target, and Company Explorer label from the committed response or `logic_gate_updated` workspace event without requiring a full page refresh.
 RW16 - Explicit editor saved versions are created through HTTP save-version routes after pending projection writes are flushed; the information tables store those saved versions, not every live typing update.
 RW17 - Restoring an editor saved version is an HTTP restore route that overwrites the current editor projection after user confirmation and publishes the normal committed projection/update signals.
+RW18 - A terminal `401` or failed auth refresh must make realtime and API recovery quieter: stop ticket requests, WebSocket reconnects, fallback refetches, editor saves, and background retries, then rely on the auth layer to force the normal Mango login page.
+RW19 - WebSocket reconnects after backend replacement/deploy must use randomized delay, exponential backoff, and bounded or very slow retry behavior; clients must not all reconnect immediately.
+RW20 - WebSocket reconnect recovery must be scoped: reconnecting must not refetch the whole app by default, and should request only data that may be stale for the affected subscriptions.
+RW21 - A `404` for a node, Logic Gate, or other resource is terminal for that resource until explicit user navigation or an authoritative event says the resource exists; the client must stop refetching that exact missing resource and unsubscribe from its realtime scope.
+RW22 - Failure handling for `401`, `404`, and WebSocket disconnects must reduce frontend/backend work rather than creating retry, reconnect, or fallback-refetch storms.
 
 ## Scenarios
 
@@ -146,3 +151,59 @@ Expected:
 - Renaming the same logic gate from Company Explorer updates the active Logic Gate Arena title from the `logic_gate_updated` workspace event.
 - The app-level arena target and any collapsed Logic Gate Arena dock tab for that logic gate keep the committed label so later route changes do not reapply the old title.
 - A full browser refresh is not required to see the committed logic gate header in either surface.
+
+### Scenario RW-S6: Terminal Auth Failure Stops Realtime And Refetch Storms
+
+Business logic covered:
+- RW12
+- RW18
+- RW22
+
+Given:
+- A realtime ticket request, WebSocket open, API fallback refetch, or editor save receives a terminal auth failure.
+- The auth layer cannot silently refresh the access token.
+
+Expected:
+- Realtime ticket requests stop.
+- WebSocket reconnect attempts stop.
+- Fallback refetches stop.
+- Editor save attempts stop.
+- Background API retries stop.
+- The normal auth flow forces the existing Mango login page instead of keeping a half-authenticated work surface alive.
+
+### Scenario RW-S7: Missing Resource 404 Does Not Refetch Forever
+
+Business logic covered:
+- RW11
+- RW21
+- RW22
+
+Given:
+- The client asks for a node, Logic Gate, board, or editor resource that the backend returns as `404`.
+- The client may still have stale UI state, route state, or a realtime subscription for that resource.
+
+Expected:
+- The client treats the `404` as terminal for that resource.
+- The client stops refetching that exact missing resource.
+- The client unsubscribes from the missing resource's realtime scope when applicable.
+- The client clears or closes the stale UI reference.
+- The client does not retry until explicit user navigation or an authoritative event says the resource exists.
+
+### Scenario RW-S8: Backend Replacement Reconnects Are Calm And Scoped
+
+Business logic covered:
+- RW19
+- RW20
+- RW22
+
+Given:
+- A new backend version is deployed and old backend workers are replaced.
+- Existing WebSocket connections drop as old workers stop.
+- Multiple browser tabs or users may reconnect at the same time.
+
+Expected:
+- Reconnect attempts use randomized delay so all clients do not reconnect at once.
+- Reconnect attempts use exponential backoff after repeated failures.
+- Reconnect behavior is capped or becomes very slow instead of retrying aggressively forever.
+- A reconnect does not refetch the whole app by default.
+- After reconnect, the client requests only the scoped data that may be stale for active subscriptions.
