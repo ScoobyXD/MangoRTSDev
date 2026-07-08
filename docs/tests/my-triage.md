@@ -99,6 +99,7 @@ MT88 - My Triage mailbox rows group messages by provider/Nylas `thread_id` when 
 MT89 - A grouped My Triage row uses the newest loaded message as the visible row representative while unread, starred, attachment, and thread-count indicators roll up from the loaded messages in that thread.
 MT90 - Selecting a My Triage thread row opens a scrollable, full-height conversation detail pane that hydrates the thread through Nylas thread `message_ids` plus individual message-detail reads for HTML bodies; the thread endpoint alone must not be treated as containing full message bodies.
 MT91 - Personal rich compose send must preserve sanitized block indentation, including indent/outdent and blockquote-style indents, so sent email HTML does not flatten intended paragraph indentation.
+MT92 - Expired or revoked personal My Triage mailbox provider credentials return a My Triage reconnect/repair state, not a Mango auth logout. Personal mailbox folder, message-list, message-detail, send, archive, star, and draft endpoints must not represent provider reauthorization as a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response; they must return a recoverable provider-specific response, such as `409 nylas_reauth_required`, while the user remains signed in to Mango.
 
 ## Nylas Configuration Contract
 
@@ -115,6 +116,24 @@ Personal read receipts depend on both outbound send tracking and webhook deliver
 My Triage uses Nylas `thread_id` and thread `message_ids` to group related messages into one inbox row and to load the selected conversation history. Message bodies still come from single-message detail reads because list/thread responses can omit full HTML bodies.
 
 ## Scenarios
+
+### Scenario MT-S0A: Personal Mailbox Provider Reauth Does Not Log Out Mango
+
+Business logic covered:
+- MT1
+- MT2
+- MT92
+
+Given:
+- A user is signed in to Mango with a valid Mango/Cognito session.
+- The user's personal My Triage mailbox provider grant has expired or been revoked.
+- The user opens My Triage or clicks a personal mailbox folder/message.
+
+Expected:
+- Folder, message-list, message-detail, send, archive, star, and draft reads or writes return a provider reauth-required response, such as `409 nylas_reauth_required`, not a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response.
+- The user remains signed in to Mango.
+- The UI shows the My Triage reconnect/repair state for the personal mailbox.
+- The app does not navigate to the Mango login page solely because the personal mailbox provider needs reconnecting.
 
 ### Scenario MT-S1: Personal Triage Add, Refresh, List, And Delete
 
