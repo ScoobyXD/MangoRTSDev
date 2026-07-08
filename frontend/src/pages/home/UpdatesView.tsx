@@ -1,7 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { buildNodeRoute } from "../../app/deepLinkRoutes";
-import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { MinimizeToLineIcon, OpenInNewTabIcon } from "../../app/nodeEditorPopupControls";
 import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
@@ -28,10 +26,9 @@ import {
   type UpdateGroup,
 } from "../../modules/notifications/notificationsApi";
 import { formatNotificationTimestamp } from "../../modules/notifications/notificationTime";
-import { createSavedViewID, deleteSavedView as deleteSavedViewRequest, fetchSavedViews, saveSavedView, type SavedView, type SavedViewPrincipal } from "./savedViewsApi";
+import { createSavedViewID, fetchSavedViews, type SavedView, type SavedViewPrincipal } from "./savedViewsApi";
 import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNestedGroup } from "../../modules/grouping/universalGrouping";
-import { HOME_UPDATES_SAVED_VIEWS_SLOT_ID } from "./homeConstants";
-import { sharedInboxContextMenuButtonStyle } from "./homeStyles";
+import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
 import { orderedUpdateSelection, resolveUpdateClickSelection } from "./updatesSelection";
 
 type UpdatesEditorContentComponent = React.FC<{
@@ -154,8 +151,6 @@ const DEFAULT_UPDATE_GROUPINGS: UpdateGroupingSetting[] = [
 
 const UPDATE_GROUPING_FIELD_SET = new Set<UpdateGroupingField>(UPDATE_GROUPING_FIELDS.map((field) => field.value));
 const UPDATES_SELECTED_VIEW_STORAGE_KEY = "mangorts.updates.selectedView.v1";
-const HOME_SAVED_VIEWS_CHANGED_EVENT = "mangorts:home-saved-views-changed";
-const HOME_SIDEBAR_SAVED_VIEWS_PORTAL_ENABLED = false;
 const NOTIFICATION_TYPE_NODE_ASSIGNED = "node.assigned";
 const NOTIFICATION_TYPE_NODE_FIELDS_CHANGED = "node.fields_changed";
 const NOTIFICATION_TYPE_NODE_COMMENT_CREATED = "node.comment_created";
@@ -184,10 +179,7 @@ export function UpdatesView({
   const fallbackSetting = useMemo(() => createDefaultUpdateGroupingSetting(companyID, currentUserID), [companyID, currentUserID]);
   const [settings, setSettings] = useState<UpdateSavedGroupingSetting[]>(() => [fallbackSetting]);
   const [selectedSettingID, setSelectedSettingID] = useState(settings[0]?.setting_id ?? "");
-  const [addGroupingOpen, setAddGroupingOpen] = useState(false);
-  const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
   const [settingsError, setSettingsError] = useState("");
-  const [savedViewsSidebarSlot, setSavedViewsSidebarSlot] = useState<HTMLElement | null>(null);
   const [savedViewsReloadToken, setSavedViewsReloadToken] = useState(0);
   const [hiddenNotificationIDs, setHiddenNotificationIDs] = useState<Set<string>>(new Set());
   const [selectedNotificationKey, setSelectedNotificationKey] = useState("");
@@ -200,35 +192,6 @@ export function UpdatesView({
   const updatesListRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (typeof document === "undefined") return;
-    let cancelled = false;
-    let retryTimer: number | null = null;
-    const syncSidebarSlot = () => {
-      if (cancelled) return;
-      const nextSlot = document.getElementById(HOME_UPDATES_SAVED_VIEWS_SLOT_ID);
-      setSavedViewsSidebarSlot((current) => (current === nextSlot ? current : nextSlot));
-      if (nextSlot && retryTimer !== null) {
-        window.clearTimeout(retryTimer);
-        retryTimer = null;
-      }
-      if (!nextSlot && retryTimer === null) {
-        retryTimer = window.setTimeout(() => {
-          retryTimer = null;
-          syncSidebarSlot();
-        }, 120);
-      }
-    };
-    const observer = new MutationObserver(syncSidebarSlot);
-    syncSidebarSlot();
-    observer.observe(document.body, { childList: true, subtree: true });
-    return () => {
-      cancelled = true;
-      if (retryTimer !== null) window.clearTimeout(retryTimer);
-      observer.disconnect();
-    };
-  }, []);
-
-  useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const handleSavedViewsChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ surface?: string; settingID?: string }>).detail;
@@ -237,8 +200,8 @@ export function UpdatesView({
       if (settingID) setSelectedSettingID(settingID);
       setSavedViewsReloadToken((value) => value + 1);
     };
-    window.addEventListener(HOME_SAVED_VIEWS_CHANGED_EVENT, handleSavedViewsChanged);
-    return () => window.removeEventListener(HOME_SAVED_VIEWS_CHANGED_EVENT, handleSavedViewsChanged);
+    window.addEventListener(EVENT_HOME_SAVED_VIEWS_CHANGED, handleSavedViewsChanged);
+    return () => window.removeEventListener(EVENT_HOME_SAVED_VIEWS_CHANGED, handleSavedViewsChanged);
   }, []);
 
   useEffect(() => {
@@ -296,143 +259,6 @@ export function UpdatesView({
     setContextMenu(null);
     setActiveNodePanel(null);
   }, [filter]);
-
-  const persistSavedSetting = useCallback((setting: UpdateSavedGroupingSetting) => {
-    if (!apiBase || !companyID.trim()) return;
-    setSettingsError("");
-    void saveSavedView({
-      apiBase,
-      savedView: updateSettingToSavedViewInput(setting, companyID, currentUserID),
-    }).then((savedView) => {
-      setSettings((current) => current.map((item) => (
-        item.setting_id === setting.setting_id
-          ? savedViewToUpdateSetting(savedView, item, currentUserID)
-          : item
-      )));
-    }).catch((nextError) => {
-      setSettingsError(savedViewErrorMessage(nextError, "Failed to save view"));
-    });
-  }, [apiBase, companyID, currentUserID]);
-
-  const updateSelectedSetting = useCallback((updater: (setting: UpdateSavedGroupingSetting) => UpdateSavedGroupingSetting) => {
-    const updated = updater(selectedSetting);
-    const next = {
-      ...updated,
-      groupings: normalizeUpdateGroupingStack(updated.groupings),
-      updated_timestamp: new Date().toISOString(),
-    };
-    setSettings((current) => current.map((setting) => (setting.setting_id === selectedSetting.setting_id ? next : setting)));
-    persistSavedSetting(next);
-  }, [persistSavedSetting, selectedSetting]);
-
-  const addSavedView = useCallback(() => {
-    const now = new Date().toISOString();
-    const setting: UpdateSavedGroupingSetting = {
-      ...selectedSetting,
-      setting_id: createSavedViewID(),
-      principal: "user",
-      principal_id: currentUserID,
-      name: `View ${settings.length + 1}`,
-      position: nextUpdateSavedViewPosition(settings),
-      created_timestamp: now,
-      updated_timestamp: now,
-    };
-    setSettings((current) => [...current, setting]);
-    setSelectedSettingID(setting.setting_id);
-    storeUpdatesSelectedViewID(companyID, currentUserID, setting.setting_id);
-    persistSavedSetting(setting);
-  }, [companyID, currentUserID, persistSavedSetting, selectedSetting, settings]);
-
-  const selectSavedView = useCallback((settingID: string) => {
-    setSelectedSettingID(settingID);
-    storeUpdatesSelectedViewID(companyID, currentUserID, settingID);
-  }, [companyID, currentUserID]);
-
-  const renameSavedView = useCallback((settingID: string) => {
-    const setting = settings.find((item) => item.setting_id === settingID);
-    if (!setting) return;
-    const nextName = window.prompt("Rename view", setting.name)?.trim();
-    if (!nextName || nextName === setting.name) return;
-    const next = { ...setting, name: nextName, updated_timestamp: new Date().toISOString() };
-    setSettings((current) => current.map((item) => (item.setting_id === settingID ? next : item)));
-    persistSavedSetting(next);
-  }, [persistSavedSetting, settings]);
-
-  const deleteSavedView = useCallback((settingID: string) => {
-    const setting = settings.find((item) => item.setting_id === settingID);
-    setSettings((current) => {
-      if (current.length <= 1) return current;
-      const next = current.filter((item) => item.setting_id !== settingID);
-      if (selectedSettingID === settingID) {
-        const nextSettingID = next[0]?.setting_id ?? "";
-        setSelectedSettingID(nextSettingID);
-        if (nextSettingID) storeUpdatesSelectedViewID(companyID, currentUserID, nextSettingID);
-      }
-      return next;
-    });
-    if (apiBase && companyID.trim() && setting) {
-      void deleteSavedViewRequest({ apiBase, companyID, savedViewID: setting.setting_id }).catch((nextError) => {
-        setSettingsError(savedViewErrorMessage(nextError, "Failed to delete view"));
-      });
-    }
-  }, [apiBase, companyID, currentUserID, selectedSettingID, settings]);
-
-  const moveSavedView = useCallback((settingID: string, direction: -1 | 1) => {
-    const currentIndex = settings.findIndex((item) => item.setting_id === settingID);
-    const targetIndex = currentIndex + direction;
-    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= settings.length) return;
-    const reordered = [...settings];
-    [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
-    const now = new Date().toISOString();
-    const nextSettings = reordered.map((setting, index) => {
-      const previous = settings.find((item) => item.setting_id === setting.setting_id);
-      const position = (index + 1) * 1000;
-      return previous?.position === position
-        ? setting
-        : { ...setting, position, updated_timestamp: now };
-    });
-    setSettings(nextSettings);
-    for (const setting of nextSettings) {
-      const previous = settings.find((item) => item.setting_id === setting.setting_id);
-      if (previous?.position !== setting.position) persistSavedSetting(setting);
-    }
-  }, [persistSavedSetting, settings]);
-
-  const updateGrouping = useCallback((index: number, grouping: UpdateGroupingSetting) => {
-    updateSelectedSetting((setting) => ({
-      ...setting,
-      groupings: setting.groupings.map((item, itemIndex) => (itemIndex === index ? grouping : item)),
-    }));
-  }, [updateSelectedSetting]);
-
-  const removeGrouping = useCallback((index: number) => {
-    setGroupingFieldMenuIndex(null);
-    updateSelectedSetting((setting) => ({
-      ...setting,
-      groupings: setting.groupings.filter((_, itemIndex) => itemIndex !== index),
-    }));
-  }, [updateSelectedSetting]);
-
-  const moveGrouping = useCallback((index: number, direction: -1 | 1) => {
-    setGroupingFieldMenuIndex(null);
-    setAddGroupingOpen(false);
-    updateSelectedSetting((setting) => {
-      const targetIndex = index + direction;
-      if (index < 0 || targetIndex < 0 || targetIndex >= setting.groupings.length) return setting;
-      const groupings = [...setting.groupings];
-      [groupings[index], groupings[targetIndex]] = [groupings[targetIndex], groupings[index]];
-      return { ...setting, groupings };
-    });
-  }, [updateSelectedSetting]);
-
-  const addGrouping = useCallback((field: UpdateGroupingField) => {
-    setGroupingFieldMenuIndex(null);
-    updateSelectedSetting((setting) => ({
-      ...setting,
-      groupings: [...setting.groupings, { field, direction: "asc" }],
-    }));
-    setAddGroupingOpen(false);
-  }, [updateSelectedSetting]);
 
   const loadBranch = useCallback((rootID: string) => {
     const cleanRootID = rootID.trim();
@@ -538,8 +364,6 @@ export function UpdatesView({
     groupings: selectedSetting.groupings,
     rows: updateRows.map((row) => row.rowKey).sort(),
   }), [selectedSetting.groupings, selectedSetting.setting_id, updateRows]);
-  const activeFieldSet = new Set(selectedSetting.groupings.map((grouping) => grouping.field));
-  const addableFields = UPDATE_GROUPING_FIELDS.filter((field) => !activeFieldSet.has(field.value));
 
   useEffect(() => {
     const nextExpanded = new Set<string>();
@@ -787,27 +611,6 @@ export function UpdatesView({
             </div>
           </div>
         </div>
-        {HOME_SIDEBAR_SAVED_VIEWS_PORTAL_ENABLED && savedViewsSidebarSlot ? createPortal(
-          <UpdateGroupingPanel
-            setting={selectedSetting}
-            settings={settings}
-            addableFields={addableFields}
-            addGroupingOpen={addGroupingOpen}
-            groupingFieldMenuIndex={groupingFieldMenuIndex}
-            onSelectSetting={selectSavedView}
-            onAddSavedView={addSavedView}
-            onRenameSavedView={renameSavedView}
-            onMoveSavedView={moveSavedView}
-            onDeleteSavedView={deleteSavedView}
-            onUpdateGrouping={updateGrouping}
-            onRemoveGrouping={removeGrouping}
-            onMoveGrouping={moveGrouping}
-            onSetAddGroupingOpen={setAddGroupingOpen}
-            onSetGroupingFieldMenuIndex={setGroupingFieldMenuIndex}
-            onAddGrouping={addGrouping}
-          />,
-          savedViewsSidebarSlot,
-        ) : null}
         <div ref={updatesListRef} className="mango-home-scroll" style={updatesListStyle}>
           {!loadingRoots && !error && displayGroups.length === 0 ? (
             <div style={updatesEmptyStyle}>No updates</div>
@@ -852,280 +655,6 @@ export function UpdatesView({
         />
       )}
     </section>
-  );
-}
-
-function UpdateGroupingPanel({
-  setting,
-  settings,
-  addableFields,
-  addGroupingOpen,
-  groupingFieldMenuIndex,
-  onSelectSetting,
-  onAddSavedView,
-  onRenameSavedView,
-  onMoveSavedView,
-  onDeleteSavedView,
-  onUpdateGrouping,
-  onRemoveGrouping,
-  onMoveGrouping,
-  onSetAddGroupingOpen,
-  onSetGroupingFieldMenuIndex,
-  onAddGrouping,
-}: {
-  setting: UpdateSavedGroupingSetting;
-  settings: UpdateSavedGroupingSetting[];
-  addableFields: ReadonlyArray<{ value: UpdateGroupingField; label: string }>;
-  addGroupingOpen: boolean;
-  groupingFieldMenuIndex: number | null;
-  onSelectSetting: (settingID: string) => void;
-  onAddSavedView: () => void;
-  onRenameSavedView: (settingID: string) => void;
-  onMoveSavedView: (settingID: string, direction: -1 | 1) => void;
-  onDeleteSavedView: (settingID: string) => void;
-  onUpdateGrouping: (index: number, grouping: UpdateGroupingSetting) => void;
-  onRemoveGrouping: (index: number) => void;
-  onMoveGrouping: (index: number, direction: -1 | 1) => void;
-  onSetAddGroupingOpen: (open: boolean) => void;
-  onSetGroupingFieldMenuIndex: (index: number | null) => void;
-  onAddGrouping: (field: UpdateGroupingField) => void;
-}) {
-  const [savedViewContextMenu, setSavedViewContextMenu] = useState<{ settingID: string; x: number; y: number } | null>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [editorPosition, setEditorPosition] = useState<{ left: number; top: number }>({ left: 320, top: 92 });
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const pendingEditAfterAddRef = useRef(false);
-  const updateEditorPosition = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const rect = panelRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const width = 430;
-    const inset = 10;
-    const left = Math.max(inset, Math.min(rect.right + 12, window.innerWidth - width - inset));
-    const top = Math.max(inset, Math.min(rect.top, window.innerHeight - 180));
-    setEditorPosition((current) => (current.left === left && current.top === top ? current : { left, top }));
-  }, []);
-  useEffect(() => {
-    if (!editorOpen) return undefined;
-    updateEditorPosition();
-    const timer = window.setTimeout(updateEditorPosition, 0);
-    window.addEventListener("resize", updateEditorPosition);
-    window.addEventListener("scroll", updateEditorPosition, true);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("resize", updateEditorPosition);
-      window.removeEventListener("scroll", updateEditorPosition, true);
-    };
-  }, [editorOpen, updateEditorPosition]);
-  useEffect(() => {
-    if (!editorOpen) return undefined;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setEditorOpen(false);
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [editorOpen]);
-  useEffect(() => {
-    if (!pendingEditAfterAddRef.current) return;
-    pendingEditAfterAddRef.current = false;
-    setEditorOpen(true);
-  }, [setting.setting_id]);
-  const contextSettingIndex = savedViewContextMenu ? settings.findIndex((item) => item.setting_id === savedViewContextMenu.settingID) : -1;
-  const contextSetting = contextSettingIndex >= 0 ? settings[contextSettingIndex] : null;
-  const closeEditor = useCallback(() => {
-    setEditorOpen(false);
-    onSetAddGroupingOpen(false);
-    onSetGroupingFieldMenuIndex(null);
-  }, [onSetAddGroupingOpen, onSetGroupingFieldMenuIndex]);
-  const openEditorForSetting = useCallback((settingID: string) => {
-    setSavedViewContextMenu(null);
-    onSelectSetting(settingID);
-    setEditorOpen(true);
-  }, [onSelectSetting]);
-  const editor = editorOpen && typeof document !== "undefined" ? createPortal(
-    <div style={updatesGroupingBodyStyle(editorPosition)}>
-      <div style={updatesGroupingEditorHeaderStyle}>
-        <span style={updatesGroupingEditorTitleStyle}>{setting.name}</span>
-        <button type="button" title="Close editor" style={updatesGroupingEditorCloseButtonStyle} onClick={closeEditor}>x</button>
-      </div>
-      <div style={updatesGroupingStackStyle}>
-        {setting.groupings.map((grouping, index) => (
-          <div key={`${grouping.field}:${index}`} style={updatesGroupingRowStyle(index)}>
-            <button
-              type="button"
-              style={updatesGroupingFieldButtonStyle}
-              onClick={() => {
-                onSetAddGroupingOpen(false);
-                onSetGroupingFieldMenuIndex(groupingFieldMenuIndex === index ? null : index);
-              }}
-            >
-              {updateGroupingFieldLabel(grouping.field)}
-            </button>
-            {groupingFieldMenuIndex === index && (
-              <div style={updatesGroupingFieldMenuStyle}>
-                {UPDATE_GROUPING_FIELDS
-                  .filter((field) => field.value === grouping.field || !setting.groupings.some((item, itemIndex) => itemIndex !== index && item.field === field.value))
-                  .map((field) => (
-                    <button
-                      key={field.value}
-                      type="button"
-                      style={updatesGroupingFieldOptionStyle(field.value === grouping.field)}
-                      onClick={() => {
-                        onUpdateGrouping(index, { ...grouping, field: field.value });
-                        onSetGroupingFieldMenuIndex(null);
-                      }}
-                    >
-                      {field.label}
-                    </button>
-                  ))}
-              </div>
-            )}
-            <button
-              type="button"
-              style={updatesGroupingDirectionButtonStyle}
-              onClick={() => onUpdateGrouping(index, { ...grouping, direction: grouping.direction === "asc" ? "desc" : "asc" })}
-            >
-              {grouping.direction === "asc" ? "Asc" : "Desc"}
-            </button>
-            <button
-              type="button"
-              title="Move grouping up"
-              disabled={index === 0}
-              style={updatesGroupingMoveButtonStyle(index === 0)}
-              onClick={() => onMoveGrouping(index, -1)}
-            >
-              Up
-            </button>
-            <button
-              type="button"
-              title="Move grouping down"
-              disabled={index >= setting.groupings.length - 1}
-              style={updatesGroupingMoveButtonStyle(index >= setting.groupings.length - 1)}
-              onClick={() => onMoveGrouping(index, 1)}
-            >
-              Dn
-            </button>
-            <button type="button" title="Remove grouping" style={updatesGroupingRemoveButtonStyle} onClick={() => onRemoveGrouping(index)}>x</button>
-          </div>
-        ))}
-        <div style={{ position: "relative" }}>
-          <button
-            type="button"
-            style={updatesAddGroupingButtonStyle}
-            disabled={addableFields.length === 0}
-            onClick={() => {
-              onSetGroupingFieldMenuIndex(null);
-              onSetAddGroupingOpen(!addGroupingOpen);
-            }}
-          >
-            + Add Grouping
-          </button>
-          {addGroupingOpen && (
-            <div style={updatesAddGroupingMenuStyle}>
-              {addableFields.map((field) => (
-                <button key={field.value} type="button" style={updatesAddGroupingOptionStyle} onClick={() => onAddGrouping(field.value)}>
-                  {field.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>,
-    document.body,
-  ) : null;
-
-  return (
-    <div ref={panelRef} style={updatesGroupingPanelStyle}>
-      <div style={updatesSavedViewsListStyle}>
-        {settings.map((item) => (
-          <button
-            key={item.setting_id}
-            type="button"
-            style={updatesSavedViewRowStyle(item.setting_id === setting.setting_id)}
-            onClick={() => {
-              setSavedViewContextMenu(null);
-              onSelectSetting(item.setting_id);
-            }}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              setSavedViewContextMenu({ settingID: item.setting_id, x: event.clientX, y: event.clientY });
-            }}
-          >
-            <span style={updatesSavedViewButtonStyle}>{item.name}</span>
-          </button>
-        ))}
-      </div>
-      <button
-        type="button"
-        style={updatesNewViewButtonStyle}
-        onClick={() => {
-          pendingEditAfterAddRef.current = true;
-          setSavedViewContextMenu(null);
-          onAddSavedView();
-        }}
-      >
-        Add new +
-      </button>
-      {savedViewContextMenu && contextSetting && (
-        <FrameRightClickMenu x={savedViewContextMenu.x} y={savedViewContextMenu.y} onClose={() => setSavedViewContextMenu(null)} minWidth={170}>
-          <button
-            type="button"
-            style={sharedInboxContextMenuButtonStyle}
-            onClick={() => openEditorForSetting(contextSetting.setting_id)}
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            style={sharedInboxContextMenuButtonStyle}
-            onClick={() => {
-              onRenameSavedView(contextSetting.setting_id);
-              setSavedViewContextMenu(null);
-            }}
-          >
-            Rename
-          </button>
-          <button
-            type="button"
-            style={sharedInboxContextMenuButtonStyle}
-            disabled={contextSettingIndex <= 0}
-            onClick={() => {
-              onMoveSavedView(contextSetting.setting_id, -1);
-              setSavedViewContextMenu(null);
-            }}
-          >
-            Move up
-          </button>
-          <button
-            type="button"
-            style={sharedInboxContextMenuButtonStyle}
-            disabled={contextSettingIndex >= settings.length - 1}
-            onClick={() => {
-              onMoveSavedView(contextSetting.setting_id, 1);
-              setSavedViewContextMenu(null);
-            }}
-          >
-            Move down
-          </button>
-          <button
-            type="button"
-            style={{ ...sharedInboxContextMenuButtonStyle, color: settings.length <= 1 ? "#94a3b8" : "#dc2626" }}
-            disabled={settings.length <= 1}
-            onClick={() => {
-              if (settings.length <= 1) return;
-              if (contextSetting.setting_id === setting.setting_id) closeEditor();
-              onDeleteSavedView(contextSetting.setting_id);
-              setSavedViewContextMenu(null);
-            }}
-          >
-            Delete
-          </button>
-        </FrameRightClickMenu>
-      )}
-      {editor}
-    </div>
   );
 }
 
@@ -1922,10 +1451,6 @@ function storeUpdatesSelectedViewID(companyID: string, userID: string, settingID
   } catch {}
 }
 
-function updateGroupingFieldLabel(field: UpdateGroupingField): string {
-  return UPDATE_GROUPING_FIELDS.find((item) => item.value === field)?.label ?? "Field";
-}
-
 function normalizeUpdateGroupingStack(value: unknown): UpdateGroupingSetting[] {
   if (!Array.isArray(value)) return [...DEFAULT_UPDATE_GROUPINGS];
   const out: UpdateGroupingSetting[] = [];
@@ -2025,24 +1550,6 @@ function normalizeUpdateSavedGroupingSetting(value: unknown, fallback: UpdateSav
   };
 }
 
-function updateSettingToSavedViewInput(setting: UpdateSavedGroupingSetting, companyID: string, currentUserID: string) {
-  const principal = setting.principal === "group" ? "group" as const : "user" as const;
-  return {
-    company_id: companyID,
-    saved_view_id: setting.setting_id,
-    surface: "updates" as const,
-    principal,
-    principal_id: (principal === "group" ? setting.principal_id : currentUserID).trim(),
-    name: setting.name,
-    groupings: setting.groupings,
-    position: setting.position,
-  };
-}
-
-function nextUpdateSavedViewPosition(settings: UpdateSavedGroupingSetting[]): number {
-  return Math.max(0, ...settings.map((setting) => Number.isFinite(setting.position) ? setting.position : 0)) + 1000;
-}
-
 function savedViewErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim() ? error.message.trim() : fallback;
 }
@@ -2069,274 +1576,6 @@ const updatesMainPaneStyle: React.CSSProperties = {
   gridTemplateRows: "auto minmax(0, 1fr)",
   gap: 10,
   overflow: "hidden",
-};
-
-const updatesGroupingPanelStyle: React.CSSProperties = {
-  position: "relative",
-  width: "100%",
-  minWidth: 0,
-  display: "grid",
-  gap: 4,
-  padding: "0 4px 2px 14px",
-  overflow: "visible",
-};
-
-function updatesGroupingBodyStyle(position: { left: number; top: number }): React.CSSProperties {
-  return {
-    position: "fixed",
-    top: position.top,
-    left: position.left,
-    zIndex: 90,
-    width: "min(430px, calc(100vw - 96px))",
-    maxHeight: "min(520px, calc(100vh - 32px))",
-    overflow: "auto",
-    minWidth: 0,
-    display: "grid",
-    gap: 8,
-    padding: 10,
-    border: "1px solid rgba(15, 23, 42, 0.18)",
-    borderRadius: 8,
-    background: "#ffffff",
-    boxShadow: "0 18px 42px rgba(15, 23, 42, 0.16), 0 1px 0 rgba(255, 255, 255, 0.92) inset",
-  };
-}
-
-const updatesGroupingEditorHeaderStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 26px",
-  alignItems: "center",
-  gap: 6,
-};
-
-const updatesGroupingEditorTitleStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  color: "#111827",
-  fontSize: 12,
-  fontWeight: 850,
-};
-
-const updatesGroupingEditorCloseButtonStyle: React.CSSProperties = {
-  width: 26,
-  height: 24,
-  border: "1px solid rgba(15, 23, 42, 0.12)",
-  borderRadius: 6,
-  background: "rgba(255, 255, 255, 0.84)",
-  color: "#64748b",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 12,
-  fontWeight: 900,
-  padding: 0,
-};
-
-const updatesSavedViewsListStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  alignContent: "start",
-  gap: 4,
-};
-
-function updatesSavedViewRowStyle(active: boolean): React.CSSProperties {
-  return {
-    minWidth: 0,
-    minHeight: 28,
-    display: "grid",
-    alignItems: "center",
-    border: "1px solid transparent",
-    borderRadius: 5,
-    background: active ? "rgba(71, 85, 105, 0.12)" : "transparent",
-    cursor: "pointer",
-    padding: "2px 7px",
-  };
-}
-
-const updatesSavedViewButtonStyle: React.CSSProperties = {
-  minWidth: 0,
-  height: 22,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  border: "none",
-  background: "transparent",
-  color: "#111827",
-  font: "inherit",
-  fontSize: 11,
-  fontWeight: 800,
-  textAlign: "left",
-  padding: 0,
-};
-
-const updatesNewViewButtonStyle: React.CSSProperties = {
-  minHeight: 28,
-  width: "100%",
-  border: "1px dashed rgba(15, 23, 42, 0.24)",
-  borderRadius: 5,
-  background: "#ffffff",
-  color: "#334155",
-  font: "inherit",
-  fontSize: 11,
-  fontWeight: 800,
-  cursor: "pointer",
-  padding: "0 8px",
-};
-
-const updatesGroupingStackStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  alignContent: "start",
-  gap: 5,
-};
-
-function updatesGroupingRowStyle(index: number): React.CSSProperties {
-  const indent = Math.min(index * 20, 42);
-  return {
-    position: "relative",
-    minWidth: 0,
-    minHeight: 30,
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 46px 32px 32px 22px",
-    alignItems: "center",
-    gap: 5,
-    width: `calc(100% - ${indent}px)`,
-    marginLeft: indent,
-    border: "1px solid rgba(15, 23, 42, 0.16)",
-    borderRadius: 5,
-    background: "#f8fafc",
-    padding: "0 5px 0 8px",
-  };
-}
-
-const updatesGroupingFieldButtonStyle: React.CSSProperties = {
-  minWidth: 0,
-  height: 24,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  border: "none",
-  borderRadius: 4,
-  background: "transparent",
-  color: "#111827",
-  font: "inherit",
-  fontSize: 12,
-  fontWeight: 800,
-  textAlign: "left",
-  cursor: "pointer",
-  padding: "0 4px",
-};
-
-const updatesGroupingDirectionButtonStyle: React.CSSProperties = {
-  height: 22,
-  border: "1px solid rgba(15, 23, 42, 0.16)",
-  borderRadius: 5,
-  background: "#ffffff",
-  color: "#334155",
-  font: "inherit",
-  fontSize: 10,
-  fontWeight: 800,
-  cursor: "pointer",
-};
-
-function updatesGroupingMoveButtonStyle(disabled: boolean): React.CSSProperties {
-  return {
-    height: 22,
-    border: "1px solid rgba(15, 23, 42, 0.12)",
-    borderRadius: 5,
-    background: disabled ? "rgba(226, 232, 240, 0.54)" : "#ffffff",
-    color: disabled ? "#94a3b8" : "#334155",
-    font: "inherit",
-    fontSize: 10,
-    fontWeight: 800,
-    cursor: disabled ? "default" : "pointer",
-    padding: 0,
-  };
-}
-
-const updatesGroupingRemoveButtonStyle: React.CSSProperties = {
-  height: 22,
-  border: "none",
-  background: "transparent",
-  color: "#64748b",
-  font: "inherit",
-  fontSize: 12,
-  fontWeight: 900,
-  cursor: "pointer",
-};
-
-const updatesGroupingFieldMenuStyle: React.CSSProperties = {
-  position: "absolute",
-  zIndex: 24,
-  top: "calc(100% + 4px)",
-  left: 0,
-  width: 190,
-  display: "grid",
-  gap: 2,
-  padding: 5,
-  border: "1px solid rgba(15, 23, 42, 0.16)",
-  borderRadius: 6,
-  background: "#ffffff",
-  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.16)",
-};
-
-function updatesGroupingFieldOptionStyle(active: boolean): React.CSSProperties {
-  return {
-    minHeight: 27,
-    border: "none",
-    borderRadius: 5,
-    background: active ? "rgba(71, 85, 105, 0.12)" : "transparent",
-    color: "#111827",
-    font: "inherit",
-    fontSize: 12,
-    fontWeight: active ? 800 : 700,
-    textAlign: "left",
-    cursor: "pointer",
-    padding: "0 7px",
-  };
-}
-
-const updatesAddGroupingButtonStyle: React.CSSProperties = {
-  minHeight: 28,
-  border: "1px dashed rgba(15, 23, 42, 0.24)",
-  borderRadius: 5,
-  background: "#ffffff",
-  color: "#334155",
-  font: "inherit",
-  fontSize: 11,
-  fontWeight: 800,
-  cursor: "pointer",
-  padding: "0 8px",
-};
-
-const updatesAddGroupingMenuStyle: React.CSSProperties = {
-  position: "absolute",
-  zIndex: 22,
-  top: "calc(100% + 4px)",
-  left: 0,
-  width: 180,
-  display: "grid",
-  gap: 2,
-  padding: 5,
-  border: "1px solid rgba(15, 23, 42, 0.16)",
-  borderRadius: 6,
-  background: "#ffffff",
-  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.16)",
-};
-
-const updatesAddGroupingOptionStyle: React.CSSProperties = {
-  minHeight: 27,
-  border: "none",
-  borderRadius: 5,
-  background: "transparent",
-  color: "#111827",
-  font: "inherit",
-  fontSize: 12,
-  fontWeight: 700,
-  textAlign: "left",
-  cursor: "pointer",
-  padding: "0 7px",
 };
 
 const updatesHeaderStyle: React.CSSProperties = {

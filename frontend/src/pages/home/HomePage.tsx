@@ -78,7 +78,7 @@ import { useNotificationSummary } from "../../modules/notifications/useNotificat
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
 import { buildLogicGateRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
-import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, HomeSidebar, LogicGateRail, NodeEditorPopup, NodeInboxRail, GVICMatrixViewerSelector, GVICRoleInboxMatrix, SharedInboxGVICSettingsModal, type GVICMatrixViewerListEntry } from "./HomeParts";
+import { DeleteHomeEntitiesConfirmationModal, HomeBulkEditMenu, HomeColumnResizeHandle, LogicGateRail, NodeEditorPopup, NodeInboxRail, GVICMatrixViewerSelector, GVICRoleInboxMatrix, SharedInboxGVICSettingsModal, type GVICMatrixViewerListEntry } from "./HomeParts";
 import { MyWorkView } from "./MyWorkView";
 import { markMyWorkMatrixCachesStaleForCompany, markMyWorkMatrixCachesStaleForTargetUsers } from "./myWorkMatrixLoader";
 import { myWorkDebugLog, recordMyWorkDebugCause } from "./myWorkPerformanceDebug";
@@ -86,7 +86,7 @@ import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { composeHasDraftContent, createHomeMailDraftID, createHomeMailForwardDraftID, createHomeMailReplyDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_QUEUE_MAX_EMAILS, EVENT_HOME_TRIAGE_CONVERSION_APPLIED, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME, type HomeTriageConversionAppliedDetail } from "./homeConstants";
-import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
+import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, communicationStreamEventIsArchiveConfirmation, communicationStreamEventIsStarConfirmation, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, formatMessageDate, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, localMailboxMutationEchoKeys, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, triageMessageIDsFromStreamMessageID, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
@@ -416,13 +416,13 @@ export function HomePage({
   me,
   onNavigate,
   embedded = false,
-  hideNavigation = false,
   initialViewID = "my-work",
   onActiveViewChange,
   deepLinkNodeID,
   onNodeOverlayOpen,
   onNodeOverlayClose,
 }: HomePageProps) {
+  const appSidebarOwnsNavigation = true;
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
   const permissionsRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
@@ -574,7 +574,7 @@ export function HomePage({
   const workspaceRef = useRef<HTMLElement | null>(null);
   const columnWidthsRef = useRef<HomeColumnWidths>(columnWidths);
   const columnResizeDragRef = useRef<HomeColumnResizeDrag | null>(null);
-  const hideNavigationRef = useRef(hideNavigation);
+  const appSidebarOwnsNavigationRef = useRef(appSidebarOwnsNavigation);
   const isInboxMatrixView = isInboxMatrixViewID(activeViewID);
   const isMyWorkView = activeViewID === "my-work";
   const isUpdatesView = activeViewID === "updates";
@@ -583,7 +583,7 @@ export function HomePage({
     ? viewportWidth < 980
     : isMyWorkView || isUpdatesView
       ? viewportWidth < 760
-      : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!hideNavigation);
+      : workspaceTrackWidth < getHomeColumnMinimumTrackWidth(!appSidebarOwnsNavigation);
   const currentUserID = me?.user.user_id?.trim() ?? "";
   const activeGVICMatrixUserID = isInboxMatrixView ? (GVICMatrixTargetUserID.trim() || currentUserID) : currentUserID;
   useEffect(() => {
@@ -834,8 +834,8 @@ export function HomePage({
     columnWidthsRef.current = columnWidths;
   }, [columnWidths]);
   useEffect(() => {
-    hideNavigationRef.current = hideNavigation;
-  }, [hideNavigation]);
+    appSidebarOwnsNavigationRef.current = appSidebarOwnsNavigation;
+  }, [appSidebarOwnsNavigation]);
   const setMailboxCountOverride = useCallback((key: string, mailboxKey: MailboxCountOverrideKey, count: number | undefined) => {
     const cleanKey = key.trim();
     if (!cleanKey) return;
@@ -929,14 +929,14 @@ export function HomePage({
       event.preventDefault();
       const delta = event.clientX - drag.startX;
       const activeIsInboxMatrixView = isInboxMatrixViewID(activeViewIDRef.current);
-      const nextWidths = hideNavigationRef.current
+      const nextWidths = appSidebarOwnsNavigationRef.current
         ? activeIsInboxMatrixView
           ? resizeHomeInboxMatrixColumnsWithoutSidebar(drag.startWidths, drag.dividerIndex, delta, drag.availableWidth)
           : resizeHomeColumnsWithoutSidebar(drag.startWidths, drag.dividerIndex, delta, drag.availableWidth)
         : resizeHomeColumns(drag.startWidths, drag.dividerIndex, delta, drag.availableWidth);
       const fittedWidths = activeIsInboxMatrixView
         ? nextWidths
-        : fitHomeColumnWidthsToAvailableWidth(nextWidths, drag.availableWidth, !hideNavigationRef.current);
+        : fitHomeColumnWidthsToAvailableWidth(nextWidths, drag.availableWidth, !appSidebarOwnsNavigationRef.current);
       columnWidthsRef.current = fittedWidths;
       setColumnWidths(fittedWidths);
     };
@@ -955,12 +955,12 @@ export function HomePage({
   useEffect(() => {
     if (isNarrow || isInboxMatrixView) return;
     setColumnWidths((current) => {
-      const fitted = fitHomeColumnWidthsToAvailableWidth(current, workspaceTrackWidth, !hideNavigation);
+      const fitted = fitHomeColumnWidthsToAvailableWidth(current, workspaceTrackWidth, !appSidebarOwnsNavigation);
       if (fitted.every((width, index) => width === current[index])) return current;
       columnWidthsRef.current = fitted;
       return fitted;
     });
-  }, [hideNavigation, isInboxMatrixView, isNarrow, workspaceTrackWidth]);
+  }, [appSidebarOwnsNavigation, isInboxMatrixView, isNarrow, workspaceTrackWidth]);
   useEffect(() => {
     if (isNarrow) return;
     saveHomeColumnWidths(columnWidths);
@@ -2901,37 +2901,6 @@ export function HomePage({
       setError(formatError(connectError, "Failed to start shared inbox email connection"));
     }
   }, [currentUserCanManageSharedInboxStructure, sharedInboxEmailConnectionDialog]);
-  const createSharedInboxFolder = useCallback(async (parentFolderID: string, rawName = "New Folder", accountEmail = ""): Promise<CommunicationsSharedInbox | null> => {
-    if (!currentUserCanManageSharedInboxStructure) {
-      setError("Only managers and admins can create Shared Triage folders and inboxes.");
-      return null;
-    }
-    setBusy("shared-inbox");
-    setError("");
-    setNotice("");
-    try {
-      const result = await createSharedInboxCommand({ companyID, parentFolderID, rawName, accountEmail });
-      if (!result) return null;
-      const folder = result.folder;
-      setSharedInboxes((previous) => sortSharedInboxes([
-        ...previous.filter((item) => item.folder_id !== folder.folder_id),
-        folder,
-      ]));
-      const viewID = result.viewID ?? (`shared:${folder.folder_id}` as HomeViewID);
-      selectHomeView(viewID, "primary");
-      if (folder.entry_type === "shared_inbox" && (folder.account_email ?? "").trim()) {
-        setPendingSharedInboxMessageRefreshID(folder.folder_id);
-      }
-      return folder;
-    } catch (sharedInboxError) {
-      if (accountEmail.trim() && requestSharedInboxEmailConnection(sharedInboxError, accountEmail, { companyID, parentFolderID, name: rawName })) return null;
-      setError(formatError(sharedInboxError, "Failed to create Shared Triage"));
-      return null;
-    } finally {
-      setBusy("");
-    }
-  }, [companyID, currentUserCanManageSharedInboxStructure, requestSharedInboxEmailConnection, selectHomeView]);
-
   const setSharedInboxAccountEmail = useCallback(async (folderID: string, accountEmail: string): Promise<void> => {
     if (!currentUserCanManageSharedInboxStructure) {
       setError("Only managers and admins can assign Shared Triage emails.");
@@ -2991,76 +2960,6 @@ export function HomePage({
     setSharedInboxEmailAssignmentDialog(null);
     void setSharedInboxAccountEmail(folderID, accountEmail);
   }, [busy, setSharedInboxAccountEmail, sharedInboxEmailAssignmentDialog]);
-  const renameSharedInboxFolder = useCallback(async (folderID: string, name: string): Promise<void> => {
-    setBusy("shared-inbox");
-    setError("");
-    setNotice("");
-    try {
-      const result = await renameSharedInboxCommand({ companyID, folderID, name });
-      if (!result) return;
-      const folder = result.folder;
-      setSharedInboxes((previous) => sortSharedInboxes(previous.map((item) => item.folder_id === folder.folder_id ? folder : item)));
-    } catch (sharedInboxError) {
-      setError(formatError(sharedInboxError, "Failed to rename Shared Triage folder"));
-    } finally {
-      setBusy("");
-    }
-  }, [companyID]);
-
-  const moveSharedInboxFolder = useCallback(async (folderID: string, parentFolderID: string, position: number): Promise<void> => {
-    setBusy("shared-inbox");
-    setError("");
-    setNotice("");
-    try {
-      const result = await moveSharedInboxCommand({ companyID, folderID, parentFolderID, position });
-      if (!result) return;
-      const folder = result.folder;
-      setSharedInboxes((previous) => sortSharedInboxes(previous.map((item) => item.folder_id === folder.folder_id ? folder : item)));
-    } catch (sharedInboxError) {
-      setError(formatError(sharedInboxError, "Failed to move Shared Triage folder"));
-    } finally {
-      setBusy("");
-    }
-  }, [companyID]);
-
-  const deleteSharedInboxFolder = useCallback(async (folderID: string): Promise<void> => {
-    setBusy("shared-inbox");
-    setError("");
-    setNotice("");
-    try {
-      const result = await deleteSharedInboxCommand({ companyID, folderID, sharedInboxes });
-      if (!result) return;
-      const deletedIDs = new Set(result.deletedFolderIDs);
-      setSharedInboxes((previous) => previous.filter((folder) => !deletedIDs.has(folder.folder_id)));
-      const currentView = activeViewIDRef.current;
-      const activeFolderID = currentView.startsWith("shared:") ? currentView.slice("shared:".length) : "";
-      if (activeFolderID && deletedIDs.has(activeFolderID)) setActiveViewID("shared-root");
-    } catch (sharedInboxError) {
-      setError(formatError(sharedInboxError, "Failed to delete Shared Triage folder"));
-    } finally {
-      setBusy("");
-    }
-  }, [companyID, sharedInboxes]);
-
-  const removeSharedInboxFolder = useCallback(async (folderID: string): Promise<void> => {
-    setBusy("shared-inbox");
-    setError("");
-    setNotice("");
-    try {
-      const result = await removeSharedInboxCommand({ companyID, folderID, sharedInboxes });
-      if (!result) return;
-      const deletedIDs = new Set(result.deletedFolderIDs);
-      setSharedInboxes((previous) => previous.filter((folder) => !deletedIDs.has(folder.folder_id)));
-      const currentView = activeViewIDRef.current;
-      const activeFolderID = currentView.startsWith("shared:") ? currentView.slice("shared:".length) : "";
-      if (activeFolderID && deletedIDs.has(activeFolderID)) setActiveViewID("shared-root");
-    } catch (sharedInboxError) {
-      setError(formatError(sharedInboxError, "Failed to remove Shared Triage inbox"));
-    } finally {
-      setBusy("");
-    }
-  }, [companyID, sharedInboxes]);
-
   const currentDirectSharedInboxGVICAssignments = useCallback((folderID: string): Array<{ role: CommunicationsSharedInboxGVICRole; principal_type: CommunicationsSharedInboxGVICPrincipalType; principal_id: string }> => {
     const cleanFolderID = folderID.trim();
     const folder = sharedInboxes.find((item) => item.folder_id === cleanFolderID);
@@ -4479,7 +4378,7 @@ export function HomePage({
     const activeIsInboxMatrixView = isInboxMatrixViewID(activeViewIDRef.current);
     const startWidths = activeIsInboxMatrixView
       ? columnWidthsRef.current
-      : fitHomeColumnWidthsToAvailableWidth(columnWidthsRef.current, availableWidth, !hideNavigationRef.current);
+      : fitHomeColumnWidthsToAvailableWidth(columnWidthsRef.current, availableWidth, !appSidebarOwnsNavigationRef.current);
     const ownerDocument = event.currentTarget.ownerDocument;
     columnResizeDragRef.current = {
       dividerIndex,
@@ -4595,14 +4494,14 @@ export function HomePage({
   const showLocalEntityRail = !embedded;
   const layoutColumnWidths = isNarrow || isInboxMatrixView || isMyWorkView || isUpdatesView
     ? columnWidths
-    : fitHomeColumnWidthsToAvailableWidth(columnWidths, workspaceTrackWidth, !hideNavigation);
+    : fitHomeColumnWidthsToAvailableWidth(columnWidths, workspaceTrackWidth, !appSidebarOwnsNavigation);
   const workspaceGridTemplateColumns = isNarrow
     ? "1fr"
     : isMyWorkView || isUpdatesView
-      ? hideNavigation
+      ? appSidebarOwnsNavigation
         ? "minmax(0, 1fr)"
         : `${layoutColumnWidths[0]}px minmax(0, 1fr)`
-      : hideNavigation
+      : appSidebarOwnsNavigation
       ? isInboxMatrixView
         ? showLocalEntityRail
           ? getInboxMatrixGridTemplateColumnsWithoutSidebar(layoutColumnWidths)
@@ -4667,27 +4566,6 @@ export function HomePage({
         </main>
       ) : (
         <main ref={workspaceRef} style={workspaceLayoutStyle}>
-          {!hideNavigation && (
-            <HomeSidebar
-              activeViewID={activeViewID}
-              apiBase={apiBase}
-              companyID={companyID}
-              connectedAccountEmail={connection?.account_email}
-              currentUserID={currentUserID}
-              sharedInboxes={sharedInboxes}
-              loadingSharedInboxes={loadingSharedInboxes}
-              notificationSummary={notificationSummary}
-              busy={busy}
-              canManageSharedTriage={currentUserCanManageSharedInboxStructure}
-              onSelectView={selectHomeView}
-              onCreateSharedInbox={createSharedInboxFolder}
-              onRenameSharedInbox={renameSharedInboxFolder}
-              onSetSharedInboxAccountEmail={setSharedInboxAccountEmail}
-              onMoveSharedInbox={moveSharedInboxFolder}
-              onDeleteSharedInbox={deleteSharedInboxFolder}
-              onRemoveSharedInbox={removeSharedInboxFolder}
-            />
-          )}
           {isMyWorkView ? (
             <MyWorkView
               apiBase={apiBase}
@@ -4763,7 +4641,7 @@ export function HomePage({
                   onDropLogicGates={(input) => { void moveLogicGatesIntoInboxCell(input); }}
                 />
               )}
-              {showLocalEntityRail && hideNavigation && !isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
+              {showLocalEntityRail && appSidebarOwnsNavigation && !isNarrow && <HomeColumnResizeHandle dividerIndex={2} onPointerDown={startColumnResize} />}
               {showLocalEntityRail && (
                 <NodeInboxRail
                   loading={loadingNodes}
@@ -4805,7 +4683,7 @@ export function HomePage({
             </>
           ) : (
             <>
-          {!hideNavigation && !isNarrow && <HomeColumnResizeHandle dividerIndex={0} onPointerDown={startColumnResize} />}
+          {!appSidebarOwnsNavigation && !isNarrow && <HomeColumnResizeHandle dividerIndex={0} onPointerDown={startColumnResize} />}
           <HomeMailWorkspace
             activeViewID={activeViewID}
             accountEmail={activeMailAccountEmail}

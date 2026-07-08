@@ -4,10 +4,7 @@ import {
   addMyLogicGateShortcuts as defaultAddMyLogicGateShortcuts,
   convertTriageMessagesToExplorerTarget as defaultConvertTriageMessagesToExplorerTarget,
   convertTriageMessagesToLogicGate as defaultConvertTriageMessagesToLogicGate,
-  createCommunicationsSharedInbox as defaultCreateCommunicationsSharedInbox,
-  deleteCommunicationsSharedInbox as defaultDeleteCommunicationsSharedInbox,
   deleteEmailMessage as defaultDeleteEmailMessage,
-  removeCommunicationsSharedInbox as defaultRemoveCommunicationsSharedInbox,
   removeMyLogicGateShortcut as defaultRemoveMyLogicGateShortcut,
   parseEmailAddressList,
   sendEmail as defaultSendEmail,
@@ -57,13 +54,12 @@ import {
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../../modules/workspace/workspaceEntityCommands.js";
 import {
   cleanIDList,
-  collectSharedInboxSubtreeIDs,
   logicGateIDsFromExplorerPayload,
   nodeTitle,
   normalizeGVICInboxStatus,
 } from "./homeUtils.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "./homeConstants.js";
-import type { ComposeState, HomeEntityDeleteKind, HomeViewID, InboxPriority, GVICInboxStatus } from "./homeTypes.js";
+import type { ComposeState, HomeEntityDeleteKind, InboxPriority, GVICInboxStatus } from "./homeTypes.js";
 
 export type HomeDropAssignNodeToLogicGateStatus = (
   args: Parameters<typeof defaultAssignNodeToLogicGateStatus>[0],
@@ -87,10 +83,7 @@ export type HomeAddMyLogicGateShortcuts = typeof defaultAddMyLogicGateShortcuts;
 export type HomeRemoveMyLogicGateShortcut = typeof defaultRemoveMyLogicGateShortcut;
 export type HomeConvertTriageMessagesToExplorerTarget = typeof defaultConvertTriageMessagesToExplorerTarget;
 export type HomeConvertTriageMessagesToLogicGate = typeof defaultConvertTriageMessagesToLogicGate;
-export type HomeCreateSharedInbox = typeof defaultCreateCommunicationsSharedInbox;
 export type HomeUpdateSharedInbox = typeof defaultUpdateCommunicationsSharedInbox;
-export type HomeDeleteSharedInbox = typeof defaultDeleteCommunicationsSharedInbox;
-export type HomeRemoveSharedInbox = typeof defaultRemoveCommunicationsSharedInbox;
 export type HomeUpdateSharedInboxGVICAssignments = typeof defaultUpdateCommunicationsSharedInboxGVICAssignments;
 
 export type HomeBulkNodePatch = Partial<Pick<NodeRecord, "priority" | "status" | "due_date">>;
@@ -192,12 +185,7 @@ function composeBodyHasContent(value: string): boolean {
 
 export type HomeSharedInboxCommandResult = {
   folder: CommunicationsSharedInbox;
-  viewID?: HomeViewID;
   notice?: string;
-};
-
-export type HomeSharedInboxDeleteCommandResult = {
-  deletedFolderIDs: string[];
 };
 
 export type HomeSharedInboxGVICCommandResult = {
@@ -696,25 +684,6 @@ export async function applyBulkNodePatchCommand(args: {
     return updateNode(args.companyID, nodeID, directPatch);
   })).then((nodes) => nodes.filter((node): node is NodeRecord => node !== null));
 }
-export async function createSharedInboxCommand(args: {
-  companyID: string;
-  parentFolderID: string;
-  rawName?: string;
-  accountEmail?: string;
-  createSharedInbox?: HomeCreateSharedInbox;
-}): Promise<HomeSharedInboxCommandResult | null> {
-  const name = (args.rawName ?? "New Folder").trim();
-  if (!name) return null;
-  const createSharedInbox = args.createSharedInbox ?? defaultCreateCommunicationsSharedInbox;
-  const folder = await createSharedInbox({
-    companyID: args.companyID,
-    name,
-    parentFolderID: args.parentFolderID,
-    accountEmail: args.accountEmail,
-  });
-  return { folder, viewID: `shared:${folder.folder_id}` };
-}
-
 export async function updateSharedInboxAccountEmailCommand(args: {
   companyID: string;
   folderID: string;
@@ -726,69 +695,6 @@ export async function updateSharedInboxAccountEmailCommand(args: {
   const updateSharedInbox = args.updateSharedInbox ?? defaultUpdateCommunicationsSharedInbox;
   const folder = await updateSharedInbox({ companyID: args.companyID, folderID, accountEmail: args.accountEmail });
   return { folder, notice: folder.account_email ? `Attached ${folder.account_email}.` : "Email removed." };
-}
-
-export async function renameSharedInboxCommand(args: {
-  companyID: string;
-  folderID: string;
-  name: string;
-  updateSharedInbox?: HomeUpdateSharedInbox;
-}): Promise<HomeSharedInboxCommandResult | null> {
-  const folderID = args.folderID.trim();
-  const name = args.name.trim();
-  if (!folderID || !name) return null;
-  const updateSharedInbox = args.updateSharedInbox ?? defaultUpdateCommunicationsSharedInbox;
-  const folder = await updateSharedInbox({ companyID: args.companyID, folderID, name });
-  return { folder };
-}
-
-export async function moveSharedInboxCommand(args: {
-  companyID: string;
-  folderID: string;
-  parentFolderID: string;
-  position: number;
-  updateSharedInbox?: HomeUpdateSharedInbox;
-}): Promise<HomeSharedInboxCommandResult | null> {
-  const folderID = args.folderID.trim();
-  if (!folderID) return null;
-  const updateSharedInbox = args.updateSharedInbox ?? defaultUpdateCommunicationsSharedInbox;
-  const folder = await updateSharedInbox({
-    companyID: args.companyID,
-    folderID,
-    parentFolderID: args.parentFolderID,
-    position: args.position,
-  });
-  return { folder };
-}
-
-export async function deleteSharedInboxCommand(args: {
-  companyID: string;
-  folderID: string;
-  sharedInboxes: CommunicationsSharedInbox[];
-  deleteSharedInbox?: HomeDeleteSharedInbox;
-}): Promise<HomeSharedInboxDeleteCommandResult | null> {
-  const folderID = args.folderID.trim();
-  if (!folderID) return null;
-  const deletedIDs = collectSharedInboxSubtreeIDs(args.sharedInboxes, folderID);
-  if (deletedIDs.size === 0) deletedIDs.add(folderID);
-  const deleteSharedInbox = args.deleteSharedInbox ?? defaultDeleteCommunicationsSharedInbox;
-  await deleteSharedInbox(args.companyID, folderID);
-  return { deletedFolderIDs: Array.from(deletedIDs) };
-}
-
-export async function removeSharedInboxCommand(args: {
-  companyID: string;
-  folderID: string;
-  sharedInboxes: CommunicationsSharedInbox[];
-  removeSharedInbox?: HomeRemoveSharedInbox;
-}): Promise<HomeSharedInboxDeleteCommandResult | null> {
-  const folderID = args.folderID.trim();
-  if (!folderID) return null;
-  const deletedIDs = collectSharedInboxSubtreeIDs(args.sharedInboxes, folderID);
-  if (deletedIDs.size === 0) deletedIDs.add(folderID);
-  const removeSharedInbox = args.removeSharedInbox ?? defaultRemoveCommunicationsSharedInbox;
-  await removeSharedInbox(args.companyID, folderID);
-  return { deletedFolderIDs: Array.from(deletedIDs) };
 }
 
 export async function saveSharedInboxGVICAssignmentsCommand(args: {
