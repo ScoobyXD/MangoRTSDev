@@ -632,6 +632,18 @@ export function MyWorkView({
     }));
   }, [updateSelectedSetting]);
 
+  const moveGrouping = useCallback((index: number, direction: -1 | 1) => {
+    setGroupingFieldMenuIndex(null);
+    setAddGroupingOpen(false);
+    updateSelectedSetting((setting) => {
+      const targetIndex = index + direction;
+      if (index < 0 || targetIndex < 0 || targetIndex >= setting.groupings.length) return setting;
+      const groupings = [...setting.groupings];
+      [groupings[index], groupings[targetIndex]] = [groupings[targetIndex], groupings[index]];
+      return { ...setting, groupings };
+    });
+  }, [updateSelectedSetting]);
+
   const addGrouping = useCallback((field: MyWorkGroupingField) => {
     setGroupingFieldMenuIndex(null);
     updateSelectedSetting((setting) => ({
@@ -819,13 +831,19 @@ export function MyWorkView({
             {settingsError ? ` - ${settingsError}` : ""}
           </div>
         </div>
+        <MyWorkScopeControls
+          selectedScope={selectedScope}
+          scopeMenuLevel={scopeMenuLevel}
+          scopeRows={scopeRows}
+          onSelectScopeLevel={selectScopeLevel}
+          onSelectScope={selectScope}
+          onSetScopeMenuLevel={setScopeMenuLevel}
+        />
       </div>
       {savedViewsSidebarSlot ? createPortal(
         <GroupingPanel
           setting={selectedSetting}
           settings={settings}
-          scopeMenuLevel={scopeMenuLevel}
-          scopeRows={scopeRows}
           addableFields={addableFields}
           addGroupingOpen={addGroupingOpen}
           groupingFieldMenuIndex={groupingFieldMenuIndex}
@@ -834,12 +852,9 @@ export function MyWorkView({
           onRenameSavedView={renameSavedView}
           onMoveSavedView={moveSavedView}
           onDeleteSavedView={deleteSavedView}
-          onSelectScopeLevel={selectScopeLevel}
-          onSelectScope={selectScope}
-          onSetScopeMenuLevel={setScopeMenuLevel}
-          selectedScope={selectedScope}
           onUpdateGrouping={updateGrouping}
           onRemoveGrouping={removeGrouping}
+          onMoveGrouping={moveGrouping}
           onSetAddGroupingOpen={setAddGroupingOpen}
           onSetGroupingFieldMenuIndex={setGroupingFieldMenuIndex}
           onAddGrouping={addGrouping}
@@ -898,58 +913,23 @@ export function MyWorkView({
   );
 }
 
-function GroupingPanel({
-  setting,
-  settings,
+function MyWorkScopeControls({
   selectedScope,
   scopeMenuLevel,
   scopeRows,
-  addableFields,
-  addGroupingOpen,
-  groupingFieldMenuIndex,
-  onSelectSetting,
-  onAddSavedView,
-  onRenameSavedView,
-  onMoveSavedView,
-  onDeleteSavedView,
   onSelectScopeLevel,
   onSelectScope,
   onSetScopeMenuLevel,
-  onUpdateGrouping,
-  onRemoveGrouping,
-  onSetAddGroupingOpen,
-  onSetGroupingFieldMenuIndex,
-  onAddGrouping,
 }: {
-  setting: MyWorkSavedGroupingSetting;
-  settings: MyWorkSavedGroupingSetting[];
   selectedScope: MyWorkSelectedScope;
   scopeMenuLevel: MyWorkScopeLevel | null;
   scopeRows: ScopePickerRow[];
-  addableFields: ReadonlyArray<{ value: MyWorkGroupingField; label: string }>;
-  addGroupingOpen: boolean;
-  groupingFieldMenuIndex: number | null;
-  onSelectSetting: (settingID: string) => void;
-  onAddSavedView: () => void;
-  onRenameSavedView: (settingID: string) => void;
-  onMoveSavedView: (settingID: string, direction: -1 | 1) => void;
-  onDeleteSavedView: (settingID: string) => void;
   onSelectScopeLevel: (level: MyWorkScopeLevel) => void;
   onSelectScope: (scope: MyWorkSelectedScope) => void;
   onSetScopeMenuLevel: (level: MyWorkScopeLevel | null) => void;
-  onUpdateGrouping: (index: number, grouping: MyWorkGroupingSetting) => void;
-  onRemoveGrouping: (index: number) => void;
-  onSetAddGroupingOpen: (open: boolean) => void;
-  onSetGroupingFieldMenuIndex: (index: number | null) => void;
-  onAddGrouping: (field: MyWorkGroupingField) => void;
 }) {
   const [collapsedScopeRowKeys, setCollapsedScopeRowKeys] = useState<Set<string>>(new Set());
-  const [savedViewContextMenu, setSavedViewContextMenu] = useState<{ settingID: string; x: number; y: number } | null>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [editorPosition, setEditorPosition] = useState<{ left: number; top: number }>({ left: 320, top: 92 });
-  const panelRef = useRef<HTMLDivElement | null>(null);
   const scopeMenuRef = useRef<HTMLDivElement>(null);
-  const pendingEditAfterAddRef = useRef(false);
   const scopeRowsWithChildren = useMemo(() => scopeRows.map((row, index) => ({
     ...row,
     hasChildren: Boolean(scopeRows[index + 1] && scopeRows[index + 1].depth > row.depth),
@@ -975,6 +955,125 @@ function GroupingPanel({
       return next;
     });
   }, []);
+  useEffect(() => {
+    if (!scopeMenuLevel) return undefined;
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Node && scopeMenuRef.current?.contains(target)) return;
+      onSetScopeMenuLevel(null);
+    };
+    const timer = window.setTimeout(() => window.addEventListener("mousedown", handleOutsideClick, true), 0);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("mousedown", handleOutsideClick, true);
+    };
+  }, [onSetScopeMenuLevel, scopeMenuLevel]);
+
+  return (
+    <div style={scopeControlRowStyle}>
+      <div ref={scopeMenuRef} style={scopeTabsAnchorStyle}>
+        <div style={scopeTabsStyle}>
+          {(["me", "team", "all"] as const).map((level) => (
+            <button
+              key={level}
+              type="button"
+              className={`mango-my-work-scope-tab${selectedScope.level === level ? " is-active" : ""}`}
+              style={scopeTabStyle(level, selectedScope.level === level)}
+              onClick={() => onSelectScopeLevel(level)}
+            >
+              {level === "me" ? "Me" : level === "team" ? "My Team" : "All"}
+            </button>
+          ))}
+        </div>
+        {scopeMenuLevel && (
+          <div className="mango-my-work-scope-picker mango-home-scroll" style={scopePickerStyle}>
+            {scopeRows.length === 0 ? (
+              <div style={scopePickerEmptyStyle}>No people or groups</div>
+            ) : visibleScopeRows.map((row) => {
+              const collapsed = collapsedScopeRowKeys.has(row.key);
+              return (
+                <div
+                  key={row.key}
+                  role="button"
+                  tabIndex={0}
+                  className="mango-my-work-menu-option"
+                  style={scopePickerRowStyle(row.depth, scopesEqual(row.scope, selectedScope))}
+                  onClick={() => onSelectScope(row.scope)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    onSelectScope(row.scope);
+                  }}
+                >
+                  {row.hasChildren ? (
+                    <button
+                      type="button"
+                      className="mango-my-work-scope-disclosure"
+                      aria-label={collapsed ? `Expand ${row.label}` : `Collapse ${row.label}`}
+                      style={scopePickerDisclosureStyle}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleScopeRowCollapsed(row.key);
+                      }}
+                    >
+                      <ExplorerDisclosureIcon open={!collapsed} color="currentColor" />
+                    </button>
+                  ) : <span style={scopePickerDisclosureSpacerStyle} />}
+                  <ScopeIcon icon={row.icon} />
+                  <span style={scopePickerTextStyle}>
+                    <span style={scopePickerLabelStyle}>{row.label}</span>
+                    {row.detail && <span style={scopePickerDetailStyle}>{row.detail}</span>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GroupingPanel({
+  setting,
+  settings,
+  addableFields,
+  addGroupingOpen,
+  groupingFieldMenuIndex,
+  onSelectSetting,
+  onAddSavedView,
+  onRenameSavedView,
+  onMoveSavedView,
+  onDeleteSavedView,
+  onUpdateGrouping,
+  onRemoveGrouping,
+  onMoveGrouping,
+  onSetAddGroupingOpen,
+  onSetGroupingFieldMenuIndex,
+  onAddGrouping,
+}: {
+  setting: MyWorkSavedGroupingSetting;
+  settings: MyWorkSavedGroupingSetting[];
+  addableFields: ReadonlyArray<{ value: MyWorkGroupingField; label: string }>;
+  addGroupingOpen: boolean;
+  groupingFieldMenuIndex: number | null;
+  onSelectSetting: (settingID: string) => void;
+  onAddSavedView: () => void;
+  onRenameSavedView: (settingID: string) => void;
+  onMoveSavedView: (settingID: string, direction: -1 | 1) => void;
+  onDeleteSavedView: (settingID: string) => void;
+  onUpdateGrouping: (index: number, grouping: MyWorkGroupingSetting) => void;
+  onRemoveGrouping: (index: number) => void;
+  onMoveGrouping: (index: number, direction: -1 | 1) => void;
+  onSetAddGroupingOpen: (open: boolean) => void;
+  onSetGroupingFieldMenuIndex: (index: number | null) => void;
+  onAddGrouping: (field: MyWorkGroupingField) => void;
+}) {
+  const [savedViewContextMenu, setSavedViewContextMenu] = useState<{ settingID: string; x: number; y: number } | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorPosition, setEditorPosition] = useState<{ left: number; top: number }>({ left: 320, top: 92 });
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const pendingEditAfterAddRef = useRef(false);
   const updateEditorPosition = useCallback(() => {
     if (typeof window === "undefined") return;
     const rect = panelRef.current?.getBoundingClientRect();
@@ -1010,99 +1109,23 @@ function GroupingPanel({
     pendingEditAfterAddRef.current = false;
     setEditorOpen(true);
   }, [setting.setting_id]);
-  useEffect(() => {
-    if (!scopeMenuLevel) return undefined;
-    const handleOutsideClick = (event: MouseEvent) => {
-      const target = event.target;
-      if (target instanceof Node && scopeMenuRef.current?.contains(target)) return;
-      onSetScopeMenuLevel(null);
-    };
-    const timer = window.setTimeout(() => window.addEventListener("mousedown", handleOutsideClick, true), 0);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("mousedown", handleOutsideClick, true);
-    };
-  }, [onSetScopeMenuLevel, scopeMenuLevel]);
   const contextSettingIndex = savedViewContextMenu ? settings.findIndex((item) => item.setting_id === savedViewContextMenu.settingID) : -1;
   const contextSetting = contextSettingIndex >= 0 ? settings[contextSettingIndex] : null;
   const closeEditor = useCallback(() => {
     setEditorOpen(false);
-    onSetScopeMenuLevel(null);
     onSetAddGroupingOpen(false);
     onSetGroupingFieldMenuIndex(null);
-  }, [onSetAddGroupingOpen, onSetGroupingFieldMenuIndex, onSetScopeMenuLevel]);
+  }, [onSetAddGroupingOpen, onSetGroupingFieldMenuIndex]);
   const openEditorForSetting = useCallback((settingID: string) => {
     setSavedViewContextMenu(null);
     onSelectSetting(settingID);
-    onSetScopeMenuLevel(null);
     setEditorOpen(true);
-  }, [onSelectSetting, onSetScopeMenuLevel]);
+  }, [onSelectSetting]);
   const editor = editorOpen && typeof document !== "undefined" ? createPortal(
     <div style={groupingBodyStyle(editorPosition)}>
       <div style={groupingEditorHeaderStyle}>
         <span style={groupingEditorTitleStyle}>{setting.name}</span>
         <button type="button" title="Close editor" style={groupingEditorCloseButtonStyle} onClick={closeEditor}>x</button>
-      </div>
-      <div style={scopeControlRowStyle}>
-        <div ref={scopeMenuRef} style={scopeTabsAnchorStyle}>
-          <div style={scopeTabsStyle}>
-            {(["me", "team", "all"] as const).map((level) => (
-              <button
-                key={level}
-                type="button"
-                className={`mango-my-work-scope-tab${selectedScope.level === level ? " is-active" : ""}`}
-                style={scopeTabStyle(level, selectedScope.level === level)}
-                onClick={() => onSelectScopeLevel(level)}
-              >
-                {level === "me" ? "Me" : level === "team" ? "Team" : "All"}
-              </button>
-            ))}
-          </div>
-          {scopeMenuLevel && (
-            <div className="mango-my-work-scope-picker mango-home-scroll" style={scopePickerStyle}>
-              {scopeRows.length === 0 ? (
-                <div style={scopePickerEmptyStyle}>No people or groups</div>
-              ) : visibleScopeRows.map((row) => {
-                const collapsed = collapsedScopeRowKeys.has(row.key);
-                return (
-                  <div
-                    key={row.key}
-                    role="button"
-                    tabIndex={0}
-                    className="mango-my-work-menu-option"
-                    style={scopePickerRowStyle(row.depth, scopesEqual(row.scope, selectedScope))}
-                    onClick={() => onSelectScope(row.scope)}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") return;
-                      event.preventDefault();
-                      onSelectScope(row.scope);
-                    }}
-                  >
-                    {row.hasChildren ? (
-                      <button
-                        type="button"
-                        className="mango-my-work-scope-disclosure"
-                        aria-label={collapsed ? `Expand ${row.label}` : `Collapse ${row.label}`}
-                        style={scopePickerDisclosureStyle}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleScopeRowCollapsed(row.key);
-                        }}
-                      >
-                        <ExplorerDisclosureIcon open={!collapsed} color="currentColor" />
-                      </button>
-                    ) : <span style={scopePickerDisclosureSpacerStyle} />}
-                    <ScopeIcon icon={row.icon} />
-                    <span style={scopePickerTextStyle}>
-                      <span style={scopePickerLabelStyle}>{row.label}</span>
-                      {row.detail && <span style={scopePickerDetailStyle}>{row.detail}</span>}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
       </div>
       <div style={groupingStackStyle}>
         {setting.groupings.map((grouping, index) => (
@@ -1145,6 +1168,26 @@ function GroupingPanel({
               onClick={() => onUpdateGrouping(index, { ...grouping, direction: grouping.direction === "asc" ? "desc" : "asc" })}
             >
               {grouping.direction === "asc" ? "Asc" : "Desc"}
+            </button>
+            <button
+              type="button"
+              className="mango-my-work-action-button"
+              title="Move grouping up"
+              disabled={index === 0}
+              style={groupingMoveButtonStyle(index === 0)}
+              onClick={() => onMoveGrouping(index, -1)}
+            >
+              Up
+            </button>
+            <button
+              type="button"
+              className="mango-my-work-action-button"
+              title="Move grouping down"
+              disabled={index >= setting.groupings.length - 1}
+              style={groupingMoveButtonStyle(index >= setting.groupings.length - 1)}
+              onClick={() => onMoveGrouping(index, 1)}
+            >
+              Dn
             </button>
             <button type="button" className="mango-my-work-icon-button" title="Remove grouping" style={groupingRemoveButtonStyle} onClick={() => onRemoveGrouping(index)}>x</button>
           </div>
@@ -2320,6 +2363,7 @@ function createDefaultGroupingSetting(companyID: string, currentUserID: string):
 function savedViewsToMyWorkSettings(savedViews: SavedView[], fallback: MyWorkSavedGroupingSetting, currentUserID: string): MyWorkSavedGroupingSetting[] {
   return savedViews
     .filter((view) => view.surface === "my_work")
+    .sort((left, right) => left.position - right.position || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }) || left.saved_view_id.localeCompare(right.saved_view_id))
     .map((view) => savedViewToMyWorkSetting(view, fallback, currentUserID));
 }
 
@@ -2607,6 +2651,9 @@ const scopeControlRowStyle: React.CSSProperties = {
   display: "grid",
   gap: 8,
   alignItems: "center",
+  justifySelf: "end",
+  width: "min(280px, 34vw)",
+  minWidth: 220,
 };
 
 const scopeTabsAnchorStyle: React.CSSProperties = {
@@ -2863,16 +2910,17 @@ const groupingStackStyle: React.CSSProperties = {
 
 function groupingRowStyle(index: number): React.CSSProperties {
   const accent = myWorkGroupingAccent(index);
+  const indent = Math.min(index * 12, 30);
   return {
     position: "relative",
-    width: "min(100%, 294px)",
+    width: `calc(100% - ${indent}px)`,
     minWidth: 0,
     minHeight: 30,
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 46px 22px",
+    gridTemplateColumns: "minmax(0, 1fr) 46px 32px 32px 22px",
     alignItems: "center",
     gap: 5,
-    marginLeft: Math.min(index * 12, 30),
+    marginLeft: indent,
     border: `1px solid ${homeColorWithAlpha(accent, 0.18)}`,
     borderRadius: 7,
     background: `linear-gradient(145deg, rgba(255,255,255,0.92), ${homeColorWithAlpha(accent, 0.12)})`,
@@ -2910,6 +2958,21 @@ const groupingDirectionButtonStyle: React.CSSProperties = {
   fontWeight: 820,
   cursor: "pointer",
 };
+
+function groupingMoveButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    height: 22,
+    border: "1px solid rgba(15, 23, 42, 0.12)",
+    borderRadius: 5,
+    background: disabled ? "rgba(226, 232, 240, 0.54)" : "rgba(255, 255, 255, 0.78)",
+    color: disabled ? "#94a3b8" : "#334155",
+    font: "inherit",
+    fontSize: 10,
+    fontWeight: 820,
+    cursor: disabled ? "default" : "pointer",
+    padding: 0,
+  };
+}
 
 const groupingRemoveButtonStyle: React.CSSProperties = {
   height: 22,

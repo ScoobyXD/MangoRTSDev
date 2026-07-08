@@ -69,8 +69,8 @@ MW42 - A node deleted from My Work may be hidden optimistically while the delete
 MW43 - Updates grouping supports project and logic gate as normal grouping fields, and those fields persist through the saved-views API. Updates remains an event/mention feed and must not share My Work's active-work semantics.
 MW44 - My Work saved grouping views persist through the saved-views API. `logic_gate` is a valid My Work saved-view grouping field and must round-trip through save and reload.
 MW45 - My Work remembers the selected saved view per company and current user so returning to the My Work tab does not reset to the first saved view.
-MW46 - My Work saved grouping view rows render under the My Work sidebar tab. The floating grouping editor opens from Add new + or from a saved-view row's right-click Edit command, not from hover or focus.
-MW47 - Me, Team, and All scope menus open from click and close after selecting a scope or clicking outside the scope menu.
+MW46 - My Work saved grouping view rows render under the My Work entry in the Key Views sidebar, not in the My Work header. Add new + opens the floating grouping editor for a new saved view, and right-clicking a saved-view row exposes Edit, Rename, Move up/down, and Delete commands. The Me, My Team, and All scope tabs remain in the My Work header.
+MW47 - Me, My Team, and All scope menus open from click and close after selecting a scope or clicking outside the scope menu.
 MW48 - The active My Work saved-view row is visibly highlighted.
 MW49 - Right-clicking a My Work saved-view row exposes Edit, Rename, Move up/down, and Delete commands. Renames persist to the saved-view name and reorder persists through saved-view `position`.
 MW50 - Dragging a node between My Work cells updates both target priority and target GVIC role. A logic-gate-backed node must keep the same logic-gate relationship while moving, for example from priority 1 Generated to priority 3 Consulted.
@@ -109,7 +109,7 @@ Given:
 
 Expected:
 - My Work includes generated, verified, consulted, and informed assignments and does not show notification-feed-only Updates.
-- Me, Team, and All scopes resolve the correct target users.
+- Me, My Team, and All scopes resolve the correct target users.
 - Duplicate target user IDs are loaded once.
 - Successful target results remain visible when another target fails.
 - A full failure state appears only when every target fails.
@@ -165,8 +165,9 @@ Expected:
 - Logic Gate grouping saves and reloads through the saved-views API.
 - The selected saved view is restored when returning to My Work.
 - Malformed or duplicate settings are normalized.
-- The saved-view rows are shown under the My Work sidebar tab, and the floating grouping editor opens from Add new + or right-click Edit.
-- Me, Team, and All open on click and close on outside click or after a scope is selected.
+- The saved-view rows are shown under the My Work entry in the Key Views sidebar, and the floating grouping editor opens from Add new + or right-click Edit.
+- Me, My Team, and All stay in the My Work header and do not share the saved grouping view row real estate.
+- Me, My Team, and All open on click and close on outside click or after a scope is selected.
 - The active saved view row is highlighted.
 - Right-clicking a saved view can edit, rename, move it up/down, or delete it; rename and reorder changes persist.
 - Opening a row navigates to the node with available path context.

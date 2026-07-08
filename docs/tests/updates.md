@@ -74,7 +74,7 @@ U63 - Updates rows support Company Explorer-style multi-selection: normal click 
 U64 - Right-clicking an Updates row opens an Updates context menu with seen actions for the selected rows and for all rows; destructive multi-row seen actions ask for confirmation before removing notifications.
 U65 - Text editor mention row previews show the text block containing the specific new @ or ! mention occurrence; older mention blocks or unrelated editor text in the same saved document must not appear in that new row preview.
 U66 - Seeing an individual update hides that row locally without reloading the whole Updates feed; the list must not blink away and come back for the current user's own Seen action.
-U67 - Updates saved grouping view rows render under the Updates sidebar tab. Add new + opens the floating grouping editor for a new view, and right-clicking an existing view exposes Edit, Rename, and Delete commands.
+U67 - Updates saved grouping view rows render under the Updates entry in the Key Views sidebar, not in the Updates header. Add new + opens the floating grouping editor for a new saved grouping view, and right-clicking an existing view exposes Edit, Rename, Move up/down, and Delete commands.
 U68 - Activating an Updates row that opens the node preview panel keeps keyboard focus on the Updates row list; Up and Down arrow keys continue moving through visible rows across grouping boundaries instead of moving the caret inside the node editor.
 U69 - The Home sidebar Updates tab shows separate unread badges for urgent ! mentions, normal @ mentions, and non-mention update notifications using notification summary counts.
 
@@ -246,6 +246,7 @@ Given:
 Expected:
 - Project and Logic Gate grouping fields save through the saved-views API.
 - The saved fields reload in the same grouping order and direction.
+- Updates saved grouping views live under the Updates entry in the Key Views sidebar, where users can add, activate, edit, rename, reorder, and delete saved grouping rows.
 - Unknown Updates grouping fields are rejected instead of silently stored.
 - Updates saved-view rows are shown under the Updates sidebar tab, and the floating grouping editor opens from Add new + or right-click Edit.
 - Right-clicking a saved Updates view can edit, rename, or delete it.
