@@ -122,7 +122,7 @@ const mailboxDropdownWrapStyle: React.CSSProperties = {
 const mailboxDropdownMenuStyle: React.CSSProperties = {
   position: "absolute",
   zIndex: 30,
-  top: "calc(100% + 6px)",
+  top: "100%",
   right: 0,
   minWidth: 132,
   display: "grid",

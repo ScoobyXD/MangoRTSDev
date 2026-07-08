@@ -730,7 +730,7 @@ test("Home archive command sends message IDs in one background batch request by 
   assert.equal(result?.failed, undefined);
 });
 
-test("Home compose command validates and normalizes send payloads", async () => {
+test("Home compose command validates send payloads and preserves body spacing", async () => {
   const sentInputs: SendEmailInput[] = [];
   const sendEmail: HomeSendEmail = async (input) => {
     sentInputs.push(input);
@@ -758,7 +758,7 @@ test("Home compose command validates and normalizes send payloads", async () => 
     cc: [],
     bcc: [{ email: "teammate@example.test" }],
     subject: "Subject",
-    body: '<div style="font:14px/1.5 Arial,sans-serif;color:#111827;">Body</div>',
+    body: '<div style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;"> Body </div>',
     attachments: [],
     reply_to_message_id: "message-1",
   }]);
@@ -782,7 +782,7 @@ test("Home compose command validates and normalizes send payloads", async () => 
     cc: [],
     bcc: [],
     subject: "Shared",
-    body: '<div style="font:14px/1.5 Arial,sans-serif;color:#111827;">Reply</div>',
+    body: '<div style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;"> Reply </div>',
     attachments: [],
     reply_to_message_id: undefined,
     company_id: "company-1",

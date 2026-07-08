@@ -372,20 +372,20 @@ function isNodeWorkspaceHeaderInformationType(type: string): boolean {
 }
 
 const LINKED_NODE_ACCESS_DENIED_MESSAGE = "You do not have permission to see this.";
-const LINKED_ENTITY_NOT_FOUND_MESSAGE = "This resource is no longer available.";
+const LINKED_ENTITY_NOT_FOUND_MESSAGE = "This resource no longer exists. It was deleted or something.";
 
 function linkedEntityLoadErrorMessage(cause: unknown, entityKind: "" | "node" | "logic_gate"): string {
   if (isTerminalResourceNotFoundError(cause)) return LINKED_ENTITY_NOT_FOUND_MESSAGE;
   const message = cause instanceof Error ? cause.message : String(cause ?? "");
   const normalized = message.trim().toLowerCase();
+  if (normalized.includes("node_not_found") || normalized.includes("logic_gate_not_found") || normalized.includes("not_found") || normalized.includes("404")) {
+    return LINKED_ENTITY_NOT_FOUND_MESSAGE;
+  }
   if (
     normalized.includes("access_denied") ||
-    normalized.includes("node_not_found") ||
-    normalized.includes("logic_gate_not_found") ||
     normalized.includes("company_access_denied") ||
     normalized.includes("forbidden") ||
-    normalized.includes("403") ||
-    normalized.includes("404")
+    normalized.includes("403")
   ) {
     return entityKind === "logic_gate" ? "You do not have permission to see this." : LINKED_NODE_ACCESS_DENIED_MESSAGE;
   }

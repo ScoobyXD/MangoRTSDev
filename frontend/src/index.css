@@ -783,6 +783,34 @@ button, input, textarea, select {
   user-select: none;
 }
 
+.editor-document-scroll [data-mango-editor-table-align-controls="true"] {
+  display: inline-grid;
+  grid-template-columns: repeat(3, 18px);
+  gap: 2px;
+  margin: -2px 0 3px;
+  vertical-align: top;
+  user-select: none;
+}
+
+.editor-document-scroll [data-mango-editor-table-align-controls="true"] button {
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(100, 116, 139, 0.28);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.72);
+  color: rgba(15, 23, 42, 0.82);
+  font: 800 9px/1 var(--mango-font-family);
+  letter-spacing: 0;
+  cursor: pointer;
+  padding: 0;
+}
+
+.editor-document-scroll [data-mango-editor-table-align-controls="true"] button:hover {
+  border-color: var(--editor-document-scroll-accent);
+  color: var(--editor-document-scroll-accent);
+  background: rgba(255, 255, 255, 0.95);
+}
+
 .editor-document-scroll table[data-mango-editor-table="true"] [data-mango-editor-table-selected] {
   background:
     linear-gradient(180deg, rgba(224, 242, 254, 0.94), rgba(186, 230, 253, 0.62));

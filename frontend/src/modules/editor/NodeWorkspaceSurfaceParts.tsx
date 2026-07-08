@@ -4073,8 +4073,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   const recipients = parseEmailAddressDraft(toDraft);
   const canSend = editable && !sending && Boolean(message) && Boolean(replyTargetMessageID) && recipients.length > 0 && subjectDraft.trim() && bodyDraft.trim();
-  const replyLineCount = Math.min(5, Math.max(1, bodyDraft.split(/\r\n|\r|\n/).length));
-  const replyTextareaHeight = 34 + ((replyLineCount - 1) * 17);
+  const replyLineCount = Math.max(3, bodyDraft.split(/\r\n|\r|\n/).length);
+  const replyTextareaHeight = Math.min(260, 42 + ((replyLineCount - 1) * 18));
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
   const useRichEmailBody = !canUseEmailSelection;
   const selectedEmailBodyText = useMemo(() => (message ? emailBodyText(message.body || message.snippet || "") : ""), [message]);
@@ -4250,7 +4250,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     void sendEmail({
       to: recipients,
       subject: subjectDraft.trim(),
-      body: bodyDraft.trim(),
+      body: nodeReplyPlainTextToHTML(bodyDraft),
       reply_to_message_id: replyTargetMessage.id,
       company_id: companyID,
     })
@@ -4556,7 +4556,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   submitReply();
                 }
               }}
-              style={{ width: "100%", height: replyTextareaHeight, minHeight: 34, maxHeight: 102, resize: "none", overflowY: replyLineCount >= 5 ? "auto" : "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+              style={{ width: "100%", height: replyTextareaHeight, minHeight: 70, maxHeight: 260, resize: "vertical", overflowY: replyLineCount > 13 ? "auto" : "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
             />
             <button
               type="button"
@@ -5047,4 +5047,26 @@ function messageDocument(body: string, compact = false): string {
 
 function escapeHTML(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function linkifyNodeReplyHTMLLine(value: string): string {
+  const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
+  let output = "";
+  let cursor = 0;
+  for (const match of value.matchAll(urlPattern)) {
+    const matchText = match[0] ?? "";
+    const index = match.index ?? 0;
+    if (index > cursor) output += escapeHTML(value.slice(cursor, index));
+    const trailingPunctuation = matchText.match(/[),.;:!?]+$/)?.[0] ?? "";
+    const cleanURL = trailingPunctuation ? matchText.slice(0, -trailingPunctuation.length) : matchText;
+    const href = cleanURL.toLowerCase().startsWith("www.") ? `https://${cleanURL}` : cleanURL;
+    output += `<a href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer" style="color:#0369a1;text-decoration:underline;">${escapeHTML(cleanURL)}</a>${escapeHTML(trailingPunctuation)}`;
+    cursor = index + matchText.length;
+  }
+  return output + escapeHTML(value.slice(cursor));
+}
+
+function nodeReplyPlainTextToHTML(value: string): string {
+  const lines = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  return `<div style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;">${lines.map(linkifyNodeReplyHTMLLine).join("<br>")}</div>`;
 }

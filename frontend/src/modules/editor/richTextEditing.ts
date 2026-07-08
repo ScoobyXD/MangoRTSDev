@@ -21,6 +21,9 @@ export const EDITOR_TABLE_HEADER_ATTRIBUTE = "data-mango-editor-table-header";
 export const EDITOR_TABLE_COLUMN_WIDTHS_ATTRIBUTE = "data-mango-editor-table-column-widths";
 export const EDITOR_TABLE_WIDTH_ATTRIBUTE = "data-mango-editor-table-width";
 export const EDITOR_TABLE_OFFSET_ATTRIBUTE = "data-mango-editor-table-offset";
+export const EDITOR_TABLE_TEXT_ALIGN_ATTRIBUTE = "data-mango-editor-table-text-align";
+export const EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE = "data-mango-editor-table-align-controls";
+export const EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE = "data-mango-editor-table-align-action";
 export const EDITOR_LIST_ATTRIBUTE = "data-mango-editor-list";
 export const EDITOR_LIST_ITEM_ATTRIBUTE = "data-mango-editor-list-item";
 export const EDITOR_CHECKLIST_CHECKED_ATTRIBUTE = "data-mango-editor-checklist-checked";
@@ -28,6 +31,7 @@ export const EDITOR_LIST_MARKER_ATTRIBUTE = "data-mango-editor-list-marker";
 
 export type EditorListKind = "bullet" | "checklist";
 export type EditorListMarkerStyle = "solid-circle" | "hollow-circle" | "solid-square" | "hollow-square";
+export type EditorTableTextAlign = "left" | "center" | "right";
 
 export const EDITOR_TABLE_DEFAULT_ROWS = 3;
 export const EDITOR_TABLE_DEFAULT_COLUMNS = 3;
@@ -115,6 +119,17 @@ function applySafeFontSize(source: HTMLElement, target: HTMLElement) {
   const parsed = Number.parseFloat(fontSize);
   if (!Number.isFinite(parsed) || parsed < 6 || parsed > 96) return;
   target.style.fontSize = `${Math.round(parsed)}px`;
+}
+
+export function readEditorTableTextAlignValue(value: string | null | undefined): EditorTableTextAlign | null {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "left" || normalized === "center" || normalized === "right") return normalized;
+  return null;
+}
+
+export function readEditorTableTextAlign(table: HTMLElement): EditorTableTextAlign | null {
+  return readEditorTableTextAlignValue(table.getAttribute(EDITOR_TABLE_TEXT_ALIGN_ATTRIBUTE))
+    ?? readEditorTableTextAlignValue(table.style.textAlign);
 }
 
 function clampEditorTableSize(value: number, min: number, max: number): number {
@@ -215,6 +230,55 @@ export function applyEditorTableLayout(table: HTMLTableElement, widthPercent = 1
   return { widthPercent: safeWidth, offsetPercent: safeOffset };
 }
 
+export function applyEditorTableTextAlign(table: HTMLTableElement, align: EditorTableTextAlign | null) {
+  if (align) {
+    table.setAttribute(EDITOR_TABLE_TEXT_ALIGN_ATTRIBUTE, align);
+    table.style.textAlign = align;
+  } else {
+    table.removeAttribute(EDITOR_TABLE_TEXT_ALIGN_ATTRIBUTE);
+    table.style.textAlign = "";
+  }
+  Array.from(table.querySelectorAll("td,th")).forEach((cell) => {
+    if (!(cell instanceof HTMLElement)) return;
+    cell.style.textAlign = align ?? "";
+  });
+}
+
+function editorTableAlignmentButtonLabel(align: EditorTableTextAlign): string {
+  if (align === "left") return "L";
+  if (align === "right") return "R";
+  return "C";
+}
+
+function isEditorTableAlignmentControlNode(node: Node): boolean {
+  return node instanceof HTMLElement && node.getAttribute(EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE) === "true";
+}
+
+export function ensureEditorTableAlignmentControls(cell: HTMLTableCellElement, rowIndex: number, columnIndex: number) {
+  Array.from(cell.querySelectorAll(`[${EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE}="true"]`)).forEach((control) => {
+    if (rowIndex !== 0 || columnIndex !== 0 || control.parentElement !== cell) control.remove();
+  });
+  if (rowIndex !== 0 || columnIndex !== 0) return;
+  const existing = Array.from(cell.children).find((child): child is HTMLElement => (
+    child instanceof HTMLElement && child.getAttribute(EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE) === "true"
+  ));
+  if (existing) return;
+  const controls = cell.ownerDocument.createElement("span");
+  controls.setAttribute(EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE, "true");
+  controls.setAttribute("contenteditable", "false");
+  controls.setAttribute("aria-label", "Table alignment");
+  (["left", "center", "right"] as EditorTableTextAlign[]).forEach((align) => {
+    const button = cell.ownerDocument.createElement("button");
+    button.type = "button";
+    button.setAttribute(EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE, align);
+    button.setAttribute("aria-label", `Align table ${align}`);
+    button.title = `Align table ${align}`;
+    button.textContent = editorTableAlignmentButtonLabel(align);
+    controls.appendChild(button);
+  });
+  cell.insertBefore(controls, cell.firstChild);
+}
+
 function readEditorGridTableColumns(element: HTMLElement, fallback = 3): number {
   const raw = Number.parseInt(element.getAttribute(EDITOR_TABLE_COLUMNS_ATTRIBUTE) ?? "", 10);
   return clampEditorTableSize(raw || fallback, 1, EDITOR_TABLE_MAX_COLUMNS);
@@ -273,17 +337,21 @@ function createEditorTableCell(ownerDocument: Document, rowIndex: number, column
   if (isHeader) {
     cell.setAttribute(EDITOR_TABLE_HEADER_ATTRIBUTE, rowIndex === 0 && columnIndex === 0 ? "corner" : rowIndex === 0 ? "column" : "row");
   }
+  ensureEditorTableAlignmentControls(cell, rowIndex, columnIndex);
   cell.appendChild(ownerDocument.createElement("br"));
   return cell;
 }
 
 function ensureEditableTableCellContent(cell: HTMLTableCellElement) {
-  if (cell.childNodes.length > 0) return;
+  const editableChildren = Array.from(cell.childNodes).filter((child) => !isEditorTableAlignmentControlNode(child));
+  if (editableChildren.length > 0) return;
   cell.appendChild(cell.ownerDocument.createElement("br"));
 }
 
 function sanitizeEditorTableCellContent(source: HTMLElement, target: HTMLTableCellElement, ownerDocument: Document) {
-  source.childNodes.forEach((child) => appendSanitizedNode(child, target, ownerDocument));
+  source.childNodes.forEach((child) => {
+    if (!isEditorTableAlignmentControlNode(child)) appendSanitizedNode(child, target, ownerDocument);
+  });
   while (target.firstChild?.nodeType === Node.TEXT_NODE && !(target.firstChild.textContent ?? "").trim()) {
     target.firstChild.remove();
   }
@@ -309,11 +377,13 @@ function createSanitizedEditorTableFromCells(sourceRows: HTMLElement[][], ownerD
       if (!targetCell || !sourceCell) continue;
       targetCell.replaceChildren();
       sanitizeEditorTableCellContent(sourceCell, targetCell, ownerDocument);
+      ensureEditorTableAlignmentControls(targetCell, rowIndex, columnIndex);
     }
   }
   if (sourceTable) {
     applyEditorTableColumnWidths(table, readEditorTableColumnWidths(sourceTable, safeColumns));
     applyEditorTableLayout(table, readEditorTablePercentAttribute(sourceTable, EDITOR_TABLE_WIDTH_ATTRIBUTE, 100, EDITOR_TABLE_MIN_WIDTH_PERCENT, 100), readEditorTablePercentAttribute(sourceTable, EDITOR_TABLE_OFFSET_ATTRIBUTE, 0, 0, 100));
+    applyEditorTableTextAlign(table, readEditorTableTextAlign(sourceTable));
   }
   return table;
 }
@@ -493,6 +563,12 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
 
   const element = source as HTMLElement;
   const tagName = element.tagName.toLowerCase();
+  if (
+    element.getAttribute(EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE) === "true"
+    || element.hasAttribute(EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE)
+  ) {
+    return;
+  }
   if (element.getAttribute(EDITOR_TABLE_ATTRIBUTE) === "true" && tagName !== "table") {
     appendSanitizedEditorGridTable(element, target, ownerDocument);
     return;
@@ -714,6 +790,7 @@ export function readEditorDocumentText(root: HTMLElement): string {
   const readNodePlainText = (node: Node): string => {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
     if (!(node instanceof HTMLElement)) return "";
+    if (node.getAttribute(EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE) === "true") return "";
     if (node.tagName === "BR") return "\n";
     let value = "";
     node.childNodes.forEach((child) => {
@@ -727,6 +804,7 @@ export function readEditorDocumentText(root: HTMLElement): string {
       return;
     }
     if (!(node instanceof HTMLElement)) return;
+    if (node.getAttribute(EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE) === "true") return;
     if (node.tagName === "BR") {
       text += "\n";
       return;

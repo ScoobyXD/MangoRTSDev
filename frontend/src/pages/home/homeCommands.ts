@@ -159,12 +159,12 @@ function linkifyEmailBodyLine(value: string): string {
 
 function plainTextEmailBodyToHTML(value: string): string {
   const lines = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  return `<div style="font:14px/1.5 Arial,sans-serif;color:#111827;">${lines.map(linkifyEmailBodyLine).join("<br>")}</div>`;
+  return `<div style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;">${lines.map(linkifyEmailBodyLine).join("<br>")}</div>`;
 }
 
 function richEmailBodyToHTML(value: string): string {
   const html = sanitizeEditorDocumentHTML(value.slice(EDITOR_RICH_TEXT_PREFIX.length));
-  return `<div style="font:14px/1.5 Arial,sans-serif;color:#111827;">${html}</div>`;
+  return `<div style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;">${html}</div>`;
 }
 
 function composeBodyToEmailHTML(value: string): string {
@@ -343,7 +343,7 @@ export async function sendHomeMailComposeCommand(args: {
     throw new Error("Add at least one recipient.");
   }
   const subject = args.compose.subject.trim();
-  const bodyText = args.compose.body.trim();
+  const bodyText = args.compose.body;
   const attachments = (args.compose.attachments ?? [])
     .map((attachment) => ({
       filename: attachment.filename.trim() || "attachment",
@@ -360,7 +360,7 @@ export async function sendHomeMailComposeCommand(args: {
     cc,
     bcc,
     subject,
-    body: bodyText ? composeBodyToEmailHTML(bodyText) : "",
+    body: composeBodyHasContent(bodyText) ? composeBodyToEmailHTML(bodyText) : "",
     attachments,
     reply_to_message_id: args.compose.replyToMessageID || undefined,
   };

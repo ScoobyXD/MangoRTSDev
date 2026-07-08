@@ -4816,6 +4816,28 @@ function composeBodyToEditorHTML(body: string): string {
   return linkifyEditorPlainTextToHTML(body);
 }
 
+function plainTextSignatureToEditorHTML(value: string): string {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line ? linkifyEditorPlainTextToHTML(line) : "<br>")
+    .join("<br>");
+}
+
+function appendSignatureToComposeBody(body: string, signature: string): string {
+  const cleanSignature = signature.trim();
+  if (!cleanSignature) return body;
+  if (body.startsWith(EDITOR_RICH_TEXT_PREFIX)) {
+    const currentHTML = sanitizeEditorDocumentHTML(body.slice(EDITOR_RICH_TEXT_PREFIX.length));
+    const signatureHTML = `<div>${plainTextSignatureToEditorHTML(cleanSignature)}</div>`;
+    const spacerHTML = currentHTML.trim() ? "<div><br></div><div><br></div>" : "<div><br></div><div><br></div>";
+    return `${EDITOR_RICH_TEXT_PREFIX}${sanitizeEditorDocumentHTML(`${currentHTML}${spacerHTML}${signatureHTML}`)}`;
+  }
+  const currentBody = body.trimEnd();
+  return currentBody ? `${currentBody}\n\n\n${cleanSignature}` : `\n\n\n${cleanSignature}`;
+}
+
 function normalizeComposeLinkHref(value: string): string | null {
   const withProtocol = value.trim().toLowerCase().startsWith("www.") ? `https://${value.trim()}` : value.trim();
   try {
@@ -5084,9 +5106,8 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   const insertSignature = () => {
     const signature = emailSignature.trim();
     if (!signature) return;
-    const body = compose.body.trimEnd();
-    if (body.endsWith(signature)) return;
-    update({ body: body ? `${body}\n\n\n${signature}` : `\n\n\n${signature}` });
+    if (compose.body.endsWith(signature)) return;
+    update({ body: appendSignatureToComposeBody(compose.body, signature) });
   };
   const commitBodyEditor = React.useCallback(() => {
     const editor = bodyEditorRef.current;
