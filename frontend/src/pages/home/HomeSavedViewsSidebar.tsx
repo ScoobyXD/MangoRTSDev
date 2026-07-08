@@ -59,6 +59,7 @@ const MY_WORK_SELECTED_VIEW_STORAGE_KEY = "mangorts.myWork.selectedView.v1";
 const UPDATES_SELECTED_VIEW_STORAGE_KEY = "mangorts.updates.selectedView.v1";
 const HOME_SAVED_VIEW_DRAG_MIME = "application/x-mangorts-home-saved-view";
 const HOME_SAVED_VIEW_GROUPING_DRAG_MIME = "application/x-mangorts-home-saved-view-grouping";
+const HOME_SAVED_VIEW_EDITOR_WIDTH = 318;
 
 type SavedViewDropPlacement = "before" | "after";
 
@@ -84,8 +85,13 @@ export function HomeSavedViewsSidebarSection({
   const [savedViewDropTarget, setSavedViewDropTarget] = useState<{ settingID: string; placement: SavedViewDropPlacement } | null>(null);
   const [groupingDropTarget, setGroupingDropTarget] = useState<{ index: number; placement: SavedViewDropPlacement } | null>(null);
   const [addGroupingMenuOpen, setAddGroupingMenuOpen] = useState(false);
+  const [addGroupingMenuPosition, setAddGroupingMenuPosition] = useState({ left: 0, top: 0, width: 208 });
+  const [addButtonRaised, setAddButtonRaised] = useState(false);
   const [error, setError] = useState("");
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const addGroupingButtonRef = useRef<HTMLButtonElement | null>(null);
+  const addGroupingMenuRef = useRef<HTMLDivElement | null>(null);
   const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
   const contextSetting = contextMenu ? settings.find((setting) => setting.setting_id === contextMenu.settingID) ?? null : null;
   const groupingFields = homeSavedViewGroupingFields(surface);
@@ -96,11 +102,26 @@ export function HomeSavedViewsSidebarSection({
     if (typeof window === "undefined") return;
     const rect = panelRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const width = 420;
+    const width = HOME_SAVED_VIEW_EDITOR_WIDTH;
     const inset = 10;
     const left = Math.max(inset, Math.min(rect.right + 12, window.innerWidth - width - inset));
     const top = Math.max(inset, Math.min(rect.top, window.innerHeight - 180));
     setEditorPosition((current) => (current.left === left && current.top === top ? current : { left, top }));
+  }, []);
+
+  const updateAddGroupingMenuPosition = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const rect = addGroupingButtonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = Math.min(218, Math.max(188, rect.width));
+    const inset = 8;
+    const left = Math.max(inset, Math.min(rect.left, window.innerWidth - width - inset));
+    const top = Math.max(inset, Math.min(rect.bottom + 6, window.innerHeight - inset));
+    setAddGroupingMenuPosition((current) => (
+      current.left === left && current.top === top && current.width === width
+        ? current
+        : { left, top, width }
+    ));
   }, []);
 
   useEffect(() => {
@@ -161,6 +182,41 @@ export function HomeSavedViewsSidebarSection({
       window.removeEventListener("scroll", updateEditorPosition, true);
     };
   }, [editorOpen, updateEditorPosition]);
+
+  useEffect(() => {
+    if (!editorOpen) return undefined;
+    const handler = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (editorRef.current?.contains(target)) {
+        if (addGroupingMenuOpen && !addGroupingMenuRef.current?.contains(target) && !addGroupingButtonRef.current?.contains(target)) {
+          setAddGroupingMenuOpen(false);
+        }
+        return;
+      }
+      if (addGroupingMenuRef.current?.contains(target)) return;
+      setEditorOpen(false);
+      setAddGroupingMenuOpen(false);
+    };
+    const timer = window.setTimeout(() => window.addEventListener("mousedown", handler, true), 0);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("mousedown", handler, true);
+    };
+  }, [addGroupingMenuOpen, editorOpen]);
+
+  useEffect(() => {
+    if (!editorOpen || !addGroupingMenuOpen) return undefined;
+    updateAddGroupingMenuPosition();
+    const timer = window.setTimeout(updateAddGroupingMenuPosition, 0);
+    window.addEventListener("resize", updateAddGroupingMenuPosition);
+    window.addEventListener("scroll", updateAddGroupingMenuPosition, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("resize", updateAddGroupingMenuPosition);
+      window.removeEventListener("scroll", updateAddGroupingMenuPosition, true);
+    };
+  }, [addGroupingMenuOpen, editorOpen, updateAddGroupingMenuPosition]);
 
   const selectSetting = useCallback((settingID: string, navigate = false) => {
     const cleanSettingID = settingID.trim();
@@ -333,7 +389,7 @@ export function HomeSavedViewsSidebarSection({
   }, []);
 
   const editor = editorOpen && typeof document !== "undefined" ? createPortal(
-    <div style={savedViewEditorStyle(editorPosition)}>
+    <div ref={editorRef} style={savedViewEditorStyle(editorPosition)}>
       <div style={savedViewEditorHeaderStyle}>
         <input
           value={nameDraft}
@@ -433,32 +489,38 @@ export function HomeSavedViewsSidebarSection({
         })}
         <div style={savedViewAddGroupingShellStyle}>
           <button
+            ref={addGroupingButtonRef}
             type="button"
             style={savedViewAddGroupingButtonStyle(addableFields.length === 0)}
             disabled={addableFields.length === 0}
-            onClick={() => setAddGroupingMenuOpen(true)}
+            onClick={() => {
+              updateAddGroupingMenuPosition();
+              setAddGroupingMenuOpen(true);
+            }}
           >
             Add grouping +
           </button>
-          {addGroupingMenuOpen && addableFields.length > 0 && (
-            <div style={savedViewAddGroupingMenuStyle}>
-              {addableFields.map((field) => (
-                <button
-                  key={field.value}
-                  type="button"
-                  style={savedViewAddGroupingMenuOptionStyle}
-                  onClick={() => {
-                    updateSelectedSetting((setting) => ({ ...setting, groupings: [...setting.groupings, { field: field.value, direction: "asc" }] }));
-                    setAddGroupingMenuOpen(false);
-                  }}
-                >
-                  {field.label}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
       </div>
+    </div>,
+    document.body,
+  ) : null;
+
+  const addGroupingMenu = editorOpen && addGroupingMenuOpen && addableFields.length > 0 && typeof document !== "undefined" ? createPortal(
+    <div ref={addGroupingMenuRef} style={savedViewAddGroupingMenuStyle(addGroupingMenuPosition)}>
+      {addableFields.map((field) => (
+        <button
+          key={field.value}
+          type="button"
+          style={savedViewAddGroupingMenuOptionStyle}
+          onClick={() => {
+            updateSelectedSetting((setting) => ({ ...setting, groupings: [...setting.groupings, { field: field.value, direction: "asc" }] }));
+            setAddGroupingMenuOpen(false);
+          }}
+        >
+          {field.label}
+        </button>
+      ))}
     </div>,
     document.body,
   ) : null;
@@ -531,7 +593,17 @@ export function HomeSavedViewsSidebarSection({
           );
         })}
       </div>
-      <button type="button" style={savedViewAddButtonStyle} onClick={addSavedView}>Add new +</button>
+      <button
+        type="button"
+        style={savedViewAddButtonStyle(surface, addButtonRaised)}
+        onPointerEnter={() => setAddButtonRaised(true)}
+        onPointerLeave={() => setAddButtonRaised(false)}
+        onFocus={() => setAddButtonRaised(true)}
+        onBlur={() => setAddButtonRaised(false)}
+        onClick={addSavedView}
+      >
+        Add new +
+      </button>
       {error && <div style={savedViewErrorStyle}>{error}</div>}
       {contextMenu && contextSetting && (
         <FrameRightClickMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)} width={118} minWidth={118} maxWidth={118}>
@@ -552,6 +624,7 @@ export function HomeSavedViewsSidebarSection({
         </FrameRightClickMenu>
       )}
       {editor}
+      {addGroupingMenu}
     </div>
   );
 }
@@ -757,20 +830,28 @@ const savedViewSettingsButtonStyle: React.CSSProperties = {
   padding: 0,
 };
 
-const savedViewAddButtonStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 26,
-  border: "1px solid rgba(255, 255, 255, 0.78)",
-  borderRadius: 8,
-  background: "linear-gradient(145deg, #ffffff 0%, #f7f8fb 100%)",
-  color: "#087f5b",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 11,
-  fontWeight: 820,
-  padding: "0 8px",
-  boxShadow: "4px 4px 10px rgba(174, 174, 192, 0.20), -4px -4px 10px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
-};
+function savedViewAddButtonStyle(surface: HomeSavedViewsSurface, raised: boolean): React.CSSProperties {
+  const accent = savedViewSurfaceAccent(surface);
+  return {
+    width: "100%",
+    minHeight: 26,
+    border: `1px solid ${raised ? "transparent" : colorWithAlpha(accent.strong, 0.20)}`,
+    borderRadius: 8,
+    background: raised
+      ? `linear-gradient(145deg, rgba(255, 255, 255, 0.96), ${accent.soft}) padding-box, ${accent.frame} border-box`
+      : `linear-gradient(145deg, #ffffff 0%, ${accent.faint} 100%)`,
+    color: accent.text,
+    cursor: "pointer",
+    font: "inherit",
+    fontSize: 11,
+    fontWeight: 840,
+    padding: "0 8px",
+    boxShadow: raised
+      ? `${accent.glow}, 6px 6px 14px rgba(174, 174, 192, 0.24), -5px -5px 13px rgba(255, 255, 255, 0.90), inset 1px 1px 0 rgba(255, 255, 255, 0.92)`
+      : "4px 4px 10px rgba(174, 174, 192, 0.20), -4px -4px 10px rgba(255, 255, 255, 0.88), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
+    transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, color 140ms ease",
+  };
+}
 
 const savedViewErrorStyle: React.CSSProperties = {
   minWidth: 0,
@@ -788,9 +869,9 @@ function savedViewEditorStyle(position: { left: number; top: number }): React.CS
     zIndex: 130,
     top: position.top,
     left: position.left,
-    width: "min(420px, calc(100vw - 96px))",
-    maxHeight: "min(520px, calc(100vh - 32px))",
-    overflow: "auto",
+    width: `min(${HOME_SAVED_VIEW_EDITOR_WIDTH}px, calc(100vw - 96px))`,
+    maxHeight: "none",
+    overflow: "visible",
     display: "grid",
     gap: 10,
     minWidth: 0,
@@ -840,8 +921,8 @@ const savedViewEditorCloseStyle: React.CSSProperties = {
 };
 
 const savedViewGroupingStackStyle: React.CSSProperties = {
-  width: "min(396px, 100%)",
-  maxWidth: 396,
+  width: "100%",
+  maxWidth: "100%",
   minWidth: 0,
   display: "grid",
   alignContent: "start",
@@ -941,20 +1022,22 @@ function savedViewAddGroupingButtonStyle(disabled: boolean): React.CSSProperties
   };
 }
 
-const savedViewAddGroupingMenuStyle: React.CSSProperties = {
-  position: "absolute",
-  left: 0,
-  top: "calc(100% + 5px)",
-  zIndex: 4,
-  width: "min(220px, 100%)",
-  display: "grid",
-  gap: 3,
-  padding: 6,
-  border: "1px solid rgba(0, 163, 255, 0.26)",
-  borderRadius: 9,
-  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(240, 249, 255, 0.96))",
-  boxShadow: "0 14px 30px rgba(15, 23, 42, 0.16), inset 1px 1px 0 rgba(255, 255, 255, 0.92)",
-};
+function savedViewAddGroupingMenuStyle(position: { left: number; top: number; width: number }): React.CSSProperties {
+  return {
+    position: "fixed",
+    left: position.left,
+    top: position.top,
+    zIndex: 132,
+    width: position.width,
+    display: "grid",
+    gap: 3,
+    padding: 6,
+    border: "1px solid rgba(0, 163, 255, 0.26)",
+    borderRadius: 9,
+    background: "linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(240, 249, 255, 0.96))",
+    boxShadow: "0 14px 30px rgba(15, 23, 42, 0.16), inset 1px 1px 0 rgba(255, 255, 255, 0.92)",
+  };
+}
 
 const savedViewAddGroupingMenuOptionStyle: React.CSSProperties = {
   minHeight: 29,
@@ -982,6 +1065,34 @@ const savedViewContextMenuButtonStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "0 9px",
 };
+
+function savedViewSurfaceAccent(surface: HomeSavedViewsSurface): {
+  strong: string;
+  faint: string;
+  soft: string;
+  frame: string;
+  text: string;
+  glow: string;
+} {
+  if (surface === "updates") {
+    return {
+      strong: "#f59e0b",
+      faint: "#fff7ed",
+      soft: "rgba(255, 237, 213, 0.82)",
+      frame: "linear-gradient(135deg, rgba(251, 146, 60, 0.96), rgba(251, 191, 36, 0.82), rgba(255, 255, 255, 0.90))",
+      text: "#b45309",
+      glow: "0 0 0 1px rgba(245, 158, 11, 0.18), 0 8px 20px rgba(245, 158, 11, 0.16)",
+    };
+  }
+  return {
+    strong: "#10b981",
+    faint: "#ecfdf5",
+    soft: "rgba(209, 250, 229, 0.82)",
+    frame: "linear-gradient(135deg, rgba(16, 185, 129, 0.94), rgba(45, 212, 191, 0.78), rgba(255, 255, 255, 0.90))",
+    text: "#047857",
+    glow: "0 0 0 1px rgba(16, 185, 129, 0.18), 0 8px 20px rgba(16, 185, 129, 0.15)",
+  };
+}
 
 function colorWithAlpha(color: string, alpha: number): string {
   const normalized = color.trim();
