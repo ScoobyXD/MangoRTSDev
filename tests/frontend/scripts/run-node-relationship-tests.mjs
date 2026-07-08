@@ -62,6 +62,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorScroll.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorIndentGuides.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorProjection.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeTextBlockProjectionSaves.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTextBlockChatHighlights.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeContentChanges.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorDates.test.js"),

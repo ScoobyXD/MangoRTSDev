@@ -37,6 +37,10 @@ import {
 } from "./editorProjection";
 import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "./editorTypes";
 import type { NodeContentChange } from "./nodeContentChanges";
+import {
+  createTextBlockProjectionSaveController,
+  type TextBlockProjectionSaveController,
+} from "./nodeTextBlockProjectionSaves";
 import { resolveEditorTextBlockChatAnchorMessageID } from "./editorTextBlockChatHighlights";
 import { createEditorImageFrame } from "./editorImages";
 import { serializeEditorDocumentHTML } from "./richTextEditing";
@@ -339,6 +343,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const logicGateAssignStatusTimerRef = useRef<number | null>(null);
   const logicGateAssignFlashTimerRef = useRef<number | null>(null);
   const contentByBlockRef = useRef(new Map<string, EditorTextBlockContent>());
+  const textBlockProjectionSaveControllerRef = useRef<TextBlockProjectionSaveController<EditorTextBlockContent> | null>(null);
   const focusBlockIDRef = useRef("");
   const handledFocusRequestRef = useRef("");
   const previousNodeIDRef = useRef(nodeID);
@@ -389,6 +394,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [author, setAuthor] = useState({ userID: "", name: "You" });
   const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number; position: ConfirmActionMenuPosition } | null>(null);
   const autoCreatedTextBlockNodeIDsRef = useRef(new Set<string>());
+  if (textBlockProjectionSaveControllerRef.current === null) {
+    textBlockProjectionSaveControllerRef.current = createTextBlockProjectionSaveController<EditorTextBlockContent>();
+  }
+  const textBlockProjectionSaveController = textBlockProjectionSaveControllerRef.current;
 
   const projectionIdentity = useMemo(() => projectionsKey(projections), [projections]);
   const loadedTextBlockProjections = useMemo(() => listEditorTextBlockProjections(projections), [projectionIdentity, projections]);
@@ -699,6 +708,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [companyID, nodeID]);
 
   useEffect(() => {
+    for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
+    saveTimersRef.current.clear();
+    contentByBlockRef.current = new Map();
+    textBlockProjectionSaveController.clear();
+  }, [companyID, nodeID, textBlockProjectionSaveController]);
+
+  useEffect(() => {
     if (skipNextPaneLayoutPersistRef.current) {
       skipNextPaneLayoutPersistRef.current = false;
       return;
@@ -725,11 +741,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         pending: false,
       };
     });
+    const parsedAttachedEmails = parseEditorAttachedEmails(projections);
     const parsedChatMessages = parseEditorTextBlockChats(projections);
+    if (textBlockProjectionSaveController.hasAnyChangedOrSaveInProgress()) {
+      setChatMessages(parsedChatMessages);
+      setAttachedEmails(parsedAttachedEmails);
+      return;
+    }
     setBlocks(textBlocks);
     contentByBlockRef.current = new Map(textBlocks.map((block) => [block.id, { title: block.title, document: block.document, attachments: block.attachments }]));
+    textBlockProjectionSaveController.replaceBlocksAsHasNotChanged(textBlocks.map((block) => ({
+      blockID: block.id,
+      content: { title: block.title, document: block.document, attachments: block.attachments },
+    })));
     setChatMessages(parsedChatMessages);
-    const parsedAttachedEmails = parseEditorAttachedEmails(projections);
     setAttachedEmails(parsedAttachedEmails);
     const nodeChanged = previousNodeIDRef.current !== nodeID;
     previousNodeIDRef.current = nodeID;
@@ -769,7 +794,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       setClosedChatBlockIDs((current) => new Set(Array.from(current).filter((id) => blockIDs.has(id))));
     }
     setFocusedTextBlockID((current) => (nodeChanged || !blockIDs.has(current) ? "" : current));
-  }, [loadedTextBlockProjections, nodeID, projectionIdentity, projections, projectionsLoaded]);
+  }, [loadedTextBlockProjections, nodeID, projectionIdentity, projections, projectionsLoaded, textBlockProjectionSaveController]);
 
   useEffect(() => {
     let cancelled = false;
@@ -838,7 +863,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (logicGateAssignFlashTimerRef.current !== null) window.clearTimeout(logicGateAssignFlashTimerRef.current);
     for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
     saveTimersRef.current.clear();
-  }, []);
+    textBlockProjectionSaveController.clear();
+  }, [textBlockProjectionSaveController]);
 
   useEffect(() => {
     if (!focusBlockIDRef.current) return;
@@ -854,40 +880,45 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [blocks.length, canEdit]);
 
-  const persistTextBlock = useCallback(async (blockID: string, content: EditorTextBlockContent) => {
-    if (!canEdit) return;
-    if (!nodeID || !companyID) return;
-    setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, pending: true } : block));
-    try {
-      const information = buildEditorTextBlockContentPayload(content);
-      if (information.trim()) {
-        await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection`, {
-          method: "POST",
-          body: JSON.stringify({
-            company_id: companyID,
-            type: EDITOR_TEXT_BLOCK_TYPE,
-            information,
-            information_id: blockID,
-          }),
-        });
-      } else {
-        await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${blockID}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
-      }
-      onProjectionMutation();
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "failed_to_save_text_block");
-    } finally {
-      setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, pending: false } : block));
+  const saveTextBlockProjection = useCallback(async (blockID: string, content: EditorTextBlockContent) => {
+    if (!canEdit || !nodeID || !companyID) throw new Error("failed_to_save_text_block");
+    const information = buildEditorTextBlockContentPayload(content);
+    if (information.trim()) {
+      await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection`, {
+        method: "POST",
+        body: JSON.stringify({
+          company_id: companyID,
+          type: EDITOR_TEXT_BLOCK_TYPE,
+          information,
+          information_id: blockID,
+        }),
+      });
+    } else {
+      await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${blockID}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
     }
-  }, [canEdit, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+    onProjectionMutation();
+  }, [canEdit, companyID, nodeID, onProjectionMutation, requestJSON]);
+
+  const setTextBlockSaveInProgress = useCallback((blockID: string, saveInProgress: boolean) => {
+    setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, pending: saveInProgress } : block));
+  }, []);
+
+  useEffect(() => {
+    textBlockProjectionSaveController.configure({
+      saveBlock: ({ blockID, content }) => saveTextBlockProjection(blockID, content),
+      onBlockSaveInProgressChange: setTextBlockSaveInProgress,
+      onSaveError: (_blockID, cause) => {
+        onError(cause instanceof Error ? cause.message : "failed_to_save_text_block");
+      },
+    });
+  }, [onError, saveTextBlockProjection, setTextBlockSaveInProgress, textBlockProjectionSaveController]);
 
   const flushAllTextBlockProjectionSaves = useCallback(async () => {
     if (!canEdit) return;
     for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
     saveTimersRef.current.clear();
-    const entries = Array.from(contentByBlockRef.current.entries());
-    await Promise.all(entries.map(([blockID, content]) => persistTextBlock(blockID, content)));
-  }, [canEdit, persistTextBlock]);
+    await textBlockProjectionSaveController.flushChangedBlocks();
+  }, [canEdit, textBlockProjectionSaveController]);
 
   useEffect(() => {
     if (!onRegisterSaveController) return undefined;
@@ -902,20 +933,21 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       window.clearTimeout(timer);
       saveTimersRef.current.delete(blockID);
     }
-    void persistTextBlock(blockID, contentByBlockRef.current.get(blockID) ?? { title: "", document: "", attachments: [] });
-  }, [canEdit, persistTextBlock]);
+    textBlockProjectionSaveController.startLatestContentSave(blockID);
+  }, [canEdit, textBlockProjectionSaveController]);
 
   const scheduleTextBlockSave = useCallback((blockID: string, content: EditorTextBlockContent) => {
     if (!canEdit) return;
     contentByBlockRef.current.set(blockID, content);
+    textBlockProjectionSaveController.markHasChanged(blockID, content);
     const existingTimer = saveTimersRef.current.get(blockID);
     if (existingTimer !== undefined) window.clearTimeout(existingTimer);
     const timer = window.setTimeout(() => {
       saveTimersRef.current.delete(blockID);
-      void persistTextBlock(blockID, contentByBlockRef.current.get(blockID) ?? { title: "", document: "", attachments: [] });
+      textBlockProjectionSaveController.startLatestContentSave(blockID);
     }, EDITOR_AUTOSAVE_DELAY_MS);
     saveTimersRef.current.set(blockID, timer);
-  }, [canEdit, persistTextBlock]);
+  }, [canEdit, textBlockProjectionSaveController]);
 
   const createTextBlock = useCallback(() => {
     if (!canEdit) return;
@@ -924,6 +956,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const initialContent: EditorTextBlockContent = { title: DEFAULT_TEXT_BLOCK_TITLE, document: "", attachments: [] };
     focusBlockIDRef.current = blockID;
     contentByBlockRef.current.set(blockID, initialContent);
+    textBlockProjectionSaveController.markHasChanged(blockID, initialContent);
     setBlocks((current) => [
       {
         id: blockID,
@@ -936,8 +969,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       },
       ...current,
     ]);
-    void persistTextBlock(blockID, initialContent);
-  }, [canEdit, persistTextBlock]);
+    textBlockProjectionSaveController.startLatestContentSave(blockID);
+  }, [canEdit, textBlockProjectionSaveController]);
 
   useEffect(() => {
     if (!canEdit || !projectionsLoaded || !nodeID || loadedTextBlockProjections.length > 0 || blocks.length > 0 || autoCreatedTextBlockNodeIDsRef.current.has(nodeID)) return;
@@ -1000,6 +1033,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const relatedChatIDs = chatMessages.filter((message) => message.blockID === blockID).map((message) => message.id);
     const deletedInformationIDs = [blockID, ...relatedChatIDs];
     contentByBlockRef.current.delete(blockID);
+    textBlockProjectionSaveController.removeBlock(blockID);
     setBlocks((current) => current.filter((block) => block.id !== blockID));
     setChatMessages((current) => current.filter((message) => message.blockID !== blockID));
     setChatDrafts((current) => {
@@ -1079,7 +1113,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       onError(cause instanceof Error ? cause.message : "failed_to_delete_text_block");
       onProjectionMutation();
     }
-  }, [canEdit, chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON]);
+  }, [canEdit, chatMessages, companyID, nodeID, onError, onProjectionMutation, requestJSON, textBlockProjectionSaveController]);
 
   const requestDeleteTextBlock = useCallback((blockID: string, position: ConfirmActionMenuPosition) => {
     if (!canEdit) return;

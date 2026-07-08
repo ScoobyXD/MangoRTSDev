@@ -224,6 +224,7 @@ const EDITOR_RELATIONSHIP_WORLD_W = 12800;
 const EDITOR_RELATIONSHIP_WORLD_H = 8800;
 const EDITOR_SAVE_VERSION_INTERVAL_OPTIONS = [5, 10, 30, 60] as const;
 const EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES = 10;
+const EDITOR_AUTO_SAVE_VERSION_CREATION_ENABLED: boolean = false;
 
 type EditorSaveVersionItem = {
   information_id: string;
@@ -2190,6 +2191,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
     const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
     const resourceID = linkedNodeID.trim();
+    if (!EDITOR_AUTO_SAVE_VERSION_CREATION_ENABLED) return;
     if (!companyID || !resourceType || !resourceID || !linkedEntityCanEdit || linkedEntityAccessDenied) return;
     const intervalMs = Math.max(1, saveVersionIntervalMinutes) * 60_000;
     autoSaveVersionTimerRef.current = window.setInterval(() => {
