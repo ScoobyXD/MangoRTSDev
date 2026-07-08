@@ -62,6 +62,7 @@ P51 - Apply-to-descendants overwrites existing descendant special rules for the 
 P52 - Conflicting direct bindings and ancestor apply records resolve by a monotonic transaction sequence, not wall-clock time.
 P53 - Permission audit/explainability must identify whether a user's rule came from a direct resource binding, create/transfer inheritance, ancestor apply-to-descendants, or group membership, and must not report GVIC assignment as a resource-permission grant.
 P54 - Soft delete for nodes and Company Explorer delete targets requires edit access to the deleted resource or container; resource admin is not required, view-only is not enough, and GVIC assignments must not authorize the delete.
+P55 - If a user is denied permission-settings visibility, the permissions dialog remains dismissible with the X control and must not attempt to autosave a panel that never loaded editable permission data.
 
 ## Scenarios
 
@@ -226,3 +227,18 @@ Given:
 Expected:
 - Closing with X persists the pending permission change.
 - The dialog does not require a separate Save button before close.
+
+### Scenario P-S6: Denied Permission Dialog Can Close
+
+Business logic covered:
+- P39
+- P55
+
+Given:
+- A regular user opens a node, Logic Gate, or Explorer resource where the user cannot view permission settings.
+- The permissions dialog or tab displays the manager/admin permission message.
+
+Expected:
+- The X control closes the permissions dialog.
+- Closing does not issue a permission save request.
+- The user can return to the underlying resource or previous UI state.

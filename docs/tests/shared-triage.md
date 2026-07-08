@@ -125,6 +125,7 @@ ST114 - Shared Triage mailbox rows group messages by provider/Nylas `thread_id` 
 ST115 - A grouped Shared Triage row uses the newest loaded message as the visible row representative while unread, starred, attachment, and thread-count indicators roll up from the loaded messages in that thread.
 ST116 - Selecting a Shared Triage thread row opens a scrollable, full-height conversation detail pane that hydrates the thread through Nylas thread `message_ids` plus individual message-detail reads for HTML bodies, all scoped to the selected `shared_inbox_id` and company-owned shared grant.
 ST117 - Shared Triage rich compose send must preserve sanitized block indentation, including indent/outdent and blockquote-style indents, so sent shared email HTML does not flatten intended paragraph indentation.
+ST118 - Expired or revoked company-owned Shared Triage mailbox provider credentials return a Shared Triage reconnect/repair state, not a Mango auth logout; permitted users remain signed in and managers/admins with edit access can repair the shared connection.
 
 ## Nylas Configuration Contract
 
@@ -166,6 +167,25 @@ Expected:
 - Mailbox-capable entries and plain folder entries are represented in the same tree without mixing their mailbox behavior.
 - User A opens a visible shared inbox without connecting that mailbox to User A's personal account.
 - The visible Shared Triage folder query succeeds for User A without SQL argument-count errors.
+
+### Scenario ST-S1B: Shared Mailbox Provider Reauth Does Not Log Out Mango
+
+Business logic covered:
+- ST11
+- ST33
+- ST34
+- ST118
+
+Given:
+- A user has view access to a mailbox-capable Shared Triage inbox.
+- The company-owned shared mailbox provider grant has expired or been revoked.
+- The user selects that Shared Triage inbox.
+
+Expected:
+- Folder and message reads return a provider reauth-required response, not a Mango session `401`.
+- The user remains signed in to Mango.
+- The UI shows the Shared Triage reconnect/repair state for the shared mailbox.
+- A manager/admin with edit access can start the shared inbox OAuth reconnect flow.
 
 ### Scenario ST-S2: Create, Rename, Move, And Delete Shared Inbox Folders
 

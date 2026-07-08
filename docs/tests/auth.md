@@ -21,6 +21,7 @@ AUTH10 - Auth refresh means the app silently obtains a fresh access token from t
 AUTH11 - A terminal auth failure or failed silent refresh must force the normal Mango logout/login flow and show the existing Mango login page.
 AUTH12 - After terminal auth failure, the frontend must stop product fetches, realtime ticket requests, WebSocket reconnects, fallback/refetch behavior, editor saves, and background retries until the user logs in again.
 AUTH13 - The app must not leave the user editing a dead authenticated surface with only a small websocket/auth error indicator.
+AUTH14 - Third-party provider credential failures, such as Nylas mailbox reauthorization for My Triage or Shared Triage, are not Mango auth failures and must not clear the Mango session or force the login page.
 
 ## Scenarios
 
@@ -96,3 +97,20 @@ Expected:
 - The visible screen becomes the existing Mango login page.
 - The user is not left typing into an editor or work surface that can no longer save.
 - A small websocket/auth status badge is not the only user-visible auth failure state.
+
+### Scenario AUTH-S5: Provider Reauth Does Not Log Out Mango
+
+Business logic covered:
+- AUTH11
+- AUTH14
+
+Given:
+- A user is signed in to Mango with a valid Mango/Cognito session.
+- The user opens My Triage or a Shared Triage mailbox.
+- The mailbox provider grant has expired or requires reauthorization.
+
+Expected:
+- The backend returns a provider reauth error instead of a Mango `401`.
+- The frontend shows the mailbox reconnect/repair flow.
+- The user's Mango session remains active.
+- The app does not navigate to the Mango login page solely because the mailbox provider needs reconnecting.

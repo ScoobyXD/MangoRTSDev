@@ -22,6 +22,7 @@ import (
 func main() {
 	repo, workspaceFanout, cleanup := buildRepository()
 	defer cleanup()
+	nylasConfig := buildNylasConfig()
 	server := httpapi.NewServerWithOptions(repo, httpapi.ServerOptions{
 		AuthValidator: buildAuthValidator(),
 		CognitoAdmin:  buildCognitoAdminClient(),
@@ -32,7 +33,8 @@ func main() {
 			CompanyName: getenvDefault("MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME", "MangoRTS Bootstrap"),
 		},
 		NylasClient:          buildNylasClient(),
-		NylasConfig:          buildNylasConfig(),
+		NylasConfig:          nylasConfig,
+		RealtimeTicketSecret: secretEnvValue("MANGORTS_REALTIME_TICKET_SECRET", "realtime_ticket_secret", "ticket_secret", "MANGORTS_REALTIME_TICKET_SECRET"),
 		WorkspaceEventFanout: workspaceFanout,
 	})
 	defer server.Close()

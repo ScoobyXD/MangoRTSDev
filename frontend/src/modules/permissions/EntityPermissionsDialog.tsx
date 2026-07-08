@@ -185,6 +185,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [permissionsLoadFailed, setPermissionsLoadFailed] = useState(false);
   const [saved, setSaved] = useState(false);
   const [applyToDescendants, setApplyToDescendants] = useState(false);
 
@@ -198,6 +199,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
     async function load() {
       setBusy(true);
       setError("");
+      setPermissionsLoadFailed(false);
       try {
         const [companyUsers, groupsPayload, permissionsPayload] = await Promise.all([
           listCompanyUsers(companyID),
@@ -221,11 +223,13 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
         setServerCanEditPermissions(permissionsPayload.can_edit_permissions === true);
         setServerCanEditManagerPermissions(permissionsPayload.can_edit_manager_permissions === true);
         setApplyToDescendants(false);
+        setPermissionsLoadFailed(false);
         setSaved(false);
       } catch (loadError) {
         if (!cancelled) {
           console.error("Failed to load permissions", loadError);
           setError(permissionRequestErrorMessage(loadError, "view"));
+          setPermissionsLoadFailed(true);
         }
       } finally {
         if (!cancelled) setBusy(false);
@@ -529,7 +533,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const containerStyle = dialogMode ? permissionDialogStyle : permissionEmbeddedStyle;
   const closeWithSave = () => {
     if (!onClose) return;
-    if (effectiveReadOnly) {
+    if (effectiveReadOnly || permissionsLoadFailed) {
       onClose();
       return;
     }
