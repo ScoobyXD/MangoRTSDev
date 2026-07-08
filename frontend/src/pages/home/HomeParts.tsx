@@ -1543,6 +1543,15 @@ const homeSidebarSavedViewPanelStyle: React.CSSProperties = {
   padding: "0 4px 2px 14px",
 };
 
+const homeSidebarSavedViewsSlotStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  alignContent: "start",
+  gap: 4,
+  marginTop: -1,
+  padding: "1px 0 3px",
+};
+
 const homeSidebarSavedViewListStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
@@ -2430,7 +2439,7 @@ export function HomeSidebar({
         </section>
         <section style={sidebarSectionStyle}>
           <HomeNavButton label="My Work" active={activeViewID === "my-work"} onClick={() => onSelectView("my-work", "all")} />
-          <div id={HOME_MY_WORK_SAVED_VIEWS_SLOT_ID}>
+          <div id={HOME_MY_WORK_SAVED_VIEWS_SLOT_ID} style={homeSidebarSavedViewsSlotStyle}>
             {activeViewID !== "my-work" && (
               <HomeSidebarSavedViewsFallback
                 apiBase={apiBase}
@@ -2449,7 +2458,7 @@ export function HomeSidebar({
             meta={<UpdatesTabNotificationBadges counts={updatesCounts} />}
             onClick={() => onSelectView("updates", "all")}
           />
-          <div id={HOME_UPDATES_SAVED_VIEWS_SLOT_ID}>
+          <div id={HOME_UPDATES_SAVED_VIEWS_SLOT_ID} style={homeSidebarSavedViewsSlotStyle}>
             {activeViewID !== "updates" && (
               <HomeSidebarSavedViewsFallback
                 apiBase={apiBase}
