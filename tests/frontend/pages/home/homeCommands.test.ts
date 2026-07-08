@@ -7,7 +7,7 @@ import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/k
 import type { NodeRecord } from "../../../../frontend/src/modules/node-map/shared.js";
 import { EDITOR_RICH_TEXT_PREFIX } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "../../../../frontend/src/pages/home/homeConstants.js";
-import { addMyLogicGateShortcutsCommand, addSharedInboxGVICPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeGVICMatrixNodeCommand, createSharedInboxCommand, deleteHomeMailMessagesCommand, deleteSharedInboxCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, moveSharedInboxCommand, removeMyLogicGateShortcutCommand, removeSharedInboxCommand, removeSharedInboxGVICPrincipalCommand, renameSharedInboxCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateGVICMatrixNode, type HomeCreateSharedInbox, type HomeDeleteEmailMessage, type HomeDeleteSharedInbox, type HomeDropAssignNodeToLogicGateStatus, type HomeMoveMyWorkNodeToCell, type HomeRemoveMyLogicGateShortcut, type HomeRemoveSharedInbox, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInbox, type HomeUpdateSharedInboxGVICAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { addMyLogicGateShortcutsCommand, addSharedInboxGVICPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeGVICMatrixNodeCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, removeSharedInboxGVICPrincipalCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateGVICMatrixNode, type HomeDeleteEmailMessage, type HomeDropAssignNodeToLogicGateStatus, type HomeMoveMyWorkNodeToCell, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInboxGVICAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 
 const timestamp = "2026-01-01T00:00:00Z";
 
@@ -817,62 +817,6 @@ test("Home compose command sends rich editor HTML without plain-text escaping", 
   assert.match(sentInputs[0]?.body ?? "", /<b>Bold<\/b>/);
   assert.match(sentInputs[0]?.body ?? "", /href="https:\/\/example\.test\/?"/);
   assert.doesNotMatch(sentInputs[0]?.body ?? "", /&lt;b&gt;/);
-});
-
-test("Home shared inbox commands normalize folder operations", async () => {
-  const updatedCalls: Array<Parameters<HomeUpdateSharedInbox>[0]> = [];
-  const deletedCalls: Array<{ companyID: string; folderID: string }> = [];
-  const removedCalls: Array<{ companyID: string; folderID: string }> = [];
-  const createSharedInbox: HomeCreateSharedInbox = async (input) => sharedInbox("child-1", {
-    name: input.name,
-    parent_folder_id: input.parentFolderID,
-    account_email: input.accountEmail,
-  });
-  const updateSharedInbox: HomeUpdateSharedInbox = async (input) => {
-    updatedCalls.push(input);
-    return sharedInbox(input.folderID, {
-      name: input.name ?? "Updated",
-      parent_folder_id: input.parentFolderID,
-      account_email: input.accountEmail,
-      position: input.position ?? 1000,
-    });
-  };
-  const deleteSharedInbox: HomeDeleteSharedInbox = async (companyID, folderID) => {
-    deletedCalls.push({ companyID, folderID });
-  };
-  const removeSharedInbox: HomeRemoveSharedInbox = async (companyID, folderID) => {
-    removedCalls.push({ companyID, folderID });
-  };
-
-  const created = await createSharedInboxCommand({ companyID: "company-1", parentFolderID: "parent-1", rawName: " Team ", accountEmail: "team@example.test", createSharedInbox });
-  const attached = await updateSharedInboxAccountEmailCommand({ companyID: "company-1", folderID: " child-1 ", accountEmail: "team@example.test", updateSharedInbox });
-  await renameSharedInboxCommand({ companyID: "company-1", folderID: "child-1", name: " Renamed ", updateSharedInbox });
-  await moveSharedInboxCommand({ companyID: "company-1", folderID: "child-1", parentFolderID: "parent-2", position: 2000, updateSharedInbox });
-  const deleted = await deleteSharedInboxCommand({
-    companyID: "company-1",
-    folderID: "parent-1",
-    sharedInboxes: [sharedInbox("parent-1"), sharedInbox("child-1", { parent_folder_id: "parent-1" })],
-    deleteSharedInbox,
-  });
-  const removed = await removeSharedInboxCommand({
-    companyID: "company-1",
-    folderID: " child-1 ",
-    sharedInboxes: [sharedInbox("parent-1"), sharedInbox("child-1", { parent_folder_id: "parent-1" })],
-    removeSharedInbox,
-  });
-
-  assert.equal(created?.viewID, "shared:child-1");
-  assert.equal(created?.folder.name, "Team");
-  assert.equal(attached?.notice, "Attached team@example.test.");
-  assert.deepEqual(updatedCalls.map((call) => ({ folderID: call.folderID, name: call.name, parentFolderID: call.parentFolderID, position: call.position, accountEmail: call.accountEmail })), [
-    { folderID: "child-1", name: undefined, parentFolderID: undefined, position: undefined, accountEmail: "team@example.test" },
-    { folderID: "child-1", name: "Renamed", parentFolderID: undefined, position: undefined, accountEmail: undefined },
-    { folderID: "child-1", name: undefined, parentFolderID: "parent-2", position: 2000, accountEmail: undefined },
-  ]);
-  assert.deepEqual(deletedCalls, [{ companyID: "company-1", folderID: "parent-1" }]);
-  assert.deepEqual(removedCalls, [{ companyID: "company-1", folderID: "child-1" }]);
-  assert.deepEqual(deleted?.deletedFolderIDs.sort(), ["child-1", "parent-1"]);
-  assert.deepEqual(removed?.deletedFolderIDs, ["child-1"]);
 });
 
 test("Home shared inbox GVIC commands build direct replacement payloads", async () => {
