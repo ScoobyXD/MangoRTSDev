@@ -154,6 +154,8 @@ const DEFAULT_UPDATE_GROUPINGS: UpdateGroupingSetting[] = [
 
 const UPDATE_GROUPING_FIELD_SET = new Set<UpdateGroupingField>(UPDATE_GROUPING_FIELDS.map((field) => field.value));
 const UPDATES_SELECTED_VIEW_STORAGE_KEY = "mangorts.updates.selectedView.v1";
+const HOME_SAVED_VIEWS_CHANGED_EVENT = "mangorts:home-saved-views-changed";
+const HOME_SIDEBAR_SAVED_VIEWS_PORTAL_ENABLED = false;
 const NOTIFICATION_TYPE_NODE_ASSIGNED = "node.assigned";
 const NOTIFICATION_TYPE_NODE_FIELDS_CHANGED = "node.fields_changed";
 const NOTIFICATION_TYPE_NODE_COMMENT_CREATED = "node.comment_created";
@@ -186,6 +188,7 @@ export function UpdatesView({
   const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
   const [settingsError, setSettingsError] = useState("");
   const [savedViewsSidebarSlot, setSavedViewsSidebarSlot] = useState<HTMLElement | null>(null);
+  const [savedViewsReloadToken, setSavedViewsReloadToken] = useState(0);
   const [hiddenNotificationIDs, setHiddenNotificationIDs] = useState<Set<string>>(new Set());
   const [selectedNotificationKey, setSelectedNotificationKey] = useState("");
   const [selectedNotificationKeys, setSelectedNotificationKeys] = useState<Set<string>>(new Set());
@@ -226,6 +229,19 @@ export function UpdatesView({
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handleSavedViewsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ surface?: string; settingID?: string }>).detail;
+      if (detail?.surface !== "updates") return;
+      const settingID = detail.settingID?.trim() ?? "";
+      if (settingID) setSelectedSettingID(settingID);
+      setSavedViewsReloadToken((value) => value + 1);
+    };
+    window.addEventListener(HOME_SAVED_VIEWS_CHANGED_EVENT, handleSavedViewsChanged);
+    return () => window.removeEventListener(HOME_SAVED_VIEWS_CHANGED_EVENT, handleSavedViewsChanged);
+  }, []);
+
+  useEffect(() => {
     if (!apiBase || !companyID.trim()) {
       setSettings([fallbackSetting]);
       setSelectedSettingID(fallbackSetting.setting_id);
@@ -251,7 +267,7 @@ export function UpdatesView({
       setSettingsError(savedViewErrorMessage(nextError, "Failed to load saved views"));
     });
     return () => { cancelled = true; };
-  }, [apiBase, companyID, currentUserID, fallbackSetting]);
+  }, [apiBase, companyID, currentUserID, fallbackSetting, savedViewsReloadToken]);
 
   useEffect(() => {
     if (settings.some((setting) => setting.setting_id === selectedSettingID)) return;
@@ -771,7 +787,7 @@ export function UpdatesView({
             </div>
           </div>
         </div>
-        {savedViewsSidebarSlot ? createPortal(
+        {HOME_SIDEBAR_SAVED_VIEWS_PORTAL_ENABLED && savedViewsSidebarSlot ? createPortal(
           <UpdateGroupingPanel
             setting={selectedSetting}
             settings={settings}

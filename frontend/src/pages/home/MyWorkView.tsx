@@ -125,6 +125,8 @@ const HOME_INBOX_LOGIC_GATE_DRAG_MIME = "application/x-mangorts-home-inbox-logic
 const HOME_INBOX_PROJECT_DRAG_MIME = "application/x-mangorts-home-inbox-project";
 const MY_WORK_ROLE_COLUMN_WIDTHS_STORAGE_KEY = "mangorts.myWork.roleColumnWidths.v1";
 const MY_WORK_SELECTED_VIEW_STORAGE_KEY = "mangorts.myWork.selectedView.v1";
+const HOME_SAVED_VIEWS_CHANGED_EVENT = "mangorts:home-saved-views-changed";
+const HOME_SIDEBAR_SAVED_VIEWS_PORTAL_ENABLED = false;
 const MY_WORK_PRIORITY_COLUMN_WIDTH = 104;
 const MY_WORK_ROLE_COLUMN_DEFAULT_WIDTH = 282;
 const MY_WORK_ROLE_COLUMN_MIN_WIDTH = 190;
@@ -247,6 +249,7 @@ export function MyWorkView({
   const [addGroupingOpen, setAddGroupingOpen] = useState(false);
   const [groupingFieldMenuIndex, setGroupingFieldMenuIndex] = useState<number | null>(null);
   const [savedViewsSidebarSlot, setSavedViewsSidebarSlot] = useState<HTMLElement | null>(null);
+  const [savedViewsReloadToken, setSavedViewsReloadToken] = useState(0);
   const [expandedGroupIDs, setExpandedGroupIDs] = useState<Set<string>>(new Set());
   const [matrixCells, setMatrixCells] = useState<MyWorkMatrixCellWithUser[]>([]);
   const [matrixStateCacheKey, setMatrixStateCacheKey] = useState("");
@@ -288,6 +291,19 @@ export function MyWorkView({
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handleSavedViewsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ surface?: string; settingID?: string }>).detail;
+      if (detail?.surface !== "my_work") return;
+      const settingID = detail.settingID?.trim() ?? "";
+      if (settingID) setSelectedSettingID(settingID);
+      setSavedViewsReloadToken((value) => value + 1);
+    };
+    window.addEventListener(HOME_SAVED_VIEWS_CHANGED_EVENT, handleSavedViewsChanged);
+    return () => window.removeEventListener(HOME_SAVED_VIEWS_CHANGED_EVENT, handleSavedViewsChanged);
+  }, []);
+
+  useEffect(() => {
     setSelectedScope(defaultMyWorkSelectedScope(currentUserID));
   }, [currentUserID]);
 
@@ -321,7 +337,7 @@ export function MyWorkView({
       setSettingsError(savedViewErrorMessage(error, "Failed to load saved views"));
     });
     return () => { cancelled = true; };
-  }, [apiBase, companyID, currentUserID, fallbackSetting]);
+  }, [apiBase, companyID, currentUserID, fallbackSetting, savedViewsReloadToken]);
 
   useEffect(() => {
     if (settings.some((setting) => setting.setting_id === selectedSettingID)) return;
@@ -864,7 +880,7 @@ export function MyWorkView({
           onSetScopeMenuLevel={setScopeMenuLevel}
         />
       </div>
-      {savedViewsSidebarSlot ? createPortal(
+      {HOME_SIDEBAR_SAVED_VIEWS_PORTAL_ENABLED && savedViewsSidebarSlot ? createPortal(
         <GroupingPanel
           setting={selectedSetting}
           settings={settings}
