@@ -89,6 +89,7 @@ type UpdateSavedGroupingSetting = {
   name: string;
   groupings: UpdateGroupingSetting[];
   panel_collapsed: boolean;
+  position: number;
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -292,6 +293,7 @@ export function UpdatesView({
       principal: "user",
       principal_id: currentUserID,
       name: `View ${settings.length + 1}`,
+      position: nextUpdateSavedViewPosition(settings),
       created_timestamp: now,
       updated_timestamp: now,
     };
@@ -299,7 +301,7 @@ export function UpdatesView({
     setSelectedSettingID(setting.setting_id);
     storeUpdatesSelectedViewID(companyID, currentUserID, setting.setting_id);
     persistSavedSetting(setting);
-  }, [companyID, currentUserID, persistSavedSetting, selectedSetting, settings.length]);
+  }, [companyID, currentUserID, persistSavedSetting, selectedSetting, settings]);
 
   const selectSavedView = useCallback((settingID: string) => {
     setSelectedSettingID(settingID);
@@ -335,6 +337,27 @@ export function UpdatesView({
     }
   }, [apiBase, companyID, currentUserID, selectedSettingID, settings]);
 
+  const moveSavedView = useCallback((settingID: string, direction: -1 | 1) => {
+    const currentIndex = settings.findIndex((item) => item.setting_id === settingID);
+    const targetIndex = currentIndex + direction;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= settings.length) return;
+    const reordered = [...settings];
+    [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
+    const now = new Date().toISOString();
+    const nextSettings = reordered.map((setting, index) => {
+      const previous = settings.find((item) => item.setting_id === setting.setting_id);
+      const position = (index + 1) * 1000;
+      return previous?.position === position
+        ? setting
+        : { ...setting, position, updated_timestamp: now };
+    });
+    setSettings(nextSettings);
+    for (const setting of nextSettings) {
+      const previous = settings.find((item) => item.setting_id === setting.setting_id);
+      if (previous?.position !== setting.position) persistSavedSetting(setting);
+    }
+  }, [persistSavedSetting, settings]);
+
   const updateGrouping = useCallback((index: number, grouping: UpdateGroupingSetting) => {
     updateSelectedSetting((setting) => ({
       ...setting,
@@ -348,6 +371,18 @@ export function UpdatesView({
       ...setting,
       groupings: setting.groupings.filter((_, itemIndex) => itemIndex !== index),
     }));
+  }, [updateSelectedSetting]);
+
+  const moveGrouping = useCallback((index: number, direction: -1 | 1) => {
+    setGroupingFieldMenuIndex(null);
+    setAddGroupingOpen(false);
+    updateSelectedSetting((setting) => {
+      const targetIndex = index + direction;
+      if (index < 0 || targetIndex < 0 || targetIndex >= setting.groupings.length) return setting;
+      const groupings = [...setting.groupings];
+      [groupings[index], groupings[targetIndex]] = [groupings[targetIndex], groupings[index]];
+      return { ...setting, groupings };
+    });
   }, [updateSelectedSetting]);
 
   const addGrouping = useCallback((field: UpdateGroupingField) => {
@@ -722,9 +757,11 @@ export function UpdatesView({
             onSelectSetting={selectSavedView}
             onAddSavedView={addSavedView}
             onRenameSavedView={renameSavedView}
+            onMoveSavedView={moveSavedView}
             onDeleteSavedView={deleteSavedView}
             onUpdateGrouping={updateGrouping}
             onRemoveGrouping={removeGrouping}
+            onMoveGrouping={moveGrouping}
             onSetAddGroupingOpen={setAddGroupingOpen}
             onSetGroupingFieldMenuIndex={setGroupingFieldMenuIndex}
             onAddGrouping={addGrouping}
@@ -787,9 +824,11 @@ function UpdateGroupingPanel({
   onSelectSetting,
   onAddSavedView,
   onRenameSavedView,
+  onMoveSavedView,
   onDeleteSavedView,
   onUpdateGrouping,
   onRemoveGrouping,
+  onMoveGrouping,
   onSetAddGroupingOpen,
   onSetGroupingFieldMenuIndex,
   onAddGrouping,
@@ -802,9 +841,11 @@ function UpdateGroupingPanel({
   onSelectSetting: (settingID: string) => void;
   onAddSavedView: () => void;
   onRenameSavedView: (settingID: string) => void;
+  onMoveSavedView: (settingID: string, direction: -1 | 1) => void;
   onDeleteSavedView: (settingID: string) => void;
   onUpdateGrouping: (index: number, grouping: UpdateGroupingSetting) => void;
   onRemoveGrouping: (index: number) => void;
+  onMoveGrouping: (index: number, direction: -1 | 1) => void;
   onSetAddGroupingOpen: (open: boolean) => void;
   onSetGroupingFieldMenuIndex: (index: number | null) => void;
   onAddGrouping: (field: UpdateGroupingField) => void;
@@ -849,7 +890,8 @@ function UpdateGroupingPanel({
     pendingEditAfterAddRef.current = false;
     setEditorOpen(true);
   }, [setting.setting_id]);
-  const contextSetting = savedViewContextMenu ? settings.find((item) => item.setting_id === savedViewContextMenu.settingID) ?? null : null;
+  const contextSettingIndex = savedViewContextMenu ? settings.findIndex((item) => item.setting_id === savedViewContextMenu.settingID) : -1;
+  const contextSetting = contextSettingIndex >= 0 ? settings[contextSettingIndex] : null;
   const closeEditor = useCallback(() => {
     setEditorOpen(false);
     onSetAddGroupingOpen(false);
@@ -904,6 +946,24 @@ function UpdateGroupingPanel({
               onClick={() => onUpdateGrouping(index, { ...grouping, direction: grouping.direction === "asc" ? "desc" : "asc" })}
             >
               {grouping.direction === "asc" ? "Asc" : "Desc"}
+            </button>
+            <button
+              type="button"
+              title="Move grouping up"
+              disabled={index === 0}
+              style={updatesGroupingMoveButtonStyle(index === 0)}
+              onClick={() => onMoveGrouping(index, -1)}
+            >
+              Up
+            </button>
+            <button
+              type="button"
+              title="Move grouping down"
+              disabled={index >= setting.groupings.length - 1}
+              style={updatesGroupingMoveButtonStyle(index >= setting.groupings.length - 1)}
+              onClick={() => onMoveGrouping(index, 1)}
+            >
+              Dn
             </button>
             <button type="button" title="Remove grouping" style={updatesGroupingRemoveButtonStyle} onClick={() => onRemoveGrouping(index)}>x</button>
           </div>
@@ -986,6 +1046,28 @@ function UpdateGroupingPanel({
             }}
           >
             Rename
+          </button>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            disabled={contextSettingIndex <= 0}
+            onClick={() => {
+              onMoveSavedView(contextSetting.setting_id, -1);
+              setSavedViewContextMenu(null);
+            }}
+          >
+            Move up
+          </button>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            disabled={contextSettingIndex >= settings.length - 1}
+            onClick={() => {
+              onMoveSavedView(contextSetting.setting_id, 1);
+              setSavedViewContextMenu(null);
+            }}
+          >
+            Move down
           </button>
           <button
             type="button"
@@ -1850,6 +1932,7 @@ function createDefaultUpdateGroupingSetting(companyID: string, currentUserID: st
     name: "Updates",
     groupings: [...DEFAULT_UPDATE_GROUPINGS],
     panel_collapsed: true,
+    position: 1000,
     created_timestamp: now,
     updated_timestamp: now,
   };
@@ -1858,6 +1941,7 @@ function createDefaultUpdateGroupingSetting(companyID: string, currentUserID: st
 function savedViewsToUpdateSettings(savedViews: SavedView[], fallback: UpdateSavedGroupingSetting, currentUserID: string): UpdateSavedGroupingSetting[] {
   return savedViews
     .filter((view) => view.surface === "updates")
+    .sort((left, right) => left.position - right.position || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }) || left.saved_view_id.localeCompare(right.saved_view_id))
     .map((view) => savedViewToUpdateSetting(view, fallback, currentUserID));
 }
 
@@ -1872,6 +1956,7 @@ function savedViewToUpdateSetting(view: SavedView, fallback: UpdateSavedGrouping
     name: view.name,
     groupings: view.groupings,
     panel_collapsed: fallback.panel_collapsed,
+    position: view.position,
     created_timestamp: view.created_timestamp,
     updated_timestamp: view.updated_timestamp,
   }, fallback);
@@ -1894,6 +1979,7 @@ function normalizeUpdateSavedGroupingSetting(value: unknown, fallback: UpdateSav
     name: typeof candidate.name === "string" && candidate.name.trim() ? candidate.name.trim() : fallback.name,
     groupings: normalizeUpdateGroupingStack(candidate.groupings),
     panel_collapsed: candidate.panel_collapsed === true,
+    position: typeof candidate.position === "number" && Number.isFinite(candidate.position) ? candidate.position : fallback.position,
     created_timestamp: typeof candidate.created_timestamp === "string" && candidate.created_timestamp.trim() ? candidate.created_timestamp : fallback.created_timestamp,
     updated_timestamp: typeof candidate.updated_timestamp === "string" && candidate.updated_timestamp.trim() ? candidate.updated_timestamp : fallback.updated_timestamp,
   };
@@ -1909,7 +1995,12 @@ function updateSettingToSavedViewInput(setting: UpdateSavedGroupingSetting, comp
     principal_id: (principal === "group" ? setting.principal_id : currentUserID).trim(),
     name: setting.name,
     groupings: setting.groupings,
+    position: setting.position,
   };
+}
+
+function nextUpdateSavedViewPosition(settings: UpdateSavedGroupingSetting[]): number {
+  return Math.max(0, ...settings.map((setting) => Number.isFinite(setting.position) ? setting.position : 0)) + 1000;
 }
 
 function savedViewErrorMessage(error: unknown, fallback: string): string {
@@ -2061,15 +2152,17 @@ const updatesGroupingStackStyle: React.CSSProperties = {
 };
 
 function updatesGroupingRowStyle(index: number): React.CSSProperties {
+  const indent = Math.min(index * 20, 42);
   return {
     position: "relative",
     minWidth: 0,
     minHeight: 30,
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 46px 22px",
+    gridTemplateColumns: "minmax(0, 1fr) 46px 32px 32px 22px",
     alignItems: "center",
     gap: 5,
-    marginLeft: index * 20,
+    width: `calc(100% - ${indent}px)`,
+    marginLeft: indent,
     border: "1px solid rgba(15, 23, 42, 0.16)",
     borderRadius: 5,
     background: "#f8fafc",
@@ -2106,6 +2199,21 @@ const updatesGroupingDirectionButtonStyle: React.CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
 };
+
+function updatesGroupingMoveButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    height: 22,
+    border: "1px solid rgba(15, 23, 42, 0.12)",
+    borderRadius: 5,
+    background: disabled ? "rgba(226, 232, 240, 0.54)" : "#ffffff",
+    color: disabled ? "#94a3b8" : "#334155",
+    font: "inherit",
+    fontSize: 10,
+    fontWeight: 800,
+    cursor: disabled ? "default" : "pointer",
+    padding: 0,
+  };
+}
 
 const updatesGroupingRemoveButtonStyle: React.CSSProperties = {
   height: 22,

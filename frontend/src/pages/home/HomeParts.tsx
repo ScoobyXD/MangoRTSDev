@@ -1203,6 +1203,7 @@ function HomeSidebarSavedViewsFallback({
       if (cancelled) return;
       const loaded = savedViews
         .filter((view) => view.surface === surface)
+        .sort((left, right) => left.position - right.position || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }) || left.saved_view_id.localeCompare(right.saved_view_id))
         .map((view) => homeSidebarSavedViewToSetting(view, fallbackSetting, surface, currentUserID));
       const nextSettings = loaded.length > 0 ? loaded : [fallbackSetting];
       const preferredSettingID = readHomeSidebarSelectedViewID(surface, companyID, currentUserID);
@@ -1313,6 +1314,39 @@ function HomeSidebarSavedViewsFallback({
     }
   }, [apiBase, companyID, currentUserID, selectedSetting.setting_id, selectedSettingID, settings, surface]);
 
+  const moveSavedView = useCallback((settingID: string, direction: -1 | 1) => {
+    const currentIndex = settings.findIndex((item) => item.setting_id === settingID);
+    const targetIndex = currentIndex + direction;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= settings.length) return;
+    const reordered = [...settings];
+    [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
+    const now = new Date().toISOString();
+    const nextSettings = reordered.map((setting, index) => {
+      const previous = settings.find((item) => item.setting_id === setting.setting_id);
+      const position = (index + 1) * 1000;
+      return previous?.position === position
+        ? setting
+        : { ...setting, position, updated_timestamp: now };
+    });
+    setSettings(nextSettings);
+    for (const setting of nextSettings) {
+      const previous = settings.find((item) => item.setting_id === setting.setting_id);
+      if (previous?.position !== setting.position) persistSetting(setting);
+    }
+  }, [persistSetting, settings]);
+
+  const moveSelectedGrouping = useCallback((index: number, direction: -1 | 1) => {
+    setFieldMenuIndex(null);
+    setAddGroupingOpen(false);
+    updateSelectedSetting((setting) => {
+      const targetIndex = index + direction;
+      if (index < 0 || targetIndex < 0 || targetIndex >= setting.groupings.length) return setting;
+      const groupings = [...setting.groupings];
+      [groupings[index], groupings[targetIndex]] = [groupings[targetIndex], groupings[index]];
+      return { ...setting, groupings };
+    });
+  }, [updateSelectedSetting]);
+
   const editor = editorOpen && typeof document !== "undefined" ? createPortal(
     <div style={homeSidebarSavedViewEditorStyle(editorPosition)}>
       <div style={homeSidebarSavedViewEditorHeaderStyle}>
@@ -1366,6 +1400,24 @@ function HomeSidebarSavedViewsFallback({
             </button>
             <button
               type="button"
+              title="Move grouping up"
+              disabled={index === 0}
+              style={homeSidebarSavedViewMoveButtonStyle(index === 0)}
+              onClick={() => moveSelectedGrouping(index, -1)}
+            >
+              Up
+            </button>
+            <button
+              type="button"
+              title="Move grouping down"
+              disabled={index >= selectedSetting.groupings.length - 1}
+              style={homeSidebarSavedViewMoveButtonStyle(index >= selectedSetting.groupings.length - 1)}
+              onClick={() => moveSelectedGrouping(index, 1)}
+            >
+              Dn
+            </button>
+            <button
+              type="button"
               title="Remove grouping"
               style={homeSidebarSavedViewRemoveButtonStyle}
               onClick={() => {
@@ -1414,6 +1466,7 @@ function HomeSidebarSavedViewsFallback({
     </div>,
     document.body,
   ) : null;
+  const contextSettingIndex = contextMenu ? settings.findIndex((item) => item.setting_id === contextMenu.settingID) : -1;
 
   return (
     <div ref={panelRef} style={homeSidebarSavedViewPanelStyle}>
@@ -1443,6 +1496,28 @@ function HomeSidebarSavedViewsFallback({
           </button>
           <button type="button" style={sharedInboxContextMenuButtonStyle} onClick={() => { renameSavedView(contextSetting.setting_id); setContextMenu(null); }}>
             Rename
+          </button>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            disabled={contextSettingIndex <= 0}
+            onClick={() => {
+              moveSavedView(contextSetting.setting_id, -1);
+              setContextMenu(null);
+            }}
+          >
+            Move up
+          </button>
+          <button
+            type="button"
+            style={sharedInboxContextMenuButtonStyle}
+            disabled={contextSettingIndex >= settings.length - 1}
+            onClick={() => {
+              moveSavedView(contextSetting.setting_id, 1);
+              setContextMenu(null);
+            }}
+          >
+            Move down
           </button>
           <button
             type="button"
@@ -1591,16 +1666,17 @@ const homeSidebarSavedViewGroupingStackStyle: React.CSSProperties = {
 
 function homeSidebarSavedViewGroupingRowStyle(index: number): React.CSSProperties {
   const accent = ["#0891b2", "#d97706", "#7c3aed", "#059669", "#be123c"][index % 5] ?? "#475569";
+  const indent = Math.min(index * 12, 30);
   return {
     position: "relative",
-    width: "min(100%, 360px)",
+    width: `calc(100% - ${indent}px)`,
     minWidth: 0,
     minHeight: 30,
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 46px 22px",
+    gridTemplateColumns: "minmax(0, 1fr) 46px 32px 32px 22px",
     alignItems: "center",
     gap: 5,
-    marginLeft: Math.min(index * 12, 30),
+    marginLeft: indent,
     border: `1px solid ${homeColorWithAlpha(accent, 0.18)}`,
     borderRadius: 7,
     background: `linear-gradient(145deg, rgba(255,255,255,0.92), ${homeColorWithAlpha(accent, 0.12)})`,
@@ -1638,6 +1714,21 @@ const homeSidebarSavedViewDirectionButtonStyle: React.CSSProperties = {
   fontSize: 10,
   fontWeight: 820,
 };
+
+function homeSidebarSavedViewMoveButtonStyle(disabled: boolean): React.CSSProperties {
+  return {
+    height: 22,
+    border: "1px solid rgba(15, 23, 42, 0.12)",
+    borderRadius: 5,
+    background: disabled ? "rgba(226, 232, 240, 0.54)" : "rgba(255, 255, 255, 0.78)",
+    color: disabled ? "#94a3b8" : "#334155",
+    cursor: disabled ? "default" : "pointer",
+    font: "inherit",
+    fontSize: 10,
+    fontWeight: 820,
+    padding: 0,
+  };
+}
 
 const homeSidebarSavedViewRemoveButtonStyle: React.CSSProperties = {
   height: 22,
