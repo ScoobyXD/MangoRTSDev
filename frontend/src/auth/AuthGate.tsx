@@ -6,6 +6,7 @@ import { MangoWordmark } from "../app/MangoLogo";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
 import {
   acceptInvitation,
+  addAuthTerminalFailureListener,
   apiFetchJSON,
   changePassword,
   completeNewPassword,
@@ -395,6 +396,17 @@ export default function AuthGate() {
     }
     void loadMe();
   }, [authEnabled, loadMe, navigate]);
+
+  useEffect(() => {
+    if (!authEnabled) return undefined;
+    return addAuthTerminalFailureListener(() => {
+      setMe(null);
+      setLoading(false);
+      setError("");
+      if (!isAuthPath(window.location.pathname)) rememberAuthReturnPath(window.location.pathname);
+      navigate("/login", { replace: true });
+    });
+  }, [authEnabled, navigate]);
 
   const normalizedPath = normalizeAppPath(path);
   const deepLinkRoute = parseDeepLinkRoute(normalizedPath);

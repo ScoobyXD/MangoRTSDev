@@ -24,6 +24,7 @@ import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingle
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache } from "../communications/communicationsApi";
 import { createRequestJSON } from "../api/requestJSON";
+import { clearResourceMissing, isTerminalResourceNotFoundError } from "../api/missingResources";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
 import { getEditorDocumentIsolationState, type EditorRelatedNodeCreationKind, type EditorTabID } from "./editorTabs";
@@ -371,8 +372,10 @@ function isNodeWorkspaceHeaderInformationType(type: string): boolean {
 }
 
 const LINKED_NODE_ACCESS_DENIED_MESSAGE = "You do not have permission to see this.";
+const LINKED_ENTITY_NOT_FOUND_MESSAGE = "This resource is no longer available.";
 
 function linkedEntityLoadErrorMessage(cause: unknown, entityKind: "" | "node" | "logic_gate"): string {
+  if (isTerminalResourceNotFoundError(cause)) return LINKED_ENTITY_NOT_FOUND_MESSAGE;
   const message = cause instanceof Error ? cause.message : String(cause ?? "");
   const normalized = message.trim().toLowerCase();
   if (
@@ -1343,6 +1346,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const applyLinkedNode = useCallback((nodeID: string, label = "", options: { focusEditor?: boolean } = {}) => {
     const shouldFocusEditor = options.focusEditor !== false;
     shouldFocusEditorForSelectionRef.current = shouldFocusEditor;
+    if (nodeID) clearResourceMissing({ apiBase, companyID, resourceType: "node", resourceID: nodeID });
     const isSameEntity = linkedEntityKind === "node" && linkedNodeID === nodeID;
     if (!isSameEntity) {
       rememberCurrentDocumentScroll();
@@ -1358,11 +1362,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setActiveTab("editor");
       focusEditorDocumentWithoutScrollJump();
     }
-  }, [clearVisibleDocumentForSelection, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, linkedNodeTitle, preserveNodeTitle, readNodeLabelFromGraph, rememberCurrentDocumentScroll]);
+  }, [apiBase, clearVisibleDocumentForSelection, companyID, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, linkedNodeTitle, preserveNodeTitle, readNodeLabelFromGraph, rememberCurrentDocumentScroll]);
 
   const applyLinkedLogicGate = useCallback((logicGateID: string, label = "", options: { focusEditor?: boolean } = {}) => {
     const shouldFocusEditor = options.focusEditor !== false;
     shouldFocusEditorForSelectionRef.current = shouldFocusEditor;
+    if (logicGateID) clearResourceMissing({ apiBase, companyID, resourceType: "logic_gate", resourceID: logicGateID });
     const isSameEntity = linkedEntityKind === "logic_gate" && linkedNodeID === logicGateID;
     if (!isSameEntity) {
       rememberCurrentDocumentScroll();
@@ -1376,7 +1381,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setActiveTab("editor");
       focusEditorDocumentWithoutScrollJump();
     }
-  }, [clearVisibleDocumentForSelection, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, readLogicGateLabelFromGraph, rememberCurrentDocumentScroll]);
+  }, [apiBase, clearVisibleDocumentForSelection, companyID, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, readLogicGateLabelFromGraph, rememberCurrentDocumentScroll]);
 
   useEffect(() => {
     if (!forcedEntityKind) return;
@@ -2108,9 +2113,18 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const localDocumentSaveActive = pendingSaveRef.current !== null || queuedSaveRef.current !== null || saveInFlightRef.current;
       if (!localDocumentSaveActive) applyLoadedDocument("logic_gate", resourceID, currentTextBox?.information_id ?? "", currentTextBox?.information ?? "");
     } catch (cause) {
-      if (isCurrentTarget()) setError(cause instanceof Error ? cause.message : "Failed to refresh linked information");
+      if (!isCurrentTarget()) return;
+      if (isTerminalResourceNotFoundError(cause)) {
+        clearVisibleDocumentForSelection();
+        setLinkedEntityCanEdit(false);
+        setLinkedEntityCanAdmin(false);
+        setLinkedEntityAccessDeniedMessage(LINKED_ENTITY_NOT_FOUND_MESSAGE);
+        setError("");
+        return;
+      }
+      setError(cause instanceof Error ? cause.message : "Failed to refresh linked information");
     }
-  }, [apiBase, applyLoadedDocument, companyID, focusInformationID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence]);
+  }, [apiBase, applyLoadedDocument, clearVisibleDocumentForSelection, companyID, focusInformationID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence]);
 
   const currentEditorVersionSignature = useCallback(() => {
     if (linkedEntityKind === "node") {
@@ -2690,7 +2704,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       } catch (cause) {
         if (!cancelled) {
           const message = linkedEntityLoadErrorMessage(cause, linkedEntityKind);
-          if (message === LINKED_NODE_ACCESS_DENIED_MESSAGE) {
+          if (message === LINKED_NODE_ACCESS_DENIED_MESSAGE || message === LINKED_ENTITY_NOT_FOUND_MESSAGE) {
             clearVisibleDocumentForSelection();
             setLinkedEntityCanEdit(false);
             setLinkedEntityCanAdmin(false);

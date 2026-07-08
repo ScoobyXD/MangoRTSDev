@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { TerminalAuthFailureError } from "../../../../frontend/src/modules/api/requestJSON.js";
 import { applyKanbanProjectionEnvelope, type KanbanProjectionEnvelope } from "../../../../frontend/src/modules/kanban/kanbanProjectionDeltas.js";
 import {
+  computeRealtimeReconnectDelayMs,
   parseRealtimeMessage,
   realtimeWebSocketURL,
   MangoRealtimeClient,
@@ -164,6 +166,30 @@ test("websocket URL does not include credential query params", () => {
   assert.equal(url.searchParams.has("ticket"), false);
   assert.equal(url.searchParams.has("access_token"), false);
   assert.equal(url.searchParams.has("token"), false);
+});
+
+test("realtime reconnect delay uses jittered exponential backoff", () => {
+  assert.equal(computeRealtimeReconnectDelayMs(0, { baseDelayMs: 1_000, random: () => 0 }), 500);
+  assert.equal(computeRealtimeReconnectDelayMs(1, { baseDelayMs: 1_000, random: () => 1 }), 2_000);
+  assert.equal(computeRealtimeReconnectDelayMs(4, { baseDelayMs: 1_000, maxDelayMs: 10_000, random: () => 1 }), 10_000);
+});
+
+test("realtime client does not reconnect after terminal auth failure", async () => {
+  let ticketRequests = 0;
+  const client = new MangoRealtimeClient("https://api.example.test", "company-1", {
+    getTicket: async () => {
+      ticketRequests += 1;
+      throw new TerminalAuthFailureError("http_401");
+    },
+    reconnectDelayMs: 1,
+  });
+
+  const unsubscribe = client.subscribe("board:A");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(ticketRequests, 1);
+  unsubscribe();
+  client.close();
 });
 
 test("realtime client mints cookie before opening websocket without query credentials", async () => {

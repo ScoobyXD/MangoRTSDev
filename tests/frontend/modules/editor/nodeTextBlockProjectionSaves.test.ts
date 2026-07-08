@@ -114,3 +114,34 @@ test("forced text block projection flush skips has not changed blocks and saves 
   assert.equal(controller.getSnapshot("changed-1")?.hasChanged, false);
   assert.equal(controller.getSnapshot("changed-2")?.hasChanged, false);
 });
+
+test("deleting a text block waits for the active save and suppresses follow-up saves", async () => {
+  const controller = createTextBlockProjectionSaveController<string>();
+  const requests: TextBlockProjectionSaveRequest<string>[] = [];
+  const pendingSaves: Deferred[] = [];
+
+  controller.configure({
+    saveBlock: async (request) => {
+      requests.push(request);
+      const pending = createDeferred();
+      pendingSaves.push(pending);
+      await pending.promise;
+    },
+  });
+
+  controller.replaceBlocksAsHasNotChanged([{ blockID: "block-1", content: "initial" }]);
+  controller.markHasChanged("block-1", "first");
+  const saveDrain = controller.saveLatestContent("block-1");
+  await waitFor(() => requests.length === 1);
+
+  controller.markHasChanged("block-1", "latest");
+  const deleteDrain = controller.waitForInProgressSaveThenRemoveBlock("block-1");
+  assert.equal(requests.length, 1);
+  assert.equal(controller.getSnapshot("block-1")?.saveInProgress, true);
+
+  pendingSaves[0]?.resolve();
+  await Promise.all([saveDrain, deleteDrain]);
+
+  assert.equal(requests.length, 1);
+  assert.equal(controller.getSnapshot("block-1"), null);
+});

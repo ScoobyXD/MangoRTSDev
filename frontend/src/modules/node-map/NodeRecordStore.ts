@@ -1,4 +1,11 @@
+import {
+  clearResourceMissing,
+  markResourceMissing,
+  TerminalResourceNotFoundError,
+  throwIfResourceMarkedMissing,
+} from "../api/missingResources.js";
 import { requestJSON } from "../api/requestJSON.js";
+import { isHTTPNotFoundError } from "../api/requestJSON.js";
 import type { NodeContentChange } from "../editor/nodeContentChanges.js";
 import type { NodeDetails, NodeRecord, NodeRelationship } from "./shared.js";
 
@@ -63,6 +70,8 @@ function cacheNodeViewPayload(cacheKey: string, payload: NodeViewResponse): Node
 
 async function getNodeViewPayloadSingleFlight(apiBase: string, companyID: string, nodeID: string): Promise<NodeViewResponse> {
   const cacheKey = key(apiBase, companyID, nodeID);
+  const resourceKey = { apiBase, companyID, resourceType: "node" as const, resourceID: nodeID };
+  throwIfResourceMarkedMissing(resourceKey);
   const cached = viewCache.get(cacheKey);
   if (cached) return cached;
   const inflight = viewInflight.get(cacheKey);
@@ -76,6 +85,11 @@ async function getNodeViewPayloadSingleFlight(apiBase: string, companyID: string
     })
     .catch((error) => {
       if (viewInflight.get(cacheKey) === promise) viewInflight.delete(cacheKey);
+      if (isHTTPNotFoundError(error)) {
+        markResourceMissing(resourceKey);
+        invalidateNodeRecordStoreCaches(apiBase, companyID, nodeID);
+        throw new TerminalResourceNotFoundError("node", nodeID);
+      }
       throw error;
     });
   viewInflight.set(cacheKey, promise);
@@ -99,6 +113,7 @@ export function primeNodeRecordStoreCaches(apiBase: string, companyID: string, e
 }>): void {
   for (const entry of entries) {
     const cacheKey = key(apiBase, companyID, entry.node.node_id);
+    clearResourceMissing({ apiBase, companyID, resourceType: "node", resourceID: entry.node.node_id });
     bumpViewGeneration(cacheKey);
     viewInflight.delete(cacheKey);
     viewCache.delete(cacheKey);

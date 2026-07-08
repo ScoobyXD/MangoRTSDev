@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { clearResourceMissing, isTerminalResourceNotFoundError } from "../../../../frontend/src/modules/api/missingResources.js";
 import {
   getKanbanBoardContentsSingleFlight,
   invalidateKanbanBoardContentsCache,
@@ -12,8 +13,8 @@ import {
   type KanbanColumn,
 } from "../../../../frontend/src/modules/kanban/shared.js";
 
-function jsonResponse(payload: unknown): Response {
-  return new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } });
+function jsonResponse(payload: unknown, init: ResponseInit = {}): Response {
+  return new Response(JSON.stringify(payload), { ...init, headers: { "Content-Type": "application/json" } });
 }
 
 test("Kanban board content store loads Logic Gate board contents from v2 work read", async () => {
@@ -83,6 +84,42 @@ test("Kanban board content store loads Logic Gate board contents from v2 work re
     assert.equal(calls.some((url) => url.includes("/v1/kanban/columns")), false);
   } finally {
     globalThis.fetch = originalFetch;
+    invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
+    invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
+  }
+});
+
+test("Logic Gate board 404 is terminal and stops repeated work refetches", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  const apiBase = "https://api.example.test/kanban-404";
+  const companyID = "company-1";
+  const logicGateID = "missing-gate";
+  const boardID = logicGateKanbanBoardID(logicGateID);
+  clearResourceMissing({ apiBase, companyID, resourceType: "logic_gate", resourceID: logicGateID });
+  clearResourceMissing({ apiBase, companyID, resourceType: "kanban_board", resourceID: boardID });
+  invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
+  invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls.push(input.toString());
+    return jsonResponse({ error: "logic_gate_not_found" }, { status: 404, statusText: "Not Found" });
+  }) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      getKanbanBoardContentsSingleFlight(apiBase, companyID, boardID),
+      (error: unknown) => isTerminalResourceNotFoundError(error),
+    );
+    await assert.rejects(
+      getKanbanBoardContentsSingleFlight(apiBase, companyID, boardID),
+      (error: unknown) => isTerminalResourceNotFoundError(error),
+    );
+    assert.equal(calls.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearResourceMissing({ apiBase, companyID, resourceType: "logic_gate", resourceID: logicGateID });
+    clearResourceMissing({ apiBase, companyID, resourceType: "kanban_board", resourceID: boardID });
     invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
     invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
   }

@@ -1,4 +1,10 @@
-import { requestJSON } from "../api/requestJSON.js";
+import {
+  clearResourceMissing,
+  markResourceMissing,
+  TerminalResourceNotFoundError,
+  throwIfResourceMarkedMissing,
+} from "../api/missingResources.js";
+import { isHTTPNotFoundError, requestJSON } from "../api/requestJSON.js";
 import type { LogicGateDetails, LogicGateGVICAssignment, LogicGateRecord, LogicGateRelationship } from "./shared.js";
 
 export type LogicGateProjectionItem = {
@@ -66,6 +72,8 @@ function normalizeCachedGVICAssignments(assignments: LogicGateGVICAssignment[], 
 
 async function getLogicGateViewPayloadSingleFlight(apiBase: string, companyID: string, logicGateID: string): Promise<LogicGateViewResponse> {
   const cacheKey = key(apiBase, companyID, logicGateID);
+  const resourceKey = { apiBase, companyID, resourceType: "logic_gate" as const, resourceID: logicGateID };
+  throwIfResourceMarkedMissing(resourceKey);
   const cached = viewCache.get(cacheKey);
   if (cached) return cached;
   const inflight = viewInflight.get(cacheKey);
@@ -79,6 +87,11 @@ async function getLogicGateViewPayloadSingleFlight(apiBase: string, companyID: s
     })
     .catch((error) => {
       if (viewInflight.get(cacheKey) === promise) viewInflight.delete(cacheKey);
+      if (isHTTPNotFoundError(error)) {
+        markResourceMissing(resourceKey);
+        invalidateLogicGateRecordStoreCaches(apiBase, companyID, logicGateID);
+        throw new TerminalResourceNotFoundError("logic_gate", logicGateID);
+      }
       throw error;
     });
   viewInflight.set(cacheKey, promise);
@@ -102,6 +115,7 @@ export function patchLogicGateRecordStoreGVICAssignments(
 ): void {
   const cleanLogicGateID = logicGateID.trim();
   if (!cleanLogicGateID) return;
+  clearResourceMissing({ apiBase, companyID, resourceType: "logic_gate", resourceID: cleanLogicGateID });
   const cacheKey = key(apiBase, companyID, cleanLogicGateID);
   const nextAssignments = normalizeCachedGVICAssignments(assignments, cleanLogicGateID);
   bumpViewGeneration(cacheKey);
@@ -137,6 +151,7 @@ export function primeLogicGateRecordStoreCaches(apiBase: string, companyID: stri
 }>): void {
   for (const entry of entries) {
     const cacheKey = key(apiBase, companyID, entry.logicGate.logic_gate_id);
+    clearResourceMissing({ apiBase, companyID, resourceType: "logic_gate", resourceID: entry.logicGate.logic_gate_id });
     bumpViewGeneration(cacheKey);
     viewInflight.delete(cacheKey);
     viewCache.delete(cacheKey);

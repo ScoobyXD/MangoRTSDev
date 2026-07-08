@@ -3,6 +3,7 @@ import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks";
 import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl";
+import { clearResourceMissing, isTerminalResourceNotFoundError } from "../api/missingResources";
 import { entityMatchesAccountFilter, setNodeAccountAssignments } from "../accounts/accountsApi";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
@@ -1417,8 +1418,15 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       applyColumns(sortColumns(nextColumns));
       applyCards(nextCards);
       setKanbanProjectionSnapshotBoardID(requestedBoardID);
-    } catch {
+    } catch (cause) {
       if (boardRefreshRequestRef.current !== requestID) return;
+      if (isTerminalResourceNotFoundError(cause)) {
+        applyColumns([]);
+        applyCards([]);
+        setKanbanProjectionSnapshotBoardID("");
+        setError("This board is no longer available.");
+        return;
+      }
       if (columnsRef.current.length === 0 && cardsRef.current.length === 0 && !logicGateIDFromKanbanBoardID(requestedBoardID)) {
         setError("Kanban board API unavailable");
       }
@@ -1426,6 +1434,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       if (boardRefreshRequestRef.current === requestID) setLoading(false);
     }
   }, [apiBase, applyCards, applyColumns, boardID, companyID]);
+
+  useEffect(() => {
+    if (!companyID || !activeBoardID) return;
+    clearResourceMissing({ apiBase, companyID, resourceType: "kanban_board", resourceID: activeBoardID });
+    const logicGateID = logicGateIDFromKanbanBoardID(activeBoardID);
+    if (logicGateID) clearResourceMissing({ apiBase, companyID, resourceType: "logic_gate", resourceID: logicGateID });
+  }, [activeBoardID, apiBase, companyID]);
 
   useEffect(() => {
     if (arenaMode) return;
@@ -1579,7 +1594,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       onRejected: () => requestKanbanProjectionFallback("invalid_envelope", streamBoardID, streamLogicGateID),
       onRefetch: () => requestKanbanProjectionFallback("sequence_gap", streamBoardID, streamLogicGateID),
       onPermissionRevoked: () => requestKanbanProjectionFallback("permission_revoked", streamBoardID, streamLogicGateID),
-      onError: () => requestKanbanProjectionFallback("invalid_envelope", streamBoardID, streamLogicGateID),
       onDelta: applyRealtimeKanbanProjectionDelta,
     });
   }, [activeBoardID, apiBase, applyRealtimeKanbanProjectionDelta, arenaMode, companyID, kanbanProjectionSnapshotBoardID, requestKanbanProjectionFallback]);
