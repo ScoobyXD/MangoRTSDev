@@ -2266,7 +2266,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             </button>
           )}
           {canEdit && (
-            <div ref={projectAssignerRef} style={{ position: "relative", display: "inline-flex", flex: "1 1 132px", minWidth: 0, maxWidth: compact ? "100%" : 360, overflow: "visible" }}>
+            <div ref={projectAssignerRef} style={{ position: "relative", display: "inline-flex", flex: "0 1 auto", width: "fit-content", minWidth: 0, maxWidth: compact ? "100%" : 360, overflow: "visible" }}>
               <button
                 type="button"
                 title={assignProjectButtonLabel}
