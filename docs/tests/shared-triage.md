@@ -131,7 +131,7 @@ ST120 - Shared Triage compose/reply file attachments must follow `docs/tests/att
 ST121 - Shared Triage compose/reply inline body images use the unified rich-editor image attachment path, while normal file attachments use the shared-mail attachment path.
 ST122 - Incoming shared provider attachments can stay provider-referenced as mailbox metadata, but when converted into work, attached to a node, or otherwise made durable Mango work context, bytes must be cached/persisted into Mango S3 and stored as Mango attachment references under the company/shared mailbox scope.
 ST123 - Mango-generated shared outgoing email HTML is marked as a Mango email body, and local Shared Triage Sent/reply caches must keep the exact submitted HTML body when the provider send response does not return a body.
-ST124 - Shared Triage Inbox, All, Sent, and thread/detail views must preserve Mango-authored line breaks, spaces, and indentation when displaying sent or received copies of Mango-generated email bodies; this is a Mango display/cache contract and must not weaken the outbound shared email formatting that recipients receive.
+ST124 - Shared Triage Inbox, All, Sent, and thread/detail views must preserve Mango-authored line breaks, spaces, and indentation when displaying sent or received copies of Mango-generated email bodies; this is a Mango display/cache contract and must not weaken the outbound shared email formatting that recipients receive. Once a detail or thread body is hydrated, later list, summary, realtime, star/read, or other preview-shaped payloads must not overwrite that hydrated body with a flattened snippet, and the detail pane must prefer a loading state over showing a snippet as if it were the full body.
 
 ## Nylas Configuration Contract
 
@@ -572,6 +572,8 @@ Expected:
 - Sent shared rich HTML preserves block indentation instead of flattening indented paragraphs.
 - Local shared Sent/reply caches keep the exact Mango-submitted HTML body when the send response omits body content.
 - Mango's own shared Inbox, All, Sent, thread, and detail displays preserve Mango-authored line breaks, spaces, and indentation instead of flattening the same email body into one sentence.
+- Once the selected shared message or thread has a hydrated body, list refreshes, realtime updates, read/star changes, and preview-only cache writes preserve that hydrated structure instead of replacing it with the row snippet.
+- While a full detail body is being fetched, the detail pane may show a loading placeholder but must not present the shared inbox preview snippet as the full structured body.
 
 ### Scenario ST-S14: Shared Mail Attachments Use Mango Attachments
 

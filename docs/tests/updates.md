@@ -76,7 +76,7 @@ U65 - Text editor mention row previews show the text block containing the specif
 U66 - Seeing an individual update hides that row locally without reloading the whole Updates feed; the list must not blink away and come back for the current user's own Seen action.
 U67 - Updates saved grouping view rows render under the Updates entry in the Key Views sidebar, not in the Updates header. + Add new opens the floating grouping editor for a new saved grouping view without navigating the main content area to Updates. Existing views expose Edit, Rename, and Delete commands, and view rows reorder by drag. Updates may have zero saved grouping rows.
 U68 - Activating an Updates row that opens the node preview panel keeps keyboard focus on the Updates row list; Up and Down arrow keys continue moving through visible rows across grouping boundaries instead of moving the caret inside the node editor.
-U69 - The Home sidebar Updates tab shows separate unread badges for urgent ! mentions, normal @ mentions, and non-mention update notifications using notification summary counts.
+U69 - The Home sidebar Updates tab shows separate live unread badges for urgent ! mentions, normal @ mentions, and non-mention update notifications using notification summary counts: urgent comes from `mention.urgent_created`, @ comes from `mention.created`, and regular updates come from total unread minus those mention counts. These badges are display state only, not a second notification source of truth, and must increment or decrement after notification-created, Seen, and Seen all reconciliation.
 U70 - Attachment-related update rows may reference attachment IDs, email IDs, node IDs, and preview metadata, but Updates payloads must not carry file bytes, data URLs, base64 blobs, or S3 object contents.
 
 ## Update Row Copy And Visual Language
@@ -360,6 +360,7 @@ Expected:
 - Up and Down arrow keys continue moving the selected row through the flattened visible Updates rows, including across nested groups.
 - Right-clicking a row opens an Updates context menu with seen actions for the selected rows and all rows, with confirmation before multi-row removal.
 - The Updates tab badge set shows one count for ! urgent mentions, one for @ mentions, and one for regular non-mention updates.
+- The badge counts are derived from the notification summary, update when new notifications arrive, and decrement when Seen or Seen all removes matching notifications from the feed.
 
 ### Scenario U-S8: Attachment Update Rows Are Metadata Only
 

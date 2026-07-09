@@ -114,6 +114,24 @@ function emailMessageDetailSortTimestamp(message: EmailMessage): number {
   return Number.isFinite(date) ? date : 0;
 }
 
+function emailBodyLooksHydrated(message: EmailMessage): boolean {
+  const body = message.body?.trim() ?? "";
+  if (!body) return false;
+  const snippet = message.snippet?.trim() ?? "";
+  return !snippet || body !== snippet || /<\/?[a-z][\s\S]*>|\r|\n|\s{2,}/i.test(body);
+}
+
+function mergeEmailDetailMessage(previous: EmailMessage, next: EmailMessage): EmailMessage {
+  const merged: EmailMessage = { ...previous, ...next };
+  if (emailBodyLooksHydrated(previous) && !emailBodyLooksHydrated(next)) merged.body = previous.body;
+  if (!next.snippet && previous.snippet) merged.snippet = previous.snippet;
+  if (!next.from?.length && previous.from?.length) merged.from = previous.from;
+  if (!next.to?.length && previous.to?.length) merged.to = previous.to;
+  if (!next.cc?.length && previous.cc?.length) merged.cc = previous.cc;
+  if (!next.bcc?.length && previous.bcc?.length) merged.bcc = previous.bcc;
+  return merged;
+}
+
 function mergeEmailThreadDetailMessages(current: EmailMessage[], incoming: EmailMessage[]): EmailMessage[] {
   const byID = new Map<string, EmailMessage>();
   for (const message of [...current, ...incoming]) {
@@ -121,8 +139,7 @@ function mergeEmailThreadDetailMessages(current: EmailMessage[], incoming: Email
     if (!id) continue;
     const existing = byID.get(id);
     byID.set(id, existing ? {
-      ...existing,
-      ...message,
+      ...mergeEmailDetailMessage(existing, message),
       local_replies: message.local_replies ?? existing.local_replies,
     } : message);
   }
@@ -2122,7 +2139,7 @@ export function HomePage({
       }));
       if (selectedMessageIDRef.current === message.id) {
         setSelectedMessage((current) => current?.id === message.id ? {
-          ...message,
+          ...mergeEmailDetailMessage(current, message),
           local_replies: current.local_replies ?? message.local_replies,
         } : message);
       }
@@ -3415,13 +3432,16 @@ export function HomePage({
     const orderedSelectedIDs = orderedIDs.filter((id) => next.selectedIDs.has(id));
     const primaryID = next.selectedIDs.has(message.id) ? message.id : (orderedSelectedIDs[0] ?? message.id);
     const primaryMessage = messages.find((item) => item.id === primaryID) ?? message;
+    const visiblePrimaryMessage = selectedMessageRef.current?.id === primaryID
+      ? mergeEmailDetailMessage(selectedMessageRef.current, primaryMessage)
+      : primaryMessage;
     setSelectedMessageIDs(new Set(orderedSelectedIDs));
     setSelectionAnchorMessageID(next.anchorID);
     setSelectedMessageID(primaryID);
-    setSelectedMessage(primaryMessage);
-    setSelectedThreadMessages([primaryMessage]);
+    setSelectedMessage(visiblePrimaryMessage);
+    setSelectedThreadMessages((current) => mergeEmailThreadDetailMessages(current, [visiblePrimaryMessage]));
     setMessageContextMenu(null);
-    if (mailboxRef.current === "drafts" || homeMessageIsDraft(primaryMessage)) {
+    if (mailboxRef.current === "drafts" || homeMessageIsDraft(visiblePrimaryMessage)) {
       const draft = mailDrafts.find((item) => item.id === primaryID);
       if (draft) {
         setCompose(homeMailDraftToCompose(draft));
@@ -3436,7 +3456,7 @@ export function HomePage({
       }
       return;
     }
-    markMessageReadFromListSelection(primaryMessage);
+    markMessageReadFromListSelection(visiblePrimaryMessage);
   }, [companyID, mailDrafts, markMessageReadFromListSelection, messages, selectedMessageIDs, selectionAnchorMessageID]);
   const openMessageContextMenu = useCallback((message: EmailMessage, event: React.MouseEvent) => {
     event.preventDefault();

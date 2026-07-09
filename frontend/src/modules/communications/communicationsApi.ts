@@ -1837,15 +1837,30 @@ function primeMessageCaches(message: EmailMessage): void {
   if (!cleanMessageID) return;
   const now = Date.now();
   const hydratedMessage = hydrateEmailMessageLocalReplies(message);
+  const hydratedIsDetailed = isEmailMessageDetailed(hydratedMessage);
   for (const [key, entry] of messageDetailCache.entries()) {
     if (!messageCacheKeyMatchesID(key, cleanMessageID)) continue;
-    const replies = mergeLocalReplies(entry.value.local_replies ?? [], hydratedMessage.local_replies ?? []);
-    const value = cloneMessage({ ...hydratedMessage, local_replies: replies.length > 0 ? replies : undefined });
+    const baseMessage = hydratedIsDetailed ? hydratedMessage : mergeEmailMessageForDetailCache(entry.value, hydratedMessage);
+    const replies = mergeLocalReplies(entry.value.local_replies ?? [], baseMessage.local_replies ?? []);
+    const value = cloneMessage({ ...baseMessage, local_replies: replies.length > 0 ? replies : undefined });
     messageDetailCache.set(key, { value, fetchedAt: now });
   }
   const existing = messageDetailCache.get(cleanMessageID)?.value;
-  const replies = mergeLocalReplies(existing?.local_replies ?? [], hydratedMessage.local_replies ?? []);
-  messageDetailCache.set(cleanMessageID, { value: cloneMessage({ ...hydratedMessage, local_replies: replies.length > 0 ? replies : undefined }), fetchedAt: now });
+  if (!hydratedIsDetailed && !existing) return;
+  const baseMessage = existing && !hydratedIsDetailed ? mergeEmailMessageForDetailCache(existing, hydratedMessage) : hydratedMessage;
+  const replies = mergeLocalReplies(existing?.local_replies ?? [], baseMessage.local_replies ?? []);
+  messageDetailCache.set(cleanMessageID, { value: cloneMessage({ ...baseMessage, local_replies: replies.length > 0 ? replies : undefined }), fetchedAt: now });
+}
+
+function mergeEmailMessageForDetailCache(previous: EmailMessage, next: EmailMessage): EmailMessage {
+  const merged: EmailMessage = { ...previous, ...next };
+  if (!isEmailMessageDetailed(next) && previous.body) merged.body = previous.body;
+  if (!next.snippet && previous.snippet) merged.snippet = previous.snippet;
+  if (!next.from?.length && previous.from?.length) merged.from = cloneEmailAddresses(previous.from);
+  if (!next.to?.length && previous.to?.length) merged.to = cloneEmailAddresses(previous.to);
+  if (!next.cc?.length && previous.cc?.length) merged.cc = cloneEmailAddresses(previous.cc);
+  if (!next.bcc?.length && previous.bcc?.length) merged.bcc = cloneEmailAddresses(previous.bcc);
+  return merged;
 }
 
 function messageDetailCacheKey(messageID: string, companyID?: string, sharedInboxID?: string): string {
