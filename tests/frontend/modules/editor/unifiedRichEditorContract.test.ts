@@ -36,6 +36,11 @@ function assertMailToolbarControls(adapterSource: string, editorTabBarSource: st
   assert.match(adapterSource, /visibleTabIDs=/);
   assert.match(adapterSource, /onSelectionFontSizeChange=/);
   assert.match(adapterSource, /onSelectionInlineFormatChange=/);
+  assert.match(editorTabBarSource, /hoveredFormatControl/);
+  assert.match(editorTabBarSource, /formatControlDivider/);
+  for (const controlID of ["decrease-font", "font-size", "increase-font", "bold", "underline"]) {
+    assert.match(editorTabBarSource, new RegExp(`data-mango-editor-format-control="${controlID}"`));
+  }
 }
 
 function assertRemovedMailOnlyFontSelect(source: string) {
@@ -83,7 +88,7 @@ test("mail compose and attached-email reply mount unified rich editor adapters",
 
   assert.match(nodeWorkspaceParts, /UnifiedRichEditorSurface/);
   assert.match(nodeWorkspaceParts, /surfaceID="attached-email-reply"/);
-  assert.match(nodeWorkspaceParts, /unifiedRichEditorBodyToEmailHTML/);
+  assert.match(nodeWorkspaceParts, /serializeEditorBodyForEmailHTML/);
   assertMailToolbarControls(nodeWorkspaceParts, editorTabBar, editorPreferences);
   assert.match(nodeWorkspaceParts, /ATTACHED_EMAIL_REPLY_EDITOR_TAB_IDS/);
   assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
@@ -163,6 +168,9 @@ test("node window adapters mount the shared unified node shell", () => {
   assert.match(kanbanOverlays, /surfaceID="kanban-my-work-node-overlay"/);
   assert.match(kanbanOverlays, /id: "fullscreen"/);
   assert.match(kanbanOverlays, /pressed: fullscreen/);
+  assert.match(kanbanOverlays, /position: fullscreen \? "fixed" : "absolute"/);
+  assert.match(kanbanOverlays, /width: fullscreen \? "100vw"/);
+  assert.match(kanbanOverlays, /height: fullscreen \? "100vh"/);
   assert.match(kanbanContent, /onToggleFullscreen=\{toggleNodeEditorOverlayFullscreen\}/);
   assert.match(kanbanContent, /fullscreen=\{nodeEditorOverlayFullscreen\}/);
   assert.doesNotMatch(kanbanOverlays, /overlayHeaderButtonStyle\(right/);

@@ -45,7 +45,7 @@ import {
   type KanbanBoardContentsUpdatedDetail,
   type KanbanBoardsUpdatedDetail,
 } from "../../modules/kanban/shared.js";
-import { EDITOR_RICH_TEXT_PREFIX, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing.js";
+import { editorBodyHasEmailContent, serializeEditorBodyForEmailHTML } from "../../modules/editor/richTextEditing.js";
 import type { NodeRecord } from "../../modules/node-map/shared.js";
 import {
   moveMyWorkNodeToCell as defaultMoveMyWorkNodeToCell,
@@ -135,53 +135,6 @@ export type HomeSendMailCommandResult = {
   sentMessage: EmailMessage;
   sentToConnectedAccount: boolean;
 };
-
-function escapeEmailBodyHTML(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function linkifyEmailBodyLine(value: string): string {
-  const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
-  let output = "";
-  let cursor = 0;
-  for (const match of value.matchAll(urlPattern)) {
-    const matchText = match[0] ?? "";
-    const index = match.index ?? 0;
-    if (index > cursor) output += escapeEmailBodyHTML(value.slice(cursor, index));
-    const trailingPunctuation = matchText.match(/[),.;:!?]+$/)?.[0] ?? "";
-    const cleanURL = trailingPunctuation ? matchText.slice(0, -trailingPunctuation.length) : matchText;
-    const href = cleanURL.toLowerCase().startsWith("www.") ? `https://${cleanURL}` : cleanURL;
-    output += `<a href="${escapeEmailBodyHTML(href)}" target="_blank" rel="noopener noreferrer" style="color:#0369a1;text-decoration:underline;">${escapeEmailBodyHTML(cleanURL)}</a>${escapeEmailBodyHTML(trailingPunctuation)}`;
-    cursor = index + matchText.length;
-  }
-  return output + escapeEmailBodyHTML(value.slice(cursor));
-}
-
-function plainTextEmailBodyToHTML(value: string): string {
-  const lines = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  return `<div style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;">${lines.map(linkifyEmailBodyLine).join("<br>")}</div>`;
-}
-
-function richEmailBodyToHTML(value: string): string {
-  const html = sanitizeEditorDocumentHTML(value.slice(EDITOR_RICH_TEXT_PREFIX.length));
-  return `<div style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;">${html}</div>`;
-}
-
-function composeBodyToEmailHTML(value: string): string {
-  return value.startsWith(EDITOR_RICH_TEXT_PREFIX) ? richEmailBodyToHTML(value) : plainTextEmailBodyToHTML(value);
-}
-
-function composeBodyHasContent(value: string): boolean {
-  const body = value.trim();
-  if (!body) return false;
-  if (!body.startsWith(EDITOR_RICH_TEXT_PREFIX)) return true;
-  return body
-    .slice(EDITOR_RICH_TEXT_PREFIX.length)
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .trim()
-    .length > 0;
-}
 
 export type HomeSharedInboxCommandResult = {
   folder: CommunicationsSharedInbox;
@@ -352,7 +305,7 @@ export async function sendHomeMailComposeCommand(args: {
       size: attachment.size,
     }))
     .filter((attachment) => attachment.content.trim());
-  if (!subject && !composeBodyHasContent(bodyText) && attachments.length === 0) {
+  if (!subject && !editorBodyHasEmailContent(bodyText) && attachments.length === 0) {
     throw new Error("Add a subject or message body.");
   }
   const input: SendEmailInput = {
@@ -360,7 +313,7 @@ export async function sendHomeMailComposeCommand(args: {
     cc,
     bcc,
     subject,
-    body: composeBodyHasContent(bodyText) ? composeBodyToEmailHTML(bodyText) : "",
+    body: editorBodyHasEmailContent(bodyText) ? serializeEditorBodyForEmailHTML(bodyText) : "",
     attachments,
     reply_to_message_id: args.compose.replyToMessageID || undefined,
   };

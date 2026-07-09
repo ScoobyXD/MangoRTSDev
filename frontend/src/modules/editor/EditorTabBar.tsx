@@ -121,6 +121,8 @@ type EditorTabBarProps = {
   disabled?: boolean;
 };
 
+type EditorFormatControlID = "decrease-font" | "font-size" | "increase-font" | "bold" | "underline";
+
 export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   activeTab,
   outlineStyle,
@@ -153,6 +155,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   const [outlineMenuOpen, setOutlineMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [hoveredTabID, setHoveredTabID] = useState<EditorTabID | "create" | null>(null);
+  const [hoveredFormatControl, setHoveredFormatControl] = useState<EditorFormatControlID | null>(null);
   const [hoveredOutlineStyle, setHoveredOutlineStyle] = useState<EditorOutlineStyleID | null>(null);
   const [fontSizeDraft, setFontSizeDraft] = useState(String(documentFontSize));
   const outlineMenuRef = useRef<HTMLDivElement | null>(null);
@@ -251,21 +254,36 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     transform: hovered && !selected ? "translateY(-1px)" : "translateY(0)",
     transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease, color 140ms ease",
   });
-  const inlineFormatButtonStyle = (active: boolean, withRightBorder = true): React.CSSProperties => ({
-    width: 28,
+  const formatControlDivider = `1px solid ${colorWithAlpha(strokeColor, 0.92)}`;
+  const formatControlHoverBackground = "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(230,252,255,0.72) 46%, rgba(247,239,255,0.74))";
+  const formatControlStyle = (id: EditorFormatControlID, options: { active?: boolean; withRightBorder?: boolean; width?: number; fontSize?: number } = {}): React.CSSProperties => {
+    const active = options.active ?? false;
+    const hovered = hoveredFormatControl === id && !disabled;
+    return {
+      width: options.width ?? 28,
+      height: 24,
+      border: 0,
+      borderRight: options.withRightBorder === false ? 0 : formatControlDivider,
+      background: active ? colorWithAlpha(outlineMenuAccent, 0.16) : hovered ? formatControlHoverBackground : "transparent",
+      color: active ? outlineMenuAccent : surfaceText,
+      display: "grid",
+      placeItems: "center",
+      cursor: disabled ? "default" : "pointer",
+      fontSize: options.fontSize ?? 12,
+      fontWeight: 900,
+      lineHeight: 1,
+      boxShadow: active ? "inset 1px 1px 3px rgba(15,23,42,0.08)" : hovered ? "inset 2px 2px 5px rgba(15,23,42,0.08), inset -2px -2px 5px rgba(255,255,255,0.78)" : undefined,
+      transition: "background 130ms ease, box-shadow 130ms ease, color 130ms ease",
+    };
+  };
+  const formatControlHoverHandlers = (id: EditorFormatControlID) => ({
+    onMouseEnter: () => setHoveredFormatControl(id),
+    onMouseLeave: () => setHoveredFormatControl((current) => (current === id ? null : current)),
+  });
+  const inlineFormatButtonStyle = (id: EditorFormatControlID, active: boolean, withRightBorder = true): React.CSSProperties => ({
+    ...formatControlStyle(id, { active, withRightBorder }),
     height: 24,
-    border: 0,
-    borderRight: withRightBorder ? `1px solid ${strokeColor}` : 0,
-    background: active ? colorWithAlpha(outlineMenuAccent, 0.16) : "transparent",
-    color: active ? outlineMenuAccent : surfaceText,
-    display: "grid",
-    placeItems: "center",
-    cursor: disabled ? "default" : "pointer",
-    fontSize: 12,
-    fontWeight: 900,
-    lineHeight: 1,
     textDecoration: active && !withRightBorder ? "underline" : undefined,
-    boxShadow: active ? "inset 1px 1px 3px rgba(15,23,42,0.08)" : undefined,
   });
 
   return (
@@ -289,13 +307,15 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 aria-label="Decrease font size"
                 title="Decrease font size"
                 disabled={disabled}
+                data-mango-editor-format-control="decrease-font"
+                {...formatControlHoverHandlers("decrease-font")}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (disabled) return;
                   onAdjustSelectionFontSize(-1);
                 }}
-                style={{ width: 30, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, display: "grid", placeItems: "center", cursor: disabled ? "default" : "pointer", fontSize: 17, lineHeight: 1 }}
+                style={formatControlStyle("decrease-font", { width: 30, fontSize: 17 })}
               >
                 -
               </button>
@@ -303,11 +323,18 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 aria-label="Font size value"
                 value={fontSizeDraft}
                 disabled={disabled}
+                data-mango-editor-format-control="font-size"
+                onMouseEnter={() => setHoveredFormatControl("font-size")}
+                onMouseLeave={() => setHoveredFormatControl((current) => (current === "font-size" ? null : current))}
+                onFocus={() => setHoveredFormatControl("font-size")}
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
                 onDoubleClick={(event) => event.currentTarget.select()}
                 onChange={(event) => setFontSizeDraft(event.target.value.replace(/[^\d]/g, "").slice(0, 2))}
-                onBlur={commitFontSizeDraft}
+                onBlur={() => {
+                  commitFontSizeDraft();
+                  setHoveredFormatControl((current) => (current === "font-size" ? null : current));
+                }}
                 onKeyDown={(event) => {
                   event.stopPropagation();
                   if (event.key === "Enter") event.currentTarget.blur();
@@ -316,20 +343,22 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                     event.currentTarget.blur();
                   }
                 }}
-                style={{ width: 34, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, textAlign: "center", outline: "none", font: "inherit", fontSize: 10, fontWeight: 500, padding: 0 }}
+                style={{ ...formatControlStyle("font-size", { width: 34 }), cursor: disabled ? "default" : "text", textAlign: "center", outline: "none", font: "inherit", fontSize: 10, fontWeight: 500, padding: 0 }}
               />
               <button
                 type="button"
                 aria-label="Increase font size"
                 title="Increase font size"
                 disabled={disabled}
+                data-mango-editor-format-control="increase-font"
+                {...formatControlHoverHandlers("increase-font")}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (disabled) return;
                   onAdjustSelectionFontSize(1);
                 }}
-                style={{ width: 30, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, display: "grid", placeItems: "center", cursor: disabled ? "default" : "pointer", fontSize: 17, lineHeight: 1 }}
+                style={formatControlStyle("increase-font", { width: 30, fontSize: 17 })}
               >
                 +
               </button>
@@ -339,13 +368,15 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 title="Bold"
                 aria-pressed={boldActive}
                 disabled={disabled}
+                data-mango-editor-format-control="bold"
+                {...formatControlHoverHandlers("bold")}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (disabled) return;
                   onToggleBold();
                 }}
-                style={inlineFormatButtonStyle(boldActive)}
+                style={inlineFormatButtonStyle("bold", boldActive)}
               >
                 B
               </button>
@@ -355,13 +386,15 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 title="Underline"
                 aria-pressed={underlineActive}
                 disabled={disabled}
+                data-mango-editor-format-control="underline"
+                {...formatControlHoverHandlers("underline")}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
                   if (disabled) return;
                   onToggleUnderline();
                 }}
-                style={inlineFormatButtonStyle(underlineActive, false)}
+                style={inlineFormatButtonStyle("underline", underlineActive, false)}
               >
                 <span style={{ textDecoration: "underline", textUnderlineOffset: 2 }}>U</span>
               </button>

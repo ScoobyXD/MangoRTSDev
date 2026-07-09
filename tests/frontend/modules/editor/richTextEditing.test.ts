@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { sanitizeAPIErrorMessage } from "../../../../frontend/src/modules/api/requestJSON.js";
-import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, deserializeEditorDocumentHTML, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML, serializeEditorBodyForEmailHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { clampEditorImageVerticalOffset, createStandaloneImageClipboardHTML, editorAttachmentImageSource, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isEditorAttachmentImageSource, isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
@@ -21,6 +21,20 @@ test("editor paste linkification preserves punctuation outside the URL", () => {
   const html = linkifyEditorPlainTextToHTML("open https://example.test/path.");
 
   assert.match(html, /href="https:\/\/example\.test\/path"/);
+  assert.match(html, /<\/a>\./);
+});
+
+test("email serialization preserves editor line breaks and spacing", () => {
+  const html = serializeEditorBodyForEmailHTML(`${EDITOR_RICH_TEXT_PREFIX}First line\n  1. indented\n\nNext block`);
+
+  assert.match(html, /white-space:pre-wrap/);
+  assert.match(html, /First line<br>  1\. indented<br><br>Next block/);
+});
+
+test("email serialization keeps plain text links and explicit line breaks", () => {
+  const html = serializeEditorBodyForEmailHTML("Hello\n  https://example.test/path.");
+
+  assert.match(html, /Hello<br>  <a href="https:\/\/example\.test\/path"/);
   assert.match(html, /<\/a>\./);
 });
 

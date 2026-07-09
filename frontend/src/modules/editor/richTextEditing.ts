@@ -792,6 +792,40 @@ export function normalizeEditorWhitespaceText(value: string): string {
   return value.replace(/\u00a0/g, " ");
 }
 
+const EDITOR_EMAIL_BODY_STYLE = "font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;overflow-wrap:anywhere;";
+
+function editorEmailHTMLWithExplicitLineBreaks(value: string): string {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n/g, "<br>");
+}
+
+function plainEditorTextToEmailHTML(value: string): string {
+  return editorEmailHTMLWithExplicitLineBreaks(linkifyEditorPlainTextToHTML(value));
+}
+
+function richEditorDocumentToEmailHTML(value: string): string {
+  return editorEmailHTMLWithExplicitLineBreaks(sanitizeEditorDocumentHTML(value.slice(EDITOR_RICH_TEXT_PREFIX.length)));
+}
+
+export function serializeEditorBodyForEmailHTML(value: string): string {
+  if (!value.trim()) return "";
+  const html = value.startsWith(EDITOR_RICH_TEXT_PREFIX)
+    ? richEditorDocumentToEmailHTML(value)
+    : plainEditorTextToEmailHTML(value);
+  return `<div style="${EDITOR_EMAIL_BODY_STYLE}">${html}</div>`;
+}
+
+export function editorBodyHasEmailContent(value: string): boolean {
+  const body = value.trim();
+  if (!body) return false;
+  if (!body.startsWith(EDITOR_RICH_TEXT_PREFIX)) return true;
+  return body
+    .slice(EDITOR_RICH_TEXT_PREFIX.length)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .trim()
+    .length > 0;
+}
+
 const EDITOR_TEXT_BLOCK_TAGS = new Set(["DIV", "P", "LI", "TABLE"]);
 const EDITOR_TABLE_CELL_TAGS = new Set(["TD", "TH"]);
 
