@@ -1751,9 +1751,10 @@ func (s *Server) applyCommunicationsMailboxQuery(ctx context.Context, connection
 		starred := true
 		query.Starred = &starred
 		if connection.Provider == "google" {
-			query.SearchQueryNative = gmailUserSearch(query.Query, query.Unread)
+			query.SearchQueryNative = gmailStarredSearch(query.Query, query.Unread)
 			query.Query = ""
 			query.Unread = nil
+			query.Starred = nil
 		}
 		return query, nil
 	case "archive":
@@ -1839,6 +1840,10 @@ func gmailAllSearch(userQuery string, unread *bool) string {
 
 func gmailUserSearch(userQuery string, unread *bool) string {
 	return gmailSearch(nil, userQuery, unread)
+}
+
+func gmailStarredSearch(userQuery string, unread *bool) string {
+	return gmailSearch([]string{"is:starred"}, userQuery, unread)
 }
 
 func gmailPrimarySearch(userQuery string, unread *bool) string {
