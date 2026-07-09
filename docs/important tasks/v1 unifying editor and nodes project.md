@@ -218,6 +218,7 @@ Phase 1 implementation status (2026-07-08):
 Phase 1 regression fix status (2026-07-09):
 
 - Mail compose/reply and attached-email reply toolbars expose the full supported unified control set: numbered list, indent, outdent, bullet list, checklist, font size, bold, underline, link, and table.
+- Mail compose/reply and attached-email reply now reuse the shared editor format/outline toolbar controls for font size, bold, underline, outline-style dropdown, and table insertion instead of maintaining separate mail-only controls for those semantics.
 - Numbered-list toolbar actions route through the shared rich-editor controller and automatic numbered/alphanumerical outline helper instead of only switching the outline-style state.
 - Shared controller methods for numbered list, indent, and outdent live behind `UnifiedRichEditorSurface` and reuse the editor module behavior helpers; personal/shared mail send scopes and attached-email reply send flow remain unchanged.
 
@@ -241,6 +242,7 @@ Phase 2 implementation status (2026-07-09):
 - `frontend/src/modules/editor/UnifiedNodeShell.tsx` is the shared node-window shell source for top-right action ordering, accessible action labels, shell/body data attributes, and the node-workspace body boundary.
 - `frontend/src/modules/editor/unifiedNodeShellContract.ts` records the Phase 2 surface IDs, action capabilities, opener-state boundary, and node information/projection persistence boundary used by focused frontend tests.
 - Home node popup, app/sidebar Company Explorer node popup, dock-restored node popup, Kanban/My Work node overlay, Updates node panel, and Project critical-path inline node window mount `UnifiedNodeShell`.
+- Kanban/My Work node overlay exposes the shared fullscreen action and keeps Kanban's board-relative fullscreen/restore ratio state in the Kanban adapter.
 - Opener-specific state remains outside the shared shell: Home/app popup geometry, sidebar collision bounds, dock-tab restore state, Kanban linked resize ratios, Updates notification context, and Project critical-path row selection still live in their owning surfaces.
 - Node editor content still flows through `EditorContent` and `NodeWorkspaceSurface`; node text boxes, attached emails, and chats keep node information/projection persistence and chat/editor boundaries.
 - Project critical-path inline node windows now expose shared shell close/open actions while edits inside the window remain node editor mutations, not project critical-path mutations.

@@ -13,22 +13,43 @@ import {
   UNIFIED_NODE_SHELL_TOP_RIGHT_ACTION_ORDER,
 } from "../../../../frontend/src/modules/editor/unifiedNodeShellContract.js";
 
-const MAIL_CONTROL_LABELS = [
+const MAIL_ADAPTER_CONTROL_LABELS = [
   "Numbered list",
   "Outdent",
   "Indent",
   "Bullet list",
   "Checklist",
+  "Create link",
+] as const;
+
+const SHARED_EDITOR_TAB_BAR_CONTROL_LABELS = [
   "Font size",
+  "Font size value",
   "Bold",
   "Underline",
-  "Create link",
+  "Outline styles",
   "Insert table",
 ] as const;
 
-function assertMailToolbarControls(source: string) {
-  for (const label of MAIL_CONTROL_LABELS) {
-    assert.match(source, new RegExp(`aria-label="${label}"`));
+function assertMailToolbarControls(adapterSource: string, editorTabBarSource: string, preferencesSource: string) {
+  for (const label of MAIL_ADAPTER_CONTROL_LABELS) {
+    assert.match(adapterSource, new RegExp(`aria-label="${label}"`));
+  }
+  for (const label of SHARED_EDITOR_TAB_BAR_CONTROL_LABELS) {
+    assert.match(editorTabBarSource, new RegExp(`aria-label="${label}"`));
+  }
+  for (const label of ["Automatic Numbering", "Bullet Points", "Checklist"]) {
+    assert.match(preferencesSource, new RegExp(label));
+  }
+  assert.match(adapterSource, /<EditorTabBar/);
+  assert.match(adapterSource, /visibleTabIDs=/);
+  assert.match(adapterSource, /onSelectionFontSizeChange=/);
+  assert.match(adapterSource, /onSelectionInlineFormatChange=/);
+}
+
+function assertRemovedMailOnlyFontSelect(source: string) {
+  for (const staleName of ["composeRichFontSelectStyle", "attachedEmailReplyFontSelectStyle"]) {
+    assert.doesNotMatch(source, new RegExp(staleName));
   }
 }
 
@@ -61,22 +82,27 @@ test("mail compose and attached-email reply mount unified rich editor adapters",
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
+  const editorTabBar = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorTabBar.tsx"), "utf8");
+  const editorPreferences = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorPreferences.ts"), "utf8");
 
   assert.match(homeParts, /UnifiedRichEditorSurface/);
   assert.match(homeParts, /composeEditorSurfaceID/);
   assert.match(homeParts, /"my-triage-compose"/);
   assert.match(homeParts, /"shared-triage-compose"/);
   assert.doesNotMatch(homeParts, /document\.execCommand/);
-  assertMailToolbarControls(homeParts);
+  assertMailToolbarControls(homeParts, editorTabBar, editorPreferences);
+  assert.match(homeParts, /MAIL_RICH_EDITOR_TAB_IDS/);
   assert.match(homeParts, /bodyEditorControllerRef\.current\?\.toggleNumberedList\(\)/);
   assert.match(homeParts, /bodyEditorControllerRef\.current\?\.outdent\(\)/);
   assert.match(homeParts, /bodyEditorControllerRef\.current\?\.indent\(\)/);
+  assert.match(homeParts, /bodyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
   assert.doesNotMatch(homeParts, /selectNumberedMode/);
 
   assert.match(nodeWorkspaceParts, /UnifiedRichEditorSurface/);
   assert.match(nodeWorkspaceParts, /surfaceID="attached-email-reply"/);
   assert.match(nodeWorkspaceParts, /unifiedRichEditorBodyToEmailHTML/);
-  assertMailToolbarControls(nodeWorkspaceParts);
+  assertMailToolbarControls(nodeWorkspaceParts, editorTabBar, editorPreferences);
+  assert.match(nodeWorkspaceParts, /ATTACHED_EMAIL_REPLY_EDITOR_TAB_IDS/);
   assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.toggleNumberedList\(\)/);
   assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.outdent\(\)/);
   assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.indent\(\)/);
@@ -88,6 +114,8 @@ test("mail compose and attached-email reply mount unified rich editor adapters",
   assert.match(unifiedRichEditorSurface, /toggleNumberedList:/);
   assert.match(unifiedRichEditorSurface, /indent:/);
   assert.match(unifiedRichEditorSurface, /outdent:/);
+  assertRemovedMailOnlyFontSelect(homeParts);
+  assertRemovedMailOnlyFontSelect(nodeWorkspaceParts);
 });
 
 test("EmailPickerModal remains attach-only and cannot compose or send mail", () => {
@@ -131,6 +159,7 @@ test("node window adapters mount the shared unified node shell", () => {
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const appSidebar = readFileSync(resolve(process.cwd(), "frontend/src/app/AppSidebarChrome.tsx"), "utf8");
   const appLayout = readFileSync(resolve(process.cwd(), "frontend/src/app/applayout.tsx"), "utf8");
+  const kanbanContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/kanban/KanbanContent.tsx"), "utf8");
   const kanbanOverlays = readFileSync(resolve(process.cwd(), "frontend/src/modules/kanban/KanbanOverlays.tsx"), "utf8");
   const updatesView = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/UpdatesView.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
@@ -151,6 +180,10 @@ test("node window adapters mount the shared unified node shell", () => {
 
   assert.match(kanbanOverlays, /UnifiedNodeShell/);
   assert.match(kanbanOverlays, /surfaceID="kanban-my-work-node-overlay"/);
+  assert.match(kanbanOverlays, /id: "fullscreen"/);
+  assert.match(kanbanOverlays, /pressed: fullscreen/);
+  assert.match(kanbanContent, /onToggleFullscreen=\{toggleNodeEditorOverlayFullscreen\}/);
+  assert.match(kanbanContent, /fullscreen=\{nodeEditorOverlayFullscreen\}/);
   assert.doesNotMatch(kanbanOverlays, /overlayHeaderButtonStyle\(right/);
 
   assert.match(updatesView, /UnifiedNodeShell/);

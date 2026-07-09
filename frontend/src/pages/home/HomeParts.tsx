@@ -9,10 +9,14 @@ import { NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } fr
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { BoundRequestJSON } from "../../modules/api/requestJSON";
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
+import { EditorTabBar } from "../../modules/editor/EditorTabBar";
+import type { EditorTabID } from "../../modules/editor/editorTabs";
 import { EDITOR_RICH_TEXT_PREFIX, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
 import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
+import type { EditorSelectionInlineFormatState } from "../../modules/editor/useEditorDocumentSurfaceHandlers";
+import { EDITOR_DOCUMENT_FONT_SIZE_PX } from "../../modules/editor/useEditorPreferences";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
@@ -41,6 +45,7 @@ const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "home-node-editor-popup-size-v1";
 const HOME_INBOX_GROUP_COLLAPSED_STORAGE_KEY_PREFIX = "mangorts.communications.inboxLogicGateGroupCollapsed.v1";
 const HOME_COMPACT_CONTEXT_MENU_WIDTH = 210;
+const MAIL_RICH_EDITOR_TAB_IDS: readonly EditorTabID[] = ["format", "outline-styles"];
 const HOME_LOGIC_GATE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
   { value: 1, label: "1  URGENT(<1hr)" },
   { value: 2, label: "2  By end of day" },
@@ -4632,15 +4637,6 @@ const composeRichToolWideButtonStyle: React.CSSProperties = {
   fontWeight: 760,
 };
 
-const composeRichFontSelectStyle: React.CSSProperties = {
-  ...mailPanelInputStyle,
-  width: 76,
-  height: 28,
-  minHeight: 28,
-  padding: "0 6px",
-  fontSize: 11,
-};
-
 const composeRichEditorStyle: React.CSSProperties = {
   ...mailPanelTextareaStyle,
   minHeight: 180,
@@ -4865,6 +4861,9 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   const [recipientDrafts, setRecipientDrafts] = React.useState<Record<ComposeRecipientField, string>>({ to: "", cc: "", bcc: "" });
   const [replyEditorHeight, setReplyEditorHeight] = React.useState(220);
   const [bodyOutlineStyle, setBodyOutlineStyle] = React.useState<EditorOutlineStyleID>("automatic-outline-numbering");
+  const [bodyToolbarTab, setBodyToolbarTab] = React.useState<EditorTabID>("format");
+  const [bodySelectionFontSize, setBodySelectionFontSize] = React.useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
+  const [bodySelectionInlineFormat, setBodySelectionInlineFormat] = React.useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
   const update = (patch: Partial<ComposeState>) => onChange({ ...compose, ...patch });
   const totalAttachmentBytes = compose.attachments.reduce((sum, attachment) => sum + Math.max(0, attachment.size || 0), 0);
   const focusRecipientInput = (field: ComposeRecipientField) => {
@@ -5032,10 +5031,23 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     if (compose.body.endsWith(signature)) return;
     update({ body: appendSignatureToComposeBody(compose.body, signature) });
   };
-  const applyFontSize = (size: string) => {
-    const fontSize = Number.parseInt(size, 10);
-    if (!Number.isFinite(fontSize)) return;
+  const syncBodyToolbarFormatState = () => {
+    const state = bodyEditorControllerRef.current?.readFormatState();
+    if (!state) return;
+    setBodySelectionFontSize(state.fontSize);
+    setBodySelectionInlineFormat({ bold: state.bold, underline: state.underline });
+  };
+  const adjustBodyFontSize = (delta: number) => {
+    bodyEditorControllerRef.current?.adjustFontSize(delta);
+    syncBodyToolbarFormatState();
+  };
+  const setBodyFontSize = (fontSize: number) => {
     bodyEditorControllerRef.current?.applyFontSizeValue(fontSize);
+    syncBodyToolbarFormatState();
+  };
+  const toggleBodyInlineFormat = (command: "bold" | "underline") => {
+    bodyEditorControllerRef.current?.toggleInlineFormat(command);
+    syncBodyToolbarFormatState();
   };
   const createHyperlink = () => {
     const rawHref = window.prompt("Link URL") ?? "";
@@ -5136,32 +5148,38 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           </div>
         )}
         <div style={composeRichToolbarStyle}>
-          <button type="button" title="Bold" aria-label="Bold" style={composeRichToolButtonStyle} onClick={() => bodyEditorControllerRef.current?.toggleInlineFormat("bold")}>B</button>
-          <button type="button" title="Underline" aria-label="Underline" style={composeRichToolButtonStyle} onClick={() => bodyEditorControllerRef.current?.toggleInlineFormat("underline")}>U</button>
+          <EditorTabBar
+            activeTab={bodyToolbarTab}
+            outlineStyle={bodyOutlineStyle}
+            accent={HOME_CYAN}
+            strokeColor="rgba(148, 163, 184, 0.34)"
+            surfaceText="#111827"
+            tabBackground="rgba(255, 255, 255, 0.76)"
+            tabSelectedBackground="rgba(240, 253, 255, 0.9)"
+            outlineMenuAccent={HOME_CYAN}
+            onSelectTab={setBodyToolbarTab}
+            onAdjustSelectionFontSize={adjustBodyFontSize}
+            documentFontSize={bodySelectionFontSize}
+            onSetSelectionFontSize={setBodyFontSize}
+            boldActive={bodySelectionInlineFormat.bold}
+            underlineActive={bodySelectionInlineFormat.underline}
+            onToggleBold={() => toggleBodyInlineFormat("bold")}
+            onToggleUnderline={() => toggleBodyInlineFormat("underline")}
+            onOutlineStyleFocus={() => setBodyToolbarTab("outline-styles")}
+            onOutlineStyleChange={(nextOutlineStyle) => {
+              setBodyOutlineStyle(nextOutlineStyle);
+              setBodyToolbarTab("outline-styles");
+            }}
+            onInsertTable={() => bodyEditorControllerRef.current?.insertTable()}
+            reserveHeaderOffset={false}
+            visibleTabIDs={MAIL_RICH_EDITOR_TAB_IDS}
+          />
           <button type="button" title="Numbered list" aria-label="Numbered list" style={composeRichToolButtonStyle} onClick={toggleNumberedList}>1.</button>
           <button type="button" title="Bullet list" aria-label="Bullet list" style={composeRichToolButtonStyle} onClick={insertBulletList}>-</button>
           <button type="button" title="Checklist" aria-label="Checklist" style={composeRichToolWideButtonStyle} onClick={insertChecklist}>Check</button>
           <button type="button" title="Outdent" aria-label="Outdent" style={composeRichToolButtonStyle} onClick={outdentBody}>{"<<"}</button>
           <button type="button" title="Indent" aria-label="Indent" style={composeRichToolButtonStyle} onClick={indentBody}>{">>"}</button>
           <button type="button" title="Create link" aria-label="Create link" style={composeRichToolWideButtonStyle} onClick={createHyperlink}>Link</button>
-          <button type="button" title="Insert table" aria-label="Insert table" style={composeRichToolWideButtonStyle} onClick={() => bodyEditorControllerRef.current?.insertTable()}>Table</button>
-          <select
-            aria-label="Font size"
-            style={composeRichFontSelectStyle}
-            defaultValue=""
-            onChange={(event) => {
-              applyFontSize(event.currentTarget.value);
-              event.currentTarget.value = "";
-            }}
-          >
-            <option value="" disabled>Size</option>
-            <option value="12">12</option>
-            <option value="14">14</option>
-            <option value="16">16</option>
-            <option value="18">18</option>
-            <option value="22">22</option>
-            <option value="28">28</option>
-          </select>
         </div>
         <UnifiedRichEditorSurface
           value={compose.body}
@@ -5174,6 +5192,8 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           indentGuideColor="rgba(14,165,233,0.38)"
           formattingControllerRef={bodyEditorControllerRef}
           style={richEditorStyle}
+          onSelectionFontSizeChange={setBodySelectionFontSize}
+          onSelectionInlineFormatChange={setBodySelectionInlineFormat}
           onChange={(body) => update({ body })}
         />
         <div style={mailComposeAttachmentRowStyle}>

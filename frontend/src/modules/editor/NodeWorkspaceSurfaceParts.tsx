@@ -4,6 +4,8 @@ import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type Ema
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
+import { EditorTabBar } from "./EditorTabBar";
+import type { EditorTabID } from "./editorTabs";
 import { EDITOR_TAB_TEXT, type EditorOutlineStyleID } from "./plainTextEditing";
 import { buildEditorIndentGuideSegments, editorIndentGuideLeftForDepth, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import {
@@ -25,7 +27,7 @@ import {
   type EditorDocumentFormattingController,
   type EditorSelectionInlineFormatState,
 } from "./useEditorDocumentSurfaceHandlers";
-import { getEditorDocumentFontFamily } from "./useEditorPreferences";
+import { EDITOR_DOCUMENT_FONT_SIZE_PX, getEditorDocumentFontFamily } from "./useEditorPreferences";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "./UnifiedRichEditorSurface";
 import {
   createStandaloneImageClipboardHTML,
@@ -3735,6 +3737,7 @@ const EMAIL_SELECTION_ACTION_OFFSET = 8;
 const EMAIL_PICKER_MESSAGE_BATCH_SIZE = 12;
 const EMAIL_PICKER_PREFETCH_REMAINING_ROWS = 5;
 const EMAIL_PICKER_APPROX_ROW_HEIGHT = 80;
+const ATTACHED_EMAIL_REPLY_EDITOR_TAB_IDS: readonly EditorTabID[] = ["format", "outline-styles"];
 
 type EmailPickerPrefetchedPage = {
   filterKey: string;
@@ -3792,22 +3795,6 @@ const attachedEmailReplyToolButtonStyle: React.CSSProperties = {
 const attachedEmailReplyWideToolButtonStyle: React.CSSProperties = {
   ...attachedEmailReplyToolButtonStyle,
   minWidth: 40,
-};
-
-const attachedEmailReplyFontSelectStyle: React.CSSProperties = {
-  minWidth: 58,
-  height: 24,
-  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-  borderRadius: 7,
-  background: EDITOR_NEU_SURFACE,
-  color: "inherit",
-  outline: "none",
-  padding: "0 5px",
-  fontSize: 10.5,
-  fontWeight: 850,
-  cursor: "pointer",
-  boxSizing: "border-box",
-  boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.78)",
 };
 
 const EmailSelectionActionIconFrame: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -4049,6 +4036,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [draftAttachments, setDraftAttachments] = useState<EditorChatAttachment[]>([]);
   const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
   const [replyOutlineStyle, setReplyOutlineStyle] = useState<EditorOutlineStyleID>("automatic-outline-numbering");
+  const [replyToolbarTab, setReplyToolbarTab] = useState<EditorTabID>("format");
+  const [replySelectionFontSize, setReplySelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
+  const [replySelectionInlineFormat, setReplySelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -4071,6 +4061,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setThreadMessages([]);
     setSentReplies([]);
     setReplyTargetMessageID("");
+    setReplyToolbarTab("format");
+    setReplySelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
+    setReplySelectionInlineFormat({ bold: false, underline: false });
     setDraftAttachments([]);
     setPreviewAttachment(null);
     setSelectionDraft(null);
@@ -4366,10 +4359,27 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     if (!rawHref.trim()) return;
     replyEditorControllerRef.current?.insertLink(rawHref);
   }, []);
-  const applyReplyFontSize = useCallback((size: string) => {
-    const fontSize = Number.parseInt(size, 10);
-    if (!Number.isFinite(fontSize)) return;
+  const syncReplyToolbarFormatState = useCallback(() => {
+    const state = replyEditorControllerRef.current?.readFormatState();
+    if (!state) return;
+    setReplySelectionFontSize(state.fontSize);
+    setReplySelectionInlineFormat({ bold: state.bold, underline: state.underline });
+  }, []);
+  const adjustReplyFontSize = useCallback((delta: number) => {
+    replyEditorControllerRef.current?.adjustFontSize(delta);
+    syncReplyToolbarFormatState();
+  }, [syncReplyToolbarFormatState]);
+  const setReplyFontSize = useCallback((fontSize: number) => {
     replyEditorControllerRef.current?.applyFontSizeValue(fontSize);
+    syncReplyToolbarFormatState();
+  }, [syncReplyToolbarFormatState]);
+  const toggleReplyInlineFormat = useCallback((command: "bold" | "underline") => {
+    replyEditorControllerRef.current?.toggleInlineFormat(command);
+    syncReplyToolbarFormatState();
+  }, [syncReplyToolbarFormatState]);
+  const changeReplyOutlineStyle = useCallback((nextOutlineStyle: EditorOutlineStyleID) => {
+    setReplyOutlineStyle(nextOutlineStyle);
+    setReplyToolbarTab("outline-styles");
   }, []);
   const toggleReplyNumberedList = useCallback(() => {
     setReplyOutlineStyle("automatic-outline-numbering");
@@ -4658,33 +4668,36 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             </button>
             <div style={{ minWidth: 0, display: "grid", gap: 5 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-                <button type="button" title="Bold" aria-label="Bold" disabled={!editable} onClick={() => replyEditorControllerRef.current?.toggleInlineFormat("bold")} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>B</button>
-                <button type="button" title="Underline" aria-label="Underline" disabled={!editable} onClick={() => replyEditorControllerRef.current?.toggleInlineFormat("underline")} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>U</button>
+                <EditorTabBar
+                  activeTab={replyToolbarTab}
+                  outlineStyle={replyOutlineStyle}
+                  accent={accent}
+                  strokeColor={strokeColor}
+                  surfaceText={surfaceText}
+                  tabBackground={EDITOR_NEU_SURFACE}
+                  tabSelectedBackground={EDITOR_NEU_ACTIVE_SURFACE}
+                  outlineMenuAccent={accent}
+                  onSelectTab={setReplyToolbarTab}
+                  onAdjustSelectionFontSize={adjustReplyFontSize}
+                  documentFontSize={replySelectionFontSize}
+                  onSetSelectionFontSize={setReplyFontSize}
+                  boldActive={replySelectionInlineFormat.bold}
+                  underlineActive={replySelectionInlineFormat.underline}
+                  onToggleBold={() => toggleReplyInlineFormat("bold")}
+                  onToggleUnderline={() => toggleReplyInlineFormat("underline")}
+                  onOutlineStyleFocus={() => setReplyToolbarTab("outline-styles")}
+                  onOutlineStyleChange={changeReplyOutlineStyle}
+                  onInsertTable={() => replyEditorControllerRef.current?.insertTable()}
+                  reserveHeaderOffset={false}
+                  visibleTabIDs={ATTACHED_EMAIL_REPLY_EDITOR_TAB_IDS}
+                  disabled={!editable}
+                />
                 <button type="button" title="Numbered list" aria-label="Numbered list" disabled={!editable} onClick={toggleReplyNumberedList} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>1.</button>
                 <button type="button" title="Bullet list" aria-label="Bullet list" disabled={!editable} onClick={insertReplyBulletList} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>-</button>
                 <button type="button" title="Checklist" aria-label="Checklist" disabled={!editable} onClick={insertReplyChecklist} style={{ ...attachedEmailReplyWideToolButtonStyle, color: accent }}>Check</button>
                 <button type="button" title="Outdent" aria-label="Outdent" disabled={!editable} onClick={outdentReplyBody} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>{"<<"}</button>
                 <button type="button" title="Indent" aria-label="Indent" disabled={!editable} onClick={indentReplyBody} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>{">>"}</button>
                 <button type="button" title="Create link" aria-label="Create link" disabled={!editable} onClick={createReplyHyperlink} style={{ ...attachedEmailReplyWideToolButtonStyle, color: accent }}>Link</button>
-                <button type="button" title="Insert table" aria-label="Insert table" disabled={!editable} onClick={() => replyEditorControllerRef.current?.insertTable()} style={{ ...attachedEmailReplyWideToolButtonStyle, color: accent }}>Table</button>
-                <select
-                  aria-label="Font size"
-                  disabled={!editable}
-                  style={{ ...attachedEmailReplyFontSelectStyle, color: accent, opacity: editable ? 1 : 0.46 }}
-                  defaultValue=""
-                  onChange={(event) => {
-                    applyReplyFontSize(event.currentTarget.value);
-                    event.currentTarget.value = "";
-                  }}
-                >
-                  <option value="" disabled>Size</option>
-                  <option value="12">12</option>
-                  <option value="14">14</option>
-                  <option value="16">16</option>
-                  <option value="18">18</option>
-                  <option value="22">22</option>
-                  <option value="28">28</option>
-                </select>
               </div>
               <UnifiedRichEditorSurface
                 value={bodyDraft}
@@ -4698,6 +4711,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 indentGuideColor={strokeColor}
                 formattingControllerRef={replyEditorControllerRef}
                 style={{ width: "100%", height: replyEditorHeight, minHeight: 78, maxHeight: 260, resize: editable ? "vertical" : "none", overflowY: "auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+                onSelectionFontSizeChange={setReplySelectionFontSize}
+                onSelectionInlineFormatChange={setReplySelectionInlineFormat}
                 onChange={setBodyDraft}
               />
             </div>
