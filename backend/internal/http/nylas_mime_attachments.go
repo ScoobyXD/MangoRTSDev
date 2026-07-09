@@ -11,6 +11,7 @@ import (
 	"net/mail"
 	"net/textproto"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -18,7 +19,7 @@ import (
 )
 
 func (s *Server) attachRawMIMEAttachmentsIfMissing(ctx context.Context, connection domain.UserEmailConnection, message NylasMessage) NylasMessage {
-	if len(message.Attachments) > 0 || s.nylasClient == nil || strings.TrimSpace(connection.GrantID) == "" || strings.TrimSpace(message.ID) == "" {
+	if !messageNeedsRawMIMEAttachmentRecovery(message) || s.nylasClient == nil || strings.TrimSpace(connection.GrantID) == "" || strings.TrimSpace(message.ID) == "" {
 		return message
 	}
 	rawMIME, err := s.nylasClient.GetMessageRawMIME(ctx, connection.GrantID, message.ID)
@@ -31,9 +32,142 @@ func (s *Server) attachRawMIMEAttachmentsIfMissing(ctx context.Context, connecti
 		log.Printf("communications_attachment_raw_mime outcome=no_attachments user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(rawMIME))
 		return message
 	}
-	message.Attachments = attachments
-	log.Printf("communications_attachment_raw_mime outcome=attachments_recovered user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s attachment_count=%d raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(attachments), len(rawMIME))
+	if len(message.Attachments) == 0 {
+		message.Attachments = attachments
+		log.Printf("communications_attachment_raw_mime outcome=attachments_recovered user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s attachment_count=%d raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(attachments), len(rawMIME))
+		return message
+	}
+	merged, changed := mergeRawMIMEAttachments(message.Attachments, attachments)
+	if !changed {
+		log.Printf("communications_attachment_raw_mime outcome=no_merge_needed user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s raw_attachment_count=%d raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(attachments), len(rawMIME))
+		return message
+	}
+	message.Attachments = merged
+	log.Printf("communications_attachment_raw_mime outcome=attachments_merged user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s attachment_count=%d raw_attachment_count=%d raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(merged), len(attachments), len(rawMIME))
 	return message
+}
+
+var rawMIMEBodyCIDPattern = regexp.MustCompile(`(?i)\bcid:([^"'\s>)]+)`)
+
+func messageNeedsRawMIMEAttachmentRecovery(message NylasMessage) bool {
+	if len(message.Attachments) == 0 {
+		return true
+	}
+	refs := rawMIMEBodyCIDReferences(message.Body)
+	if len(refs) == 0 {
+		return false
+	}
+	for ref := range refs {
+		attachment, ok := findRawMIMEAttachmentByContentID(message.Attachments, ref)
+		if !ok || strings.TrimSpace(attachment.Content) == "" {
+			return true
+		}
+	}
+	return false
+}
+
+func rawMIMEBodyCIDReferences(body string) map[string]bool {
+	refs := map[string]bool{}
+	for _, match := range rawMIMEBodyCIDPattern.FindAllStringSubmatch(body, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		if ref := normalizeRawMIMEContentID(match[1]); ref != "" {
+			refs[ref] = true
+		}
+	}
+	return refs
+}
+
+func findRawMIMEAttachmentByContentID(attachments []NylasAttachment, contentID string) (NylasAttachment, bool) {
+	target := normalizeRawMIMEContentID(contentID)
+	if target == "" {
+		return NylasAttachment{}, false
+	}
+	for _, attachment := range attachments {
+		if normalizeRawMIMEContentID(attachment.ContentID) == target {
+			return attachment, true
+		}
+	}
+	return NylasAttachment{}, false
+}
+
+func mergeRawMIMEAttachments(existing, recovered []NylasAttachment) ([]NylasAttachment, bool) {
+	merged := append([]NylasAttachment(nil), existing...)
+	changed := false
+	for _, raw := range recovered {
+		contentID := normalizeRawMIMEContentID(raw.ContentID)
+		if contentID != "" {
+			if index := rawMIMEAttachmentIndexByContentID(merged, contentID); index >= 0 {
+				next := mergeRawMIMEAttachment(merged[index], raw)
+				if next != merged[index] {
+					merged[index] = next
+					changed = true
+				}
+				continue
+			}
+		}
+		if rawMIMEAttachmentAlreadyPresent(merged, raw) {
+			continue
+		}
+		merged = append(merged, raw)
+		changed = true
+	}
+	return merged, changed
+}
+
+func rawMIMEAttachmentIndexByContentID(attachments []NylasAttachment, contentID string) int {
+	for index, attachment := range attachments {
+		if normalizeRawMIMEContentID(attachment.ContentID) == contentID {
+			return index
+		}
+	}
+	return -1
+}
+
+func rawMIMEAttachmentAlreadyPresent(attachments []NylasAttachment, raw NylasAttachment) bool {
+	rawID := strings.TrimSpace(raw.ID)
+	for _, attachment := range attachments {
+		if rawID != "" && strings.TrimSpace(attachment.ID) == rawID {
+			return true
+		}
+		if normalizeRawMIMEContentID(raw.ContentID) != "" && normalizeRawMIMEContentID(attachment.ContentID) == normalizeRawMIMEContentID(raw.ContentID) {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeRawMIMEAttachment(existing, raw NylasAttachment) NylasAttachment {
+	merged := existing
+	if strings.TrimSpace(merged.ID) == "" {
+		merged.ID = strings.TrimSpace(raw.ID)
+	}
+	if strings.TrimSpace(merged.AttachmentID) == "" {
+		merged.AttachmentID = strings.TrimSpace(raw.AttachmentID)
+	}
+	if strings.TrimSpace(merged.Filename) == "" {
+		merged.Filename = strings.TrimSpace(raw.Filename)
+	}
+	if strings.TrimSpace(merged.ContentType) == "" {
+		merged.ContentType = strings.TrimSpace(raw.ContentType)
+	}
+	if strings.TrimSpace(merged.Content) == "" {
+		merged.Content = strings.TrimSpace(raw.Content)
+	}
+	if strings.TrimSpace(merged.ContentID) == "" {
+		merged.ContentID = strings.TrimSpace(raw.ContentID)
+	}
+	if strings.TrimSpace(merged.ContentDisposition) == "" {
+		merged.ContentDisposition = strings.TrimSpace(raw.ContentDisposition)
+	}
+	if !merged.IsInline {
+		merged.IsInline = raw.IsInline
+	}
+	if merged.Size <= 0 {
+		merged.Size = raw.Size
+	}
+	return merged
 }
 
 func nylasAttachmentsFromRawMIME(rawMIME string) []NylasAttachment {
@@ -150,6 +284,13 @@ func readDecodedRawMIMEPart(header textproto.MIMEHeader, body io.Reader) ([]byte
 
 func cleanRawMIMEContentID(raw string) string {
 	return strings.Trim(strings.TrimSpace(raw), "<>")
+}
+
+func normalizeRawMIMEContentID(raw string) string {
+	clean := strings.TrimSpace(raw)
+	clean = strings.TrimPrefix(strings.ToLower(clean), "cid:")
+	clean = strings.Trim(strings.TrimSpace(clean), "<>\"'")
+	return clean
 }
 
 func rawMIMEAttachmentFilename(filename, contentType string, position int) string {

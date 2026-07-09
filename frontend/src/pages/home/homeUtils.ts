@@ -1139,7 +1139,7 @@ export function normalizeEmailContentID(value: string | undefined): string {
   return clean.trim().toLowerCase();
 }
 
-function emailAttachmentLooksInline(attachment: Pick<EmailAttachment, "content_disposition" | "content_id" | "is_inline">): boolean {
+export function emailAttachmentIsInlineContent(attachment: Pick<EmailAttachment, "content_disposition" | "content_id" | "is_inline">): boolean {
   return Boolean(attachment.is_inline)
     || Boolean(attachment.content_id?.trim())
     || attachment.content_disposition?.trim().toLowerCase() === "inline";
@@ -1152,7 +1152,7 @@ export function emailAttachmentContentIDKeys(attachment: Pick<EmailAttachment, "
     if (key) keys.add(key);
   };
   add(attachment.content_id);
-  if (emailAttachmentLooksInline(attachment)) {
+  if (emailAttachmentIsInlineContent(attachment)) {
     add(attachment.id);
     add(attachment.filename);
   }

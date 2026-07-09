@@ -5398,24 +5398,29 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
     const controller = new AbortController();
     setLoading(true);
     const loadInlineAttachment = async (attachment: EmailAttachment): Promise<{ keys: string[]; sourceURL: string }> => {
-      const inlineURL = emailAttachmentDataURL(attachment);
-      if (inlineURL) return { keys: emailAttachmentContentIDKeys(attachment), sourceURL: inlineURL };
-      const mangoAttachmentID = attachment.attachment_id?.trim() ?? "";
-      const providerAttachmentID = attachment.id?.trim() ?? "";
-      let sourceURL = "";
-      if (mangoAttachmentID) {
-        sourceURL = await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal });
-      } else if (providerAttachmentID) {
-        const blob = await downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID);
-        if (cancelled) return { keys: emailAttachmentContentIDKeys(attachment), sourceURL: "" };
-        sourceURL = URL.createObjectURL(blob);
+      const keys = emailAttachmentContentIDKeys(attachment);
+      try {
+        const inlineURL = emailAttachmentDataURL(attachment);
+        if (inlineURL) return { keys, sourceURL: inlineURL };
+        const mangoAttachmentID = attachment.attachment_id?.trim() ?? "";
+        const providerAttachmentID = attachment.id?.trim() ?? "";
+        let sourceURL = "";
+        if (mangoAttachmentID) {
+          sourceURL = await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal });
+        } else if (providerAttachmentID) {
+          const blob = await downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID);
+          if (cancelled) return { keys, sourceURL: "" };
+          sourceURL = URL.createObjectURL(blob);
+        }
+        if (cancelled) {
+          if (sourceURL.startsWith("blob:")) URL.revokeObjectURL(sourceURL);
+          return { keys, sourceURL: "" };
+        }
+        if (sourceURL && sourceURL.startsWith("blob:")) objectURLs.push(sourceURL);
+        return { keys, sourceURL };
+      } catch {
+        return { keys, sourceURL: "" };
       }
-      if (cancelled) {
-        if (sourceURL.startsWith("blob:")) URL.revokeObjectURL(sourceURL);
-        return { keys: emailAttachmentContentIDKeys(attachment), sourceURL: "" };
-      }
-      if (sourceURL && sourceURL.startsWith("blob:")) objectURLs.push(sourceURL);
-      return { keys: emailAttachmentContentIDKeys(attachment), sourceURL };
     };
     void Promise.all(inlineAttachments.map(loadInlineAttachment))
       .then((items) => {

@@ -13,6 +13,7 @@ import {
   communicationStreamEventIsStarConfirmation,
   condenseEmailThreadMessages,
   emailAttachmentIsReferencedInline,
+  emailAttachmentIsInlineContent,
   fitHomeColumnWidthsToAvailableWidth,
   getHomeColumnMinimumTrackWidth,
   getHomeGridTemplateColumns,
@@ -156,11 +157,14 @@ test("email body inline cid attachments are treated as body images", () => {
     id: "provider-file-1",
     filename: "dashboard.png",
     content_type: "image/png",
+    is_inline: false,
     size: 197,
   };
 
   assert.equal(emailAttachmentIsReferencedInline(body, inlineImage), true);
   assert.equal(emailAttachmentIsReferencedInline(body, dashboard), false);
+  assert.equal(emailAttachmentIsInlineContent(inlineImage), true);
+  assert.equal(emailAttachmentIsInlineContent(dashboard), false);
   assert.deepEqual(visibleEmailAttachmentsForBody(body, [inlineImage, dashboard]).map((attachment) => attachment.filename), ["dashboard.png"]);
 });
 

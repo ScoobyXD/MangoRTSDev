@@ -2,7 +2,7 @@ import React from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import type { CompanyUser, EmailMailbox, EmailMessage } from "../../modules/communications/communicationsApi";
 import type { ComposeState, HomeViewID, MessageSelectionModifiers } from "./homeTypes";
-import { canDragTriageMessageFromMailbox, formatAddressList, formatMessageDate, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle } from "./homeUtils";
+import { canDragTriageMessageFromMailbox, emailAttachmentIsInlineContent, formatAddressList, formatMessageDate, mailboxLabel, messageReadStatusLabel, messageReadStatusTitle } from "./homeUtils";
 import { HomeColumnResizeHandle, ComposePanel, DeleteMessagesConfirmationModal, MessageDetail, MessagePlacementIcon } from "./HomeParts";
 import {
   accountEmailStyle,
@@ -162,7 +162,7 @@ function MessageReadStatusText({ message }: { message: EmailMessage }) {
 }
 
 function MessageAttachmentCount({ message }: { message: EmailMessage }) {
-  const count = message.attachments?.length ?? 0;
+  const count = (message.attachments ?? []).filter((attachment) => !emailAttachmentIsInlineContent(attachment)).length;
   if (count <= 0) return null;
   return <span style={messageReadStatusStyle}>{count === 1 ? "1 file" : `${count} files`}</span>;
 }

@@ -1111,6 +1111,108 @@ func TestCommunicationsMessageFallsBackToRawMIMEAttachments(t *testing.T) {
 	}
 }
 
+func TestCommunicationsMessageMergesRawMIMEInlineAttachmentContent(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		message: NylasMessage{
+			ID:      "message-1",
+			Subject: "Inline image",
+			Body:    `<div>Here</div><img src="cid:image-1@local" alt="image.png">`,
+			Attachments: []NylasAttachment{{
+				ID:                 "provider-inline-1",
+				Filename:           "image.png",
+				ContentType:        "image/png",
+				ContentID:          "image-1@local",
+				ContentDisposition: "inline",
+				IsInline:           true,
+				Size:               86,
+			}},
+		},
+		rawMIME: strings.Join([]string{
+			"From: Sender <sender@example.com>",
+			"To: User <user@example.com>",
+			"Subject: Inline image",
+			"MIME-Version: 1.0",
+			`Content-Type: multipart/related; boundary="mango-related"`,
+			"",
+			"--mango-related",
+			"Content-Type: text/html; charset=utf-8",
+			"",
+			`<div>Here</div><img src="cid:image-1@local" alt="image.png">`,
+			"--mango-related",
+			"Content-Type: image/png",
+			"Content-Disposition: inline",
+			"Content-ID: <image-1@local>",
+			"Content-Transfer-Encoding: base64",
+			"",
+			"aW1hZ2UtYnl0ZXM=",
+			"--mango-related--",
+			"",
+		}, "\r\n"),
+	}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1", nil)
+	req.Header.Set("Authorization", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("message status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Message NylasMessage `json:"message"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if nylas.lastRawMIMEGrantID != "grant-1" || nylas.lastRawMIMEMessageID != "message-1" {
+		t.Fatalf("raw mime scope grant=%q message=%q", nylas.lastRawMIMEGrantID, nylas.lastRawMIMEMessageID)
+	}
+	if len(payload.Message.Attachments) != 1 {
+		t.Fatalf("attachments = %+v, want existing inline attachment merged with raw MIME bytes", payload.Message.Attachments)
+	}
+	attachment := payload.Message.Attachments[0]
+	if attachment.ID != "provider-inline-1" || attachment.ContentID != "image-1@local" || attachment.Content != "aW1hZ2UtYnl0ZXM=" || !attachment.IsInline {
+		t.Fatalf("attachment = %+v, want provider metadata with raw MIME inline bytes", attachment)
+	}
+
+	attachmentReq := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1/attachments/provider-inline-1", nil)
+	attachmentReq.Header.Set("Authorization", token)
+	attachmentRec := httptest.NewRecorder()
+	handler.ServeHTTP(attachmentRec, attachmentReq)
+	if attachmentRec.Code != http.StatusOK {
+		t.Fatalf("merged inline attachment status = %d body=%s", attachmentRec.Code, attachmentRec.Body.String())
+	}
+	if attachmentRec.Header().Get("Content-Type") != "image/png" || attachmentRec.Body.String() != "image-bytes" {
+		t.Fatalf("merged inline attachment content-type=%q body=%q, want image/png image-bytes", attachmentRec.Header().Get("Content-Type"), attachmentRec.Body.String())
+	}
+	if nylas.lastDownloadAttachmentID != "" {
+		t.Fatalf("download attachment id = %q, want raw MIME inline content without provider download", nylas.lastDownloadAttachmentID)
+	}
+}
+
 func TestCommunicationsSendResolvesLargeMangoAttachmentWithQueryCompanyID(t *testing.T) {
 	t.Parallel()
 
@@ -1799,13 +1901,10 @@ func TestCommunicationsStarredMailboxAppliesStarredFilter(t *testing.T) {
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
 	assertJSONStatus(t, handler, http.MethodGet, "/v1/communications/messages?mailbox=starred&q=invoice&unread=true", "", token, http.StatusOK)
-	if nylas.lastQuery.Starred == nil || !*nylas.lastQuery.Starred {
-		t.Fatalf("starred = %v, want true", nylas.lastQuery.Starred)
-	}
-	if nylas.lastQuery.SearchQueryNative != "invoice is:unread" {
+	if nylas.lastQuery.SearchQueryNative != "is:starred invoice is:unread" {
 		t.Fatalf("search_query_native = %q", nylas.lastQuery.SearchQueryNative)
 	}
-	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil {
+	if nylas.lastQuery.Query != "" || nylas.lastQuery.Unread != nil || nylas.lastQuery.Starred != nil {
 		t.Fatalf("query = %+v, want Gmail-native starred search only", nylas.lastQuery)
 	}
 }
