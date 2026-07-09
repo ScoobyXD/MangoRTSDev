@@ -277,11 +277,62 @@ Do not delete:
 - `nodes`
 - relationships/assignments/events unless a separate reason is proven.
 
-## Important Open Implementation Detail
+## Implemented Dev Compaction Command
+
+The next guarded tooling step is now implemented:
+
+```text
+backend/cmd/compact-node-information-from-projections
+```
+
+Purpose:
+
+- Dev-only node editor history compaction.
+- Requires `-company-id`.
+- Defaults to dry-run.
+- Requires `-apply -confirm-apply=COMPACT_DEV_NODE_INFORMATION` before destructive changes.
+- Refuses prod-like targets when `APP_ENV`, `MANGORTS_ENV`, `MANGORTS_STAGE`, `DB_NAME`, or `DB_HOST` look production-like.
+- Preserves `node_projection_table`.
+- Deletes/recreates only `node_information` and clears `node_projection_seen_snapshots` for the target company in apply mode.
+- Runs the delete/reinsert work in a single transaction in apply mode.
+- Recreates one manual save-version batch per node from current `node_projection_table` `Text box` rows.
+- Preserves `source_information_id` as the projection row's `information_id`.
+- Blocks apply while any current `node_projection_table` rows still contain inline-byte signals, so run the attachment migration for `node_projection_table` first.
+
+Report byte fields in this command are Postgres text bytes via `octet_length(information)`, not decoded embedded-file bytes. The existing `mango-attachment-migrate` dry-run report remains the decoded-byte inventory source.
+
+Dry-run shape:
+
+```powershell
+cd C:\Users\Jonat\MangoRTSDev\backend
+go run .\cmd\compact-node-information-from-projections -company-id 11111111-1111-1111-1111-111111111111 -report ..\tmp\node-history-compaction-dry-run.json
+```
+
+Apply shape, only after Jonat approves, the DB access boundary verifier passes in that exact session, and `node_projection_table` has already been migrated clean:
+
+```powershell
+cd C:\Users\Jonat\MangoRTSDev\backend
+go run .\cmd\compact-node-information-from-projections -company-id 11111111-1111-1111-1111-111111111111 -apply -confirm-apply COMPACT_DEV_NODE_INFORMATION -report ..\tmp\node-history-compaction-apply.json
+```
+
+Verification after apply:
+
+```powershell
+cd C:\Users\Jonat\MangoRTSDev\backend
+go run .\cmd\mango-attachment-migrate -limit 5000 -report ..\tmp\attachment-migration-post-compaction.json
+```
+
+Expected post-compaction result:
+
+- `node_information` should be reduced to current `Text box` projection rows copied as one manual save-version batch per node.
+- `node_projection_seen_snapshots` should be 0 for the target company.
+- `node_projection_table` should be unchanged by the compactor and should already be clean from the attachment migration.
+
+## Prior Open Implementation Detail
 
 The current `mango-attachment-migrate -apply` command applies the scanner migration for selected source tables, but it is not designed as a history compactor.
 
-The next agent should implement a small, explicit, dev-only maintenance command or guarded script rather than hand-running ad hoc deletes.
+This was the original instruction for the maintenance command. It is kept below for design context.
 
 Suggested command name:
 
@@ -396,12 +447,13 @@ docs/important tasks/one time data migration.md
 cd C:\Users\Jonat\MangoRTSDev\backend
 $env:GOCACHE = "C:\tmp\MangoRTSDev-workers\MangoRTSDev-mangp-attachment-phase-30000510\backend\go-build-cache"
 go test ./cmd/mango-attachment-migrate
+go test ./cmd/compact-node-information-from-projections
 go test ./internal/attachments/migration
 ```
 
-4. Decide whether to implement the compaction command in Go or as a carefully guarded PowerShell/SQL script.
+4. Use the Go compaction command rather than hand-running destructive SQL.
 
-5. If implementing in Go, keep it under `backend/cmd/` with scary dry-run/apply flags and tests.
+5. Keep any future changes under `backend/cmd/compact-node-information-from-projections` with scary dry-run/apply flags and tests.
 
 6. Before running anything against dev DB:
 
