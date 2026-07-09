@@ -1345,7 +1345,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       blockID={block.id}
                       editable
                       nodeID={`project:${projectID}`}
+                      apiBase={apiBase}
                       companyID={companyID}
+                      attachmentResourceType="project"
+                      attachmentResourceID={projectID}
+                      attachmentRequestJSON={attachmentRequestJSON}
+                      attachmentEditorSurface="project_text_block"
                       currentUserID={currentUserID || "local-user"}
                       companyUsers={companyUsers}
                       documentValue={block.document}

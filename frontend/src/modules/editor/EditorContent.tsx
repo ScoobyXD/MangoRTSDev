@@ -23,6 +23,7 @@ import { buildLinkedNodePayloadFromSourceSide } from "../node-map/relationshipPr
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, getLogicGateEditorSequenceSingleFlight, invalidateLogicGateRecordStoreCaches, patchLogicGateRecordStoreGVICAssignments, type LogicGateProjectionItem } from "../logic-gate-map/LogicGateRecordStore";
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache } from "../communications/communicationsApi";
+import { loadMangoAttachmentObjectURL } from "../attachments/attachmentApi";
 import { createRequestJSON } from "../api/requestJSON";
 import { clearResourceMissing, isTerminalResourceNotFoundError } from "../api/missingResources";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
@@ -67,6 +68,7 @@ import {
   type LinkedEntityKind,
   type LinkedSelection,
 } from "./editorTypes";
+import { hydrateEditorAttachmentImageFrames } from "./editorImages";
 import {
   EDITOR_DOCUMENT_FONT_SIZE_PX,
   EDITOR_DOCUMENT_LINE_HEIGHT,
@@ -1202,6 +1204,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (element) {
       const nextHTML = deserializeEditorDocumentHTML(text);
       if (element.innerHTML !== nextHTML) element.innerHTML = nextHTML;
+      hydrateEditorAttachmentImageFrames(element, (attachmentID, variant, options) => (
+        loadMangoAttachmentObjectURL(apiBase, companyID, attachmentID, variant, options)
+      ));
       element.scrollTop = restoredScrollTop;
     }
     setDocumentScrollTop(restoredScrollTop);
@@ -1211,7 +1216,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       restoringScrollRef.current = false;
     });
     if (activeTabRef.current === "editor" && shouldFocusEditorForSelectionRef.current) focusEditorDocumentWithoutScrollJump(targetKey);
-  }, [focusEditorDocumentWithoutScrollJump, restoreEditorDocumentScroll, scheduleIndentGuideUpdate]);
+  }, [apiBase, companyID, focusEditorDocumentWithoutScrollJump, restoreEditorDocumentScroll, scheduleIndentGuideUpdate]);
 
   const readLinkedMapWidgetID = useCallback((): string => {
     const edges = readFrameLinksFromStorage();
@@ -2767,6 +2772,20 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const documentLineHeightPx = documentFontSize * EDITOR_DOCUMENT_LINE_HEIGHT;
   const documentBottomBufferPx = Math.round(documentLineHeightPx * EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
+  const editorImageAttachmentContext = useMemo(() => (
+    (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && linkedNodeID.trim()
+      ? {
+        requestJSON,
+        apiBase,
+        companyID,
+        resourceType: linkedEntityKind,
+        resourceID: linkedNodeID,
+        informationID: documentInformationID || undefined,
+        editorSurface: linkedEntityKind === "logic_gate" ? "logic_gate_editor" : "node_editor",
+        onError: setError,
+      }
+      : undefined
+  ), [apiBase, companyID, documentInformationID, linkedEntityKind, linkedNodeID, requestJSON]);
   const documentSurfaceHandlers = useEditorDocumentSurfaceHandlers({
     restoringScrollRef,
     currentDocumentTargetKeyRef,
@@ -2785,6 +2804,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     mentionAccent: accent,
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: strokeColor,
+    editorImageAttachmentContext,
   });
   const { mentionMenu: documentMentionMenu, insertTable: insertDocumentTable, ...documentSurfaceEventHandlers } = documentSurfaceHandlers;
   const handleNodeWorkspaceProjectionMutation = useCallback(() => {

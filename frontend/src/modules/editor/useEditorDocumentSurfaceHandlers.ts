@@ -1,4 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  fileFromDataURL,
+  loadMangoAttachmentObjectURL,
+  uploadMangoAttachment,
+  type AttachmentRequestJSON,
+  type MangoAttachmentResourceType,
+} from "../attachments/attachmentApi";
 import type { EditorDocumentSurfaceProps } from "./EditorDocumentSurface";
 import type { EditorScrollMemory } from "./editorScroll";
 import {
@@ -147,6 +154,19 @@ type UseEditorDocumentSurfaceHandlersOptions = {
   mentionSurfaceText?: string;
   mentionStrokeColor?: string;
   mentionMenuPosition?: "fixed" | "absolute";
+  editorImageAttachmentContext?: EditorImageAttachmentContext;
+  onEditorImageAttachmentError?: (message: string) => void;
+};
+
+export type EditorImageAttachmentContext = {
+  requestJSON: AttachmentRequestJSON;
+  apiBase: string;
+  companyID: string;
+  resourceType: MangoAttachmentResourceType;
+  resourceID: string;
+  informationID?: string;
+  editorSurface?: string;
+  onError?: (message: string) => void;
 };
 
 export type EditorInlineStyleCommand = "bold" | "underline";
@@ -1009,6 +1029,69 @@ function createEditorImageClearBreak(ownerDocument: Document): HTMLBRElement {
   return clearBreak;
 }
 
+function editorImageAttachmentContextReady(context: EditorImageAttachmentContext | undefined): context is EditorImageAttachmentContext {
+  return Boolean(
+    context?.requestJSON &&
+    context.apiBase.trim() &&
+    context.companyID.trim() &&
+    context.resourceType &&
+    context.resourceID.trim(),
+  );
+}
+
+function editorAttachmentFilenameForMimeType(mimeType: string): string {
+  const cleanType = mimeType.trim().toLowerCase();
+  if (cleanType === "image/jpeg") return "pasted-image.jpg";
+  if (cleanType === "image/gif") return "pasted-image.gif";
+  if (cleanType === "image/webp") return "pasted-image.webp";
+  return "pasted-image.png";
+}
+
+function reportEditorImageAttachmentError(
+  context: EditorImageAttachmentContext | undefined,
+  fallbackErrorHandler: ((message: string) => void) | undefined,
+  cause: unknown,
+): void {
+  const rawMessage = cause instanceof Error ? cause.message : "failed_to_upload_attachment";
+  const message = rawMessage === "editor_image_attachment_context_unavailable"
+    ? "Inline image uploads are not available in this editor yet."
+    : rawMessage;
+  (context?.onError ?? fallbackErrorHandler)?.(message);
+}
+
+async function attachUploadedEditorImageData(
+  imageData: EditorImageData,
+  file: File,
+  context: EditorImageAttachmentContext | undefined,
+): Promise<EditorImageData> {
+  if (!editorImageAttachmentContextReady(context)) throw new Error("editor_image_attachment_context_unavailable");
+  const uploaded = await uploadMangoAttachment(context.requestJSON, {
+    companyID: context.companyID,
+    resourceType: context.resourceType,
+    resourceID: context.resourceID,
+    file,
+    sourceKind: "editor_paste",
+    relationshipKind: "inline_image",
+    informationID: context.informationID,
+    editorSurface: context.editorSurface,
+  });
+  const attachment = uploaded.attachment;
+  let displaySrc = imageData.src;
+  try {
+    displaySrc = await loadMangoAttachmentObjectURL(context.apiBase, context.companyID, attachment.attachment_id, "display");
+  } catch {
+    displaySrc = imageData.src;
+  }
+  return {
+    ...imageData,
+    src: displaySrc,
+    attachmentID: attachment.attachment_id,
+    filename: attachment.original_filename || file.name || "image",
+    mimeType: attachment.mime_type || file.type || "image/png",
+    byteSize: attachment.byte_size || file.size,
+  };
+}
+
 async function insertEditorImageFile(
   root: HTMLElement,
   file: File,
@@ -1017,9 +1100,14 @@ async function insertEditorImageFile(
   documentUndoHistory: EditorDocumentUndoHistory,
   scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
   scheduleIndentGuideUpdate: (text: string) => void,
+  editorImageAttachmentContext: EditorImageAttachmentContext | undefined,
 ) {
   const maxDisplayWidth = Math.max(120, Math.min(720, root.clientWidth - 56));
-  const imageData = await createEditorImageDataFromFile(file, maxDisplayWidth, getEditorImageStorageBudget(root));
+  const imageData = await attachUploadedEditorImageData(
+    await createEditorImageDataFromFile(file, maxDisplayWidth, getEditorImageStorageBudget(root)),
+    file,
+    editorImageAttachmentContext,
+  );
   insertPreparedEditorImage(root, imageData, savedRange, undoBefore, documentUndoHistory, scheduleDocumentSave, scheduleIndentGuideUpdate);
 }
 
@@ -1031,8 +1119,24 @@ async function insertEditorClipboardImageData(
   documentUndoHistory: EditorDocumentUndoHistory,
   scheduleDocumentSave: (nextText: string, immediate?: boolean) => void,
   scheduleIndentGuideUpdate: (text: string) => void,
+  editorImageAttachmentContext: EditorImageAttachmentContext | undefined,
 ) {
   const maxDisplayWidth = Math.max(120, Math.min(720, root.clientWidth - 56));
+  if (clipboardData.attachmentID) {
+    insertPreparedEditorImage(root, {
+      src: clipboardData.src,
+      attachmentID: clipboardData.attachmentID,
+      filename: clipboardData.filename,
+      mimeType: clipboardData.mimeType,
+      byteSize: clipboardData.byteSize,
+      width: clipboardData.width ?? 220,
+      height: clipboardData.height ?? 160,
+      marginLeft: clipboardData.marginLeft,
+      marginTop: clipboardData.marginTop,
+      floatSide: clipboardData.floatSide,
+    }, savedRange, undoBefore, documentUndoHistory, scheduleDocumentSave, scheduleIndentGuideUpdate);
+    return;
+  }
   const imageData = await createEditorImageDataFromSource(clipboardData.src, maxDisplayWidth, {
     maxStoredBytes: getEditorImageStorageBudget(root),
     preferredWidth: clipboardData.width,
@@ -1041,7 +1145,10 @@ async function insertEditorClipboardImageData(
     marginTop: clipboardData.marginTop,
     floatSide: clipboardData.floatSide,
   });
-  insertPreparedEditorImage(root, imageData, savedRange, undoBefore, documentUndoHistory, scheduleDocumentSave, scheduleIndentGuideUpdate);
+  const file = fileFromDataURL(clipboardData.src, editorAttachmentFilenameForMimeType(clipboardData.mimeType ?? "image/png"));
+  if (!file) throw new Error("failed_to_prepare_attachment");
+  const uploadedImageData = await attachUploadedEditorImageData(imageData, file, editorImageAttachmentContext);
+  insertPreparedEditorImage(root, uploadedImageData, savedRange, undoBefore, documentUndoHistory, scheduleDocumentSave, scheduleIndentGuideUpdate);
 }
 
 function insertPreparedEditorImage(
@@ -1957,6 +2064,7 @@ type EditorImagePreviewDraft = {
   src: string;
   label: string;
   html: string;
+  attachmentID?: string;
 };
 
 function previewEditorImageFrame(
@@ -1970,6 +2078,7 @@ function previewEditorImageFrame(
     src: data.src,
     label: "Editor image",
     html: createEditorImageClipboardHTML(root.ownerDocument, data),
+    attachmentID: data.attachmentID,
   });
   return true;
 }
@@ -2872,6 +2981,8 @@ export function useEditorDocumentSurfaceHandlers({
   mentionSurfaceText = "#111827",
   mentionStrokeColor = "rgba(15,23,42,0.18)",
   mentionMenuPosition = "fixed",
+  editorImageAttachmentContext,
+  onEditorImageAttachmentError,
 }: UseEditorDocumentSurfaceHandlersOptions): EditorDocumentSurfaceHandlerResult {
   const pendingNativeUndoSnapshotRef = useRef<EditorDocumentUndoSnapshot | null>(null);
   const activeMentionRootRef = useRef<HTMLElement | null>(null);
@@ -3051,6 +3162,32 @@ export function useEditorDocumentSurfaceHandlers({
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [activeImagePreview]);
+
+  useEffect(() => {
+    const attachmentID = activeImagePreview?.attachmentID?.trim() ?? "";
+    if (!attachmentID || !editorImageAttachmentContextReady(editorImageAttachmentContext)) return undefined;
+    const controller = new AbortController();
+    let objectURL = "";
+    void loadMangoAttachmentObjectURL(
+      editorImageAttachmentContext.apiBase,
+      editorImageAttachmentContext.companyID,
+      attachmentID,
+      "original",
+      { signal: controller.signal },
+    ).then((url) => {
+      objectURL = url;
+      setActiveImagePreview((current) => (
+        current?.attachmentID === attachmentID ? { ...current, src: url } : current
+      ));
+    }).catch(() => undefined);
+    return () => {
+      controller.abort();
+      if (objectURL) URL.revokeObjectURL(objectURL);
+    };
+  }, [
+    activeImagePreview?.attachmentID,
+    editorImageAttachmentContext,
+  ]);
 
   const mentionMenu = mentionMenuOpen && activeMentionDraft
     ? React.createElement(
@@ -3474,7 +3611,8 @@ export function useEditorDocumentSurfaceHandlers({
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
         const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
-        void insertEditorImageFile(root, imageFile, savedRange, undoBefore, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        void insertEditorImageFile(root, imageFile, savedRange, undoBefore, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate, editorImageAttachmentContext)
+          .catch((cause) => reportEditorImageAttachmentError(editorImageAttachmentContext, onEditorImageAttachmentError, cause));
         return;
       }
 
@@ -3484,7 +3622,8 @@ export function useEditorDocumentSurfaceHandlers({
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
         const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
-        void insertEditorClipboardImageData(root, clipboardImageData, savedRange, undoBefore, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        void insertEditorClipboardImageData(root, clipboardImageData, savedRange, undoBefore, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate, editorImageAttachmentContext)
+          .catch((cause) => reportEditorImageAttachmentError(editorImageAttachmentContext, onEditorImageAttachmentError, cause));
         return;
       }
 
@@ -3538,7 +3677,8 @@ export function useEditorDocumentSurfaceHandlers({
         pendingEditorFontSizeRef.current = null;
         root.focus({ preventScroll: true });
         const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
-        void insertEditorImageFile(root, imageFile, savedRange, undoBefore, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        void insertEditorImageFile(root, imageFile, savedRange, undoBefore, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate, editorImageAttachmentContext)
+          .catch((cause) => reportEditorImageAttachmentError(editorImageAttachmentContext, onEditorImageAttachmentError, cause));
         return;
       }
 
@@ -3549,7 +3689,8 @@ export function useEditorDocumentSurfaceHandlers({
         pendingEditorFontSizeRef.current = null;
         root.focus({ preventScroll: true });
         const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
-        void insertEditorClipboardImageData(root, clipboardImageData, savedRange, undoBefore, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate);
+        void insertEditorClipboardImageData(root, clipboardImageData, savedRange, undoBefore, documentUndoHistoryRef.current, scheduleDocumentSave, scheduleIndentGuideUpdate, editorImageAttachmentContext)
+          .catch((cause) => reportEditorImageAttachmentError(editorImageAttachmentContext, onEditorImageAttachmentError, cause));
         return;
       }
 
@@ -4095,12 +4236,14 @@ export function useEditorDocumentSurfaceHandlers({
     activeMentionIndex,
     currentDocumentTargetKeyRef,
     documentUndoHistoryRef,
+    editorImageAttachmentContext,
     flushPendingDocumentSave,
     insertMention,
     mentionMenuOpen,
     mentionOptions,
     onSelectionFontSizeChange,
     onSelectionInlineFormatChange,
+    onEditorImageAttachmentError,
     openTableContextMenu,
     outlineStyle,
     pendingEditorFontSizeRef,

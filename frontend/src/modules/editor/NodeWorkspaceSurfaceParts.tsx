@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
-import { downloadMangoAttachment, loadMangoAttachmentObjectURL, type MangoAttachmentVariantType } from "../attachments/attachmentApi";
+import { downloadMangoAttachment, loadMangoAttachmentObjectURL, type AttachmentRequestJSON, type MangoAttachmentResourceType, type MangoAttachmentVariantType } from "../attachments/attachmentApi";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
@@ -33,6 +33,7 @@ import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } 
 import {
   createStandaloneImageClipboardHTML,
   findEditorImageFrame,
+  hydrateEditorAttachmentImageFrames,
   readEditorImageData,
   writeImageClipboardData,
   writeImageToSystemClipboard,
@@ -248,7 +249,12 @@ type NodeTextBlockEditorProps = {
   blockID: string;
   editable: boolean;
   nodeID: string;
+  apiBase: string;
   companyID: string;
+  attachmentResourceType?: MangoAttachmentResourceType;
+  attachmentResourceID?: string;
+  attachmentRequestJSON?: AttachmentRequestJSON;
+  attachmentEditorSurface?: string;
   currentUserID: string;
   companyUsers: MentionableCompanyUser[];
   documentValue: string;
@@ -652,7 +658,12 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   blockID,
   editable,
   nodeID,
+  apiBase,
   companyID,
+  attachmentResourceType,
+  attachmentResourceID,
+  attachmentRequestJSON,
+  attachmentEditorSurface,
   currentUserID,
   companyUsers,
   documentValue,
@@ -766,6 +777,14 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   }, [documentTargetKey, documentValue]);
 
   useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !apiBase.trim() || !companyID.trim()) return;
+    hydrateEditorAttachmentImageFrames(editor, (attachmentID, variant, options) => (
+      loadMangoAttachmentObjectURL(apiBase, companyID, attachmentID, variant, options)
+    ));
+  }, [apiBase, companyID, documentTargetKey, documentValue]);
+
+  useEffect(() => {
     const element = editorRef.current;
     if (!element || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
@@ -851,6 +870,20 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     onDocumentFlush(nextDocument);
   }, [documentValue, editable, onDocumentFlush]);
 
+  const editorImageAttachmentContext = useMemo(() => (
+    attachmentRequestJSON && attachmentResourceType && attachmentResourceID
+      ? {
+        requestJSON: attachmentRequestJSON,
+        apiBase,
+        companyID,
+        resourceType: attachmentResourceType,
+        resourceID: attachmentResourceID,
+        informationID: blockID,
+        editorSurface: attachmentEditorSurface,
+      }
+      : undefined
+  ), [apiBase, attachmentEditorSurface, attachmentRequestJSON, attachmentResourceID, attachmentResourceType, blockID, companyID]);
+
   const handlers = useEditorDocumentSurfaceHandlers({
     restoringScrollRef,
     currentDocumentTargetKeyRef: targetKeyRef,
@@ -870,6 +903,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: indentGuideColor,
     mentionMenuPosition: "absolute",
+    editorImageAttachmentContext,
   });
   const { mentionMenu: documentMentionMenu, insertTable, ...documentSurfaceHandlers } = handlers;
   const formattingController = useMemo<EditorDocumentFormattingController>(() => ({
@@ -4814,6 +4848,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 style={{ width: "100%", height: replyEditorHeight, minHeight: 78, maxHeight: 260, resize: editable ? "vertical" : "none", overflowY: "auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
                 onSelectionFontSizeChange={setReplySelectionFontSize}
                 onSelectionInlineFormatChange={setReplySelectionInlineFormat}
+                onEditorImageAttachmentError={(message) => {
+                  setError(message);
+                  onError(message);
+                }}
                 onChange={setBodyDraft}
               />
             </div>

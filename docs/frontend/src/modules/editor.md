@@ -31,6 +31,12 @@ The Editor module is the linked document workspace for MangoRTS. It gives the se
 - Chat attachments are intentionally separate from unified rich editor semantics; convert `NodeWorkspaceSurfaceShared.readChatAttachment` and related chat rendering to use Mango attachment references without turning chat into rich-editor content.
 - Email compose/reply file attachments should use a mail attachment path backed by Mango attachments. Inline body images use the unified rich-editor image path; normal file attachments use attachment references that the backend reads from S3 at send time.
 
+## V1 Mango Attachment System Implementation Update (2026-07-09)
+- Rich-editor image frames can now carry `data-mango-editor-attachment-id` metadata and persist a `mango-attachment:` reference source instead of durable data URLs.
+- The shared paste/drop image path uploads node, Logic Gate, and project rich-editor inline images through `/v1/attachments` before committing the editor mutation.
+- Reloaded attachment image frames hydrate their inline display image through Mango attachment content reads, and double-click fullscreen preview asks for the `original` variant when an attachment ID is available.
+- `UnifiedRichEditorSurface` can accept the same attachment context and reports unavailable inline-image uploads on mail surfaces until the email draft/send attachment resolution path is wired.
+
 ## Key Responsibilities
 - Resolve which Node Map frame this editor is linked to through the frame-link graph + frame registry.
 - Resolve which Logic Gate Map frame this editor is linked to through the same frame-link graph + frame registry.

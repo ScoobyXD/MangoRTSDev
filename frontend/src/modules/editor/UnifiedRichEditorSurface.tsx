@@ -19,8 +19,11 @@ import {
   readEditorSelectionFormatState,
   useEditorDocumentSurfaceHandlers,
   type EditorDocumentFormattingController,
+  type EditorImageAttachmentContext,
   type EditorSelectionInlineFormatState,
 } from "./useEditorDocumentSurfaceHandlers";
+import { hydrateEditorAttachmentImageFrames } from "./editorImages";
+import { loadMangoAttachmentObjectURL } from "../attachments/attachmentApi";
 import { EDITOR_DOCUMENT_FONT_SIZE_PX, EDITOR_DOCUMENT_LINE_HEIGHT, getEditorDocumentFontFamily } from "./useEditorPreferences";
 import { UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE, type UnifiedRichEditorSurfaceID } from "./unifiedRichEditorContract";
 
@@ -45,6 +48,8 @@ type UnifiedRichEditorSurfaceProps = {
   indentGuideColor: string;
   scrollbarTrack?: string;
   formattingControllerRef?: React.MutableRefObject<UnifiedRichEditorFormattingController | null>;
+  editorImageAttachmentContext?: EditorImageAttachmentContext;
+  onEditorImageAttachmentError?: (message: string) => void;
   onChange: (nextValue: string) => void;
   onFlush?: (nextValue: string) => void;
   onFocus?: () => void;
@@ -72,6 +77,8 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   indentGuideColor,
   scrollbarTrack = "transparent",
   formattingControllerRef,
+  editorImageAttachmentContext,
+  onEditorImageAttachmentError,
   onChange,
   onFlush,
   onFocus,
@@ -127,11 +134,36 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     if (lastAppliedValueRef.current === value) return;
     if (editorHasFocus(editor)) return;
     editor.innerHTML = deserializeEditorDocumentHTML(value);
+    if (editorImageAttachmentContext) {
+      hydrateEditorAttachmentImageFrames(editor, (attachmentID, variant, options) => (
+        loadMangoAttachmentObjectURL(
+          editorImageAttachmentContext.apiBase,
+          editorImageAttachmentContext.companyID,
+          attachmentID,
+          variant,
+          options,
+        )
+      ));
+    }
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
     lastAppliedValueRef.current = value;
     userEditedRef.current = false;
     scheduleIndentGuideUpdate(readEditorDocumentText(editor));
-  }, [scheduleIndentGuideUpdate, value]);
+  }, [editorImageAttachmentContext, scheduleIndentGuideUpdate, value]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !editorImageAttachmentContext) return;
+    hydrateEditorAttachmentImageFrames(editor, (attachmentID, variant, options) => (
+      loadMangoAttachmentObjectURL(
+        editorImageAttachmentContext.apiBase,
+        editorImageAttachmentContext.companyID,
+        attachmentID,
+        variant,
+        options,
+      )
+    ));
+  }, [editorImageAttachmentContext, value]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -177,6 +209,8 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: indentGuideColor,
     mentionMenuPosition: "absolute",
+    editorImageAttachmentContext,
+    onEditorImageAttachmentError,
   });
   const { mentionMenu, insertTable, ...documentSurfaceHandlers } = handlers;
 
