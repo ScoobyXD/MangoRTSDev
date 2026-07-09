@@ -37,6 +37,17 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - **Relationship line**: the literal line UI element connecting two nodes on the canvas.
 - **Relationship**: the parent/child/peer data relationship represented by a `node_relationships` row.
 
+### V1 Unified Node Shell Direction (2026-07-08)
+
+- The V1 unifying nodes project is about full node editor/window shell behavior, not legacy Map behavior.
+- Full node windows opened from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, and Projects should share one user-facing shell source wherever practical.
+- The shared shell should own header/title behavior, top-right actions, close/minimize/open/fullscreen/delete controls, sizing/resizing, dock/minimize behavior, and the body layout around text boxes, attached emails, and chats.
+- Shared shell behavior does not require one opener, route, page state, permission source, or backend persistence path.
+- Project critical-path inline node windows should use the same shell/editor behavior while node edits still save to node information/projection state.
+- Node/project text-block chats remain conversation UI and are outside the unified rich editor semantics.
+- Node/project email pickers are attach/select surfaces only and must not compose, send, schedule, or save email drafts.
+- Map and legacy map-specific node behavior are out of scope unless a live non-map node-window surface imports a helper that must change for this shell contract.
+
 ---
 
 ## 2) API contracts used by the module

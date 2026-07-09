@@ -3,6 +3,14 @@
 ## Purpose
 The Editor module is the linked document workspace for MangoRTS. It gives the selected node or logic gate one full-frame writing surface with native caret behavior, scrolling, and projection-backed persistence.
 
+## Unified Editor Direction (2026-07-08)
+- The rich editor must become a shared user-facing behavior source for node text boxes, Logic Gate text, project text boxes, My Triage compose/reply, Shared Triage compose/reply, and attached-email reply bodies that send or draft real mail.
+- Shared behavior means editing semantics: indentation, Delete/Backspace, copy/cut/paste, paste cleanup, lists, checklist, link creation, font size, bold, underline, table insertion where supported, selection behavior, keyboard routing, sanitization, and legacy plain-text loading.
+- Shared behavior does not mean shared persistence. Node, Logic Gate, project, personal mailbox, and shared mailbox saves must continue to use their own domain adapters and authorization scopes.
+- Chat panes inside node/project text boxes are conversation UI and must remain outside the unified rich editor contract.
+- Node/project email pickers are attach/select surfaces only; compose/reply bodies belong in real mail compose/reply surfaces and should use the unified editor.
+- Legacy Map behavior is outside the V1 unifying editor project unless a live non-map editor surface imports a helper that must change for the shared contract.
+
 ## Key Responsibilities
 - Resolve which Node Map frame this editor is linked to through the frame-link graph + frame registry.
 - Resolve which Logic Gate Map frame this editor is linked to through the same frame-link graph + frame registry.

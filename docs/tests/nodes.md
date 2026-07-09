@@ -39,6 +39,13 @@ N28 - Node editor text-block projection saves must use one-save-at-a-time latest
 N29 - Node editor text-block save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. A block is marked `has not changed` only when the completed request's version matches the latest local version.
 N30 - Node editor forced projection flushes must save only blocks that have changed and must not `Promise.all` every text block in the node. The flush must preserve all user characters by waiting for in-progress saves and then saving the latest content if newer edits arrived.
 N31 - Deleting a node text block must not race with an in-flight projection save. If a projection save is already in progress for that block, deletion must wait for that save to finish or otherwise cancel/ignore it before issuing the projection DELETE, so a late POST cannot recreate the deleted block.
+N32 - Node text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, and table semantics must apply to node text boxes wherever a node editor is opened.
+N33 - Full node editor windows participate in the unified node shell contract: header, title behavior, top-right actions, close/minimize/open/fullscreen/delete controls, sizing, and body layout must come from one shared user-facing shell behavior wherever practical.
+N34 - Adding, removing, reordering, or restyling a top-right node-window action must happen through the unified node shell so Home, sidebar/app shell, Updates, Kanban/My Work, dock-restored, and Projects inline node windows stay aligned when the capability is available.
+N35 - Unified node shell does not require one opener, route, page state, or backend path; a node may be opened from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, or Projects while still sharing the same user-facing shell.
+N36 - The node workspace body remains text boxes, attached emails, and text-block chats; chats are conversation UI and must not inherit unified rich-editor toolbar, indentation, paste, delete, list, or font-size semantics.
+N37 - The node email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
+N38 - Project critical-path inline node windows must use the unified node shell and unified node text-box editor semantics while preserving node information/projection persistence for node edits.
 
 ## Scenarios
 
@@ -204,3 +211,27 @@ Expected:
 - Forced flushes save only changed text blocks and complete without dropping characters typed during in-progress saves.
 - If the user deletes a text block while a projection save for that block is in progress, the delete path waits for the in-progress save to finish or prevents its result from applying before issuing the projection DELETE.
 - A late projection POST must not recreate a deleted text block after the DELETE succeeds.
+
+### Scenario N-S9: Unified Node Shell And Editor Semantics
+
+Business logic covered:
+- N32
+- N33
+- N34
+- N35
+- N36
+- N37
+- N38
+
+Given:
+- A user opens the same node from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, and a Project critical-path row.
+- The node has text boxes, attached emails, and text-block chats.
+- A future product change adds a new top-right node-window action or changes rich editor indentation/paste/delete semantics.
+
+Expected:
+- Each full node window uses the unified node shell behavior for header, title, top-right actions, close/minimize/open/fullscreen/delete controls, sizing, and body layout where the capability is available.
+- Adding or changing a top-right node-window action through the shared shell reaches every full node window surface that exposes that capability.
+- Node text boxes use the unified editor semantics on every node-window surface.
+- Node text-box edits continue to save through node information/projection persistence.
+- Text-block chats remain chat composers and do not receive rich editor toolbar or rich editor keyboard semantics.
+- Opening the node email picker allows attaching existing email but does not expose compose, send, scheduled send, or draft-save controls.
