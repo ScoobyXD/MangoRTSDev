@@ -131,7 +131,7 @@ KB96 - Direct email-created Kanban cards can originate from My Triage or from a 
 KB97 - Email-card transfer uses the stored direct email-node provenance and board/card IDs; it must not require the actor to have a connected personal mailbox at transfer time.
 KB98 - When a local email-to-Logic-Gate conversion has already updated the board from the POST response, matching immediate communications/workspace events must not force repeated Home workspace panel reloads, and the source mail list must keep the source email row visible with patched Logic Gate icon state instead of being refreshed, row-removed, refilled from stale prefetched pages, or message-length-prefetched by broad communications cache invalidation.
 KB99 - The initial email-to-Logic-Gate conversion sets the source email to unstarred and returns `unstarred_message_ids` for local Home reconciliation; later direct email-card transfer between Kanban cards uses stored email-node provenance only and must not perform another mailbox star/unstar mutation.
-KB100 - Node editor popups opened from Kanban expose a fullscreen toggle in the popup header; fullscreen expands the popup close to the viewport while preserving a way to restore the previous popup size and position.
+KB100 - Node editor popups opened from Kanban expose a fullscreen toggle in the popup header; fullscreen uses a browser-viewport-fixed overlay that escapes normal Kanban board-relative bounds while preserving a way to restore the previous board-relative popup size and position.
 KB101 - Dragging a triage/mailbox email directly onto a Logic Gate Kanban column converts it into a direct email-created node card on that Logic Gate board and in that target column.
 KB102 - Direct email-to-Kanban column drops use the same triage drag payload and Home conversion reconciliation event as Company Explorer email drops so source mail rows, local freshness suppression, Logic Gate icons, and unstarred state are reconciled consistently.
 KB103 - Dropping an email onto a supported priority group inside a Logic Gate Kanban column applies that priority while still using the column as the assignment status target; dropping onto ordinary column or card space uses the backend default priority.
@@ -405,7 +405,7 @@ Given:
 
 Expected:
 - A fullscreen toggle appears in the header immediately to the left of the close action.
-- Activating fullscreen expands the popup close to the viewport without hiding the header actions.
+- Activating fullscreen expands the popup to the browser viewport instead of only filling the Kanban board area, without hiding the header actions.
 - Deactivating fullscreen restores the previous popup size and position.
 - Manually resizing or dragging the popup exits fullscreen behavior and preserves normal popup movement.
 

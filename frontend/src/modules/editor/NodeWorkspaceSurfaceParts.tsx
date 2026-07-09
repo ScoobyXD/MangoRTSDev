@@ -11,10 +11,10 @@ import { buildEditorIndentGuideSegments, editorIndentGuideLeftForDepth, type Edi
 import {
   EDITOR_RICH_TEXT_PREFIX,
   deserializeEditorDocumentHTML,
-  linkifyEditorPlainTextToHTML,
+  editorBodyHasEmailContent,
   readEditorDocumentText,
-  sanitizeEditorDocumentHTML,
   serializeEditorDocumentHTML,
+  serializeEditorBodyForEmailHTML,
 } from "./richTextEditing";
 import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
 import {
@@ -3065,7 +3065,7 @@ const AttachedEmailThreadCard: React.FC<{
               minWidth: 0,
               display: replyComposerOpen ? "grid" : "block",
               gridTemplateRows: replyComposerOpen ? "minmax(0, 1fr)" : undefined,
-              height: replyComposerOpen ? "min(620px, 72vh)" : undefined,
+              height: replyComposerOpen ? "clamp(420px, calc(100vh - 380px), 640px)" : undefined,
               maxHeight: replyComposerOpen ? undefined : "min(620px, 72vh)",
               overflow: replyComposerOpen ? "hidden" : "visible",
               padding: replyComposerOpen ? "0 10px" : "0 10px 10px",
@@ -3990,6 +3990,18 @@ function mergeEmailThreadMessages(primary: EmailMessage | null, fetchedMessages:
   ));
 }
 
+function estimateEditorBodyLineCount(value: string): number {
+  if (!value.trim()) return 1;
+  const raw = value.startsWith(EDITOR_RICH_TEXT_PREFIX) ? value.slice(EDITOR_RICH_TEXT_PREFIX.length) : value;
+  const normalized = raw
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:div|p|li|tr)>/gi, "\n")
+    .replace(/<[^>]+>/g, "");
+  return Math.max(1, normalized.split("\n").length);
+}
+
 export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   messageID,
   companyID,
@@ -4027,6 +4039,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const replyEditorControllerRef = useRef<UnifiedRichEditorFormattingController | null>(null);
   const appliedInitialReplyTargetRef = useRef("");
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const replyDockRef = useRef<HTMLDivElement | null>(null);
   const selectedEmailBodyRef = useRef<HTMLDivElement | null>(null);
   const [selectionDraft, setSelectionDraft] = useState<EmailSelectionDraft | null>(null);
   const [emailHighlightsByMessageID, setEmailHighlightsByMessageID] = useState<EmailLocalHighlightsByMessageID>(() => ({
@@ -4122,8 +4135,11 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   }, [highlightRemovalRequest?.requestID, highlightRemovalRequest?.messageID, messageID]);
 
   const recipients = parseEmailAddressDraft(toDraft);
-  const canSend = editable && !sending && Boolean(message) && Boolean(replyTargetMessageID) && recipients.length > 0 && subjectDraft.trim() && bodyDraft.trim();
-  const replyEditorHeight = inlineExpansion ? 112 : 138;
+  const canSend = editable && !sending && Boolean(message) && Boolean(replyTargetMessageID) && recipients.length > 0 && subjectDraft.trim() && editorBodyHasEmailContent(bodyDraft);
+  const replyEditorLineCount = useMemo(() => estimateEditorBodyLineCount(bodyDraft), [bodyDraft]);
+  const replyEditorMinHeight = inlineExpansion ? 112 : 138;
+  const replyEditorMaxHeight = inlineExpansion ? 272 : 340;
+  const replyEditorHeight = Math.min(replyEditorMaxHeight, replyEditorMinHeight + Math.max(0, replyEditorLineCount - 4) * 18);
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
   const useRichEmailBody = !canUseEmailSelection;
   const selectedEmailBodyText = useMemo(() => (message ? emailBodyText(message.body || message.snippet || "") : ""), [message]);
@@ -4303,7 +4319,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     void sendEmail({
       to: recipients,
       subject: subjectDraft.trim(),
-      body: unifiedRichEditorBodyToEmailHTML(bodyDraft),
+      body: serializeEditorBodyForEmailHTML(bodyDraft),
       reply_to_message_id: replyTargetMessage.id,
       company_id: companyID,
     })
@@ -4360,6 +4376,13 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   const showConversationHeader = loading || Boolean(error) || Boolean(message && !inlineExpansion);
   const replyDockVisible = Boolean(message && replyTargetMessage);
+  useEffect(() => {
+    if (!replyDockVisible) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      replyDockRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [replyDockVisible, replyTargetMessage?.id]);
   const conversationGridRows = inlineExpansion
     ? replyDockVisible
       ? (showConversationHeader ? "auto minmax(0, 1fr) auto" : "minmax(0, 1fr) auto")
@@ -4579,6 +4602,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         )}
         {message && replyTargetMessage && (
           <div
+            ref={replyDockRef}
             style={{
               position: "relative",
               zIndex: 2,
@@ -4661,7 +4685,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 accent={accent}
                 indentGuideColor={strokeColor}
                 formattingControllerRef={replyEditorControllerRef}
-                style={{ width: "100%", height: replyEditorHeight, minHeight: 78, maxHeight: 260, resize: editable ? "vertical" : "none", overflowY: "auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+                style={{ width: "100%", height: replyEditorHeight, minHeight: replyEditorMinHeight, maxHeight: replyEditorMaxHeight, resize: editable ? "vertical" : "none", overflowY: "auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
                 onSelectionFontSizeChange={setReplySelectionFontSize}
                 onSelectionInlineFormatChange={setReplySelectionInlineFormat}
                 onChange={setBodyDraft}
@@ -5095,10 +5119,3 @@ function escapeHTML(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function unifiedRichEditorBodyToEmailHTML(value: string): string {
-  if (!value.trim()) return "";
-  const html = value.startsWith(EDITOR_RICH_TEXT_PREFIX)
-    ? value.slice(EDITOR_RICH_TEXT_PREFIX.length)
-    : linkifyEditorPlainTextToHTML(value);
-  return sanitizeEditorDocumentHTML(html);
-}

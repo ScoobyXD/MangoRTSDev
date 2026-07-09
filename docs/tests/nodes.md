@@ -47,7 +47,7 @@ N36 - The node workspace body remains text boxes, attached emails, and text-bloc
 N37 - The node email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
 N38 - Project critical-path inline node windows must use the unified node shell and unified node text-box editor semantics while preserving node information/projection persistence for node edits.
 N39 - The V1 unified node shell source is `UnifiedNodeShell`; full node-window adapters may keep their own opener state, geometry, route handling, and permissions, but top-right node-window action ordering and shell/body data attributes must come from that shared source.
-N40 - Kanban/My Work node overlays expose the same shared fullscreen shell action as Home node popups when a full node editor overlay is opened; Kanban keeps board-relative overlay ratio and restore state in the Kanban adapter instead of moving that geometry persistence into the shared shell.
+N40 - Kanban/My Work node overlays expose the same shared fullscreen shell action as Home node popups when a full node editor overlay is opened; activating fullscreen is a temporary viewport-fixed exception to Kanban board-relative bounds, while Kanban keeps the previous board-relative overlay ratio only for restoring when fullscreen is turned off.
 N41 - Double-clicking a node in the Project Logic Gates / Nodes tab is a full node-window opener, not a project text-box editor. It may route through the standard app/sidebar node popup, but the resulting node window must use `UnifiedNodeShell`, the shared node workspace body, unified node text-box editor semantics, node information/projection persistence, and separate chat-pane behavior.
 N42 - The Home node popup is a unified node shell surface.
 N43 - The app/sidebar Company Explorer node popup is a unified node shell surface.
@@ -61,6 +61,9 @@ N50 - Small node card previews, list rows, tree rows, timeline bars, picker rows
 N51 - Node text-box inline images and node attachment-button uploads must follow `docs/tests/attachments.md`: durable node information/projection rows store attachment references, not data URLs, base64 file bytes, or embedded file payloads.
 N52 - Node text-block chat attachments remain chat-specific UI, but submitted chat payloads must store Mango attachment references instead of durable `dataURL` values.
 N53 - Attached emails on nodes may store message/thread/provider metadata and Mango attachment references, but must not store attachment bytes in node projection rows or communications email attachment JSON.
+N54 - When a user clicks Reply on an email attached inside a node, the reply composer appears as a bottom dock inside that email detail immediately; the user must not have to manually scroll down to reveal the To, Subject, toolbar, body, attachments, or send action.
+N55 - The attached-email reply composer remains anchored to the bottom of the email detail while the conversation body scrolls above it, and the reply body editor grows upward as additional rows are typed until its documented maximum height is reached.
+N56 - Attached-email reply sends use the same email-safe rich-editor serialization as My Triage and Shared Triage compose/reply: sanitized rich blocks, explicit line breaks, indentation, and spacing are preserved in outbound HTML instead of flattening into one long line.
 
 ## Scenarios
 
@@ -261,10 +264,12 @@ Expected:
 - The unified node shell surface inventory is Home node popup, app/sidebar Company Explorer node popup, minimized/dock-restored node popup, Updates row detail node popup/panel, Kanban/My Work full node popup/overlay, Project critical-path inline node window, Project Logic Gates / Nodes double-click node popup, and any future full node editor/window surface without a documented exception.
 - Adding or changing a top-right node-window action through the shared shell reaches every full node window surface that exposes that capability.
 - The Kanban/My Work full node overlay exposes the shared fullscreen control between minimize and close and restores its prior board-relative overlay size when fullscreen is turned off or the overlay closes.
+- Activating that Kanban/My Work fullscreen control pins the node overlay to the browser viewport, not merely to the visible Kanban board bounds.
 - Node text boxes use the unified editor semantics on every node-window surface.
 - Node text-box edits continue to save through node information/projection persistence.
 - Text-block chats remain chat composers and do not receive rich editor toolbar or rich editor keyboard semantics.
 - Opening the node email picker allows attaching existing email but does not expose compose, send, scheduled send, or draft-save controls.
+- Replying to an attached email opens a complete bottom-docked composer immediately, keeps it visible while the email body scrolls above it, and lets the reply body expand upward as the reply grows.
 - Small node card previews, list rows, tree rows, timeline bars, picker rows, and other non-editor node summaries do not need to mount the unified node shell.
 - Home, app/sidebar, dock-restored, Updates, Kanban/My Work, Project inline node windows, and Project Logic Gates / Nodes standalone node popups mount the `UnifiedNodeShell` adapter and expose only the actions enabled by that opener.
 
@@ -278,16 +283,22 @@ Business logic covered:
 - N51
 - N52
 - N53
+- N54
+- N55
+- N56
 
 Given:
 - A user pastes screenshots into node text boxes.
 - A user uploads files with the node attachment button.
 - A user attaches images/files to text-block chat.
 - A user attaches an email to the node.
+- A user replies to an attached email with multiple lines and indentation.
 
 Expected:
 - Node text-box projection saves preserve the latest text content but store attachment references for inline files.
 - Node attachment-button uploads create Mango attachment links instead of embedding bytes in node information/projection payloads.
 - Chat messages store attachment references and remain outside rich-editor semantics.
 - Attached-email projections store email metadata and attachment references only.
+- The attached-email reply composer is visible without manual scrolling and stays docked to the bottom of the selected email detail.
+- Outbound attached-email reply HTML preserves explicit line breaks, spacing, and indentation from the unified editor.
 - Loading the node does not require reading multi-megabyte inline base64 strings from node projection rows.

@@ -758,7 +758,7 @@ test("Home compose command validates send payloads and preserves body spacing", 
     cc: [],
     bcc: [{ email: "teammate@example.test" }],
     subject: "Subject",
-    body: '<div style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;"> Body </div>',
+    body: '<div style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;overflow-wrap:anywhere;"> Body </div>',
     attachments: [],
     reply_to_message_id: "message-1",
   }]);
@@ -782,7 +782,7 @@ test("Home compose command validates send payloads and preserves body spacing", 
     cc: [],
     bcc: [],
     subject: "Shared",
-    body: '<div style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;"> Reply </div>',
+    body: '<div style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;overflow-wrap:anywhere;"> Reply </div>',
     attachments: [],
     reply_to_message_id: undefined,
     company_id: "company-1",
@@ -807,7 +807,7 @@ test("Home compose command sends rich editor HTML without plain-text escaping", 
       cc: "",
       bcc: "",
       subject: "Rich",
-      body: `${EDITOR_RICH_TEXT_PREFIX}<b>Bold</b> <a href="https://example.test" target="_blank" rel="noopener noreferrer">link</a>`,
+      body: `${EDITOR_RICH_TEXT_PREFIX}<b>Bold</b>\n  <a href="https://example.test" target="_blank" rel="noopener noreferrer">link</a>`,
       attachments: [],
       replyToMessageID: "",
     },
@@ -815,6 +815,7 @@ test("Home compose command sends rich editor HTML without plain-text escaping", 
   });
 
   assert.match(sentInputs[0]?.body ?? "", /<b>Bold<\/b>/);
+  assert.match(sentInputs[0]?.body ?? "", /<br>  <a href="https:\/\/example\.test\/?"/);
   assert.match(sentInputs[0]?.body ?? "", /href="https:\/\/example\.test\/?"/);
   assert.doesNotMatch(sentInputs[0]?.body ?? "", /&lt;b&gt;/);
 });
