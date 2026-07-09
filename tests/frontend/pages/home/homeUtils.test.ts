@@ -12,6 +12,7 @@ import {
   communicationStreamEventIsArchiveConfirmation,
   communicationStreamEventIsStarConfirmation,
   condenseEmailThreadMessages,
+  emailAttachmentIsReferencedInline,
   fitHomeColumnWidthsToAvailableWidth,
   getHomeColumnMinimumTrackWidth,
   getHomeGridTemplateColumns,
@@ -28,12 +29,14 @@ import {
   mailboxForHomeView,
   nodeDragItemsFromExplorerRows,
   nodeIDsFromExplorerPayload,
+  rewriteEmailDocumentCIDSources,
   GVICRoleCellKey,
   resizeHomeColumns,
   resizeHomeInboxMatrixColumnsWithoutSidebar,
   setNodeDragData,
   sharedInboxCanLoadMail,
   triageMessageIDsFromStreamMessageID,
+  visibleEmailAttachmentsForBody,
   workspaceEventTouchesHomePanel,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
 import { messageSelectDotStyle, triageMessageRowStyle } from "../../../../frontend/src/pages/home/homeStyles.js";
@@ -137,6 +140,36 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
 test("communications triage stream message ids are cleaned and deduped", () => {
   assert.deepEqual(triageMessageIDsFromStreamMessageID(" message-1,message-2, message-1 ,,message-3 "), ["message-1", "message-2", "message-3"]);
   assert.deepEqual(triageMessageIDsFromStreamMessageID(" , "), []);
+});
+
+test("email body inline cid attachments are treated as body images", () => {
+  const body = '<p>Here is a screenshot:</p><img src="cid:image-1@local" alt="image.png"><p>done</p>';
+  const inlineImage = {
+    id: "provider-inline-1",
+    filename: "image.png",
+    content_type: "image/png",
+    content_id: "<image-1@local>",
+    is_inline: true,
+    size: 86,
+  };
+  const dashboard = {
+    id: "provider-file-1",
+    filename: "dashboard.png",
+    content_type: "image/png",
+    size: 197,
+  };
+
+  assert.equal(emailAttachmentIsReferencedInline(body, inlineImage), true);
+  assert.equal(emailAttachmentIsReferencedInline(body, dashboard), false);
+  assert.deepEqual(visibleEmailAttachmentsForBody(body, [inlineImage, dashboard]).map((attachment) => attachment.filename), ["dashboard.png"]);
+});
+
+test("email cid image sources are rewritten to resolved sources", () => {
+  const documentHTML = messageDocument('<div><img src="cid:image-1%40local" alt="image.png"></div>');
+  const rewritten = rewriteEmailDocumentCIDSources(documentHTML, { "image-1@local": "blob:http://localhost/image-1" });
+
+  assert.match(rewritten, /src="blob:http:\/\/localhost\/image-1"/);
+  assert.doesNotMatch(rewritten, /src="cid:/);
 });
 
 test("shared inbox local mailbox mutation echoes include scoped and unscoped keys", () => {
