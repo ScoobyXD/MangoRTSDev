@@ -854,6 +854,8 @@ test("Home compose command sends Mango attachment references without durable con
     content_type: "application/pdf",
     size: 1234,
   }]);
+  assert.equal(sentInputs[0]?.company_id, "company-1");
+  assert.equal(sentInputs[0]?.shared_inbox_id, undefined);
   assert.equal("content" in (sentInputs[0]?.attachments?.[0] as Record<string, unknown>), false);
 });
 
