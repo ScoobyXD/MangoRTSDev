@@ -41,13 +41,23 @@ N30 - Node editor forced projection flushes must save only blocks that have chan
 N31 - Deleting a node text block must not race with an in-flight projection save. If a projection save is already in progress for that block, deletion must wait for that save to finish or otherwise cancel/ignore it before issuing the projection DELETE, so a late POST cannot recreate the deleted block.
 N32 - Node text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, and table semantics must apply to node text boxes wherever a node editor is opened.
 N33 - Full node editor windows participate in the unified node shell contract: header, title behavior, top-right actions, close/minimize/open/fullscreen/delete controls, sizing, and body layout must come from one shared user-facing shell behavior wherever practical.
-N34 - Adding, removing, reordering, or restyling a top-right node-window action must happen through the unified node shell so Home, sidebar/app shell, Updates, Kanban/My Work, dock-restored, and Projects inline node windows stay aligned when the capability is available.
-N35 - Unified node shell does not require one opener, route, page state, or backend path; a node may be opened from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, or Projects while still sharing the same user-facing shell.
+N34 - Adding, removing, reordering, or restyling a top-right node-window action must happen through the unified node shell so Home, sidebar/app shell, Updates, Kanban/My Work, dock-restored, Project critical-path inline node windows, and Project Logic Gates / Nodes node popups stay aligned when the capability is available.
+N35 - Unified node shell does not require one opener, route, page state, or backend path; a node may be opened from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, a Project critical-path row, or the Project Logic Gates / Nodes tab while still sharing the same user-facing shell.
 N36 - The node workspace body remains text boxes, attached emails, and text-block chats; chats are conversation UI and must not inherit unified rich-editor toolbar, indentation, paste, delete, list, or font-size semantics.
 N37 - The node email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
 N38 - Project critical-path inline node windows must use the unified node shell and unified node text-box editor semantics while preserving node information/projection persistence for node edits.
 N39 - The V1 unified node shell source is `UnifiedNodeShell`; full node-window adapters may keep their own opener state, geometry, route handling, and permissions, but top-right node-window action ordering and shell/body data attributes must come from that shared source.
 N40 - Kanban/My Work node overlays expose the same shared fullscreen shell action as Home node popups when a full node editor overlay is opened; Kanban keeps board-relative overlay ratio and restore state in the Kanban adapter instead of moving that geometry persistence into the shared shell.
+N41 - Double-clicking a node in the Project Logic Gates / Nodes tab is a full node-window opener, not a project text-box editor. It may route through the standard app/sidebar node popup, but the resulting node window must use `UnifiedNodeShell`, the shared node workspace body, unified node text-box editor semantics, node information/projection persistence, and separate chat-pane behavior.
+N42 - The Home node popup is a unified node shell surface.
+N43 - The app/sidebar Company Explorer node popup is a unified node shell surface.
+N44 - A minimized or dock-restored node popup is a unified node shell surface.
+N45 - The Updates row detail node popup or node panel is a unified node shell surface.
+N46 - Kanban and My Work full node popup or overlay surfaces are unified node shell surfaces.
+N47 - The Project critical-path inline node window is a unified node shell surface.
+N48 - The Project Logic Gates / Nodes double-click node popup is a unified node shell surface, even when it routes through the standard app/sidebar node popup adapter.
+N49 - Any future project or page surface that opens a full node editor/window must use the unified node shell unless a new documented exception is added with an explicit business rule and test.
+N50 - Small node card previews, list rows, tree rows, timeline bars, picker rows, and other non-editor node summaries are not unified node shell surfaces unless they open into a full node editor/window.
 
 ## Scenarios
 
@@ -226,18 +236,30 @@ Business logic covered:
 - N38
 - N39
 - N40
+- N41
+- N42
+- N43
+- N44
+- N45
+- N46
+- N47
+- N48
+- N49
+- N50
 
 Given:
-- A user opens the same node from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, and a Project critical-path row.
+- A user opens the same node from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, a Project critical-path row, and a Project Logic Gates / Nodes row.
 - The node has text boxes, attached emails, and text-block chats.
 - A future product change adds a new top-right node-window action or changes rich editor indentation/paste/delete semantics.
 
 Expected:
 - Each full node window uses the unified node shell behavior for header, title, top-right actions, close/minimize/open/fullscreen/delete controls, sizing, and body layout where the capability is available.
+- The unified node shell surface inventory is Home node popup, app/sidebar Company Explorer node popup, minimized/dock-restored node popup, Updates row detail node popup/panel, Kanban/My Work full node popup/overlay, Project critical-path inline node window, Project Logic Gates / Nodes double-click node popup, and any future full node editor/window surface without a documented exception.
 - Adding or changing a top-right node-window action through the shared shell reaches every full node window surface that exposes that capability.
 - The Kanban/My Work full node overlay exposes the shared fullscreen control between minimize and close and restores its prior board-relative overlay size when fullscreen is turned off or the overlay closes.
 - Node text boxes use the unified editor semantics on every node-window surface.
 - Node text-box edits continue to save through node information/projection persistence.
 - Text-block chats remain chat composers and do not receive rich editor toolbar or rich editor keyboard semantics.
 - Opening the node email picker allows attaching existing email but does not expose compose, send, scheduled send, or draft-save controls.
-- Home, app/sidebar, dock-restored, Updates, Kanban/My Work, and Project inline node windows mount the `UnifiedNodeShell` adapter and expose only the actions enabled by that opener.
+- Small node card previews, list rows, tree rows, timeline bars, picker rows, and other non-editor node summaries do not need to mount the unified node shell.
+- Home, app/sidebar, dock-restored, Updates, Kanban/My Work, Project inline node windows, and Project Logic Gates / Nodes standalone node popups mount the `UnifiedNodeShell` adapter and expose only the actions enabled by that opener.

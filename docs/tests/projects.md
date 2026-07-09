@@ -27,6 +27,8 @@ P16 - Project text-box persistence remains project-owned: project text boxes sav
 P17 - Project critical-path inline node windows use the unified node shell and unified node text-box editor semantics, while mutations inside that inline node window remain node editor mutations instead of project critical-path data mutations.
 P18 - The project email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
 P19 - Project critical-path inline node windows mount `UnifiedNodeShell`; the inline window may keep project row selection/close state in Project Management, but shell actions and body metadata come from the shared node-shell source.
+P20 - In the Project Logic Gates / Nodes tab, double-clicking a node opens the standard full node editor window for that node instead of a project-specific editor surface.
+P21 - Nodes opened from the Project Logic Gates / Nodes tab use the unified node shell, unified node text-box editor semantics, node information/projection persistence, attached-email behavior, and separate chat-pane behavior of the standard node editor.
 
 ## Scenarios
 
@@ -125,3 +127,20 @@ Expected:
 - Project text-box edits do not write node information/projection state.
 - The project email picker allows attaching existing email where permitted.
 - The project email picker does not expose compose, send, scheduled send, or draft-save controls.
+
+### Scenario P-S6: Logic Gates / Nodes Node Opener
+
+Business logic covered:
+- P20
+- P21
+
+Given:
+- A project has at least one related Logic Gate and at least one related node visible in the Logic Gates / Nodes tab.
+- The viewer can open the node.
+
+Expected:
+- Double-clicking the node row opens the standard full node editor window for that node.
+- The opened node window uses the shared node shell actions and shared node workspace body instead of a project-specific node shell.
+- Text boxes inside that window use the unified node editor semantics.
+- Node edits save through node information/projection persistence, not project information/projection or project relationship persistence.
+- Chat panes inside the opened node window remain chat surfaces and do not inherit unified rich-editor toolbar or keyboard semantics.

@@ -22,6 +22,17 @@ ED11 - Map and legacy map-specific editing behavior is outside the V1 unified ed
 ED12 - Any future change to unified editor semantics must update one shared behavior test plus adapter/mount coverage proving each target surface receives the shared behavior.
 ED13 - The V1 shared rich editor behavior source is the editor module handler contract behind `useEditorDocumentSurfaceHandlers`; target surfaces must either call that handler directly or mount a narrow adapter such as `UnifiedRichEditorSurface`, while preserving their own persistence/send adapter.
 ED14 - Mail compose/reply and attached-email reply must expose the shared editor format/outline toolbar controls for font size, bold, underline, the outline-style dropdown, and table insertion where supported; mail-specific wrapper controls may add list insertion, indent/outdent, and link commands, but must call the shared editor controller instead of local DOM commands.
+ED15 - Nodes opened from Projects participate in the same unified editor contract in both project entry paths: the Critical Path inline node window and the Logic Gates / Nodes tab double-click opener. The Logic Gates / Nodes opener may route to the standard standalone node popup, but the node text boxes inside that popup must still use the shared node editor behavior rather than a project-local editor implementation.
+ED16 - The Logic Gate editor text body is a unified editor surface.
+ED17 - Node editor text boxes are unified editor surfaces wherever a full node editor is opened, including Home, My Work, Updates, Kanban, Company Explorer/sidebar, minimized dock restore, Project critical-path inline node windows, and Project Logic Gates / Nodes double-click node popups.
+ED18 - Project text boxes and project information editors are unified editor surfaces.
+ED19 - My Triage email compose and reply bodies are unified editor surfaces.
+ED20 - Shared Triage email compose and reply bodies are unified editor surfaces.
+ED21 - Attached-email reply bodies opened from an email attached to a node or project are unified editor surfaces when that reply sends or drafts real mail.
+ED22 - Chat panes inside node or project text boxes are explicitly not unified editor surfaces; they are conversation UI with chat-specific behavior.
+ED23 - Node and project email pickers are explicitly not compose editor surfaces; they may search, filter, scroll, drag, and attach existing email, but they must not contain compose, send, scheduled send, draft-save, or rich body editing behavior.
+ED24 - Map and legacy map-specific editor surfaces are explicitly outside the V1 unified editor contract unless they import a helper that is actively shared by a live non-map unified editor surface.
+ED25 - Backend persistence unification is explicitly outside the unified editor contract; shared editing behavior must not force node, Logic Gate, project, personal mailbox, shared mailbox, or attached-email reply content into one storage owner.
 
 ## Scenarios
 
@@ -36,14 +47,24 @@ Business logic covered:
 - ED12
 - ED13
 - ED14
+- ED15
+- ED16
+- ED17
+- ED18
+- ED19
+- ED20
+- ED21
 
 Given:
-- A user can edit a Logic Gate body, a node text box, a project text box, a My Triage compose body, and a Shared Triage compose body.
+- A user can edit a Logic Gate body, a node text box, a project text box, a My Triage compose body, a Shared Triage compose body, and an attached-email reply body.
+- A user can open a node from a Project critical-path row and by double-clicking a node in the Project Logic Gates / Nodes tab.
 - The implementation changes indentation, paste cleanup, list behavior, hyperlink creation, font size, Delete/Backspace, copy/cut/paste, or keyboard routing.
 
 Expected:
 - The behavior change is made in the shared editor behavior source or deliberately shared helper.
 - Each target surface receives the same user-facing semantics.
+- The unified editor target inventory is Logic Gate editor text, node editor text boxes from every full node editor opener, project text boxes/information editors, My Triage compose/reply, Shared Triage compose/reply, and attached-email reply bodies that send or draft real mail.
+- Project critical-path node text boxes and Project Logic Gates / Nodes standalone node-popup text boxes receive the same node editor semantics.
 - No target surface keeps a separate local implementation that disagrees with the shared behavior.
 - Tests cover the shared behavior once and prove each adapter/mount uses that shared behavior.
 - Mail compose/reply adapters do not call browser `document.execCommand` directly for rich editing commands when a shared editor command exists.
@@ -55,6 +76,7 @@ Expected:
 Business logic covered:
 - ED1
 - ED3
+- ED25
 
 Given:
 - A user edits node, Logic Gate, project, personal email, and shared email rich editor content.
@@ -74,6 +96,9 @@ Business logic covered:
 - ED7
 - ED8
 - ED14
+- ED19
+- ED20
+- ED21
 
 Given:
 - A user writes a personal compose, personal reply, shared compose, shared reply, or attached-email reply body.
@@ -91,6 +116,7 @@ Expected:
 
 Business logic covered:
 - ED9
+- ED22
 
 Given:
 - A user opens a chat pane inside a node or project text block.
@@ -105,6 +131,7 @@ Expected:
 
 Business logic covered:
 - ED10
+- ED23
 
 Given:
 - A user opens an email picker from a node or project surface.
@@ -118,6 +145,7 @@ Expected:
 
 Business logic covered:
 - ED11
+- ED24
 
 Given:
 - A V1 unified editor implementation pass is changing rich editor behavior.
