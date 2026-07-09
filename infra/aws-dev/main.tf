@@ -45,6 +45,7 @@ module "platform" {
   backend_cpu           = var.backend_cpu
   backend_memory        = var.backend_memory
   backend_desired_count = var.backend_desired_count
+  attachment_s3_bucket  = var.attachment_s3_bucket
 
   default_company_id     = local.effective_default_company_id
   email_from_address     = var.email_from_address

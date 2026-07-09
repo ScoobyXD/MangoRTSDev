@@ -116,6 +116,10 @@ resource "aws_ecs_task_definition" "backend" {
           { name = "DB_USER", value = local.db_user },
           { name = "DB_SSLMODE", value = "require" }
         ],
+        trimspace(var.attachment_s3_bucket) != "" ? [
+          { name = "MANGORTS_ATTACHMENT_S3_BUCKET", value = trimspace(var.attachment_s3_bucket) },
+          { name = "MANGORTS_ATTACHMENT_AWS_REGION", value = var.aws_region }
+        ] : [],
         local.nylas_enabled ? [
           { name = "NYLAS_CLIENT_ID", value = var.nylas_client_id },
           { name = "NYLAS_API_BASE_URL", value = var.nylas_api_base_url },

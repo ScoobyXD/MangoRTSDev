@@ -424,6 +424,32 @@ For dev compaction, prefer:
 
 Do not apply migration to all `node_information` unless Jonat changes the decision and wants to preserve old dev history.
 
+## Post-Migration Image Display Config
+
+After rows are migrated, editor image payloads contain `mango-attachment:<attachment_id>` references. That is expected. Local/dev backends must be configured with the attachment bucket so `GET /v1/attachments/:attachment_id/content` can hydrate those references back into browser object URLs.
+
+The dev attachment bucket created for this cleanup is:
+
+```text
+mangorts-dev-attachments
+```
+
+Local cloud-integrated startup now defaults to that bucket and exports:
+
+```text
+MANGORTS_ATTACHMENT_S3_BUCKET=mangorts-dev-attachments
+MANGORTS_ATTACHMENT_AWS_REGION=us-west-1
+```
+
+If a different dev bucket is needed, pass it explicitly:
+
+```powershell
+cd C:\Users\Jonat\MangoRTSDev
+.\scripts\start_local_cognito_backend.ps1 -AwsProfile mangorts-dev -AttachmentS3Bucket <bucket-name> -StopExisting -SkipNylas
+```
+
+The dev deploy workflow also passes `attachment_s3_bucket` into Terraform, defaulting to `mangorts-dev-attachments`, and the dev ECS task role receives scoped S3 object permissions for `companies/*` in that bucket. If GitHub variable `TF_ATTACHMENT_S3_BUCKET` is set, that value overrides the default.
+
 ## Suggested Next Agent Checklist
 
 1. Check main working tree:

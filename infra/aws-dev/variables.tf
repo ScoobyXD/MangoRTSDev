@@ -192,6 +192,12 @@ variable "backend_desired_count" {
   default     = 2
 }
 
+variable "attachment_s3_bucket" {
+  description = "Private S3 bucket used by the Mango attachment system in dev."
+  type        = string
+  default     = "mangorts-dev-attachments"
+}
+
 variable "default_company_id" {
   description = "Default company UUID used by the frontend until tenant selection exists. Prefer this over dev_company_id for new config."
   type        = string
