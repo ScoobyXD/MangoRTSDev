@@ -4,7 +4,7 @@ Last updated: 2026-07-09
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial. Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; Company Explorer search resource-type filtering has backend coverage; node editor projection-save helpers have frontend coverage; the unified editor contract, EmailPickerModal attach-only boundary, and unified node-shell contract/adapter mounting are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; GVIC picker rule IDs and the Assign to Logic Gate picker no-preload UI behavior are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: Partial. Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; Company Explorer search resource-type filtering has backend coverage; node editor projection-save helpers have frontend coverage; the unified editor contract, EmailPickerModal attach-only boundary, and unified node-shell contract/adapter mounting are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; GVIC picker rule IDs, the Assign to Logic Gate picker no-preload UI behavior, and node header project-assignment layout rules are not mapped to automated tests yet.
 
 ## Business Logic
 
@@ -61,6 +61,9 @@ N50 - Small node card previews, list rows, tree rows, timeline bars, picker rows
 N51 - Node text-box inline images and node attachment-button uploads must follow `docs/tests/attachments.md`: durable node information/projection rows store attachment references, not data URLs, base64 file bytes, or embedded file payloads.
 N52 - Node text-block chat attachments remain chat-specific UI, but submitted chat payloads must store Mango attachment references instead of durable `dataURL` values.
 N53 - Attached emails on nodes may store message/thread/provider metadata and Mango attachment references, but must not store attachment bytes in node projection rows or communications email attachment JSON.
+N54 - The node header Assign to Project button must size to its icon and current label instead of flex-growing into all remaining toolbar space. In the unassigned state it should remain compact for the `Assign to Project` label; after assignment it may grow for `Project: <project name>` up to the node header's project-control maximum and must ellipsize overflow text instead of pushing adjacent header actions away.
+N55 - The node header project assignment dropdown must use a compact horizontal width. Its nominal width is clamped to a minimum of 280px, a desktop maximum of 390px, and a compact-layout maximum of 320px, with the browser viewport maximum still allowed to reduce the rendered width when the viewport is narrower.
+N56 - Opening the node header project assignment dropdown near the right edge of the visible node workspace must shift the dropdown left just enough to keep the full list visible inside the node workspace or browser viewport. The dropdown must not remain right-anchored when that would clip project names or list content, and the left shift must preserve the normal node workspace side padding.
 
 ## Scenarios
 
@@ -179,6 +182,9 @@ Business logic covered:
 - N19
 - N20
 - N21
+- N54
+- N55
+- N56
 - N22
 
 Given:
@@ -188,7 +194,10 @@ Given:
 
 Expected:
 - The node header project button displays the current related project when one is known.
+- The project button is content-sized: it is compact when the label is `Assign to Project`, grows for `Project: <project name>`, and ellipsizes long project names without taking over all spare toolbar width.
 - Assigning a node to a project first asks for the project.
+- The project assignment dropdown opens at a compact width instead of the old wide panel width.
+- If the project assignment dropdown would extend beyond the right edge of the visible node workspace or viewport, it shifts left until the list fits while keeping the normal side padding.
 - Confirming project-only assignment creates or updates the node/project relationship without requiring a Logic Gate or priority.
 - Choosing an optional Logic Gate inside that project creates or updates the node/project relationship and assigns the node to the selected Logic Gate.
 - Go to Project opens the related project directly.

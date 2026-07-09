@@ -46,6 +46,9 @@ PM35 - Project information/projection attachment payloads must follow `docs/test
 PM36 - The project detail work panel exposes Critical Path and Logic Gates / Nodes as distinct project relationship views; Critical Path is the default entry view.
 PM37 - Double-clicking a node in the Project Logic Gates / Nodes view opens that node in the standard full node editor window instead of creating a project-owned node editor surface.
 PM38 - Opening a node from Project Management preserves node-level access, node information/projection persistence, unified node shell behavior, unified node text-box editor semantics, and separate chat-pane behavior; the project relationship is opener context only and must not become the persistence owner for node edits.
+PM39 - The node workspace project assignment control is a content-sized action, not a spacer. The unassigned `Assign to Project` button must remain compact, and the assigned `Project: <project name>` button may grow only until the node header project-control maximum before ellipsizing.
+PM40 - The node workspace project assignment menu must use the compact project-picker width contract: nominal minimum 280px, desktop maximum 390px, compact-layout maximum 320px, and no wider than the browser viewport allows.
+PM41 - The node workspace project assignment menu must avoid right-edge clipping by shifting left when there is not enough visible space to the right of the button; project rows and optional Logic Gate rows must remain readable without horizontal viewport overflow.
 
 ## Scenarios
 
@@ -167,6 +170,9 @@ Business logic covered:
 - PM32
 - PM33
 - PM34
+- PM39
+- PM40
+- PM41
 
 Given:
 - A user edits an existing node.
@@ -174,7 +180,9 @@ Given:
 - The user opens the node workspace project assignment control.
 
 Expected:
+- The closed project assignment control is compact when no project is assigned and grows only as needed for the assigned project label.
 - The first assignment step lists accessible projects.
+- The project picker opens at the compact menu width and shifts left when necessary to keep the list inside the visible node workspace or browser viewport.
 - After a project is selected, the user can assign the node directly to the project without choosing a Logic Gate.
 - The optional second step lists Logic Gates related to that project.
 - Confirming project-only assignment creates or updates the node/project relationship and does not require node priority.
