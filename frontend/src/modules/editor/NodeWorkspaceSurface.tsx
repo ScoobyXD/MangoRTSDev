@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { humanLabelOrFallback } from "../entityLabels.js";
@@ -391,6 +391,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [assigningProjectID, setAssigningProjectID] = useState("");
   const [assigningProjectLogicGateID, setAssigningProjectLogicGateID] = useState("");
   const [projectAssignStatus, setProjectAssignStatus] = useState("");
+  const [projectAssignerDropdownLeft, setProjectAssignerDropdownLeft] = useState(0);
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
   const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number; position: ConfirmActionMenuPosition } | null>(null);
@@ -496,6 +497,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const assignProjectButtonLabel = primaryAssignedProject
     ? `Project: ${primaryAssignedProjectLabel}`
     : "Assign to Project";
+  const projectAssignerMenuWidth = Math.max(
+    280,
+    Math.min(compact ? 420 : 520, width > 0 ? width - 28 : compact ? 420 : 520),
+  );
   const nodePriorityUnassignedForLogicGate = useMemo(() => {
     const raw = nodePriorityDraft.trim();
     if (!raw || raw === "0") return true;
@@ -609,6 +614,31 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setLogicGateSearchResults([]);
     setLogicGateSearchLoading(false);
   }, [logicGateAssignerOpen]);
+
+  useLayoutEffect(() => {
+    if (!projectAssignerOpen) {
+      setProjectAssignerDropdownLeft(0);
+      return;
+    }
+    const updateDropdownLeft = () => {
+      const anchor = projectAssignerRef.current;
+      if (!anchor || typeof window === "undefined") {
+        setProjectAssignerDropdownLeft(0);
+        return;
+      }
+      const anchorBounds = anchor.getBoundingClientRect();
+      const rootBounds = rootRef.current?.getBoundingClientRect();
+      const visibleRight = Math.min(rootBounds?.right ?? window.innerWidth, window.innerWidth) - 14;
+      const visibleLeft = Math.max(rootBounds?.left ?? 0, 0) + 14;
+      const overflowRight = Math.max(0, anchorBounds.left + projectAssignerMenuWidth - visibleRight);
+      const minLeft = visibleLeft - anchorBounds.left;
+      const nextLeft = Math.round(Math.max(minLeft, -overflowRight));
+      setProjectAssignerDropdownLeft((current) => (current === nextLeft ? current : nextLeft));
+    };
+    updateDropdownLeft();
+    window.addEventListener("resize", updateDropdownLeft);
+    return () => window.removeEventListener("resize", updateDropdownLeft);
+  }, [projectAssignerMenuWidth, projectAssignerOpen, width]);
 
   useEffect(() => {
     if (!projectAssignerOpen) return;
@@ -1964,10 +1994,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       {logicGateAssignStatus && <div style={{ justifySelf: "start", maxWidth: "100%", border: `1px solid ${logicGateAssignStatus.startsWith("Assigning") ? "rgba(59,130,246,0.24)" : logicGateAssignStatus.startsWith("Assigned") ? "rgba(100,116,139,0.22)" : "rgba(245,158,11,0.30)"}`, borderRadius: 9, background: logicGateAssignStatus.startsWith("Assigning") ? "rgba(239,246,255,0.82)" : logicGateAssignStatus.startsWith("Assigned") ? "rgba(248,250,252,0.9)" : "rgba(255,251,235,0.9)", color: logicGateAssignStatus.startsWith("Assigning") ? accent : logicGateAssignStatus.startsWith("Assigned") ? surfaceText : "#92400e", padding: "5px 8px", fontSize: 11, fontWeight: 800, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{logicGateAssignStatus}</div>}
     </div>
   ) : null;
-  const projectAssignerMenuWidth = Math.max(
-    280,
-    Math.min(compact ? 420 : 520, width > 0 ? width - 28 : compact ? 420 : 520),
-  );
   const projectAssignerDropdown = canEdit && projectAssignerOpen ? (
     <div
       role="menu"
@@ -1976,7 +2002,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       style={{
         position: "absolute",
         top: "calc(100% - 1px)",
-        left: 0,
+        left: projectAssignerDropdownLeft,
         zIndex: 94,
         width: projectAssignerMenuWidth,
         minWidth: 0,
