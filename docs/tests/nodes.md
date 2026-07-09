@@ -4,7 +4,7 @@ Last updated: 2026-07-08
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; Company Explorer search resource-type filtering has backend coverage; GVIC picker rule IDs and the Assign to Logic Gate picker no-preload UI behavior are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: Partial. Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; Company Explorer search resource-type filtering has backend coverage; node editor projection-save helpers have frontend coverage; the unified editor contract and EmailPickerModal attach-only boundary are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; GVIC picker rule IDs and the Assign to Logic Gate picker no-preload UI behavior are not mapped to automated tests yet.
 
 ## Business Logic
 

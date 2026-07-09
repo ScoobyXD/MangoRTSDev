@@ -58,6 +58,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorUndoHistory.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorMentions.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/plainTextEditing.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/unifiedRichEditorContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/richTextEditing.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorScroll.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorIndentGuides.test.js"),
@@ -101,6 +102,7 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/kanbanProjectionDeltas"', '"../../../../frontend/src/modules/kanban/kanbanProjectionDeltas.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/KanbanBoardContentStore"', '"../../../../frontend/src/modules/kanban/KanbanBoardContentStore.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/plainTextEditing"', '"../../../../frontend/src/modules/editor/plainTextEditing.js"');
+  contents = contents.replaceAll('"../../../../frontend/src/modules/editor/unifiedRichEditorContract"', '"../../../../frontend/src/modules/editor/unifiedRichEditorContract.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/richTextEditing"', '"../../../../frontend/src/modules/editor/richTextEditing.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/editorUndoHistory"', '"../../../../frontend/src/modules/editor/editorUndoHistory.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/editorProjection"', '"../../../../frontend/src/modules/editor/editorProjection.js"');

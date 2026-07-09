@@ -6,7 +6,14 @@ import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from 
 import { createEditorScrollMemory } from "./editorScroll";
 import { EDITOR_TAB_TEXT, type EditorOutlineStyleID } from "./plainTextEditing";
 import { buildEditorIndentGuideSegments, editorIndentGuideLeftForDepth, type EditorIndentGuideSegment } from "./editorIndentGuides";
-import { deserializeEditorDocumentHTML, readEditorDocumentText, serializeEditorDocumentHTML } from "./richTextEditing";
+import {
+  EDITOR_RICH_TEXT_PREFIX,
+  deserializeEditorDocumentHTML,
+  linkifyEditorPlainTextToHTML,
+  readEditorDocumentText,
+  sanitizeEditorDocumentHTML,
+  serializeEditorDocumentHTML,
+} from "./richTextEditing";
 import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
 import {
   applyEditorInlineFormatToRoot,
@@ -17,6 +24,7 @@ import {
   type EditorSelectionInlineFormatState,
 } from "./useEditorDocumentSurfaceHandlers";
 import { getEditorDocumentFontFamily } from "./useEditorPreferences";
+import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "./UnifiedRichEditorSurface";
 import {
   createStandaloneImageClipboardHTML,
   findEditorImageFrame,
@@ -3735,6 +3743,28 @@ const emailSelectionActionButtonStyle: React.CSSProperties = {
   boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)",
 };
 
+const attachedEmailReplyToolButtonStyle: React.CSSProperties = {
+  minWidth: 25,
+  height: 24,
+  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+  borderRadius: 7,
+  background: EDITOR_NEU_SURFACE,
+  display: "grid",
+  placeItems: "center",
+  padding: "0 6px",
+  fontSize: 10.5,
+  fontWeight: 900,
+  lineHeight: 1,
+  cursor: "pointer",
+  boxSizing: "border-box",
+  boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.78)",
+};
+
+const attachedEmailReplyWideToolButtonStyle: React.CSSProperties = {
+  ...attachedEmailReplyToolButtonStyle,
+  minWidth: 40,
+};
+
 const EmailSelectionActionIconFrame: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <span aria-hidden="true" style={{ width: 16, height: 16, display: "grid", placeItems: "center", lineHeight: 0 }}>
     {children}
@@ -3973,11 +4003,12 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [replyTargetMessageID, setReplyTargetMessageID] = useState("");
   const [draftAttachments, setDraftAttachments] = useState<EditorChatAttachment[]>([]);
   const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
+  const [replyOutlineStyle, setReplyOutlineStyle] = useState<EditorOutlineStyleID>("automatic-outline-numbering");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const replyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const replyEditorControllerRef = useRef<UnifiedRichEditorFormattingController | null>(null);
   const appliedInitialReplyTargetRef = useRef("");
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const selectedEmailBodyRef = useRef<HTMLDivElement | null>(null);
@@ -4073,8 +4104,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   const recipients = parseEmailAddressDraft(toDraft);
   const canSend = editable && !sending && Boolean(message) && Boolean(replyTargetMessageID) && recipients.length > 0 && subjectDraft.trim() && bodyDraft.trim();
-  const replyLineCount = Math.max(3, bodyDraft.split(/\r\n|\r|\n/).length);
-  const replyTextareaHeight = Math.min(260, 42 + ((replyLineCount - 1) * 18));
+  const replyEditorHeight = inlineExpansion ? 112 : 138;
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
   const useRichEmailBody = !canUseEmailSelection;
   const selectedEmailBodyText = useMemo(() => (message ? emailBodyText(message.body || message.snippet || "") : ""), [message]);
@@ -4109,7 +4139,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setReplyTargetMessageID(target.id);
     setToDraft(formatAddressList(target.reply_to?.length ? target.reply_to : target.from));
     setSubjectDraft(replySubject(target.subject || message?.subject || ""));
-    window.requestAnimationFrame(() => replyTextareaRef.current?.focus());
+    window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
   }, [displayThreadMessages, editable, initialReplyTargetMessageID, message?.subject, messageID]);
 
   const readEmailSelectionDraft = useCallback((): EmailSelectionDraft | null => {
@@ -4239,7 +4269,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setReplyTargetMessageID(target.id);
     setToDraft(formatAddressList(target.reply_to?.length ? target.reply_to : target.from));
     setSubjectDraft(replySubject(target.subject || message?.subject || ""));
-    window.requestAnimationFrame(() => replyTextareaRef.current?.focus());
+    window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
   }, [editable, message?.subject, replyTargetMessageID]);
 
   const submitReply = () => {
@@ -4254,7 +4284,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     void sendEmail({
       to: recipients,
       subject: subjectDraft.trim(),
-      body: nodeReplyPlainTextToHTML(bodyDraft),
+      body: unifiedRichEditorBodyToEmailHTML(bodyDraft),
       reply_to_message_id: replyTargetMessage.id,
       company_id: companyID,
     })
@@ -4286,10 +4316,28 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     }
   }, [inlineExpansion]);
 
+  const createReplyHyperlink = useCallback(() => {
+    const rawHref = window.prompt("Link URL") ?? "";
+    if (!rawHref.trim()) return;
+    replyEditorControllerRef.current?.insertLink(rawHref);
+  }, []);
+  const selectReplyNumberedMode = useCallback(() => {
+    setReplyOutlineStyle("automatic-outline-numbering");
+    replyEditorControllerRef.current?.focus();
+  }, []);
+  const insertReplyBulletList = useCallback(() => {
+    setReplyOutlineStyle("bullet-list");
+    replyEditorControllerRef.current?.insertList("bullet");
+  }, []);
+  const insertReplyChecklist = useCallback(() => {
+    setReplyOutlineStyle("checklist");
+    replyEditorControllerRef.current?.insertList("checklist");
+  }, []);
+
   const showConversationHeader = loading || Boolean(error) || Boolean(message && !inlineExpansion);
   const replyDockPinned = Boolean(message && replyTargetMessage && !inlineExpansion);
   const replyDockBottomPadding = replyDockPinned
-    ? Math.min(420, replyTextareaHeight + 118 + (draftAttachments.length > 0 ? 44 : 0))
+    ? Math.min(420, replyEditorHeight + 162 + (draftAttachments.length > 0 ? 44 : 0))
     : 0;
 
   return (
@@ -4552,26 +4600,31 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             >
               <PlusIcon color={accent} />
             </button>
-            <textarea
-              ref={replyTextareaRef}
-              value={bodyDraft}
-              disabled={!editable}
-              readOnly={!editable}
-              rows={replyLineCount}
-              placeholder="Write a reply"
-              onChange={(event) => setBodyDraft(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (!editable) {
-                  event.preventDefault();
-                  return;
-                }
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  submitReply();
-                }
-              }}
-              style={{ width: "100%", height: replyTextareaHeight, minHeight: 70, maxHeight: 260, resize: "vertical", overflowY: replyLineCount > 13 ? "auto" : "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
-            />
+            <div style={{ minWidth: 0, display: "grid", gap: 5 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                <button type="button" title="Bold" aria-label="Bold" disabled={!editable} onClick={() => replyEditorControllerRef.current?.toggleInlineFormat("bold")} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>B</button>
+                <button type="button" title="Underline" aria-label="Underline" disabled={!editable} onClick={() => replyEditorControllerRef.current?.toggleInlineFormat("underline")} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>U</button>
+                <button type="button" title="Numbered list" aria-label="Numbered list" disabled={!editable} onClick={selectReplyNumberedMode} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>1.</button>
+                <button type="button" title="Bullet list" aria-label="Bullet list" disabled={!editable} onClick={insertReplyBulletList} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>-</button>
+                <button type="button" title="Checklist" aria-label="Checklist" disabled={!editable} onClick={insertReplyChecklist} style={{ ...attachedEmailReplyWideToolButtonStyle, color: accent }}>Check</button>
+                <button type="button" title="Create link" aria-label="Create link" disabled={!editable} onClick={createReplyHyperlink} style={{ ...attachedEmailReplyWideToolButtonStyle, color: accent }}>Link</button>
+                <button type="button" title="Insert table" aria-label="Insert table" disabled={!editable} onClick={() => replyEditorControllerRef.current?.insertTable()} style={{ ...attachedEmailReplyWideToolButtonStyle, color: accent }}>Table</button>
+              </div>
+              <UnifiedRichEditorSurface
+                value={bodyDraft}
+                editable={editable}
+                outlineStyle={replyOutlineStyle}
+                surfaceID="attached-email-reply"
+                ariaLabel="Reply body"
+                placeholder="Write a reply"
+                surfaceText={surfaceText}
+                accent={accent}
+                indentGuideColor={strokeColor}
+                formattingControllerRef={replyEditorControllerRef}
+                style={{ width: "100%", height: replyEditorHeight, minHeight: 78, maxHeight: 260, resize: editable ? "vertical" : "none", overflowY: "auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+                onChange={setBodyDraft}
+              />
+            </div>
             <button
               type="button"
               aria-label={sending ? "Sending" : "Send reply"}
@@ -4624,14 +4677,11 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
   const [query, setQuery] = useState("");
   const [searchDraft, setSearchDraft] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const [composeOpen, setComposeOpen] = useState(false);
-  const [composeDraft, setComposeDraft] = useState({ to: "", subject: "", body: "" });
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [nextPageToken, setNextPageToken] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
-  const [sending, setSending] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const requestSeqRef = useRef(0);
   const prefetchedPageRef = useRef<EmailPickerPrefetchedPage | null>(null);
@@ -4834,23 +4884,22 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
   }, [loadMoreMessages, prefetchNextMessagePage]);
 
   useEffect(() => {
-    if (composeOpen || loading || !nextPageToken) return;
+    if (loading || !nextPageToken) return;
     window.setTimeout(() => {
       const list = messageListRef.current;
       if (!list) return;
       if (emailPickerWithinPrefetchDistance()) void prefetchNextMessagePage();
       if (list.scrollHeight <= list.clientHeight + (EMAIL_PICKER_APPROX_ROW_HEIGHT * 2)) void loadMoreMessages();
     }, 0);
-  }, [composeOpen, emailPickerWithinPrefetchDistance, loadMoreMessages, loading, messages.length, nextPageToken, prefetchNextMessagePage]);
+  }, [emailPickerWithinPrefetchDistance, loadMoreMessages, loading, messages.length, nextPageToken, prefetchNextMessagePage]);
 
   const mailboxTabs: Array<{ mailbox: EmailMailbox; label: string }> = [
     { mailbox: "primary", label: "Inbox" },
     { mailbox: "starred", label: "Starred" },
     { mailbox: "all", label: "All" },
+    { mailbox: "sent", label: "Sent" },
   ];
   const unreadCount = messages.filter((message) => message.unread).length;
-  const recipients = parseEmailAddressDraft(composeDraft.to);
-  const canSend = !sending && recipients.length > 0 && composeDraft.subject.trim().length > 0 && composeDraft.body.trim().length > 0;
 
   const tabButtonStyle = (active: boolean): React.CSSProperties => ({
     minWidth: 0,
@@ -4877,29 +4926,6 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
     setQuery(searchDraft.trim());
   };
 
-  const submitCompose = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!canSend) return;
-    setSending(true);
-    setError("");
-    void sendEmail({
-      to: recipients,
-      subject: composeDraft.subject.trim(),
-      body: composeDraft.body.trim(),
-    })
-      .then((sent) => {
-        const sentWithTimestamp = sent.date ? sent : { ...sent, date: Math.floor(Date.now() / 1000) };
-        setComposeDraft({ to: "", subject: "", body: "" });
-        setComposeOpen(false);
-        setMailbox("sent");
-        setMessages((current) => [sentWithTimestamp, ...current.filter((message) => message.id !== sentWithTimestamp.id)]);
-      })
-      .catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "failed_to_send_email");
-      })
-      .finally(() => setSending(false));
-  };
-
   return (
     <div
       role="dialog"
@@ -4920,19 +4946,18 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
             x
             </button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6 }}>
             {mailboxTabs.map((tab) => (
               <button
                 key={tab.mailbox}
                 type="button"
-                style={tabButtonStyle(!composeOpen && mailbox === tab.mailbox)}
+                style={tabButtonStyle(mailbox === tab.mailbox)}
                 onClick={() => {
-                  setComposeOpen(false);
                   setMailbox(tab.mailbox);
                 }}
               >
                 {tab.label}
-                {!composeOpen && mailbox === tab.mailbox && messages.length > 0 && (
+                {mailbox === tab.mailbox && messages.length > 0 && (
                   <span style={{ minWidth: 18, height: 18, display: "inline-grid", placeItems: "center", borderRadius: 9, padding: "0 5px", border: "1px solid rgba(148,163,184,0.18)", background: "#ffffff", color: "#334155", fontSize: 10, fontWeight: 850 }}>
                     {messages.length}
                   </span>
@@ -4940,44 +4965,23 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
               </button>
             ))}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 6 }}>
-            <button type="button" style={tabButtonStyle(composeOpen)} onClick={() => setComposeOpen(true)}>
-              <PlusIcon color={accent} />
-              Compose
-            </button>
-            <button
-              type="button"
-              style={tabButtonStyle(!composeOpen && mailbox === "sent")}
-              onClick={() => {
-                setComposeOpen(false);
-                setMailbox("sent");
-              }}
-            >
-              <ArrowRightIcon color={accent} />
-              Sent
-            </button>
+          <form style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 76px", gap: 6 }} onSubmit={submitSearch}>
+            <input
+              autoFocus
+              value={searchDraft}
+              onChange={(event) => setSearchDraft(event.currentTarget.value)}
+              placeholder="Search mail"
+              style={{ minWidth: 0, height: 34, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, padding: "0 10px", outline: "none", color: surfaceText, background: "#ffffff", fontSize: 12, letterSpacing: 0, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }}
+            />
+            <button type="submit" style={tabButtonStyle(false)}>Search</button>
+          </form>
+          <div style={{ minWidth: 0, minHeight: 24, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 10, padding: "0 2px" }}>
+            <span style={{ minWidth: 0, color: "rgba(15,23,42,0.58)", fontSize: 11, fontWeight: 800 }}>{unreadOnly ? "Unread only" : `${unreadCount} unread`}</span>
+            <label style={{ display: "flex", alignItems: "center", gap: 7, color: surfaceText, fontSize: 11, fontWeight: 700 }}>
+              <input type="checkbox" checked={unreadOnly} onChange={(event) => setUnreadOnly(event.currentTarget.checked)} />
+              <span>Unread only</span>
+            </label>
           </div>
-          {!composeOpen && (
-            <>
-              <form style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 76px", gap: 6 }} onSubmit={submitSearch}>
-                <input
-                  autoFocus
-                  value={searchDraft}
-                  onChange={(event) => setSearchDraft(event.currentTarget.value)}
-                  placeholder="Search mail"
-                  style={{ minWidth: 0, height: 34, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, padding: "0 10px", outline: "none", color: surfaceText, background: "#ffffff", fontSize: 12, letterSpacing: 0, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }}
-                />
-                <button type="submit" style={tabButtonStyle(false)}>Search</button>
-              </form>
-              <div style={{ minWidth: 0, minHeight: 24, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 10, padding: "0 2px" }}>
-                <span style={{ minWidth: 0, color: "rgba(15,23,42,0.58)", fontSize: 11, fontWeight: 800 }}>{unreadOnly ? "Unread only" : `${unreadCount} unread`}</span>
-                <label style={{ display: "flex", alignItems: "center", gap: 7, color: surfaceText, fontSize: 11, fontWeight: 700 }}>
-                  <input type="checkbox" checked={unreadOnly} onChange={(event) => setUnreadOnly(event.currentTarget.checked)} />
-                  <span>Unread only</span>
-                </label>
-              </div>
-            </>
-          )}
         </div>
         <div
           ref={messageListRef}
@@ -4986,23 +4990,10 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
           style={{ overflowY: "auto", minHeight: 220, padding: 10, display: "grid", alignContent: "start", gap: 8, ["--editor-document-scroll-accent" as string]: accent, ["--editor-document-scroll-track" as string]: "transparent" }}
         >
           {error && <div style={{ padding: 10, border: "1px solid rgba(185,28,28,0.24)", borderRadius: 10, background: "rgba(254,242,242,0.9)", color: "#991b1b", fontSize: 12, fontWeight: 800 }}>{error}</div>}
-          {composeOpen ? (
-            <form onSubmit={submitCompose} style={{ display: "grid", gap: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: "#ffffff", padding: 10, boxShadow: EDITOR_NEU_SHADOW }}>
-              <input value={composeDraft.to} onChange={(event) => setComposeDraft((current) => ({ ...current, to: event.currentTarget.value }))} placeholder="To" style={{ minWidth: 0, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, padding: "0 9px", outline: "none", color: surfaceText, fontSize: 12, letterSpacing: 0 }} />
-              <input value={composeDraft.subject} onChange={(event) => setComposeDraft((current) => ({ ...current, subject: event.currentTarget.value }))} placeholder="Subject" style={{ minWidth: 0, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, padding: "0 9px", outline: "none", color: surfaceText, fontSize: 12, letterSpacing: 0 }} />
-              <textarea value={composeDraft.body} onChange={(event) => setComposeDraft((current) => ({ ...current, body: event.currentTarget.value }))} placeholder="Message" rows={9} style={{ minWidth: 0, minHeight: 190, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, padding: "8px 9px", outline: "none", color: surfaceText, fontSize: 12, lineHeight: 1.45, letterSpacing: 0, resize: "vertical" }} />
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
-                <button type="button" disabled={sending} onClick={() => setComposeOpen(false)} style={tabButtonStyle(false)}>Cancel</button>
-                <button type="submit" disabled={!canSend} style={{ ...tabButtonStyle(true), opacity: canSend ? 1 : 0.46, cursor: canSend ? "pointer" : "default" }}>
-                  {sending ? "Sending" : "Send"}
-                </button>
-              </div>
-            </form>
-          ) : (
-            <>
-              {loading && <div style={{ padding: 12, color: surfaceText, opacity: 0.68, fontSize: 12, fontWeight: 700 }}>Loading</div>}
-              {!loading && !error && messages.length === 0 && <div style={{ padding: 12, color: surfaceText, opacity: 0.68, fontSize: 12, fontWeight: 700 }}>No email</div>}
-              {messages.map((message) => (
+          <>
+            {loading && <div style={{ padding: 12, color: surfaceText, opacity: 0.68, fontSize: 12, fontWeight: 700 }}>Loading</div>}
+            {!loading && !error && messages.length === 0 && <div style={{ padding: 12, color: surfaceText, opacity: 0.68, fontSize: 12, fontWeight: 700 }}>No email</div>}
+            {messages.map((message) => (
                 <button
                   key={message.id}
                   type="button"
@@ -5044,8 +5035,7 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
                 </button>
               ))}
               {loadingMore && <div style={{ padding: 10, color: surfaceText, opacity: 0.68, fontSize: 11, fontWeight: 800, textAlign: "center" }}>Loading more</div>}
-            </>
-          )}
+          </>
         </div>
       </div>
     </div>
@@ -5063,24 +5053,10 @@ function escapeHTML(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function linkifyNodeReplyHTMLLine(value: string): string {
-  const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
-  let output = "";
-  let cursor = 0;
-  for (const match of value.matchAll(urlPattern)) {
-    const matchText = match[0] ?? "";
-    const index = match.index ?? 0;
-    if (index > cursor) output += escapeHTML(value.slice(cursor, index));
-    const trailingPunctuation = matchText.match(/[),.;:!?]+$/)?.[0] ?? "";
-    const cleanURL = trailingPunctuation ? matchText.slice(0, -trailingPunctuation.length) : matchText;
-    const href = cleanURL.toLowerCase().startsWith("www.") ? `https://${cleanURL}` : cleanURL;
-    output += `<a href="${escapeHTML(href)}" target="_blank" rel="noopener noreferrer" style="color:#0369a1;text-decoration:underline;">${escapeHTML(cleanURL)}</a>${escapeHTML(trailingPunctuation)}`;
-    cursor = index + matchText.length;
-  }
-  return output + escapeHTML(value.slice(cursor));
-}
-
-function nodeReplyPlainTextToHTML(value: string): string {
-  const lines = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  return `<div style="font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;">${lines.map(linkifyNodeReplyHTMLLine).join("<br>")}</div>`;
+function unifiedRichEditorBodyToEmailHTML(value: string): string {
+  if (!value.trim()) return "";
+  const html = value.startsWith(EDITOR_RICH_TEXT_PREFIX)
+    ? value.slice(EDITOR_RICH_TEXT_PREFIX.length)
+    : linkifyEditorPlainTextToHTML(value);
+  return sanitizeEditorDocumentHTML(html);
 }

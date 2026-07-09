@@ -6,7 +6,7 @@ Detailed Logic Gate Kanban board behavior, including subgrouping, request card f
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: 0% (rule IDs are not mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract; Logic Gate-specific projection/persistence rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
