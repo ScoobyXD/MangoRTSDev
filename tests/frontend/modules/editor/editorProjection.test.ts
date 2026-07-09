@@ -53,8 +53,11 @@ test("parses node text block chat projection payloads", () => {
     selectionQuote: "selected text",
     selectionStart: 12,
     selectionEnd: 25,
-    attachments: [{ id: "attachment-1", name: "notes.csv", type: "text/csv", size: 42, dataURL: "data:text/csv;base64,YSxi" }],
+    attachments: [{ id: "local-draft-1", attachmentID: "attachment-1", name: "notes.csv", type: "text/csv", size: 42 }],
   });
+  assert.equal(payload.includes("attachment_id"), true);
+  assert.equal(payload.includes("data_url"), false);
+  assert.equal(payload.includes("data:text/csv"), false);
   const messages = parseEditorTextBlockChats([
     { information_id: "chat-1", type: "Text block chat", information: payload, created_timestamp: "2026-05-04T01:00:00.000Z" },
   ]);
@@ -67,7 +70,7 @@ test("parses node text block chat projection payloads", () => {
   assert.equal(messages[0].selectionEnd, 25);
   assert.equal(messages[0].authorName, "Ada");
   assert.equal(messages[0].message, "Check this section");
-  assert.deepEqual(messages[0].attachments, [{ id: "attachment-1", name: "notes.csv", type: "text/csv", size: 42, dataURL: "data:text/csv;base64,YSxi" }]);
+  assert.deepEqual(messages[0].attachments, [{ id: "attachment-1", attachmentID: "attachment-1", name: "notes.csv", type: "text/csv", size: 42, dataURL: undefined }]);
 });
 
 test("keeps legacy chat payloads valid without parent or attachments", () => {
@@ -88,6 +91,28 @@ test("keeps legacy chat payloads valid without parent or attachments", () => {
   assert.equal(messages.length, 1);
   assert.equal(messages[0].parentID, undefined);
   assert.deepEqual(messages[0].attachments, []);
+});
+
+test("parses legacy data-url chat attachments without emitting them from new builds", () => {
+  const messages = parseEditorTextBlockChats([
+    {
+      information_id: "chat-legacy-attachment",
+      type: "Text block chat",
+      information: JSON.stringify({
+        block_id: "block-1",
+        author_name: "Ada",
+        message: "Legacy attachment",
+        created_timestamp: "2026-05-04T01:00:00.000Z",
+        attachments: [
+          { id: "legacy-attachment-1", name: "notes.csv", mime_type: "text/csv", byte_size: 42, data_url: "data:text/csv;base64,YSxi" },
+        ],
+      }),
+      created_timestamp: "2026-05-04T01:00:00.000Z",
+    },
+  ]);
+
+  assert.equal(messages.length, 1);
+  assert.deepEqual(messages[0].attachments, [{ id: "legacy-attachment-1", attachmentID: undefined, name: "notes.csv", type: "text/csv", size: 42, dataURL: "data:text/csv;base64,YSxi" }]);
 });
 
 test("parses attachment-only chat payloads", () => {
@@ -117,12 +142,15 @@ test("parses titled node text block content payloads with legacy fallback", () =
   const payload = buildEditorTextBlockContentPayload({
     title: "Decision notes",
     document: "<!-- mango-editor-html-v1 --><b>Ship it</b>",
+    attachments: [{ id: "local-draft-2", attachmentID: "attachment-2", name: "diagram.png", type: "image/png", size: 128 }],
   });
+  assert.equal(payload.includes("attachment_id"), true);
+  assert.equal(payload.includes("data_url"), false);
 
   assert.deepEqual(parseEditorTextBlockContent(payload), {
     title: "Decision notes",
     document: "<!-- mango-editor-html-v1 --><b>Ship it</b>",
-    attachments: [],
+    attachments: [{ id: "attachment-2", attachmentID: "attachment-2", name: "diagram.png", type: "image/png", size: 128, dataURL: undefined }],
   });
   assert.deepEqual(parseEditorTextBlockContent("legacy text"), {
     title: "",

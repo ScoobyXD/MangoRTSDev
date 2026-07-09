@@ -1,6 +1,14 @@
 import React, { useEffect } from "react";
 import type { EmailAddress, EmailMessage } from "../communications/communicationsApi";
 import type { NodeProjectionItem } from "../node-map/NodeRecordStore";
+import {
+  uploadMangoAttachment,
+  type AttachmentRequestJSON,
+  type MangoAttachmentRelationshipKind,
+  type MangoAttachmentResourceType,
+  type MangoAttachmentSourceKind,
+  type MangoAttachmentUploadResponse,
+} from "../attachments/attachmentApi";
 import type { MentionableCompanyUser } from "./editorMentions";
 import type { EditorChatAttachment, EditorTextBlockChatMessage } from "./editorProjection";
 import { generateStableInformationID } from "./editorTypes";
@@ -229,6 +237,44 @@ export function readChatAttachment(file: File): Promise<EditorChatAttachment> {
   });
 }
 
+export type UploadEditorAttachmentOptions = {
+  requestJSON: AttachmentRequestJSON;
+  companyID: string;
+  resourceType: MangoAttachmentResourceType;
+  resourceID: string;
+  sourceKind: MangoAttachmentSourceKind;
+  relationshipKind: MangoAttachmentRelationshipKind;
+  informationID?: string;
+  messageID?: string;
+  editorSurface?: string;
+};
+
+export async function uploadEditorAttachment(file: File, options: UploadEditorAttachmentOptions): Promise<EditorChatAttachment> {
+  const uploaded = await uploadMangoAttachment(options.requestJSON, {
+    companyID: options.companyID,
+    resourceType: options.resourceType,
+    resourceID: options.resourceID,
+    file,
+    sourceKind: options.sourceKind,
+    relationshipKind: options.relationshipKind,
+    informationID: options.informationID,
+    messageID: options.messageID,
+    editorSurface: options.editorSurface,
+  });
+  return editorChatAttachmentFromUpload(uploaded);
+}
+
+export function editorChatAttachmentFromUpload(uploaded: MangoAttachmentUploadResponse): EditorChatAttachment {
+  const attachment = uploaded.attachment;
+  return {
+    id: attachment.attachment_id,
+    attachmentID: attachment.attachment_id,
+    name: attachment.original_filename || "attachment",
+    type: attachment.mime_type || "application/octet-stream",
+    size: attachment.byte_size,
+  };
+}
+
 export function imageFilesFromTransfer(dataTransfer: DataTransfer): File[] {
   const files: File[] = [];
   for (const file of Array.from(dataTransfer.files)) {
@@ -244,7 +290,7 @@ export function imageFilesFromTransfer(dataTransfer: DataTransfer): File[] {
 }
 
 export function isImageAttachment(attachment: EditorChatAttachment): boolean {
-  return attachment.type.startsWith("image/") && Boolean(attachment.dataURL?.startsWith("data:image/"));
+  return attachment.type.startsWith("image/") && Boolean(attachment.attachmentID || attachment.dataURL?.startsWith("data:image/"));
 }
 
 export function clampChatPaneHeight(value: number): number {

@@ -17,6 +17,7 @@ export type EditorTextBlockProjection<T extends EditorProjectionItem = EditorPro
 
 export type EditorChatAttachment = {
   id: string;
+  attachmentID?: string;
   name: string;
   type: string;
   size: number;
@@ -139,13 +140,7 @@ export function buildEditorTextBlockChatPayload(input: {
     author_name: input.authorName,
     message: input.message,
     created_timestamp: input.createdTimestamp,
-    attachments: normalizeChatAttachments(input.attachments ?? []).map((attachment) => ({
-      id: attachment.id,
-      name: attachment.name,
-      type: attachment.type,
-      size: attachment.size,
-      data_url: attachment.dataURL ?? "",
-    })),
+    attachments: normalizeChatAttachments(input.attachments ?? []).map(editorAttachmentReferencePayload),
   });
 }
 
@@ -191,13 +186,7 @@ export function buildEditorTextBlockContentPayload(input: EditorTextBlockContent
   return `${EDITOR_TEXT_BLOCK_CONTENT_PREFIX}${JSON.stringify({
     title,
     document,
-    attachments: attachments.map((attachment) => ({
-      id: attachment.id,
-      name: attachment.name,
-      type: attachment.type,
-      size: attachment.size,
-      data_url: attachment.dataURL ?? "",
-    })),
+    attachments: attachments.map(editorAttachmentReferencePayload),
   })}`;
 }
 
@@ -233,6 +222,7 @@ function normalizeChatAttachments(items: EditorChatAttachment[]): EditorChatAtta
   return items
     .map((item) => ({
       id: item.id.trim(),
+      attachmentID: item.attachmentID?.trim() || undefined,
       name: item.name.trim(),
       type: item.type.trim(),
       size: Number.isFinite(item.size) && item.size > 0 ? Math.round(item.size) : 0,
@@ -241,24 +231,51 @@ function normalizeChatAttachments(items: EditorChatAttachment[]): EditorChatAtta
     .filter((item) => item.id && item.name);
 }
 
+function editorAttachmentReferencePayload(attachment: EditorChatAttachment): Record<string, unknown> {
+  const attachmentID = attachment.attachmentID?.trim() || attachment.id.trim();
+  return {
+    id: attachmentID,
+    attachment_id: attachmentID,
+    name: attachment.name,
+    filename: attachment.name,
+    type: attachment.type,
+    mime_type: attachment.type,
+    size: attachment.size,
+    byte_size: attachment.size,
+  };
+}
+
 function parseEditorChatAttachments(value: unknown): EditorChatAttachment[] {
   if (!Array.isArray(value)) return [];
   const attachments: EditorChatAttachment[] = [];
   for (const raw of value) {
     if (!raw || typeof raw !== "object") continue;
     const record = raw as Record<string, unknown>;
-    const id = typeof record.id === "string" ? record.id.trim() : "";
-    const name = typeof record.name === "string" ? record.name.trim() : "";
+    const attachmentID = typeof record.attachment_id === "string"
+      ? record.attachment_id.trim()
+      : typeof record.attachmentID === "string"
+        ? record.attachmentID.trim()
+        : "";
+    const id = typeof record.id === "string" && record.id.trim() ? record.id.trim() : attachmentID;
+    const name = typeof record.name === "string" && record.name.trim()
+      ? record.name.trim()
+      : typeof record.filename === "string"
+        ? record.filename.trim()
+        : "";
     if (!id || !name) continue;
-    const type = typeof record.type === "string" ? record.type.trim() : "";
-    const rawSize = record.size;
+    const type = typeof record.type === "string" && record.type.trim()
+      ? record.type.trim()
+      : typeof record.mime_type === "string"
+        ? record.mime_type.trim()
+        : "";
+    const rawSize = typeof record.size === "number" ? record.size : record.byte_size;
     const size = typeof rawSize === "number" && Number.isFinite(rawSize) && rawSize > 0 ? Math.round(rawSize) : 0;
     const dataURL = typeof record.data_url === "string"
       ? record.data_url.trim()
       : typeof record.dataURL === "string"
         ? record.dataURL.trim()
         : "";
-    attachments.push({ id, name, type, size, dataURL: dataURL || undefined });
+    attachments.push({ id, attachmentID: attachmentID || undefined, name, type, size, dataURL: dataURL || undefined });
   }
   return attachments;
 }

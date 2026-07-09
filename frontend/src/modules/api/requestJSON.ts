@@ -71,10 +71,11 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
   const method = (requestInit.method ?? "GET").toUpperCase();
   const headers = new Headers(requestInit.headers);
   let body = requestInit.body;
+  const isFormDataBody = typeof FormData !== "undefined" && body instanceof FormData;
   if (json !== undefined) {
     body = JSON.stringify(json);
     if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  } else if (body != null && !headers.has("Content-Type")) {
+  } else if (body != null && !headers.has("Content-Type") && !isFormDataBody) {
     headers.set("Content-Type", "application/json");
   }
   if (!headers.has("Accept")) headers.set("Accept", "application/json");

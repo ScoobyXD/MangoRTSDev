@@ -18,6 +18,7 @@ import {
   type ProjectRecord,
   type ProjectRelationshipProjection,
 } from "../project-management/projectManagementApi";
+import { fileFromDataURL } from "../attachments/attachmentApi";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockContentPayload,
@@ -77,8 +78,8 @@ import {
   parseDraggedEmail,
   PlusIcon,
   projectionsKey,
-  readChatAttachment,
   TableIcon,
+  uploadEditorAttachment,
   type NodeWorkspaceSurfaceProps,
   type TextBlockImageDraft,
   type TextBlockSelectionAnchor,
@@ -1017,12 +1018,21 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     if (accepted.length === 0) return;
     try {
-      const attachments = await Promise.all(accepted.map(readChatAttachment));
+      const attachments = await Promise.all(accepted.map((file) => uploadEditorAttachment(file, {
+        requestJSON,
+        companyID,
+        resourceType: "node",
+        resourceID: nodeID,
+        sourceKind: "user_upload",
+        relationshipKind: "file_attachment",
+        informationID: blockID,
+        editorSurface: "node_text_block",
+      })));
       updateTextBlockContent(blockID, { attachments: [...existingAttachments, ...attachments] });
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "failed_to_read_attachment");
+      onError(cause instanceof Error ? cause.message : "failed_to_upload_attachment");
     }
-  }, [canEdit, onError, updateTextBlockContent]);
+  }, [canEdit, companyID, nodeID, onError, requestJSON, updateTextBlockContent]);
 
   const deleteTextBlock = useCallback(async (blockID: string) => {
     if (!canEdit) return;
@@ -1317,15 +1327,24 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     if (accepted.length === 0) return;
     try {
-      const attachments = await Promise.all(accepted.map(readChatAttachment));
+      const attachments = await Promise.all(accepted.map((file) => uploadEditorAttachment(file, {
+        requestJSON,
+        companyID,
+        resourceType: "node",
+        resourceID: nodeID,
+        sourceKind: "chat_upload",
+        relationshipKind: "chat_attachment",
+        informationID: blockID,
+        editorSurface: "node_text_block_chat",
+      })));
       setChatDraftAttachments((current) => ({
         ...current,
         [blockID]: [...(current[blockID] ?? []), ...attachments],
       }));
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "failed_to_read_attachment");
+      onError(cause instanceof Error ? cause.message : "failed_to_upload_attachment");
     }
-  }, [canEdit, chatDraftAttachments, onError]);
+  }, [canEdit, chatDraftAttachments, companyID, nodeID, onError, requestJSON]);
 
   const removeChatDraftAttachment = useCallback((blockID: string, attachmentID: string) => {
     if (!canEdit) return;
@@ -1340,15 +1359,29 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [canEdit]);
 
-  const addImageChatComment = useCallback((image: TextBlockImageDraft) => {
+  const addImageChatComment = useCallback(async (image: TextBlockImageDraft) => {
     if (!canEdit) return;
-    const attachment: EditorChatAttachment = {
-      id: generateStableInformationID(),
-      name: "selected-image.png",
-      type: image.mimeType || "image/png",
-      size: image.size,
-      dataURL: image.dataURL,
-    };
+    const file = fileFromDataURL(image.dataURL, "selected-image.png");
+    if (!file) {
+      onError("failed_to_prepare_attachment");
+      return;
+    }
+    let attachment: EditorChatAttachment;
+    try {
+      attachment = await uploadEditorAttachment(file, {
+        requestJSON,
+        companyID,
+        resourceType: "node",
+        resourceID: nodeID,
+        sourceKind: "chat_upload",
+        relationshipKind: "chat_attachment",
+        informationID: image.blockID,
+        editorSurface: "node_text_block_image_chat",
+      });
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_upload_attachment");
+      return;
+    }
     setFocusedTextBlockID("");
     setClosedChatBlockIDs((current) => {
       if (!current.has(image.blockID)) return current;
@@ -1373,7 +1406,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       ...current,
       [image.blockID]: [...(current[image.blockID] ?? []), attachment],
     }));
-  }, [canEdit]);
+  }, [canEdit, companyID, nodeID, onError, requestJSON]);
 
   const createNodeFromImage = useCallback(async (image: TextBlockImageDraft) => {
     if (!canEdit) return;
@@ -2633,6 +2666,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   <ChatPane
                     blockID={block.id}
                     editable={canEdit}
+                    apiBase={apiBase}
+                    companyID={companyID}
                     messages={messages}
                     selectionAnchor={selectionAnchor}
                     draft={chatDrafts[block.id] ?? ""}

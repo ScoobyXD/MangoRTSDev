@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
+import { downloadMangoAttachment, loadMangoAttachmentObjectURL, type MangoAttachmentVariantType } from "../attachments/attachmentApi";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
@@ -544,24 +545,88 @@ function copyImageAttachmentToClipboard(attachment: EditorChatAttachment, clipbo
   return wroteEventClipboard || wroteSystemClipboard;
 }
 
-function downloadChatAttachment(attachment: EditorChatAttachment): boolean {
-  if (!attachment.dataURL || typeof document === "undefined") return false;
-  const link = document.createElement("a");
-  link.href = attachment.dataURL;
-  link.download = attachment.name.trim() || "attachment";
-  link.rel = "noopener noreferrer";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+function attachmentIDForContent(attachment: EditorChatAttachment): string {
+  return attachment.attachmentID?.trim() || (attachment.dataURL ? "" : attachment.id.trim());
+}
+
+function canLoadAttachmentContent(attachment: EditorChatAttachment, apiBase?: string, companyID?: string): boolean {
+  return Boolean(apiBase?.trim() && companyID?.trim() && attachmentIDForContent(attachment));
+}
+
+function useAttachmentObjectURL(
+  attachment: EditorChatAttachment,
+  apiBase: string | undefined,
+  companyID: string | undefined,
+  variant: MangoAttachmentVariantType,
+  enabled = true,
+): string {
+  const legacyDataURL = attachment.dataURL?.trim() ?? "";
+  const attachmentID = attachmentIDForContent(attachment);
+  const [objectURL, setObjectURL] = useState("");
+
+  useEffect(() => {
+    setObjectURL("");
+    if (!enabled || legacyDataURL || !apiBase?.trim() || !companyID?.trim() || !attachmentID) return undefined;
+    const controller = new AbortController();
+    let cancelled = false;
+    void loadMangoAttachmentObjectURL(apiBase, companyID, attachmentID, variant, { signal: controller.signal })
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        setObjectURL(url);
+      })
+      .catch(() => {
+        if (!cancelled) setObjectURL("");
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [apiBase, attachmentID, companyID, enabled, legacyDataURL, variant]);
+
+  useEffect(() => () => {
+    if (objectURL) URL.revokeObjectURL(objectURL);
+  }, [objectURL]);
+
+  return enabled ? legacyDataURL || objectURL : "";
+}
+
+async function downloadChatAttachment(attachment: EditorChatAttachment, apiBase?: string, companyID?: string): Promise<boolean> {
+  if (attachment.dataURL && typeof document !== "undefined") {
+    const link = document.createElement("a");
+    link.href = attachment.dataURL;
+    link.download = attachment.name.trim() || "attachment";
+    link.rel = "noopener noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    return true;
+  }
+  const attachmentID = attachmentIDForContent(attachment);
+  if (!apiBase?.trim() || !companyID?.trim() || !attachmentID) return false;
+  await downloadMangoAttachment({
+    apiBase,
+    companyID,
+    attachmentID,
+    filename: attachment.name,
+  });
   return true;
 }
 
-function openChatAttachment(attachment: EditorChatAttachment, onPreviewImage: (attachment: EditorChatAttachment) => void): boolean {
+function openChatAttachment(
+  attachment: EditorChatAttachment,
+  onPreviewImage: (attachment: EditorChatAttachment) => void,
+  apiBase?: string,
+  companyID?: string,
+): boolean {
   if (isImageAttachment(attachment)) {
     onPreviewImage(attachment);
     return true;
   }
-  return downloadChatAttachment(attachment);
+  void downloadChatAttachment(attachment, apiBase, companyID).catch(() => undefined);
+  return Boolean(attachment.dataURL || canLoadAttachmentContent(attachment, apiBase, companyID));
 }
 
 function readImageDraftFromFrame(blockID: string, frame: HTMLElement, wrapper: HTMLElement): TextBlockImageDraft | null {
@@ -1426,6 +1491,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
 type ChatPaneProps = {
   blockID: string;
   editable: boolean;
+  apiBase?: string;
+  companyID?: string;
   messages: EditorTextBlockChatMessage[];
   emailPane?: React.ReactNode;
   activeTab?: "chat" | "email";
@@ -1463,6 +1530,8 @@ const CHAT_COMPOSER_PANE_HEIGHT_RESERVE = 116;
 export const ChatPane: React.FC<ChatPaneProps> = ({
   blockID,
   editable,
+  apiBase,
+  companyID,
   messages,
   emailPane,
   activeTab = "chat",
@@ -1763,6 +1832,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   node={thread}
                   depth={0}
                   isLastSibling={false}
+                  apiBase={apiBase}
+                  companyID={companyID}
                   currentUserID={currentUserID}
                   editable={editable}
                   activeMessageID={activeMessageID}
@@ -1798,6 +1869,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           {draftAttachments.length > 0 && (
             <DraftAttachmentList
               attachments={draftAttachments}
+              apiBase={apiBase}
+              companyID={companyID}
               surfaceText={surfaceText}
               strokeColor={strokeColor}
               onRemove={onRemoveDraftAttachment}
@@ -2006,6 +2079,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       {previewAttachment && (
         <ImageAttachmentPreviewModal
           attachment={previewAttachment}
+          apiBase={apiBase}
+          companyID={companyID}
           surfaceText={surfaceText}
           strokeColor={strokeColor}
           onClose={() => setPreviewAttachment(null)}
@@ -2019,6 +2094,8 @@ type ChatThreadItemProps = {
   node: ChatThreadNode;
   depth: number;
   isLastSibling: boolean;
+  apiBase?: string;
+  companyID?: string;
   currentUserID: string;
   editable: boolean;
   activeMessageID: string;
@@ -2054,7 +2131,7 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
   );
 };
 
-const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, currentUserID, editable, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onDelete, onPreviewImage }) => {
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, apiBase, companyID, currentUserID, editable, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onDelete, onPreviewImage }) => {
   const { message, children } = node;
   const hasChildren = children.length > 0;
   const collapsed = collapsedThreadIDs.has(message.id);
@@ -2135,7 +2212,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
           <span style={{ opacity: 0.58, flex: "0 0 auto" }}>{formatTimestamp(message.createdTimestamp)}</span>
         </div>
         {message.message && <MentionHighlightedText text={message.message} users={companyUsers} color={surfaceText} />}
-        {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
+        {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} apiBase={apiBase} companyID={companyID} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
         <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {editable && (
             <button type="button" onClick={(event) => { event.stopPropagation(); onReply(message.id); }} style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: accent, cursor: "pointer", fontSize: 10, fontWeight: 800, letterSpacing: 0, padding: "2px 0" }}>
@@ -2179,6 +2256,8 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               node={child}
               depth={depth + 1}
               isLastSibling={childIndex === children.length - 1}
+              apiBase={apiBase}
+              companyID={companyID}
               currentUserID={currentUserID}
               editable={editable}
               activeMessageID={activeMessageID}
@@ -2203,12 +2282,14 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
 
 type ChatAttachmentListProps = {
   attachments: EditorChatAttachment[];
+  apiBase?: string;
+  companyID?: string;
   surfaceText: string;
   strokeColor: string;
   onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, surfaceText, strokeColor, onPreviewImage }) => {
+const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, apiBase, companyID, surfaceText, strokeColor, onPreviewImage }) => {
   const [selectedAttachmentID, setSelectedAttachmentID] = useState("");
 
   useEffect(() => {
@@ -2225,7 +2306,7 @@ const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, su
 
   const openAttachment = (event: React.MouseEvent, attachment: EditorChatAttachment) => {
     selectAttachment(event, attachment.id);
-    openChatAttachment(attachment, onPreviewImage);
+    openChatAttachment(attachment, onPreviewImage, apiBase, companyID);
   };
 
   return (
@@ -2257,7 +2338,7 @@ const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, su
             type="button"
             data-mango-copyable-image={isImageAttachment(attachment) ? "true" : undefined}
             aria-pressed={selected}
-            title={isImageAttachment(attachment) ? "Double-click to preview" : attachment.dataURL ? "Double-click to download" : attachment.name}
+            title={isImageAttachment(attachment) ? "Double-click to preview" : attachment.dataURL || canLoadAttachmentContent(attachment, apiBase, companyID) ? "Double-click to download" : attachment.name}
             onCopy={(event) => {
               if (!copyImageAttachmentToClipboard(attachment, event.clipboardData)) return;
               event.preventDefault();
@@ -2272,7 +2353,7 @@ const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, su
             onDoubleClick={(event) => openAttachment(event, attachment)}
             style={style}
           >
-            <AttachmentThumb attachment={attachment} />
+            <AttachmentThumb attachment={attachment} apiBase={apiBase} companyID={companyID} />
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
             <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
           </button>
@@ -2284,13 +2365,15 @@ const ChatAttachmentList: React.FC<ChatAttachmentListProps> = ({ attachments, su
 
 type DraftAttachmentListProps = {
   attachments: EditorChatAttachment[];
+  apiBase?: string;
+  companyID?: string;
   surfaceText: string;
   strokeColor: string;
   onRemove: (attachmentID: string) => void;
   onPreviewImage: (attachment: EditorChatAttachment) => void;
 };
 
-const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, surfaceText, strokeColor, onRemove, onPreviewImage }) => {
+const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, apiBase, companyID, surfaceText, strokeColor, onRemove, onPreviewImage }) => {
   const [selectedAttachmentID, setSelectedAttachmentID] = useState("");
 
   useEffect(() => {
@@ -2307,7 +2390,7 @@ const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, 
 
   const openAttachment = (event: React.MouseEvent, attachment: EditorChatAttachment) => {
     selectAttachment(event, attachment.id);
-    openChatAttachment(attachment, onPreviewImage);
+    openChatAttachment(attachment, onPreviewImage, apiBase, companyID);
   };
 
   return (
@@ -2320,7 +2403,7 @@ const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, 
             role="button"
             tabIndex={0}
             aria-pressed={selected}
-            title={isImageAttachment(attachment) ? "Double-click to preview" : attachment.dataURL ? "Double-click to download" : attachment.name}
+            title={isImageAttachment(attachment) ? "Double-click to preview" : attachment.dataURL || canLoadAttachmentContent(attachment, apiBase, companyID) ? "Double-click to download" : attachment.name}
             onClick={(event) => selectAttachment(event, attachment.id)}
             onDoubleClick={(event) => openAttachment(event, attachment)}
             onKeyDown={(event) => {
@@ -2364,7 +2447,7 @@ const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, 
               onDoubleClick={(event) => openAttachment(event, attachment)}
               style={{ width: 24, height: 24, border: "none", background: "transparent", padding: 0, cursor: "pointer" }}
             >
-              <AttachmentThumb attachment={attachment} />
+              <AttachmentThumb attachment={attachment} apiBase={apiBase} companyID={companyID} />
             </button>
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</span>
             <span style={{ flex: "0 0 auto", opacity: 0.58 }}>{formatFileSize(attachment.size)}</span>
@@ -2387,9 +2470,18 @@ const DraftAttachmentList: React.FC<DraftAttachmentListProps> = ({ attachments, 
   );
 };
 
-const AttachmentThumb: React.FC<{ attachment: EditorChatAttachment }> = ({ attachment }) => {
-  if (isImageAttachment(attachment)) {
-    return <img alt="" src={attachment.dataURL} style={{ width: 24, height: 24, borderRadius: 4, objectFit: "cover", display: "block", border: "1px solid rgba(17,17,17,0.12)" }} />;
+const AttachmentThumb: React.FC<{ attachment: EditorChatAttachment; apiBase?: string; companyID?: string }> = ({ attachment, apiBase, companyID }) => {
+  const image = isImageAttachment(attachment);
+  const src = useAttachmentObjectURL(attachment, apiBase, companyID, "thumbnail", image);
+  if (image) {
+    if (src) {
+      return <img alt="" src={src} style={{ width: 24, height: 24, borderRadius: 4, objectFit: "cover", display: "block", border: "1px solid rgba(17,17,17,0.12)" }} />;
+    }
+    return (
+      <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 4, border: "1px solid rgba(17,17,17,0.14)", background: "rgba(92,238,255,0.10)", display: "grid", placeItems: "center", color: "rgba(15,23,42,0.78)", fontSize: 8, fontWeight: 900 }}>
+        IMG
+      </span>
+    );
   }
   return (
     <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 4, border: "1px solid rgba(17,17,17,0.14)", background: "rgba(100,116,139,0.10)", display: "grid", placeItems: "center", color: "rgba(15,23,42,0.78)", fontSize: 8, fontWeight: 900 }}>
@@ -2400,12 +2492,15 @@ const AttachmentThumb: React.FC<{ attachment: EditorChatAttachment }> = ({ attac
 
 type ImageAttachmentPreviewModalProps = {
   attachment: EditorChatAttachment;
+  apiBase?: string;
+  companyID?: string;
   surfaceText: string;
   strokeColor: string;
   onClose: () => void;
 };
 
-const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = ({ attachment, surfaceText, strokeColor, onClose }) => {
+const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = ({ attachment, apiBase, companyID, surfaceText, strokeColor, onClose }) => {
+  const src = useAttachmentObjectURL(attachment, apiBase, companyID, "original");
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -2450,7 +2545,13 @@ const ImageAttachmentPreviewModal: React.FC<ImageAttachmentPreviewModalProps> = 
           </button>
         </div>
         <div style={{ minHeight: 0, overflow: "auto", display: "grid", placeItems: "center", background: "#111827", padding: 10 }}>
-          <img alt={attachment.name} src={attachment.dataURL} style={{ maxWidth: "100%", maxHeight: "78vh", objectFit: "contain", display: "block" }} />
+          {src ? (
+            <img alt={attachment.name} src={src} style={{ maxWidth: "100%", maxHeight: "78vh", objectFit: "contain", display: "block" }} />
+          ) : (
+            <div style={{ minHeight: 180, display: "grid", placeItems: "center", color: "#ffffff", fontSize: 12, fontWeight: 800 }}>
+              Preview unavailable
+            </div>
+          )}
         </div>
       </div>
     </div>
