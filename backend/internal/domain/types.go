@@ -221,6 +221,54 @@ type EffectiveResourceAccess struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type Attachment struct {
+	CompanyID        string               `json:"company_id"`
+	AttachmentID     string               `json:"attachment_id"`
+	UploadedByUserID string               `json:"uploaded_by_user_id,omitempty"`
+	OriginalFilename string               `json:"original_filename"`
+	MimeType         string               `json:"mime_type"`
+	ByteSize         int64                `json:"byte_size"`
+	SHA256           string               `json:"sha256"`
+	StorageBucket    string               `json:"storage_bucket"`
+	StorageKey       string               `json:"storage_key"`
+	OriginalWidth    *int                 `json:"original_width,omitempty"`
+	OriginalHeight   *int                 `json:"original_height,omitempty"`
+	SourceKind       string               `json:"source_kind"`
+	SourceProvider   string               `json:"source_provider,omitempty"`
+	CreatedTimestamp time.Time            `json:"created_timestamp"`
+	DeletedTimestamp *time.Time           `json:"deleted_timestamp,omitempty"`
+	Variants         []AttachmentVariant  `json:"variants,omitempty"`
+	ResourceLinks    []ResourceAttachment `json:"resource_links,omitempty"`
+}
+
+type AttachmentVariant struct {
+	AttachmentID     string    `json:"attachment_id"`
+	VariantType      string    `json:"variant_type"`
+	MimeType         string    `json:"mime_type"`
+	ByteSize         int64     `json:"byte_size"`
+	Width            *int      `json:"width,omitempty"`
+	Height           *int      `json:"height,omitempty"`
+	StorageBucket    string    `json:"storage_bucket"`
+	StorageKey       string    `json:"storage_key"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+}
+
+type ResourceAttachment struct {
+	ResourceAttachmentID string      `json:"resource_attachment_id"`
+	CompanyID            string      `json:"company_id"`
+	ResourceType         string      `json:"resource_type"`
+	ResourceID           string      `json:"resource_id"`
+	AttachmentID         string      `json:"attachment_id"`
+	InformationID        string      `json:"information_id,omitempty"`
+	MessageID            string      `json:"message_id,omitempty"`
+	EditorSurface        string      `json:"editor_surface,omitempty"`
+	RelationshipKind     string      `json:"relationship_kind"`
+	CreatedByUserID      string      `json:"created_by_user_id,omitempty"`
+	CreatedTimestamp     time.Time   `json:"created_timestamp"`
+	DeletedTimestamp     *time.Time  `json:"deleted_timestamp,omitempty"`
+	Attachment           *Attachment `json:"attachment,omitempty"`
+}
+
 type Invitation struct {
 	InvitationID       string     `json:"invitation_id"`
 	CompanyID          string     `json:"company_id"`

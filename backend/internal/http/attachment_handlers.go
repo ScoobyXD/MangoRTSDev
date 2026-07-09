@@ -1,0 +1,489 @@
+package httpapi
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"io"
+	"mime"
+	"miraeopus/backend/internal/domain"
+	"miraeopus/backend/internal/store"
+	"net/http"
+	"strconv"
+	"strings"
+)
+
+const attachmentMultipartMaxMemory = 32 << 20
+
+type attachmentUploadResponse struct {
+	Attachment         domain.Attachment         `json:"attachment"`
+	ResourceAttachment domain.ResourceAttachment `json:"resource_attachment"`
+}
+
+type attachmentResourceLinkRequest struct {
+	CompanyID        string `json:"company_id"`
+	AttachmentID     string `json:"attachment_id"`
+	InformationID    string `json:"information_id"`
+	MessageID        string `json:"message_id"`
+	EditorSurface    string `json:"editor_surface"`
+	RelationshipKind string `json:"relationship_kind"`
+}
+
+func (s *Server) handleAttachments(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/v1/attachments" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	s.handleAttachmentUpload(w, r)
+}
+
+func (s *Server) handleAttachmentByID(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/attachments/"), "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	attachmentID := strings.TrimSpace(parts[0])
+	if len(parts) == 1 && r.Method == http.MethodGet {
+		s.handleAttachmentMetadata(w, r, attachmentID)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "content" && r.Method == http.MethodGet {
+		s.handleAttachmentContent(w, r, attachmentID)
+		return
+	}
+	writeError(w, http.StatusNotFound, "not_found")
+}
+
+func (s *Server) handleAttachmentUpload(w http.ResponseWriter, r *http.Request) {
+	if s.attachmentStorage == nil {
+		writeError(w, http.StatusServiceUnavailable, "attachment_storage_unavailable")
+		return
+	}
+	if err := r.ParseMultipartForm(attachmentMultipartMaxMemory); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_multipart_upload")
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	companyID := strings.TrimSpace(r.FormValue("company_id"))
+	resourceType := store.NormalizeAttachmentResourceType(r.FormValue("resource_type"))
+	resourceID := strings.TrimSpace(r.FormValue("resource_id"))
+	if companyID == "" || resourceType == "" || resourceID == "" {
+		writeError(w, http.StatusBadRequest, "attachment_resource_context_required")
+		return
+	}
+	if !s.requireAttachmentResourceEdit(w, r, companyID, resourceType, resourceID) {
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "file_required")
+		return
+	}
+	defer file.Close()
+	body, err := io.ReadAll(file)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed_to_read_upload")
+		return
+	}
+	attachmentID := store.NewUUIDv7String()
+	storageKey := attachmentOriginalObjectKey(companyID, attachmentID)
+	mimeType := strings.TrimSpace(header.Header.Get("Content-Type"))
+	if mimeType == "" {
+		mimeType = http.DetectContentType(body)
+	}
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	if err := s.attachmentStorage.PutObject(r.Context(), AttachmentPutObjectInput{
+		Key:         storageKey,
+		ContentType: mimeType,
+		Body:        body,
+	}); err != nil {
+		writeAttachmentStorageError(w, err)
+		return
+	}
+	actorUserID := ""
+	if actor, ok := authenticatedActor(r); ok {
+		actorUserID = strings.TrimSpace(actor.User.UserID)
+	}
+	width, ok := optionalPositiveIntFormValue(w, r, "original_width")
+	if !ok {
+		return
+	}
+	height, ok := optionalPositiveIntFormValue(w, r, "original_height")
+	if !ok {
+		return
+	}
+	sum := sha256.Sum256(body)
+	attachment, link, err := s.repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
+		CompanyID:        companyID,
+		AttachmentID:     attachmentID,
+		UploadedByUserID: actorUserID,
+		OriginalFilename: attachmentFilename(header.Filename),
+		MimeType:         mimeType,
+		ByteSize:         int64(len(body)),
+		SHA256:           hex.EncodeToString(sum[:]),
+		StorageBucket:    s.attachmentStorage.Bucket(),
+		StorageKey:       storageKey,
+		OriginalWidth:    width,
+		OriginalHeight:   height,
+		SourceKind:       r.FormValue("source_kind"),
+		SourceProvider:   r.FormValue("source_provider"),
+		ResourceLink: store.ResourceAttachmentInput{
+			CompanyID:        companyID,
+			ResourceType:     resourceType,
+			ResourceID:       resourceID,
+			InformationID:    r.FormValue("information_id"),
+			MessageID:        r.FormValue("message_id"),
+			EditorSurface:    r.FormValue("editor_surface"),
+			RelationshipKind: r.FormValue("relationship_kind"),
+			CreatedByUserID:  actorUserID,
+		},
+	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_attachment")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "resource_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_create_attachment")
+		return
+	}
+	writeJSON(w, http.StatusCreated, attachmentUploadResponse{Attachment: attachment, ResourceAttachment: link})
+}
+
+func (s *Server) handleAttachmentMetadata(w http.ResponseWriter, r *http.Request, attachmentID string) {
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	attachment, err := s.repo.GetAttachment(companyID, attachmentID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_attachment")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_attachment")
+		return
+	}
+	if !s.canReadAttachmentThroughResourceLink(w, r, companyID, attachment.AttachmentID) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"attachment": attachment})
+}
+
+func (s *Server) handleAttachmentContent(w http.ResponseWriter, r *http.Request, attachmentID string) {
+	if s.attachmentStorage == nil {
+		writeError(w, http.StatusServiceUnavailable, "attachment_storage_unavailable")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	variantType := store.NormalizeAttachmentVariantType(r.URL.Query().Get("variant"))
+	if variantType == "" || variantType == store.AttachmentVariantEmailSend {
+		writeError(w, http.StatusBadRequest, "invalid_attachment_variant")
+		return
+	}
+	attachment, err := s.repo.GetAttachment(companyID, attachmentID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_attachment")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_attachment")
+		return
+	}
+	if !s.canReadAttachmentThroughResourceLink(w, r, companyID, attachment.AttachmentID) {
+		return
+	}
+	variant, err := s.repo.GetAttachmentVariant(companyID, attachment.AttachmentID, variantType)
+	if errors.Is(err, store.ErrNotFound) && variantType != store.AttachmentVariantOriginal {
+		variant, err = s.repo.GetAttachmentVariant(companyID, attachment.AttachmentID, store.AttachmentVariantOriginal)
+	}
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_attachment_variant")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "attachment_variant_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_attachment_variant")
+		return
+	}
+	output, err := s.attachmentStorage.GetObject(r.Context(), AttachmentGetObjectInput{Key: variant.StorageKey})
+	if err != nil {
+		writeAttachmentStorageError(w, err)
+		return
+	}
+	defer output.Body.Close()
+	contentType := strings.TrimSpace(output.ContentType)
+	if contentType == "" {
+		contentType = variant.MimeType
+	}
+	if contentType == "" {
+		contentType = attachment.MimeType
+	}
+	w.Header().Set("Content-Type", contentType)
+	if variant.ByteSize >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(variant.ByteSize, 10))
+	}
+	if attachment.OriginalFilename != "" {
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": attachment.OriginalFilename}))
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, output.Body)
+}
+
+func (s *Server) handleResourceAttachments(w http.ResponseWriter, r *http.Request, resourceType, resourceID string, parts []string) {
+	if len(parts) == 3 && parts[2] == "attachments" {
+		switch r.Method {
+		case http.MethodGet:
+			s.handleResourceAttachmentList(w, r, resourceType, resourceID)
+		case http.MethodPost:
+			s.handleResourceAttachmentLink(w, r, resourceType, resourceID)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		}
+		return
+	}
+	if len(parts) == 4 && parts[2] == "attachments" && r.Method == http.MethodDelete {
+		s.handleResourceAttachmentUnlink(w, r, resourceType, resourceID, parts[3])
+		return
+	}
+	writeError(w, http.StatusNotFound, "not_found")
+}
+
+func (s *Server) handleResourceAttachmentList(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) {
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	if !s.requireAttachmentResourceView(w, r, companyID, resourceType, resourceID) {
+		return
+	}
+	items, err := s.repo.ListResourceAttachments(companyID, resourceType, resourceID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_attachment_resource")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_list_resource_attachments")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"company_id": companyID, "resource_type": resourceType, "resource_id": resourceID, "attachments": items})
+}
+
+func (s *Server) handleResourceAttachmentLink(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) {
+	var req attachmentResourceLinkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.CompanyID = strings.TrimSpace(req.CompanyID)
+	if req.CompanyID == "" || strings.TrimSpace(req.AttachmentID) == "" {
+		writeError(w, http.StatusBadRequest, "attachment_resource_context_required")
+		return
+	}
+	if !s.requireAttachmentResourceEdit(w, r, req.CompanyID, resourceType, resourceID) {
+		return
+	}
+	actorUserID := ""
+	if actor, ok := authenticatedActor(r); ok {
+		actorUserID = strings.TrimSpace(actor.User.UserID)
+	}
+	link, err := s.repo.LinkResourceAttachment(store.ResourceAttachmentInput{
+		CompanyID:        req.CompanyID,
+		ResourceType:     resourceType,
+		ResourceID:       resourceID,
+		AttachmentID:     req.AttachmentID,
+		InformationID:    req.InformationID,
+		MessageID:        req.MessageID,
+		EditorSurface:    req.EditorSurface,
+		RelationshipKind: req.RelationshipKind,
+		CreatedByUserID:  actorUserID,
+	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_attachment_link")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "attachment_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_link_attachment")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"resource_attachment": link})
+}
+
+func (s *Server) handleResourceAttachmentUnlink(w http.ResponseWriter, r *http.Request, resourceType, resourceID, attachmentID string) {
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	if !s.requireAttachmentResourceEdit(w, r, companyID, resourceType, resourceID) {
+		return
+	}
+	err := s.repo.SoftDeleteResourceAttachment(store.ResourceAttachmentDeleteInput{
+		CompanyID:    companyID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		AttachmentID: attachmentID,
+	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_attachment_link")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "attachment_link_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_unlink_attachment")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "unlinked"})
+}
+
+func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
+	entityType, ok := attachmentPermissionEntityType(resourceType)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unsupported_attachment_resource_type")
+		return false
+	}
+	return s.requireEntityView(w, r, companyID, entityType, resourceID, "resource_not_found")
+}
+
+func (s *Server) requireAttachmentResourceEdit(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
+	entityType, ok := attachmentPermissionEntityType(resourceType)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unsupported_attachment_resource_type")
+		return false
+	}
+	return s.requireEntityEdit(w, r, companyID, entityType, resourceID, "resource_not_found")
+}
+
+func (s *Server) canReadAttachmentThroughResourceLink(w http.ResponseWriter, r *http.Request, companyID, attachmentID string) bool {
+	links, err := s.repo.ListAttachmentResourceLinks(companyID, attachmentID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_attachment")
+		return false
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_attachment_links")
+		return false
+	}
+	for _, link := range links {
+		allowed, err := s.canViewAttachmentResource(r, companyID, link.ResourceType, link.ResourceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_check_attachment_permission")
+			return false
+		}
+		if allowed {
+			return true
+		}
+	}
+	writeAccessResourceNotFound(w)
+	return false
+}
+
+func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceType, resourceID string) (bool, error) {
+	userID := s.entityPermissionActorUserID(r, companyID)
+	if userID == "" {
+		return true, nil
+	}
+	entityType, ok := attachmentPermissionEntityType(resourceType)
+	if !ok {
+		return false, nil
+	}
+	return s.repo.UserHasEffectiveAccess(companyID, userID, entityType, resourceID, store.EntityPermissionView)
+}
+
+func attachmentPermissionEntityType(resourceType string) (string, bool) {
+	switch store.NormalizeAttachmentResourceType(resourceType) {
+	case "node":
+		return store.EntityTypeNode, true
+	case "logic_gate":
+		return store.EntityTypeLogicGate, true
+	case "project":
+		return store.EntityTypeProject, true
+	case "shared_inbox":
+		return store.EntityTypeSharedInbox, true
+	case "company_explorer_folder":
+		return store.EntityTypeCompanyExplorerFolder, true
+	case "shared_inbox_folder":
+		return store.EntityTypeSharedInboxFolder, true
+	default:
+		return "", false
+	}
+}
+
+func attachmentOriginalObjectKey(companyID, attachmentID string) string {
+	return "companies/" + strings.TrimSpace(companyID) + "/attachments/" + strings.TrimSpace(attachmentID) + "/original"
+}
+
+func attachmentFilename(filename string) string {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return "attachment"
+	}
+	return filename
+}
+
+func optionalPositiveIntFormValue(w http.ResponseWriter, r *http.Request, key string) (*int, bool) {
+	raw := strings.TrimSpace(r.FormValue(key))
+	if raw == "" {
+		return nil, true
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid_attachment_dimensions")
+		return nil, false
+	}
+	return &value, true
+}
+
+func writeAttachmentStorageError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrAttachmentObjectNotFound) {
+		writeError(w, http.StatusNotFound, "attachment_content_not_found")
+		return
+	}
+	if errors.Is(err, ErrAttachmentStorageUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "attachment_storage_unavailable")
+		return
+	}
+	writeError(w, http.StatusBadGateway, "attachment_storage_failed")
+}
