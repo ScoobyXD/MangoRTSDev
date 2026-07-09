@@ -771,6 +771,15 @@ Outcome:
 
 Existing bloat is removed, and new inline file-byte bloat cannot come back through normal save/send paths.
 
+Phase 3 implementation update on 2026-07-09:
+
+- Added `backend/cmd/mango-attachment-migrate` as the dry-run-first migration entry point. It emits JSON to stdout and optionally `-report`, defaults to dry run, and requires `-apply -confirm-apply=MIGRATE_INLINE_ATTACHMENTS -company-id=<uuid>` before any rewrite/upload path can run.
+- The scanner inventories `data:image/...;base64`, `data:application/...;base64`, `base64,`, durable `dataURL` / `data_url` fields, email attachment `content` fields, and very large text/JSON payloads. It proposes deterministic attachment IDs, S3 object keys, decoded byte estimates, SHA-256 values, and rewritten payload previews without including decoded bytes in the report.
+- Candidate coverage includes `node_projection_table.information`, `node_information.information`, `node_projection_seen_snapshots.information`, `node_content_changes.text`, Logic Gate projection/source information, project projection/source information, `communications_email_nodes.message`, `communications_email_node_attachments.message`, and `communications_triage_items.message`.
+- Apply mode uploads original bytes through the attachment storage backend, creates `attachments` metadata, creates `resource_attachments` links, records `attachment_migration_runs` and `attachment_migration_items`, then rewrites supported source rows. `communications_triage_items` is inventory-only until a company/resource ownership mapping is confirmed because that table does not carry `company_id`.
+- Normal backend write paths now reject durable inline file bytes for node, Logic Gate, and project information/projection saves, save-version create/restore copies, project-scoped initial editor rows, communications send bodies, and normal email attachment payloads with raw base64 content.
+- No live migration has been run as part of this implementation. Before any live dry-run/apply operation, run `python scripts/verify_agent_db_access_boundary.py` in that exact session, review the report with Jonat, and get explicit approval for any database/S3 write.
+
 ## Acceptance Criteria
 
 Global attachment system:

@@ -365,6 +365,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "information_required")
 				return
 			}
+			if rejectDurableInlineFileBytes(w, "node_projection", req.Information) {
+				return
+			}
 			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
 				return
 			}
@@ -442,6 +445,22 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
 				return
 			}
+			current, err := s.repo.ListNodeProjections(req.CompanyID, nodeID)
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "node_not_found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_load_node_projection")
+				return
+			}
+			currentPayloads := make([]string, 0, len(current))
+			for _, item := range current {
+				currentPayloads = append(currentPayloads, item.Information)
+			}
+			if rejectAnyDurableInlineFileBytes(w, "node_save_version_source", currentPayloads) {
+				return
+			}
 			actorUserID, actorLabel := nodeChangeActorPayload(r)
 			version, err := s.repo.CreateNodeEditorSaveVersion(store.EditorSaveVersionInput{
 				CompanyID:        req.CompanyID,
@@ -513,6 +532,28 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		}
 		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
 			return
+		}
+		versions, err := s.repo.ListNodeEditorSaveVersions(req.CompanyID, nodeID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "save_version_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_node_save_versions")
+			return
+		}
+		for _, candidate := range versions {
+			if candidate.SaveID != saveID {
+				continue
+			}
+			payloads := make([]string, 0, len(candidate.Items))
+			for _, item := range candidate.Items {
+				payloads = append(payloads, item.Information)
+			}
+			if rejectAnyDurableInlineFileBytes(w, "node_save_version_restore", payloads) {
+				return
+			}
+			break
 		}
 		actorUserID, actorLabel := nodeChangeActorPayload(r)
 		version, err := s.repo.RestoreNodeEditorSaveVersion(store.EditorSaveVersionRestoreInput{
@@ -601,6 +642,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			// UI clients and future headless agents share this endpoint. Guarding here keeps
 			// blank editor blurs from creating hot-path history/projection noise in Postgres.
 			writeError(w, http.StatusBadRequest, "information_required")
+			return
+		}
+		if rejectDurableInlineFileBytes(w, "node_information", req.Information) {
 			return
 		}
 		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {

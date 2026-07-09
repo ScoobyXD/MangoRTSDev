@@ -4,7 +4,7 @@ Last updated: 2026-07-09
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/api/requestJSON.test.ts` covers multipart upload request headers; `tests/frontend/modules/editor/editorProjection.test.ts` covers attachment-reference serialization for editor text-block/chat payloads and legacy data-url parsing without emitting new durable data URLs; `tests/frontend/modules/editor/richTextEditing.test.ts` covers the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers email compose payloads sending Mango attachment references without durable `content`; `backend/internal/http/attachment_handlers_test.go` covers attachment metadata/resource links, content permission checks, and `email_draft`/`attached_email` resource authorization; `backend/internal/http/communications_handlers_test.go` covers email send-time S3 resolution into provider payloads and rejection of raw attachment content)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/api/requestJSON.test.ts` covers multipart upload request headers; `tests/frontend/modules/editor/editorProjection.test.ts` covers attachment-reference serialization for editor text-block/chat payloads and legacy data-url parsing without emitting new durable data URLs; `tests/frontend/modules/editor/richTextEditing.test.ts` covers the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers email compose payloads sending Mango attachment references without durable `content`; `backend/internal/http/attachment_handlers_test.go` covers attachment metadata/resource links, content permission checks, and `email_draft`/`attached_email` resource authorization; `backend/internal/http/communications_handlers_test.go` covers email send-time S3 resolution into provider payloads, rejection of raw attachment content, and rejection of inline data URL send bodies; `backend/internal/http/durable_inline_guard_test.go` covers backend durable-inline-byte guard shapes; `backend/internal/attachments/migration/scanner_test.go` covers scanner rewrite/idempotency/signals; `backend/cmd/mango-attachment-migrate/main_test.go` covers dry-run report mapping and apply confirmation)
 
 ## Business Logic
 
@@ -145,6 +145,9 @@ Given:
 
 Expected:
 - The migration dry run reports affected rows, decoded byte estimates, parent resources, and proposed attachment IDs before writing.
-- The migration is resumable and records old-to-new mappings.
+- The migration dry run inventories node projection/source/history rows, Logic Gate projection/source rows, project projection/source rows, communications email node JSON, attached-email JSON, triage message JSON, and large chat/message projection payloads where they live in those durable text/JSON rows.
+- Apply mode is disabled unless explicitly requested with the apply flag, confirmation string, and company scope.
+- The migration is resumable, idempotent, and records old-to-new mappings in migration run/item tables.
 - Migrated content contains attachment references and no durable inline file bytes.
 - Backend validation prevents normal product paths from reintroducing the removed durable inline file-byte shapes.
+- Live database/S3 dry-run or apply steps remain manual operations requiring the agent DB access boundary verifier, report review, and explicit approval.

@@ -336,6 +336,9 @@ func (s *Server) handleProjectInformation(w http.ResponseWriter, r *http.Request
 	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, projectID, "project_not_found") {
 		return
 	}
+	if rejectDurableInlineFileBytes(w, "project_information", req.Information) {
+		return
+	}
 	actor, _ := authenticatedActor(r)
 	item, err := s.repo.AddProjectInformation(store.ProjectInformationInput{
 		CompanyID:     companyID,
@@ -623,6 +626,9 @@ func (s *Server) handleProjectScopedNodeCreate(w http.ResponseWriter, r *http.Re
 		ActorUserID: actor.User.UserID,
 	}
 	if req.InitialInformation != nil {
+		if rejectDurableInlineFileBytes(w, "project_scoped_node_initial_information", req.InitialInformation.Information) {
+			return
+		}
 		input.InitialInformation = &store.ProjectScopedInitialInformationInput{
 			Type:          req.InitialInformation.Type,
 			Information:   req.InitialInformation.Information,
@@ -676,6 +682,9 @@ func (s *Server) handleProjectScopedLogicGateCreate(w http.ResponseWriter, r *ht
 		ActorUserID: actor.User.UserID,
 	}
 	if req.InitialInformation != nil {
+		if rejectDurableInlineFileBytes(w, "project_scoped_logic_gate_initial_information", req.InitialInformation.Information) {
+			return
+		}
 		input.InitialInformation = &store.ProjectScopedInitialInformationInput{
 			Type:          req.InitialInformation.Type,
 			Information:   req.InitialInformation.Information,
