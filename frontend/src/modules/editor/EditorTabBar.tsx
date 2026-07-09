@@ -117,6 +117,8 @@ type EditorTabBarProps = {
   saveCurrentVersionBusy?: boolean;
   onRelationshipTabAnchorChange?: (anchor: { left: number; width: number } | null) => void;
   reserveHeaderOffset?: boolean;
+  visibleTabIDs?: readonly EditorTabID[];
+  disabled?: boolean;
 };
 
 export const EditorTabBar: React.FC<EditorTabBarProps> = ({
@@ -145,6 +147,8 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   saveCurrentVersionBusy = false,
   onRelationshipTabAnchorChange,
   reserveHeaderOffset = true,
+  visibleTabIDs,
+  disabled = false,
 }) => {
   const [outlineMenuOpen, setOutlineMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
@@ -161,6 +165,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   const outlineRowSelectedSurface = `linear-gradient(145deg, ${colorWithAlpha(outlineMenuAccent, 0.17)}, rgba(255, 255, 255, 0.84))`;
   const tabHoverBackground = "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.66))";
   const tabHoverShadow = "0 8px 20px rgba(15, 23, 42, 0.12), 0 0 14px rgba(183, 124, 255, 0.18), inset 1px 1px 0 rgba(255,255,255,0.86)";
+  const visibleTabs = visibleTabIDs ? EDITOR_TAB_ITEMS.filter((tab) => visibleTabIDs.includes(tab.id)) : EDITOR_TAB_ITEMS;
 
   useEffect(() => {
     setFontSizeDraft(String(documentFontSize));
@@ -240,7 +245,8 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     letterSpacing: 0,
     padding: "4px 10px",
     borderRadius: 8,
-    cursor: "pointer",
+    cursor: disabled ? "default" : "pointer",
+    opacity: disabled ? 0.54 : 1,
     boxShadow: selected || hovered ? tabHoverShadow : "none",
     transform: hovered && !selected ? "translateY(-1px)" : "translateY(0)",
     transition: "background 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease, color 140ms ease",
@@ -254,7 +260,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
     color: active ? outlineMenuAccent : surfaceText,
     display: "grid",
     placeItems: "center",
-    cursor: "pointer",
+    cursor: disabled ? "default" : "pointer",
     fontSize: 12,
     fontWeight: 900,
     lineHeight: 1,
@@ -264,7 +270,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
 
   return (
     <div style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", gap: 6, paddingLeft: reserveHeaderOffset ? 106 : 0, overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto" }}>
-      {EDITOR_TAB_ITEMS.map((tab) => {
+      {visibleTabs.map((tab) => {
         const selected = activeTab === tab.id;
         const hovered = hoveredTabID === tab.id;
         const tabStyle = tabStyleFor(selected, hovered);
@@ -282,18 +288,21 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 type="button"
                 aria-label="Decrease font size"
                 title="Decrease font size"
+                disabled={disabled}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
+                  if (disabled) return;
                   onAdjustSelectionFontSize(-1);
                 }}
-                style={{ width: 30, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 17, lineHeight: 1 }}
+                style={{ width: 30, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, display: "grid", placeItems: "center", cursor: disabled ? "default" : "pointer", fontSize: 17, lineHeight: 1 }}
               >
                 -
               </button>
               <input
                 aria-label="Font size value"
                 value={fontSizeDraft}
+                disabled={disabled}
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
                 onDoubleClick={(event) => event.currentTarget.select()}
@@ -313,12 +322,14 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 type="button"
                 aria-label="Increase font size"
                 title="Increase font size"
+                disabled={disabled}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
+                  if (disabled) return;
                   onAdjustSelectionFontSize(1);
                 }}
-                style={{ width: 30, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, display: "grid", placeItems: "center", cursor: "pointer", fontSize: 17, lineHeight: 1 }}
+                style={{ width: 30, height: 24, border: 0, borderRight: `1px solid ${strokeColor}`, background: "transparent", color: surfaceText, display: "grid", placeItems: "center", cursor: disabled ? "default" : "pointer", fontSize: 17, lineHeight: 1 }}
               >
                 +
               </button>
@@ -327,9 +338,11 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 aria-label="Bold"
                 title="Bold"
                 aria-pressed={boldActive}
+                disabled={disabled}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
+                  if (disabled) return;
                   onToggleBold();
                 }}
                 style={inlineFormatButtonStyle(boldActive)}
@@ -341,9 +354,11 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 aria-label="Underline"
                 title="Underline"
                 aria-pressed={underlineActive}
+                disabled={disabled}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
+                  if (disabled) return;
                   onToggleUnderline();
                 }}
                 style={inlineFormatButtonStyle(underlineActive, false)}
@@ -368,7 +383,9 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 aria-haspopup="menu"
                 aria-expanded={outlineMenuOpen}
                 aria-label="Outline styles"
+                disabled={disabled}
                 onClick={() => {
+                  if (disabled) return;
                   onOutlineStyleFocus();
                   setOutlineMenuOpen((open) => !open);
                 }}
@@ -405,9 +422,11 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                         type="button"
                         role="menuitemradio"
                         aria-checked={itemSelected}
+                        disabled={disabled}
                         onMouseEnter={() => setHoveredOutlineStyle(item.id)}
                         onMouseLeave={() => setHoveredOutlineStyle(null)}
                         onClick={() => {
+                          if (disabled) return;
                           onOutlineStyleChange(item.id);
                           setOutlineMenuOpen(false);
                         }}
@@ -475,7 +494,10 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
             type="button"
             onMouseEnter={() => setHoveredTabID(tab.id)}
             onMouseLeave={() => setHoveredTabID((current) => (current === tab.id ? null : current))}
-            onClick={() => onSelectTab(tab.id)}
+            disabled={disabled}
+            onClick={() => {
+              if (!disabled) onSelectTab(tab.id);
+            }}
             style={tabStyle}
           >
             {tab.label}
@@ -487,8 +509,11 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
           type="button"
           aria-label="Insert table"
           title="Insert table"
+          disabled={disabled}
           onMouseDown={(event) => event.preventDefault()}
-          onClick={onInsertTable}
+          onClick={() => {
+            if (!disabled) onInsertTable();
+          }}
           style={{ ...tabStyleFor(false, false), width: 30, height: 26, display: "grid", placeItems: "center", padding: 0 }}
         >
           <EditorTableIcon color={surfaceText} />

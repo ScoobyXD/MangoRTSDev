@@ -21,6 +21,7 @@ ED10 - Node/project email pickers are attach/select surfaces only and must not e
 ED11 - Map and legacy map-specific editing behavior is outside the V1 unified editor project unless a live non-map editor surface imports a helper that must be changed for the shared contract.
 ED12 - Any future change to unified editor semantics must update one shared behavior test plus adapter/mount coverage proving each target surface receives the shared behavior.
 ED13 - The V1 shared rich editor behavior source is the editor module handler contract behind `useEditorDocumentSurfaceHandlers`; target surfaces must either call that handler directly or mount a narrow adapter such as `UnifiedRichEditorSurface`, while preserving their own persistence/send adapter.
+ED14 - Mail compose/reply and attached-email reply must expose the shared editor format/outline toolbar controls for font size, bold, underline, the outline-style dropdown, and table insertion where supported; mail-specific wrapper controls may add list insertion, indent/outdent, and link commands, but must call the shared editor controller instead of local DOM commands.
 
 ## Scenarios
 
@@ -34,6 +35,7 @@ Business logic covered:
 - ED6
 - ED12
 - ED13
+- ED14
 
 Given:
 - A user can edit a Logic Gate body, a node text box, a project text box, a My Triage compose body, and a Shared Triage compose body.
@@ -46,6 +48,7 @@ Expected:
 - Tests cover the shared behavior once and prove each adapter/mount uses that shared behavior.
 - Mail compose/reply adapters do not call browser `document.execCommand` directly for rich editing commands when a shared editor command exists.
 - Mail compose/reply and attached-email reply adapters expose numbered list, indent, outdent, bullet list, checklist, font size, bold, underline, link, and table controls where table insertion is supported.
+- Font size, bold, underline, outline-style dropdown, and table insertion are supplied by the shared editor toolbar control source rather than a compose-only or attached-reply-only toolbar implementation.
 
 ### Scenario ED-S2: Domain Persistence Stays Separate
 
@@ -70,6 +73,7 @@ Business logic covered:
 - ED2
 - ED7
 - ED8
+- ED14
 
 Given:
 - A user writes a personal compose, personal reply, shared compose, shared reply, or attached-email reply body.
@@ -81,6 +85,7 @@ Expected:
 - Sent or saved rich content is sanitized.
 - Indented blocks remain indented in sent HTML instead of flattening.
 - Numbered-list toolbar actions create or toggle a shared automatic numbered/alphanumerical list item rather than only changing an outline-style setting.
+- The visible mail toolbar includes the shared font-size control, bold/underline controls, and outline-style dropdown used by the main editor.
 
 ### Scenario ED-S4: Chat Is Excluded
 

@@ -47,6 +47,7 @@ N36 - The node workspace body remains text boxes, attached emails, and text-bloc
 N37 - The node email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
 N38 - Project critical-path inline node windows must use the unified node shell and unified node text-box editor semantics while preserving node information/projection persistence for node edits.
 N39 - The V1 unified node shell source is `UnifiedNodeShell`; full node-window adapters may keep their own opener state, geometry, route handling, and permissions, but top-right node-window action ordering and shell/body data attributes must come from that shared source.
+N40 - Kanban/My Work node overlays expose the same shared fullscreen shell action as Home node popups when a full node editor overlay is opened; Kanban keeps board-relative overlay ratio and restore state in the Kanban adapter instead of moving that geometry persistence into the shared shell.
 
 ## Scenarios
 
@@ -224,6 +225,7 @@ Business logic covered:
 - N37
 - N38
 - N39
+- N40
 
 Given:
 - A user opens the same node from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, and a Project critical-path row.
@@ -233,6 +235,7 @@ Given:
 Expected:
 - Each full node window uses the unified node shell behavior for header, title, top-right actions, close/minimize/open/fullscreen/delete controls, sizing, and body layout where the capability is available.
 - Adding or changing a top-right node-window action through the shared shell reaches every full node window surface that exposes that capability.
+- The Kanban/My Work full node overlay exposes the shared fullscreen control between minimize and close and restores its prior board-relative overlay size when fullscreen is turned off or the overlay closes.
 - Node text boxes use the unified editor semantics on every node-window surface.
 - Node text-box edits continue to save through node information/projection persistence.
 - Text-block chats remain chat composers and do not receive rich editor toolbar or rich editor keyboard semantics.

@@ -481,6 +481,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const [priorityMenu, setPriorityMenu] = useState<KanbanPriorityMenuState | null>(null);
   const [nodeEditorOverlay, setNodeEditorOverlay] = useState<NodeEditorOverlayState | null>(null);
   const [nodeEditorOverlayRatio, setNodeEditorOverlayRatio] = useState<NodeEditorOverlayRatio>(() => readNodeEditorOverlayRatio(companyID, frameID));
+  const [nodeEditorOverlayFullscreen, setNodeEditorOverlayFullscreen] = useState(false);
   const [deleteCardConfirmation, setDeleteCardConfirmation] = useState<{ cardIDs: string[]; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [deleteNodeConfirmation, setDeleteNodeConfirmation] = useState<{ nodeIDs: string[]; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [renameNodeDraft, setRenameNodeDraft] = useState<{ cardID: string; nodeID: string; title: string } | null>(null);
@@ -496,6 +497,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const resizeRef = useRef<ColumnResizeState | null>(null);
   const nodeEditorOverlayResizeRef = useRef<OverlayResizeState | null>(null);
   const nodeEditorOverlayRatioRef = useRef(nodeEditorOverlayRatio);
+  const nodeEditorOverlayRestoreRatioRef = useRef<NodeEditorOverlayRatio | null>(null);
   const arenaBoardLeftResizeBaselineRef = useRef<{ sessionID: number; ratio: NodeEditorOverlayRatio; startKanbanWidthPx: number } | null>(null);
   const activeBoardIDRef = useRef(activeBoardID);
   const frameBoardIDRef = useRef(frameBoardID);
@@ -610,6 +612,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const boardMinColumnHeightPx = arenaMode ? KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX : KANBAN_DEFAULT_COLUMN_HEIGHT_PX;
 
   useEffect(() => {
+    setNodeEditorOverlayFullscreen(false);
+    nodeEditorOverlayRestoreRatioRef.current = null;
     if (arenaMode) {
       setNodeEditorOverlayRatio(readNodeEditorOverlayRatio(companyID, frameBoardID));
       return;
@@ -625,6 +629,17 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   useEffect(() => {
     nodeEditorOverlayRatioRef.current = nodeEditorOverlayRatio;
   }, [nodeEditorOverlayRatio]);
+
+  useEffect(() => {
+    if (nodeEditorOverlay) return;
+    const restored = nodeEditorOverlayRestoreRatioRef.current;
+    nodeEditorOverlayRestoreRatioRef.current = null;
+    setNodeEditorOverlayFullscreen(false);
+    if (!restored) return;
+    nodeEditorOverlayRatioRef.current = restored;
+    setNodeEditorOverlayRatio(restored);
+    storeNodeEditorOverlayRatio(companyID, frameID, restored);
+  }, [companyID, frameID, nodeEditorOverlay]);
 
   useEffect(() => {
     if (!nodeEditorOverlay || !arenaBoardLeftResizeRequest) return;
@@ -703,9 +718,48 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     seedKanbanProjectionVersions(cards, kanbanProjectionVersionsRef.current);
   }, [cards]);
 
+  const restoreNodeEditorOverlayRatio = useCallback(() => {
+    const restored = nodeEditorOverlayRestoreRatioRef.current;
+    nodeEditorOverlayRestoreRatioRef.current = null;
+    setNodeEditorOverlayFullscreen(false);
+    if (!restored) return;
+    nodeEditorOverlayRatioRef.current = restored;
+    setNodeEditorOverlayRatio(restored);
+    storeNodeEditorOverlayRatio(companyID, frameID, restored);
+  }, [companyID, frameID]);
+
+  const fullscreenNodeEditorOverlayRatio = useCallback((): NodeEditorOverlayRatio => {
+    const boardWidth = Math.max(1, boardRootRef.current?.getBoundingClientRect().width ?? 1);
+    const minLeft = getNodeEditorOverlayMinLeftPx(boardRootRef.current, false) / boardWidth;
+    return clampNodeEditorOverlayRatio({
+      left: minLeft,
+      top: 0.02,
+      width: Math.max(0.42, 0.98 - minLeft),
+      height: 0.94,
+    }, { minLeft });
+  }, []);
+
+  const toggleNodeEditorOverlayFullscreen = useCallback(() => {
+    if (nodeEditorOverlayFullscreen) {
+      restoreNodeEditorOverlayRatio();
+      return;
+    }
+    nodeEditorOverlayRestoreRatioRef.current = nodeEditorOverlayRatioRef.current;
+    const nextRatio = fullscreenNodeEditorOverlayRatio();
+    nodeEditorOverlayRatioRef.current = nextRatio;
+    setNodeEditorOverlayRatio(nextRatio);
+    setNodeEditorOverlayFullscreen(true);
+  }, [fullscreenNodeEditorOverlayRatio, nodeEditorOverlayFullscreen, restoreNodeEditorOverlayRatio]);
+
+  const exitNodeEditorOverlayFullscreenForResize = useCallback(() => {
+    setNodeEditorOverlayFullscreen(false);
+    nodeEditorOverlayRestoreRatioRef.current = null;
+  }, []);
+
   const openNodeEditorOverlay = useCallback((nodeID: string, nodeTitle: string, notifyRoute = true) => {
     const cleanNodeID = nodeID.trim();
     if (!cleanNodeID) return;
+    restoreNodeEditorOverlayRatio();
     const cleanNodeTitle = humanLabelOrFallback(nodeTitle, cleanNodeID);
     setNodeEditorOverlay((current) => (
       current?.nodeID === cleanNodeID && current.nodeTitle === cleanNodeTitle
@@ -713,12 +767,13 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         : { nodeID: cleanNodeID, nodeTitle: cleanNodeTitle }
     ));
     if (notifyRoute) onNodeEditorOverlayOpen?.(cleanNodeID);
-  }, [onNodeEditorOverlayOpen]);
+  }, [onNodeEditorOverlayOpen, restoreNodeEditorOverlayRatio]);
 
   const closeNodeEditorOverlay = useCallback((notifyRoute = true) => {
+    restoreNodeEditorOverlayRatio();
     setNodeEditorOverlay(null);
     if (notifyRoute) onNodeEditorOverlayClose?.();
-  }, [onNodeEditorOverlayClose]);
+  }, [onNodeEditorOverlayClose, restoreNodeEditorOverlayRatio]);
 
   const collapseNodeEditorOverlayToTab = useCallback(() => {
     if (!nodeEditorOverlay) return;
@@ -3091,6 +3146,9 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           frameID={frameID}
           accent={accent}
           theme={theme}
+          fullscreen={nodeEditorOverlayFullscreen}
+          onToggleFullscreen={toggleNodeEditorOverlayFullscreen}
+          onResizeStart={exitNodeEditorOverlayFullscreenForResize}
           onLinkedLeftResizeStart={onNodeEditorOverlayLeftResizeStart}
           onClose={() => closeNodeEditorOverlay()}
           onCollapseToTab={collapseNodeEditorOverlayToTab}

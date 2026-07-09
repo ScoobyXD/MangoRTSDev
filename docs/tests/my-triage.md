@@ -87,7 +87,7 @@ MT76 - Personal reply drafts are unique per company, user, mailbox scope, and or
 MT77 - A saved personal reply draft stores or reloads the original message context, and reopening the draft shows the original email being answered above the compose editor.
 MT78 - Personal compose supports To, Cc, Bcc, Reply, Reply All, and Forward; Reply All excludes the active mailbox address from generated recipients.
 MT79 - Personal compose supports scheduled sends by saving a scheduled draft with a due timestamp, sending it through the normal personal send path when due while the app is open, and deleting the scheduled draft only after send succeeds.
-MT80 - Personal compose and reply use the unified editor semantics shared with node, Logic Gate, project, and attached-email reply editor surfaces, including numbered/alphanumeric list, indent/outdent, bullet list, checklist, font size, bold, underline, hyperlink creation, paste cleanup, Delete/Backspace, and copy/cut/paste behavior.
+MT80 - Personal compose and reply use the unified editor semantics shared with node, Logic Gate, project, and attached-email reply editor surfaces, including numbered/alphanumeric list, indent/outdent, bullet list, checklist, font size, bold, underline, hyperlink creation, paste cleanup, Delete/Backspace, and copy/cut/paste behavior; the visible compose/reply controls must include the shared editor font-size control, bold/underline controls, and outline-style dropdown instead of a personal-compose-only toolbar.
 MT81 - Personal compose stores rich editor content as sanitized rich HTML, while legacy plain text drafts continue to load and send as escaped/linkified HTML.
 MT82 - Received personal email detail must display Cc recipients when the provider returns them; Bcc is displayed only when it is present on messages the user is allowed to see.
 MT83 - Links in received personal email bodies, forwarded/replied original-message previews, sent reply bodies, and email signatures must open in a new browser tab when clicked.
@@ -100,7 +100,7 @@ MT89 - A grouped My Triage row uses the newest loaded message as the visible row
 MT90 - Selecting a My Triage thread row opens a scrollable, full-height conversation detail pane that hydrates the thread through Nylas thread `message_ids` plus individual message-detail reads for HTML bodies; the thread endpoint alone must not be treated as containing full message bodies.
 MT91 - Personal rich compose send must preserve sanitized block indentation, including indent/outdent and blockquote-style indents, so sent email HTML does not flatten intended paragraph indentation.
 MT92 - Expired or revoked personal My Triage mailbox provider credentials return a My Triage reconnect/repair state, not a Mango auth logout. Personal mailbox folder, message-list, message-detail, send, archive, star, and draft endpoints must not represent provider reauthorization as a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response; they must return a recoverable provider-specific response, such as `409 nylas_reauth_required`, while the user remains signed in to Mango.
-MT93 - Any future change to unified editor semantics must apply to My Triage compose and reply through the shared editor behavior, not through a separate personal-compose-only implementation.
+MT93 - Any future change to unified editor semantics or shared editor format/outline controls must apply to My Triage compose and reply through the shared editor behavior and shared toolbar controls, not through a separate personal-compose-only implementation.
 
 ## Nylas Configuration Contract
 
@@ -323,7 +323,7 @@ Expected:
 - Reopening a reply draft shows the original email context above the compose editor.
 - Reply, Reply All, Forward, Cc, and Bcc compose paths send through the normal personal mailbox connection and preserve local sent/reply reconciliation.
 - A future scheduled send is saved as a scheduled draft, is sent through the normal personal send path when due while the app is open, and is deleted only after send succeeds.
-- Rich compose controls use the unified editor behavior shared with node, Logic Gate, project, and attached-email reply editor surfaces.
+- Rich compose controls use the unified editor behavior and shared format/outline toolbar controls used by node, Logic Gate, project, and attached-email reply editor surfaces.
 - Rich compose controls persist sanitized rich HTML, and legacy plain text drafts still send as escaped/linkified HTML.
 - Received Cc recipients are visible in message detail.
 - Email body/signature/original-preview links open in a new browser tab on click.
