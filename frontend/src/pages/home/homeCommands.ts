@@ -320,8 +320,10 @@ export async function sendHomeMailComposeCommand(args: {
   };
   const cleanCompanyID = args.companyID?.trim() ?? "";
   const cleanSharedInboxID = args.sharedInboxID?.trim() ?? "";
-  if (cleanCompanyID && cleanSharedInboxID) {
+  if (cleanCompanyID) {
     input.company_id = cleanCompanyID;
+  }
+  if (cleanSharedInboxID) {
     input.shared_inbox_id = cleanSharedInboxID;
   }
   const cleanConnectedAccountEmail = args.connectedAccountEmail?.trim().toLowerCase() ?? "";
