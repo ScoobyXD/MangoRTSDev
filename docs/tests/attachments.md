@@ -4,7 +4,7 @@ Last updated: 2026-07-09
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/api/requestJSON.test.ts` covers multipart upload request headers; `tests/frontend/modules/editor/editorProjection.test.ts` covers attachment-reference serialization for editor text-block/chat payloads and legacy data-url parsing without emitting new durable data URLs; `tests/frontend/modules/editor/richTextEditing.test.ts` covers the durable rich-editor image attachment reference source)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/api/requestJSON.test.ts` covers multipart upload request headers; `tests/frontend/modules/editor/editorProjection.test.ts` covers attachment-reference serialization for editor text-block/chat payloads and legacy data-url parsing without emitting new durable data URLs; `tests/frontend/modules/editor/richTextEditing.test.ts` covers the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers email compose payloads sending Mango attachment references without durable `content`; `backend/internal/http/attachment_handlers_test.go` covers attachment metadata/resource links, content permission checks, and `email_draft`/`attached_email` resource authorization; `backend/internal/http/communications_handlers_test.go` covers email send-time S3 resolution into provider payloads and rejection of raw attachment content)
 
 ## Business Logic
 
@@ -129,7 +129,7 @@ Given:
 
 Expected:
 - Provider-only mailbox metadata can remain provider-referenced until Mango needs durable ownership.
-- Durable Mango email attachment use caches/persists bytes into Mango S3.
+- Current attached-email projections store message metadata without provider attachment bytes; any path that makes provider attachments durable Mango-owned resources must first cache/persist those bytes into Mango S3.
 - Attached-email projections store metadata and Mango attachment references, not attachment bytes.
 - Reads remain scoped by the node/email/shared-inbox permissions that authorize the user.
 

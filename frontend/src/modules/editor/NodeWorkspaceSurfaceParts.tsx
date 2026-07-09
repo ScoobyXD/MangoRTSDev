@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
-import { downloadMangoAttachment, loadMangoAttachmentObjectURL, type AttachmentRequestJSON, type MangoAttachmentResourceType, type MangoAttachmentVariantType } from "../attachments/attachmentApi";
+import { downloadMangoAttachment, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachmentResourceType, type MangoAttachmentVariantType } from "../attachments/attachmentApi";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
@@ -75,9 +75,9 @@ import {
   messageAttachmentPayload,
   PaperclipIcon,
   PlusIcon,
-  readChatAttachment,
   readStoredChatPaneHeight,
   storeChatPaneHeight,
+  uploadEditorAttachment,
   EDITOR_NEU_ACTIVE_SURFACE,
   EDITOR_NEU_EDGE_FRAME,
   EDITOR_NEU_PANEL_BACKGROUND,
@@ -2870,7 +2870,10 @@ type AttachedEmailPaneLayout = {
 
 type AttachedEmailOrganizerPaneProps = {
   emails: EditorAttachedEmail[];
+  nodeID?: string;
+  apiBase?: string;
   companyID: string;
+  attachmentRequestJSON?: AttachmentRequestJSON;
   storageKey: string;
   editable: boolean;
   accent: string;
@@ -3035,7 +3038,10 @@ async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, compan
 
 const AttachedEmailThreadCard: React.FC<{
   email: EditorAttachedEmail;
+  nodeID?: string;
+  apiBase?: string;
   companyID: string;
+  attachmentRequestJSON?: AttachmentRequestJSON;
   editable: boolean;
   accent: string;
   surfaceText: string;
@@ -3058,7 +3064,7 @@ const AttachedEmailThreadCard: React.FC<{
   onDropOnEmail: React.DragEventHandler<HTMLDivElement>;
   onSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (messageID: string, quote: string) => void;
-}> = ({ email, companyID, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", activeSelection = null, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
+}> = ({ email, nodeID = "", apiBase = "", companyID, attachmentRequestJSON, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", activeSelection = null, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -3211,7 +3217,10 @@ const AttachedEmailThreadCard: React.FC<{
           >
             <EmailConversationPane
               messageID={email.messageID}
+              nodeID={nodeID}
+              apiBase={apiBase}
               companyID={companyID}
+              attachmentRequestJSON={attachmentRequestJSON}
               editable={editable}
               accent={accent}
               surfaceText={surfaceText}
@@ -3275,7 +3284,7 @@ const AttachedEmailThreadCard: React.FC<{
   );
 };
 
-export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, companyID, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionNodeRequest, onError }) => {
+export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, attachmentRequestJSON, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionNodeRequest, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [localSelectedMessageID, setLocalSelectedMessageID] = useState("");
@@ -3514,7 +3523,10 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     <AttachedEmailThreadCard
       key={email.messageID}
       email={email}
+      nodeID={nodeID}
+      apiBase={apiBase}
       companyID={companyID}
+      attachmentRequestJSON={attachmentRequestJSON}
       editable={editable}
       accent={accent}
       surfaceText={surfaceText}
@@ -3810,7 +3822,10 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
 
 type EmailConversationPaneProps = {
   messageID: string;
+  nodeID?: string;
+  apiBase?: string;
   companyID: string;
+  attachmentRequestJSON?: AttachmentRequestJSON;
   editable: boolean;
   accent: string;
   surfaceText: string;
@@ -4139,7 +4154,10 @@ function estimateEditorBodyLineCount(value: string): number {
 
 export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   messageID,
+  nodeID = "",
+  apiBase = "",
   companyID,
+  attachmentRequestJSON,
   editable,
   accent,
   surfaceText,
@@ -4275,6 +4293,19 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const replyEditorMinHeight = inlineExpansion ? 112 : 138;
   const replyEditorMaxHeight = inlineExpansion ? 272 : 340;
   const replyEditorHeight = Math.min(replyEditorMaxHeight, replyEditorMinHeight + Math.max(0, replyEditorLineCount - 4) * 18);
+  const attachedEmailAttachmentResourceID = useMemo(() => (
+    nodeID.trim() && messageID.trim() ? mangoAttachedEmailResourceID({ nodeID, messageID }) : ""
+  ), [messageID, nodeID]);
+  const replyEditorImageAttachmentContext = attachmentRequestJSON && apiBase.trim() && companyID.trim() && attachedEmailAttachmentResourceID
+    ? {
+      requestJSON: attachmentRequestJSON,
+      apiBase,
+      companyID,
+      resourceType: "attached_email" as const,
+      resourceID: attachedEmailAttachmentResourceID,
+      editorSurface: "attached-email-reply",
+    }
+    : undefined;
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
   const useRichEmailBody = !canUseEmailSelection;
   const selectedEmailBodyText = useMemo(() => (message ? emailBodyText(message.body || message.snippet || "") : ""), [message]);
@@ -4414,7 +4445,23 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       nextTotalSize += file.size;
     }
     if (acceptedFiles.length === 0) return;
-    void Promise.all(acceptedFiles.map((file) => readChatAttachment(file)))
+    if (!attachmentRequestJSON || !apiBase.trim() || !companyID.trim() || !nodeID.trim()) {
+      const nextError = "Email attachment upload context is unavailable.";
+      setError(nextError);
+      onError(nextError);
+      return;
+    }
+    const resourceID = mangoAttachedEmailResourceID({ nodeID, messageID });
+    void Promise.all(acceptedFiles.map((file) => uploadEditorAttachment(file, {
+      requestJSON: attachmentRequestJSON,
+      companyID,
+      resourceType: "attached_email",
+      resourceID,
+      sourceKind: "email_outgoing",
+      relationshipKind: "email_attachment",
+      messageID: replyTargetMessageID || messageID,
+      editorSurface: "attached-email-reply",
+    })))
       .then((attachments) => {
         setError("");
         setDraftAttachments((current) => [...current, ...attachments]);
@@ -4424,7 +4471,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         setError(nextError);
         onError(nextError);
       });
-  }, [draftAttachments, editable, onError]);
+  }, [apiBase, attachmentRequestJSON, companyID, draftAttachments, editable, messageID, nodeID, onError, replyTargetMessageID]);
 
   const removeEmailDraftAttachment = useCallback((attachmentID: string) => {
     setDraftAttachments((current) => current.filter((attachment) => attachment.id !== attachmentID));
@@ -4444,17 +4491,23 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   const submitReply = () => {
     if (!message || !replyTargetMessage || !canSend) return;
-    if (draftAttachments.length > 0) {
-      const nextError = "Email attachment sending is not wired yet.";
-      setError(nextError);
-      onError(nextError);
-      return;
-    }
     setSending(true);
     void sendEmail({
       to: recipients,
       subject: subjectDraft.trim(),
       body: serializeEditorBodyForEmailHTML(bodyDraft),
+      attachments: draftAttachments
+        .map((attachment) => {
+          const attachmentID = attachment.attachmentID?.trim() || attachment.id.trim();
+          return {
+            id: attachmentID,
+            attachment_id: attachmentID,
+            filename: attachment.name.trim() || "attachment",
+            content_type: attachment.type.trim() || "application/octet-stream",
+            size: attachment.size,
+          };
+        })
+        .filter((attachment) => attachment.attachment_id),
       reply_to_message_id: replyTargetMessage.id,
       company_id: companyID,
     })
@@ -4766,6 +4819,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             {draftAttachments.length > 0 && (
               <DraftAttachmentList
                 attachments={draftAttachments}
+                apiBase={apiBase}
+                companyID={companyID}
                 surfaceText={surfaceText}
                 strokeColor={strokeColor}
                 onRemove={removeEmailDraftAttachment}
@@ -4823,6 +4878,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 style={{ width: "100%", height: replyEditorHeight, minHeight: replyEditorMinHeight, maxHeight: replyEditorMaxHeight, resize: editable ? "vertical" : "none", overflowY: "auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
                 onSelectionFontSizeChange={setReplySelectionFontSize}
                 onSelectionInlineFormatChange={setReplySelectionInlineFormat}
+                editorImageAttachmentContext={replyEditorImageAttachmentContext}
                 onEditorImageAttachmentError={(message) => {
                   setError(message);
                   onError(message);

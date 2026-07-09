@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"mime"
 	"miraeopus/backend/internal/domain"
@@ -920,8 +921,13 @@ func communicationsMutationErrorCode(err error) string {
 	return "archive_failed"
 }
 
+type communicationsSendMessageRequest struct {
+	NylasSendMessageRequest
+	CompanyID string `json:"company_id,omitempty"`
+}
+
 func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection) {
-	var req NylasSendMessageRequest
+	var req communicationsSendMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
@@ -932,25 +938,29 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	req.To = cleanEmailAddresses(req.To)
 	req.Cc = cleanEmailAddresses(req.Cc)
 	req.Bcc = cleanEmailAddresses(req.Bcc)
-	var attachmentsOK bool
-	req.Attachments, attachmentsOK = cleanNylasAttachments(req.Attachments)
+	cleanCompanyID := strings.TrimSpace(req.CompanyID)
+	if cleanCompanyID == "" {
+		cleanCompanyID = strings.TrimSpace(r.URL.Query().Get("company_id"))
+	}
+	sendReq := req.NylasSendMessageRequest
+	attachments, attachmentsOK := s.resolveCommunicationsSendAttachments(w, r, cleanCompanyID, sendReq.Attachments)
 	if !attachmentsOK {
-		writeError(w, http.StatusBadRequest, "invalid_email_attachment")
 		return
 	}
-	req.TrackingOptions = defaultCommunicationsTrackingOptions()
-	if len(req.To) == 0 && len(req.Cc) == 0 && len(req.Bcc) == 0 {
+	sendReq.Attachments = attachments
+	sendReq.TrackingOptions = defaultCommunicationsTrackingOptions()
+	if len(sendReq.To) == 0 && len(sendReq.Cc) == 0 && len(sendReq.Bcc) == 0 {
 		writeError(w, http.StatusBadRequest, "email_recipients_required")
 		return
 	}
-	if req.Subject == "" && req.Body == "" && len(req.Attachments) == 0 {
+	if sendReq.Subject == "" && sendReq.Body == "" && len(sendReq.Attachments) == 0 {
 		writeError(w, http.StatusBadRequest, "email_content_required")
 		return
 	}
 	var message NylasMessage
 	err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
 		var err error
-		message, err = s.nylasClient.SendMessage(ctx, connection.GrantID, req)
+		message, err = s.nylasClient.SendMessage(ctx, connection.GrantID, sendReq)
 		return err
 	})
 	if err != nil {
@@ -958,7 +968,7 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if message.TrackingOptions == nil || !message.TrackingOptions.Opens {
-		log.Printf("nylas send response missing open tracking user_id=%s grant_id=%s message_id=%s subject=%q", connection.UserID, connection.GrantID, message.ID, req.Subject)
+		log.Printf("nylas send response missing open tracking user_id=%s grant_id=%s message_id=%s subject=%q", connection.UserID, connection.GrantID, message.ID, sendReq.Subject)
 	}
 	now := time.Now().UTC()
 	cacheScope := communicationsConnectionCacheScope(connection)
@@ -1933,49 +1943,136 @@ func cleanEmailAddresses(items []NylasEmailAddress) []NylasEmailAddress {
 	return cleaned
 }
 
-func cleanNylasAttachments(items []NylasAttachment) ([]NylasAttachment, bool) {
+func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *http.Request, companyID string, items []NylasAttachment) ([]NylasAttachment, bool) {
 	if len(items) == 0 {
 		return nil, true
+	}
+	if s.attachmentStorage == nil {
+		writeError(w, http.StatusServiceUnavailable, "attachment_storage_unavailable")
+		return nil, false
+	}
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return nil, false
 	}
 	cleaned := make([]NylasAttachment, 0, len(items))
 	var totalDecodedBytes int64
 	for _, item := range items {
-		filename := strings.TrimSpace(item.Filename)
-		content := strings.TrimSpace(item.Content)
-		if filename == "" && content == "" {
+		attachmentID := strings.TrimSpace(item.AttachmentID)
+		if attachmentID == "" {
+			attachmentID = strings.TrimSpace(item.ID)
+		}
+		if strings.TrimSpace(item.Filename) == "" && attachmentID == "" {
 			continue
 		}
-		if filename == "" || content == "" {
+		if attachmentID == "" || strings.TrimSpace(item.Content) != "" {
+			writeError(w, http.StatusBadRequest, "invalid_email_attachment")
 			return nil, false
 		}
-		decoded, err := base64.StdEncoding.DecodeString(content)
+		if !s.canSendAttachmentThroughResourceLink(w, r, companyID, attachmentID) {
+			return nil, false
+		}
+		attachment, err := s.repo.GetAttachment(companyID, attachmentID)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_email_attachment")
+			return nil, false
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeAccessResourceNotFound(w)
+			return nil, false
+		}
 		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_attachment")
 			return nil, false
 		}
-		totalDecodedBytes += int64(len(decoded))
+		variant, err := s.repo.GetAttachmentVariant(companyID, attachment.AttachmentID, store.AttachmentVariantOriginal)
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_email_attachment")
+			return nil, false
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "attachment_variant_not_found")
+			return nil, false
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_attachment_variant")
+			return nil, false
+		}
+		output, err := s.attachmentStorage.GetObject(r.Context(), AttachmentGetObjectInput{Key: variant.StorageKey})
+		if err != nil {
+			writeAttachmentStorageError(w, err)
+			return nil, false
+		}
+		content, readErr := io.ReadAll(output.Body)
+		_ = output.Body.Close()
+		if readErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_read_attachment")
+			return nil, false
+		}
+		totalDecodedBytes += int64(len(content))
 		if totalDecodedBytes > communicationsAttachmentMaxTotalBytes {
+			writeError(w, http.StatusBadRequest, "invalid_email_attachment")
 			return nil, false
 		}
 		contentType := strings.TrimSpace(item.ContentType)
 		if contentType == "" {
+			contentType = strings.TrimSpace(output.ContentType)
+		}
+		if contentType == "" {
+			contentType = strings.TrimSpace(variant.MimeType)
+		}
+		if contentType == "" {
+			contentType = strings.TrimSpace(attachment.MimeType)
+		}
+		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		size := item.Size
-		if size <= 0 {
-			size = int64(len(decoded))
+		filename := attachmentFilename(item.Filename)
+		if filename == "attachment" && strings.TrimSpace(attachment.OriginalFilename) != "" {
+			filename = attachment.OriginalFilename
 		}
 		cleaned = append(cleaned, NylasAttachment{
-			ID:                 strings.TrimSpace(item.ID),
+			ID:                 attachment.AttachmentID,
+			AttachmentID:       attachment.AttachmentID,
 			Filename:           filename,
 			ContentType:        contentType,
-			Content:            content,
+			Content:            base64.StdEncoding.EncodeToString(content),
 			ContentID:          strings.TrimSpace(item.ContentID),
 			ContentDisposition: strings.TrimSpace(item.ContentDisposition),
 			IsInline:           item.IsInline,
-			Size:               size,
+			Size:               int64(len(content)),
 		})
 	}
 	return cleaned, true
+}
+
+func (s *Server) canSendAttachmentThroughResourceLink(w http.ResponseWriter, r *http.Request, companyID, attachmentID string) bool {
+	links, err := s.repo.ListAttachmentResourceLinks(companyID, attachmentID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_email_attachment")
+		return false
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_attachment_links")
+		return false
+	}
+	for _, link := range links {
+		allowed, err := s.canViewAttachmentResource(r, companyID, link.ResourceType, link.ResourceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_check_attachment_permission")
+			return false
+		}
+		if allowed {
+			return true
+		}
+	}
+	writeAccessResourceNotFound(w)
+	return false
 }
 
 func cleanStringList(items []string) []string {

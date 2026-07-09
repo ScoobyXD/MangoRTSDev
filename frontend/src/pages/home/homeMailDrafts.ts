@@ -59,8 +59,24 @@ export function createHomeMailForwardDraftID(sharedInboxID: string, messageID: s
   return `draft:forward:${encodeURIComponent(scope)}:${encodeURIComponent(cleanMessageID)}`;
 }
 
+function normalizeComposeAttachment(raw: unknown): ComposeAttachment | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Partial<ComposeAttachment> & { attachment_id?: string };
+  const attachmentID = (item.attachmentID ?? item.attachment_id ?? "").trim();
+  if (!attachmentID) return null;
+  return {
+    id: item.id?.trim() || attachmentID,
+    attachmentID,
+    filename: item.filename?.trim() || "attachment",
+    contentType: item.contentType?.trim() || "application/octet-stream",
+    size: Number.isFinite(item.size) ? Math.max(0, Math.round(item.size ?? 0)) : 0,
+  };
+}
+
 function cloneAttachments(attachments: ComposeAttachment[] | undefined): ComposeAttachment[] {
-  return (attachments ?? []).map((attachment) => ({ ...attachment }));
+  return (attachments ?? [])
+    .map(normalizeComposeAttachment)
+    .filter((attachment): attachment is ComposeAttachment => Boolean(attachment));
 }
 
 function normalizeDraft(raw: unknown, companyID: string, userID: string): HomeMailDraft | null {
@@ -227,9 +243,10 @@ export function homeMailDraftToMessage(draft: HomeMailDraft): EmailMessage {
     cc: parseEmailAddressList(draft.cc),
     bcc: parseEmailAddressList(draft.bcc),
     attachments: draft.attachments.map((attachment) => ({
+      id: attachment.attachmentID,
+      attachment_id: attachment.attachmentID,
       filename: attachment.filename,
       content_type: attachment.contentType,
-      content: attachment.content,
       size: attachment.size,
     })),
     folders: ["drafts", "draft"],

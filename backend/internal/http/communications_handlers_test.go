@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -186,6 +187,38 @@ func (f *fakeNylasClient) SendMessage(_ context.Context, grantID string, request
 	f.lastSendGrantID = grantID
 	f.sent = request
 	return NylasMessage{ID: "sent-message", Subject: request.Subject, To: request.To}, nil
+}
+
+func uploadEmailAttachmentForCommunicationsTest(t *testing.T, handler http.Handler, token, companyID, resourceID, filename, contentType string, content []byte) string {
+	t.Helper()
+	body, multipartContentType := attachmentMultipartBody(t, map[string]string{
+		"company_id":        companyID,
+		"resource_type":     "email_draft",
+		"resource_id":       resourceID,
+		"relationship_kind": "email_attachment",
+		"source_kind":       "email_outgoing",
+	}, filename, contentType, content)
+	req := httptest.NewRequest(http.MethodPost, "/v1/attachments?company_id="+url.QueryEscape(companyID), body)
+	req.Header.Set("Content-Type", multipartContentType)
+	req.Header.Set("Authorization", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("upload email attachment status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created attachmentUploadResponse
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatalf("decode email attachment upload: %v", err)
+	}
+	return created.Attachment.AttachmentID
+}
+
+func personalEmailDraftResourceID(userID, draftID string) string {
+	return "personal:" + url.QueryEscape(strings.TrimSpace(userID)) + ":" + url.QueryEscape(strings.TrimSpace(draftID))
+}
+
+func sharedEmailDraftResourceID(sharedInboxID, draftID string) string {
+	return "shared:" + url.QueryEscape(strings.TrimSpace(sharedInboxID)) + ":" + url.QueryEscape(strings.TrimSpace(draftID))
 }
 
 func TestNylasOAuthStateRoundTripAndExpiry(t *testing.T) {
@@ -918,8 +951,13 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
+	const companyID = "communications-proxy-company"
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
+		t.Fatal(err)
+	}
+	repo.EnsureCompany(companyID, "Communications Proxy Company")
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
@@ -937,10 +975,12 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 		message:         NylasMessage{ID: "message-1", Subject: "Hello", Body: "Body", Unread: true, Attachments: []NylasAttachment{{ID: "attachment-1", Filename: "photo.jpg", ContentType: "image/jpeg", Size: 12}}},
 		downloadContent: []byte("photo-bytes"),
 	}
+	storage := newFakeAttachmentObjectStorage()
 	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
+		AuthValidator:     testValidator(t, "kid", key),
+		NylasConfig:       testNylasConfig(),
+		NylasClient:       nylas,
+		AttachmentStorage: storage,
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 
@@ -965,15 +1005,17 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	if nylas.update.Unread == nil || *nylas.update.Unread || len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "archive" {
 		t.Fatalf("update = %+v, want unread=false and archive folder", nylas.update)
 	}
-	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", `{"to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"filename":"note.txt","content":"aGVsbG8="}]}`, token, http.StatusCreated)
+	attachmentID := uploadEmailAttachmentForCommunicationsTest(t, handler, token, companyID, personalEmailDraftResourceID(user.UserID, "draft-proxy"), "note.txt", "text/plain", []byte("hello"))
+	sendBody := `{"company_id":"` + companyID + `","to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"note.txt","content_type":"text/plain","size":5}]}`
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", sendBody, token, http.StatusCreated)
 	if nylas.sent.To[0].Email != "friend@example.com" || nylas.sent.Subject != "Hi" {
 		t.Fatalf("sent = %+v, want normalized send request", nylas.sent)
 	}
 	if nylas.sent.TrackingOptions == nil || !nylas.sent.TrackingOptions.Opens {
 		t.Fatalf("tracking options = %+v, want opens enabled", nylas.sent.TrackingOptions)
 	}
-	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].Filename != "note.txt" || nylas.sent.Attachments[0].ContentType != "application/octet-stream" || nylas.sent.Attachments[0].Content != "aGVsbG8=" {
-		t.Fatalf("attachments = %+v, want normalized attachment", nylas.sent.Attachments)
+	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != attachmentID || nylas.sent.Attachments[0].Filename != "note.txt" || nylas.sent.Attachments[0].ContentType != "text/plain" || nylas.sent.Attachments[0].Content != "aGVsbG8=" {
+		t.Fatalf("attachments = %+v, want attachment resolved from Mango storage", nylas.sent.Attachments)
 	}
 	assertJSONStatus(t, handler, http.MethodDelete, "/v1/communications/messages/message-1", "", token, http.StatusOK)
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/disconnect", "", token, http.StatusOK)
@@ -1069,7 +1111,7 @@ func TestCommunicationsMessageFallsBackToRawMIMEAttachments(t *testing.T) {
 	}
 }
 
-func TestCommunicationsSendAllowsLargeAttachmentBodyWithQueryCompanyID(t *testing.T) {
+func TestCommunicationsSendResolvesLargeMangoAttachmentWithQueryCompanyID(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
@@ -1094,29 +1136,37 @@ func TestCommunicationsSendAllowsLargeAttachmentBodyWithQueryCompanyID(t *testin
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{}
+	storage := newFakeAttachmentObjectStorage()
 	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
+		AuthValidator:     testValidator(t, "kid", key),
+		NylasConfig:       testNylasConfig(),
+		NylasClient:       nylas,
+		AttachmentStorage: storage,
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-	largeContent := strings.Repeat("QUJD", 280000)
-	body := `{"to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"filename":"large.txt","content":"` + largeContent + `"}]}`
+	largeContent := []byte(strings.Repeat("ABC", 280000))
+	attachmentID := uploadEmailAttachmentForCommunicationsTest(t, handler, token, companyID, personalEmailDraftResourceID(user.UserID, "draft-large"), "large.txt", "text/plain", largeContent)
+	body := `{"to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"large.txt","content_type":"text/plain","size":` + fmt.Sprint(len(largeContent)) + `}]}`
 
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send?company_id="+companyID, body, token, http.StatusCreated)
-	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].Filename != "large.txt" {
-		t.Fatalf("attachments = %+v, want large attachment to reach Nylas send", nylas.sent.Attachments)
+	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].Filename != "large.txt" || nylas.sent.Attachments[0].Content != base64.StdEncoding.EncodeToString(largeContent) {
+		t.Fatalf("attachments = %+v, want large Mango attachment resolved at send boundary", nylas.sent.Attachments)
 	}
 }
 
-func TestCommunicationsSendAllowsLargePersonalAttachmentBodyWithoutCompanyID(t *testing.T) {
+func TestCommunicationsSendRejectsRawAttachmentContent(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
 	repo := store.NewMemoryRepo()
 	const subject = "email-user"
+	const companyID = "communications-raw-content-company"
 	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
 	if err != nil {
+		t.Fatal(err)
+	}
+	repo.EnsureCompany(companyID, "Communications Raw Content Company")
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
@@ -1129,18 +1179,19 @@ func TestCommunicationsSendAllowsLargePersonalAttachmentBodyWithoutCompanyID(t *
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{}
+	storage := newFakeAttachmentObjectStorage()
 	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
+		AuthValidator:     testValidator(t, "kid", key),
+		NylasConfig:       testNylasConfig(),
+		NylasClient:       nylas,
+		AttachmentStorage: storage,
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
-	largeContent := strings.Repeat("QUJD", 280000)
-	body := `{"to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"filename":"large.txt","content":"` + largeContent + `"}]}`
+	body := `{"company_id":"` + companyID + `","to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"filename":"large.txt","content":"QUJD"}]}`
 
-	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", body, token, http.StatusCreated)
-	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].Filename != "large.txt" {
-		t.Fatalf("attachments = %+v, want large personal attachment to reach Nylas send", nylas.sent.Attachments)
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", body, token, http.StatusBadRequest)
+	if nylas.lastSendGrantID != "" {
+		t.Fatalf("send grant after raw attachment request = %q, want none", nylas.lastSendGrantID)
 	}
 }
 
@@ -1338,10 +1389,12 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{}
+	storage := newFakeAttachmentObjectStorage()
 	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-		NylasConfig:   testNylasConfig(),
-		NylasClient:   nylas,
+		AuthValidator:     testValidator(t, "kid", key),
+		NylasConfig:       testNylasConfig(),
+		NylasClient:       nylas,
+		AttachmentStorage: storage,
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
 	path := "/v1/communications/messages/send?company_id=" + url.QueryEscape(companyID) + "&shared_inbox_id=" + url.QueryEscape(folder.FolderID)
@@ -1361,8 +1414,9 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	largeContent := strings.Repeat("QUJD", 280000)
-	largeBody := `{"to":[{"email":"customer@example.com"}],"subject":"Shared hello","body":"Body","attachments":[{"filename":"shared-large.txt","content":"` + largeContent + `"}]}`
+	sharedContent := []byte("shared attachment bytes")
+	attachmentID := uploadEmailAttachmentForCommunicationsTest(t, handler, token, companyID, sharedEmailDraftResourceID(folder.FolderID, "draft-shared-send"), "shared-large.txt", "text/plain", sharedContent)
+	largeBody := `{"to":[{"email":"customer@example.com"}],"subject":"Shared hello","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"shared-large.txt","content_type":"text/plain","size":` + fmt.Sprint(len(sharedContent)) + `}]}`
 	assertJSONStatus(t, handler, http.MethodPost, path, largeBody, token, http.StatusCreated)
 	if nylas.lastSendGrantID != "grant-support" {
 		t.Fatalf("send grant = %q, want shared inbox grant", nylas.lastSendGrantID)
@@ -1370,8 +1424,8 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	if nylas.sent.To[0].Email != "customer@example.com" || nylas.sent.Subject != "Shared hello" {
 		t.Fatalf("sent = %+v, want shared inbox send payload", nylas.sent)
 	}
-	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].Filename != "shared-large.txt" {
-		t.Fatalf("attachments = %+v, want shared inbox attachment", nylas.sent.Attachments)
+	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != attachmentID || nylas.sent.Attachments[0].Filename != "shared-large.txt" || nylas.sent.Attachments[0].Content != base64.StdEncoding.EncodeToString(sharedContent) {
+		t.Fatalf("attachments = %+v, want shared inbox attachment resolved from Mango storage", nylas.sent.Attachments)
 	}
 }
 

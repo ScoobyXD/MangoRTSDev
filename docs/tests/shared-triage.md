@@ -4,7 +4,7 @@ Last updated: 2026-07-09
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (backend coverage exists for destructive delete vs remove-only and OAuth linkage; frontend helper coverage exists for mailbox-capable Shared Triage rows; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting and full rich-control exposure for Shared Triage compose/reply; rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (backend coverage exists for destructive delete vs remove-only and OAuth linkage; frontend helper coverage exists for mailbox-capable Shared Triage rows; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting and full rich-control exposure for Shared Triage compose/reply; `tests/frontend/pages/home/homeCommands.test.ts` covers shared compose attachment reference payload shape; `backend/internal/http/communications_handlers_test.go` covers shared-inbox send-time Mango attachment resolution and edit-access enforcement; rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -590,4 +590,4 @@ Expected:
 - Attachment references preserve the selected `shared_inbox_id` and company-owned shared mailbox scope.
 - Inline body images use the unified rich-editor image attachment path.
 - The backend reads S3 bytes at send time and sends them through the company-owned provider grant.
-- Provider attachments become Mango attachment references when they become durable Mango work context.
+- Current attached-email/conversion projections do not persist provider attachment bytes; before a shared provider attachment becomes a durable Mango-owned resource, it must be cached into Mango S3 and represented by Mango attachment references under the company/shared mailbox scope.

@@ -231,6 +231,63 @@ func TestAttachmentSystemDoesNotAddWebSocketFileBytePayloadRoute(t *testing.T) {
 	}
 }
 
+func TestAttachmentUploadAuthorizesEmailResourceTypes(t *testing.T) {
+	repo, server, _, companyID, allowed, denied, node := newAttachmentRouteTestFixture(t)
+	handler := server.Routes()
+
+	personalResourceID := "personal:" + allowed.UserID + ":draft-personal"
+	if rec := uploadAttachmentResourceForTest(t, handler, companyID, "email_draft", personalResourceID, allowed); rec.Code != http.StatusCreated {
+		t.Fatalf("personal email draft upload status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := uploadAttachmentResourceForTest(t, handler, companyID, "email_draft", personalResourceID, denied); rec.Code != http.StatusNotFound {
+		t.Fatalf("denied personal email draft upload status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	if _, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID:         companyID,
+		Provider:          "google",
+		AccountEmail:      "support@example.com",
+		GrantID:           "support-grant",
+		Status:            "connected",
+		ConnectedByUserID: allowed.UserID,
+	}); err != nil {
+		t.Fatalf("UpsertCompanyEmailConnection: %v", err)
+	}
+	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
+	if err != nil {
+		t.Fatalf("CreateCommunicationsSharedInboxFolder: %v", err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeSharedInbox,
+		EntityID:         folder.FolderID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   allowed.UserID,
+			AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions shared inbox: %v", err)
+	}
+	sharedResourceID := "shared:" + folder.FolderID + ":draft-shared"
+	if rec := uploadAttachmentResourceForTest(t, handler, companyID, "email_draft", sharedResourceID, allowed); rec.Code != http.StatusCreated {
+		t.Fatalf("shared email draft upload status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := uploadAttachmentResourceForTest(t, handler, companyID, "email_draft", sharedResourceID, denied); rec.Code != http.StatusNotFound {
+		t.Fatalf("denied shared email draft upload status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	attachedEmailResourceID := "node:" + node.NodeID + ":message:message-1"
+	if rec := uploadAttachmentResourceForTest(t, handler, companyID, "attached_email", attachedEmailResourceID, allowed); rec.Code != http.StatusCreated {
+		t.Fatalf("attached email upload status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := uploadAttachmentResourceForTest(t, handler, companyID, "attached_email", attachedEmailResourceID, denied); rec.Code != http.StatusNotFound {
+		t.Fatalf("denied attached email upload status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func newAttachmentRouteTestFixture(t *testing.T) (*store.MemoryRepo, *Server, *fakeAttachmentObjectStorage, string, domain.User, domain.User, domain.Node) {
 	t.Helper()
 	repo := store.NewMemoryRepo()
@@ -300,6 +357,23 @@ func uploadAttachmentForTest(t *testing.T, handler http.Handler, companyID, node
 		t.Fatalf("decode upload attachment: %v", err)
 	}
 	return created.Attachment.AttachmentID
+}
+
+func uploadAttachmentResourceForTest(t *testing.T, handler http.Handler, companyID, resourceType, resourceID string, actor domain.User) *httptest.ResponseRecorder {
+	t.Helper()
+	body, contentType := attachmentMultipartBody(t, map[string]string{
+		"company_id":        companyID,
+		"resource_type":     resourceType,
+		"resource_id":       resourceID,
+		"relationship_kind": "email_attachment",
+		"source_kind":       "email_outgoing",
+	}, "hello.txt", "text/plain", []byte("hello attachment"))
+	req := httptest.NewRequest(http.MethodPost, "/v1/attachments", body)
+	req.Header.Set("Content-Type", contentType)
+	req = attachmentRequestWithActor(req, actor, companyID, domain.RoleCompanyUser)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
 }
 
 func attachmentMultipartBody(t *testing.T, fields map[string]string, filename, contentType string, content []byte) (*bytes.Buffer, string) {

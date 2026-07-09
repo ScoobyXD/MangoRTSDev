@@ -64,10 +64,11 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 
 ### V1 Mango Attachment System Note (2026-07-09)
 
-- Node text-box inline images, node attachment-button uploads, node text-block chat attachments, and attached-email projections all need to converge on the global Mango attachment system.
-- The durable node projection/information payload should store attachment references only. The known slow node with multi-megabyte pasted screenshots is the evidence case for removing inline data URLs/base64 from node content.
-- The shared node shell means attachment button behavior should be wired through the shared node workspace/body path, not separately for Home, sidebar, Updates, Kanban/My Work, dock restore, and Project inline node openers.
-- Node chats remain separate chat UI; they should use attachment references without inheriting rich-editor toolbar/list/indent semantics.
+- Node text-box inline images, node attachment-button uploads, node text-block chat attachments, and attached-email reply attachments use the global Mango attachment system for new writes.
+- Durable node projection/information payloads store attachment references only. The known slow node with multi-megabyte pasted screenshots is the evidence case for removing inline data URLs/base64 from node content.
+- The shared node shell keeps attachment button behavior in the shared node workspace/body path, not separately for Home, sidebar, Updates, Kanban/My Work, dock restore, and Project inline node openers.
+- Node chats remain separate chat UI; they store attachment references without inheriting rich-editor toolbar/list/indent semantics.
+- Incoming provider attachments on attached emails remain provider-referenced until a product path explicitly selects them for Mango ownership/cache.
 
 ---
 

@@ -192,6 +192,7 @@ export function HomeMailWorkspace({
   archiveLabel,
   busy,
   companyID,
+  currentUserID,
   compose,
   draftCount,
   emailSignature,
@@ -262,6 +263,7 @@ export function HomeMailWorkspace({
   archiveLabel: string;
   busy: string;
   companyID: string;
+  currentUserID: string;
   compose: ComposeState;
   draftCount: number;
   emailSignature: string;
@@ -699,6 +701,8 @@ export function HomeMailWorkspace({
             busy={busy === "send"}
             replyMessage={compose.replyToMessage ?? (selectedMessage?.id === compose.replyToMessageID ? selectedMessage : null)}
             emailSignature={emailSignature}
+            companyID={companyID}
+            currentUserID={currentUserID}
             companyUsers={companyUsers}
             onChange={onComposeChange}
             onCancel={onCancelCompose}

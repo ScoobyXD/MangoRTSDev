@@ -4,7 +4,7 @@ Last updated: 2026-07-09
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract, EmailPickerModal attach-only boundary, and Project critical-path inline node shell adapter mounting; project-specific persistence rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract, EmailPickerModal attach-only boundary, and Project critical-path inline node shell adapter mounting; shared editor/chat attachment tests cover attachment-reference serialization used by project text blocks and project chats; project-specific persistence rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
