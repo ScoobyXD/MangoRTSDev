@@ -1,5 +1,6 @@
 import {
   createEditorImageFrame,
+  editorAttachmentIDFromImageSource,
   EDITOR_IMAGE_NODE_ATTRIBUTE,
   readEditorImageData,
 } from "./editorImages.js";
@@ -527,6 +528,21 @@ function appendSanitizedChildren(source: Node, target: Node, ownerDocument: Docu
   source.childNodes.forEach((child) => appendSanitizedNode(child, target, ownerDocument));
 }
 
+function readSafeImageStylePixels(value: string, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseFloat(value.trim());
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(parsed)));
+}
+
+function readMigratedStandaloneAttachmentImageData(element: HTMLElement) {
+  const src = element.getAttribute("src")?.trim() ?? "";
+  const attachmentID = editorAttachmentIDFromImageSource(src);
+  if (!attachmentID) return null;
+  const width = readSafeImageStylePixels(element.style.width, 220, 48, 960);
+  const height = readSafeImageStylePixels(element.style.height, 160, 36, 1_600);
+  return { src, attachmentID, width, height };
+}
+
 function formatSafeCSSNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
 }
@@ -619,6 +635,14 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
     anchor.style.cursor = "pointer";
     appendSanitizedChildren(element, anchor, ownerDocument);
     target.appendChild(anchor);
+    return;
+  }
+
+  if (tagName === "img") {
+    const imageData = readMigratedStandaloneAttachmentImageData(element);
+    if (imageData) {
+      target.appendChild(createEditorImageFrame(ownerDocument, imageData, { durable: true }));
+    }
     return;
   }
 

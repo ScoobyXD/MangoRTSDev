@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { sanitizeAPIErrorMessage } from "../../../../frontend/src/modules/api/requestJSON.js";
 import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_EMAIL_BODY_ATTRIBUTE, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, editorEmailDisplayDocument, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML, serializeEditorBodyForEmailHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
-import { clampEditorImageVerticalOffset, createStandaloneImageClipboardHTML, editorAttachmentImageSource, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isEditorAttachmentImageSource, isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
+import { clampEditorImageVerticalOffset, createStandaloneImageClipboardHTML, editorAttachmentIDFromImageSource, editorAttachmentImageSource, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isEditorAttachmentImageSource, isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
   assert.equal(EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, 20);
@@ -100,6 +100,8 @@ test("editor attachment images use durable reference sources instead of data url
   assert.equal(src, "mango-attachment:attachment-1");
   assert.equal(isEditorAttachmentImageSource(src), true);
   assert.equal(isSafeEditorImageSource(src), false);
+  assert.equal(editorAttachmentIDFromImageSource(src), "attachment-1");
+  assert.equal(editorAttachmentIDFromImageSource("mango-attachment:attachment%20one"), "attachment one");
 });
 
 test("standalone image clipboard HTML uses safe raster sources and escaped alt text", () => {
