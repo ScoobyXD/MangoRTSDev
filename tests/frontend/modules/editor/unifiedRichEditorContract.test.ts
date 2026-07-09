@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE,
+  UNIFIED_RICH_EDITOR_MAIL_CONTROL_IDS,
   UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS,
 } from "../../../../frontend/src/modules/editor/unifiedRichEditorContract.js";
 import {
@@ -11,6 +12,25 @@ import {
   UNIFIED_NODE_SHELL_SURFACE_CONTRACTS,
   UNIFIED_NODE_SHELL_TOP_RIGHT_ACTION_ORDER,
 } from "../../../../frontend/src/modules/editor/unifiedNodeShellContract.js";
+
+const MAIL_CONTROL_LABELS = [
+  "Numbered list",
+  "Outdent",
+  "Indent",
+  "Bullet list",
+  "Checklist",
+  "Font size",
+  "Bold",
+  "Underline",
+  "Create link",
+  "Insert table",
+] as const;
+
+function assertMailToolbarControls(source: string) {
+  for (const label of MAIL_CONTROL_LABELS) {
+    assert.match(source, new RegExp(`aria-label="${label}"`));
+  }
+}
 
 test("unified rich editor contract lists every Phase 1 target surface", () => {
   assert.equal(UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE, "useEditorDocumentSurfaceHandlers");
@@ -23,21 +43,51 @@ test("unified rich editor contract lists every Phase 1 target surface", () => {
     "attached-email-reply",
   ]);
   assert.ok(UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS.every((surface) => surface.chatSurface === false));
+  assert.deepEqual(UNIFIED_RICH_EDITOR_MAIL_CONTROL_IDS, [
+    "numbered-list",
+    "indent",
+    "outdent",
+    "bullet-list",
+    "checklist",
+    "font-size",
+    "bold",
+    "underline",
+    "link",
+    "table",
+  ]);
 });
 
 test("mail compose and attached-email reply mount unified rich editor adapters", () => {
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
 
   assert.match(homeParts, /UnifiedRichEditorSurface/);
   assert.match(homeParts, /composeEditorSurfaceID/);
   assert.match(homeParts, /"my-triage-compose"/);
   assert.match(homeParts, /"shared-triage-compose"/);
   assert.doesNotMatch(homeParts, /document\.execCommand/);
+  assertMailToolbarControls(homeParts);
+  assert.match(homeParts, /bodyEditorControllerRef\.current\?\.toggleNumberedList\(\)/);
+  assert.match(homeParts, /bodyEditorControllerRef\.current\?\.outdent\(\)/);
+  assert.match(homeParts, /bodyEditorControllerRef\.current\?\.indent\(\)/);
+  assert.doesNotMatch(homeParts, /selectNumberedMode/);
 
   assert.match(nodeWorkspaceParts, /UnifiedRichEditorSurface/);
   assert.match(nodeWorkspaceParts, /surfaceID="attached-email-reply"/);
   assert.match(nodeWorkspaceParts, /unifiedRichEditorBodyToEmailHTML/);
+  assertMailToolbarControls(nodeWorkspaceParts);
+  assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.toggleNumberedList\(\)/);
+  assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.outdent\(\)/);
+  assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.indent\(\)/);
+  assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
+  assert.doesNotMatch(nodeWorkspaceParts, /selectReplyNumberedMode/);
+
+  assert.match(unifiedRichEditorSurface, /applyEditorNumberedListToRoot/);
+  assert.match(unifiedRichEditorSurface, /applyEditorIndentCommandToRoot/);
+  assert.match(unifiedRichEditorSurface, /toggleNumberedList:/);
+  assert.match(unifiedRichEditorSurface, /indent:/);
+  assert.match(unifiedRichEditorSurface, /outdent:/);
 });
 
 test("EmailPickerModal remains attach-only and cannot compose or send mail", () => {

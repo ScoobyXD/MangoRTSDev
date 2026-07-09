@@ -7,7 +7,9 @@ import {
   insertAutomaticOutlineFirstText,
   insertEditorEnterText,
   insertEditorTabText,
+  toggleAutomaticOutlineNumberingText,
   type EditorOutlineStyleID,
+  type EditorTabDirection,
 } from "./plainTextEditing";
 import {
   EDITOR_CHECKLIST_CHECKED_ATTRIBUTE,
@@ -162,6 +164,9 @@ export type EditorDocumentFormattingController = {
   applyFontSizeValue: (fontSize: number) => boolean;
   adjustFontSize: (delta: number) => boolean;
   toggleInlineFormat: (command: EditorInlineStyleCommand) => boolean;
+  toggleNumberedList: () => boolean;
+  indent: () => boolean;
+  outdent: () => boolean;
   insertTable: () => boolean;
   readFormatState: () => EditorSelectionFormatState | null;
 };
@@ -1315,6 +1320,69 @@ export function insertEditorListKindToRoot(
   const inserted = insertEditorListAtSelection(root, kind) !== null;
   if (!inserted) return false;
   recordEditorDocumentMutation(options.documentUndoHistory, root, undoBefore, "format");
+  commitEditorDocument(root, options.scheduleDocumentSave, options.scheduleIndentGuideUpdate);
+  return true;
+}
+
+export function applyEditorNumberedListToRoot(
+  root: HTMLElement,
+  options: {
+    documentUndoHistory: EditorDocumentUndoHistory;
+    scheduleDocumentSave: (nextText: string, immediate?: boolean) => void;
+    scheduleIndentGuideUpdate: (text: string) => void;
+  },
+): boolean {
+  root.focus({ preventScroll: true });
+  const offsets = getEditorSelectionOffsets(root);
+  if (!offsets) return false;
+  const currentText = readEditorDocumentText(root);
+  const edit = toggleAutomaticOutlineNumberingText(currentText, offsets.start, offsets.end);
+  if (!edit || (edit.value === currentText && edit.selectionStart === offsets.start && edit.selectionEnd === offsets.end)) return false;
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  const appliedRichEdit = applyPlainTextEditToRichDocument(root, currentText, edit);
+  if (!appliedRichEdit) {
+    if (documentHasEditorImages(root)) return false;
+    replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
+  }
+  recordEditorDocumentMutation(options.documentUndoHistory, root, undoBefore, "format");
+  commitEditorDocument(root, options.scheduleDocumentSave, options.scheduleIndentGuideUpdate);
+  return true;
+}
+
+export function applyEditorIndentCommandToRoot(
+  root: HTMLElement,
+  direction: EditorTabDirection,
+  outlineStyle: EditorOutlineStyleID,
+  options: {
+    documentUndoHistory: EditorDocumentUndoHistory;
+    scheduleDocumentSave: (nextText: string, immediate?: boolean) => void;
+    scheduleIndentGuideUpdate: (text: string) => void;
+  },
+): boolean {
+  root.focus({ preventScroll: true });
+  const activeEditorListItem = getCurrentEditorListItem(root);
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  if (activeEditorListItem) {
+    const changed = direction === "outdent"
+      ? outdentEditorListItem(root, activeEditorListItem)
+      : indentEditorListItem(root, activeEditorListItem);
+    if (!changed) return false;
+    recordEditorDocumentMutation(options.documentUndoHistory, root, undoBefore, "tab");
+    commitEditorDocument(root, options.scheduleDocumentSave, options.scheduleIndentGuideUpdate);
+    return true;
+  }
+
+  const offsets = getEditorSelectionOffsets(root);
+  if (!offsets) return false;
+  const currentText = readEditorDocumentText(root);
+  const edit = insertEditorTabText(currentText, offsets.start, offsets.end, outlineStyle, direction);
+  if (edit.value === currentText && edit.selectionStart === offsets.start && edit.selectionEnd === offsets.end) return false;
+  const appliedRichEdit = applyPlainTextEditToRichDocument(root, currentText, edit);
+  if (!appliedRichEdit) {
+    if (documentHasEditorImages(root)) return false;
+    replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
+  }
+  recordEditorDocumentMutation(options.documentUndoHistory, root, undoBefore, "tab");
   commitEditorDocument(root, options.scheduleDocumentSave, options.scheduleIndentGuideUpdate);
   return true;
 }

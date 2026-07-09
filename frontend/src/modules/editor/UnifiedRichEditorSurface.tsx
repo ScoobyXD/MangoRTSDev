@@ -10,8 +10,10 @@ import {
   type EditorListKind,
 } from "./richTextEditing";
 import {
+  applyEditorIndentCommandToRoot,
   applyEditorInlineFormatToRoot,
   applyEditorLinkToRoot,
+  applyEditorNumberedListToRoot,
   applyEditorSelectionFontSizeToRoot,
   insertEditorListKindToRoot,
   readEditorSelectionFormatState,
@@ -232,6 +234,33 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
         scheduleIndentGuideUpdate,
       });
     },
+    toggleNumberedList: () => {
+      const editor = editorRef.current;
+      if (!editable || !editor) return false;
+      return applyEditorNumberedListToRoot(editor, {
+        documentUndoHistory: documentUndoHistoryRef.current,
+        scheduleDocumentSave,
+        scheduleIndentGuideUpdate,
+      });
+    },
+    indent: () => {
+      const editor = editorRef.current;
+      if (!editable || !editor) return false;
+      return applyEditorIndentCommandToRoot(editor, "indent", outlineStyle, {
+        documentUndoHistory: documentUndoHistoryRef.current,
+        scheduleDocumentSave,
+        scheduleIndentGuideUpdate,
+      });
+    },
+    outdent: () => {
+      const editor = editorRef.current;
+      if (!editable || !editor) return false;
+      return applyEditorIndentCommandToRoot(editor, "outdent", outlineStyle, {
+        documentUndoHistory: documentUndoHistoryRef.current,
+        scheduleDocumentSave,
+        scheduleIndentGuideUpdate,
+      });
+    },
     insertList: (kind: EditorListKind) => {
       const editor = editorRef.current;
       if (!editable || !editor) return false;
@@ -251,6 +280,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     handleSelectionFontSizeChange,
     insertTable,
     onSelectionInlineFormatChange,
+    outlineStyle,
     scheduleDocumentSave,
     scheduleIndentGuideUpdate,
   ]);

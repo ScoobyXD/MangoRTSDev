@@ -5042,9 +5042,9 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     if (!rawHref.trim()) return;
     bodyEditorControllerRef.current?.insertLink(rawHref);
   };
-  const selectNumberedMode = () => {
+  const toggleNumberedList = () => {
     setBodyOutlineStyle("automatic-outline-numbering");
-    bodyEditorControllerRef.current?.focus();
+    bodyEditorControllerRef.current?.toggleNumberedList();
   };
   const insertBulletList = () => {
     setBodyOutlineStyle("bullet-list");
@@ -5053,6 +5053,12 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   const insertChecklist = () => {
     setBodyOutlineStyle("checklist");
     bodyEditorControllerRef.current?.insertList("checklist");
+  };
+  const outdentBody = () => {
+    bodyEditorControllerRef.current?.outdent();
+  };
+  const indentBody = () => {
+    bodyEditorControllerRef.current?.indent();
   };
   const isReplyMode = !!replyMessage;
   const startReplyEditorResize = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -5132,9 +5138,11 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
         <div style={composeRichToolbarStyle}>
           <button type="button" title="Bold" aria-label="Bold" style={composeRichToolButtonStyle} onClick={() => bodyEditorControllerRef.current?.toggleInlineFormat("bold")}>B</button>
           <button type="button" title="Underline" aria-label="Underline" style={composeRichToolButtonStyle} onClick={() => bodyEditorControllerRef.current?.toggleInlineFormat("underline")}>U</button>
-          <button type="button" title="Numbered list" aria-label="Numbered list" style={composeRichToolButtonStyle} onClick={selectNumberedMode}>1.</button>
+          <button type="button" title="Numbered list" aria-label="Numbered list" style={composeRichToolButtonStyle} onClick={toggleNumberedList}>1.</button>
           <button type="button" title="Bullet list" aria-label="Bullet list" style={composeRichToolButtonStyle} onClick={insertBulletList}>-</button>
           <button type="button" title="Checklist" aria-label="Checklist" style={composeRichToolWideButtonStyle} onClick={insertChecklist}>Check</button>
+          <button type="button" title="Outdent" aria-label="Outdent" style={composeRichToolButtonStyle} onClick={outdentBody}>{"<<"}</button>
+          <button type="button" title="Indent" aria-label="Indent" style={composeRichToolButtonStyle} onClick={indentBody}>{">>"}</button>
           <button type="button" title="Create link" aria-label="Create link" style={composeRichToolWideButtonStyle} onClick={createHyperlink}>Link</button>
           <button type="button" title="Insert table" aria-label="Insert table" style={composeRichToolWideButtonStyle} onClick={() => bodyEditorControllerRef.current?.insertTable()}>Table</button>
           <select
