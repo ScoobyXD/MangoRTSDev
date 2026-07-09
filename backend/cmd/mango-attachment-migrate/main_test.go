@@ -49,6 +49,16 @@ func TestRunApplyRequiresExplicitConfirmationBeforeDBConfig(t *testing.T) {
 	}
 }
 
+func TestCandidateSourcesConsumeStandardQueryArguments(t *testing.T) {
+	for _, source := range candidateSources() {
+		for _, placeholder := range []string{"$1", "$2", "$3"} {
+			if !strings.Contains(source.Query, placeholder) {
+				t.Fatalf("%s.%s query does not consume %s:\n%s", source.Table, source.Column, placeholder, source.Query)
+			}
+		}
+	}
+}
+
 func TestAttachedEmailMigrationResourceIDEscapesProviderMessageID(t *testing.T) {
 	got := attachedEmailMigrationResourceID("node-1", "msg:with/slash")
 	want := "node:node-1:message:msg%3Awith%2Fslash"
