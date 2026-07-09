@@ -1,4 +1,4 @@
-Last updated: 2026-07-08
+Last updated: 2026-07-09
 
 # REST API & WebSocket Tests
 
@@ -31,6 +31,7 @@ RW20 - WebSocket reconnect recovery must be scoped: reconnecting must not refetc
 RW21 - A `404` for a node, Logic Gate, or other resource is terminal for that resource until explicit user navigation or an authoritative event says the resource exists; the client must stop refetching that exact missing resource and unsubscribe from its realtime scope.
 RW22 - Failure handling for `401`, `404`, and WebSocket disconnects must reduce frontend/backend work rather than creating retry, reconnect, or fallback-refetch storms.
 RW23 - Realtime WebSocket tickets must be short-lived, HTTP-only, and valid across backend worker instances in the same environment so a ticket issued by one ECS task can be accepted by another task during WebSocket upgrade.
+RW24 - Attachment upload, metadata, linking, and content reads are HTTP API operations; WebSocket messages may notify that attachment metadata changed, but WebSocket payloads must not carry file bytes, base64 blobs, or S3 object contents.
 
 ## Scenarios
 
@@ -225,3 +226,20 @@ Expected:
 - The ticket is accepted by the upgrade worker when it is unexpired and scoped to the requested company.
 - The ticket is not exposed as a query parameter or normal JavaScript-readable credential.
 - Cross-worker routing does not create repeated `401` WebSocket upgrade failures for a still-authenticated user.
+
+### Scenario RW-S10: Attachments Use HTTP APIs, Not Realtime Byte Payloads
+
+Business logic covered:
+- RW10
+- RW11
+- RW24
+
+Given:
+- A user uploads, links, unlinks, or reads an attachment.
+- Other clients may be subscribed to the affected resource.
+
+Expected:
+- Uploads, metadata reads, link/unlink writes, and content reads use permissioned HTTP routes.
+- Realtime events may invalidate or update scoped attachment metadata.
+- Realtime payloads do not include raw file bytes, base64 strings, or S3 object content.
+- Clients fetch attachment content through the attachment HTTP content route only when they need to render or download it.

@@ -21,6 +21,8 @@ ED10 - Node/project email pickers are attach/select surfaces only and must not e
 ED11 - Map and legacy map-specific editing behavior is outside the V1 unified editor project unless a live non-map editor surface imports a helper that must be changed for the shared contract.
 ED12 - Any future change to unified editor semantics must update one shared behavior test plus adapter/mount coverage proving each target surface receives the shared behavior.
 ED13 - The V1 shared rich editor behavior source is the editor module handler contract behind `useEditorDocumentSurfaceHandlers`; target surfaces must either call that handler directly or mount a narrow adapter such as `UnifiedRichEditorSurface`, while preserving their own persistence/send adapter.
+ED14 - Rich-editor pasted or dropped inline images in unified editor surfaces must follow the global attachment contract in `docs/tests/attachments.md`: temporary previews are allowed, but durable editor/email content stores attachment references instead of data URLs or base64 bytes.
+ED15 - Chat attachments remain outside the unified rich-editor contract; they must use the global attachment contract as chat attachments rather than inheriting rich-editor body semantics.
 
 ## Scenarios
 
@@ -113,6 +115,25 @@ Expected:
 
 Business logic covered:
 - ED11
+
+### Scenario ED-S7: Unified Rich-Editor Images Use Mango Attachments
+
+Business logic covered:
+- ED2
+- ED3
+- ED13
+- ED14
+- ED15
+
+Given:
+- A user pastes or drops an image into a node text box, Logic Gate editor body, project text box, My Triage compose/reply body, Shared Triage compose/reply body, or attached-email reply body.
+- A user separately attaches an image to a node/project chat.
+
+Expected:
+- The rich-editor image insertion path comes from the shared editor handler contract.
+- Durable saved rich-editor content stores attachment references, not `data:image/...;base64` or durable `dataURL` values.
+- Each rich-editor surface still saves or sends through its own node, Logic Gate, project, personal mailbox, or shared mailbox adapter.
+- Chat attachment behavior follows `docs/tests/attachments.md` as chat attachment behavior and does not become unified rich-editor content.
 
 Given:
 - A V1 unified editor implementation pass is changing rich editor behavior.

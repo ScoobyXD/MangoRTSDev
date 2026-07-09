@@ -101,6 +101,9 @@ MT90 - Selecting a My Triage thread row opens a scrollable, full-height conversa
 MT91 - Personal rich compose send must preserve sanitized block indentation, including indent/outdent and blockquote-style indents, so sent email HTML does not flatten intended paragraph indentation.
 MT92 - Expired or revoked personal My Triage mailbox provider credentials return a My Triage reconnect/repair state, not a Mango auth logout. Personal mailbox folder, message-list, message-detail, send, archive, star, and draft endpoints must not represent provider reauthorization as a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response; they must return a recoverable provider-specific response, such as `409 nylas_reauth_required`, while the user remains signed in to Mango.
 MT93 - Any future change to unified editor semantics must apply to My Triage compose and reply through the shared editor behavior, not through a separate personal-compose-only implementation.
+MT94 - Personal email compose/reply file attachments must follow `docs/tests/attachments.md`: files upload to Mango attachments before durable draft/send state is saved, and normal durable payloads store attachment references instead of raw base64 `content`.
+MT95 - Personal compose/reply inline body images use the unified rich-editor image attachment path, while normal file attachments use the mail attachment path.
+MT96 - Incoming personal provider attachments can stay provider-referenced as mailbox metadata, but when converted into work, attached to a node, or otherwise made durable Mango work context, bytes must be cached/persisted into Mango S3 and stored as Mango attachment references.
 
 ## Nylas Configuration Contract
 
@@ -406,3 +409,27 @@ Expected:
 - The right-side detail pane fills the available detail area and shows a chronological conversation history for the thread.
 - Thread history bodies are loaded through individual message-detail reads scoped to the personal mailbox, using Nylas thread `message_ids` only as the grouping/index source.
 - Sent rich HTML preserves block indentation instead of flattening indented paragraphs.
+
+### Scenario MT-S9: Personal Mail Attachments Use Mango Attachments
+
+Business logic covered:
+- MT7
+- MT17
+- MT59
+- MT80
+- MT81
+- MT94
+- MT95
+- MT96
+
+Given:
+- A user attaches files to a personal compose, reply, reply-all, forward, or scheduled draft.
+- A user pastes an inline image into the personal compose/reply body.
+- A personal mailbox message with provider attachments is converted into work or attached to a node.
+
+Expected:
+- File attachments upload to Mango attachments before durable draft/send state is saved.
+- Personal draft/send payloads store Mango attachment references, not raw base64 attachment content.
+- Inline body images use the unified rich-editor image attachment path.
+- The backend reads S3 bytes at send time and sends them through the provider.
+- Provider attachments become Mango attachment references when they become durable Mango work context.

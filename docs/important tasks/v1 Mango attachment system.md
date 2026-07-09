@@ -197,6 +197,32 @@ Those `message jsonb` payloads need to be audited. They should not become a long
 
 Project summary text blocks store `attachments` in editor content structures. Those attachment objects need to be converted to references to Mango attachment records, not embedded data URLs.
 
+## Effect Of The Unified Editor And Node Work
+
+The V1 unifying editor/node project changes the frontend integration plan, but it does not change the storage architecture.
+
+Unified rich editor surfaces now share behavior through `useEditorDocumentSurfaceHandlers` and, for mail-style surfaces, `UnifiedRichEditorSurface`. That means pasted/dropped inline images in rich editor bodies should be fixed once in the shared editor image path instead of patched separately per surface.
+
+This applies to:
+
+- Logic Gate editor text
+- node text boxes wherever the node editor is opened
+- project text boxes
+- project critical-path inline node text boxes
+- My Triage compose/reply bodies
+- Shared Triage compose/reply bodies
+- attached-email reply bodies
+
+The unified editor work explicitly preserves domain persistence. Node text still saves through node information/projection paths, Logic Gate text through Logic Gate information/projection paths, project text through project information/projection paths, and mail compose/reply through mailbox draft/send paths. The attachment system therefore needs one shared file-byte backend, but each surface still links attachments to its owning resource.
+
+The unified node shell also helps because full node windows opened from Home, sidebar/app shell, Updates, Kanban/My Work, dock restore, and project critical-path rows now share the same node workspace body boundary. Node attachment UI should be wired once through that shared node workspace/shell path instead of per opener.
+
+Important boundary:
+
+- Chat panes are still conversation UI, not unified rich editor surfaces.
+- Node/project email pickers are attach/select surfaces only; they do not compose or send mail.
+- Chat attachment conversion, node attachment-button uploads, project attachment arrays, and email attachments still need their own conversion points, even though they should all store bytes through the same Mango attachment API.
+
 ## Core Architecture
 
 The Mango attachment system has two durable layers:
@@ -710,12 +736,13 @@ Do together:
 - add high-quality image rendering
 - preserve fullscreen original-image viewing
 - add upload progress/error states
-- intercept pasted editor images and upload them instead of saving data URLs
+- integrate attachment upload/reference handling into `useEditorDocumentSurfaceHandlers` and `editorImages` so rich-editor pasted/dropped images are handled once for node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply bodies
+- replace rich-editor pasted image HTML/data URLs with attachment references before durable save/send
 - convert node attachment button uploads
 - convert Logic Gate editor images/files
 - convert project text block attachments
 - convert project chat attachments
-- convert node/text-block chat attachments
+- convert node/text-block chat attachments while keeping chat semantics separate from unified rich editor semantics
 - convert outgoing email compose/reply attachments so the backend reads S3 bytes at send time
 - cache incoming email attachments into Mango attachments when they become durable Mango resources
 - preserve inline email image semantics without storing bytes in message JSON
@@ -766,20 +793,24 @@ Node:
 - Known 6.5M-character node projection shrinks to normal content plus attachment references.
 - Node attachment button uploads use the shared attachment system.
 - Node view lists and renders attachments through shared APIs.
+- Node windows opened from Home, sidebar/app shell, Updates, Kanban/My Work, dock restore, and Projects use the same node attachment behavior through the shared node workspace/shell boundary.
 
 Logic Gate:
 
 - Logic Gate editor images/files use shared attachments.
+- Logic Gate pasted/dropped inline images are converted through the unified rich editor image path, not a Logic Gate-only path.
 
 Project:
 
 - Project text block attachments use shared attachments.
 - Project chat attachments use shared attachments.
+- Project critical-path inline node windows inherit node attachment behavior, while project text boxes keep project-owned attachment links.
 
 Chat:
 
 - Chat attachments store attachment IDs, not data URLs.
 - Image preview and fullscreen behavior still work.
+- Chat attachment conversion remains a chat-specific path, even though it stores bytes in the same attachment backend.
 
 Email:
 
@@ -787,6 +818,7 @@ Email:
 - Backend reads S3 attachment bytes to send through provider.
 - Incoming email attachments can be cached into Mango S3 when they become durable Mango resources.
 - Attached email projections do not store attachment bytes.
+- My Triage and Shared Triage compose/reply bodies use the unified rich editor for body images, while normal file attachments use the mail attachment path.
 
 Developer inspection:
 

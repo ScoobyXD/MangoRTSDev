@@ -47,6 +47,9 @@ N36 - The node workspace body remains text boxes, attached emails, and text-bloc
 N37 - The node email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
 N38 - Project critical-path inline node windows must use the unified node shell and unified node text-box editor semantics while preserving node information/projection persistence for node edits.
 N39 - The V1 unified node shell source is `UnifiedNodeShell`; full node-window adapters may keep their own opener state, geometry, route handling, and permissions, but top-right node-window action ordering and shell/body data attributes must come from that shared source.
+N40 - Node text-box inline images and node attachment-button uploads must follow `docs/tests/attachments.md`: durable node information/projection rows store attachment references, not data URLs, base64 file bytes, or embedded file payloads.
+N41 - Node text-block chat attachments remain chat-specific UI, but submitted chat payloads must store Mango attachment references instead of durable `dataURL` values.
+N42 - Attached emails on nodes may store message/thread/provider metadata and Mango attachment references, but must not store attachment bytes in node projection rows or communications email attachment JSON.
 
 ## Scenarios
 
@@ -238,3 +241,27 @@ Expected:
 - Text-block chats remain chat composers and do not receive rich editor toolbar or rich editor keyboard semantics.
 - Opening the node email picker allows attaching existing email but does not expose compose, send, scheduled send, or draft-save controls.
 - Home, app/sidebar, dock-restored, Updates, Kanban/My Work, and Project inline node windows mount the `UnifiedNodeShell` adapter and expose only the actions enabled by that opener.
+
+### Scenario N-S10: Node Attachments Do Not Bloat Projection Rows
+
+Business logic covered:
+- N23
+- N28
+- N30
+- N36
+- N40
+- N41
+- N42
+
+Given:
+- A user pastes screenshots into node text boxes.
+- A user uploads files with the node attachment button.
+- A user attaches images/files to text-block chat.
+- A user attaches an email to the node.
+
+Expected:
+- Node text-box projection saves preserve the latest text content but store attachment references for inline files.
+- Node attachment-button uploads create Mango attachment links instead of embedding bytes in node information/projection payloads.
+- Chat messages store attachment references and remain outside rich-editor semantics.
+- Attached-email projections store email metadata and attachment references only.
+- Loading the node does not require reading multi-megabyte inline base64 strings from node projection rows.

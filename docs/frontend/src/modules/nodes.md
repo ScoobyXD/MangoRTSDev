@@ -62,6 +62,13 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - Node editor content still flows through `EditorContent` and `NodeWorkspaceSurface`, preserving node information/projection saves, attached-email behavior, and separate chat panes.
 - Project critical-path inline node windows mount the shared shell while edits inside them remain node editor mutations rather than project critical-path mutations.
 
+### V1 Mango Attachment System Note (2026-07-09)
+
+- Node text-box inline images, node attachment-button uploads, node text-block chat attachments, and attached-email projections all need to converge on the global Mango attachment system.
+- The durable node projection/information payload should store attachment references only. The known slow node with multi-megabyte pasted screenshots is the evidence case for removing inline data URLs/base64 from node content.
+- The shared node shell means attachment button behavior should be wired through the shared node workspace/body path, not separately for Home, sidebar, Updates, Kanban/My Work, dock restore, and Project inline node openers.
+- Node chats remain separate chat UI; they should use attachment references without inheriting rich-editor toolbar/list/indent semantics.
+
 ---
 
 ## 2) API contracts used by the module

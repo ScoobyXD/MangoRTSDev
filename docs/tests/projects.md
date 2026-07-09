@@ -27,6 +27,8 @@ P16 - Project text-box persistence remains project-owned: project text boxes sav
 P17 - Project critical-path inline node windows use the unified node shell and unified node text-box editor semantics, while mutations inside that inline node window remain node editor mutations instead of project critical-path data mutations.
 P18 - The project email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
 P19 - Project critical-path inline node windows mount `UnifiedNodeShell`; the inline window may keep project row selection/close state in Project Management, but shell actions and body metadata come from the shared node-shell source.
+P20 - Project text-box inline images and project text-block attachment arrays must follow `docs/tests/attachments.md`: durable project information/projection payloads store attachment references, not data URLs, base64 file bytes, or embedded file payloads.
+P21 - Project chat attachments use Mango attachment references, and project critical-path inline node windows inherit node attachment behavior while preserving node-owned persistence for node edits.
 
 ## Scenarios
 
@@ -125,3 +127,24 @@ Expected:
 - Project text-box edits do not write node information/projection state.
 - The project email picker allows attaching existing email where permitted.
 - The project email picker does not expose compose, send, scheduled send, or draft-save controls.
+
+### Scenario P-S6: Project Attachments Use Global Attachment Storage
+
+Business logic covered:
+- P3
+- P9
+- P16
+- P17
+- P20
+- P21
+
+Given:
+- A user pastes or drops images into a project text box.
+- A user attaches files to a project text block or project chat.
+- A user opens a project critical-path inline node window and adds node text-box images or node attachments.
+
+Expected:
+- Project text-box and project text-block attachment data stores Mango attachment references.
+- Project information/projection payloads do not store durable data URLs or base64 file bytes.
+- Project chats store attachment references while remaining chat UI.
+- The inline node window uses node attachment behavior and node-owned persistence, not project-owned attachment logic for node edits.

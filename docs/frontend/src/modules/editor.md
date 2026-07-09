@@ -25,6 +25,12 @@ The Editor module is the linked document workspace for MangoRTS. It gives the se
 - The shared shell does not own opener state or persistence. Popup size/fullscreen state, sidebar-aware bounds, dock restore state, Kanban overlay ratios, Updates notification context, and Project critical-path row selection remain with their current openers.
 - Node content still mounts through `EditorContent` and `NodeWorkspaceSurface`, so node text boxes, attached emails, and chats keep node information/projection persistence and the Phase 1 editor/chat boundaries.
 
+## V1 Mango Attachment System Direction (2026-07-09)
+- Rich-editor pasted/dropped inline images should be integrated at the shared `useEditorDocumentSurfaceHandlers` / `editorImages` path so node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply bodies all store Mango attachment references instead of data URLs.
+- Temporary image previews may exist in component state while upload is pending, but durable editor, projection, saved-version, draft, and send payloads must not contain base64 file bytes.
+- Chat attachments are intentionally separate from unified rich editor semantics; convert `NodeWorkspaceSurfaceShared.readChatAttachment` and related chat rendering to use Mango attachment references without turning chat into rich-editor content.
+- Email compose/reply file attachments should use a mail attachment path backed by Mango attachments. Inline body images use the unified rich-editor image path; normal file attachments use attachment references that the backend reads from S3 at send time.
+
 ## Key Responsibilities
 - Resolve which Node Map frame this editor is linked to through the frame-link graph + frame registry.
 - Resolve which Logic Gate Map frame this editor is linked to through the same frame-link graph + frame registry.

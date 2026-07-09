@@ -1,4 +1,4 @@
-Last updated: 2026-06-30
+Last updated: 2026-07-09
 
 # Updates Tests
 
@@ -77,6 +77,7 @@ U66 - Seeing an individual update hides that row locally without reloading the w
 U67 - Updates saved grouping view rows render under the Updates entry in the Key Views sidebar, not in the Updates header. + Add new opens the floating grouping editor for a new saved grouping view without navigating the main content area to Updates. Existing views expose Edit, Rename, and Delete commands, and view rows reorder by drag. Updates may have zero saved grouping rows.
 U68 - Activating an Updates row that opens the node preview panel keeps keyboard focus on the Updates row list; Up and Down arrow keys continue moving through visible rows across grouping boundaries instead of moving the caret inside the node editor.
 U69 - The Home sidebar Updates tab shows separate unread badges for urgent ! mentions, normal @ mentions, and non-mention update notifications using notification summary counts.
+U70 - Attachment-related update rows may reference attachment IDs, email IDs, node IDs, and preview metadata, but Updates payloads must not carry file bytes, data URLs, base64 blobs, or S3 object contents.
 
 ## Update Row Copy And Visual Language
 
@@ -359,3 +360,23 @@ Expected:
 - Up and Down arrow keys continue moving the selected row through the flattened visible Updates rows, including across nested groups.
 - Right-clicking a row opens an Updates context menu with seen actions for the selected rows and all rows, with confirmation before multi-row removal.
 - The Updates tab badge set shows one count for ! urgent mentions, one for @ mentions, and one for regular non-mention updates.
+
+### Scenario U-S8: Attachment Update Rows Are Metadata Only
+
+Business logic covered:
+- U38
+- U39
+- U53
+- U56
+- U70
+
+Given:
+- A user attaches an email to a node.
+- A user drops or merges an email-created card onto an existing node.
+- The action creates an Updates row for another permitted viewer.
+
+Expected:
+- The Updates row uses the attached-email update category and the normal attachment/action tone rules.
+- The Updates payload may reference the node, email, provider message, and Mango attachment IDs needed for navigation/rendering.
+- The Updates payload does not include raw attachment bytes, data URLs, base64 strings, or S3 object contents.
+- Opening the referenced attachment content requires the normal Mango attachment/content API permission check.
