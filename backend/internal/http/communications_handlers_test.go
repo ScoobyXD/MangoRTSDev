@@ -1143,6 +1143,11 @@ func TestCommunicationsMessageMergesRawMIMEInlineAttachmentContent(t *testing.T)
 				ContentDisposition: "inline",
 				IsInline:           true,
 				Size:               86,
+			}, {
+				ID:          "provider-file-1",
+				Filename:    "dashboard.png",
+				ContentType: "image/png",
+				Size:        197,
 			}},
 		},
 		rawMIME: strings.Join([]string{
@@ -1163,6 +1168,12 @@ func TestCommunicationsMessageMergesRawMIMEInlineAttachmentContent(t *testing.T)
 			"Content-Transfer-Encoding: base64",
 			"",
 			"aW1hZ2UtYnl0ZXM=",
+			"--mango-related",
+			`Content-Type: image/png; name="dashboard.png"`,
+			`Content-Disposition: attachment; filename="dashboard.png"`,
+			"Content-Transfer-Encoding: base64",
+			"",
+			"ZGFzaGJvYXJk",
 			"--mango-related--",
 			"",
 		}, "\r\n"),
@@ -1190,10 +1201,15 @@ func TestCommunicationsMessageMergesRawMIMEInlineAttachmentContent(t *testing.T)
 	if nylas.lastRawMIMEGrantID != "grant-1" || nylas.lastRawMIMEMessageID != "message-1" {
 		t.Fatalf("raw mime scope grant=%q message=%q", nylas.lastRawMIMEGrantID, nylas.lastRawMIMEMessageID)
 	}
-	if len(payload.Message.Attachments) != 1 {
-		t.Fatalf("attachments = %+v, want existing inline attachment merged with raw MIME bytes", payload.Message.Attachments)
+	if len(payload.Message.Attachments) != 2 {
+		t.Fatalf("attachments = %+v, want existing inline attachment merged without duplicating regular attachments", payload.Message.Attachments)
 	}
-	attachment := payload.Message.Attachments[0]
+	var attachment NylasAttachment
+	for _, item := range payload.Message.Attachments {
+		if item.ID == "provider-inline-1" {
+			attachment = item
+		}
+	}
 	if attachment.ID != "provider-inline-1" || attachment.ContentID != "image-1@local" || attachment.Content != "aW1hZ2UtYnl0ZXM=" || !attachment.IsInline {
 		t.Fatalf("attachment = %+v, want provider metadata with raw MIME inline bytes", attachment)
 	}
@@ -1210,6 +1226,95 @@ func TestCommunicationsMessageMergesRawMIMEInlineAttachmentContent(t *testing.T)
 	}
 	if nylas.lastDownloadAttachmentID != "" {
 		t.Fatalf("download attachment id = %q, want raw MIME inline content without provider download", nylas.lastDownloadAttachmentID)
+	}
+}
+
+func TestCommunicationsCachedMessageRecoversRawMIMEInlineAttachmentContent(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{
+		rawMIME: strings.Join([]string{
+			"From: Sender <sender@example.com>",
+			"To: User <user@example.com>",
+			"Subject: Cached inline image",
+			"MIME-Version: 1.0",
+			`Content-Type: multipart/related; boundary="mango-related"`,
+			"",
+			"--mango-related",
+			"Content-Type: text/html; charset=utf-8",
+			"",
+			`<div>Here</div><img src="cid:image-1@local" alt="image.png">`,
+			"--mango-related",
+			"Content-Type: image/png",
+			"Content-Disposition: inline",
+			"Content-ID: <image-1@local>",
+			"Content-Transfer-Encoding: base64",
+			"",
+			"aW1hZ2UtYnl0ZXM=",
+			"--mango-related--",
+			"",
+		}, "\r\n"),
+	}
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	})
+	server.commCache.setMessage(user.UserID, communicationsConnectionCacheScope(connection), NylasMessage{
+		ID:      "message-1",
+		Subject: "Cached inline image",
+		Body:    `<div>Here</div><img src="cid:image-1@local" alt="image.png">`,
+		Attachments: []NylasAttachment{{
+			ID:                 "provider-inline-1",
+			Filename:           "image.png",
+			ContentType:        "image/png",
+			ContentID:          "image-1@local",
+			ContentDisposition: "inline",
+			IsInline:           true,
+			Size:               86,
+		}},
+	}, time.Now().UTC())
+	handler := server.Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1", nil)
+	req.Header.Set("Authorization", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cached message status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Message NylasMessage `json:"message"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if nylas.detailCalls != 0 {
+		t.Fatalf("detail calls = %d, want cached detail with raw MIME recovery", nylas.detailCalls)
+	}
+	if nylas.lastRawMIMEGrantID != "grant-1" || nylas.lastRawMIMEMessageID != "message-1" {
+		t.Fatalf("raw mime scope grant=%q message=%q", nylas.lastRawMIMEGrantID, nylas.lastRawMIMEMessageID)
+	}
+	if len(payload.Message.Attachments) != 1 || payload.Message.Attachments[0].Content != "aW1hZ2UtYnl0ZXM=" {
+		t.Fatalf("attachments = %+v, want cached inline attachment recovered from raw MIME", payload.Message.Attachments)
 	}
 }
 

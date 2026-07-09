@@ -1432,7 +1432,7 @@ func findNylasAttachmentByID(attachments []NylasAttachment, attachmentID string)
 		return NylasAttachment{}, false
 	}
 	for _, attachment := range attachments {
-		if strings.TrimSpace(attachment.ID) == attachmentID {
+		if strings.TrimSpace(attachment.ID) == attachmentID || strings.TrimSpace(attachment.AttachmentID) == attachmentID {
 			return attachment, true
 		}
 	}
@@ -1505,12 +1505,18 @@ func (s *Server) communicationsMessage(ctx context.Context, connection domain.Us
 	now := time.Now().UTC()
 	cacheScope := communicationsConnectionCacheScope(connection)
 	if message, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, now); ok {
+		if messageNeedsRawMIMEAttachmentRecovery(message) {
+			_ = s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+				message = s.recoverCommunicationsMessageRawMIMEAttachments(ctx, connection, cacheScope, message, now)
+				return nil
+			})
+		}
 		return s.enrichCommunicationsMessageReadStatus(connection, message), nil
 	}
 	var message NylasMessage
 	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
 		if cached, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, time.Now().UTC()); ok {
-			message = cached
+			message = s.recoverCommunicationsMessageRawMIMEAttachments(ctx, connection, cacheScope, cached, time.Now().UTC())
 			return nil
 		}
 		var err error
@@ -1531,6 +1537,17 @@ func (s *Server) communicationsMessage(ctx context.Context, connection domain.Us
 	}
 	s.commCache.setMessage(connection.UserID, cacheScope, message, now)
 	return s.enrichCommunicationsMessageReadStatus(connection, message), nil
+}
+
+func (s *Server) recoverCommunicationsMessageRawMIMEAttachments(ctx context.Context, connection domain.UserEmailConnection, cacheScope string, message NylasMessage, now time.Time) NylasMessage {
+	if !messageNeedsRawMIMEAttachmentRecovery(message) {
+		return message
+	}
+	recovered := s.attachRawMIMEAttachmentsIfMissing(ctx, connection, message)
+	if len(recovered.Attachments) != len(message.Attachments) || !messageNeedsRawMIMEAttachmentRecovery(recovered) {
+		s.commCache.setMessage(connection.UserID, cacheScope, recovered, now)
+	}
+	return recovered
 }
 
 func shouldServeStaleCommunicationsCache(err error) bool {

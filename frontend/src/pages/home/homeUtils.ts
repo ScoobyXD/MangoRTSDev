@@ -1122,7 +1122,7 @@ export function messageDocument(body: string): string {
 }
 
 const EMAIL_CID_REFERENCE_PATTERN = /\bcid:([^"'\s>)]+)/gi;
-const EMAIL_CID_SRC_ATTRIBUTE_PATTERN = /\bsrc\s*=\s*(["'])\s*cid:([^"']+)\1/gi;
+const EMAIL_CID_SRC_ATTRIBUTE_PATTERN = /\bsrc\s*=\s*(?:(["'])\s*cid:([^"']+)\1|cid:([^\s>]+))/gi;
 
 export function normalizeEmailContentID(value: string | undefined): string {
   let clean = value?.trim() ?? "";
@@ -1193,10 +1193,12 @@ function escapeEmailDocumentAttribute(value: string): string {
 export function rewriteEmailDocumentCIDSources(documentHTML: string, sourceByContentID: Record<string, string>): string {
   if (!documentHTML.trim()) return documentHTML;
   EMAIL_CID_SRC_ATTRIBUTE_PATTERN.lastIndex = 0;
-  return documentHTML.replace(EMAIL_CID_SRC_ATTRIBUTE_PATTERN, (match, quote: string, rawContentID: string) => {
+  return documentHTML.replace(EMAIL_CID_SRC_ATTRIBUTE_PATTERN, (match, quote: string | undefined, quotedContentID: string | undefined, unquotedContentID: string | undefined) => {
+    const rawContentID = quotedContentID ?? unquotedContentID ?? "";
     const replacement = sourceByContentID[normalizeEmailContentID(rawContentID)];
     if (!replacement) return match;
-    return `src=${quote}${escapeEmailDocumentAttribute(replacement)}${quote}`;
+    const safeReplacement = escapeEmailDocumentAttribute(replacement);
+    return quote ? `src=${quote}${safeReplacement}${quote}` : `src="${safeReplacement}"`;
   });
 }
 
