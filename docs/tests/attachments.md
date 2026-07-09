@@ -4,7 +4,7 @@ Last updated: 2026-07-09
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: 0% (V1 Mango Attachment System is a target contract; rule IDs are not mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/api/requestJSON.test.ts` covers multipart upload request headers; `tests/frontend/modules/editor/editorProjection.test.ts` covers attachment-reference serialization for editor text-block/chat payloads and legacy data-url parsing without emitting new durable data URLs)
 
 ## Business Logic
 

@@ -16,6 +16,7 @@ import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyE
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
 import { getExplorerDropPayloadItems, getExplorerDropPayloadItemType, type ExplorerDropPayload } from "../company-explorer/treePresentation.js";
 import { createRequestJSON } from "../api/requestJSON.js";
+import { fileFromDataURL } from "../attachments/attachmentApi.js";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockChatPayload,
@@ -44,6 +45,7 @@ import {
 } from "../editor/NodeWorkspaceSurfaceParts.js";
 import {
   CHAT_ATTACHMENT_MAX_BYTES,
+  CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES,
   EDITOR_NEU_ACTIVE_SURFACE,
   EDITOR_NEU_EDGE_FRAME,
   EDITOR_NEU_PANEL_BACKGROUND,
@@ -54,9 +56,10 @@ import {
   MailIcon,
   messageAttachmentPayload,
   PaperclipIcon,
-  readChatAttachment,
   TableIcon,
   ChatIcon,
+  uploadEditorAttachment,
+  type TextBlockImageDraft,
   type TextBlockSelectionDraft,
 } from "../editor/NodeWorkspaceSurfaceShared.js";
 import { useEditorPreferences } from "../editor/useEditorPreferences.js";
@@ -193,7 +196,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   workspace,
 }) => {
   const companyID = getActiveCompanyID();
-  const permissionsRequestJSON = useMemo(() => createRequestJSON(readAuthConfig().apiBase), []);
+  const apiBase = readAuthConfig().apiBase;
+  const permissionsRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
+  const attachmentRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const refreshTokenRef = useRef(refreshToken);
   const { accounts } = useCompanyAccounts(companyID);
@@ -470,14 +475,23 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     });
     if (acceptedFiles.length === 0) return;
     try {
-      const attachments = await Promise.all(acceptedFiles.map((file) => readChatAttachment(file)));
+      const attachments = await Promise.all(acceptedFiles.map((file) => uploadEditorAttachment(file, {
+        requestJSON: attachmentRequestJSON,
+        companyID,
+        resourceType: "project",
+        resourceID: projectID,
+        sourceKind: "user_upload",
+        relationshipKind: "file_attachment",
+        informationID: block.id,
+        editorSurface: "project_text_block",
+      })));
       const nextAttachments = [...block.attachments, ...attachments];
       setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, attachments: nextAttachments } : item));
       await saveTextBlock(block, { attachments: nextAttachments });
     } catch (attachmentError) {
       setError(attachmentError instanceof Error ? attachmentError.message : "Failed to add attachment");
     }
-  }, [saveTextBlock]);
+  }, [attachmentRequestJSON, companyID, projectID, saveTextBlock]);
 
   const submitChatMessage = useCallback(async (blockID: string) => {
     const message = (chatDrafts[blockID] ?? "").trim();
@@ -545,17 +559,68 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [companyID, loadProject, projectID]);
 
-  const attachChatDraftFiles = useCallback((blockID: string, files: FileList | File[]) => {
+  const attachChatDraftFiles = useCallback(async (blockID: string, files: FileList | File[]) => {
     const incomingFiles = Array.from(files);
     if (incomingFiles.length === 0) return;
-    void Promise.all(incomingFiles.map((file) => readChatAttachment(file)))
-      .then((attachments) => {
-        setChatDraftAttachments((current) => ({ ...current, [blockID]: [...(current[blockID] ?? []), ...attachments] }));
-      })
-      .catch((attachmentError) => {
-        setError(attachmentError instanceof Error ? attachmentError.message : "Failed to add chat attachment");
+    let nextTotalSize = (chatDraftAttachments[blockID] ?? []).reduce((total, attachment) => total + attachment.size, 0);
+    const acceptedFiles: File[] = [];
+    for (const file of incomingFiles) {
+      if (file.size > CHAT_ATTACHMENT_MAX_BYTES) {
+        setError(`${file.name} is larger than ${formatFileSize(CHAT_ATTACHMENT_MAX_BYTES)}.`);
+        continue;
+      }
+      if (nextTotalSize + file.size > CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES) {
+        setError(`Chat attachments are limited to ${formatFileSize(CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES)} per message.`);
+        break;
+      }
+      acceptedFiles.push(file);
+      nextTotalSize += file.size;
+    }
+    if (acceptedFiles.length === 0) return;
+    try {
+      const attachments = await Promise.all(acceptedFiles.map((file) => uploadEditorAttachment(file, {
+        requestJSON: attachmentRequestJSON,
+        companyID,
+        resourceType: "project",
+        resourceID: projectID,
+        sourceKind: "chat_upload",
+        relationshipKind: "chat_attachment",
+        informationID: blockID,
+        editorSurface: "project_text_block_chat",
+      })));
+      setChatDraftAttachments((current) => ({ ...current, [blockID]: [...(current[blockID] ?? []), ...attachments] }));
+    } catch (attachmentError) {
+      setError(attachmentError instanceof Error ? attachmentError.message : "Failed to add chat attachment");
+    }
+  }, [attachmentRequestJSON, chatDraftAttachments, companyID, projectID]);
+
+  const addImageChatComment = useCallback(async (image: TextBlockImageDraft) => {
+    const file = fileFromDataURL(image.dataURL, "selected-image.png");
+    if (!file) {
+      setError("Failed to prepare image attachment");
+      return;
+    }
+    try {
+      const attachment = await uploadEditorAttachment(file, {
+        requestJSON: attachmentRequestJSON,
+        companyID,
+        resourceType: "project",
+        resourceID: projectID,
+        sourceKind: "chat_upload",
+        relationshipKind: "chat_attachment",
+        informationID: image.blockID,
+        editorSurface: "project_text_block_image_chat",
       });
-  }, []);
+      setOpenChatBlockIDs((current) => new Set(current).add(image.blockID));
+      setActivePaneTabs((current) => ({ ...current, [image.blockID]: "chat" }));
+      setChatDraftAttachments((current) => ({
+        ...current,
+        [image.blockID]: [...(current[image.blockID] ?? []), attachment],
+      }));
+    } catch (attachmentError) {
+      setError(attachmentError instanceof Error ? attachmentError.message : "Failed to add chat attachment");
+    }
+  }, [attachmentRequestJSON, companyID, projectID]);
 
   const attachEmailToBlock = useCallback(async (blockID: string, message: Parameters<typeof messageAttachmentPayload>[0]) => {
     const payload = messageAttachmentPayload(message);
@@ -1307,10 +1372,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         setOpenChatBlockIDs((current) => new Set(current).add(block.id));
                         setActivePaneTabs((current) => ({ ...current, [block.id]: "chat" }));
                       }}
-                      onImageChatRequest={() => {
-                        setOpenChatBlockIDs((current) => new Set(current).add(block.id));
-                        setActivePaneTabs((current) => ({ ...current, [block.id]: "chat" }));
-                      }}
+                      onImageChatRequest={(image) => { void addImageChatComment(image); }}
                       onImageNodeRequest={() => undefined}
                     />
                   </div>
@@ -1319,6 +1381,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       <ChatPane
                         blockID={block.id}
                         editable
+                        apiBase={apiBase}
+                        companyID={companyID}
                         messages={chatMessagesByBlockID.get(block.id) ?? []}
                         emailPane={
                           <div style={projectEmailPaneWrapStyle}>

@@ -32,6 +32,30 @@ test("requestJSON serializes json bodies and default JSON headers", async () => 
   assert.equal(seenHeaders.get("Accept"), "application/json");
 });
 
+test("requestJSON lets FormData bodies keep the browser multipart Content-Type", async () => {
+  let seenBody: BodyInit | null | undefined;
+  let seenHeaders = new Headers();
+  const form = new FormData();
+  form.set("company_id", "company-1");
+  form.set("resource_type", "node");
+
+  const payload = await requestJSON<{ ok: boolean }>("https://api.example.test", "/v1/attachments", {
+    auth: false,
+    fetchImpl: async (_input, init) => {
+      seenBody = init?.body;
+      seenHeaders = new Headers(init?.headers);
+      return jsonResponse({ ok: true });
+    },
+    body: form,
+    method: "POST",
+  });
+
+  assert.deepEqual(payload, { ok: true });
+  assert.equal(seenBody, form);
+  assert.equal(seenHeaders.get("Content-Type"), null);
+  assert.equal(seenHeaders.get("Accept"), "application/json");
+});
+
 test("requestJSON aborts requests when timeout elapses", async () => {
   let sawAbort = false;
   const fetchImpl: typeof fetch = async (_input, init) => {
