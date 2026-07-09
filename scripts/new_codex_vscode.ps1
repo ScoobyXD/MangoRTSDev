@@ -66,6 +66,26 @@ function ConvertTo-PowerShellSingleQuotedLiteral {
   return "'" + $Value.Replace("'", "''") + "'"
 }
 
+function Set-JsonProperty {
+  param(
+    [Parameter(Mandatory = $true)]
+    [pscustomobject]$Object,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Name,
+
+    [AllowNull()]
+    [object]$Value
+  )
+
+  $existing = $Object.PSObject.Properties | Where-Object { $_.Name -eq $Name } | Select-Object -First 1
+  if ($existing) {
+    $existing.Value = $Value
+  } else {
+    $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
+  }
+}
+
 function Get-VsCodeExe {
   $code = Join-Path $env:LOCALAPPDATA "Programs\Microsoft VS Code\Code.exe"
   if (-not (Test-Path -LiteralPath $code)) {
@@ -263,13 +283,13 @@ Write-Host "Launching isolated VS Code for `$slug..."
 Write-Host "Worktree: `$worktree"
 Write-Host "User data: `$userData"
 
-`$args = @('--new-window', "--user-data-dir=`$userData", "--extensions-dir=`$extensions", `$worktree)
+`$args = @('--new-window', '--disable-workspace-trust', "--user-data-dir=`$userData", "--extensions-dir=`$extensions", '--command', 'chatgpt.openSidebar', `$worktree)
 `$p = Start-Process -FilePath `$code -WorkingDirectory `$worktree -ArgumentList `$args -WindowStyle Normal -PassThru
 Write-Host ("Started Code.exe PID {0}" -f `$p.Id)
 "@
 }
 
-function Set-CodexSidebarOpenOnStartup {
+function Initialize-CodexVsCodeUserData {
   param(
     [Parameter(Mandatory = $true)]
     [string]$UserData
@@ -291,12 +311,23 @@ function Set-CodexSidebarOpenOnStartup {
     }
   }
 
-  $existing = $settings.PSObject.Properties | Where-Object { $_.Name -eq "chatgpt.openOnStartup" } | Select-Object -First 1
-  if ($existing) {
-    $settings."chatgpt.openOnStartup" = $true
-  } else {
-    $settings | Add-Member -NotePropertyName "chatgpt.openOnStartup" -NotePropertyValue $true
+  Set-JsonProperty -Object $settings -Name "workbench.colorTheme" -Value "Dark 2026"
+  Set-JsonProperty -Object $settings -Name "workbench.iconTheme" -Value "vs-seti"
+  Set-JsonProperty -Object $settings -Name "chatgpt.openOnStartup" -Value $true
+  Set-JsonProperty -Object $settings -Name "security.workspace.trust.enabled" -Value $false
+  Set-JsonProperty -Object $settings -Name "security.workspace.trust.startupPrompt" -Value "never"
+
+  $untrustedWorkspaceSupport = $settings.PSObject.Properties |
+    Where-Object { $_.Name -eq "extensions.supportUntrustedWorkspaces" } |
+    Select-Object -First 1 -ExpandProperty Value
+  if (($null -eq $untrustedWorkspaceSupport) -or ($untrustedWorkspaceSupport -isnot [pscustomobject])) {
+    $untrustedWorkspaceSupport = [pscustomobject]@{}
   }
+
+  Set-JsonProperty -Object $untrustedWorkspaceSupport -Name "openai.chatgpt" -Value ([pscustomobject]@{
+    supported = $true
+  })
+  Set-JsonProperty -Object $settings -Name "extensions.supportUntrustedWorkspaces" -Value $untrustedWorkspaceSupport
 
   $settings | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $settingsPath -Encoding UTF8
 }
@@ -415,7 +446,7 @@ $code = Get-VsCodeExe
 $launcherPid = ""
 $codePid = ""
 
-Set-CodexSidebarOpenOnStartup -UserData $userData
+Initialize-CodexVsCodeUserData -UserData $userData
 
 if (-not $NoStart) {
   $script = New-VsCodeLauncherScript -Slug $slug -Worktree $workerPath -UserData $userData -Extensions $extensions -Code $code
