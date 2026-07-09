@@ -5351,15 +5351,29 @@ function conversationMessagesForDetail(message: EmailMessage, threadMessages: Em
   });
 }
 
-function EmailConversationMessage({ message, companyID, sharedInboxID, fill }: {
+const emailBodyLoadingStyle: React.CSSProperties = {
+  minHeight: 260,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(148, 163, 184, 0.22)",
+  borderRadius: 8,
+  background: "#ffffff",
+  color: "rgba(100, 116, 139, 0.76)",
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+function EmailConversationMessage({ message, companyID, sharedInboxID, fill, loadingBody = false }: {
   message: EmailMessage;
   companyID: string;
   sharedInboxID?: string;
   fill: boolean;
+  loadingBody?: boolean;
 }) {
   const attachments = (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || attachment.id?.trim());
   const hasAttachments = attachments.length > 0;
   const messageDate = formatMessageDate(message.date);
+  const body = message.body?.trim() ? message.body : loadingBody ? "" : (message.snippet || "");
   const frameStyle: React.CSSProperties = fill
     ? { ...iframeStyle, minHeight: hasAttachments ? 320 : 0, height: "100%" }
     : { ...iframeStyle, minHeight: 260, height: 320, boxShadow: "none" };
@@ -5405,7 +5419,11 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill }: {
           </div>
         </div>
       )}
-      <iframe title="Email body" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={messageDocument(message.body || message.snippet || "")} style={frameStyle} />
+      {loadingBody && !body ? (
+        <div style={emailBodyLoadingStyle}>Loading message</div>
+      ) : (
+        <iframe title="Email body" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={messageDocument(body)} style={frameStyle} />
+      )}
     </article>
   );
 }
@@ -5472,6 +5490,7 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
             companyID={companyID}
             sharedInboxID={sharedInboxID}
             fill={singleMessage}
+            loadingBody={loading && conversationMessage.id === message.id && !conversationMessage.body?.trim()}
           />
         ))}
       </div>

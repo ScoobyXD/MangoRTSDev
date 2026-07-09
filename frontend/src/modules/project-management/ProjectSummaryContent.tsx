@@ -32,9 +32,12 @@ import {
   type EditorChatAttachment,
   type EditorTextBlockChatMessage,
 } from "../editor/editorProjection.js";
+import { EditorTabBar } from "../editor/EditorTabBar.js";
+import type { EditorTabID } from "../editor/editorTabs.js";
 import { EditorContent } from "../editor/EditorContent.js";
 import { generateStableInformationID } from "../editor/editorTypes.js";
 import { UnifiedNodeShell } from "../editor/UnifiedNodeShell.js";
+import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState } from "../editor/useEditorDocumentSurfaceHandlers.js";
 import {
   AttachedEmailOrganizerPane,
   ChatPane,
@@ -58,6 +61,7 @@ import {
   PaperclipIcon,
   TableIcon,
   ChatIcon,
+  TEXT_BLOCK_FONT_SIZE,
   uploadEditorAttachment,
   type TextBlockImageDraft,
   type TextBlockSelectionDraft,
@@ -178,6 +182,7 @@ const PROJECT_SUMMARY_SPLIT_MAX = 74;
 const PROJECT_RELATIONSHIP_NODE_DRAG_MIME = "application/x-mangorts-project-relationship-node";
 const PROJECT_CRITICAL_STEP_DRAG_MIME = "application/x-mangorts-project-critical-step";
 const PROJECT_HEALTH_OPTIONS: ProjectHealth[] = ["On Track", "AT RISK", "Off Track"];
+const PROJECT_TEXT_EDITOR_TOOLBAR_TAB_IDS: readonly EditorTabID[] = ["format", "outline-styles"];
 
 function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
   if (typeof window === "undefined") return;
@@ -201,6 +206,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const attachmentRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const refreshTokenRef = useRef(refreshToken);
+  const projectFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
   const { accounts } = useCompanyAccounts(companyID);
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [projectTitleEditing, setProjectTitleEditing] = useState(false);
@@ -245,7 +251,26 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [selectionAnchorRelationshipNodeID, setSelectionAnchorRelationshipNodeID] = useState("");
   const [activeRightPanelTab, setActiveRightPanelTab] = useState<"relationships" | "critical-path">("critical-path");
   const [selectedCriticalPathNode, setSelectedCriticalPathNode] = useState<CriticalPathNodePreviewSelection | null>(null);
+  const [projectSelectionFontSize, setProjectSelectionFontSize] = useState(TEXT_BLOCK_FONT_SIZE);
+  const [projectInlineFormat, setProjectInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
+
+  const refreshProjectSelectionFormat = useCallback(() => {
+    const state = projectFormattingControllerRef.current?.readFormatState();
+    if (!state) return;
+    setProjectSelectionFontSize(state.fontSize);
+    setProjectInlineFormat({ bold: state.bold, underline: state.underline });
+  }, []);
+
+  const runProjectFormatCommand = useCallback((command: (controller: EditorDocumentFormattingController) => boolean) => {
+    const controller = projectFormattingControllerRef.current;
+    if (!controller) return;
+    command(controller);
+    const state = controller.readFormatState();
+    if (!state) return;
+    setProjectSelectionFontSize(state.fontSize);
+    setProjectInlineFormat({ bold: state.bold, underline: state.underline });
+  }, []);
 
   const loadProject = useCallback(async (options: { showLoading?: boolean } = {}) => {
     const cleanProjectID = projectID.trim();
@@ -1245,26 +1270,46 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           <div style={columnToolbarStyle}>
             <div style={columnTitleStyle}>Timeline</div>
             <div style={toolbarActionsStyle}>
-              <div role="group" aria-label="Outline style" style={outlineToggleStyle}>
-                <button
-                  type="button"
-                  style={outlineToggleButtonStyle(outlineStyle === "indent-guides")}
-                  onClick={() => setOutlineStyle("indent-guides")}
-                >
-                  Indent
-                </button>
-                <button
-                  type="button"
-                  style={outlineToggleButtonStyle(outlineStyle === "automatic-outline-numbering")}
-                  onClick={() => setOutlineStyle("automatic-outline-numbering")}
-                >
-                  A1
-                </button>
-              </div>
-              <button type="button" style={primaryButtonStyle(accent)} onClick={() => void addTextBlock()}>New Text Box</button>
+              <EditorTabBar
+                activeTab="format"
+                outlineStyle={outlineStyle}
+                accent={accent}
+                outlineMenuAccent={accent}
+                strokeColor={EDITOR_NEU_SOFT_BORDER}
+                surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
+                tabBackground={EDITOR_NEU_SURFACE}
+                tabSelectedBackground={EDITOR_NEU_ACTIVE_SURFACE}
+                onSelectTab={() => undefined}
+                onAdjustSelectionFontSize={(delta) => runProjectFormatCommand((controller) => controller.adjustFontSize(delta))}
+                documentFontSize={projectSelectionFontSize}
+                onSetSelectionFontSize={(fontSize) => runProjectFormatCommand((controller) => controller.applyFontSizeValue(fontSize))}
+                boldActive={projectInlineFormat.bold}
+                underlineActive={projectInlineFormat.underline}
+                onToggleBold={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("bold"))}
+                onToggleUnderline={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("underline"))}
+                onOutlineStyleFocus={refreshProjectSelectionFormat}
+                onOutlineStyleChange={setOutlineStyle}
+                onInsertTable={() => {
+                  const targetBlockID = focusedTextBlockID || blocks[0]?.id || "";
+                  if (!targetBlockID) return;
+                  setTableInsertRequests((current) => ({ ...current, [targetBlockID]: (current[targetBlockID] ?? 0) + 1 }));
+                }}
+                reserveHeaderOffset={false}
+                visibleTabIDs={PROJECT_TEXT_EDITOR_TOOLBAR_TAB_IDS}
+                disabled={!focusedTextBlockID}
+              />
             </div>
           </div>
           <div className="kanban-board-scroll" style={textBlocksScrollStyle}>
+            <button
+              type="button"
+              title="Add text box"
+              aria-label="Add text box"
+              style={projectTimelineAddButtonStyle(accent)}
+              onClick={() => void addTextBlock()}
+            >
+              +
+            </button>
             {blocks.map((block, index) => (
               <div key={block.id} style={projectTimelineRowStyle}>
                 <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
@@ -1364,7 +1409,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       outlineStyle={outlineStyle}
                       indentGuideColor={PROJECT_SUMMARY_RULE}
                       scrollbarTrack="rgba(15, 23, 42, 0.08)"
-                      onFocus={() => setFocusedTextBlockID(block.id)}
+                      formattingControllerRef={projectFormattingControllerRef}
+                      onFocus={() => {
+                        setFocusedTextBlockID(block.id);
+                        window.setTimeout(refreshProjectSelectionFormat, 0);
+                      }}
                       onBlur={() => setFocusedTextBlockID((current) => current === block.id ? "" : current)}
                       onDocumentChange={(document) => updateBlockDocument(block.id, document)}
                       onDocumentFlush={(document) => {
@@ -1379,6 +1428,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       }}
                       onImageChatRequest={(image) => { void addImageChatComment(image); }}
                       onImageNodeRequest={() => undefined}
+                      onSelectionFontSizeChange={setProjectSelectionFontSize}
+                      onSelectionInlineFormatChange={setProjectInlineFormat}
                     />
                   </div>
                   {(openChatBlockIDs.has(block.id) || openEmailBlockIDs.has(block.id)) ? (
@@ -1450,11 +1501,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 </div>
               </div>
             ))}
-            {blocks.length === 0 ? (
-              <button type="button" style={emptyTextButtonStyle} onClick={() => void addTextBlock()}>
-                New Text Box
-              </button>
-            ) : null}
           </div>
         </section>
         <div role="separator" aria-orientation="vertical" style={summarySplitHandleStyle} onPointerDown={startSummarySplitResize} />
@@ -3520,39 +3566,8 @@ const criticalPulseBadgeTextStyle: React.CSSProperties = {
   lineHeight: 1,
 };
 
-const outlineToggleStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  padding: 3,
-  borderRadius: 999,
-  background: "#e2e8f0",
-  gap: 2,
-};
-
-const outlineToggleButtonStyle = (active: boolean): React.CSSProperties => ({
-  minHeight: 26,
-  border: 0,
-  borderRadius: 999,
-  padding: "0 10px",
-  background: active ? "#ffffff" : "transparent",
-  color: active ? "#0f172a" : "#64748b",
-  fontWeight: 800,
-  cursor: "pointer",
-});
-
-const primaryButtonStyle = (accent: string): React.CSSProperties => ({
-  minHeight: 32,
-  border: 0,
-  borderRadius: 8,
-  background: accent,
-  color: "#ffffff",
-  padding: "0 12px",
-  fontWeight: 850,
-  cursor: "pointer",
-  boxShadow: "0 8px 18px rgba(37, 99, 235, 0.16)",
-});
-
 const textBlocksScrollStyle: React.CSSProperties = {
+  position: "relative",
   minHeight: 0,
   flex: "1 1 auto",
   overflow: "auto",
@@ -3561,6 +3576,28 @@ const textBlocksScrollStyle: React.CSSProperties = {
   gap: 12,
   paddingRight: 4,
 };
+
+const projectTimelineAddButtonStyle = (accent: string): React.CSSProperties => ({
+  position: "absolute",
+  top: 4,
+  left: 3,
+  zIndex: 8,
+  width: 30,
+  height: 30,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(91, 141, 239, 0.34)",
+  borderRadius: 999,
+  background: "#ffffff",
+  color: accent,
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 22,
+  fontWeight: 850,
+  lineHeight: 1,
+  padding: "0 0 2px",
+  boxShadow: "4px 4px 10px rgba(174,174,192,0.22), -4px -4px 10px rgba(255,255,255,0.90)",
+});
 
 const projectTimelineRowStyle: React.CSSProperties = {
   minWidth: 0,
@@ -3691,16 +3728,6 @@ const savingStyle: React.CSSProperties = {
   fontSize: 12,
   color: "#64748b",
   fontWeight: 700,
-};
-
-const emptyTextButtonStyle: React.CSSProperties = {
-  minHeight: 120,
-  border: "1px dashed rgba(91, 141, 239, 0.45)",
-  borderRadius: 8,
-  background: "#ffffff",
-  color: "#1d4ed8",
-  fontWeight: 850,
-  cursor: "pointer",
 };
 
 const relationshipScrollStyle = (dropActive: boolean): React.CSSProperties => ({

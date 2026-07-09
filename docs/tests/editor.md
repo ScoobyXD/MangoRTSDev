@@ -35,6 +35,7 @@ ED24 - Map and legacy map-specific editor surfaces are explicitly outside the V1
 ED25 - Backend persistence unification is explicitly outside the unified editor contract; shared editing behavior must not force node, Logic Gate, project, personal mailbox, shared mailbox, or attached-email reply content into one storage owner.
 ED26 - Rich-editor pasted or dropped inline images in unified editor surfaces must follow the global attachment contract in `docs/tests/attachments.md`: temporary previews are allowed, but durable editor/email content stores attachment references instead of data URLs or base64 bytes.
 ED27 - Chat attachments remain outside the unified rich-editor contract; they must use the global attachment contract as chat attachments rather than inheriting rich-editor body semantics.
+ED28 - Project text boxes must expose the same shared format and outline toolbar controls as node text boxes, including font-size controls, bold, underline, automatic numbering, bullets, checklist, and outline-style selection; project-specific toolbar toggles must call the shared editor controller instead of defining separate semantics.
 
 ## Scenarios
 
@@ -56,6 +57,7 @@ Business logic covered:
 - ED19
 - ED20
 - ED21
+- ED28
 
 Given:
 - A user can edit a Logic Gate body, a node text box, a project text box, a My Triage compose body, a Shared Triage compose body, and an attached-email reply body.
@@ -72,6 +74,7 @@ Expected:
 - Mail compose/reply adapters do not call browser `document.execCommand` directly for rich editing commands when a shared editor command exists.
 - Mail compose/reply and attached-email reply adapters expose numbered list, indent, outdent, bullet list, checklist, font size, bold, underline, link, and table controls where table insertion is supported.
 - Font size, bold, underline, outline-style dropdown, and table insertion are supplied by the shared editor toolbar control source rather than a compose-only or attached-reply-only toolbar implementation.
+- Project text-box adapters expose the shared node-style format and outline controls and route those actions through the shared editor controller.
 
 ### Scenario ED-S2: Domain Persistence Stays Separate
 

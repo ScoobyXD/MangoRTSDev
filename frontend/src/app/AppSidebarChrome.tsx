@@ -36,6 +36,8 @@ import {
   type CommunicationsTriageConversionTarget,
   type EmailProvider,
 } from "../modules/communications/communicationsApi";
+import { NOTIFICATION_TYPE_MENTION, NOTIFICATION_TYPE_URGENT_MENTION, type NotificationSummary } from "../modules/notifications/notificationsApi";
+import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
 import { assignNodeToLogicGateStatus } from "../modules/kanban/kanbanApi";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../modules/editor/UnifiedNodeShell";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, INBOX_PRIORITIES, type HomeTriageConversionAppliedDetail } from "../pages/home/homeConstants";
@@ -88,6 +90,10 @@ function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionApplied
 }
 const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
+
+function notificationTypeCount(summary: NotificationSummary, type: string): number {
+  return normalizeSidebarNotificationCount(summary.type_counts.find((item) => item.type === type)?.count);
+}
 const NODE_EDITOR_POPUP_SIDEBAR_BUFFER = 14;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "app-node-editor-popup-size-v1";
 const NODE_EDITOR_POPUP_Z_INDEX = 130;
@@ -262,6 +268,7 @@ export function AppSidebar({
   const homeActive = activePage === "home";
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
+  const notificationSummary = useNotificationSummary(companyID);
   const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", false);
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [connectedAccountEmail, setConnectedAccountEmail] = useState("");
@@ -308,6 +315,18 @@ export function AppSidebar({
   const sharedTriageNotificationCount = useMemo(
     () => mailUnreadCounts.sharedTriage,
     [mailUnreadCounts.sharedTriage],
+  );
+  const updatesUrgentNotificationCount = useMemo(
+    () => notificationTypeCount(notificationSummary, NOTIFICATION_TYPE_URGENT_MENTION),
+    [notificationSummary],
+  );
+  const updatesMentionNotificationCount = useMemo(
+    () => notificationTypeCount(notificationSummary, NOTIFICATION_TYPE_MENTION),
+    [notificationSummary],
+  );
+  const updatesOtherNotificationCount = useMemo(
+    () => Math.max(0, normalizeSidebarNotificationCount(notificationSummary.total_unread) - updatesUrgentNotificationCount - updatesMentionNotificationCount),
+    [notificationSummary.total_unread, updatesMentionNotificationCount, updatesUrgentNotificationCount],
   );
   const [sharedTriageHovered, setSharedTriageHovered] = useState(false);
   const [sharedTriageFocused, setSharedTriageFocused] = useState(false);
@@ -1184,6 +1203,11 @@ export function AppSidebar({
           label="Updates"
           active={homeActive && activeHomeView === "updates"}
           icon={<HeaderUpdatesIcon color="#f59e0b" />}
+          trailing={<SidebarNotificationBadges badges={[
+            { key: "updates-urgent", label: "!", count: updatesUrgentNotificationCount, tone: "urgent", title: `${updatesUrgentNotificationCount} urgent mentions`, showZero: true },
+            { key: "updates-mentions", label: "@", count: updatesMentionNotificationCount, tone: "mention", title: `${updatesMentionNotificationCount} mentions`, showZero: true },
+            { key: "updates-other", label: "*", count: updatesOtherNotificationCount, tone: "updates", title: `${updatesOtherNotificationCount} other updates`, showZero: true },
+          ]} />}
           elevated
           onClick={() => onHomeViewSelect("updates")}
         />
@@ -1621,10 +1645,11 @@ function AppSidebarCompanyExplorerSection({
   );
 }
 
-type SidebarNotificationBadgeTone = "mail";
+type SidebarNotificationBadgeTone = "mail" | "urgent" | "mention" | "updates";
 
 type SidebarNotificationBadge = {
   key: string;
+  label?: string;
   count: number;
   tone: SidebarNotificationBadgeTone;
   title: string;
@@ -1648,11 +1673,13 @@ function SidebarNotificationBadges({ badges }: { badges: SidebarNotificationBadg
           aria-label={badge.title}
           style={appSidebarNotificationBadgeStyle(badge.tone)}
           onClick={(event) => {
+            if (!badge.onClick) return;
             event.preventDefault();
             event.stopPropagation();
-            badge.onClick?.(event);
+            badge.onClick(event);
           }}
         >
+          {badge.label && <span style={appSidebarNotificationBadgeLabelStyle}>{badge.label}</span>}
           {formatSidebarNotificationCount(badge.count)}
         </span>
       ))}
@@ -2446,10 +2473,12 @@ const appSidebarBadgeStripStyle: React.CSSProperties = {
 function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone): React.CSSProperties {
   const colors = sidebarNotificationBadgeColors(tone);
   return {
-    minWidth: 20,
+    minWidth: 22,
     height: 20,
-    display: "grid",
-    placeItems: "center",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
     border: `1px solid ${colors.border}`,
     borderRadius: 6,
     background: colors.background,
@@ -2466,7 +2495,16 @@ function appSidebarNotificationBadgeStyle(tone: SidebarNotificationBadgeTone): R
   };
 }
 
+const appSidebarNotificationBadgeLabelStyle: React.CSSProperties = {
+  fontSize: 10,
+  fontWeight: 950,
+  lineHeight: 1,
+};
+
 function sidebarNotificationBadgeColors(tone: SidebarNotificationBadgeTone): { background: string; border: string; color: string } {
+  if (tone === "urgent") return { background: "#fef2f2", border: "rgba(239, 68, 68, 0.42)", color: "#b91c1c" };
+  if (tone === "mention") return { background: "#eff6ff", border: "rgba(59, 130, 246, 0.36)", color: "#1d4ed8" };
+  if (tone === "updates") return { background: "#f8fafc", border: "rgba(148, 163, 184, 0.42)", color: "#475569" };
   if (tone === "mail") return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.36)", color: "#c2410c" };
   return { background: "#fff7ed", border: "rgba(255, 136, 32, 0.36)", color: "#c2410c" };
 }
