@@ -229,7 +229,7 @@ function updateAutomaticOutlineIndent(value: string, selectionStart: number, dir
     if (direction === "outdent") return outdentPlainLine(value, selectionStart);
     const nextCursor = selectionStart + EDITOR_TAB_TEXT.length;
     return {
-      value: `${value.slice(0, lineStart)}${EDITOR_TAB_TEXT}${line}${value.slice(lineStart + line.length)}`,
+      value: `${value.slice(0, selectionStart)}${EDITOR_TAB_TEXT}${value.slice(selectionStart)}`,
       selectionStart: nextCursor,
       selectionEnd: nextCursor,
     };

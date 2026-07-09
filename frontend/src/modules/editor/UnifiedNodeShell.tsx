@@ -43,6 +43,20 @@ type UnifiedNodeShellProps = {
   onTouchStart?: React.TouchEventHandler<HTMLDivElement>;
 };
 
+export const UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE: React.CSSProperties = {
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid transparent",
+  background: "linear-gradient(135deg, #ff5a6b, #ef334e)",
+  color: "#ffffff",
+  padding: 0,
+  fontSize: 16,
+  fontWeight: 700,
+  lineHeight: "20px",
+  cursor: "pointer",
+  boxShadow: "0 8px 18px rgba(239, 51, 78, 0.26), inset 1px 1px 0 rgba(255,255,255,0.38)",
+};
+
 function UnifiedNodeShellFullscreenIcon({ active = false }: { active?: boolean }) {
   return (
     <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
@@ -134,6 +148,7 @@ export function UnifiedNodeShell({
       {orderedActions.map((action, index) => {
         const titleText = defaultActionTitle(action);
         const customStyle = resolveActionStyle(action, index, action.id === "close" ? closeButtonStyle : actionButtonStyle);
+        const closeChromeStyle = action.id === "close" ? UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE : null;
         return (
           <button
             key={action.id}
@@ -154,9 +169,10 @@ export function UnifiedNodeShell({
               position: "absolute",
               zIndex: 80,
               ...customStyle,
+              ...closeChromeStyle,
               right: actionRight + (index * actionStep),
               top: actionTop,
-              color: action.danger ? "#be123c" : customStyle.color,
+              color: action.danger ? "#be123c" : closeChromeStyle?.color ?? customStyle.color,
             }}
           >
             {action.icon ?? defaultActionIcon(action)}

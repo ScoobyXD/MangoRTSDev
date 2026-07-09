@@ -29,6 +29,7 @@ export const EDITOR_LIST_ATTRIBUTE = "data-mango-editor-list";
 export const EDITOR_LIST_ITEM_ATTRIBUTE = "data-mango-editor-list-item";
 export const EDITOR_CHECKLIST_CHECKED_ATTRIBUTE = "data-mango-editor-checklist-checked";
 export const EDITOR_LIST_MARKER_ATTRIBUTE = "data-mango-editor-list-marker";
+export const EDITOR_EMAIL_BODY_ATTRIBUTE = "data-mango-email-body";
 
 export type EditorListKind = "bullet" | "checklist";
 export type EditorListMarkerStyle = "solid-circle" | "hollow-circle" | "solid-square" | "hollow-square";
@@ -793,6 +794,7 @@ export function normalizeEditorWhitespaceText(value: string): string {
 }
 
 const EDITOR_EMAIL_BODY_STYLE = "font:14px/1.5 Arial,sans-serif;color:#111827;white-space:pre-wrap;overflow-wrap:anywhere;";
+const EDITOR_EMAIL_BODY_HTML_PATTERN = /<\/?[a-z][\s\S]*>/i;
 
 function editorEmailHTMLWithExplicitLineBreaks(value: string): string {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n/g, "<br>");
@@ -811,7 +813,21 @@ export function serializeEditorBodyForEmailHTML(value: string): string {
   const html = value.startsWith(EDITOR_RICH_TEXT_PREFIX)
     ? richEditorDocumentToEmailHTML(value)
     : plainEditorTextToEmailHTML(value);
-  return `<div style="${EDITOR_EMAIL_BODY_STYLE}">${html}</div>`;
+  return `<div ${EDITOR_EMAIL_BODY_ATTRIBUTE}="true" style="${EDITOR_EMAIL_BODY_STYLE}">${html}</div>`;
+}
+
+export function isMangoEditorEmailBodyHTML(value: string): boolean {
+  return value.includes(`${EDITOR_EMAIL_BODY_ATTRIBUTE}="true"`) || value.includes(`${EDITOR_EMAIL_BODY_ATTRIBUTE}='true'`);
+}
+
+export function editorEmailDisplayDocument(body: string, options: { compact?: boolean; baseTarget?: boolean } = {}): string {
+  const value = body.trim();
+  const content = EDITOR_EMAIL_BODY_HTML_PATTERN.test(value)
+    ? value
+    : `<pre ${EDITOR_EMAIL_BODY_ATTRIBUTE}="plain">${linkifyEditorPlainTextToHTML(value)}</pre>`;
+  const padding = options.compact ? "6px 0 2px" : "14px";
+  const base = options.baseTarget ? `<base target="_blank">` : "";
+  return `<!doctype html><html><head><meta charset="utf-8">${base}<style>html{margin:0;padding:0}body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:${padding};overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;margin:0}[${EDITOR_EMAIL_BODY_ATTRIBUTE}]{white-space:pre-wrap!important;overflow-wrap:anywhere!important}p{margin-top:0}a{color:${EDITOR_LINK_COLOR};text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:2px;font-weight:650;cursor:pointer}a:hover{color:#0c4a6e}</style></head><body>${content}</body></html>`;
 }
 
 export function editorBodyHasEmailContent(value: string): boolean {

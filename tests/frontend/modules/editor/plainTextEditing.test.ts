@@ -156,6 +156,18 @@ test("automatic numbering Tab changes a numeric item into an alphabetic child", 
   });
 });
 
+test("automatic numbering Tab in ordinary text inserts at the caret", () => {
+  const value = "plain block";
+  const edit = insertEditorTabText(value, value.length, value.length, "automatic-outline-numbering", "indent");
+  const expectedValue = `plain block${EDITOR_TAB_TEXT}`;
+
+  assert.deepEqual(edit, {
+    value: expectedValue,
+    selectionStart: expectedValue.length,
+    selectionEnd: expectedValue.length,
+  });
+});
+
 test("automatic numbering continues alphabetic child items on Enter", () => {
   const value = `1. alpha\n${EDITOR_TAB_TEXT}a. `;
   const edit = insertEditorEnterText(value, value.length, value.length, "automatic-outline-numbering");

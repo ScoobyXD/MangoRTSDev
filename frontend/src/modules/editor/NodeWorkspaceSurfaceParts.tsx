@@ -13,6 +13,8 @@ import {
   EDITOR_RICH_TEXT_PREFIX,
   deserializeEditorDocumentHTML,
   editorBodyHasEmailContent,
+  editorEmailDisplayDocument,
+  isMangoEditorEmailBodyHTML,
   readEditorDocumentText,
   serializeEditorDocumentHTML,
   serializeEditorBodyForEmailHTML,
@@ -4061,6 +4063,7 @@ function emailBodyText(body: string): string {
   const value = body.trim();
   if (!value) return "";
   if (/<\/?[a-z][\s\S]*>/i.test(value) && typeof DOMParser !== "undefined") {
+    const preserveWhitespace = isMangoEditorEmailBodyHTML(value) || /white-space\s*:\s*pre-wrap/i.test(value);
     const document = new DOMParser().parseFromString(value, "text/html");
     document.querySelectorAll("script, style, noscript").forEach((element) => element.remove());
     const blockTags = new Set(["address", "article", "aside", "blockquote", "div", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "li", "p", "section", "tr"]);
@@ -4077,9 +4080,11 @@ function emailBodyText(body: string): string {
       if (blockTags.has(tagName)) parts.push("\n");
     };
     for (const child of Array.from(document.body.childNodes)) appendText(child);
-    return parts.join("")
-      .replace(/[ \t\f\v]+/g, " ")
-      .replace(/[ \t]*\n[ \t]*/g, "\n")
+    const text = parts.join("").replace(/\u00a0/g, " ");
+    return (preserveWhitespace
+      ? text
+      : text.replace(/[ \t\f\v]+/g, " ").replace(/[ \t]*\n[ \t]*/g, "\n")
+    )
       .replace(/\n{3,}/g, "\n\n")
       .trim();
   }
@@ -4875,7 +4880,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 accent={accent}
                 indentGuideColor={strokeColor}
                 formattingControllerRef={replyEditorControllerRef}
-                style={{ width: "100%", height: replyEditorHeight, minHeight: replyEditorMinHeight, maxHeight: replyEditorMaxHeight, resize: editable ? "vertical" : "none", overflowY: "auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+                style={{ width: "100%", height: replyEditorHeight, minHeight: replyEditorMinHeight, maxHeight: replyEditorMaxHeight, resize: editable ? "vertical" : "none", overflowY: "auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px 24px", scrollPaddingBottom: 24, color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
                 onSelectionFontSizeChange={setReplySelectionFontSize}
                 onSelectionInlineFormatChange={setReplySelectionInlineFormat}
                 editorImageAttachmentContext={replyEditorImageAttachmentContext}
@@ -5304,13 +5309,6 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
 };
 
 function messageDocument(body: string, compact = false): string {
-  const value = body.trim();
-  const content = /<\/?[a-z][\s\S]*>/i.test(value) ? value : `<pre>${escapeHTML(value)}</pre>`;
-  const padding = compact ? "6px 0 2px" : "14px";
-  return `<!doctype html><html><head><meta charset="utf-8"><style>html{margin:0;padding:0}body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:${padding};overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;margin:0}p{margin-top:0}</style></head><body>${content}</body></html>`;
-}
-
-function escapeHTML(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return editorEmailDisplayDocument(body, { compact });
 }
 

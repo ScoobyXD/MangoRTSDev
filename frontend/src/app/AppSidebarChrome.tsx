@@ -15,6 +15,14 @@ import { resolveExplorerClickSelection } from "../modules/company-explorer/treeP
 import type { SidebarPin } from "./sidebarPins";
 import { NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
 import {
+  NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
+  NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
+  fullscreenNodeEditorViewportRect,
+  readNodeEditorFullscreenChromeActive,
+  setNodeEditorFullscreenChromeActive as setNodeEditorFullscreenChromeActiveFlag,
+  subscribeNodeEditorFullscreenChrome,
+} from "../modules/editor/nodeEditorFullscreenChrome";
+import {
   createCommunicationsSharedInbox,
   deleteCommunicationsSharedInbox,
   EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED,
@@ -282,6 +290,7 @@ export function AppSidebar({
   const [pinDropSuccess, setPinDropSuccess] = useState("");
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
+  const [nodeEditorFullscreenChromeActive, setNodeEditorFullscreenChromeActiveState] = useState(readNodeEditorFullscreenChromeActive);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
@@ -331,6 +340,8 @@ export function AppSidebar({
     }, 3_000);
     return () => window.clearTimeout(timerID);
   }, [explorerDropSuccess]);
+
+  useEffect(() => subscribeNodeEditorFullscreenChrome(setNodeEditorFullscreenChromeActiveState), []);
 
   const openMailBadgeView = useCallback((view: HomeKeyViewID) => {
     onPageSelect("home");
@@ -1071,7 +1082,8 @@ export function AppSidebar({
     );
   };
 
-  const explorerSearchActive = explorerSearchQuery.trim().length > 0;
+  const explorerSearchHidden = nodeEditorFullscreenChromeActive;
+  const explorerSearchActive = !explorerSearchHidden && explorerSearchQuery.trim().length > 0;
 
   return (
     <aside className="company-explorer-scroll" data-app-sidebar="primary" style={appSidebarStyle}>
@@ -1080,13 +1092,15 @@ export function AppSidebar({
         {accountChrome && <div style={appSidebarAccountChromeStyle}>{accountChrome}</div>}
       </div>
 
-      <div data-frame-interactive="true" style={appSidebarExplorerSearchContainerStyle}>
-        <CompanyExplorerSearchBox
-          value={explorerSearchQuery}
-          onChange={setExplorerSearchQuery}
-          onEscape={() => setExplorerSearchQuery("")}
-        />
-      </div>
+      {!explorerSearchHidden && (
+        <div data-frame-interactive="true" style={appSidebarExplorerSearchContainerStyle}>
+          <CompanyExplorerSearchBox
+            value={explorerSearchQuery}
+            onChange={setExplorerSearchQuery}
+            onEscape={() => setExplorerSearchQuery("")}
+          />
+        </div>
+      )}
       {!explorerSearchActive && (
         <>
       <section style={appSidebarNavSectionStyle} aria-label="Live Feed">
@@ -1994,12 +2008,7 @@ function defaultNodeEditorPopupRect(): NodeEditorPopupRect {
 
 function fullscreenNodeEditorPopupRect(): NodeEditorPopupRect {
   if (typeof window === "undefined") return defaultNodeEditorPopupRect();
-  return {
-    left: 0,
-    top: 0,
-    width: window.innerWidth,
-    height: window.innerHeight,
-  };
+  return fullscreenNodeEditorViewportRect();
 }
 
 export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar-node-popup", focusInformationID, focusRequestID, onClose, onCollapseToTab, onOpenInNewTab, onDeleteNode }: {
@@ -2023,6 +2032,8 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar
   useEffect(() => {
     popupRectRef.current = popupRect;
   }, [popupRect]);
+
+  useEffect(() => setNodeEditorFullscreenChromeActiveFlag(popupFullscreen), [popupFullscreen]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2929,11 +2940,11 @@ const nodeEditorPopupStyle: React.CSSProperties = {
 };
 
 const nodeEditorPopupFullscreenStyle: React.CSSProperties = {
-  minWidth: "100vw",
-  minHeight: "100vh",
-  maxWidth: "100vw",
-  maxHeight: "100vh",
-  borderRadius: 0,
+  minWidth: 0,
+  minHeight: 0,
+  maxWidth: `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)`,
+  maxHeight: `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)`,
+  borderRadius: 14,
 };
 
 const nodeEditorPopupCloseButtonStyle: React.CSSProperties = {
