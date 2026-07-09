@@ -4,7 +4,7 @@ import { readAuthConfig } from "../auth/cognitoAuth";
 import { WORKTREE_VERSION } from "./worktreeVersion";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import FrameRightClickMenu from "./framerightclickmenu";
-import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderRecycleBinIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "./HeaderIcons";
+import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "./HeaderIcons";
 import { MangoWordmark } from "./MangoLogo";
 import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
@@ -13,7 +13,7 @@ import { CompanyExplorerSearchBox } from "../modules/company-explorer/CompanyExp
 import type { CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
 import type { SidebarPin } from "./sidebarPins";
-import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, OpenInNewTabIcon, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
+import { NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
 import {
   createCommunicationsSharedInbox,
   deleteCommunicationsSharedInbox,
@@ -29,6 +29,7 @@ import {
   type EmailProvider,
 } from "../modules/communications/communicationsApi";
 import { assignNodeToLogicGateStatus } from "../modules/kanban/kanbanApi";
+import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../modules/editor/UnifiedNodeShell";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, INBOX_PRIORITIES, type HomeTriageConversionAppliedDetail } from "../pages/home/homeConstants";
 import { convertMessagesToExplorerTargetCommand } from "../pages/home/homeCommands";
 import { HomeSavedViewsSidebarSection } from "../pages/home/HomeSavedViewsSidebar";
@@ -1991,9 +1992,10 @@ function defaultNodeEditorPopupRect(): NodeEditorPopupRect {
   });
 }
 
-export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab, onOpenInNewTab, onDeleteNode }: {
+export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar-node-popup", focusInformationID, focusRequestID, onClose, onCollapseToTab, onOpenInNewTab, onDeleteNode }: {
   nodeID: string;
   nodeTitle: string;
+  surfaceID?: "app-sidebar-node-popup" | "dock-restored-node-popup";
   focusInformationID?: string;
   focusRequestID?: number;
   onClose: () => void;
@@ -2105,16 +2107,36 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div
+      <UnifiedNodeShell
+        surfaceID={surfaceID}
+        title={nodeTitle}
         role="dialog"
-        aria-modal="true"
-        aria-label={`${nodeTitle} node editor`}
-        data-frame-interactive="true"
+        ariaModal
+        actionButtonStyle={nodeEditorPopupCollapseButtonStyle}
+        closeButtonStyle={nodeEditorPopupCloseButtonStyle}
         style={{ ...nodeEditorPopupStyle, ...nodeEditorPopupDynamicBoundsStyle(popupRect.left), left: popupRect.left, top: popupRect.top, width: popupRect.width, height: popupRect.height }}
         onMouseDown={(event) => event.stopPropagation()}
         onTouchStart={(event) => event.stopPropagation()}
-      >
-        {NODE_EDITOR_POPUP_RESIZE_HANDLES.map((handle) => (
+        actions={([
+          onDeleteNode ? {
+            id: "delete",
+            danger: true,
+            onClick: requestDeleteNode,
+          } : null,
+          onOpenInNewTab ? {
+            id: "open-in-new-tab",
+            onClick: onOpenInNewTab,
+          } : null,
+          onCollapseToTab ? {
+            id: "minimize",
+            onClick: onCollapseToTab,
+          } : null,
+          {
+            id: "close",
+            onClick: onClose,
+          },
+        ].filter(Boolean) as UnifiedNodeShellAction[])}
+        chrome={NODE_EDITOR_POPUP_RESIZE_HANDLES.map((handle) => (
           <div
             key={handle.key}
             role="separator"
@@ -2131,56 +2153,7 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
             }}
           />
         ))}
-        {onDeleteNode && (
-          <button
-            type="button"
-            title="Move node to Recycle Bin"
-            aria-label="Move node to Recycle Bin"
-            data-frame-interactive="true"
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={requestDeleteNode}
-            style={{ ...nodeEditorPopupIconButtonStyle(onOpenInNewTab ? (onCollapseToTab ? 98 : 68) : onCollapseToTab ? 68 : 38), color: "#be123c" }}
-          >
-            <HeaderRecycleBinIcon />
-          </button>
-        )}
-        {onOpenInNewTab && (
-          <button
-            type="button"
-            title="Open node in new browser tab"
-            aria-label="Open node in new browser tab"
-            data-frame-interactive="true"
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={onOpenInNewTab}
-            style={nodeEditorPopupIconButtonStyle(onCollapseToTab ? 68 : 38)}
-          >
-            <OpenInNewTabIcon />
-          </button>
-        )}
-        {onCollapseToTab && (
-          <button
-            type="button"
-            title="Collapse node editor to app tab"
-            aria-label="Collapse node editor to app tab"
-            data-frame-interactive="true"
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={onCollapseToTab}
-            style={nodeEditorPopupIconButtonStyle(38)}
-          >
-            <MinimizeToLineIcon />
-          </button>
-        )}
-        <button
-          type="button"
-          title="Close node editor"
-          aria-label="Close node editor"
-          data-frame-interactive="true"
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={onClose}
-          style={nodeEditorPopupCloseButtonStyle}
-        >
-          X
-        </button>
+      >
         <React.Suspense fallback={fullPageFallback}>
           <AppNodeEditorContent
             accent="#334155"
@@ -2205,7 +2178,7 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focu
             onCancel={() => setDeleteConfirmation(null)}
           />
         )}
-      </div>
+      </UnifiedNodeShell>
     </div>
   );
 }
@@ -2955,9 +2928,3 @@ const nodeEditorPopupCollapseButtonStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-function nodeEditorPopupIconButtonStyle(right: number): React.CSSProperties {
-  return {
-    ...nodeEditorPopupCollapseButtonStyle,
-    right,
-  };
-}

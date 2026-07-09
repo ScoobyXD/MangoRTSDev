@@ -1,10 +1,10 @@
-Last updated: 2026-07-08
+Last updated: 2026-07-09
 
 # Nodes Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial. Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; Company Explorer search resource-type filtering has backend coverage; node editor projection-save helpers have frontend coverage; the unified editor contract and EmailPickerModal attach-only boundary are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; GVIC picker rule IDs and the Assign to Logic Gate picker no-preload UI behavior are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: Partial. Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; Company Explorer search resource-type filtering has backend coverage; node editor projection-save helpers have frontend coverage; the unified editor contract, EmailPickerModal attach-only boundary, and unified node-shell contract/adapter mounting are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; GVIC picker rule IDs and the Assign to Logic Gate picker no-preload UI behavior are not mapped to automated tests yet.
 
 ## Business Logic
 
@@ -46,6 +46,7 @@ N35 - Unified node shell does not require one opener, route, page state, or back
 N36 - The node workspace body remains text boxes, attached emails, and text-block chats; chats are conversation UI and must not inherit unified rich-editor toolbar, indentation, paste, delete, list, or font-size semantics.
 N37 - The node email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
 N38 - Project critical-path inline node windows must use the unified node shell and unified node text-box editor semantics while preserving node information/projection persistence for node edits.
+N39 - The V1 unified node shell source is `UnifiedNodeShell`; full node-window adapters may keep their own opener state, geometry, route handling, and permissions, but top-right node-window action ordering and shell/body data attributes must come from that shared source.
 
 ## Scenarios
 
@@ -222,6 +223,7 @@ Business logic covered:
 - N36
 - N37
 - N38
+- N39
 
 Given:
 - A user opens the same node from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, and a Project critical-path row.
@@ -235,3 +237,4 @@ Expected:
 - Node text-box edits continue to save through node information/projection persistence.
 - Text-block chats remain chat composers and do not receive rich editor toolbar or rich editor keyboard semantics.
 - Opening the node email picker allows attaching existing email but does not expose compose, send, scheduled send, or draft-save controls.
+- Home, app/sidebar, dock-restored, Updates, Kanban/My Work, and Project inline node windows mount the `UnifiedNodeShell` adapter and expose only the actions enabled by that opener.

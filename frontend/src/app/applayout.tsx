@@ -90,6 +90,7 @@ type ExplorerEntityActivatedDetail = {
 type NodeEditorPopupState = {
   nodeID: string;
   nodeTitle: string;
+  surfaceID?: "app-sidebar-node-popup" | "dock-restored-node-popup";
   focusInformationID?: string;
   focusRequestID?: number;
 };
@@ -1202,7 +1203,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     closeMenus();
     if (tab.kind === "node") {
       setActiveDockTabID(tab.id);
-      setExplorerNodePopup({ nodeID: tab.entityID, nodeTitle: tab.label });
+      setExplorerNodePopup({ nodeID: tab.entityID, nodeTitle: tab.label, surfaceID: "dock-restored-node-popup" });
       if (onNavigate) onNavigate(buildNodeRoute(tab.entityID));
       return;
     }
@@ -2129,6 +2130,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         <AppNodeEditorPopup
           nodeID={explorerNodePopup.nodeID}
           nodeTitle={explorerNodePopup.nodeTitle}
+          surfaceID={explorerNodePopup.surfaceID}
           focusInformationID={explorerNodePopup.focusInformationID}
           focusRequestID={explorerNodePopup.focusRequestID}
           onClose={() => {

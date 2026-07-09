@@ -1,6 +1,6 @@
 # V1 Unifying Editor And Nodes Project
 
-Last updated: 2026-07-08
+Last updated: 2026-07-09
 
 ## Purpose
 
@@ -229,3 +229,13 @@ Phase 1 implementation status (2026-07-08):
   - Kanban/My Work node popup.
   - Dock-restored node popup.
   - Project critical-path inline node window.
+
+Phase 2 implementation status (2026-07-09):
+
+- `frontend/src/modules/editor/UnifiedNodeShell.tsx` is the shared node-window shell source for top-right action ordering, accessible action labels, shell/body data attributes, and the node-workspace body boundary.
+- `frontend/src/modules/editor/unifiedNodeShellContract.ts` records the Phase 2 surface IDs, action capabilities, opener-state boundary, and node information/projection persistence boundary used by focused frontend tests.
+- Home node popup, app/sidebar Company Explorer node popup, dock-restored node popup, Kanban/My Work node overlay, Updates node panel, and Project critical-path inline node window mount `UnifiedNodeShell`.
+- Opener-specific state remains outside the shared shell: Home/app popup geometry, sidebar collision bounds, dock-tab restore state, Kanban linked resize ratios, Updates notification context, and Project critical-path row selection still live in their owning surfaces.
+- Node editor content still flows through `EditorContent` and `NodeWorkspaceSurface`; node text boxes, attached emails, and chats keep node information/projection persistence and chat/editor boundaries.
+- Project critical-path inline node windows now expose shared shell close/open actions while edits inside the window remain node editor mutations, not project critical-path mutations.
+- Focused frontend coverage lives in `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`, covering the shell contract, action ordering, and representative adapter mounting.

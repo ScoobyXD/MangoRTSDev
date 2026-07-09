@@ -54,6 +54,14 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - `EmailPickerModal` in `NodeWorkspaceSurfaceParts.tsx` is now explicitly an attach/select picker: mailbox tabs, search, unread filter, list scrolling/prefetch, and attach remain; compose/send/schedule/draft UI and logic do not belong there.
 - Attached-email reply bodies that send real mail use the unified rich editor adapter while the send call remains scoped to the existing email reply flow.
 
+### V1 Unified Node Shell Phase 2 Note (2026-07-09)
+
+- `UnifiedNodeShell` is the shared full-node-window shell source for Home, app/sidebar Company Explorer, dock-restored, Updates, Kanban/My Work, and Project critical-path inline node windows.
+- The shared shell owns top-right action ordering, accessible action labels, shell/body metadata, and the shared `node-workspace` body boundary.
+- Home/app popup sizing, fullscreen state, sidebar collision bounds, dock tab restore, Kanban overlay ratios, Updates row context, and Project critical-path row selection remain opener-owned adapters.
+- Node editor content still flows through `EditorContent` and `NodeWorkspaceSurface`, preserving node information/projection saves, attached-email behavior, and separate chat panes.
+- Project critical-path inline node windows mount the shared shell while edits inside them remain node editor mutations rather than project critical-path mutations.
+
 ---
 
 ## 2) API contracts used by the module
