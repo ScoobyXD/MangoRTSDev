@@ -1195,6 +1195,45 @@ func TestCommunicationsSendRejectsRawAttachmentContent(t *testing.T) {
 	}
 }
 
+func TestCommunicationsSendRejectsInlineDataURLBody(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-user"
+	const companyID = "communications-inline-body-company"
+	user, err := repo.UpsertAuthUser(subject, "user@example.com", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.EnsureCompany(companyID, "Communications Inline Body Company")
+	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-1",
+		Status:       "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{}
+	handler := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	}).Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+	body := `{"company_id":"` + companyID + `","to":[{"email":"friend@example.com"}],"subject":"Hi","body":"<img src=\"data:image/png;base64,aGVsbG8=\">"}`
+
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", body, token, http.StatusBadRequest)
+	if nylas.lastSendGrantID != "" {
+		t.Fatalf("send grant after inline data URL body = %q, want none", nylas.lastSendGrantID)
+	}
+}
+
 func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 	t.Parallel()
 

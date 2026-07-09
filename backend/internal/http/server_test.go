@@ -522,6 +522,37 @@ func TestNodeInformationProjectionAPIKeepsEditorTextBoxesIndependent(t *testing.
 	}
 }
 
+func TestNodeInformationRejectsInlineFileBytes(t *testing.T) {
+	t.Parallel()
+
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	companyID := "company-node-inline-file-guard-test"
+	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
+
+	node, err := repo.CreateNode(companyID, "node with rejected inline file")
+	if err != nil {
+		t.Fatalf("CreateNode() error = %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"company_id":     companyID,
+		"type":           "Text box",
+		"information":    `<img src="data:image/png;base64,aGVsbG8=">`,
+		"information_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+node.NodeID+"/information", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST node information status = %d, want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "inline_file_bytes_not_allowed") {
+		t.Fatalf("response body = %s, want inline_file_bytes_not_allowed", rec.Body.String())
+	}
+}
+
 func TestGetNodeDefaultsToLightweightDetails(t *testing.T) {
 	t.Parallel()
 

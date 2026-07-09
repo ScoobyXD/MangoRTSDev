@@ -255,6 +255,9 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 				writeError(w, http.StatusBadRequest, "information_required")
 				return
 			}
+			if rejectDurableInlineFileBytes(w, "logic_gate_projection", req.Information) {
+				return
+			}
 			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 				return
 			}
@@ -331,6 +334,22 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 				return
 			}
+			current, err := s.repo.ListLogicGateProjections(req.CompanyID, logicGateID)
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "logic_gate_not_found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_projection")
+				return
+			}
+			currentPayloads := make([]string, 0, len(current))
+			for _, item := range current {
+				currentPayloads = append(currentPayloads, item.Information)
+			}
+			if rejectAnyDurableInlineFileBytes(w, "logic_gate_save_version_source", currentPayloads) {
+				return
+			}
 			actorUserID, actorLabel := nodeChangeActorPayload(r)
 			version, err := s.repo.CreateLogicGateEditorSaveVersion(store.EditorSaveVersionInput{
 				CompanyID:        req.CompanyID,
@@ -402,6 +421,28 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		}
 		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
 			return
+		}
+		versions, err := s.repo.ListLogicGateEditorSaveVersions(req.CompanyID, logicGateID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "save_version_not_found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_save_versions")
+			return
+		}
+		for _, candidate := range versions {
+			if candidate.SaveID != saveID {
+				continue
+			}
+			payloads := make([]string, 0, len(candidate.Items))
+			for _, item := range candidate.Items {
+				payloads = append(payloads, item.Information)
+			}
+			if rejectAnyDurableInlineFileBytes(w, "logic_gate_save_version_restore", payloads) {
+				return
+			}
+			break
 		}
 		actorUserID, actorLabel := nodeChangeActorPayload(r)
 		version, err := s.repo.RestoreLogicGateEditorSaveVersion(store.EditorSaveVersionRestoreInput{
@@ -487,6 +528,9 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			// Keep the API contract strict: empty text boxes should not become durable
 			// logic_gate_information rows, no matter whether the caller is UI or an agent.
 			writeError(w, http.StatusBadRequest, "information_required")
+			return
+		}
+		if rejectDurableInlineFileBytes(w, "logic_gate_information", req.Information) {
 			return
 		}
 		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {

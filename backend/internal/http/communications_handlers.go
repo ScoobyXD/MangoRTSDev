@@ -943,6 +943,9 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		cleanCompanyID = strings.TrimSpace(r.URL.Query().Get("company_id"))
 	}
 	sendReq := req.NylasSendMessageRequest
+	if rejectDurableInlineFileBytes(w, "communications_send_body", sendReq.Body) {
+		return
+	}
 	attachments, attachmentsOK := s.resolveCommunicationsSendAttachments(w, r, cleanCompanyID, sendReq.Attachments)
 	if !attachmentsOK {
 		return
