@@ -499,7 +499,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     : "Assign to Project";
   const projectAssignerMenuWidth = Math.max(
     280,
-    Math.min(compact ? 420 : 520, width > 0 ? width - 28 : compact ? 420 : 520),
+    Math.min(compact ? 320 : 390, width > 0 ? width - 28 : compact ? 320 : 390),
   );
   const nodePriorityUnassignedForLogicGate = useMemo(() => {
     const raw = nodePriorityDraft.trim();
