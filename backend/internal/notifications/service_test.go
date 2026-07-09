@@ -68,7 +68,7 @@ func TestUpdateFeedAffectedScopesTargetsRecipientUser(t *testing.T) {
 	}
 }
 
-func TestPhase6NotificationRecipientsUseGVICRouting(t *testing.T) {
+func TestPhase6NotificationRecipientsUseNodeGVICRouting(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)
 	companyID := "66666666-6666-4666-8666-666666666601"
@@ -117,10 +117,22 @@ func TestPhase6NotificationRecipientsUseGVICRouting(t *testing.T) {
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
-			UserID: responsible.UserID,
+			UserID: viewer.UserID,
 		}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+	}
+	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: store.EntityTypeNode,
+		ResourceID:   node.NodeID,
+		Assignments: []store.ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: store.EntityPermissionSubjectUser,
+			PrincipalID:   responsible.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments node: %v", err)
 	}
 
 	notifications, err := service.ProcessDomainEvent(context.Background(), domain.DomainEvent{
@@ -147,12 +159,12 @@ func TestPhase6NotificationRecipientsUseGVICRouting(t *testing.T) {
 	}
 	for _, user := range []domain.User{responsible} {
 		if _, ok := byUser[user.UserID]; !ok {
-			t.Fatalf("missing notification for GVIC user %s; got %+v", user.UserID, notifications)
+			t.Fatalf("missing notification for node GVIC user %s; got %+v", user.UserID, notifications)
 		}
 	}
 	for _, user := range []domain.User{viewer, editor, admin, blocked, actor} {
 		if _, ok := byUser[user.UserID]; ok {
-			t.Fatalf("non-GVIC user %s received notification: %+v", user.UserID, byUser[user.UserID])
+			t.Fatalf("non-node-GVIC user %s received notification: %+v", user.UserID, byUser[user.UserID])
 		}
 	}
 	if got := byUser[responsible.UserID]; got.Surface != domain.NotificationSurfaceRInbox || got.Role != domain.GVICRoleGenerated {
@@ -169,7 +181,7 @@ func notificationScopeContains(scopes []string, want string) bool {
 	return false
 }
 
-func TestProcessDomainEventsLogicGateWorkUsesGVICMatrixnly(t *testing.T) {
+func TestProcessDomainEventsLogicGateWorkUsesNodeGVICMatrixOnly(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	service := NewService(repo)
 	companyID := "66666666-6666-4666-8666-666666666611"
@@ -177,6 +189,7 @@ func TestProcessDomainEventsLogicGateWorkUsesGVICMatrixnly(t *testing.T) {
 
 	viewer := mustNotificationUser(t, repo, companyID, "projector-viewer")
 	nodeOnlyViewer := mustNotificationUser(t, repo, companyID, "projector-node-viewer")
+	logicGateOnly := mustNotificationUser(t, repo, companyID, "projector-logic-gate-only")
 	responsible := mustNotificationUser(t, repo, companyID, "projector-responsible")
 	actor := mustNotificationUser(t, repo, companyID, "projector-actor")
 	blocked := mustNotificationUser(t, repo, companyID, "projector-blocked")
@@ -215,7 +228,7 @@ func TestProcessDomainEventsLogicGateWorkUsesGVICMatrixnly(t *testing.T) {
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
-			UserID: responsible.UserID,
+			UserID: logicGateOnly.UserID,
 		}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
@@ -245,7 +258,7 @@ func TestProcessDomainEventsLogicGateWorkUsesGVICMatrixnly(t *testing.T) {
 				t.Fatalf("%s missing notification for eligible user %s; got %+v", label, user.UserID, items)
 			}
 		}
-		for _, user := range []domain.User{viewer, actor, blocked, nodeOnlyViewer} {
+		for _, user := range []domain.User{viewer, actor, blocked, nodeOnlyViewer, logicGateOnly} {
 			if _, ok := byUser[user.UserID]; ok {
 				t.Fatalf("%s unexpected notification for user %s: %+v", label, user.UserID, byUser[user.UserID])
 			}
@@ -267,6 +280,18 @@ func TestProcessDomainEventsLogicGateWorkUsesGVICMatrixnly(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: store.EntityTypeNode,
+		ResourceID:   node.NodeID,
+		Assignments: []store.ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: store.EntityPermissionSubjectUser,
+			PrincipalID:   responsible.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments node: %v", err)
 	}
 	process("saved", store.WorkItemLogicGateAssignmentSavedEventType, "Brand new node", assigned.Events)
 
@@ -347,10 +372,7 @@ func TestProcessDomainEventLogicGateWorkReviewMoveNotifiesGVICRecipients(t *test
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateGVICAssignmentInput{
-			{Role: domain.GVICRoleGenerated, UserID: generated.UserID},
-			{Role: domain.GVICRoleVerified, UserID: verified.UserID},
-			{Role: domain.GVICRoleConsulted, UserID: consulted.UserID},
-			{Role: domain.GVICRoleInformed, UserID: informed.UserID},
+			{Role: domain.GVICRoleGenerated, UserID: viewer.UserID},
 		},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
@@ -380,6 +402,19 @@ func TestProcessDomainEventLogicGateWorkReviewMoveNotifiesGVICRecipients(t *test
 	}
 	if assigned.Assignment.StatusKey != store.LogicGateWorkStatusPending {
 		t.Fatalf("assigned status = %q, want pending", assigned.Assignment.StatusKey)
+	}
+	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: store.EntityTypeNode,
+		ResourceID:   node.NodeID,
+		Assignments: []store.ResourceGVICAssignmentInput{
+			{Role: domain.GVICRoleGenerated, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: generated.UserID},
+			{Role: domain.GVICRoleVerified, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: verified.UserID},
+			{Role: domain.GVICRoleConsulted, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: consulted.UserID},
+			{Role: domain.GVICRoleInformed, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: informed.UserID},
+		},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments node: %v", err)
 	}
 	moved, err := repo.MoveLogicGateNodeAssignment(store.LogicGateNodeAssignmentMoveInput{
 		CompanyID:   companyID,

@@ -253,9 +253,9 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		}
 		return nil
 	}
-	addLogicGateWorkRecipients := func(logicGateID, nodeID string) error {
+	addNodeWorkRecipients := func(logicGateID, nodeID string) error {
 		stop := observeNotificationTiming(recorder, "notifications.recipient_load")
-		roles, err := s.logicGateGVICRecipientRoles(event.CompanyID, logicGateID)
+		roles, err := s.gvicRecipientRoles(event.CompanyID, store.EntityTypeNode, nodeID)
 		stop()
 		if err != nil {
 			return err
@@ -292,7 +292,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 			logicGateID = event.EntityID
 		}
 		nodeID := payloadString(payload, "node_id")
-		if err := addLogicGateWorkRecipients(logicGateID, nodeID); err != nil {
+		if err := addNodeWorkRecipients(logicGateID, nodeID); err != nil {
 			return nil, err
 		}
 		nodeTitle := payloadString(payload, "node_title")

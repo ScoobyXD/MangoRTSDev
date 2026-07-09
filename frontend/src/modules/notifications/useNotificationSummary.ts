@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { fetchCurrentUser, readAuthConfig, type CurrentUserResponse } from "../../auth/cognitoAuth.js";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
-import { emptyNotificationSummary, EVENT_NOTIFICATIONS_UPDATED, fetchNotificationSummary, type NotificationSummary } from "./notificationsApi.js";
+import { emitNotificationsUpdated, emptyNotificationSummary, EVENT_NOTIFICATIONS_UPDATED, fetchNotificationSummary, type NotificationSummary } from "./notificationsApi.js";
 
 const NOTIFICATION_SUMMARY_CLOSE_GRACE_MS = 1500;
+const NOTIFICATION_REALTIME_UPDATE_SOURCE = "notification-realtime";
 
 type NotificationSummaryListener = (summary: NotificationSummary) => void;
 type TimerID = ReturnType<typeof setTimeout>;
@@ -86,13 +87,13 @@ function ensureNotificationRealtime(entry: NotificationSummaryEntry): void {
       if (!userID || !currentUserCanUseCompany(current, entry.companyID) || notificationSummaryEntries.get(entry.companyID) !== entry) return;
       entry.unsubscribeRealtime = subscribeRealtimeScope(apiBase, entry.companyID, `notifications:user:${userID}`, {
         onNotificationCreated(message) {
-          requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
+          emitNotificationsUpdated(message.company_id || entry.companyID, NOTIFICATION_REALTIME_UPDATE_SOURCE);
         },
         onNotificationDeleted(message) {
-          requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
+          emitNotificationsUpdated(message.company_id || entry.companyID, NOTIFICATION_REALTIME_UPDATE_SOURCE);
         },
         onNotificationsCleared(message) {
-          requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
+          emitNotificationsUpdated(message.company_id || entry.companyID, NOTIFICATION_REALTIME_UPDATE_SOURCE);
         },
         onError(error) {
           console.error("Notification realtime failed", error);

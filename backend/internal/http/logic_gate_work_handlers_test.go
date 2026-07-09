@@ -400,10 +400,22 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 		LogicGateID: logicGate.LogicGateID,
 		Assignments: []store.LogicGateGVICAssignmentInput{{
 			Role:   domain.GVICRoleGenerated,
-			UserID: responsible.UserID,
+			UserID: viewer.UserID,
 		}},
 	}); err != nil {
 		t.Fatalf("SetLogicGateGVICAssignments: %v", err)
+	}
+	if _, err := repo.SetResourceGVICAssignments(store.ResourceGVICAssignmentUpdateInput{
+		CompanyID:    companyID,
+		ResourceType: store.EntityTypeNode,
+		ResourceID:   node.NodeID,
+		Assignments: []store.ResourceGVICAssignmentInput{{
+			Role:          domain.GVICRoleGenerated,
+			PrincipalType: store.EntityPermissionSubjectUser,
+			PrincipalID:   responsible.UserID,
+		}},
+	}); err != nil {
+		t.Fatalf("SetResourceGVICAssignments node: %v", err)
 	}
 
 	server := NewServer(repo)
@@ -437,7 +449,7 @@ func TestLogicGateWorkV2StateChangeCreatesNotifications(t *testing.T) {
 
 	viewerNotifications := listLogicGateWorkNotificationsForTest(t, handler, companyID, viewer)
 	if len(viewerNotifications) != 0 {
-		t.Fatalf("viewer notifications = %+v, want none without GVIC role", viewerNotifications)
+		t.Fatalf("viewer notifications = %+v, want none without node GVIC role", viewerNotifications)
 	}
 	if got := listLogicGateWorkNotificationsForTest(t, handler, companyID, editor); len(got) != 0 {
 		t.Fatalf("actor self notifications = %+v, want none", got)
