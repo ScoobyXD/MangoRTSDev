@@ -737,6 +737,7 @@ type ProjectionRow struct {
 	LogicGateName                string           `json:"logic_gate_name,omitempty"`
 	DisplayTitle                 string           `json:"display_title,omitempty"`
 	Status                       *string          `json:"status,omitempty"`
+	CreatedFromEmail             bool             `json:"created_from_email,omitempty"`
 	DueDate                      *string          `json:"due_date,omitempty"`
 	Priority                     *int             `json:"priority,omitempty"`
 	ResourceCreatedTimestamp     time.Time        `json:"resource_created_timestamp,omitempty"`

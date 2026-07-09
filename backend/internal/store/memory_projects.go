@@ -894,6 +894,19 @@ func (r *MemoryRepo) syncProjectRelationshipProjectionLocked(companyID, relation
 		node = r.withNodeReadModelLocked(node)
 		nodeID := node.NodeID
 		row.NodeID = &nodeID
+		for _, projection := range r.nodeText[key(relationship.CompanyID, relationship.ResourceID)] {
+			if strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email") &&
+				strings.Contains(projection.Information, `"created_from_email":true`) {
+				row.CreatedFromEmail = true
+				break
+			}
+		}
+		for _, link := range r.emailNodeLinks {
+			if link.CompanyID == relationship.CompanyID && link.NodeID == relationship.ResourceID {
+				row.CreatedFromEmail = true
+				break
+			}
+		}
 		if assignment, ok := r.nodeLogicGateAssignmentLocked(relationship.CompanyID, relationship.ResourceID, ""); ok {
 			logicGateID := assignment.LogicGateID
 			row.LogicGateID = &logicGateID

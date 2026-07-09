@@ -325,6 +325,15 @@ where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).S
 		logicGate.GVICAssignments = []domain.LogicGateGVICAssignment{}
 	}
 	logicGate.DefaultAccess = defaultResourceAccessOrEdit(logicGate.DefaultAccess)
+	if input.Target.ProjectID != "" {
+		var projectExists bool
+		if err := tx.QueryRowContext(ctx, `select exists (select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`, input.CompanyID, input.Target.ProjectID).Scan(&projectExists); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		if !projectExists {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		}
+	}
 	if input.Target.Mode == CommunicationsEmailConversionTargetExistingNode {
 		result, err := r.attachCommunicationsTriageItemsToExistingNodeTx(ctx, tx, input, logicGate)
 		if err != nil {
@@ -436,7 +445,7 @@ returning company_id::text, user_id::text, message_id, node_id::text, board_id, 
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, message, time.Now().UTC()); err != nil {
+		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, message, time.Now().UTC(), true); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -459,6 +468,14 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		card.CreatedFromEmail = true
+		if input.Target.ProjectID != "" {
+			relationship, deltas, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
+			if err != nil {
+				return CommunicationsTriageConversionResult{}, err
+			}
+			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
+			result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
+		}
 		node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
 from nodes n
@@ -546,7 +563,7 @@ for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrN
 			return CommunicationsTriageConversionResult{}, err
 		}
 		message = normalizeEmailMessageSnapshot(message)
-		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.NodeID, message, time.Now().UTC()); err != nil {
+		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.NodeID, message, time.Now().UTC(), false); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -576,7 +593,7 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 }
 
 func (r *PostgresRepo) convertCommunicationsTriageItemsToExplorerTargetTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
-	if input.Target.Mode == CommunicationsEmailConversionTargetProject {
+	if input.Target.ProjectID != "" {
 		var projectExists bool
 		if err := tx.QueryRowContext(ctx, `select exists (select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`, input.CompanyID, input.Target.ProjectID).Scan(&projectExists); err != nil {
 			return CommunicationsTriageConversionResult{}, err
@@ -616,7 +633,7 @@ insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
 values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28), 120+float64(index*28)); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, message, time.Now().UTC()); err != nil {
+		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, message, time.Now().UTC(), true); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -624,7 +641,7 @@ delete from communications_triage_items
 where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if input.Target.Mode == CommunicationsEmailConversionTargetProject {
+		if input.Target.ProjectID != "" {
 			relationship, deltas, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
 			if err != nil {
 				return CommunicationsTriageConversionResult{}, err
@@ -770,7 +787,7 @@ returning company_id::text, user_id::text, message_id, node_id::text, board_id, 
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.NodeID, message, time.Now().UTC()); err != nil {
+		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.NodeID, message, time.Now().UTC(), false); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -855,9 +872,9 @@ order by created_timestamp desc, message_id asc, logic_gate_id asc`, args...)
 	return placements, rows.Err()
 }
 
-func addEmailProjectionSQL(ctx context.Context, tx *sql.Tx, companyID, nodeID string, message domain.EmailMessageSnapshot, attachedAt time.Time) error {
+func addEmailProjectionSQL(ctx context.Context, tx *sql.Tx, companyID, nodeID string, message domain.EmailMessageSnapshot, attachedAt time.Time, createdFromEmail bool) error {
 	informationID := newUUIDv7String()
-	information := attachedEmailProjectionInformation(message, attachedAt)
+	information := attachedEmailProjectionInformation(message, attachedAt, createdFromEmail)
 	if _, err := tx.ExecContext(ctx, `
 insert into node_information (
   company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp
@@ -1008,7 +1025,7 @@ returning company_id::text, user_id::text, message_id, node_id::text, board_id, 
 	if err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
-	if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, targetCard.NodeID, link.Message, time.Now().UTC()); err != nil {
+	if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, targetCard.NodeID, link.Message, time.Now().UTC(), false); err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
 	if err := deletePostgresCommunicationsEmailSourceNodeTx(ctx, tx, input.CompanyID, link); err != nil {

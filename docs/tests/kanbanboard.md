@@ -1,4 +1,4 @@
-Last updated: 2026-07-07
+Last updated: 2026-07-09
 
 # Kanban Board Tests
 
@@ -135,9 +135,10 @@ KB100 - Node editor popups opened from Kanban expose a fullscreen toggle in the 
 KB101 - Dragging a triage/mailbox email directly onto a Logic Gate Kanban column converts it into a direct email-created node card on that Logic Gate board and in that target column.
 KB102 - Direct email-to-Kanban column drops use the same triage drag payload and Home conversion reconciliation event as Company Explorer email drops so source mail rows, local freshness suppression, Logic Gate icons, and unstarred state are reconciled consistently.
 KB103 - Dropping an email onto a supported priority group inside a Logic Gate Kanban column applies that priority while still using the column as the assignment status target; dropping onto ordinary column or card space uses the backend default priority.
+KB104 - After a direct email-to-Kanban column drop succeeds, the created node opens in the normal node popup.
 
 ### New node insertion
-KB104 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
+KB105 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
 
 ## Scenarios
 
@@ -427,6 +428,7 @@ Expected:
 - Dropping the email on any visible Logic Gate Kanban column converts the email into a direct email-created node card on that same Logic Gate board.
 - The created card lands in the dropped column, not only the default Pending column.
 - The card exposes `created_from_email = true` and shows the email-created marker.
+- The created node opens in the normal node popup after the drop succeeds.
 - The conversion records the actor as the placed-by user.
 - If the drop target is a supported priority group, the created node/card uses that priority; otherwise the backend default priority is used.
 - The source Home mail row is reconciled through the local conversion event, including Logic Gate placement and `unstarred_message_ids`.

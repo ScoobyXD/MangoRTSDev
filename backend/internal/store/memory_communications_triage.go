@@ -229,6 +229,11 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 		return CommunicationsTriageConversionResult{}, ErrInvalid
 	}
 	input.Target.Header = logicGate.Header
+	if input.Target.ProjectID != "" {
+		if _, ok := r.projects[key(input.CompanyID, input.Target.ProjectID)]; !ok {
+			return CommunicationsTriageConversionResult{}, ErrNotFound
+		}
+	}
 
 	board := r.ensureLogicGateKanbanBoardLocked(input.CompanyID, input.LogicGateID, logicGate.Header)
 	column, err := resolveLogicGateAssignmentColumn(r.kanbanColumns[boardKey(input.CompanyID, board.BoardID)], input.ColumnID, input.Status)
@@ -316,8 +321,16 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			UpdatedTimestamp: now,
 		}
 		r.emailNodeLinks[emailNodeLinkKey(input.CompanyID, board.BoardID, card.CardID)] = link
-		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now)
+		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now, true)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
+		if input.Target.ProjectID != "" {
+			relationship, deltas, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
+			if err != nil {
+				return CommunicationsTriageConversionResult{}, err
+			}
+			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
+			result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
+		}
 
 		node = r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, nodeID)])
 		placement := domain.CommunicationsEmailPlacement{
@@ -373,7 +386,7 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToStandaloneNodeLocked(input
 		if !ok {
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
-		r.addEmailProjectionLocked(input.CompanyID, input.NodeID, triageItem.Message, now)
+		r.addEmailProjectionLocked(input.CompanyID, input.NodeID, triageItem.Message, now, false)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		updatedNode := r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, input.NodeID)])
 		result.Nodes = append(result.Nodes, updatedNode)
@@ -390,7 +403,7 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToStandaloneNodeLocked(input
 }
 
 func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
-	if input.Target.Mode == CommunicationsEmailConversionTargetProject {
+	if input.Target.ProjectID != "" {
 		if _, ok := r.projects[key(input.CompanyID, input.Target.ProjectID)]; !ok {
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
@@ -420,9 +433,9 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 			Y:                120 + float64(index*28),
 			UpdatedTimestamp: now,
 		}
-		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now)
+		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now, true)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
-		if input.Target.Mode == CommunicationsEmailConversionTargetProject {
+		if input.Target.ProjectID != "" {
 			relationship, deltas, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
 			if err != nil {
 				return CommunicationsTriageConversionResult{}, err
@@ -543,7 +556,7 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input C
 			UpdatedTimestamp: now,
 		}
 		r.emailNodeLinks[emailNodeAttachmentLinkKey(input.CompanyID, input.UserID, messageID, input.NodeID)] = link
-		r.addEmailProjectionLocked(input.CompanyID, input.NodeID, triageItem.Message, now)
+		r.addEmailProjectionLocked(input.CompanyID, input.NodeID, triageItem.Message, now, false)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 
 		updatedNode := r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, input.NodeID)])
@@ -654,7 +667,7 @@ func (r *MemoryRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNo
 		attachmentLink.CreatedTimestamp = existing.CreatedTimestamp
 	}
 	r.emailNodeLinks[attachmentKey] = attachmentLink
-	r.addEmailProjectionLocked(input.CompanyID, targetCard.NodeID, sourceLink.Message, now)
+	r.addEmailProjectionLocked(input.CompanyID, targetCard.NodeID, sourceLink.Message, now, false)
 	r.deleteCommunicationsEmailSourceNodeLocked(input.CompanyID, sourceKey, sourceLink)
 
 	return CommunicationsEmailNodeTransferResult{
@@ -854,8 +867,8 @@ func (r *MemoryRepo) pendingKanbanColumnIDLocked(companyID, boardID string) stri
 	return ""
 }
 
-func (r *MemoryRepo) addEmailProjectionLocked(companyID, nodeID string, message domain.EmailMessageSnapshot, now time.Time) {
-	information := attachedEmailProjectionInformation(message, now)
+func (r *MemoryRepo) addEmailProjectionLocked(companyID, nodeID string, message domain.EmailMessageSnapshot, now time.Time, createdFromEmail bool) {
+	information := attachedEmailProjectionInformation(message, now, createdFromEmail)
 	informationID := newUUIDv7String()
 	info := domain.NodeInformation{
 		CompanyID:        companyID,
@@ -882,7 +895,7 @@ func (r *MemoryRepo) addEmailProjectionLocked(companyID, nodeID string, message 
 	}
 }
 
-func attachedEmailProjectionInformation(message domain.EmailMessageSnapshot, attachedAt time.Time) string {
+func attachedEmailProjectionInformation(message domain.EmailMessageSnapshot, attachedAt time.Time, createdFromEmail bool) string {
 	var date *int64
 	if message.Date > 0 {
 		value := message.Date
@@ -896,6 +909,7 @@ func attachedEmailProjectionInformation(message domain.EmailMessageSnapshot, att
 		From              string `json:"from"`
 		Date              *int64 `json:"date"`
 		AttachedTimestamp string `json:"attached_timestamp"`
+		CreatedFromEmail  bool   `json:"created_from_email,omitempty"`
 	}{
 		MessageID:         strings.TrimSpace(message.ID),
 		ThreadID:          strings.TrimSpace(message.ThreadID),
@@ -904,6 +918,7 @@ func attachedEmailProjectionInformation(message domain.EmailMessageSnapshot, att
 		From:              emailAddressSnapshotListLabel(message.From),
 		Date:              date,
 		AttachedTimestamp: attachedAt.UTC().Format(time.RFC3339Nano),
+		CreatedFromEmail:  createdFromEmail,
 	}
 	raw, _ := json.Marshal(payload)
 	return string(raw)

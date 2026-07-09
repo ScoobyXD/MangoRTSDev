@@ -7,7 +7,7 @@ import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { useCompanyAccounts } from "../accounts/AccountFilterControl.js";
 import type { Account } from "../accounts/accountsApi.js";
-import { listCompanyUserGroups, listCompanyUsers, type CompanyUser, type CompanyUserGroup } from "../communications/communicationsApi.js";
+import { convertTriageMessagesToExplorerTarget, listCompanyUserGroups, listCompanyUsers, type CommunicationsTriageConversionTarget, type CompanyUser, type CompanyUserGroup } from "../communications/communicationsApi.js";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons.js";
 import { CompanyExplorerSearchBox } from "../company-explorer/CompanyExplorerSearchBox.js";
@@ -64,6 +64,8 @@ import { getScopedItemIDs, type CompanyExplorerFolder, type CompanyExplorerFolde
 import { moveLogicGateAssignment } from "../kanban/kanbanApi.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared.js";
 import type { NodeRecord } from "../node-map/shared.js";
+import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, type HomeTriageConversionAppliedDetail } from "../../pages/home/homeConstants.js";
+import { cleanIDList, hasTriageMessageDrag, readTriageMessageDrag } from "../../pages/home/homeUtils.js";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog.js";
 import {
   addProjectInformation,
@@ -173,6 +175,11 @@ const PROJECT_SUMMARY_SPLIT_MAX = 74;
 const PROJECT_RELATIONSHIP_NODE_DRAG_MIME = "application/x-mangorts-project-relationship-node";
 const PROJECT_CRITICAL_STEP_DRAG_MIME = "application/x-mangorts-project-critical-step";
 const PROJECT_HEALTH_OPTIONS: ProjectHealth[] = ["On Track", "AT RISK", "Off Track"];
+
+function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<HomeTriageConversionAppliedDetail>(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, { detail }));
+}
 
 export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   projectID,
@@ -633,6 +640,67 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       return ensuredRelationships;
     }
   }, [companyID, loadProject, projectID, relationships]);
+
+  const convertTriageMessagesToProject = useCallback(async (
+    drag: ReturnType<typeof readTriageMessageDrag>,
+    logicGateID = "",
+  ) => {
+    const messageIDs = cleanIDList(drag.messageIDs);
+    if (messageIDs.length === 0) return;
+    const dragCompanyID = drag.companyID?.trim() ?? "";
+    if (dragCompanyID && dragCompanyID !== companyID) {
+      setError("Email drop belongs to another company");
+      return;
+    }
+    const cleanProjectID = projectID.trim();
+    const cleanLogicGateID = logicGateID.trim();
+    if (!companyID || !cleanProjectID) return;
+    const sharedInboxID = drag.sharedInboxID?.trim() || undefined;
+    setError("");
+    setRelationshipDropActive(false);
+    setActiveRightPanelTab("relationships");
+    dispatchHomeTriageConversionApplied({ companyID, messageIDs, sharedInboxID });
+    try {
+      const position = relationships.length + 1;
+      const target: CommunicationsTriageConversionTarget = cleanLogicGateID
+        ? { mode: "existing_logic_gate", logicGateID: cleanLogicGateID, projectID: cleanProjectID, position }
+        : { mode: "project", projectID: cleanProjectID, position };
+      const result = await convertTriageMessagesToExplorerTarget({
+        companyID,
+        sharedInboxID,
+        target,
+        messageIDs,
+        priority: 3,
+      });
+      const nextRelationships = result.project_relationships ?? [];
+      if (nextRelationships.length > 0) {
+        setRelationships((current) => mergeProjectRelationships(current, nextRelationships));
+      } else {
+        await loadProject({ showLoading: false });
+      }
+      const convertedMessageIDs = cleanIDList(result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs);
+      const savedCards = result.cards ?? [];
+      const boardIDs = Array.from(new Set([
+        result.board?.board_id ?? "",
+        ...savedCards.map((card) => card.board_id),
+      ].map((id) => id.trim()).filter(Boolean)));
+      dispatchHomeTriageConversionApplied({
+        companyID,
+        messageIDs: convertedMessageIDs,
+        sharedInboxID,
+        logicGateID: result.board?.logic_gate_id?.trim() || cleanLogicGateID || undefined,
+        nodeIDs: (result.nodes ?? []).map((node) => node.node_id),
+        boardIDs,
+        cardIDs: savedCards.map((card) => card.card_id),
+        unstarredMessageIDs: cleanIDList(result.unstarred_message_ids ?? []),
+      });
+      const createdNodeID = result.nodes?.[0]?.node_id?.trim() ?? "";
+      if (createdNodeID) onNodeOpen?.(createdNodeID);
+    } catch (dropError) {
+      setError(dropError instanceof Error ? dropError.message : "Email drop failed");
+      await loadProject({ showLoading: false });
+    }
+  }, [companyID, loadProject, onNodeOpen, projectID, relationships.length]);
 
   const saveProjectAssignments = useCallback(async () => {
     if (!project) return;
@@ -1360,7 +1428,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               setSelectionAnchorRelationshipNodeID("");
             }}
             onDragOver={(event) => {
-              if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME)) return;
+              if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME) && !hasTriageMessageDrag(event.dataTransfer)) return;
               event.preventDefault();
               event.dataTransfer.dropEffect = "copy";
               setRelationshipDropActive(true);
@@ -1370,6 +1438,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               setRelationshipDropActive(false);
             }}
             onDrop={(event) => {
+              const triageMessageDrag = readTriageMessageDrag(event.dataTransfer);
+              if (triageMessageDrag.messageIDs.length > 0) {
+                event.preventDefault();
+                event.stopPropagation();
+                void convertTriageMessagesToProject(triageMessageDrag);
+                return;
+              }
               const targets = relationshipTargetsFromTransfer(event.dataTransfer);
               if (targets.length === 0) return;
               event.preventDefault();
@@ -1402,13 +1477,21 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                     });
                   }}
                   onDragOver={(event) => {
-                    if (!Array.from(event.dataTransfer.types).includes(PROJECT_RELATIONSHIP_NODE_DRAG_MIME)) return;
+                    const isTriageDrag = hasTriageMessageDrag(event.dataTransfer);
+                    if (!isTriageDrag && !Array.from(event.dataTransfer.types).includes(PROJECT_RELATIONSHIP_NODE_DRAG_MIME)) return;
                     event.preventDefault();
                     event.stopPropagation();
-                    event.dataTransfer.dropEffect = "move";
+                    event.dataTransfer.dropEffect = isTriageDrag ? "copy" : "move";
                   }}
                   onDrop={(event) => {
                     if (!gateLogicGateID) return;
+                    const triageMessageDrag = readTriageMessageDrag(event.dataTransfer);
+                    if (triageMessageDrag.messageIDs.length > 0) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      void convertTriageMessagesToProject(triageMessageDrag, gateLogicGateID);
+                      return;
+                    }
                     const payload = readProjectRelationshipNodeDragPayload(event.dataTransfer);
                     if (!payload) return;
                     event.preventDefault();
@@ -1460,6 +1543,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         >
                           <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
                           <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
+                          <span title={node.created_from_email ? "Email node" : undefined} aria-label={node.created_from_email ? "Email node" : undefined} style={relationshipNodeEmailIconStyle}>{node.created_from_email ? <MailIcon color="#64748b" /> : null}</span>
                           <CriticalPulseBeacon visible={nodeIsCurrentCritical} compact />
                           {node.status ? <span style={nodeStatusDotStyle(node.status)} /> : null}
                         </button>
@@ -1488,6 +1572,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   >
                     <span style={relationshipNodeIconStyle}><ExplorerRowIcon kind="node" /></span>
                     <span style={relationshipNodeTitleStyle}>{node.display_title}</span>
+                    <span title={node.created_from_email ? "Email node" : undefined} aria-label={node.created_from_email ? "Email node" : undefined} style={relationshipNodeEmailIconStyle}>{node.created_from_email ? <MailIcon color="#64748b" /> : null}</span>
                     <CriticalPulseBeacon visible={nodeIsCurrentCritical} compact />
                     {node.status ? <span style={nodeStatusDotStyle(node.status)} /> : null}
                   </button>
@@ -3684,7 +3769,7 @@ const logicGateNodeRowStyle = (hovered: boolean, selected: boolean): React.CSSPr
   background: selected ? "#eff6ff" : hovered ? "#f8fbff" : "rgba(255, 255, 255, 0.94)",
   color: "#111827",
   display: "grid",
-  gridTemplateColumns: "16px minmax(0, 1fr) auto auto",
+  gridTemplateColumns: "16px minmax(0, 1fr) auto auto auto",
   alignItems: "center",
   gap: 4,
   padding: "3px 5px",
@@ -3710,6 +3795,15 @@ const relationshipNodeTitleStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
+};
+
+const relationshipNodeEmailIconStyle: React.CSSProperties = {
+  width: 16,
+  height: 16,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  opacity: 0.78,
 };
 
 const nodeStatusDotStyle = (status?: string | null): React.CSSProperties => {

@@ -670,6 +670,7 @@ create table if not exists project_relationship_projection (
   assignment_id uuid,
   display_title text not null,
   status text,
+  created_from_email boolean not null default false,
   position integer not null default 0,
   resource_created_timestamp timestamptz not null,
   relationship_created_timestamp timestamptz not null,

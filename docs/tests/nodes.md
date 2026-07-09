@@ -27,7 +27,7 @@ N16 - The node editor font-size control applies to highlighted text and, for a c
 N17 - Node editor bold and underline controls must toggle the selected text or sticky caret formatting and must visually reflect the formatting at the current caret or selection.
 N18 - Inserting a table in a node editor must insert the table at the current caret/selection location, not at the top-left or beginning of the editor.
 N19 - A node header can show and edit the node's project placement: the project button displays the current project when one is known and otherwise offers project assignment.
-N20 - Assigning a node to a project from the node header requires selecting a project and then selecting a Logic Gate within that project; the assignment creates the node/project relationship and moves or assigns the node to the chosen Logic Gate.
+N20 - Assigning a node to a project from the node header supports project-only assignment; selecting a Logic Gate within that project is optional and moves or assigns the node to that Logic Gate only when chosen.
 N21 - A node with a known project relationship exposes a Go to Project action that opens the related project directly.
 N22 - When selected node text is sent to chat as a quote/prefill, the quote preview must expose a cancel action that clears the selected-text prefill without sending a message.
 N23 - Live node editor typing writes the current text-block state to the node editor projection table and must not append a full rich-text document row to `node_information` on every keystroke autosave.
@@ -174,8 +174,9 @@ Given:
 
 Expected:
 - The node header project button displays the current related project when one is known.
-- Assigning a node to a project first asks for the project, then asks for a Logic Gate inside that project.
-- Confirming the Logic Gate creates or updates the node/project relationship and assigns the node to the selected Logic Gate.
+- Assigning a node to a project first asks for the project.
+- Confirming project-only assignment creates or updates the node/project relationship without requiring a Logic Gate or priority.
+- Choosing an optional Logic Gate inside that project creates or updates the node/project relationship and assigns the node to the selected Logic Gate.
 - Go to Project opens the related project directly.
 - The selected-text chat quote includes a cancel action next to the quoted text.
 - Canceling the quote clears the prefill and leaves the chat draft otherwise intact.

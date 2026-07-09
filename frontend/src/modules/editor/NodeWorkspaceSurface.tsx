@@ -388,6 +388,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [selectedProjectForAssignment, setSelectedProjectForAssignment] = useState<ProjectRecord | null>(null);
   const [projectLogicGateOptions, setProjectLogicGateOptions] = useState<LogicGateRecord[]>([]);
   const [projectLogicGatesLoading, setProjectLogicGatesLoading] = useState(false);
+  const [assigningProjectID, setAssigningProjectID] = useState("");
   const [assigningProjectLogicGateID, setAssigningProjectLogicGateID] = useState("");
   const [projectAssignStatus, setProjectAssignStatus] = useState("");
   const [dropActive, setDropActive] = useState(false);
@@ -572,6 +573,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setSelectedProjectForAssignment(null);
     setProjectLogicGateOptions([]);
     setProjectAssignStatus("");
+    setAssigningProjectID("");
     setAssigningProjectLogicGateID("");
   }, [nodeID]);
 
@@ -1558,12 +1560,40 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
   }, [assigningLogicGateID, canEdit, flashLogicGateAssignButton, lastAssignedLogicGateID, lastAssignedLogicGateLabel, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment]);
 
+  const assignToProject = useCallback(async () => {
+    if (!canEdit) return;
+    const project = selectedProjectForAssignment;
+    const projectID = project?.project_id?.trim() ?? "";
+    if (!companyID || !nodeID || !projectID || assigningProjectID || assigningProjectLogicGateID) return;
+    const projectLabel = project ? projectOptionLabel(project) : projectID;
+    setAssigningProjectID(projectID);
+    setProjectAssignStatus(`Adding to ${projectLabel}`);
+    try {
+      await upsertProjectRelationship({
+        companyID,
+        projectID,
+        resourceType: "node",
+        resourceID: nodeID,
+      });
+      setProjectAssignerOpen(false);
+      setSelectedProjectForAssignment(null);
+      setProjectAssignStatus(`Project: ${projectLabel}`);
+      setProjectRelationshipRefreshKey((key) => key + 1);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "failed_to_assign_project";
+      setProjectAssignStatus(message);
+      onError(message);
+    } finally {
+      setAssigningProjectID("");
+    }
+  }, [assigningProjectID, assigningProjectLogicGateID, canEdit, companyID, nodeID, onError, selectedProjectForAssignment]);
+
   const assignToProjectLogicGate = useCallback(async (logicGate: LogicGateRecord) => {
     if (!canEdit) return;
     const project = selectedProjectForAssignment;
     const projectID = project?.project_id?.trim() ?? "";
     const logicGateID = logicGate.logic_gate_id.trim();
-    if (!companyID || !nodeID || !projectID || !logicGateID || assigningProjectLogicGateID) return;
+    if (!companyID || !nodeID || !projectID || !logicGateID || assigningProjectID || assigningProjectLogicGateID) return;
     if (nodePriorityUnassignedForLogicGate) {
       setProjectAssignStatus("Must give node a priority");
       onRequireNodePriorityForLogicGateAssignment();
@@ -1594,7 +1624,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     } finally {
       setAssigningProjectLogicGateID("");
     }
-  }, [assigningProjectLogicGateID, canEdit, companyID, nodeID, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment, selectedProjectForAssignment]);
+  }, [assigningProjectID, assigningProjectLogicGateID, canEdit, companyID, nodeID, nodePriorityUnassignedForLogicGate, onAssignToLogicGate, onError, onRequireNodePriorityForLogicGateAssignment, selectedProjectForAssignment]);
 
   const onDropEmail = useCallback((event: React.DragEvent) => {
     if (!canEdit) return;
@@ -1990,13 +2020,25 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       </div>
       {selectedProjectForAssignment && (
         <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
-          <div style={{ color: surfaceText, opacity: 0.68, fontSize: 10.5, fontWeight: 900 }}>Logic Gate in Project</div>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={Boolean(assigningProjectID || assigningProjectLogicGateID)}
+            onClick={() => { void assignToProject(); }}
+            title={`Assign node to ${projectOptionLabel(selectedProjectForAssignment)}`}
+            style={{ minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr) 18px", alignItems: "center", gap: 7, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: assigningProjectID || assigningProjectLogicGateID ? "default" : "pointer", padding: "5px 8px", font: "inherit", textAlign: "left", boxShadow: EDITOR_NEU_SHADOW }}
+          >
+            <ExplorerRowIcon kind="project" />
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 850 }}>Assign node to project</span>
+            <span>{assigningProjectID ? "..." : null}</span>
+          </button>
+          <div style={{ color: surfaceText, opacity: 0.68, fontSize: 10.5, fontWeight: 900 }}>Optional Logic Gate</div>
           {nodePriorityUnassignedForLogicGate && (
             <div style={{ border: "1px solid rgba(245, 158, 11, 0.34)", borderRadius: 9, background: "rgba(255,251,235,0.9)", color: "#92400e", padding: "6px 8px", fontSize: 11, fontWeight: 800 }}>Give this node a priority before assigning it to a project logic gate.</div>
           )}
           <div className="editor-document-scroll" style={{ maxHeight: 190, overflowY: "auto", display: "grid", gap: 5, padding: "2px 5px 6px 2px" }}>
             {projectLogicGatesLoading && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>Loading logic gates</div>}
-            {!projectLogicGatesLoading && projectLogicGateOptions.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>This project has no logic gates</div>}
+            {!projectLogicGatesLoading && projectLogicGateOptions.length === 0 && <div style={{ fontSize: 11, color: surfaceText, opacity: 0.64, padding: 8 }}>No logic gates in this project</div>}
             {!projectLogicGatesLoading && projectLogicGateOptions.map((logicGate) => {
               const logicGateID = logicGate.logic_gate_id.trim();
               const busy = assigningProjectLogicGateID === logicGateID;
@@ -2005,10 +2047,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                   key={logicGateID}
                   type="button"
                   role="menuitem"
-                  disabled={Boolean(assigningProjectLogicGateID)}
+                  disabled={Boolean(assigningProjectID || assigningProjectLogicGateID)}
                   onClick={() => { void assignToProjectLogicGate(logicGate); }}
                   title={logicGateOptionLabel(logicGate)}
-                  style={{ minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr) 18px", alignItems: "center", gap: 7, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: assigningProjectLogicGateID ? "default" : "pointer", padding: "5px 8px", font: "inherit", textAlign: "left", boxShadow: EDITOR_NEU_SHADOW }}
+                  style={{ minHeight: 34, display: "grid", gridTemplateColumns: "24px minmax(0, 1fr) 18px", alignItems: "center", gap: 7, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: assigningProjectID || assigningProjectLogicGateID ? "default" : "pointer", padding: "5px 8px", font: "inherit", textAlign: "left", boxShadow: EDITOR_NEU_SHADOW }}
                 >
                   <ExplorerRowIcon kind="logic_gate" />
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11, fontWeight: 850 }}>{logicGateOptionLabel(logicGate)}</span>

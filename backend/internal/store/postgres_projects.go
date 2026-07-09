@@ -156,6 +156,7 @@ func scanProjectRelationshipProjection(row interface{ Scan(dest ...any) error })
 	var nodeID sql.NullString
 	var assignmentID sql.NullString
 	var status sql.NullString
+	var createdFromEmail bool
 	err := row.Scan(
 		&item.CompanyID,
 		&item.ProjectID,
@@ -168,6 +169,7 @@ func scanProjectRelationshipProjection(row interface{ Scan(dest ...any) error })
 		&assignmentID,
 		&item.DisplayTitle,
 		&status,
+		&createdFromEmail,
 		&item.Position,
 		&item.ResourceCreatedTimestamp,
 		&item.RelationshipCreatedTimestamp,
@@ -190,6 +192,7 @@ func scanProjectRelationshipProjection(row interface{ Scan(dest ...any) error })
 		value := status.String
 		item.Status = &value
 	}
+	item.CreatedFromEmail = createdFromEmail
 	return item, err
 }
 
@@ -1168,6 +1171,7 @@ select
   projection.assignment_id::text,
   projection.display_title,
   projection.status,
+  projection.created_from_email,
   projection.position,
   projection.resource_created_timestamp,
   projection.relationship_created_timestamp,

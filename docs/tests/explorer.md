@@ -257,7 +257,7 @@ Given:
 Expected:
 - The conversion request preserves the source mailbox scope, including `shared_inbox_id` for Shared Triage.
 - The backend creates a Pending direct email-created node/card in the target Logic Gate.
-- Company Explorer folder and project rows are not email conversion targets.
+- Company Explorer folder rows are not email conversion targets; project-surface email drops use project relationship conversion instead of Company Explorer placement.
 - The created email node/card is owned by the Logic Gate/Kanban work path and does not create a Company Explorer folder item, Explorer V2 row, or `company_explorer_items` row.
 - The backend sets the source email to unstarred through the personal or shared mailbox grant that supplied the drag payload and returns successfully updated IDs in `unstarred_message_ids`.
 - The Home triage list keeps the converted row in local state and local message caches, and patches its Logic Gate icon state from the conversion result without clearing all communications message caches.

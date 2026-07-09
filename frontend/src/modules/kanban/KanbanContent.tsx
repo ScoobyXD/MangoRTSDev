@@ -2272,6 +2272,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         cardIDs: savedCards.map((card) => card.card_id),
         unstarredMessageIDs: cleanIDList(result.unstarred_message_ids ?? []),
       });
+      const createdNode = result.nodes?.[0];
+      const createdCard = savedCards[0];
+      const openedNodeID = createdNode?.node_id?.trim() || createdCard?.node_id?.trim() || "";
+      if (openedNodeID) {
+        openNodeEditorOverlay(openedNodeID, createdNode ? getNodeTitle(createdNode) : (createdCard?.node_title || openedNodeID));
+      }
     } catch (err) {
       setError(err instanceof Error && err.message.trim() ? err.message : "Email drop failed");
       shouldRefresh = true;
@@ -2279,7 +2285,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       endMutation();
     }
     if (shouldRefresh) void refreshBoard(mutationBoardID);
-  }, [activeBoard?.logic_gate_id, activeLogicGateID, apiBase, applyCards, beginLocalBoardMutation, boardID, companyID, kanbanCommandContext, refreshBoard, syncNodeStatusesFromCards]);
+  }, [activeBoard?.logic_gate_id, activeLogicGateID, apiBase, applyCards, beginLocalBoardMutation, boardID, companyID, kanbanCommandContext, openNodeEditorOverlay, refreshBoard, syncNodeStatusesFromCards]);
 
   const createNodeInColumn = useCallback(async (columnID: string, priority: number) => {
     setError("");
