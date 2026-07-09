@@ -127,6 +127,9 @@ ST116 - Selecting a Shared Triage thread row opens a scrollable, full-height con
 ST117 - Shared Triage rich compose send must preserve sanitized block indentation, including indent/outdent and blockquote-style indents, so sent shared email HTML does not flatten intended paragraph indentation.
 ST118 - Expired or revoked company-owned Shared Triage mailbox provider credentials return a Shared Triage reconnect/repair state, not a Mango auth logout; permitted users remain signed in and managers/admins with edit access can repair the shared connection. Shared mailbox folder, message-list, message-detail, send, archive, star, and draft endpoints must not represent provider reauthorization as a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response; they must return a recoverable provider-specific response, such as `409 nylas_reauth_required`.
 ST119 - Any future change to unified editor semantics must apply to Shared Triage compose and reply through the shared editor behavior, not through a separate shared-compose-only implementation.
+ST120 - Shared Triage compose/reply file attachments must follow `docs/tests/attachments.md`: files upload to Mango attachments before durable draft/send state is saved, attachment references remain scoped to the selected `shared_inbox_id`, and normal durable payloads do not store raw base64 `content`.
+ST121 - Shared Triage compose/reply inline body images use the unified rich-editor image attachment path, while normal file attachments use the shared-mail attachment path.
+ST122 - Incoming shared provider attachments can stay provider-referenced as mailbox metadata, but when converted into work, attached to a node, or otherwise made durable Mango work context, bytes must be cached/persisted into Mango S3 and stored as Mango attachment references under the company/shared mailbox scope.
 
 ## Nylas Configuration Contract
 
@@ -560,3 +563,29 @@ Expected:
 - The right-side detail pane fills the available detail area and shows a chronological conversation history for the thread.
 - Thread IDs and message bodies are loaded only through the selected `shared_inbox_id` and company-owned shared grant; the UI must not fall back to the actor's personal mailbox.
 - Sent shared rich HTML preserves block indentation instead of flattening indented paragraphs.
+
+### Scenario ST-S14: Shared Mail Attachments Use Mango Attachments
+
+Business logic covered:
+- ST13
+- ST14
+- ST80
+- ST81
+- ST105
+- ST106
+- ST120
+- ST121
+- ST122
+
+Given:
+- A user attaches files to a Shared Triage compose, reply, reply-all, forward, or scheduled draft.
+- A user pastes an inline image into the Shared Triage compose/reply body.
+- A shared mailbox provider message with attachments is converted into work or attached to a node.
+
+Expected:
+- File attachments upload to Mango attachments before durable draft/send state is saved.
+- Shared draft/send payloads store Mango attachment references, not raw base64 attachment content.
+- Attachment references preserve the selected `shared_inbox_id` and company-owned shared mailbox scope.
+- Inline body images use the unified rich-editor image attachment path.
+- The backend reads S3 bytes at send time and sends them through the company-owned provider grant.
+- Provider attachments become Mango attachment references when they become durable Mango work context.

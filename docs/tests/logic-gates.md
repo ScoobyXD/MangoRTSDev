@@ -36,6 +36,7 @@ LG23 - Logic Gate editor save state must use the vocabulary and behavior `has ch
 LG24 - The Logic Gate editor exposes applying the current GVIC template to already assigned nodes as a one-shot action next to the GVIC role fields, not as a persistent checkbox or vertical control between the title and GVIC fields.
 LG25 - Pressing the Logic Gate editor's apply-to-assigned-nodes action asks for confirmation; canceling makes no write, and confirming applies the current Logic Gate GVIC template to nodes currently assigned to that Logic Gate. Ordinary GVIC role edits remain template-only for existing assigned nodes.
 LG26 - Logic Gate editor surfaces participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, and table semantics must apply to Logic Gate editor text wherever it is opened.
+LG27 - Logic Gate editor inline images/files must follow `docs/tests/attachments.md`: rich-editor paste/drop uses the shared editor image path, and durable Logic Gate information/projection rows store attachment references instead of data URLs or base64 file bytes.
 
 ## Scenarios
 
@@ -165,3 +166,21 @@ Expected:
 - Canceling the confirmation leaves the current Logic Gate GVIC template saved but does not update existing assigned node snapshots.
 - Confirming applies the current Logic Gate GVIC template to nodes currently assigned to that Logic Gate.
 - Changing Generated, Verified, Consulted, or Informed directly does not implicitly apply that change to existing assigned nodes.
+
+### Scenario LG-S7: Logic Gate Editor Images Use Mango Attachments
+
+Business logic covered:
+- LG17
+- LG22
+- LG26
+- LG27
+
+Given:
+- A user pastes or drops screenshots into a Logic Gate editor body.
+- The editor saves the latest Logic Gate projection.
+
+Expected:
+- The image upload/reference behavior comes from the unified rich-editor image path, not a Logic Gate-only implementation.
+- The saved Logic Gate projection stores attachment references.
+- Logic Gate information/projection rows do not store durable data URLs or base64 file bytes.
+- Fullscreen image preview still opens the original or highest-quality available file.

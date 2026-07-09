@@ -38,6 +38,7 @@ Endpoints used:
 - `POST /v1/logic-gates/:logic_gate_id/information`
   - payload: `{ company_id, type, information, information_id? }`
   - `information` must contain non-whitespace text; blank editor blurs are rejected by the API and DB guard.
+  - Under the V1 Mango Attachment System, pasted/dropped editor images are represented by Mango attachment references in `information`; the endpoint must not persist data URLs or base64 file bytes.
 - `GET /v1/logic-gate-relationships?company_id=...`
 - `POST /v1/logic-gate-relationships`
   - payload: `{ company_id, logic_gate_id_a, logic_gate_id_b, a_position, b_position }`

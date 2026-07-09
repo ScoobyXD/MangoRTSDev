@@ -1,4 +1,4 @@
-Last updated: 2026-07-02
+Last updated: 2026-07-09
 
 # Project Management Tests
 
@@ -41,6 +41,7 @@ PM30 - Updating or deleting a timeline item requires authorization for the timel
 PM31 - Adding an existing node to a project from the node workspace requires selecting the project and then selecting a Logic Gate that belongs to that project.
 PM32 - Confirming node-to-project assignment creates or updates the node/project relationship and assigns the node to the selected project Logic Gate using the normal project and Logic Gate access rules.
 PM33 - Opening a project from a node workspace Go to Project action navigates to the related project without changing the node/project relationship.
+PM34 - Project information/projection attachment payloads must follow `docs/tests/attachments.md`: durable project rows store Mango attachment references instead of data URLs, base64 file bytes, or embedded file payloads, and mutation/read access follows project permissions.
 
 ## Scenarios
 
@@ -112,6 +113,24 @@ Expected:
 - Creation requires project edit access.
 - Created nodes and logic gates are related to the project.
 - Initial information, account data, and assignment data are attached to the created resource and do not drift to another resource.
+
+### Scenario PM-S3B: Project Information Attachments Use Mango Attachments
+
+Business logic covered:
+- PM6
+- PM10
+- PM11
+- PM34
+
+Given:
+- A user adds pasted images or files to a project information/projection text block.
+- The user has project edit access.
+
+Expected:
+- The project information/projection mutation stores attachment references, not inline file bytes.
+- Project detail reads return metadata/content references small enough for normal project load paths.
+- Reads and writes follow project view/edit permissions.
+- Deleting the project information/projection row does not require deleting the underlying S3 object while other resource links may still reference it.
 
 ### Scenario PM-S4: Project Management Timeline
 

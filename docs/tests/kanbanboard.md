@@ -1,4 +1,4 @@
-Last updated: 2026-07-07
+Last updated: 2026-07-09
 
 # Kanban Board Tests
 
@@ -138,6 +138,7 @@ KB103 - Dropping an email onto a supported priority group inside a Logic Gate Ka
 
 ### New node insertion
 KB104 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
+KB105 - Email-card transfer must follow `docs/tests/attachments.md`: the target node attached-email projection stores provider/email metadata and Mango attachment references only, not attachment bytes, data URLs, base64 blobs, or S3 object contents.
 
 ## Scenarios
 
@@ -372,6 +373,7 @@ Business logic covered:
 - KB97
 - KB98
 - KB99
+- KB105
 
 Given:
 - A user drags an email from My Triage or from a mailbox-capable Shared Triage inbox into a Logic Gate so the system creates a Pending node card from that email.
@@ -387,6 +389,7 @@ Expected:
 - The target card remains on the board and does not become a direct-email-created card solely because an email was attached to it.
 - The transferred email does not return to My Triage.
 - The transfer works from the stored email-node provenance even if the actor's personal mailbox is not connected.
+- The target node's attached-email projection stores metadata and Mango attachment references only.
 - The initial conversion sets the original source email to unstarred and reconciles Home from `unstarred_message_ids`; the later card-to-card transfer does not call the mailbox provider to star or unstar the email.
 - Matching workspace events from the original local conversion do not repeatedly reload the Home workspace panel or source mail list, do not remove the source email row, and do not refill the source list from stale prefetched pages, after the board has already been updated from the conversion response.
 
