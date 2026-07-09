@@ -624,7 +624,7 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
   if (tagName === "span") {
     const imageData = readEditorImageData(element);
     if (imageData) {
-      target.appendChild(createEditorImageFrame(ownerDocument, imageData));
+      target.appendChild(createEditorImageFrame(ownerDocument, imageData, { durable: true }));
       return;
     }
     if (isEditorMentionElement(element)) {

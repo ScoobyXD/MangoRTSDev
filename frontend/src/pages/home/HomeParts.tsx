@@ -5152,6 +5152,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           style={richEditorStyle}
           onSelectionFontSizeChange={setBodySelectionFontSize}
           onSelectionInlineFormatChange={setBodySelectionInlineFormat}
+          onEditorImageAttachmentError={setAttachmentError}
           onChange={(body) => update({ body })}
         />
         <div style={mailComposeAttachmentRowStyle}>

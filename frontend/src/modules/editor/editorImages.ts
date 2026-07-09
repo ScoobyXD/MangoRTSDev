@@ -2,8 +2,13 @@ export const EDITOR_IMAGE_NODE_ATTRIBUTE = "data-mango-editor-image";
 export const EDITOR_IMAGE_ID_ATTRIBUTE = "data-mango-editor-image-id";
 export const EDITOR_IMAGE_WRAP_ATTRIBUTE = "data-mango-editor-image-wrap";
 export const EDITOR_IMAGE_SELECTED_ATTRIBUTE = "data-mango-editor-image-selected";
+export const EDITOR_IMAGE_ATTACHMENT_ID_ATTRIBUTE = "data-mango-editor-attachment-id";
+export const EDITOR_IMAGE_FILENAME_ATTRIBUTE = "data-mango-editor-filename";
+export const EDITOR_IMAGE_MIME_TYPE_ATTRIBUTE = "data-mango-editor-mime-type";
+export const EDITOR_IMAGE_BYTE_SIZE_ATTRIBUTE = "data-mango-editor-byte-size";
 
 const SAFE_IMAGE_DATA_URL_PATTERN = /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/]+=*$/i;
+const EDITOR_ATTACHMENT_IMAGE_SOURCE_PREFIX = "mango-attachment:";
 const MAX_STORED_IMAGE_BYTES = 8 * 1024 * 1024;
 const MIN_STORED_IMAGE_BYTES = 512 * 1024;
 const TARGET_EDITOR_DOCUMENT_HTML_BYTES = 12 * 1024 * 1024;
@@ -23,6 +28,10 @@ export type EditorImagePointerInteraction =
 export type EditorImageData = {
   src: string;
   id?: string;
+  attachmentID?: string;
+  filename?: string;
+  mimeType?: string;
+  byteSize?: number;
   width: number;
   height: number;
   marginLeft?: number;
@@ -35,15 +44,44 @@ export type EditorImageClipboardData = Omit<EditorImageData, "width" | "height">
   height?: number;
 };
 
+export type EditorAttachmentImageObjectURLLoader = (
+  attachmentID: string,
+  variant: "display" | "original",
+  options?: { signal?: AbortSignal },
+) => Promise<string>;
+
 export function isSafeEditorImageSource(src: string): boolean {
   return SAFE_IMAGE_DATA_URL_PATTERN.test(src.trim());
 }
 
-export function createEditorImageFrame(ownerDocument: Document, data: EditorImageData): HTMLSpanElement {
+function isSafeEditorAttachmentImageDisplaySource(src: string, attachmentID: string): boolean {
+  const cleanSrc = src.trim();
+  if (isSafeEditorImageSource(cleanSrc)) return true;
+  if (cleanSrc.startsWith("blob:")) return true;
+  return cleanSrc === editorAttachmentImageSource(attachmentID);
+}
+
+export function editorAttachmentImageSource(attachmentID: string): string {
+  const cleanAttachmentID = attachmentID.trim();
+  return cleanAttachmentID ? `${EDITOR_ATTACHMENT_IMAGE_SOURCE_PREFIX}${encodeURIComponent(cleanAttachmentID)}` : "";
+}
+
+export function isEditorAttachmentImageSource(src: string): boolean {
+  return src.trim().startsWith(EDITOR_ATTACHMENT_IMAGE_SOURCE_PREFIX);
+}
+
+export function createEditorImageFrame(ownerDocument: Document, data: EditorImageData, options: { durable?: boolean } = {}): HTMLSpanElement {
+  const attachmentID = data.attachmentID?.trim() ?? "";
   const frame = ownerDocument.createElement("span");
   frame.setAttribute(EDITOR_IMAGE_NODE_ATTRIBUTE, "true");
   frame.setAttribute(EDITOR_IMAGE_ID_ATTRIBUTE, data.id?.trim() || createEditorImageID());
   frame.setAttribute(EDITOR_IMAGE_WRAP_ATTRIBUTE, "false");
+  if (attachmentID) {
+    frame.setAttribute(EDITOR_IMAGE_ATTACHMENT_ID_ATTRIBUTE, attachmentID);
+    setOptionalEditorImageAttribute(frame, EDITOR_IMAGE_FILENAME_ATTRIBUTE, data.filename);
+    setOptionalEditorImageAttribute(frame, EDITOR_IMAGE_MIME_TYPE_ATTRIBUTE, data.mimeType);
+    setOptionalEditorImageAttribute(frame, EDITOR_IMAGE_BYTE_SIZE_ATTRIBUTE, data.byteSize);
+  }
   frame.setAttribute("contenteditable", "false");
   applyEditorImageFloatLayout(frame, data.floatSide ?? "left", data.marginLeft ?? 0);
   applyEditorImageFrameSize(frame, data.width, data.height);
@@ -64,24 +102,42 @@ export function createEditorImageFrame(ownerDocument: Document, data: EditorImag
   image.style.height = "100%";
   image.style.objectFit = "fill";
   image.style.pointerEvents = "none";
-  image.src = data.src;
+  image.src = resolveEditorImageFrameSource(data.src, attachmentID, Boolean(options.durable));
   frame.appendChild(image);
   return frame;
+}
+
+function resolveEditorImageFrameSource(src: string, attachmentID: string, durable: boolean): string {
+  const cleanSrc = src.trim();
+  if (attachmentID) {
+    if (durable) return editorAttachmentImageSource(attachmentID);
+    return isSafeEditorAttachmentImageDisplaySource(cleanSrc, attachmentID) ? cleanSrc : editorAttachmentImageSource(attachmentID);
+  }
+  return isSafeEditorImageSource(cleanSrc) ? cleanSrc : "";
 }
 
 export function readEditorImageData(source: HTMLElement): EditorImageData | null {
   if (source.getAttribute(EDITOR_IMAGE_NODE_ATTRIBUTE) !== "true") return null;
   const image = source.querySelector("img[src]") as HTMLImageElement | null;
+  const attachmentID = source.getAttribute(EDITOR_IMAGE_ATTACHMENT_ID_ATTRIBUTE)?.trim() ?? "";
   const src = image?.getAttribute("src")?.trim() ?? "";
-  if (!isSafeEditorImageSource(src)) return null;
+  if (attachmentID) {
+    if (src && !isSafeEditorAttachmentImageDisplaySource(src, attachmentID)) return null;
+  } else if (!isSafeEditorImageSource(src)) {
+    return null;
+  }
   const width = readSafeStylePixels(source.style.width, 220, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX);
   const height = readSafeStylePixels(source.style.height, 160, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX);
   const floatSide = readEditorImageFloatSide(source);
   const marginLeft = readEditorImageInlineOffset(source);
   const marginTop = readSafeStylePixels(source.style.marginTop, DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX, -5_000, 5_000);
   return {
-    src,
+    src: src || editorAttachmentImageSource(attachmentID),
     id: source.getAttribute(EDITOR_IMAGE_ID_ATTRIBUTE) ?? undefined,
+    attachmentID: attachmentID || undefined,
+    filename: source.getAttribute(EDITOR_IMAGE_FILENAME_ATTRIBUTE)?.trim() || undefined,
+    mimeType: source.getAttribute(EDITOR_IMAGE_MIME_TYPE_ATTRIBUTE)?.trim() || undefined,
+    byteSize: readOptionalPositiveInteger(source.getAttribute(EDITOR_IMAGE_BYTE_SIZE_ATTRIBUTE)),
     width,
     height,
     marginLeft,
@@ -154,6 +210,40 @@ export function findEditorImageFrame(root: HTMLElement, target: EventTarget | nu
   if (!(target instanceof Element)) return null;
   const frame = target.closest(`span[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"]`);
   return frame instanceof HTMLSpanElement && root.contains(frame) ? frame : null;
+}
+
+export function editorImageFrameNeedsAttachmentHydration(frame: HTMLElement): boolean {
+  const data = readEditorImageData(frame);
+  if (!data?.attachmentID) return false;
+  const image = frame.querySelector("img[src]") as HTMLImageElement | null;
+  const src = image?.getAttribute("src")?.trim() ?? "";
+  return !src || isEditorAttachmentImageSource(src);
+}
+
+export function setEditorImageFrameDisplaySource(frame: HTMLElement, src: string): boolean {
+  const data = readEditorImageData(frame);
+  if (!data?.attachmentID) return false;
+  const cleanSrc = src.trim();
+  if (!cleanSrc || !isSafeEditorAttachmentImageDisplaySource(cleanSrc, data.attachmentID)) return false;
+  const image = frame.querySelector("img") as HTMLImageElement | null;
+  if (!image) return false;
+  image.src = cleanSrc;
+  return true;
+}
+
+export function hydrateEditorAttachmentImageFrames(root: HTMLElement, loadObjectURL: EditorAttachmentImageObjectURLLoader): void {
+  const frames = Array.from(root.querySelectorAll(`span[${EDITOR_IMAGE_ATTACHMENT_ID_ATTRIBUTE}]`))
+    .filter((node): node is HTMLSpanElement => node instanceof HTMLSpanElement);
+  for (const frame of frames) {
+    if (!editorImageFrameNeedsAttachmentHydration(frame)) continue;
+    const attachmentID = frame.getAttribute(EDITOR_IMAGE_ATTACHMENT_ID_ATTRIBUTE)?.trim() ?? "";
+    if (!attachmentID) continue;
+    void loadObjectURL(attachmentID, "display").then((objectURL) => {
+      if (!root.contains(frame) || !setEditorImageFrameDisplaySource(frame, objectURL)) {
+        URL.revokeObjectURL(objectURL);
+      }
+    }).catch(() => undefined);
+  }
 }
 
 export function clearEditorImageSelection(root: HTMLElement) {
@@ -329,6 +419,20 @@ function createEditorImageID(): string {
   return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : `image-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function setOptionalEditorImageAttribute(frame: HTMLElement, attribute: string, value: string | number | undefined): void {
+  if (typeof value === "number") {
+    if (Number.isFinite(value) && value > 0) frame.setAttribute(attribute, String(Math.round(value)));
+    return;
+  }
+  const clean = value?.trim() ?? "";
+  if (clean) frame.setAttribute(attribute, clean);
+}
+
+function readOptionalPositiveInteger(value: string | null): number | undefined {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function escapeHTMLAttribute(value: string): string {
