@@ -48,6 +48,12 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - Node/project email pickers are attach/select surfaces only and must not compose, send, schedule, or save email drafts.
 - Map and legacy map-specific node behavior are out of scope unless a live non-map node-window surface imports a helper that must change for this shell contract.
 
+### V1 Unified Editor Phase 1 Note (2026-07-08)
+
+- Node workspace text boxes and project-inline node text boxes keep using the editor module rich-text behavior and node information/projection persistence.
+- `EmailPickerModal` in `NodeWorkspaceSurfaceParts.tsx` is now explicitly an attach/select picker: mailbox tabs, search, unread filter, list scrolling/prefetch, and attach remain; compose/send/schedule/draft UI and logic do not belong there.
+- Attached-email reply bodies that send real mail use the unified rich editor adapter while the send call remains scoped to the existing email reply flow.
+
 ---
 
 ## 2) API contracts used by the module

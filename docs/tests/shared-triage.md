@@ -4,7 +4,7 @@ Last updated: 2026-07-08
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (backend coverage exists for destructive delete vs remove-only and OAuth linkage; frontend helper coverage exists for mailbox-capable Shared Triage rows; rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (backend coverage exists for destructive delete vs remove-only and OAuth linkage; frontend helper coverage exists for mailbox-capable Shared Triage rows; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting for Shared Triage compose/reply; rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 

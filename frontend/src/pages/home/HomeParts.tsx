@@ -10,7 +10,9 @@ import { HeaderRecycleBinIcon } from "../../app/HeaderIcons";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { BoundRequestJSON } from "../../modules/api/requestJSON";
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
-import { EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing";
+import { EDITOR_RICH_TEXT_PREFIX, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing";
+import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
+import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
@@ -4810,12 +4812,6 @@ function composeReplyRichEditorStyle(height: number): React.CSSProperties {
   };
 }
 
-function composeBodyToEditorHTML(body: string): string {
-  if (!body.trim()) return "";
-  if (body.startsWith(EDITOR_RICH_TEXT_PREFIX)) return deserializeEditorDocumentHTML(body);
-  return linkifyEditorPlainTextToHTML(body);
-}
-
 function plainTextSignatureToEditorHTML(value: string): string {
   return value
     .replace(/\r\n/g, "\n")
@@ -4836,31 +4832,6 @@ function appendSignatureToComposeBody(body: string, signature: string): string {
   }
   const currentBody = body.trimEnd();
   return currentBody ? `${currentBody}\n\n\n${cleanSignature}` : `\n\n\n${cleanSignature}`;
-}
-
-function normalizeComposeLinkHref(value: string): string | null {
-  const withProtocol = value.trim().toLowerCase().startsWith("www.") ? `https://${value.trim()}` : value.trim();
-  try {
-    const parsed = new URL(withProtocol);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return parsed.href;
-  } catch {
-    return null;
-  }
-}
-
-function escapeComposeEditorHTML(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function setSelectionToNodeEnd(node: Node) {
-  const selection = window.getSelection();
-  if (!selection) return;
-  const range = document.createRange();
-  range.selectNodeContents(node);
-  range.collapse(false);
-  selection.removeAllRanges();
-  selection.addRange(range);
 }
 
 function recipientQuery(value: string): string {
@@ -4934,14 +4905,14 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   onSaveDraft: () => void;
 }) {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
-  const bodyEditorRef = React.useRef<HTMLDivElement | null>(null);
-  const lastBodyHTMLRef = React.useRef("");
+  const bodyEditorControllerRef = React.useRef<UnifiedRichEditorFormattingController | null>(null);
   const recipientInputRefs = React.useRef<Record<ComposeRecipientField, HTMLInputElement | null>>({ to: null, cc: null, bcc: null });
   const [attachmentError, setAttachmentError] = React.useState("");
   const [signatureEditorOpen, setSignatureEditorOpen] = React.useState(false);
   const [activeRecipientField, setActiveRecipientField] = React.useState<ComposeRecipientField | "">("");
   const [recipientDrafts, setRecipientDrafts] = React.useState<Record<ComposeRecipientField, string>>({ to: "", cc: "", bcc: "" });
   const [replyEditorHeight, setReplyEditorHeight] = React.useState(220);
+  const [bodyOutlineStyle, setBodyOutlineStyle] = React.useState<EditorOutlineStyleID>("automatic-outline-numbering");
   const update = (patch: Partial<ComposeState>) => onChange({ ...compose, ...patch });
   const totalAttachmentBytes = compose.attachments.reduce((sum, attachment) => sum + Math.max(0, attachment.size || 0), 0);
   const focusRecipientInput = (field: ComposeRecipientField) => {
@@ -5109,85 +5080,28 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     if (compose.body.endsWith(signature)) return;
     update({ body: appendSignatureToComposeBody(compose.body, signature) });
   };
-  const commitBodyEditor = React.useCallback(() => {
-    const editor = bodyEditorRef.current;
-    if (!editor) return;
-    const html = sanitizeEditorDocumentHTML(editor.innerHTML);
-    const text = (editor.textContent ?? "").replace(/\u00a0/g, " ").trim();
-    const nextBody = text || html.replace(/<br\s*\/?>/gi, "").trim() ? `${EDITOR_RICH_TEXT_PREFIX}${html}` : "";
-    lastBodyHTMLRef.current = nextBody;
-    update({ body: nextBody });
-  }, [compose]);
-  const focusBodyEditor = () => {
-    const editor = bodyEditorRef.current;
-    if (!editor) return;
-    editor.focus();
-  };
-  const execRichCommand = (command: string, value?: string) => {
-    focusBodyEditor();
-    document.execCommand(command, false, value);
-    commitBodyEditor();
-  };
   const applyFontSize = (size: string) => {
     const fontSize = Number.parseInt(size, 10);
     if (!Number.isFinite(fontSize)) return;
-    const selection = window.getSelection();
-    const editor = bodyEditorRef.current;
-    if (!selection || !editor || selection.rangeCount === 0) return;
-    const range = selection.getRangeAt(0);
-    if (!editor.contains(range.commonAncestorContainer)) {
-      focusBodyEditor();
-      return;
-    }
-    const span = document.createElement("span");
-    span.style.fontSize = `${fontSize}px`;
-    if (range.collapsed) {
-      span.appendChild(document.createTextNode("\u200b"));
-      range.insertNode(span);
-      setSelectionToNodeEnd(span);
-    } else {
-      span.appendChild(range.extractContents());
-      range.insertNode(span);
-      setSelectionToNodeEnd(span);
-    }
-    commitBodyEditor();
+    bodyEditorControllerRef.current?.applyFontSizeValue(fontSize);
   };
   const createHyperlink = () => {
-    focusBodyEditor();
     const rawHref = window.prompt("Link URL") ?? "";
-    const href = normalizeComposeLinkHref(rawHref);
-    if (!href) return;
-    const selection = window.getSelection();
-    const editor = bodyEditorRef.current;
-    const label = selection && selection.rangeCount > 0 && !selection.getRangeAt(0).collapsed
-      ? selection.toString()
-      : href;
-    document.execCommand("insertHTML", false, `<a href="${escapeComposeEditorHTML(href)}" target="_blank" rel="noopener noreferrer" style="color:#0369a1;text-decoration:underline;cursor:pointer;">${escapeComposeEditorHTML(label)}</a>`);
-    if (editor) setSelectionToNodeEnd(editor);
-    commitBodyEditor();
+    if (!rawHref.trim()) return;
+    bodyEditorControllerRef.current?.insertLink(rawHref);
+  };
+  const selectNumberedMode = () => {
+    setBodyOutlineStyle("automatic-outline-numbering");
+    bodyEditorControllerRef.current?.focus();
+  };
+  const insertBulletList = () => {
+    setBodyOutlineStyle("bullet-list");
+    bodyEditorControllerRef.current?.insertList("bullet");
   };
   const insertChecklist = () => {
-    focusBodyEditor();
-    document.execCommand("insertHTML", false, '<ul data-mango-editor-list="checklist"><li data-mango-editor-list-item="checklist" data-mango-editor-checklist-checked="false">[ ] </li></ul>');
-    commitBodyEditor();
+    setBodyOutlineStyle("checklist");
+    bodyEditorControllerRef.current?.insertList("checklist");
   };
-  const onBodyPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const html = event.clipboardData.getData("text/html");
-    const text = event.clipboardData.getData("text/plain");
-    const insertHTML = html.trim() ? sanitizeEditorDocumentHTML(html) : linkifyEditorPlainTextToHTML(text);
-    document.execCommand("insertHTML", false, insertHTML);
-    commitBodyEditor();
-  };
-  React.useEffect(() => {
-    const editor = bodyEditorRef.current;
-    if (!editor) return;
-    if (lastBodyHTMLRef.current === compose.body) return;
-    const hadFocus = document.activeElement === editor;
-    editor.innerHTML = composeBodyToEditorHTML(compose.body);
-    lastBodyHTMLRef.current = compose.body;
-    if (hadFocus) setSelectionToNodeEnd(editor);
-  }, [compose.body]);
   const isReplyMode = !!replyMessage;
   const startReplyEditorResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -5218,8 +5132,13 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     <input style={mailPanelInputStyle} value={compose.subject} onChange={(event) => update({ subject: event.target.value })} placeholder="Subject" />
   );
   const richEditorStyle = isReplyMode ? composeReplyRichEditorStyle(replyEditorHeight) : composeRichEditorStyle;
+  const composeEditorSurfaceID = compose.sharedInboxID.trim() ? "shared-triage-compose" : "my-triage-compose";
+  const handleSubmit = (event: React.FormEvent) => {
+    bodyEditorControllerRef.current?.flush();
+    onSubmit(event);
+  };
   return (
-    <form style={composePanelStyle(isReplyMode)} onSubmit={onSubmit}>
+    <form style={composePanelStyle(isReplyMode)} onSubmit={handleSubmit}>
       <div style={isReplyMode ? composeReplyHeaderStyle : panelHeaderStyle}>
         <h2 style={panelTitleStyle}>{compose.replyToMessageID ? "Reply" : compose.draftID ? "Draft" : "New Message"}</h2>
         {isReplyMode && (
@@ -5259,14 +5178,13 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           </div>
         )}
         <div style={composeRichToolbarStyle}>
-          <button type="button" title="Bold" aria-label="Bold" style={composeRichToolButtonStyle} onClick={() => execRichCommand("bold")}>B</button>
-          <button type="button" title="Underline" aria-label="Underline" style={composeRichToolButtonStyle} onClick={() => execRichCommand("underline")}>U</button>
-          <button type="button" title="Numbered list" aria-label="Numbered list" style={composeRichToolButtonStyle} onClick={() => execRichCommand("insertOrderedList")}>1.</button>
-          <button type="button" title="Bullet list" aria-label="Bullet list" style={composeRichToolButtonStyle} onClick={() => execRichCommand("insertUnorderedList")}>-</button>
+          <button type="button" title="Bold" aria-label="Bold" style={composeRichToolButtonStyle} onClick={() => bodyEditorControllerRef.current?.toggleInlineFormat("bold")}>B</button>
+          <button type="button" title="Underline" aria-label="Underline" style={composeRichToolButtonStyle} onClick={() => bodyEditorControllerRef.current?.toggleInlineFormat("underline")}>U</button>
+          <button type="button" title="Numbered list" aria-label="Numbered list" style={composeRichToolButtonStyle} onClick={selectNumberedMode}>1.</button>
+          <button type="button" title="Bullet list" aria-label="Bullet list" style={composeRichToolButtonStyle} onClick={insertBulletList}>-</button>
           <button type="button" title="Checklist" aria-label="Checklist" style={composeRichToolWideButtonStyle} onClick={insertChecklist}>Check</button>
-          <button type="button" title="Outdent" aria-label="Outdent" style={composeRichToolButtonStyle} onClick={() => execRichCommand("outdent")}>{"<"}</button>
-          <button type="button" title="Indent" aria-label="Indent" style={composeRichToolButtonStyle} onClick={() => execRichCommand("indent")}>{">"}</button>
           <button type="button" title="Create link" aria-label="Create link" style={composeRichToolWideButtonStyle} onClick={createHyperlink}>Link</button>
+          <button type="button" title="Insert table" aria-label="Insert table" style={composeRichToolWideButtonStyle} onClick={() => bodyEditorControllerRef.current?.insertTable()}>Table</button>
           <select
             aria-label="Font size"
             style={composeRichFontSelectStyle}
@@ -5285,23 +5203,18 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
             <option value="28">28</option>
           </select>
         </div>
-        <div
-          ref={bodyEditorRef}
-          role="textbox"
-          aria-label="Message"
-          contentEditable
-          suppressContentEditableWarning
+        <UnifiedRichEditorSurface
+          value={compose.body}
+          outlineStyle={bodyOutlineStyle}
+          surfaceID={composeEditorSurfaceID}
+          ariaLabel="Message"
+          placeholder="Message"
+          surfaceText="#111827"
+          accent={HOME_CYAN}
+          indentGuideColor="rgba(14,165,233,0.38)"
+          formattingControllerRef={bodyEditorControllerRef}
           style={richEditorStyle}
-          data-placeholder="Message"
-          onInput={commitBodyEditor}
-          onBlur={commitBodyEditor}
-          onPaste={onBodyPaste}
-          onClick={(event) => {
-            const anchor = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
-            if (!anchor) return;
-            event.preventDefault();
-            window.open(anchor.href, "_blank", "noopener,noreferrer");
-          }}
+          onChange={(body) => update({ body })}
         />
         <div style={mailComposeAttachmentRowStyle}>
           <input

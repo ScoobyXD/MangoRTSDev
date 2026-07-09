@@ -11,6 +11,13 @@ The Editor module is the linked document workspace for MangoRTS. It gives the se
 - Node/project email pickers are attach/select surfaces only; compose/reply bodies belong in real mail compose/reply surfaces and should use the unified editor.
 - Legacy Map behavior is outside the V1 unifying editor project unless a live non-map editor surface imports a helper that must change for the shared contract.
 
+## Unified Editor Implementation Update (2026-07-08)
+- `frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts` is the shared rich editor behavior source for keyboard routing, paste cleanup, deletion, lists/checklists, font sizing, bold/underline, links, tables, selection, undo/redo, and sanitized serialization.
+- `frontend/src/modules/editor/UnifiedRichEditorSurface.tsx` is the narrow adapter for rich editor surfaces that do not need the full linked-document frame, currently including My Triage compose/reply, Shared Triage compose/reply, and attached-email reply bodies.
+- `frontend/src/modules/editor/unifiedRichEditorContract.ts` records the Phase 1 surface IDs and persistence boundaries used by focused frontend tests.
+- Node text blocks, project text blocks, project inline critical-path node text boxes, and Logic Gate editor text continue to keep their domain persistence adapters while using the same editor handler behavior.
+- `EmailPickerModal` is an attach/select picker only. It can search, filter, scroll, and attach existing email, but it must not contain compose, send, schedule, draft-save, or compose-body editor behavior.
+
 ## Key Responsibilities
 - Resolve which Node Map frame this editor is linked to through the frame-link graph + frame registry.
 - Resolve which Logic Gate Map frame this editor is linked to through the same frame-link graph + frame registry.

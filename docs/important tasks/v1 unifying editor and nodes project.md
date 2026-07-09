@@ -205,6 +205,16 @@ There are only two implementation phases for this project.
   - Attached-email reply body.
   - Node/project email picker attach flow with no compose controls.
 
+Phase 1 implementation status (2026-07-08):
+
+- Shared rich editor behavior is formalized around `frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts`.
+- `frontend/src/modules/editor/UnifiedRichEditorSurface.tsx` provides the narrow adapter for mail compose/reply and attached-email reply surfaces that do not need the full linked-document frame.
+- Node text boxes, project text boxes, project inline node text boxes, and Logic Gate editor text remain on their existing domain persistence adapters while using the editor module behavior source.
+- My Triage compose/reply and Shared Triage compose/reply now mount the shared adapter; personal and shared mailbox send/draft/schedule scope remains owned by the Home mail command flow.
+- Attached-email reply bodies now mount the shared adapter and send sanitized rich HTML through the existing attached-email reply send flow.
+- `EmailPickerModal` no longer owns compose/send/schedule/draft UI or logic; it remains an attach/select mailbox picker.
+- Focused frontend coverage lives in `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`, alongside the existing rich/plain editor behavior tests.
+
 ### Phase 2: Unify The Node Shell
 
 - Confirm every current full node window/shell surface in code before changing implementation.

@@ -13,6 +13,7 @@ import {
   EDITOR_CHECKLIST_CHECKED_ATTRIBUTE,
   EDITOR_LIST_ATTRIBUTE,
   EDITOR_LIST_ITEM_ATTRIBUTE,
+  EDITOR_LINK_COLOR,
   EDITOR_TABLE_ATTRIBUTE,
   EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE,
   EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE,
@@ -1300,6 +1301,24 @@ function insertEditorListAtSelection(root: HTMLElement, kind: EditorListKind, in
   return item;
 }
 
+export function insertEditorListKindToRoot(
+  root: HTMLElement,
+  kind: EditorListKind,
+  options: {
+    documentUndoHistory: EditorDocumentUndoHistory;
+    scheduleDocumentSave: (nextText: string, immediate?: boolean) => void;
+    scheduleIndentGuideUpdate: (text: string) => void;
+  },
+): boolean {
+  root.focus({ preventScroll: true });
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  const inserted = insertEditorListAtSelection(root, kind) !== null;
+  if (!inserted) return false;
+  recordEditorDocumentMutation(options.documentUndoHistory, root, undoBefore, "format");
+  commitEditorDocument(root, options.scheduleDocumentSave, options.scheduleIndentGuideUpdate);
+  return true;
+}
+
 function readPlainTextLineBounds(value: string, selectionStart: number): { lineStart: number; lineEnd: number; line: string } {
   const start = Math.max(0, Math.min(selectionStart, value.length));
   const lineStart = value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
@@ -2204,6 +2223,38 @@ export function applyEditorInlineFormatToRoot(
   commitEditorDocument(root, options.scheduleDocumentSave, options.scheduleIndentGuideUpdate);
   const nextState = readEditorSelectionFormatState(root);
   if (nextState) options.onSelectionInlineFormatChange?.({ bold: nextState.bold, underline: nextState.underline });
+  return true;
+}
+
+export function applyEditorLinkToRoot(
+  root: HTMLElement,
+  href: string,
+  options: {
+    documentUndoHistory: EditorDocumentUndoHistory;
+    scheduleDocumentSave: (nextText: string, immediate?: boolean) => void;
+    scheduleIndentGuideUpdate: (text: string) => void;
+  },
+): boolean {
+  const cleanHref = getEditorLinkHrefForText(href.trim());
+  if (!cleanHref) return false;
+  const range = getEditorSelectionRange(root);
+  if (!range) return false;
+  root.focus({ preventScroll: true });
+  const undoBefore = snapshotEditorDocumentRoot(root);
+  const selectedText = range.toString().trim();
+  const anchor = root.ownerDocument.createElement("a");
+  anchor.href = cleanHref;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.style.color = EDITOR_LINK_COLOR;
+  anchor.style.textDecoration = "underline";
+  anchor.style.cursor = "pointer";
+  anchor.textContent = selectedText || cleanHref;
+  range.deleteContents();
+  range.insertNode(anchor);
+  selectElementContents(anchor);
+  recordEditorDocumentMutation(options.documentUndoHistory, root, undoBefore, "format");
+  commitEditorDocument(root, options.scheduleDocumentSave, options.scheduleIndentGuideUpdate);
   return true;
 }
 

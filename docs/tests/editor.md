@@ -4,7 +4,7 @@ Last updated: 2026-07-08
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: 0% (new central rule IDs are not mapped to automated tests yet; related behavior exists in node, Logic Gate, My Triage, and Shared Triage tests)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified surface contract, mail compose/attached-reply adapter mounting, and EmailPickerModal attach-only source guard; shared editing primitives also have rich/plain editor module tests)
 
 ## Business Logic
 
@@ -20,6 +20,7 @@ ED9 - Chat panes inside node/project text boxes are conversation UI, not unified
 ED10 - Node/project email pickers are attach/select surfaces only and must not expose compose, send, scheduled send, or draft-save behavior.
 ED11 - Map and legacy map-specific editing behavior is outside the V1 unified editor project unless a live non-map editor surface imports a helper that must be changed for the shared contract.
 ED12 - Any future change to unified editor semantics must update one shared behavior test plus adapter/mount coverage proving each target surface receives the shared behavior.
+ED13 - The V1 shared rich editor behavior source is the editor module handler contract behind `useEditorDocumentSurfaceHandlers`; target surfaces must either call that handler directly or mount a narrow adapter such as `UnifiedRichEditorSurface`, while preserving their own persistence/send adapter.
 
 ## Scenarios
 
@@ -32,6 +33,7 @@ Business logic covered:
 - ED5
 - ED6
 - ED12
+- ED13
 
 Given:
 - A user can edit a Logic Gate body, a node text box, a project text box, a My Triage compose body, and a Shared Triage compose body.
@@ -42,6 +44,7 @@ Expected:
 - Each target surface receives the same user-facing semantics.
 - No target surface keeps a separate local implementation that disagrees with the shared behavior.
 - Tests cover the shared behavior once and prove each adapter/mount uses that shared behavior.
+- Mail compose/reply adapters do not call browser `document.execCommand` directly for rich editing commands when a shared editor command exists.
 
 ### Scenario ED-S2: Domain Persistence Stays Separate
 
