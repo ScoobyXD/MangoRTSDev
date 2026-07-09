@@ -1391,8 +1391,8 @@ func (s *Server) markCommunicationsConnectionReauthRequired(connection domain.Us
 }
 
 const (
-	communicationsNylasDefaultMessageLimit   = 20
-	communicationsNylasMaxMessageLimit       = 20
+	communicationsNylasDefaultMessageLimit   = 12
+	communicationsNylasMaxMessageLimit       = 12
 	communicationsNylasMinRequestInterval    = 200 * time.Millisecond
 	communicationsNylasMaxInFlightPerGrant   = 2
 	communicationsArchiveBatchConcurrency    = 4

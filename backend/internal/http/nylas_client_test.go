@@ -37,8 +37,8 @@ func TestNylasRESTClientListMessagesUsesSelectedFields(t *testing.T) {
 	if gotSelect != nylasMessageListSelect {
 		t.Fatalf("select = %q, want %q", gotSelect, nylasMessageListSelect)
 	}
-	if gotLimit != "20" {
-		t.Fatalf("limit = %q, want 20", gotLimit)
+	if gotLimit != "12" {
+		t.Fatalf("limit = %q, want 12", gotLimit)
 	}
 	if gotStarred != "true" {
 		t.Fatalf("starred = %q, want true", gotStarred)
