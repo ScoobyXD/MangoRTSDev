@@ -24,6 +24,7 @@ export const EDITOR_TABLE_OFFSET_ATTRIBUTE = "data-mango-editor-table-offset";
 export const EDITOR_TABLE_TEXT_ALIGN_ATTRIBUTE = "data-mango-editor-table-text-align";
 export const EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE = "data-mango-editor-table-align-controls";
 export const EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE = "data-mango-editor-table-align-action";
+export const EDITOR_TABLE_ALIGNMENT_ICON_ATTRIBUTE = "data-mango-editor-table-align-icon";
 export const EDITOR_LIST_ATTRIBUTE = "data-mango-editor-list";
 export const EDITOR_LIST_ITEM_ATTRIBUTE = "data-mango-editor-list-item";
 export const EDITOR_CHECKLIST_CHECKED_ATTRIBUTE = "data-mango-editor-checklist-checked";
@@ -240,14 +241,23 @@ export function applyEditorTableTextAlign(table: HTMLTableElement, align: Editor
   }
   Array.from(table.querySelectorAll("td,th")).forEach((cell) => {
     if (!(cell instanceof HTMLElement)) return;
+    if (cell.getAttribute(EDITOR_TABLE_HEADER_ATTRIBUTE) === "corner") {
+      cell.style.textAlign = "left";
+      return;
+    }
     cell.style.textAlign = align ?? "";
   });
 }
 
-function editorTableAlignmentButtonLabel(align: EditorTableTextAlign): string {
-  if (align === "left") return "L";
-  if (align === "right") return "R";
-  return "C";
+function appendEditorTableAlignmentIcon(button: HTMLButtonElement, align: EditorTableTextAlign) {
+  const icon = button.ownerDocument.createElement("span");
+  icon.setAttribute(EDITOR_TABLE_ALIGNMENT_ICON_ATTRIBUTE, align);
+  icon.setAttribute("aria-hidden", "true");
+  for (let index = 0; index < 4; index += 1) {
+    const line = button.ownerDocument.createElement("span");
+    icon.appendChild(line);
+  }
+  button.appendChild(icon);
 }
 
 function isEditorTableAlignmentControlNode(node: Node): boolean {
@@ -273,7 +283,7 @@ export function ensureEditorTableAlignmentControls(cell: HTMLTableCellElement, r
     button.setAttribute(EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE, align);
     button.setAttribute("aria-label", `Align table ${align}`);
     button.title = `Align table ${align}`;
-    button.textContent = editorTableAlignmentButtonLabel(align);
+    appendEditorTableAlignmentIcon(button, align);
     controls.appendChild(button);
   });
   cell.insertBefore(controls, cell.firstChild);
