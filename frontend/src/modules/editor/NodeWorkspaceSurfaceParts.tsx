@@ -4232,11 +4232,15 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   const selectReplyTarget = useCallback((target: EmailMessage) => {
     if (!editable) return;
+    if (replyTargetMessageID === target.id) {
+      setReplyTargetMessageID("");
+      return;
+    }
     setReplyTargetMessageID(target.id);
     setToDraft(formatAddressList(target.reply_to?.length ? target.reply_to : target.from));
     setSubjectDraft(replySubject(target.subject || message?.subject || ""));
     window.requestAnimationFrame(() => replyTextareaRef.current?.focus());
-  }, [editable, message?.subject]);
+  }, [editable, message?.subject, replyTargetMessageID]);
 
   const submitReply = () => {
     if (!message || !replyTargetMessage || !canSend) return;
@@ -4283,10 +4287,14 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   }, [inlineExpansion]);
 
   const showConversationHeader = loading || Boolean(error) || Boolean(message && !inlineExpansion);
+  const replyDockPinned = Boolean(message && replyTargetMessage && !inlineExpansion);
+  const replyDockBottomPadding = replyDockPinned
+    ? Math.min(420, replyTextareaHeight + 118 + (draftAttachments.length > 0 ? 44 : 0))
+    : 0;
 
   return (
     <>
-      <div style={{ height: inlineExpansion ? "auto" : "100%", minHeight: 0, display: "grid", gridTemplateRows: inlineExpansion ? (showConversationHeader ? "auto auto auto" : "auto auto") : (showConversationHeader ? "auto minmax(0, 1fr) auto" : "minmax(0, 1fr) auto"), gap: inlineExpansion ? 6 : 8, padding: inlineExpansion ? "0 0 8px" : 9, color: surfaceText, overflow: inlineExpansion ? "visible" : "hidden", boxSizing: "border-box" }}>
+      <div style={{ position: "relative", height: inlineExpansion ? "auto" : "100%", minHeight: 0, display: "grid", gridTemplateRows: inlineExpansion ? (showConversationHeader ? "auto auto auto" : "auto auto") : (showConversationHeader ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)"), gap: inlineExpansion ? 6 : 8, padding: inlineExpansion ? "0 0 8px" : 9, color: surfaceText, overflow: inlineExpansion ? "visible" : "hidden", boxSizing: "border-box" }}>
         {showConversationHeader && (
           <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
             {loading && <div style={{ padding: "6px 4px", color: accent, fontSize: 12, fontWeight: 900 }}>Loading</div>}
@@ -4313,7 +4321,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               overflow: "auto",
               maxHeight: inlineExpansion ? "min(520px, 52vh)" : undefined,
               color: "#111827",
-              padding: inlineExpansion ? "0 10px" : "0 14px",
+              padding: inlineExpansion ? "0 10px" : `0 14px ${replyDockBottomPadding}px`,
               boxShadow: inlineExpansion ? "none" : "inset 1px 1px 0 rgba(255,255,255,0.86)",
               ["--editor-document-scroll-accent" as string]: accent,
               ["--editor-document-scroll-track" as string]: "transparent",
@@ -4496,15 +4504,21 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         {message && replyTargetMessage && (
           <div
             style={{
-              position: "relative",
-              zIndex: 2,
+              position: replyDockPinned ? "absolute" : "relative",
+              left: replyDockPinned ? 9 : undefined,
+              right: replyDockPinned ? 9 : undefined,
+              bottom: replyDockPinned ? 9 : undefined,
+              zIndex: replyDockPinned ? 6 : 2,
               display: "grid",
               gap: 7,
               margin: inlineExpansion ? "0 -10px -8px" : 0,
-              borderTop: `1px solid ${ruleColor}`,
-              background: inlineExpansion ? EDITOR_NEU_ACTIVE_SURFACE : "transparent",
-              padding: inlineExpansion ? "8px 10px 0" : "8px 0 0",
-              boxShadow: inlineExpansion ? "0 -10px 18px rgba(248,250,252,0.92)" : undefined,
+              border: replyDockPinned ? `1px solid ${EDITOR_NEU_SOFT_BORDER}` : undefined,
+              borderTop: replyDockPinned ? undefined : `1px solid ${ruleColor}`,
+              borderRadius: replyDockPinned ? 11 : undefined,
+              background: inlineExpansion || replyDockPinned ? EDITOR_NEU_ACTIVE_SURFACE : "transparent",
+              padding: inlineExpansion ? "8px 10px 0" : replyDockPinned ? "8px 10px 10px" : "8px 0 0",
+              boxShadow: replyDockPinned ? "0 -12px 28px rgba(15,23,42,0.10), 4px 4px 14px rgba(174,174,192,0.16), -4px -4px 14px rgba(255,255,255,0.88)" : inlineExpansion ? "0 -10px 18px rgba(248,250,252,0.92)" : undefined,
+              boxSizing: "border-box",
             }}
           >
             {!inlineExpansion && (
