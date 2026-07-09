@@ -32,10 +32,10 @@ export type ComposeState = {
 
 export type ComposeAttachment = {
   id: string;
+  attachmentID: string;
   filename: string;
   contentType: string;
   size: number;
-  content: string;
 };
 
 export const emptyCompose: ComposeState = {

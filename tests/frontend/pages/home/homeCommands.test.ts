@@ -819,6 +819,43 @@ test("Home compose command sends rich editor HTML without plain-text escaping", 
   assert.doesNotMatch(sentInputs[0]?.body ?? "", /&lt;b&gt;/);
 });
 
+test("Home compose command sends Mango attachment references without durable content", async () => {
+  const sentInputs: SendEmailInput[] = [];
+  const sendEmail: HomeSendEmail = async (input) => {
+    sentInputs.push(input);
+    return emailMessage("sent-attachment", { to: input.to, subject: input.subject, body: input.body });
+  };
+
+  await sendHomeMailComposeCommand({
+    companyID: " company-1 ",
+    compose: {
+      to: "reader@example.test",
+      cc: "",
+      bcc: "",
+      subject: "Attachment",
+      body: "See attached.",
+      attachments: [{
+        id: "local-attachment-row",
+        attachmentID: " mango-attachment-1 ",
+        filename: "brief.pdf",
+        contentType: "application/pdf",
+        size: 1234,
+      }],
+      replyToMessageID: "",
+    },
+    sendEmail,
+  });
+
+  assert.deepEqual(sentInputs[0]?.attachments, [{
+    id: "mango-attachment-1",
+    attachment_id: "mango-attachment-1",
+    filename: "brief.pdf",
+    content_type: "application/pdf",
+    size: 1234,
+  }]);
+  assert.equal("content" in (sentInputs[0]?.attachments?.[0] as Record<string, unknown>), false);
+});
+
 test("Home shared inbox GVIC commands build direct replacement payloads", async () => {
   type SharedInboxGVICUpdatePayload = Parameters<HomeUpdateSharedInboxGVICAssignments>[2][number];
   const updateCalls: Array<{ companyID: string; folderID: string; assignments: SharedInboxGVICUpdatePayload[] }> = [];

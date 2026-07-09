@@ -4,7 +4,7 @@ Last updated: 2026-07-09
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (store-level conversion and transfer coverage exists; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting and full rich-control exposure for My Triage compose/reply; rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (store-level conversion and transfer coverage exists; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting and full rich-control exposure for My Triage compose/reply; `tests/frontend/pages/home/homeCommands.test.ts` covers personal compose attachment references without durable `content`; `backend/internal/http/communications_handlers_test.go` covers personal send-time Mango attachment resolution and raw-content rejection; rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -433,4 +433,4 @@ Expected:
 - Personal draft/send payloads store Mango attachment references, not raw base64 attachment content.
 - Inline body images use the unified rich-editor image attachment path.
 - The backend reads S3 bytes at send time and sends them through the provider.
-- Provider attachments become Mango attachment references when they become durable Mango work context.
+- Current attached-email/conversion projections do not persist provider attachment bytes; before a personal provider attachment becomes a durable Mango-owned resource, it must be cached into Mango S3 and represented by Mango attachment references.

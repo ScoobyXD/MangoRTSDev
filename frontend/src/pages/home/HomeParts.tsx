@@ -6,8 +6,16 @@ import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute } from "../../ap
 import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin, type SidebarPinKind } from "../../app/sidebarPins";
 import { NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "../../app/nodeEditorPopupControls";
+import { readAuthConfig } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { BoundRequestJSON } from "../../modules/api/requestJSON";
+import {
+  defaultAttachmentRequestJSON,
+  downloadMangoAttachment,
+  loadMangoAttachmentObjectURL,
+  mangoEmailDraftResourceID,
+  uploadMangoAttachment,
+} from "../../modules/attachments/attachmentApi";
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
 import { EditorTabBar } from "../../modules/editor/EditorTabBar";
 import type { EditorTabID } from "../../modules/editor/editorTabs";
@@ -33,6 +41,7 @@ import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/compan
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, GVIC_INBOX_SECTIONS, GVIC_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeAttachment, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, GVICInboxRole, GVICInboxStatus } from "./homeTypes";
+import { createHomeMailDraftID } from "./homeMailDrafts";
 import { buildGVICRoleInboxGroupsByCell, cleanIDList, clampNumber, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData } from "./homeUtils";
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, shortcutRemoveStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
@@ -4284,12 +4293,14 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
   const [previewURL, setPreviewURL] = React.useState("");
   const [loadingPreview, setLoadingPreview] = React.useState(false);
   const [previewFailed, setPreviewFailed] = React.useState(false);
-  const attachmentID = attachment.id?.trim() ?? "";
+  const apiBase = readAuthConfig().apiBase;
+  const mangoAttachmentID = attachment.attachment_id?.trim() ?? "";
+  const providerAttachmentID = attachment.id?.trim() ?? "";
   const filename = emailAttachmentFileName(attachment);
   const contentType = emailAttachmentContentType(attachment);
   const canRenderInline = attachmentCanRenderInline(contentType);
   const shouldLoadPreview = canRenderInline && (emailAttachmentIsImage(attachment) || previewRequested);
-  const canDownload = !!attachmentID || !!attachment.content?.trim();
+  const canDownload = !!mangoAttachmentID || !!providerAttachmentID || !!attachment.content?.trim();
   const showActions = hovered || focused;
 
   React.useEffect(() => {
@@ -4306,7 +4317,7 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
       setPreviewFailed(false);
       return undefined;
     }
-    if (!attachmentID) {
+    if (!mangoAttachmentID && !providerAttachmentID) {
       setPreviewURL("");
       setLoadingPreview(false);
       setPreviewFailed(true);
@@ -4317,10 +4328,17 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
     setPreviewURL("");
     setLoadingPreview(true);
     setPreviewFailed(false);
-    void downloadEmailAttachment(messageID, attachmentID, companyID, sharedInboxID)
-      .then((blob) => {
-        if (cancelled) return;
-        objectURL = URL.createObjectURL(blob);
+    const controller = new AbortController();
+    const previewPromise = mangoAttachmentID
+      ? loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal })
+      : downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID).then((blob) => URL.createObjectURL(blob));
+    void previewPromise
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        objectURL = url;
         setPreviewURL(objectURL);
       })
       .catch(() => {
@@ -4331,9 +4349,10 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
       });
     return () => {
       cancelled = true;
+      controller.abort();
       if (objectURL) URL.revokeObjectURL(objectURL);
     };
-  }, [attachment, attachmentID, companyID, messageID, sharedInboxID, shouldLoadPreview]);
+  }, [apiBase, attachment, companyID, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID, shouldLoadPreview]);
 
   const handleDownload = React.useCallback(() => {
     const inlineURL = emailAttachmentDataURL(attachment);
@@ -4341,13 +4360,17 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
       downloadURL(inlineURL, filename);
       return;
     }
-    if (!attachmentID) return;
-    void downloadEmailAttachment(messageID, attachmentID, companyID, sharedInboxID)
+    if (mangoAttachmentID) {
+      void downloadMangoAttachment({ apiBase, companyID, attachmentID: mangoAttachmentID, filename });
+      return;
+    }
+    if (!providerAttachmentID) return;
+    void downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID)
       .then((blob) => {
         const objectURL = URL.createObjectURL(blob);
         downloadURL(objectURL, filename, true);
       });
-  }, [attachment, attachmentID, companyID, filename, messageID, sharedInboxID]);
+  }, [apiBase, attachment, companyID, filename, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID]);
 
   const handleOpen = React.useCallback(() => {
     const inlineURL = emailAttachmentDataURL(attachment);
@@ -4355,13 +4378,20 @@ function EmailAttachmentTile({ messageID, attachment, companyID, sharedInboxID }
       openAttachmentURL(inlineURL, filename);
       return;
     }
-    if (!attachmentID) return;
-    void downloadEmailAttachment(messageID, attachmentID, companyID, sharedInboxID)
+    if (mangoAttachmentID) {
+      void loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "original")
+        .then((objectURL) => {
+          openAttachmentURL(objectURL, filename, true);
+        });
+      return;
+    }
+    if (!providerAttachmentID) return;
+    void downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID)
       .then((blob) => {
         const objectURL = URL.createObjectURL(blob);
         openAttachmentURL(objectURL, filename, true);
       });
-  }, [attachment, attachmentID, companyID, filename, messageID, sharedInboxID]);
+  }, [apiBase, attachment, companyID, filename, mangoAttachmentID, messageID, providerAttachmentID, sharedInboxID]);
 
   return (
     <div
@@ -4424,28 +4454,67 @@ function composeAttachmentContentType(attachment: ComposeAttachment): string {
   return attachment.contentType?.trim() || "application/octet-stream";
 }
 
-function composeAttachmentDataURL(attachment: ComposeAttachment): string {
-  const content = attachment.content?.trim() ?? "";
-  if (!content) return "";
-  return `data:${composeAttachmentContentType(attachment)};base64,${content}`;
+function useComposeAttachmentObjectURL(attachment: ComposeAttachment, companyID: string, enabled: boolean): string {
+  const apiBase = readAuthConfig().apiBase;
+  const attachmentID = attachment.attachmentID.trim();
+  const [objectURL, setObjectURL] = React.useState("");
+
+  React.useEffect(() => {
+    setObjectURL("");
+    if (!enabled || !apiBase.trim() || !companyID.trim() || !attachmentID) return undefined;
+    const controller = new AbortController();
+    let cancelled = false;
+    void loadMangoAttachmentObjectURL(apiBase, companyID, attachmentID, "display", { signal: controller.signal })
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        setObjectURL(url);
+      })
+      .catch(() => {
+        if (!cancelled) setObjectURL("");
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [apiBase, attachmentID, companyID, enabled]);
+
+  React.useEffect(() => () => {
+    if (objectURL) URL.revokeObjectURL(objectURL);
+  }, [objectURL]);
+
+  return objectURL;
 }
 
-function ComposeAttachmentTile({ attachment, onRemove }: {
+function ComposeAttachmentTile({ attachment, companyID, onRemove }: {
   attachment: ComposeAttachment;
+  companyID: string;
   onRemove: (attachmentID: string) => void;
 }) {
   const [hovered, setHovered] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
   const filename = attachment.filename.trim() || "attachment";
   const contentType = composeAttachmentContentType(attachment);
-  const sourceURL = composeAttachmentDataURL(attachment);
+  const sourceURL = useComposeAttachmentObjectURL(attachment, companyID, contentType.startsWith("image/"));
+  const attachmentID = attachment.attachmentID.trim();
   const showActions = hovered || focused;
+  const openAttachment = () => {
+    if (!attachmentID) return;
+    void downloadMangoAttachment({
+      apiBase: readAuthConfig().apiBase,
+      companyID,
+      attachmentID,
+      filename,
+    });
+  };
 
   return (
     <div
       role="button"
       tabIndex={0}
-      style={attachmentTileStyle(true, showActions)}
+      style={attachmentTileStyle(Boolean(attachmentID), showActions)}
       title={`Open ${filename}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -4456,12 +4525,12 @@ function ComposeAttachmentTile({ attachment, onRemove }: {
         setFocused(false);
       }}
       onClick={() => {
-        if (sourceURL) openAttachmentURL(sourceURL, filename);
+        openAttachment();
       }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
-        if (sourceURL) openAttachmentURL(sourceURL, filename);
+        openAttachment();
       }}
     >
       <div style={attachmentPreviewWrapStyle}>
@@ -4483,19 +4552,6 @@ function ComposeAttachmentTile({ attachment, onRemove }: {
       <div style={mailAttachmentMetaStyle}>{formatComposeAttachmentSize(attachment.size) || contentType}</div>
     </div>
   );
-}
-
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Failed to read attachment."));
-    reader.onload = () => {
-      const value = String(reader.result ?? "");
-      const commaIndex = value.indexOf(",");
-      resolve(commaIndex >= 0 ? value.slice(commaIndex + 1) : value);
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 type ComposeRecipientField = "to" | "cc" | "bcc";
@@ -4839,11 +4895,13 @@ function matchingCompanyUsers(users: CompanyUser[], value: string, existingRecip
     .slice(0, 6);
 }
 
-export function ComposePanel({ compose, busy, replyMessage, emailSignature, companyUsers, onChange, onCancel, onSubmit, onEmailSignatureChange, onSaveEmailSignature, onSaveDraft }: {
+export function ComposePanel({ compose, busy, replyMessage, emailSignature, companyID, currentUserID, companyUsers, onChange, onCancel, onSubmit, onEmailSignatureChange, onSaveEmailSignature, onSaveDraft }: {
   compose: ComposeState;
   busy: boolean;
   replyMessage?: EmailMessage | null;
   emailSignature: string;
+  companyID: string;
+  currentUserID: string;
   companyUsers: CompanyUser[];
   onChange: (next: ComposeState) => void;
   onCancel: () => void;
@@ -4864,6 +4922,8 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   const [bodyToolbarTab, setBodyToolbarTab] = React.useState<EditorTabID>("format");
   const [bodySelectionFontSize, setBodySelectionFontSize] = React.useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [bodySelectionInlineFormat, setBodySelectionInlineFormat] = React.useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
+  const apiBase = readAuthConfig().apiBase;
+  const attachmentRequestJSON = React.useMemo(() => defaultAttachmentRequestJSON(apiBase), [apiBase]);
   const update = (patch: Partial<ComposeState>) => onChange({ ...compose, ...patch });
   const totalAttachmentBytes = compose.attachments.reduce((sum, attachment) => sum + Math.max(0, attachment.size || 0), 0);
   const focusRecipientInput = (field: ComposeRecipientField) => {
@@ -5004,22 +5064,47 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     const selectedFiles = Array.from(files ?? []);
     if (selectedFiles.length === 0) return;
     setAttachmentError("");
+    const cleanCompanyID = companyID.trim();
+    const cleanDraftID = compose.draftID.trim() || createHomeMailDraftID();
+    const cleanSharedInboxID = compose.sharedInboxID.trim();
+    if (!cleanCompanyID || (!cleanSharedInboxID && !currentUserID.trim())) {
+      setAttachmentError("Email attachment context is unavailable.");
+      return;
+    }
     const selectedBytes = selectedFiles.reduce((sum, file) => sum + file.size, 0);
     if (totalAttachmentBytes + selectedBytes > COMPOSE_ATTACHMENT_MAX_TOTAL_BYTES) {
       setAttachmentError("Attachments are limited to 24 MB total.");
       return;
     }
     try {
-      const additions = await Promise.all(selectedFiles.map(async (file) => ({
-        id: `attachment:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`,
-        filename: file.name || "attachment",
-        contentType: file.type || "application/octet-stream",
-        size: file.size,
-        content: await readFileAsBase64(file),
-      })));
-      update({ attachments: [...compose.attachments, ...additions] });
+      const resourceID = mangoEmailDraftResourceID({
+        draftID: cleanDraftID,
+        userID: currentUserID,
+        sharedInboxID: cleanSharedInboxID,
+      });
+      const additions = await Promise.all(selectedFiles.map(async (file) => {
+        const uploaded = await uploadMangoAttachment(attachmentRequestJSON, {
+          companyID: cleanCompanyID,
+          resourceType: "email_draft",
+          resourceID,
+          file,
+          sourceKind: "email_outgoing",
+          relationshipKind: "email_attachment",
+          messageID: compose.replyToMessageID.trim() || undefined,
+          editorSurface: cleanSharedInboxID ? "shared-triage-compose" : "my-triage-compose",
+        });
+        const attachment = uploaded.attachment;
+        return {
+          id: attachment.attachment_id,
+          attachmentID: attachment.attachment_id,
+          filename: attachment.original_filename || file.name || "attachment",
+          contentType: attachment.mime_type || file.type || "application/octet-stream",
+          size: attachment.byte_size || file.size,
+        };
+      }));
+      update({ draftID: cleanDraftID, attachments: [...compose.attachments, ...additions] });
     } catch (attachError) {
-      setAttachmentError(attachError instanceof Error ? attachError.message : "Failed to read attachment.");
+      setAttachmentError(attachError instanceof Error ? attachError.message : "Failed to upload attachment.");
     }
   };
   const removeAttachment = (attachmentID: string) => {
@@ -5103,6 +5188,27 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   );
   const richEditorStyle = isReplyMode ? composeReplyRichEditorStyle(replyEditorHeight) : composeRichEditorStyle;
   const composeEditorSurfaceID = compose.sharedInboxID.trim() ? "shared-triage-compose" : "my-triage-compose";
+  const composeAttachmentResourceID = React.useMemo(() => {
+    const cleanDraftID = compose.draftID.trim();
+    if (!cleanDraftID) return "";
+    const cleanSharedInboxID = compose.sharedInboxID.trim();
+    if (!cleanSharedInboxID && !currentUserID.trim()) return "";
+    return mangoEmailDraftResourceID({
+      draftID: cleanDraftID,
+      userID: currentUserID,
+      sharedInboxID: cleanSharedInboxID,
+    });
+  }, [compose.draftID, compose.sharedInboxID, currentUserID]);
+  const composeEditorImageAttachmentContext = companyID.trim() && composeAttachmentResourceID
+    ? {
+      requestJSON: attachmentRequestJSON,
+      apiBase,
+      companyID: companyID.trim(),
+      resourceType: "email_draft" as const,
+      resourceID: composeAttachmentResourceID,
+      editorSurface: composeEditorSurfaceID,
+    }
+    : undefined;
   const handleSubmit = (event: React.FormEvent) => {
     bodyEditorControllerRef.current?.flush();
     onSubmit(event);
@@ -5194,6 +5300,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           style={richEditorStyle}
           onSelectionFontSizeChange={setBodySelectionFontSize}
           onSelectionInlineFormatChange={setBodySelectionInlineFormat}
+          editorImageAttachmentContext={composeEditorImageAttachmentContext}
           onEditorImageAttachmentError={setAttachmentError}
           onChange={(body) => update({ body })}
         />
@@ -5228,7 +5335,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
         {compose.attachments.length > 0 && (
           <div style={mailAttachmentGridStyle}>
             {compose.attachments.map((attachment) => (
-              <ComposeAttachmentTile key={attachment.id} attachment={attachment} onRemove={removeAttachment} />
+              <ComposeAttachmentTile key={attachment.id} attachment={attachment} companyID={companyID} onRemove={removeAttachment} />
             ))}
           </div>
         )}

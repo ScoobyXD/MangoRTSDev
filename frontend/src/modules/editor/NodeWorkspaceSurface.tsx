@@ -2418,7 +2418,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           const blockEmailPane = (
             <AttachedEmailOrganizerPane
               emails={blockEmails}
+              nodeID={nodeID}
+              apiBase={apiBase}
               companyID={companyID}
+              attachmentRequestJSON={requestJSON}
               storageKey={`node-editor-attached-email-layout-v1:${companyID || "company"}:${nodeID || "node"}`}
               editable={canEdit}
               accent={accent}

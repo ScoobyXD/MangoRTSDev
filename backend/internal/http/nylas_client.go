@@ -327,6 +327,7 @@ type NylasTrackingOptions struct {
 
 type NylasAttachment struct {
 	ID                 string `json:"id,omitempty"`
+	AttachmentID       string `json:"attachment_id,omitempty"`
 	Filename           string `json:"filename"`
 	ContentType        string `json:"content_type,omitempty"`
 	Content            string `json:"content,omitempty"`

@@ -2863,6 +2863,7 @@ export function HomePage({
     setCompose({
       ...emptyCompose,
       open: true,
+      draftID: createHomeMailDraftID(),
       sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
       accountEmail: (activeMailAccountEmail ?? "").trim(),
       body: composeBodyWithSignature(emailSignature),
@@ -4859,6 +4860,7 @@ export function HomePage({
             archiveLabel={isArchiveMailbox ? "Unarchive" : "Archive"}
             busy={busy}
             companyID={companyID}
+            currentUserID={currentUserID}
             compose={compose}
             draftCount={mailDrafts.length}
             emailSignature={emailSignature}

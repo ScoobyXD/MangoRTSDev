@@ -10,6 +10,7 @@ import (
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -375,6 +376,12 @@ func (s *Server) handleResourceAttachmentUnlink(w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
+	switch store.NormalizeAttachmentResourceType(resourceType) {
+	case "email_draft", "email_message":
+		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionView)
+	case "attached_email":
+		return s.requireAttachedEmailAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionView)
+	}
 	entityType, ok := attachmentPermissionEntityType(resourceType)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "unsupported_attachment_resource_type")
@@ -384,6 +391,12 @@ func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) requireAttachmentResourceEdit(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
+	switch store.NormalizeAttachmentResourceType(resourceType) {
+	case "email_draft", "email_message":
+		return s.requireEmailScopedAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionEdit)
+	case "attached_email":
+		return s.requireAttachedEmailAttachmentResourceAccess(w, r, companyID, resourceID, store.EntityPermissionEdit)
+	}
 	entityType, ok := attachmentPermissionEntityType(resourceType)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "unsupported_attachment_resource_type")
@@ -425,11 +438,145 @@ func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceT
 	if userID == "" {
 		return true, nil
 	}
+	switch store.NormalizeAttachmentResourceType(resourceType) {
+	case "email_draft", "email_message":
+		return s.canViewEmailScopedAttachmentResource(companyID, userID, resourceID)
+	case "attached_email":
+		nodeID, ok := parseAttachedEmailAttachmentResourceID(resourceID)
+		if !ok {
+			return false, nil
+		}
+		return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeNode, nodeID, store.EntityPermissionView)
+	}
 	entityType, ok := attachmentPermissionEntityType(resourceType)
 	if !ok {
 		return false, nil
 	}
 	return s.repo.UserHasEffectiveAccess(companyID, userID, entityType, resourceID, store.EntityPermissionView)
+}
+
+type emailScopedAttachmentResource struct {
+	scope         string
+	userID        string
+	sharedInboxID string
+	itemID        string
+}
+
+func (s *Server) requireEmailScopedAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceID, accessLevel string) bool {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return false
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	parsed, ok := parseEmailScopedAttachmentResourceID(resourceID)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid_attachment_resource")
+		return false
+	}
+	if parsed.scope == "personal" {
+		if actorRoleForCompany(actor, companyID) == "" {
+			writeError(w, http.StatusForbidden, "company_access_denied")
+			return false
+		}
+		if strings.TrimSpace(actor.User.UserID) != parsed.userID && !actorCanManageCompany(actor, companyID) {
+			writeAccessResourceNotFound(w)
+			return false
+		}
+		return true
+	}
+	folder, ok := s.findVisibleSharedInboxFolder(w, actor, companyID, parsed.sharedInboxID, accessLevel)
+	if !ok {
+		return false
+	}
+	if store.CommunicationsSharedInboxResourceType(folder) != store.EntityTypeSharedInbox {
+		writeError(w, http.StatusConflict, "shared_inbox_not_mailbox")
+		return false
+	}
+	return true
+}
+
+func (s *Server) canViewEmailScopedAttachmentResource(companyID, userID, resourceID string) (bool, error) {
+	parsed, ok := parseEmailScopedAttachmentResourceID(resourceID)
+	if !ok {
+		return false, nil
+	}
+	if parsed.scope == "personal" {
+		return userID == parsed.userID, nil
+	}
+	return s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeSharedInbox, parsed.sharedInboxID, store.EntityPermissionView)
+}
+
+func (s *Server) requireAttachedEmailAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceID, accessLevel string) bool {
+	nodeID, ok := parseAttachedEmailAttachmentResourceID(resourceID)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid_attachment_resource")
+		return false
+	}
+	if accessLevel == store.EntityPermissionView {
+		return s.requireEntityView(w, r, companyID, store.EntityTypeNode, nodeID, "resource_not_found")
+	}
+	return s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, nodeID, "resource_not_found")
+}
+
+func parseEmailScopedAttachmentResourceID(resourceID string) (emailScopedAttachmentResource, bool) {
+	parts := strings.Split(strings.TrimSpace(resourceID), ":")
+	if len(parts) != 3 {
+		return emailScopedAttachmentResource{}, false
+	}
+	scope := strings.TrimSpace(parts[0])
+	first, err := url.QueryUnescape(parts[1])
+	if err != nil {
+		return emailScopedAttachmentResource{}, false
+	}
+	itemID, err := url.QueryUnescape(parts[2])
+	if err != nil {
+		return emailScopedAttachmentResource{}, false
+	}
+	first = strings.TrimSpace(first)
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" {
+		return emailScopedAttachmentResource{}, false
+	}
+	switch scope {
+	case "personal":
+		if first == "" {
+			return emailScopedAttachmentResource{}, false
+		}
+		return emailScopedAttachmentResource{scope: scope, userID: first, itemID: itemID}, true
+	case "shared":
+		if first == "" {
+			return emailScopedAttachmentResource{}, false
+		}
+		return emailScopedAttachmentResource{scope: scope, sharedInboxID: first, itemID: itemID}, true
+	default:
+		return emailScopedAttachmentResource{}, false
+	}
+}
+
+func parseAttachedEmailAttachmentResourceID(resourceID string) (string, bool) {
+	parts := strings.Split(strings.TrimSpace(resourceID), ":")
+	if len(parts) != 4 || parts[0] != "node" || parts[2] != "message" {
+		return "", false
+	}
+	nodeID, err := url.QueryUnescape(parts[1])
+	if err != nil {
+		return "", false
+	}
+	messageID, err := url.QueryUnescape(parts[3])
+	if err != nil {
+		return "", false
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	messageID = strings.TrimSpace(messageID)
+	if nodeID == "" || messageID == "" {
+		return "", false
+	}
+	return nodeID, true
 }
 
 func attachmentPermissionEntityType(resourceType string) (string, bool) {

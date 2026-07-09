@@ -33,6 +33,7 @@ export type EmailAddress = {
 
 export type EmailAttachment = {
   id?: string;
+  attachment_id?: string;
   filename: string;
   content_type?: string;
   content?: string;

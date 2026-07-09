@@ -346,12 +346,13 @@ export async function sendHomeMailComposeCommand(args: {
   const bodyText = args.compose.body;
   const attachments = (args.compose.attachments ?? [])
     .map((attachment) => ({
+      id: attachment.attachmentID.trim(),
+      attachment_id: attachment.attachmentID.trim(),
       filename: attachment.filename.trim() || "attachment",
       content_type: attachment.contentType.trim() || "application/octet-stream",
-      content: attachment.content,
       size: attachment.size,
     }))
-    .filter((attachment) => attachment.content.trim());
+    .filter((attachment) => attachment.attachment_id);
   if (!subject && !composeBodyHasContent(bodyText) && attachments.length === 0) {
     throw new Error("Add a subject or message body.");
   }
