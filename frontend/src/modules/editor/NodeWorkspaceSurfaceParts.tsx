@@ -2966,6 +2966,7 @@ const AttachedEmailThreadCard: React.FC<{
     letterSpacing: 0,
     boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.76)",
   });
+  const replyComposerOpen = Boolean(replyTargetMessageID.trim());
 
   return (
     <div
@@ -3062,10 +3063,12 @@ const AttachedEmailThreadCard: React.FC<{
             className="mango-email-inline-detail"
             style={{
               minWidth: 0,
-              display: "block",
-              maxHeight: "min(620px, 72vh)",
-              overflow: "visible",
-              padding: "0 10px 10px",
+              display: replyComposerOpen ? "grid" : "block",
+              gridTemplateRows: replyComposerOpen ? "minmax(0, 1fr)" : undefined,
+              height: replyComposerOpen ? "min(620px, 72vh)" : undefined,
+              maxHeight: replyComposerOpen ? undefined : "min(620px, 72vh)",
+              overflow: replyComposerOpen ? "hidden" : "visible",
+              padding: replyComposerOpen ? "0 10px" : "0 10px 10px",
               boxSizing: "border-box",
               cursor: "text",
               userSelect: "text",
@@ -3775,28 +3778,6 @@ const emailSelectionActionButtonStyle: React.CSSProperties = {
   boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)",
 };
 
-const attachedEmailReplyToolButtonStyle: React.CSSProperties = {
-  minWidth: 25,
-  height: 24,
-  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-  borderRadius: 7,
-  background: EDITOR_NEU_SURFACE,
-  display: "grid",
-  placeItems: "center",
-  padding: "0 6px",
-  fontSize: 10.5,
-  fontWeight: 900,
-  lineHeight: 1,
-  cursor: "pointer",
-  boxSizing: "border-box",
-  boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.78)",
-};
-
-const attachedEmailReplyWideToolButtonStyle: React.CSSProperties = {
-  ...attachedEmailReplyToolButtonStyle,
-  minWidth: 40,
-};
-
 const EmailSelectionActionIconFrame: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <span aria-hidden="true" style={{ width: 16, height: 16, display: "grid", placeItems: "center", lineHeight: 0 }}>
     {children}
@@ -4354,11 +4335,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     }
   }, [inlineExpansion]);
 
-  const createReplyHyperlink = useCallback(() => {
-    const rawHref = window.prompt("Link URL") ?? "";
-    if (!rawHref.trim()) return;
-    replyEditorControllerRef.current?.insertLink(rawHref);
-  }, []);
   const syncReplyToolbarFormatState = useCallback(() => {
     const state = replyEditorControllerRef.current?.readFormatState();
     if (!state) return;
@@ -4381,34 +4357,20 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setReplyOutlineStyle(nextOutlineStyle);
     setReplyToolbarTab("outline-styles");
   }, []);
-  const toggleReplyNumberedList = useCallback(() => {
-    setReplyOutlineStyle("automatic-outline-numbering");
-    replyEditorControllerRef.current?.toggleNumberedList();
-  }, []);
-  const insertReplyBulletList = useCallback(() => {
-    setReplyOutlineStyle("bullet-list");
-    replyEditorControllerRef.current?.insertList("bullet");
-  }, []);
-  const insertReplyChecklist = useCallback(() => {
-    setReplyOutlineStyle("checklist");
-    replyEditorControllerRef.current?.insertList("checklist");
-  }, []);
-  const outdentReplyBody = useCallback(() => {
-    replyEditorControllerRef.current?.outdent();
-  }, []);
-  const indentReplyBody = useCallback(() => {
-    replyEditorControllerRef.current?.indent();
-  }, []);
 
   const showConversationHeader = loading || Boolean(error) || Boolean(message && !inlineExpansion);
-  const replyDockPinned = Boolean(message && replyTargetMessage && !inlineExpansion);
-  const replyDockBottomPadding = replyDockPinned
-    ? Math.min(420, replyEditorHeight + 162 + (draftAttachments.length > 0 ? 44 : 0))
-    : 0;
+  const replyDockVisible = Boolean(message && replyTargetMessage);
+  const conversationGridRows = inlineExpansion
+    ? replyDockVisible
+      ? (showConversationHeader ? "auto minmax(0, 1fr) auto" : "minmax(0, 1fr) auto")
+      : (showConversationHeader ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)")
+    : replyDockVisible
+      ? (showConversationHeader ? "auto minmax(0, 1fr) auto" : "minmax(0, 1fr) auto")
+      : (showConversationHeader ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)");
 
   return (
     <>
-      <div style={{ position: "relative", height: inlineExpansion ? "auto" : "100%", minHeight: 0, display: "grid", gridTemplateRows: inlineExpansion ? (showConversationHeader ? "auto auto auto" : "auto auto") : (showConversationHeader ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)"), gap: inlineExpansion ? 6 : 8, padding: inlineExpansion ? "0 0 8px" : 9, color: surfaceText, overflow: inlineExpansion ? "visible" : "hidden", boxSizing: "border-box" }}>
+      <div style={{ position: "relative", height: "100%", minHeight: 0, display: "grid", gridTemplateRows: conversationGridRows, gap: inlineExpansion ? 0 : 8, padding: inlineExpansion ? (replyDockVisible ? 0 : "0 0 8px") : 9, color: surfaceText, overflow: "hidden", boxSizing: "border-box" }}>
         {showConversationHeader && (
           <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
             {loading && <div style={{ padding: "6px 4px", color: accent, fontSize: 12, fontWeight: 900 }}>Loading</div>}
@@ -4433,9 +4395,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               borderRadius: inlineExpansion ? 0 : 8,
               background: "#ffffff",
               overflow: "auto",
-              maxHeight: inlineExpansion ? "min(520px, 52vh)" : undefined,
+              maxHeight: inlineExpansion && !replyDockVisible ? "min(520px, 52vh)" : undefined,
               color: "#111827",
-              padding: inlineExpansion ? "0 10px" : `0 14px ${replyDockBottomPadding}px`,
+              padding: inlineExpansion ? "0 10px" : "0 14px",
               boxShadow: inlineExpansion ? "none" : "inset 1px 1px 0 rgba(255,255,255,0.86)",
               ["--editor-document-scroll-accent" as string]: accent,
               ["--editor-document-scroll-track" as string]: "transparent",
@@ -4618,20 +4580,16 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         {message && replyTargetMessage && (
           <div
             style={{
-              position: replyDockPinned ? "absolute" : "relative",
-              left: replyDockPinned ? 9 : undefined,
-              right: replyDockPinned ? 9 : undefined,
-              bottom: replyDockPinned ? 9 : undefined,
-              zIndex: replyDockPinned ? 6 : 2,
+              position: "relative",
+              zIndex: 2,
               display: "grid",
               gap: 7,
-              margin: inlineExpansion ? "0 -10px -8px" : 0,
-              border: replyDockPinned ? `1px solid ${EDITOR_NEU_SOFT_BORDER}` : undefined,
-              borderTop: replyDockPinned ? undefined : `1px solid ${ruleColor}`,
-              borderRadius: replyDockPinned ? 11 : undefined,
-              background: inlineExpansion || replyDockPinned ? EDITOR_NEU_ACTIVE_SURFACE : "transparent",
-              padding: inlineExpansion ? "8px 10px 0" : replyDockPinned ? "8px 10px 10px" : "8px 0 0",
-              boxShadow: replyDockPinned ? "0 -12px 28px rgba(15,23,42,0.10), 4px 4px 14px rgba(174,174,192,0.16), -4px -4px 14px rgba(255,255,255,0.88)" : inlineExpansion ? "0 -10px 18px rgba(248,250,252,0.92)" : undefined,
+              margin: inlineExpansion ? "0 -10px" : 0,
+              borderTop: `1px solid ${ruleColor}`,
+              borderRadius: inlineExpansion ? "0 0 10px 10px" : 0,
+              background: EDITOR_NEU_ACTIVE_SURFACE,
+              padding: "8px 10px 10px",
+              boxShadow: "0 -10px 18px rgba(248,250,252,0.92)",
               boxSizing: "border-box",
             }}
           >
@@ -4687,17 +4645,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   onToggleUnderline={() => toggleReplyInlineFormat("underline")}
                   onOutlineStyleFocus={() => setReplyToolbarTab("outline-styles")}
                   onOutlineStyleChange={changeReplyOutlineStyle}
-                  onInsertTable={() => replyEditorControllerRef.current?.insertTable()}
                   reserveHeaderOffset={false}
                   visibleTabIDs={ATTACHED_EMAIL_REPLY_EDITOR_TAB_IDS}
                   disabled={!editable}
                 />
-                <button type="button" title="Numbered list" aria-label="Numbered list" disabled={!editable} onClick={toggleReplyNumberedList} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>1.</button>
-                <button type="button" title="Bullet list" aria-label="Bullet list" disabled={!editable} onClick={insertReplyBulletList} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>-</button>
-                <button type="button" title="Checklist" aria-label="Checklist" disabled={!editable} onClick={insertReplyChecklist} style={{ ...attachedEmailReplyWideToolButtonStyle, color: accent }}>Check</button>
-                <button type="button" title="Outdent" aria-label="Outdent" disabled={!editable} onClick={outdentReplyBody} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>{"<<"}</button>
-                <button type="button" title="Indent" aria-label="Indent" disabled={!editable} onClick={indentReplyBody} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>{">>"}</button>
-                <button type="button" title="Create link" aria-label="Create link" disabled={!editable} onClick={createReplyHyperlink} style={{ ...attachedEmailReplyWideToolButtonStyle, color: accent }}>Link</button>
               </div>
               <UnifiedRichEditorSurface
                 value={bodyDraft}
