@@ -29,6 +29,8 @@ P18 - The project email picker is attach/select only and must not expose compose
 P19 - Project critical-path inline node windows mount `UnifiedNodeShell`; the inline window may keep project row selection/close state in Project Management, but shell actions and body metadata come from the shared node-shell source.
 P20 - Project text-box inline images and project text-block attachment arrays must follow `docs/tests/attachments.md`: durable project information/projection payloads store attachment references, not data URLs, base64 file bytes, or embedded file payloads.
 P21 - Project chat attachments use Mango attachment references, and project critical-path inline node windows inherit node attachment behavior while preserving node-owned persistence for node edits.
+P22 - In the Project Logic Gates / Nodes tab, double-clicking a node opens the standard full node editor window for that node instead of a project-specific editor surface.
+P23 - Nodes opened from the Project Logic Gates / Nodes tab use the unified node shell, unified node text-box editor semantics, node information/projection persistence, attached-email behavior, and separate chat-pane behavior of the standard node editor.
 
 ## Scenarios
 
@@ -148,3 +150,20 @@ Expected:
 - Project information/projection payloads do not store durable data URLs or base64 file bytes.
 - Project chats store attachment references while remaining chat UI.
 - The inline node window uses node attachment behavior and node-owned persistence, not project-owned attachment logic for node edits.
+
+### Scenario P-S7: Logic Gates / Nodes Node Opener
+
+Business logic covered:
+- P22
+- P23
+
+Given:
+- A project has at least one related Logic Gate and at least one related node visible in the Logic Gates / Nodes tab.
+- The viewer can open the node.
+
+Expected:
+- Double-clicking the node row opens the standard full node editor window for that node.
+- The opened node window uses the shared node shell actions and shared node workspace body instead of a project-specific node shell.
+- Text boxes inside that window use the unified node editor semantics.
+- Node edits save through node information/projection persistence, not project information/projection or project relationship persistence.
+- Chat panes inside the opened node window remain chat surfaces and do not inherit unified rich-editor toolbar or keyboard semantics.

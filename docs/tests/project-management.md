@@ -42,6 +42,9 @@ PM31 - Adding an existing node to a project from the node workspace requires sel
 PM32 - Confirming node-to-project assignment creates or updates the node/project relationship and assigns the node to the selected project Logic Gate using the normal project and Logic Gate access rules.
 PM33 - Opening a project from a node workspace Go to Project action navigates to the related project without changing the node/project relationship.
 PM34 - Project information/projection attachment payloads must follow `docs/tests/attachments.md`: durable project rows store Mango attachment references instead of data URLs, base64 file bytes, or embedded file payloads, and mutation/read access follows project permissions.
+PM35 - The project detail work panel exposes Critical Path and Logic Gates / Nodes as distinct project relationship views; Critical Path is the default entry view.
+PM36 - Double-clicking a node in the Project Logic Gates / Nodes view opens that node in the standard full node editor window instead of creating a project-owned node editor surface.
+PM37 - Opening a node from Project Management preserves node-level access, node information/projection persistence, unified node shell behavior, unified node text-box editor semantics, and separate chat-pane behavior; the project relationship is opener context only and must not become the persistence owner for node edits.
 
 ## Scenarios
 
@@ -174,3 +177,22 @@ Expected:
 - Confirming a Logic Gate creates or updates the node/project relationship.
 - The node is assigned or moved to the selected Logic Gate.
 - Go to Project opens the related project directly and does not mutate project relationships.
+
+### Scenario PM-S6: Project Relationship Node Openers
+
+Business logic covered:
+- PM35
+- PM36
+- PM37
+
+Given:
+- A project has related Logic Gates and nodes.
+- The viewer can access the project and at least one related node.
+
+Expected:
+- The project detail work panel shows Critical Path before Logic Gates / Nodes and opens on Critical Path by default.
+- Switching to Logic Gates / Nodes shows project relationships without changing the project relationship data.
+- Double-clicking a node in Logic Gates / Nodes opens the standard full node editor window for that node.
+- The opened node window applies node access and saves node edits through node information/projection persistence.
+- The project relationship remains opener context only; it does not own node text-box edits, attached-email edits, or node chat messages.
+- Node text boxes use the unified editor semantics, and node chats remain separate chat panes.
