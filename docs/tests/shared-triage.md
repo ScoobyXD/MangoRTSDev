@@ -4,7 +4,7 @@ Last updated: 2026-07-09
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (backend coverage exists for destructive delete vs remove-only and OAuth linkage; frontend helper coverage exists for mailbox-capable Shared Triage rows; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting and full rich-control exposure for Shared Triage compose/reply; rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (backend coverage exists for destructive delete vs remove-only and OAuth linkage; frontend helper coverage exists for mailbox-capable Shared Triage rows; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting and full rich-control exposure for Shared Triage compose/reply; Mango email body marking/display preservation is covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; local sent-body cache priming is covered by `tests/frontend/modules/communications/communicationsApi.test.ts`; rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -130,6 +130,8 @@ ST119 - Any future change to unified editor semantics or shared editor format/ou
 ST120 - Shared Triage compose/reply file attachments must follow `docs/tests/attachments.md`: files upload to Mango attachments before durable draft/send state is saved, attachment references remain scoped to the selected `shared_inbox_id`, and normal durable payloads do not store raw base64 `content`.
 ST121 - Shared Triage compose/reply inline body images use the unified rich-editor image attachment path, while normal file attachments use the shared-mail attachment path.
 ST122 - Incoming shared provider attachments can stay provider-referenced as mailbox metadata, but when converted into work, attached to a node, or otherwise made durable Mango work context, bytes must be cached/persisted into Mango S3 and stored as Mango attachment references under the company/shared mailbox scope.
+ST123 - Mango-generated shared outgoing email HTML is marked as a Mango email body, and local Shared Triage Sent/reply caches must keep the exact submitted HTML body when the provider send response does not return a body.
+ST124 - Shared Triage Inbox, All, Sent, and thread/detail views must preserve Mango-authored line breaks, spaces, and indentation when displaying sent or received copies of Mango-generated email bodies; this is a Mango display/cache contract and must not weaken the outbound shared email formatting that recipients receive.
 
 ## Nylas Configuration Contract
 
@@ -552,11 +554,14 @@ Business logic covered:
 - ST115
 - ST116
 - ST117
+- ST123
+- ST124
 
 Given:
 - A mailbox-capable Shared Triage inbox has multiple provider messages with the same Nylas `thread_id`.
 - The current user has view access to that shared inbox.
 - The user with edit access sends a rich formatted shared reply with indented content, explicit line breaks, and blank lines.
+- The provider send response may omit the body even though Mango submitted rich HTML.
 
 Expected:
 - The Shared Triage list shows one row for the thread, not one row per reply.
@@ -565,6 +570,8 @@ Expected:
 - The right-side detail pane fills the available detail area and shows a chronological conversation history for the thread.
 - Thread IDs and message bodies are loaded only through the selected `shared_inbox_id` and company-owned shared grant; the UI must not fall back to the actor's personal mailbox.
 - Sent shared rich HTML preserves block indentation instead of flattening indented paragraphs.
+- Local shared Sent/reply caches keep the exact Mango-submitted HTML body when the send response omits body content.
+- Mango's own shared Inbox, All, Sent, thread, and detail displays preserve Mango-authored line breaks, spaces, and indentation instead of flattening the same email body into one sentence.
 
 ### Scenario ST-S14: Shared Mail Attachments Use Mango Attachments
 

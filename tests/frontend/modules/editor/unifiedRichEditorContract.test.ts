@@ -92,6 +92,8 @@ test("mail compose and attached-email reply mount unified rich editor adapters",
   assertMailToolbarControls(nodeWorkspaceParts, editorTabBar, editorPreferences);
   assert.match(nodeWorkspaceParts, /ATTACHED_EMAIL_REPLY_EDITOR_TAB_IDS/);
   assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
+  assert.match(nodeWorkspaceParts, /padding: "7px 8px 24px"/);
+  assert.match(nodeWorkspaceParts, /scrollPaddingBottom: 24/);
   assert.doesNotMatch(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.(toggleNumberedList|outdent|indent|insertList|insertLink|insertTable)\(/);
   assert.doesNotMatch(nodeWorkspaceParts, /selectReplyNumberedMode/);
 
@@ -139,6 +141,13 @@ test("unified node shell contract lists every Phase 2 full node-window surface",
   assert.ok(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.every((surface) => surface.persistenceBoundary === "node-information-projection"));
   assert.ok(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.every((surface) => surface.openerState === "opener-owned"));
   assert.ok(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.every((surface) => surface.chatPane === "separate"));
+  assert.deepEqual(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.find((surface) => surface.id === "kanban-my-work-node-overlay")?.actions, [
+    "close",
+    "fullscreen",
+    "minimize",
+    "open-in-new-tab",
+    "delete",
+  ]);
 });
 
 test("node window adapters mount the shared unified node shell", () => {
@@ -154,13 +163,19 @@ test("node window adapters mount the shared unified node shell", () => {
   assert.match(unifiedShell, /data-mango-unified-node-shell/);
   assert.match(unifiedShell, /data-mango-unified-node-shell-body="node-workspace"/);
   assert.match(unifiedShell, /UNIFIED_NODE_SHELL_TOP_RIGHT_ACTION_ORDER/);
+  assert.match(unifiedShell, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_CHROME_STYLE/);
+  assert.match(unifiedShell, /linear-gradient\(135deg, #ff5a6b, #ef334e\)/);
 
   assert.match(homeParts, /UnifiedNodeShell/);
   assert.match(homeParts, /surfaceID="home-node-popup"/);
+  assert.match(homeParts, /fullscreenNodeEditorViewportRect/);
   assert.doesNotMatch(homeParts, /function NodeEditorPopupFullscreenIcon/);
 
   assert.match(appSidebar, /UnifiedNodeShell/);
   assert.match(appSidebar, /surfaceID = "app-sidebar-node-popup"/);
+  assert.match(appSidebar, /fullscreenNodeEditorViewportRect/);
+  assert.match(appSidebar, /subscribeNodeEditorFullscreenChrome/);
+  assert.match(appSidebar, /explorerSearchHidden/);
   assert.doesNotMatch(appSidebar, /nodeEditorPopupIconButtonStyle/);
   assert.match(appLayout, /surfaceID: "dock-restored-node-popup"/);
 
@@ -169,8 +184,10 @@ test("node window adapters mount the shared unified node shell", () => {
   assert.match(kanbanOverlays, /id: "fullscreen"/);
   assert.match(kanbanOverlays, /pressed: fullscreen/);
   assert.match(kanbanOverlays, /position: fullscreen \? "fixed" : "absolute"/);
-  assert.match(kanbanOverlays, /width: fullscreen \? "100vw"/);
-  assert.match(kanbanOverlays, /height: fullscreen \? "100vh"/);
+  assert.match(kanbanOverlays, /NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX/);
+  assert.match(kanbanOverlays, /NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX/);
+  assert.match(kanbanOverlays, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);
+  assert.match(kanbanOverlays, /closeButtonStyle=\{overlayHeaderButtonStyle\}/);
   assert.match(kanbanContent, /onToggleFullscreen=\{toggleNodeEditorOverlayFullscreen\}/);
   assert.match(kanbanContent, /fullscreen=\{nodeEditorOverlayFullscreen\}/);
   assert.doesNotMatch(kanbanOverlays, /overlayHeaderButtonStyle\(right/);

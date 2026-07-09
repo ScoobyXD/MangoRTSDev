@@ -20,6 +20,7 @@ import {
   isWorkspacePanelHomeViewID,
   localMailboxMutationEchoKeys,
   logicGateTitle,
+  messageDocument,
   missingLogicGateRecordIDs,
   getInboxMatrixGridTemplateColumns,
   getInboxMatrixGridTemplateColumnsWithoutSidebar,
@@ -180,6 +181,14 @@ test("triage email list condenses messages from the same Nylas thread into one v
   assert.equal(condensed[0].unread, true);
   assert.equal(condensed[0].starred, true);
   assert.equal(condensed[1].thread_message_count, 1);
+});
+
+test("message documents preserve Mango-authored email body structure", () => {
+  const documentHTML = messageDocument('<div data-mango-email-body="true">hello<br>  structure</div>');
+
+  assert.match(documentHTML, /data-mango-email-body="true"/);
+  assert.match(documentHTML, /white-space:pre-wrap!important/);
+  assert.match(documentHTML, /hello<br>  structure/);
 });
 
 test("communications archive stream events are identified without treating generic updates as archive confirmations", () => {

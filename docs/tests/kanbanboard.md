@@ -4,7 +4,7 @@ Last updated: 2026-07-09
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (frontend Kanban command/helper coverage and saved-view backend coverage exist; rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (frontend Kanban command/helper coverage and saved-view backend coverage exist; unified node popup fullscreen inset/search-hide source contracts are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; rule IDs are not fully mapped to automated tests yet)
 
 ## Scope
 
@@ -140,6 +140,7 @@ KB104 - After a direct email-to-Kanban column drop succeeds, the created node op
 ### New node insertion
 KB105 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
 KB106 - Email-card transfer must follow `docs/tests/attachments.md`: the target node attached-email projection stores provider/email metadata and Mango attachment references only, not attachment bytes, data URLs, base64 blobs, or S3 object contents.
+KB107 - Fullscreen node editor popups keep a small browser-edge inset, about 12px on the left/right and 8px on the top/bottom, so background context remains visible; while a node editor is fullscreen, the Explorer search box is hidden without clearing the user's current search query.
 
 ## Scenarios
 
@@ -398,6 +399,7 @@ Expected:
 
 Business logic covered:
 - KB100
+- KB107
 
 Given:
 - A user opens a node editor popup from a Kanban board card.
@@ -406,6 +408,8 @@ Given:
 Expected:
 - A fullscreen toggle appears in the header immediately to the left of the close action.
 - Activating fullscreen expands the popup to the browser viewport instead of only filling the Kanban board area, without hiding the header actions.
+- The fullscreen popup keeps a small visible gap at the viewport edges instead of touching the browser edges exactly.
+- The Explorer search box is hidden while the fullscreen node editor is active, and the previous search query is still present after fullscreen is restored.
 - Deactivating fullscreen restores the previous popup size and position.
 - Manually resizing or dragging the popup exits fullscreen behavior and preserves normal popup movement.
 

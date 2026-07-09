@@ -602,7 +602,10 @@ export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
       ...messageInput,
     }),
   });
-  const message = sentEmailMessageForLocalLists(payload.message);
+  const message = sentEmailMessageForLocalLists({
+    ...payload.message,
+    body: payload.message.body?.trim() ? payload.message.body : messageInput.body,
+  });
   primeMessageCaches(message);
   applyEmailMessageToCachedPages(message, { prependIfMissing: true });
   if (input.reply_to_message_id?.trim()) addLocalEmailReply(input.reply_to_message_id, message);

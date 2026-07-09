@@ -7,6 +7,7 @@ import { humanLabelOrFallback } from "../../modules/entityLabels.js";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared.js";
 import { getNodeTitle, type NodeRecord } from "../../modules/node-map/shared.js";
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_REVIEW_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../../modules/kanban/shared.js";
+import { editorEmailDisplayDocument } from "../../modules/editor/richTextEditing.js";
 import { HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, INBOX_NO_LOGIC_GATE_ID, MAILBOX_OPTIONS, GVIC_INBOX_SECTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
 import type { HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, MyNodeGroup, GVICInboxRole, GVICInboxStatus } from "./homeTypes.js";
 export function readHomeColumnWidths(): HomeColumnWidths {
@@ -1116,35 +1117,8 @@ function normalizeEmailFolderToken(value: string | undefined): string {
   return token;
 }
 
-function escapeHTMLAttribute(value: string): string {
-  return escapeHTML(value).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
-
-function linkifyPlainText(value: string): string {
-  const urlPattern = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
-  let output = "";
-  let cursor = 0;
-  for (const match of value.matchAll(urlPattern)) {
-    const matchText = match[0] ?? "";
-    const index = match.index ?? 0;
-    if (index > cursor) output += escapeHTML(value.slice(cursor, index));
-    const trailingPunctuation = matchText.match(/[),.;:!?]+$/)?.[0] ?? "";
-    const cleanURL = trailingPunctuation ? matchText.slice(0, -trailingPunctuation.length) : matchText;
-    const href = cleanURL.toLowerCase().startsWith("www.") ? `https://${cleanURL}` : cleanURL;
-    output += `<a href="${escapeHTMLAttribute(href)}" target="_blank" rel="noopener noreferrer">${escapeHTML(cleanURL)}</a>${escapeHTML(trailingPunctuation)}`;
-    cursor = index + matchText.length;
-  }
-  return output + escapeHTML(value.slice(cursor));
-}
-
 export function messageDocument(body: string): string {
-  const value = body.trim();
-  const content = /<\/?[a-z][\s\S]*>/i.test(value) ? value : `<pre>${linkifyPlainText(value)}</pre>`;
-  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:14px;overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}a{color:#0369a1;text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:2px;font-weight:650;cursor:pointer}a:hover{color:#0c4a6e}</style></head><body>${content}</body></html>`;
-}
-
-export function escapeHTML(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return editorEmailDisplayDocument(body, { baseTarget: true });
 }
 
 export function formatError(error: unknown, fallback: string): string {

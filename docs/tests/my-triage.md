@@ -4,7 +4,7 @@ Last updated: 2026-07-09
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (store-level conversion and transfer coverage exists; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting and full rich-control exposure for My Triage compose/reply; rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (store-level conversion and transfer coverage exists; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting and full rich-control exposure for My Triage compose/reply; Mango email body marking/display preservation is covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; local sent-body cache priming is covered by `tests/frontend/modules/communications/communicationsApi.test.ts`; rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -104,6 +104,8 @@ MT93 - Any future change to unified editor semantics or shared editor format/out
 MT94 - Personal email compose/reply file attachments must follow `docs/tests/attachments.md`: files upload to Mango attachments before durable draft/send state is saved, and normal durable payloads store attachment references instead of raw base64 `content`.
 MT95 - Personal compose/reply inline body images use the unified rich-editor image attachment path, while normal file attachments use the mail attachment path.
 MT96 - Incoming personal provider attachments can stay provider-referenced as mailbox metadata, but when converted into work, attached to a node, or otherwise made durable Mango work context, bytes must be cached/persisted into Mango S3 and stored as Mango attachment references.
+MT97 - Mango-generated personal outgoing email HTML is marked as a Mango email body, and local Sent/reply caches must keep the exact submitted HTML body when the provider send response does not return a body.
+MT98 - My Triage Inbox, All, Sent, and thread/detail views must preserve Mango-authored line breaks, spaces, and indentation when displaying sent or received copies of Mango-generated email bodies; this is a Mango display/cache contract and must not weaken the outbound email formatting that recipients receive.
 
 ## Nylas Configuration Contract
 
@@ -398,11 +400,14 @@ Business logic covered:
 - MT89
 - MT90
 - MT91
+- MT97
+- MT98
 
 Given:
 - A personal mailbox has multiple provider messages with the same Nylas `thread_id`.
 - The newest loaded message is visible in My Triage.
 - The user selects that row or sends a rich formatted reply with indented content.
+- The provider send response may omit the body even though Mango submitted rich HTML.
 
 Expected:
 - The My Triage list shows one row for the thread, not one row per reply.
@@ -410,6 +415,8 @@ Expected:
 - The right-side detail pane fills the available detail area and shows a chronological conversation history for the thread.
 - Thread history bodies are loaded through individual message-detail reads scoped to the personal mailbox, using Nylas thread `message_ids` only as the grouping/index source.
 - Sent rich HTML preserves explicit line breaks, blank lines, spacing, and block indentation instead of flattening the reply body or indented paragraphs.
+- Local Sent/reply caches keep the exact Mango-submitted HTML body when the send response omits body content.
+- Mango's own Inbox, All, Sent, thread, and detail displays preserve Mango-authored line breaks, spaces, and indentation instead of flattening the same email body into one sentence.
 
 ### Scenario MT-S9: Personal Mail Attachments Use Mango Attachments
 

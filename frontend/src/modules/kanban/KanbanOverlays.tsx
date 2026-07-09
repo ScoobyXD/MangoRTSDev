@@ -3,6 +3,11 @@ import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMe
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../editor/UnifiedNodeShell";
+import {
+  NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
+  NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
+  setNodeEditorFullscreenChromeActive,
+} from "../editor/nodeEditorFullscreenChrome";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import type { Account } from "../accounts/accountsApi";
 import { type KanbanCard, type KanbanColumn } from "./shared";
@@ -205,6 +210,8 @@ export function KanbanNodeEditorOverlay({
   const availableWidthPx = boardWidth > 0 ? Math.max(1, boardWidth - renderedLeftPx - 22) : 0;
   const renderedWidth = boardWidth > 0 ? Math.min(ratio.width, availableWidthPx / boardWidth) : ratio.width;
 
+  React.useEffect(() => setNodeEditorFullscreenChromeActive(fullscreen), [fullscreen]);
+
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
@@ -221,7 +228,7 @@ export function KanbanNodeEditorOverlay({
       title={overlay.nodeTitle}
       actionButtonClassName="mango-elevated-action"
       actionButtonStyle={overlayHeaderButtonStyle}
-      closeButtonStyle={overlayCloseButtonStyle}
+      closeButtonStyle={overlayHeaderButtonStyle}
       onMouseDown={(event) => event.stopPropagation()}
       onTouchStart={(event) => event.stopPropagation()}
       actions={([
@@ -251,16 +258,16 @@ export function KanbanNodeEditorOverlay({
       style={{
         position: fullscreen ? "fixed" : "absolute",
         zIndex: fullscreen ? 240 : 40,
-        top: fullscreen ? 0 : `${Math.round(ratio.top * 1000) / 10}%`,
-        left: fullscreen ? 0 : `${Math.round(renderedLeft * 1000) / 10}%`,
-        width: fullscreen ? "100vw" : `${Math.round(renderedWidth * 1000) / 10}%`,
-        height: fullscreen ? "100vh" : `${Math.round(ratio.height * 1000) / 10}%`,
-        maxWidth: fullscreen ? "100vw" : boardWidth > 0 ? availableWidthPx : allowHorizontalOverflow ? "none" : "calc(100% - 44px)",
-        maxHeight: fullscreen ? "100vh" : "calc(100% - 64px)",
+        top: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : `${Math.round(ratio.top * 1000) / 10}%`,
+        left: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : `${Math.round(renderedLeft * 1000) / 10}%`,
+        width: fullscreen ? `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)` : `${Math.round(renderedWidth * 1000) / 10}%`,
+        height: fullscreen ? `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)` : `${Math.round(ratio.height * 1000) / 10}%`,
+        maxWidth: fullscreen ? `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)` : boardWidth > 0 ? availableWidthPx : allowHorizontalOverflow ? "none" : "calc(100% - 44px)",
+        maxHeight: fullscreen ? `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)` : "calc(100% - 64px)",
         minWidth: fullscreen ? 0 : boardWidth > 0 ? Math.min(420, availableWidthPx) : allowHorizontalOverflow ? 420 : "min(420px, calc(100% - 44px))",
         minHeight: fullscreen ? 0 : "min(320px, calc(100% - 64px))",
         border: "1px solid transparent",
-        borderRadius: fullscreen ? 0 : 18,
+        borderRadius: fullscreen ? 14 : 18,
         background: `${KANBAN_PANEL_BACKGROUND} padding-box, ${KANBAN_EDGE_FRAME} border-box`,
         boxShadow: KANBAN_PANEL_SHADOW,
         overflow: "hidden",
@@ -329,22 +336,6 @@ const overlayHeaderButtonStyle: React.CSSProperties = {
   padding: 0,
   cursor: "pointer",
   boxShadow: KANBAN_SHADOW,
-};
-
-const overlayCloseButtonStyle: React.CSSProperties = {
-  position: "absolute",
-  zIndex: 80,
-  width: 24,
-  height: 24,
-  border: "1px solid transparent",
-  borderRadius: 8,
-  background: "linear-gradient(135deg, #ff5a6b, #ef334e)",
-  color: "#ffffff",
-  fontSize: 16,
-  fontWeight: 600,
-  lineHeight: "20px",
-  cursor: "pointer",
-  boxShadow: "0 8px 18px rgba(239, 51, 78, 0.26), inset 1px 1px 0 rgba(255,255,255,0.38)",
 };
 
 const modalBackdropStyle: React.CSSProperties = {

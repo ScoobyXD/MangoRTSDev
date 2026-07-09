@@ -595,6 +595,7 @@ test("sendEmail scopes shared inbox sends through query params", async () => {
       shared_inbox_id: " shared-1 ",
     });
     assert.equal(sent.id, "sent-1");
+    assert.equal(sent.body, "Body");
     assert.deepEqual(calls, [{
       path: "/v1/communications/messages/send?company_id=company-1&shared_inbox_id=shared-1",
       method: "POST",

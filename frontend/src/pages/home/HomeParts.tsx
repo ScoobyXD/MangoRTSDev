@@ -6,6 +6,12 @@ import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute } from "../../ap
 import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin, type SidebarPinKind } from "../../app/sidebarPins";
 import { NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "../../app/nodeEditorPopupControls";
+import {
+  NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
+  NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
+  fullscreenNodeEditorViewportRect,
+  setNodeEditorFullscreenChromeActive,
+} from "../../modules/editor/nodeEditorFullscreenChrome";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { BoundRequestJSON } from "../../modules/api/requestJSON";
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
@@ -727,20 +733,15 @@ function defaultNodeEditorPopupRect(): NodeEditorPopupRect {
 
 function fullscreenNodeEditorPopupRect(): NodeEditorPopupRect {
   if (typeof window === "undefined") return defaultNodeEditorPopupRect();
-  return {
-    left: 0,
-    top: 0,
-    width: window.innerWidth,
-    height: window.innerHeight,
-  };
+  return fullscreenNodeEditorViewportRect();
 }
 
 const nodeEditorPopupFullscreenStyle: React.CSSProperties = {
-  minWidth: "100vw",
-  minHeight: "100vh",
-  maxWidth: "100vw",
-  maxHeight: "100vh",
-  borderRadius: 0,
+  minWidth: 0,
+  minHeight: 0,
+  maxWidth: `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)`,
+  maxHeight: `calc(100vh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)`,
+  borderRadius: 14,
 };
 
 export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab, onDeleteNode }: {
@@ -762,6 +763,8 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
   useEffect(() => {
     popupRectRef.current = popupRect;
   }, [popupRect]);
+
+  useEffect(() => setNodeEditorFullscreenChromeActive(popupFullscreen), [popupFullscreen]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
