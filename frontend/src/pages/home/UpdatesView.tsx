@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildNodeRoute } from "../../app/deepLinkRoutes";
-import { MinimizeToLineIcon, OpenInNewTabIcon } from "../../app/nodeEditorPopupControls";
 import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
+import { UnifiedNodeShell } from "../../modules/editor/UnifiedNodeShell";
 import {
   KANBAN_LOGIC_GATE_BACKLOG_COLOR,
   KANBAN_LOGIC_GATE_DONE_COLOR,
@@ -1154,15 +1154,27 @@ function UpdatesNodePanel({
           <span style={updatesNodePanelNotificationTimeStyle}>{formatNotificationTimestamp(panel.row.item.created_timestamp)}</span>
         </div>
       )}
-      <div style={updatesNodePanelEditorStyle}>
-        <div style={updatesNodePanelOverlayControlsStyle}>
-          <button type="button" title="Open node in new tab" style={updatesNodePanelIconButtonStyle} onClick={() => openAppPathInNewTab(buildNodeRoute(panel.nodeID))}>
-            <OpenInNewTabIcon />
-          </button>
-          <button type="button" title="Close node panel" style={updatesNodePanelIconButtonStyle} onClick={onClose}>
-            <MinimizeToLineIcon />
-          </button>
-        </div>
+      <UnifiedNodeShell
+        surfaceID="updates-node-panel"
+        title={nodeTitle}
+        ariaLabel="Selected update node editor"
+        actionTop={4}
+        actionButtonStyle={updatesNodePanelIconButtonStyle}
+        closeButtonStyle={updatesNodePanelIconButtonStyle}
+        style={updatesNodePanelEditorStyle}
+        actions={[
+          {
+            id: "open-in-new-tab",
+            onClick: () => openAppPathInNewTab(buildNodeRoute(panel.nodeID)),
+          },
+          {
+            id: "close",
+            title: "Close node panel",
+            ariaLabel: "Close node panel",
+            onClick: onClose,
+          },
+        ]}
+      >
         <React.Suspense fallback={<div style={updatesNodePanelLoadingStyle}>Loading node</div>}>
           <LazyUpdatesEditorContent
             accent="#2563eb"
@@ -1178,7 +1190,7 @@ function UpdatesNodePanel({
             suppressLegacyWorkspaceStream
           />
         </React.Suspense>
-      </div>
+      </UnifiedNodeShell>
     </aside>
   );
 }
@@ -1904,16 +1916,6 @@ const updatesNodePanelNotificationBodyStyle: React.CSSProperties = { minWidth: 0
 const updatesNodePanelNotificationTimeStyle: React.CSSProperties = { color: "#64748b", fontSize: 10, fontWeight: 750, whiteSpace: "nowrap" };
 const updatesNodePanelEditorStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden", background: "#f8fafc" };
 const updatesNodePanelLoadingStyle: React.CSSProperties = { minHeight: 180, display: "grid", placeItems: "center", color: "#64748b", fontSize: 12, fontWeight: 750 };
-const updatesNodePanelOverlayControlsStyle: React.CSSProperties = {
-  position: "absolute",
-  top: 4,
-  right: 8,
-  zIndex: 12,
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 5,
-};
-
 const updatesContextMenuStyle: React.CSSProperties = {
   position: "fixed",
   zIndex: 2400,

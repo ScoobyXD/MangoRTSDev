@@ -1,10 +1,10 @@
-Last updated: 2026-07-08
+Last updated: 2026-07-09
 
 # Projects Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract and EmailPickerModal attach-only boundary; project-specific persistence rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract, EmailPickerModal attach-only boundary, and Project critical-path inline node shell adapter mounting; project-specific persistence rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -26,6 +26,7 @@ P15 - Project text boxes participate in the unified editor contract: changes to 
 P16 - Project text-box persistence remains project-owned: project text boxes save to project information/projection state, not node information/projection state.
 P17 - Project critical-path inline node windows use the unified node shell and unified node text-box editor semantics, while mutations inside that inline node window remain node editor mutations instead of project critical-path data mutations.
 P18 - The project email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
+P19 - Project critical-path inline node windows mount `UnifiedNodeShell`; the inline window may keep project row selection/close state in Project Management, but shell actions and body metadata come from the shared node-shell source.
 
 ## Scenarios
 
@@ -77,6 +78,7 @@ Business logic covered:
 - P8
 - P9
 - P17
+- P19
 
 Given:
 - A node selected from the project critical path has editor content, email attachments, highlighted email references, chat messages, checkboxes, bullets, and intents.
@@ -86,6 +88,7 @@ Expected:
 - The inline node window uses the unified node shell and unified node text-box editor semantics.
 - Email attachment, email highlight, chat creation, text editing, checkbox, bullet, and intent updates follow the existing node editor rules.
 - Updates made in the inline node window persist as node editor updates, not project critical-path updates.
+- The inline node window exposes shared shell close/open actions without changing the critical-path row data.
 
 ### Scenario P-S4: Add Node From Critical Path
 

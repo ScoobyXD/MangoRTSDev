@@ -2,8 +2,7 @@ import React from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
-import { MinimizeToLineIcon, OpenInNewTabIcon } from "../../app/nodeEditorPopupControls";
-import { HeaderRecycleBinIcon } from "../../app/HeaderIcons";
+import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../editor/UnifiedNodeShell";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import type { Account } from "../accounts/accountsApi";
 import { type KanbanCard, type KanbanColumn } from "./shared";
@@ -211,10 +210,33 @@ export function KanbanNodeEditorOverlay({
   }, [onClose]);
 
   return (
-    <div
-      data-frame-interactive="true"
+    <UnifiedNodeShell
+      surfaceID="kanban-my-work-node-overlay"
+      title={overlay.nodeTitle}
+      actionButtonClassName="mango-elevated-action"
+      actionButtonStyle={overlayHeaderButtonStyle}
+      closeButtonStyle={overlayCloseButtonStyle}
       onMouseDown={(event) => event.stopPropagation()}
       onTouchStart={(event) => event.stopPropagation()}
+      actions={([
+        onRequestDelete ? {
+          id: "delete",
+          danger: true,
+          onClick: (event: React.MouseEvent<HTMLButtonElement>) => onRequestDelete(overlay.nodeID, confirmMenuPositionFromElement(event.currentTarget)),
+        } : null,
+        onOpenInNewTab ? {
+          id: "open-in-new-tab",
+          onClick: onOpenInNewTab,
+        } : null,
+        {
+          id: "minimize",
+          onClick: onCollapseToTab,
+        },
+        {
+          id: "close",
+          onClick: onClose,
+        },
+      ].filter(Boolean) as UnifiedNodeShellAction[])}
       style={{
         position: "absolute",
         zIndex: 40,
@@ -233,86 +255,7 @@ export function KanbanNodeEditorOverlay({
         overflow: "hidden",
         cursor: "default",
       }}
-    >
-      {onRequestDelete && (
-        <button
-          className="mango-elevated-action"
-          type="button"
-          title="Move node to Recycle Bin"
-          aria-label="Move node to Recycle Bin"
-          data-frame-interactive="true"
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={(event) => onRequestDelete(overlay.nodeID, confirmMenuPositionFromElement(event.currentTarget))}
-          style={{ ...overlayHeaderButtonStyle(onOpenInNewTab ? 98 : 68), color: "#be123c" }}
-        >
-          <HeaderRecycleBinIcon />
-        </button>
-      )}
-      <button
-        className="mango-elevated-action"
-        type="button"
-        title="Collapse node editor to app tab"
-        aria-label="Collapse node editor to app tab"
-        data-frame-interactive="true"
-        onMouseDown={(event) => event.stopPropagation()}
-        onClick={onCollapseToTab}
-        style={overlayHeaderButtonStyle(38)}
-      >
-        <MinimizeToLineIcon />
-      </button>
-      {onOpenInNewTab && (
-        <button
-          className="mango-elevated-action"
-          type="button"
-          title="Open node in new browser tab"
-          aria-label="Open node in new browser tab"
-          data-frame-interactive="true"
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={onOpenInNewTab}
-          style={overlayHeaderButtonStyle(68)}
-        >
-          <OpenInNewTabIcon />
-        </button>
-      )}
-      <button
-        className="mango-elevated-action"
-        type="button"
-        title="Close node editor"
-        aria-label="Close node editor"
-        data-frame-interactive="true"
-        onMouseDown={(event) => event.stopPropagation()}
-        onClick={onClose}
-        style={{
-          position: "absolute",
-          top: 7,
-          right: 8,
-          zIndex: 80,
-          width: 24,
-          height: 24,
-          border: "1px solid transparent",
-          borderRadius: 8,
-          background: "linear-gradient(135deg, #ff5a6b, #ef334e)",
-          color: "#ffffff",
-          fontSize: 16,
-          fontWeight: 600,
-          lineHeight: "20px",
-          cursor: "pointer",
-          boxShadow: "0 8px 18px rgba(239, 51, 78, 0.26), inset 1px 1px 0 rgba(255,255,255,0.38)",
-        }}
-      >
-        X
-      </button>
-      <React.Suspense fallback={<div aria-busy="true" style={{ width: "100%", height: "100%", background: KANBAN_PANEL_BACKGROUND }} />}>
-        <LazyKanbanNodeEditorContent
-          accent={accent}
-          widgetId={`${frameID}:node-editor-overlay:${overlay.nodeID}`}
-          theme={theme}
-          forcedEntityKind="node"
-          forcedEntityID={overlay.nodeID}
-          forcedLabel={overlay.nodeTitle}
-        />
-      </React.Suspense>
-      {nodeEditorOverlayResizeHandles.map((handle) => (
+      chrome={nodeEditorOverlayResizeHandles.map((handle) => (
         <span
           key={handle.key}
           aria-hidden="true"
@@ -345,29 +288,52 @@ export function KanbanNodeEditorOverlay({
           }}
         />
       ))}
-    </div>
+    >
+      <React.Suspense fallback={<div aria-busy="true" style={{ width: "100%", height: "100%", background: KANBAN_PANEL_BACKGROUND }} />}>
+        <LazyKanbanNodeEditorContent
+          accent={accent}
+          widgetId={`${frameID}:node-editor-overlay:${overlay.nodeID}`}
+          theme={theme}
+          forcedEntityKind="node"
+          forcedEntityID={overlay.nodeID}
+          forcedLabel={overlay.nodeTitle}
+        />
+      </React.Suspense>
+    </UnifiedNodeShell>
   );
 }
 
-function overlayHeaderButtonStyle(right: number): React.CSSProperties {
-  return {
-    position: "absolute",
-    top: 7,
-    right,
-    zIndex: 80,
-    width: 24,
-    height: 24,
-    display: "grid",
-    placeItems: "center",
-    border: `1px solid ${KANBAN_SOFT_BORDER}`,
-    borderRadius: 8,
-    background: KANBAN_SURFACE,
-    color: "#334155",
-    padding: 0,
-    cursor: "pointer",
-    boxShadow: KANBAN_SHADOW,
-  };
-}
+const overlayHeaderButtonStyle: React.CSSProperties = {
+  position: "absolute",
+  zIndex: 80,
+  width: 24,
+  height: 24,
+  display: "grid",
+  placeItems: "center",
+  border: `1px solid ${KANBAN_SOFT_BORDER}`,
+  borderRadius: 8,
+  background: KANBAN_SURFACE,
+  color: "#334155",
+  padding: 0,
+  cursor: "pointer",
+  boxShadow: KANBAN_SHADOW,
+};
+
+const overlayCloseButtonStyle: React.CSSProperties = {
+  position: "absolute",
+  zIndex: 80,
+  width: 24,
+  height: 24,
+  border: "1px solid transparent",
+  borderRadius: 8,
+  background: "linear-gradient(135deg, #ff5a6b, #ef334e)",
+  color: "#ffffff",
+  fontSize: 16,
+  fontWeight: 600,
+  lineHeight: "20px",
+  cursor: "pointer",
+  boxShadow: "0 8px 18px rgba(239, 51, 78, 0.26), inset 1px 1px 0 rgba(255,255,255,0.38)",
+};
 
 const modalBackdropStyle: React.CSSProperties = {
   position: "fixed",

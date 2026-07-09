@@ -18,6 +18,13 @@ The Editor module is the linked document workspace for MangoRTS. It gives the se
 - Node text blocks, project text blocks, project inline critical-path node text boxes, and Logic Gate editor text continue to keep their domain persistence adapters while using the same editor handler behavior.
 - `EmailPickerModal` is an attach/select picker only. It can search, filter, scroll, and attach existing email, but it must not contain compose, send, schedule, draft-save, or compose-body editor behavior.
 
+## Unified Node Shell Implementation Update (2026-07-09)
+- `frontend/src/modules/editor/UnifiedNodeShell.tsx` is the shared user-facing shell source for full node-window chrome/action ordering and the node-workspace body boundary.
+- `frontend/src/modules/editor/unifiedNodeShellContract.ts` records the Phase 2 surface contract for Home, app/sidebar, dock-restored, Updates, Kanban/My Work, and Project critical-path inline node windows.
+- The shared shell owns top-right action rendering, accessible labels, action ordering, and data attributes identifying the shell and `node-workspace` body.
+- The shared shell does not own opener state or persistence. Popup size/fullscreen state, sidebar-aware bounds, dock restore state, Kanban overlay ratios, Updates notification context, and Project critical-path row selection remain with their current openers.
+- Node content still mounts through `EditorContent` and `NodeWorkspaceSurface`, so node text boxes, attached emails, and chats keep node information/projection persistence and the Phase 1 editor/chat boundaries.
+
 ## Key Responsibilities
 - Resolve which Node Map frame this editor is linked to through the frame-link graph + frame registry.
 - Resolve which Logic Gate Map frame this editor is linked to through the same frame-link graph + frame registry.

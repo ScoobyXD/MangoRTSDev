@@ -5,13 +5,13 @@ import { NotificationPopover } from "../../app/NotificationPopover";
 import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute } from "../../app/deepLinkRoutes";
 import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin, type SidebarPinKind } from "../../app/sidebarPins";
-import { MinimizeToLineIcon, NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "../../app/nodeEditorPopupControls";
-import { HeaderRecycleBinIcon } from "../../app/HeaderIcons";
+import { NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "../../app/nodeEditorPopupControls";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import type { BoundRequestJSON } from "../../modules/api/requestJSON";
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
 import { EDITOR_RICH_TEXT_PREFIX, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
+import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
 import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
@@ -731,24 +731,6 @@ function fullscreenNodeEditorPopupRect(): NodeEditorPopupRect {
   });
 }
 
-function NodeEditorPopupFullscreenIcon({ active = false }: { active?: boolean }) {
-  return (
-    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block" }}>
-      {active ? (
-        <>
-          <path d="M6.2 2.2v3.6H2.6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M9.8 13.8v-3.6h3.6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </>
-      ) : (
-        <>
-          <path d="M2.6 6V2.6H6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M13.4 10v3.4H10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </>
-      )}
-    </svg>
-  );
-}
-
 export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab, onDeleteNode }: {
   nodeID: string;
   nodeTitle: string;
@@ -872,16 +854,38 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div
+      <UnifiedNodeShell
+        surfaceID="home-node-popup"
+        title={nodeTitle}
         role="dialog"
-        aria-modal="true"
-        aria-label={`${nodeTitle} node editor`}
-        data-frame-interactive="true"
+        ariaModal
+        actionButtonClassName="mango-elevated-action"
+        actionButtonStyle={nodeEditorPopupCollapseButtonStyle}
+        closeButtonStyle={nodeEditorPopupCloseButtonStyle}
         style={{ ...nodeEditorPopupStyle, left: popupRect.left, top: popupRect.top, width: popupRect.width, height: popupRect.height }}
         onMouseDown={(event) => event.stopPropagation()}
         onTouchStart={(event) => event.stopPropagation()}
-      >
-        {NODE_EDITOR_POPUP_RESIZE_HANDLES.map((handle) => (
+        actions={([
+          onDeleteNode ? {
+            id: "delete",
+            danger: true,
+            onClick: requestDeleteNode,
+          } : null,
+          onCollapseToTab ? {
+            id: "minimize",
+            onClick: onCollapseToTab,
+          } : null,
+          {
+            id: "fullscreen",
+            pressed: popupFullscreen,
+            onClick: togglePopupFullscreen,
+          },
+          {
+            id: "close",
+            onClick: onClose,
+          },
+        ].filter(Boolean) as UnifiedNodeShellAction[])}
+        chrome={NODE_EDITOR_POPUP_RESIZE_HANDLES.map((handle) => (
           <div
             key={handle.key}
             role="separator"
@@ -898,59 +902,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
             }}
           />
         ))}
-        {onDeleteNode && (
-          <button
-            className="mango-elevated-action"
-            type="button"
-            title="Move node to Recycle Bin"
-            aria-label="Move node to Recycle Bin"
-            data-frame-interactive="true"
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={requestDeleteNode}
-            style={{ ...nodeEditorPopupCollapseButtonStyle, right: onCollapseToTab ? 98 : 68, color: "#be123c" }}
-          >
-            <HeaderRecycleBinIcon />
-          </button>
-        )}
-        {onCollapseToTab && (
-          <button
-            className="mango-elevated-action"
-            type="button"
-            title="Collapse node editor to app tab"
-            aria-label="Collapse node editor to app tab"
-            data-frame-interactive="true"
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={onCollapseToTab}
-            style={{ ...nodeEditorPopupCollapseButtonStyle, right: 68 }}
-          >
-            <MinimizeToLineIcon />
-          </button>
-        )}
-        <button
-          className="mango-elevated-action"
-          type="button"
-          title={popupFullscreen ? "Restore node editor" : "Fullscreen node editor"}
-          aria-label={popupFullscreen ? "Restore node editor" : "Fullscreen node editor"}
-          aria-pressed={popupFullscreen}
-          data-frame-interactive="true"
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={togglePopupFullscreen}
-          style={{ ...nodeEditorPopupCollapseButtonStyle, right: 38 }}
-        >
-          <NodeEditorPopupFullscreenIcon active={popupFullscreen} />
-        </button>
-        <button
-          className="mango-elevated-action"
-          type="button"
-          title="Close node editor"
-          aria-label="Close node editor"
-          data-frame-interactive="true"
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={onClose}
-          style={nodeEditorPopupCloseButtonStyle}
-        >
-          X
-        </button>
+      >
         <React.Suspense fallback={<div aria-busy="true" style={{ width: "100%", height: "100%", background: "linear-gradient(180deg, #fbfbfd 0%, #f2f4f8 100%)" }} />}>
           <LazyHomeNodeEditorContent
             accent="#334155"
@@ -975,7 +927,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
             onCancel={() => setDeleteConfirmation(null)}
           />
         )}
-      </div>
+      </UnifiedNodeShell>
     </div>
   );
 }

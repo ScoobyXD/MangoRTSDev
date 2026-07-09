@@ -129,6 +129,7 @@
     "../../../frontend/src/modules/editor/plainTextEditing.ts",
     "../modules/editor/plainTextEditing.test.ts",
     "../../../frontend/src/modules/editor/unifiedRichEditorContract.ts",
+    "../../../frontend/src/modules/editor/unifiedNodeShellContract.ts",
     "../modules/editor/unifiedRichEditorContract.test.ts",
     "../../../frontend/src/modules/editor/editorImages.ts",
     "../../../frontend/src/modules/editor/richTextEditing.ts",

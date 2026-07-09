@@ -33,6 +33,7 @@ import {
 } from "../editor/editorProjection.js";
 import { EditorContent } from "../editor/EditorContent.js";
 import { generateStableInformationID } from "../editor/editorTypes.js";
+import { UnifiedNodeShell } from "../editor/UnifiedNodeShell.js";
 import {
   AttachedEmailOrganizerPane,
   ChatPane,
@@ -1881,6 +1882,8 @@ function CriticalPathTable({
                     <ProjectCriticalPathNodeWindow
                       accent={accent}
                       selection={nodePreview}
+                      onClose={onClearNodePreview}
+                      onNodeOpen={onNodeOpen}
                     />
                   </div>
                 </div>
@@ -1991,26 +1994,53 @@ function criticalPathNodePreviewFromStep(
 function ProjectCriticalPathNodeWindow({
   accent,
   selection,
+  onClose,
+  onNodeOpen,
 }: {
   accent: string;
   selection: CriticalPathNodePreviewSelection;
+  onClose: () => void;
+  onNodeOpen?: (nodeID: string) => void;
 }) {
   return (
-    <div className="project-critical-path-node-window" style={criticalPathNodePreviewSurfaceStyle(accent)}>
-      <div style={criticalPathNodePreviewEditorFrameStyle}>
-        <EditorContent
-          key={`${selection.stepID}:${selection.nodeID}`}
-          accent={accent}
-          widgetId={`project-critical-path-node:${selection.stepID}:${selection.nodeID}`}
-          theme="mango"
-          forcedEntityKind="node"
-          forcedEntityID={selection.nodeID}
-          forcedLabel={selection.title}
-          forcedEmptyMessage="Select a critical-path node."
-          compactLinkedDocumentHeader
-        />
-      </div>
-    </div>
+    <UnifiedNodeShell
+      className="project-critical-path-node-window"
+      surfaceID="project-critical-path-inline-node"
+      title={selection.title}
+      style={criticalPathNodePreviewSurfaceStyle(accent)}
+      bodyStyle={criticalPathNodePreviewEditorFrameStyle}
+      actionButtonStyle={criticalPathNodePreviewActionButtonStyle}
+      closeButtonStyle={criticalPathNodePreviewActionButtonStyle}
+      actions={[
+        {
+          id: "open-in-new-tab",
+          title: onNodeOpen ? "Open node window" : "Open node in new browser tab",
+          ariaLabel: onNodeOpen ? "Open node window" : "Open node in new browser tab",
+          onClick: () => {
+            if (onNodeOpen) onNodeOpen(selection.nodeID);
+            else openAppPathInNewTab(buildContextualNodeRoute(selection.nodeID));
+          },
+        },
+        {
+          id: "close",
+          title: "Close inline node window",
+          ariaLabel: "Close inline node window",
+          onClick: onClose,
+        },
+      ]}
+    >
+      <EditorContent
+        key={`${selection.stepID}:${selection.nodeID}`}
+        accent={accent}
+        widgetId={`project-critical-path-node:${selection.stepID}:${selection.nodeID}`}
+        theme="mango"
+        forcedEntityKind="node"
+        forcedEntityID={selection.nodeID}
+        forcedLabel={selection.title}
+        forcedEmptyMessage="Select a critical-path node."
+        compactLinkedDocumentHeader
+      />
+    </UnifiedNodeShell>
   );
 }
 
@@ -3136,6 +3166,20 @@ const criticalPathNodePreviewEditorFrameStyle: React.CSSProperties = {
   height: "clamp(500px, 64vh, 820px)",
   overflow: "hidden",
   background: EDITOR_NEU_PANEL_BACKGROUND,
+};
+
+const criticalPathNodePreviewActionButtonStyle: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  display: "grid",
+  placeItems: "center",
+  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+  borderRadius: 7,
+  background: "#ffffff",
+  color: "#334155",
+  cursor: "pointer",
+  padding: 0,
+  boxShadow: EDITOR_NEU_SHADOW,
 };
 
 function criticalPathResourceIconStyle(resourceType: "logic_gate" | "node" | ""): React.CSSProperties {
