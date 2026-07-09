@@ -92,6 +92,7 @@ export function HomeSavedViewsSidebarSection({
   const editorRef = useRef<HTMLDivElement | null>(null);
   const addGroupingButtonRef = useRef<HTMLButtonElement | null>(null);
   const addGroupingMenuRef = useRef<HTMLDivElement | null>(null);
+  const commitNameDraftRef = useRef<() => void>(() => {});
   const selectedSetting = settings.find((setting) => setting.setting_id === selectedSettingID) ?? settings[0] ?? fallbackSetting;
   const contextSetting = contextMenu ? settings.find((setting) => setting.setting_id === contextMenu.settingID) ?? null : null;
   const groupingFields = homeSavedViewGroupingFields(surface);
@@ -197,6 +198,7 @@ export function HomeSavedViewsSidebarSection({
         return;
       }
       if (addGroupingMenuRef.current?.contains(target)) return;
+      commitNameDraftRef.current();
       setEditorOpen(false);
       setAddGroupingMenuOpen(false);
     };
@@ -296,6 +298,7 @@ export function HomeSavedViewsSidebarSection({
     }
     updateSelectedSetting((setting) => ({ ...setting, name: nextName }));
   }, [nameDraft, selectedSetting.name, updateSelectedSetting]);
+  commitNameDraftRef.current = commitNameDraft;
 
   const deleteSavedView = useCallback((settingID: string) => {
     const setting = settings.find((item) => item.setting_id === settingID);
@@ -414,7 +417,7 @@ export function HomeSavedViewsSidebarSection({
           }}
           style={savedViewNameInputStyle}
         />
-        <button type="button" title="Close editor" style={savedViewEditorCloseStyle} onClick={() => setEditorOpen(false)}>x</button>
+        <button type="button" title="Close editor" style={savedViewEditorCloseStyle} onClick={() => { commitNameDraft(); setEditorOpen(false); }}>x</button>
       </div>
       <div style={savedViewGroupingStackStyle}>
         {selectedSetting.groupings.map((grouping, index) => {
