@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyEditorInlineFormat, DEFAULT_EDITOR_OUTLINE_STYLE, deleteEditorBackspaceText, EDITOR_TAB_TEXT, getAutomaticOutlineContinuation, insertEditorEnterText, insertEditorTabText, isEditorOutlineStyleID } from "../../../../frontend/src/modules/editor/plainTextEditing.js";
+import { applyEditorInlineFormat, DEFAULT_EDITOR_OUTLINE_STYLE, deleteEditorBackspaceText, EDITOR_TAB_TEXT, getAutomaticOutlineContinuation, insertEditorEnterText, insertEditorTabText, isEditorOutlineStyleID, toggleAutomaticOutlineNumberingText } from "../../../../frontend/src/modules/editor/plainTextEditing.js";
 
 test("editor Tab inserts exactly five plain spaces", () => {
   assert.equal(EDITOR_TAB_TEXT, "     ");
@@ -179,6 +179,38 @@ test("automatic numbering Tab cycles decimal, alphabetic, and roman marker style
   assert.equal(levelTwo.value, `1. alpha\n${EDITOR_TAB_TEXT.repeat(2)}i. `);
   assert.equal(levelThree.value, `1. alpha\n${EDITOR_TAB_TEXT.repeat(3)}1. `);
   assert.equal(levelFour.value, `1. alpha\n${EDITOR_TAB_TEXT.repeat(4)}a. `);
+});
+
+test("automatic numbering toggle starts a numbered item at the current line", () => {
+  assert.deepEqual(toggleAutomaticOutlineNumberingText("", 0, 0), {
+    value: "1. ",
+    selectionStart: 3,
+    selectionEnd: 3,
+  });
+
+  assert.deepEqual(toggleAutomaticOutlineNumberingText("First\nSecond", 12, 12), {
+    value: "First\n1. Second",
+    selectionStart: 15,
+    selectionEnd: 15,
+  });
+});
+
+test("automatic numbering toggle removes an existing numbered item marker", () => {
+  assert.deepEqual(toggleAutomaticOutlineNumberingText("1. Alpha", 8, 8), {
+    value: "Alpha",
+    selectionStart: 5,
+    selectionEnd: 5,
+  });
+});
+
+test("automatic numbering toggle follows alphanumerical depth markers", () => {
+  const value = `1. Parent\n${EDITOR_TAB_TEXT}Child`;
+
+  assert.deepEqual(toggleAutomaticOutlineNumberingText(value, value.length, value.length), {
+    value: `1. Parent\n${EDITOR_TAB_TEXT}a. Child`,
+    selectionStart: value.length + 3,
+    selectionEnd: value.length + 3,
+  });
 });
 
 test("automatic numbering Shift+Tab returns an alphabetic child to the numeric parent flow", () => {

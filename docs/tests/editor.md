@@ -1,10 +1,10 @@
-Last updated: 2026-07-08
+Last updated: 2026-07-09
 
 # Unified Editor Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified surface contract, mail compose/attached-reply adapter mounting, and EmailPickerModal attach-only source guard; shared editing primitives also have rich/plain editor module tests)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified surface contract, full mail compose/attached-reply control exposure, shared controller wiring, and EmailPickerModal attach-only source guard; shared editing primitives also have rich/plain editor module tests, including automatic outline numbering toggle behavior)
 
 ## Business Logic
 
@@ -45,6 +45,7 @@ Expected:
 - No target surface keeps a separate local implementation that disagrees with the shared behavior.
 - Tests cover the shared behavior once and prove each adapter/mount uses that shared behavior.
 - Mail compose/reply adapters do not call browser `document.execCommand` directly for rich editing commands when a shared editor command exists.
+- Mail compose/reply and attached-email reply adapters expose numbered list, indent, outdent, bullet list, checklist, font size, bold, underline, link, and table controls where table insertion is supported.
 
 ### Scenario ED-S2: Domain Persistence Stays Separate
 
@@ -79,6 +80,7 @@ Expected:
 - Legacy plain text loads safely as escaped/linkified rich content.
 - Sent or saved rich content is sanitized.
 - Indented blocks remain indented in sent HTML instead of flattening.
+- Numbered-list toolbar actions create or toggle a shared automatic numbered/alphanumerical list item rather than only changing an outline-style setting.
 
 ### Scenario ED-S4: Chat Is Excluded
 

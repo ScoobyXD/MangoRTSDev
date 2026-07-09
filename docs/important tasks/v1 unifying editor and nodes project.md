@@ -215,6 +215,12 @@ Phase 1 implementation status (2026-07-08):
 - `EmailPickerModal` no longer owns compose/send/schedule/draft UI or logic; it remains an attach/select mailbox picker.
 - Focused frontend coverage lives in `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`, alongside the existing rich/plain editor behavior tests.
 
+Phase 1 regression fix status (2026-07-09):
+
+- Mail compose/reply and attached-email reply toolbars expose the full supported unified control set: numbered list, indent, outdent, bullet list, checklist, font size, bold, underline, link, and table.
+- Numbered-list toolbar actions route through the shared rich-editor controller and automatic numbered/alphanumerical outline helper instead of only switching the outline-style state.
+- Shared controller methods for numbered list, indent, and outdent live behind `UnifiedRichEditorSurface` and reuse the editor module behavior helpers; personal/shared mail send scopes and attached-email reply send flow remain unchanged.
+
 ### Phase 2: Unify The Node Shell
 
 - Confirm every current full node window/shell surface in code before changing implementation.

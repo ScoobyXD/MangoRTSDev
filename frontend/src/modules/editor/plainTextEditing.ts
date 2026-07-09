@@ -334,6 +334,50 @@ export function insertAutomaticOutlineFirstText(
   };
 }
 
+export function toggleAutomaticOutlineNumberingText(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+): PlainTextEdit | null {
+  const { start, end } = clampSelection(value, selectionStart, selectionEnd);
+  const { lineStart, lineEnd, line } = readLine(value, start);
+  const parsed = parseOutlineLine(line);
+
+  if (parsed) {
+    const markerEnd = parsed.indentation.length + parsed.marker.length + parsed.delimiter.length + parsed.spacing.length;
+    const replacementLine = `${parsed.indentation}${parsed.rest}`;
+    const remapOffset = (offset: number): number => {
+      const relative = Math.max(0, Math.min(line.length, offset - lineStart));
+      if (relative <= markerEnd) return parsed.indentation.length;
+      return parsed.indentation.length + (relative - markerEnd);
+    };
+    return {
+      value: `${value.slice(0, lineStart)}${replacementLine}${value.slice(lineEnd)}`,
+      selectionStart: lineStart + remapOffset(start),
+      selectionEnd: lineStart + remapOffset(end),
+    };
+  }
+
+  const indentation = readLineIndentation(line);
+  const depth = countIndentDepth(indentation);
+  const linesBeforeCurrent = value.slice(0, lineStart).split(/\r\n|\n|\r/);
+  if (linesBeforeCurrent.length > 0 && linesBeforeCurrent[linesBeforeCurrent.length - 1] === "") linesBeforeCurrent.pop();
+  const marker = nextMarkerForOutlineDepth(linesBeforeCurrent, depth);
+  const prefix = `${marker}. `;
+  const replacementLine = `${indentation}${prefix}${line.slice(indentation.length)}`;
+  const markerEnd = indentation.length + prefix.length;
+  const remapOffset = (offset: number): number => {
+    const relative = Math.max(0, Math.min(line.length, offset - lineStart));
+    if (relative <= indentation.length) return markerEnd;
+    return relative + prefix.length;
+  };
+  return {
+    value: `${value.slice(0, lineStart)}${replacementLine}${value.slice(lineEnd)}`,
+    selectionStart: lineStart + remapOffset(start),
+    selectionEnd: lineStart + remapOffset(end),
+  };
+}
+
 export function deleteEditorBackspaceText(value: string, selectionStart: number, selectionEnd: number): PlainTextEdit | null {
   const { start, end } = clampSelection(value, selectionStart, selectionEnd);
   if (start !== end || start < EDITOR_TAB_TEXT.length) return null;

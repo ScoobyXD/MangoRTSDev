@@ -21,6 +21,18 @@ export type UnifiedRichEditorSurfaceContract = {
   chatSurface: false;
 };
 
+export type UnifiedRichEditorControlID =
+  | "numbered-list"
+  | "indent"
+  | "outdent"
+  | "bullet-list"
+  | "checklist"
+  | "font-size"
+  | "bold"
+  | "underline"
+  | "link"
+  | "table";
+
 export const UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS: readonly UnifiedRichEditorSurfaceContract[] = [
   { id: "logic-gate-editor", persistenceBoundary: "logic-gate-information-projection", chatSurface: false },
   { id: "node-text-block", persistenceBoundary: "node-information-projection", chatSurface: false },
@@ -28,4 +40,17 @@ export const UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS: readonly UnifiedRichEditorSu
   { id: "my-triage-compose", persistenceBoundary: "personal-mailbox", chatSurface: false },
   { id: "shared-triage-compose", persistenceBoundary: "shared-mailbox", chatSurface: false },
   { id: "attached-email-reply", persistenceBoundary: "personal-mailbox", chatSurface: false },
+] as const;
+
+export const UNIFIED_RICH_EDITOR_MAIL_CONTROL_IDS: readonly UnifiedRichEditorControlID[] = [
+  "numbered-list",
+  "indent",
+  "outdent",
+  "bullet-list",
+  "checklist",
+  "font-size",
+  "bold",
+  "underline",
+  "link",
+  "table",
 ] as const;

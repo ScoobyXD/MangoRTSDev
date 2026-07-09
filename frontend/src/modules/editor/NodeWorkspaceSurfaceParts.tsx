@@ -16,7 +16,9 @@ import {
 } from "./richTextEditing";
 import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
 import {
+  applyEditorIndentCommandToRoot,
   applyEditorInlineFormatToRoot,
+  applyEditorNumberedListToRoot,
   applyEditorSelectionFontSizeToRoot,
   readEditorSelectionFormatState,
   useEditorDocumentSurfaceHandlers,
@@ -838,6 +840,33 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         onSelectionInlineFormatChange,
       });
     },
+    toggleNumberedList: () => {
+      const editor = editorRef.current;
+      if (!editable || !editor) return false;
+      return applyEditorNumberedListToRoot(editor, {
+        documentUndoHistory: documentUndoHistoryRef.current,
+        scheduleDocumentSave: scheduleNodeDocumentSave,
+        scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
+      });
+    },
+    indent: () => {
+      const editor = editorRef.current;
+      if (!editable || !editor) return false;
+      return applyEditorIndentCommandToRoot(editor, "indent", outlineStyle, {
+        documentUndoHistory: documentUndoHistoryRef.current,
+        scheduleDocumentSave: scheduleNodeDocumentSave,
+        scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
+      });
+    },
+    outdent: () => {
+      const editor = editorRef.current;
+      if (!editable || !editor) return false;
+      return applyEditorIndentCommandToRoot(editor, "outdent", outlineStyle, {
+        documentUndoHistory: documentUndoHistoryRef.current,
+        scheduleDocumentSave: scheduleNodeDocumentSave,
+        scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
+      });
+    },
     insertTable: () => {
       if (!editable) return false;
       return insertTable(editorRef.current);
@@ -846,7 +875,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       const editor = editorRef.current;
       return editor ? readEditorSelectionFormatState(editor, selectionFontSizeRef.current) : null;
     },
-  }), [editable, handleSelectionFontSizeChange, insertTable, onSelectionInlineFormatChange, scheduleNodeDocumentSave, scheduleTextBlockIndentGuideUpdate]);
+  }), [editable, handleSelectionFontSizeChange, insertTable, onSelectionInlineFormatChange, outlineStyle, scheduleNodeDocumentSave, scheduleTextBlockIndentGuideUpdate]);
 
   const activateFormattingController = useCallback(() => {
     if (!formattingControllerRef || !editable) return;
@@ -3765,6 +3794,22 @@ const attachedEmailReplyWideToolButtonStyle: React.CSSProperties = {
   minWidth: 40,
 };
 
+const attachedEmailReplyFontSelectStyle: React.CSSProperties = {
+  minWidth: 58,
+  height: 24,
+  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+  borderRadius: 7,
+  background: EDITOR_NEU_SURFACE,
+  color: "inherit",
+  outline: "none",
+  padding: "0 5px",
+  fontSize: 10.5,
+  fontWeight: 850,
+  cursor: "pointer",
+  boxSizing: "border-box",
+  boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.78)",
+};
+
 const EmailSelectionActionIconFrame: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <span aria-hidden="true" style={{ width: 16, height: 16, display: "grid", placeItems: "center", lineHeight: 0 }}>
     {children}
@@ -4321,9 +4366,14 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     if (!rawHref.trim()) return;
     replyEditorControllerRef.current?.insertLink(rawHref);
   }, []);
-  const selectReplyNumberedMode = useCallback(() => {
+  const applyReplyFontSize = useCallback((size: string) => {
+    const fontSize = Number.parseInt(size, 10);
+    if (!Number.isFinite(fontSize)) return;
+    replyEditorControllerRef.current?.applyFontSizeValue(fontSize);
+  }, []);
+  const toggleReplyNumberedList = useCallback(() => {
     setReplyOutlineStyle("automatic-outline-numbering");
-    replyEditorControllerRef.current?.focus();
+    replyEditorControllerRef.current?.toggleNumberedList();
   }, []);
   const insertReplyBulletList = useCallback(() => {
     setReplyOutlineStyle("bullet-list");
@@ -4332,6 +4382,12 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const insertReplyChecklist = useCallback(() => {
     setReplyOutlineStyle("checklist");
     replyEditorControllerRef.current?.insertList("checklist");
+  }, []);
+  const outdentReplyBody = useCallback(() => {
+    replyEditorControllerRef.current?.outdent();
+  }, []);
+  const indentReplyBody = useCallback(() => {
+    replyEditorControllerRef.current?.indent();
   }, []);
 
   const showConversationHeader = loading || Boolean(error) || Boolean(message && !inlineExpansion);
@@ -4604,11 +4660,31 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
                 <button type="button" title="Bold" aria-label="Bold" disabled={!editable} onClick={() => replyEditorControllerRef.current?.toggleInlineFormat("bold")} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>B</button>
                 <button type="button" title="Underline" aria-label="Underline" disabled={!editable} onClick={() => replyEditorControllerRef.current?.toggleInlineFormat("underline")} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>U</button>
-                <button type="button" title="Numbered list" aria-label="Numbered list" disabled={!editable} onClick={selectReplyNumberedMode} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>1.</button>
+                <button type="button" title="Numbered list" aria-label="Numbered list" disabled={!editable} onClick={toggleReplyNumberedList} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>1.</button>
                 <button type="button" title="Bullet list" aria-label="Bullet list" disabled={!editable} onClick={insertReplyBulletList} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>-</button>
                 <button type="button" title="Checklist" aria-label="Checklist" disabled={!editable} onClick={insertReplyChecklist} style={{ ...attachedEmailReplyWideToolButtonStyle, color: accent }}>Check</button>
+                <button type="button" title="Outdent" aria-label="Outdent" disabled={!editable} onClick={outdentReplyBody} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>{"<<"}</button>
+                <button type="button" title="Indent" aria-label="Indent" disabled={!editable} onClick={indentReplyBody} style={{ ...attachedEmailReplyToolButtonStyle, color: accent }}>{">>"}</button>
                 <button type="button" title="Create link" aria-label="Create link" disabled={!editable} onClick={createReplyHyperlink} style={{ ...attachedEmailReplyWideToolButtonStyle, color: accent }}>Link</button>
                 <button type="button" title="Insert table" aria-label="Insert table" disabled={!editable} onClick={() => replyEditorControllerRef.current?.insertTable()} style={{ ...attachedEmailReplyWideToolButtonStyle, color: accent }}>Table</button>
+                <select
+                  aria-label="Font size"
+                  disabled={!editable}
+                  style={{ ...attachedEmailReplyFontSelectStyle, color: accent, opacity: editable ? 1 : 0.46 }}
+                  defaultValue=""
+                  onChange={(event) => {
+                    applyReplyFontSize(event.currentTarget.value);
+                    event.currentTarget.value = "";
+                  }}
+                >
+                  <option value="" disabled>Size</option>
+                  <option value="12">12</option>
+                  <option value="14">14</option>
+                  <option value="16">16</option>
+                  <option value="18">18</option>
+                  <option value="22">22</option>
+                  <option value="28">28</option>
+                </select>
               </div>
               <UnifiedRichEditorSurface
                 value={bodyDraft}
