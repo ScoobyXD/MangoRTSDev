@@ -229,7 +229,7 @@ func requestCompanyID(r *http.Request) (string, error) {
 }
 
 func requestBodyCompanyIDIgnoredByHandler(r *http.Request) bool {
-	return r.Method == http.MethodPost && r.URL.Path == "/v1/communications/messages/send"
+	return r.Method == http.MethodPost && (r.URL.Path == "/v1/communications/messages/send" || r.URL.Path == "/v1/attachments")
 }
 
 func readCompanyIDFromJSONBody(r *http.Request, maxScanBytes int64) (string, bool, error) {

@@ -18,6 +18,20 @@ type resourceGVICAssignmentsRequest struct {
 func (s *Server) handleResourceSubresource(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.TrimPrefix(r.URL.Path, "/v1/resources/")
 	parts := strings.Split(trimmed, "/")
+	if len(parts) >= 3 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" && parts[2] == "attachments" {
+		resourceType := store.NormalizeAttachmentResourceType(parts[0])
+		if resourceType == "" {
+			writeError(w, http.StatusBadRequest, "invalid_resource_type")
+			return
+		}
+		resourceID := strings.TrimSpace(parts[1])
+		if resourceID == "" {
+			writeError(w, http.StatusBadRequest, "resource_id_required")
+			return
+		}
+		s.handleResourceAttachments(w, r, resourceType, resourceID, parts)
+		return
+	}
 	if len(parts) < 3 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" || parts[2] != "gvic" {
 		writeError(w, http.StatusNotFound, "not_found")
 		return

@@ -34,6 +34,7 @@ func main() {
 		},
 		NylasClient:          buildNylasClient(),
 		NylasConfig:          nylasConfig,
+		AttachmentStorage:    httpapi.NewS3AttachmentStorageFromEnv(),
 		RealtimeTicketSecret: secretEnvValue("MANGORTS_REALTIME_TICKET_SECRET", "realtime_ticket_secret", "ticket_secret", "MANGORTS_REALTIME_TICKET_SECRET"),
 		WorkspaceEventFanout: workspaceFanout,
 	})

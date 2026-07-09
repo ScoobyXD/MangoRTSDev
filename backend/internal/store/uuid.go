@@ -45,6 +45,10 @@ func newUUIDv7String() string {
 	return string(hexBytes[0:8]) + "-" + string(hexBytes[8:12]) + "-" + string(hexBytes[12:16]) + "-" + string(hexBytes[16:20]) + "-" + string(hexBytes[20:32])
 }
 
+func NewUUIDv7String() string {
+	return newUUIDv7String()
+}
+
 func nextUUIDv7TimestampSequence() (uint64, uint16) {
 	uuidV7Mu.Lock()
 	defer uuidV7Mu.Unlock()

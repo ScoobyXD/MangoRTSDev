@@ -30,6 +30,7 @@ type Repository interface {
 	IdentityRepository
 	AccountRepository
 	CommunicationsRepository
+	AttachmentRepository
 	WorkGraphRepository
 	LogicGateRepository
 	ProjectRepository
@@ -121,6 +122,172 @@ type CommunicationsRepository interface {
 	ListUserLogicGateShortcuts(userID, companyID string) ([]domain.UserLogicGateShortcut, error)
 	UpsertUserLogicGateShortcuts(userID, companyID string, logicGateIDs []string) ([]domain.UserLogicGateShortcut, error)
 	DeleteUserLogicGateShortcut(userID, companyID, logicGateID string) error
+}
+
+const (
+	AttachmentSourceUserUpload           = "user_upload"
+	AttachmentSourceEditorPaste          = "editor_paste"
+	AttachmentSourceChatUpload           = "chat_upload"
+	AttachmentSourceEmailIncoming        = "email_incoming"
+	AttachmentSourceEmailOutgoing        = "email_outgoing"
+	AttachmentSourceMigrationInlineImage = "migration_inline_image"
+
+	AttachmentVariantOriginal  = "original"
+	AttachmentVariantDisplay   = "display"
+	AttachmentVariantThumbnail = "thumbnail"
+	AttachmentVariantEmailSend = "email_send"
+
+	AttachmentRelationshipInlineImage       = "inline_image"
+	AttachmentRelationshipFileAttachment    = "file_attachment"
+	AttachmentRelationshipChatAttachment    = "chat_attachment"
+	AttachmentRelationshipEmailAttachment   = "email_attachment"
+	AttachmentRelationshipEmailInline       = "email_inline_attachment"
+	AttachmentRelationshipMigratedInlineImg = "migrated_inline_image"
+)
+
+type AttachmentRepository interface {
+	CreateAttachmentWithResourceLink(input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error)
+	GetAttachment(companyID, attachmentID string) (domain.Attachment, error)
+	GetAttachmentVariant(companyID, attachmentID, variantType string) (domain.AttachmentVariant, error)
+	ListAttachmentResourceLinks(companyID, attachmentID string) ([]domain.ResourceAttachment, error)
+	ListResourceAttachments(companyID, resourceType, resourceID string) ([]domain.ResourceAttachment, error)
+	LinkResourceAttachment(input ResourceAttachmentInput) (domain.ResourceAttachment, error)
+	SoftDeleteResourceAttachment(input ResourceAttachmentDeleteInput) error
+}
+
+type AttachmentCreateInput struct {
+	CompanyID        string
+	AttachmentID     string
+	UploadedByUserID string
+	OriginalFilename string
+	MimeType         string
+	ByteSize         int64
+	SHA256           string
+	StorageBucket    string
+	StorageKey       string
+	OriginalWidth    *int
+	OriginalHeight   *int
+	SourceKind       string
+	SourceProvider   string
+	ResourceLink     ResourceAttachmentInput
+	CreatedTimestamp time.Time
+}
+
+type AttachmentVariantInput struct {
+	AttachmentID     string
+	VariantType      string
+	MimeType         string
+	ByteSize         int64
+	Width            *int
+	Height           *int
+	StorageBucket    string
+	StorageKey       string
+	CreatedTimestamp time.Time
+}
+
+type ResourceAttachmentInput struct {
+	ResourceAttachmentID string
+	CompanyID            string
+	ResourceType         string
+	ResourceID           string
+	AttachmentID         string
+	InformationID        string
+	MessageID            string
+	EditorSurface        string
+	RelationshipKind     string
+	CreatedByUserID      string
+	CreatedTimestamp     time.Time
+}
+
+type ResourceAttachmentDeleteInput struct {
+	CompanyID    string
+	ResourceType string
+	ResourceID   string
+	AttachmentID string
+}
+
+func NormalizeAttachmentSourceKind(sourceKind string) string {
+	switch strings.TrimSpace(sourceKind) {
+	case "", AttachmentSourceUserUpload:
+		return AttachmentSourceUserUpload
+	case AttachmentSourceEditorPaste:
+		return AttachmentSourceEditorPaste
+	case AttachmentSourceChatUpload:
+		return AttachmentSourceChatUpload
+	case AttachmentSourceEmailIncoming:
+		return AttachmentSourceEmailIncoming
+	case AttachmentSourceEmailOutgoing:
+		return AttachmentSourceEmailOutgoing
+	case AttachmentSourceMigrationInlineImage:
+		return AttachmentSourceMigrationInlineImage
+	default:
+		return ""
+	}
+}
+
+func NormalizeAttachmentVariantType(variantType string) string {
+	switch strings.TrimSpace(variantType) {
+	case "", AttachmentVariantOriginal:
+		return AttachmentVariantOriginal
+	case AttachmentVariantDisplay:
+		return AttachmentVariantDisplay
+	case AttachmentVariantThumbnail:
+		return AttachmentVariantThumbnail
+	case AttachmentVariantEmailSend, "email-send":
+		return AttachmentVariantEmailSend
+	default:
+		return ""
+	}
+}
+
+func NormalizeAttachmentRelationshipKind(relationshipKind string) string {
+	switch strings.TrimSpace(relationshipKind) {
+	case "", AttachmentRelationshipFileAttachment:
+		return AttachmentRelationshipFileAttachment
+	case AttachmentRelationshipInlineImage:
+		return AttachmentRelationshipInlineImage
+	case AttachmentRelationshipChatAttachment:
+		return AttachmentRelationshipChatAttachment
+	case AttachmentRelationshipEmailAttachment:
+		return AttachmentRelationshipEmailAttachment
+	case AttachmentRelationshipEmailInline:
+		return AttachmentRelationshipEmailInline
+	case AttachmentRelationshipMigratedInlineImg:
+		return AttachmentRelationshipMigratedInlineImg
+	default:
+		return ""
+	}
+}
+
+func NormalizeAttachmentResourceType(resourceType string) string {
+	switch strings.TrimSpace(resourceType) {
+	case "node":
+		return "node"
+	case "logic_gate", "logic-gate":
+		return "logic_gate"
+	case "project":
+		return "project"
+	case "node_chat_message", "node-chat-message":
+		return "node_chat_message"
+	case "logic_gate_chat_message", "logic-gate-chat-message":
+		return "logic_gate_chat_message"
+	case "project_chat_message", "project-chat-message":
+		return "project_chat_message"
+	case "email_message", "email-message":
+		return "email_message"
+	case "email_draft", "email-draft":
+		return "email_draft"
+	case "attached_email", "attached-email":
+		return "attached_email"
+	case "shared_inbox", "shared-inbox":
+		return "shared_inbox"
+	case "company_explorer_folder", "company-explorer-folder":
+		return "company_explorer_folder"
+	case "shared_inbox_folder", "shared-inbox-folder":
+		return "shared_inbox_folder"
+	default:
+		return ""
+	}
 }
 
 type WorkGraphRepository interface {

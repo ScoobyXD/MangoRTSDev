@@ -78,6 +78,7 @@ type Server struct {
 	bootstrapDevAdmin                       BootstrapDevAdminConfig
 	nylasClient                             NylasClient
 	nylasConfig                             NylasConfig
+	attachmentStorage                       AttachmentObjectStorage
 	maxBodyBytes                            int64
 	legacyMapRoutesEnabled                  bool
 }
@@ -92,6 +93,7 @@ type ServerOptions struct {
 	BootstrapDevAdmin                       BootstrapDevAdminConfig
 	NylasClient                             NylasClient
 	NylasConfig                             NylasConfig
+	AttachmentStorage                       AttachmentObjectStorage
 	RealtimeTicketSecret                    string
 	MaxRequestBodyBytes                     int64
 	LegacyMapRoutesEnabled                  bool
@@ -229,6 +231,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		bootstrapDevAdmin:                       normalizeBootstrapDevAdminConfig(options.BootstrapDevAdmin),
 		nylasClient:                             options.NylasClient,
 		nylasConfig:                             options.NylasConfig,
+		attachmentStorage:                       options.AttachmentStorage,
 		maxBodyBytes:                            options.MaxRequestBodyBytes,
 		legacyMapRoutesEnabled:                  options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
 	}
@@ -311,6 +314,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/accounts/", s.handleAccountByID)
 	mux.HandleFunc("/v1/account-folders", s.handleAccountFolders)
 	mux.HandleFunc("/v1/account-folders/", s.handleAccountFolderByID)
+	mux.HandleFunc("/v1/attachments", s.handleAttachments)
+	mux.HandleFunc("/v1/attachments/", s.handleAttachmentByID)
 	mux.HandleFunc("/v1/resources/", s.handleResourceSubresource)
 	mux.HandleFunc("/v1/nodes", s.handleNodes)
 	mux.HandleFunc("/v1/nodes/", s.handleNodeSubresource)
