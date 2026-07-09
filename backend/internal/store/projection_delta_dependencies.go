@@ -617,6 +617,22 @@ with source as (
     case when relationship.resource_type='node' then node_assignment.assignment_id end as assignment_id,
     coalesce(nullif(gate.header, ''), nullif(node_row.name, ''), relationship.resource_id::text) as display_title,
     case when relationship.resource_type='logic_gate' then 'Logic Gate' else nullif(node_row.status, '') end as status,
+    relationship.resource_type='node' and (
+      exists (
+        select 1
+        from communications_email_nodes email_node
+        where email_node.company_id=relationship.company_id
+          and email_node.node_id=relationship.resource_id
+      )
+      or exists (
+        select 1
+        from node_projection_table node_projection
+        where node_projection.company_id=relationship.company_id
+          and node_projection.node_id=relationship.resource_id
+          and node_projection.type='Attached email'::information_type
+          and node_projection.information like '%"created_from_email":true%'
+      )
+    ) as created_from_email,
     relationship.position,
     coalesce(gate.created_timestamp, node_row.created_timestamp) as resource_created_timestamp,
     relationship.created_timestamp as relationship_created_timestamp,
@@ -666,6 +682,7 @@ insert into project_relationship_projection (
   assignment_id,
   display_title,
   status,
+  created_from_email,
   position,
   resource_created_timestamp,
   relationship_created_timestamp,
@@ -683,6 +700,7 @@ select
   assignment_id,
   display_title,
   status,
+  created_from_email,
   position,
   resource_created_timestamp,
   relationship_created_timestamp,
@@ -699,6 +717,7 @@ do update set
   assignment_id=excluded.assignment_id,
   display_title=excluded.display_title,
   status=excluded.status,
+  created_from_email=excluded.created_from_email,
   position=excluded.position,
   resource_created_timestamp=excluded.resource_created_timestamp,
   relationship_created_timestamp=excluded.relationship_created_timestamp,
@@ -852,6 +871,7 @@ func projectRelationshipProjectionRowFromDomain(item domain.ProjectRelationshipP
 		AssignmentID:                 strings.TrimSpace(pointerStringValue(item.AssignmentID)),
 		DisplayTitle:                 strings.TrimSpace(item.DisplayTitle),
 		Status:                       cloneStringPointer(item.Status),
+		CreatedFromEmail:             item.CreatedFromEmail,
 		Position:                     item.Position,
 		ResourceCreatedTimestamp:     item.ResourceCreatedTimestamp,
 		RelationshipCreatedTimestamp: item.RelationshipCreatedTimestamp,

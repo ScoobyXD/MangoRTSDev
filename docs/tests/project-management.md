@@ -38,13 +38,14 @@ PM27 - Timeline item duration is normalized into the supported range.
 PM28 - A user can create timeline items for themself when entity access allows it.
 PM29 - Creating timeline items for another user requires company manager authorization.
 PM30 - Updating or deleting a timeline item requires authorization for the timeline item's owner.
-PM31 - Adding an existing node to a project from the node workspace requires selecting the project and then selecting a Logic Gate that belongs to that project.
-PM32 - Confirming node-to-project assignment creates or updates the node/project relationship and assigns the node to the selected project Logic Gate using the normal project and Logic Gate access rules.
+PM31 - Adding an existing node to a project from the node workspace requires selecting the project; selecting a Logic Gate that belongs to that project is optional.
+PM32 - Confirming node-to-project assignment without a Logic Gate creates or updates the node/project relationship and does not change Logic Gate assignment.
 PM33 - Opening a project from a node workspace Go to Project action navigates to the related project without changing the node/project relationship.
-PM34 - Project information/projection attachment payloads must follow `docs/tests/attachments.md`: durable project rows store Mango attachment references instead of data URLs, base64 file bytes, or embedded file payloads, and mutation/read access follows project permissions.
-PM35 - The project detail work panel exposes Critical Path and Logic Gates / Nodes as distinct project relationship views; Critical Path is the default entry view.
-PM36 - Double-clicking a node in the Project Logic Gates / Nodes view opens that node in the standard full node editor window instead of creating a project-owned node editor surface.
-PM37 - Opening a node from Project Management preserves node-level access, node information/projection persistence, unified node shell behavior, unified node text-box editor semantics, and separate chat-pane behavior; the project relationship is opener context only and must not become the persistence owner for node edits.
+PM34 - Confirming a project Logic Gate assignment creates or updates the node/project relationship and assigns or moves the node to the selected project Logic Gate using the normal project and Logic Gate access rules.
+PM35 - Project information/projection attachment payloads must follow `docs/tests/attachments.md`: durable project rows store Mango attachment references instead of data URLs, base64 file bytes, or embedded file payloads, and mutation/read access follows project permissions.
+PM36 - The project detail work panel exposes Critical Path and Logic Gates / Nodes as distinct project relationship views; Critical Path is the default entry view.
+PM37 - Double-clicking a node in the Project Logic Gates / Nodes view opens that node in the standard full node editor window instead of creating a project-owned node editor surface.
+PM38 - Opening a node from Project Management preserves node-level access, node information/projection persistence, unified node shell behavior, unified node text-box editor semantics, and separate chat-pane behavior; the project relationship is opener context only and must not become the persistence owner for node edits.
 
 ## Scenarios
 
@@ -123,7 +124,7 @@ Business logic covered:
 - PM6
 - PM10
 - PM11
-- PM34
+- PM35
 
 Given:
 - A user adds pasted images or files to a project information/projection text block.
@@ -165,25 +166,27 @@ Business logic covered:
 - PM31
 - PM32
 - PM33
+- PM34
 
 Given:
 - A user edits an existing node.
-- The company has at least one project with one or more related Logic Gates.
+- The company has at least one project, and one project may have related Logic Gates.
 - The user opens the node workspace project assignment control.
 
 Expected:
 - The first assignment step lists accessible projects.
-- After a project is selected, the second step lists Logic Gates related to that project.
-- Confirming a Logic Gate creates or updates the node/project relationship.
-- The node is assigned or moved to the selected Logic Gate.
+- After a project is selected, the user can assign the node directly to the project without choosing a Logic Gate.
+- The optional second step lists Logic Gates related to that project.
+- Confirming project-only assignment creates or updates the node/project relationship and does not require node priority.
+- Confirming a Logic Gate creates or updates the node/project relationship and assigns or moves the node to the selected Logic Gate.
 - Go to Project opens the related project directly and does not mutate project relationships.
 
 ### Scenario PM-S6: Project Relationship Node Openers
 
 Business logic covered:
-- PM35
 - PM36
 - PM37
+- PM38
 
 Given:
 - A project has related Logic Gates and nodes.

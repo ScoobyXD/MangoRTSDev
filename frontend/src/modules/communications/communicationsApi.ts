@@ -948,7 +948,7 @@ export async function fetchCommunicationsWorkspacePanel(companyID: string): Prom
 }
 
 export type CommunicationsTriageConversionTarget =
-  | { mode: "existing_logic_gate"; logicGateID: string }
+  | { mode: "existing_logic_gate"; logicGateID: string; projectID?: string; position?: number }
   | { mode: "existing_node"; nodeID: string; logicGateID?: string }
   | { mode: "folder"; folderID?: string; parentEntityID?: string; position?: number }
   | { mode: "project"; projectID: string; position?: number };
@@ -967,7 +967,7 @@ export type CommunicationsTriageConversionResult = {
 function communicationsTriageConversionTargetPayload(target: CommunicationsTriageConversionTarget): Record<string, unknown> {
   switch (target.mode) {
     case "existing_logic_gate":
-      return { mode: "existing_logic_gate", logic_gate_id: target.logicGateID };
+      return { mode: "existing_logic_gate", logic_gate_id: target.logicGateID, project_id: target.projectID || undefined, position: target.position };
     case "existing_node":
       return { mode: "existing_node", node_id: target.nodeID, logic_gate_id: target.logicGateID || undefined };
     case "folder":

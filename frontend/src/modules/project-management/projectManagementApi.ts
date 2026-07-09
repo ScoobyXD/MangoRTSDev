@@ -98,6 +98,7 @@ export type ProjectRelationshipProjection = {
   node_id?: string | null;
   display_title: string;
   status?: string | null;
+  created_from_email?: boolean;
   position: number;
   resource_created_timestamp: string;
   relationship_created_timestamp: string;

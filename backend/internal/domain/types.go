@@ -658,6 +658,7 @@ type ProjectRelationshipProjection struct {
 	AssignmentID                 *string   `json:"assignment_id,omitempty"`
 	DisplayTitle                 string    `json:"display_title"`
 	Status                       *string   `json:"status,omitempty"`
+	CreatedFromEmail             bool      `json:"created_from_email,omitempty"`
 	Position                     int       `json:"position"`
 	ResourceCreatedTimestamp     time.Time `json:"resource_created_timestamp"`
 	RelationshipCreatedTimestamp time.Time `json:"relationship_created_timestamp"`

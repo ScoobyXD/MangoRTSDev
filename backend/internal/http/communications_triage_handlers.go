@@ -175,7 +175,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		!s.requireEntityEdit(w, r, conversionInput.CompanyID, store.EntityTypeNode, conversionInput.NodeID, "node_not_found") {
 		return
 	}
-	if conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetProject &&
+	if strings.TrimSpace(conversionInput.Target.ProjectID) != "" &&
 		!s.requireEntityEdit(w, r, conversionInput.CompanyID, store.EntityTypeProject, conversionInput.Target.ProjectID, "project_not_found") {
 		return
 	}

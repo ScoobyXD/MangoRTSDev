@@ -31,6 +31,11 @@ P20 - Project text-box inline images and project text-block attachment arrays mu
 P21 - Project chat attachments use Mango attachment references, and project critical-path inline node windows inherit node attachment behavior while preserving node-owned persistence for node edits.
 P22 - In the Project Logic Gates / Nodes tab, double-clicking a node opens the standard full node editor window for that node instead of a project-specific editor surface.
 P23 - Nodes opened from the Project Logic Gates / Nodes tab use the unified node shell, unified node text-box editor semantics, node information/projection persistence, attached-email behavior, and separate chat-pane behavior of the standard node editor.
+P24 - Dropping a My Triage or mailbox-capable Shared Triage email onto a project relationship panel creates an email-derived standalone node relationship for that project.
+P25 - Dropping a My Triage or mailbox-capable Shared Triage email onto a Logic Gate group inside a project creates an email-derived node/card in that Logic Gate and a node relationship in the project.
+P26 - Project relationship node rows created from email expose `created_from_email = true` and show an email-origin icon.
+P27 - Successful project email drops dispatch the same Home triage conversion reconciliation event as Kanban and Company Explorer drops, including `shared_inbox_id` and `unstarred_message_ids` when present.
+P28 - Successful project email drops open the created node in the normal node popup.
 
 ## Scenarios
 
@@ -167,3 +172,24 @@ Expected:
 - Text boxes inside that window use the unified node editor semantics.
 - Node edits save through node information/projection persistence, not project information/projection or project relationship persistence.
 - Chat panes inside the opened node window remain chat surfaces and do not inherit unified rich-editor toolbar or keyboard semantics.
+
+### Scenario P-S8: Email Drop Creates Project Node
+
+Business logic covered:
+- P24
+- P25
+- P26
+- P27
+- P28
+
+Given:
+- A user has an email row from My Triage or a mailbox-capable Shared Triage inbox.
+- A project detail surface is open in another Chrome window or tab for the same account.
+- The project may have zero or more related Logic Gates.
+
+Expected:
+- Dropping the email on the project relationship panel creates a node relationship in the project without requiring a Logic Gate.
+- Dropping the email on a Logic Gate group inside the project creates the node/card in that Logic Gate and relates the created node to the project.
+- Created project relationship rows for email-derived nodes expose `created_from_email = true` and show the email-origin icon.
+- The source Home mail row is reconciled through the local conversion event, including shared inbox scope and unstarred IDs when present.
+- The created node opens in the standard node popup after the drop succeeds.
