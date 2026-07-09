@@ -641,7 +641,8 @@ limit $2`,
 			Query: `select user_id::text || '|' || message_id,
        '', 'email_message', message_id, '', message_id, message::text
 from communications_triage_items
-where ` + pred("message::text") + `
+where nullif($1, '') is null
+  and ` + pred("message::text") + `
 order by updated_timestamp desc
 limit $2`,
 		},
