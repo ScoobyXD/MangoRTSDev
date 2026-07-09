@@ -9,8 +9,8 @@ Coverage Status:
 ## Business Logic
 
 ST1 - Shared Triage shows shared inbox folders and mailboxes that are visible to the current user.
-ST2 - Normal users only see shared inbox folders where effective access grants at least view access.
-ST3 - Dev admins and company admins can see all shared inbox folders with admin-level effective access; company managers follow shared inbox resource permissions.
+ST2 - Normal `company_user` users only see shared inbox folders where effective access grants at least view access, and this folder-listing path must work without relying on a dev-admin or company-admin bypass.
+ST3 - Dev admins and company admins can see all shared inbox folders with admin-level effective access; company managers and normal users follow Shared Triage resource policy from default access, direct user grants, and group grants.
 ST4 - Creating a Shared Triage folder or mailbox-capable shared inbox requires manager/admin authority, a nonblank name, and edit access to the selected parent when the item is nested.
 ST5 - Creating a Shared Triage folder or mailbox-capable shared inbox does not create private creator grants; access remains controlled by the resource default and `resource_permissions` exception rows.
 ST6 - Shared inbox folders and mailbox entries use the same tree model, with mailbox-capable entries identified by a shared inbox entry type, account email, and company email connection link.
@@ -25,9 +25,9 @@ ST14 - View-only shared inbox access can read mailbox content but cannot send fr
 ST15 - Reading shared inbox access settings requires manager/admin authority and view access to the shared inbox.
 ST16 - Updating shared inbox access settings requires manager/admin authority and edit access to the shared inbox.
 ST17 - Shared inbox access settings return default access, explicit access grants, GVIC assignments, effective access, whether the actor can edit permissions, and whether the actor can edit manager permissions.
-ST18 - Updating shared inbox access changes `resource_permissions` exception rows/default access and must not convert GVIC assignments into permission grants.
-ST19 - Shared inbox access grants support user and group principals.
-ST20 - If shared inbox access storage is unavailable, access endpoints return a service-unavailable error instead of silently succeeding.
+ST18 - Updating shared inbox access changes `resource_permissions` exception rows/default access and must not convert GVIC assignments into permission grants; GVIC assignments are notification/My Work/update routing data and must not grant Shared Triage view/edit access, elevate view to edit, or authorize delete/mutation actions.
+ST19 - Shared inbox access grants support user and group principals, and group grants resolve from `company_user_groups` and `company_user_group_members` source data instead of requiring a derived group closure/projection table to be populated after schema reset.
+ST20 - If required Shared Triage access or folder-list storage is unavailable, access and folder-list endpoints return service unavailable with `shared_inbox_storage_unavailable`, not a silent success or generic `failed_to_list_shared_inboxes` error.
 ST21 - Shared inbox GVIC assignment APIs apply only to mailbox/shared inbox resources, not plain organizational folders.
 ST22 - Shared Triage must not show private personal mailbox messages unless they were explicitly added through a shared inbox path.
 ST23 - Shared inbox access and tree changes publish workspace events so other clients refresh.
@@ -43,7 +43,7 @@ ST32 - Users with view or edit permission to a shared inbox can open the shared 
 ST33 - If a company-owned shared connection is missing or expired, normal permitted users see a repair-required state and do not receive a personal OAuth prompt.
 ST34 - If a company-owned shared connection is missing or expired, managers/admins who can edit that shared inbox can start shared inbox OAuth reconnect for the company-owned credential.
 ST35 - Shared inbox mail actions use the company-owned grant but are authorized and audited as the currently logged-in user.
-ST36 - Shared inbox permissions remain stored on resource_permissions with resource_type = shared_inbox and resource_id = shared_inboxes.shared_inbox_id.
+ST36 - Shared inbox permissions remain stored on resource_permissions with resource_type = shared_inbox and resource_id = shared_inboxes.shared_inbox_id; Shared Triage folder permissions use resource_type = shared_inbox_folder, and `shared_triage_folder` may appear only as a legacy resource-type alias, not as a table name.
 ST37 - Shared inbox GVIC assignments remain stored on resource_gvic_assignments with resource_type = shared_inbox and resource_id = shared_inboxes.shared_inbox_id.
 ST38 - Email connection records do not receive Shared Triage permissions or GVIC assignments; permissions and GVIC are assigned to the shared inbox work surface.
 ST39 - Plain Shared Triage folders are organizational containers only; selecting one clears mail state and must not call email folder, message list, message detail, prefetch, or load-more endpoints.
@@ -112,7 +112,7 @@ ST101 - Shared Triage reply drafts are unique per company, user, shared inbox sc
 ST102 - A saved Shared Triage reply draft stores or reloads the original shared message context, and reopening the draft shows the original email being answered above the compose editor.
 ST103 - Shared Triage compose supports To, Cc, Bcc, Reply, Reply All, and Forward; Reply All excludes the active shared mailbox address from generated recipients.
 ST104 - Shared Triage scheduled sends are saved as scheduled drafts with the selected `shared_inbox_id`, use the company-owned shared grant when due while the app is open, and delete the scheduled draft only after send succeeds.
-ST105 - Shared Triage compose uses the same rich text controls expected from node and logic-gate editors: numbered/alphanumeric list, indent/outdent, bullet list, checklist, font size, bold, underline, and hyperlink creation.
+ST105 - Shared Triage compose and reply use the unified editor semantics shared with node, Logic Gate, project, and attached-email reply editor surfaces, including numbered/alphanumeric list, indent/outdent, bullet list, checklist, font size, bold, underline, hyperlink creation, paste cleanup, Delete/Backspace, and copy/cut/paste behavior.
 ST106 - Shared Triage compose stores rich editor content as sanitized rich HTML, while legacy plain text drafts continue to load and send as escaped/linkified HTML.
 ST107 - Shared Triage received email detail must display Cc recipients when the provider returns them; Bcc is displayed only when it is present on messages the viewer is allowed to see.
 ST108 - Links in Shared Triage email bodies, forwarded/replied original-message previews, sent reply bodies, and shared email signatures must open in a new browser tab when clicked.
@@ -126,6 +126,7 @@ ST115 - A grouped Shared Triage row uses the newest loaded message as the visibl
 ST116 - Selecting a Shared Triage thread row opens a scrollable, full-height conversation detail pane that hydrates the thread through Nylas thread `message_ids` plus individual message-detail reads for HTML bodies, all scoped to the selected `shared_inbox_id` and company-owned shared grant.
 ST117 - Shared Triage rich compose send must preserve sanitized block indentation, including indent/outdent and blockquote-style indents, so sent shared email HTML does not flatten intended paragraph indentation.
 ST118 - Expired or revoked company-owned Shared Triage mailbox provider credentials return a Shared Triage reconnect/repair state, not a Mango auth logout; permitted users remain signed in and managers/admins with edit access can repair the shared connection. Shared mailbox folder, message-list, message-detail, send, archive, star, and draft endpoints must not represent provider reauthorization as a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response; they must return a recoverable provider-specific response, such as `409 nylas_reauth_required`.
+ST119 - Any future change to unified editor semantics must apply to Shared Triage compose and reply through the shared editor behavior, not through a separate shared-compose-only implementation.
 
 ## Nylas Configuration Contract
 
@@ -163,7 +164,8 @@ Expected:
 - User A only sees the shared inboxes where effective access grants view or higher.
 - User A does not see private personal mailbox messages in Shared Triage.
 - The company admin sees shared inboxes with admin-level effective access.
-- The company manager sees only shared inboxes where effective access grants view or higher.
+- The company_user folder-listing path works without a dev-admin or company-admin bypass.
+- The company manager sees only shared inboxes where effective access grants view or higher through default, direct user, or group grants.
 - Mailbox-capable entries and plain folder entries are represented in the same tree without mixing their mailbox behavior.
 - User A opens a visible shared inbox without connecting that mailbox to User A's personal account.
 - The visible Shared Triage folder query succeeds for User A without SQL argument-count errors.
@@ -266,10 +268,11 @@ Expected:
 - The regular view-only user cannot read or update access settings.
 - The company manager can update default access and explicit resource grants for regular company users.
 - The response includes default access, explicit grants, GVIC assignments, effective access, can-edit-permissions, and can-edit-manager-permissions.
-- GVIC assignments are not converted into resource permission grants.
-- User and group grants are both accepted.
+- GVIC assignments are not converted into resource permission grants and do not grant view/edit access, elevate view-only access, or authorize delete/mutation actions.
+- User and group grants are both accepted, and group grants resolve from source group membership tables rather than a derived group projection table.
 - Permissions and GVIC rows target the shared inbox resource, not the company email connection.
-- If storage is unavailable, the endpoint returns service unavailable.
+- Shared Triage folder permissions use the `shared_inbox_folder` resource type, mailbox permissions use the `shared_inbox` resource type, and `shared_triage_folder` is not treated as a table name.
+- If storage is unavailable, the endpoint returns service unavailable with `shared_inbox_storage_unavailable`.
 
 ### Scenario ST-S5: Shared Inbox GVIC Scope
 
@@ -285,6 +288,7 @@ Expected:
 - GVIC assignments can be managed for the mailbox/shared inbox resource.
 - GVIC assignments are rejected for a plain organizational folder when that resource is not a mailbox/shared inbox.
 - GVIC assignments do not move when the shared inbox is reconnected to the same or a different company email connection.
+- Loading the Shared Triage folder tree does not depend on GVIC projection tables such as `resource_gvic_effective_assignments`.
 
 ### Scenario ST-S6: Company-Owned Shared Mailbox Connection Setup
 
@@ -487,6 +491,7 @@ Business logic covered:
 - ST110
 - ST111
 - ST112
+- ST119
 
 Given:
 - A user has edit access to a mailbox-capable Shared Triage inbox.
@@ -508,6 +513,7 @@ Expected:
 - Replying to the same shared source email never creates more than one reply draft for that source message and shared mailbox scope.
 - Reopening a shared reply draft shows the original email context above the compose editor.
 - Reply, Reply All, Forward, Cc, Bcc, scheduled send, and rich compose send through the selected shared inbox scope and continue to require edit access.
+- Shared rich compose controls use the unified editor behavior shared with node, Logic Gate, project, and attached-email reply editor surfaces.
 - A future scheduled shared send is saved as a scheduled draft with `shared_inbox_id`, is sent through the company-owned shared grant when due while the app is open, and is deleted only after send succeeds.
 - Received Cc recipients are visible in message detail.
 - Shared email body/signature/original-preview links open in a new browser tab on click.

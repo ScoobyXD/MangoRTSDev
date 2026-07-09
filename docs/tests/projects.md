@@ -1,4 +1,4 @@
-Last updated: 2026-07-01
+Last updated: 2026-07-08
 
 # Projects Tests
 
@@ -22,6 +22,10 @@ P11 - The project work panel opens with Critical Path selected before Logic Gate
 P12 - Empty critical-path resource cells use an Add node action, not a drag/drop node-or-logic-gate prompt.
 P13 - Add node opens a Company Explorer node search picker that uses Company Explorer search results and visibility rules.
 P14 - Selecting a node search result creates or reuses the project node relationship and saves that relationship onto the critical-path step.
+P15 - Project text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, and table semantics must apply to project text boxes.
+P16 - Project text-box persistence remains project-owned: project text boxes save to project information/projection state, not node information/projection state.
+P17 - Project critical-path inline node windows use the unified node shell and unified node text-box editor semantics, while mutations inside that inline node window remain node editor mutations instead of project critical-path data mutations.
+P18 - The project email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
 
 ## Scenarios
 
@@ -72,12 +76,14 @@ Business logic covered:
 - P3
 - P8
 - P9
+- P17
 
 Given:
 - A node selected from the project critical path has editor content, email attachments, highlighted email references, chat messages, checkboxes, bullets, and intents.
 
 Expected:
 - The inline node window uses the same editor projections as the standalone node popup.
+- The inline node window uses the unified node shell and unified node text-box editor semantics.
 - Email attachment, email highlight, chat creation, text editing, checkbox, bullet, and intent updates follow the existing node editor rules.
 - Updates made in the inline node window persist as node editor updates, not project critical-path updates.
 
@@ -98,3 +104,21 @@ Expected:
 - Search results are limited to visible node results from the Company Explorer search path.
 - Selecting a result creates or reuses the project relationship for that node and saves the relationship on the critical-path step.
 - The empty cell no longer advertises dropping a node or logic gate.
+
+### Scenario P-S5: Project Text Boxes And Email Picker Boundary
+
+Business logic covered:
+- P15
+- P16
+- P18
+
+Given:
+- A user edits a project text box.
+- The user opens the project email picker.
+
+Expected:
+- The project text box uses the same unified editor semantics as node, Logic Gate, and email compose/reply rich editor surfaces.
+- Project text-box edits save to project information/projection state.
+- Project text-box edits do not write node information/projection state.
+- The project email picker allows attaching existing email where permitted.
+- The project email picker does not expose compose, send, scheduled send, or draft-save controls.

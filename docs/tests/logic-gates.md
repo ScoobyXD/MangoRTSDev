@@ -35,6 +35,7 @@ LG22 - Logic Gate editor projection saves must use one-save-at-a-time latest-con
 LG23 - Logic Gate editor save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. The editor is marked `has not changed` only when the completed request's version matches the latest local version.
 LG24 - The Logic Gate editor exposes applying the current GVIC template to already assigned nodes as a one-shot action next to the GVIC role fields, not as a persistent checkbox or vertical control between the title and GVIC fields.
 LG25 - Pressing the Logic Gate editor's apply-to-assigned-nodes action asks for confirmation; canceling makes no write, and confirming applies the current Logic Gate GVIC template to nodes currently assigned to that Logic Gate. Ordinary GVIC role edits remain template-only for existing assigned nodes.
+LG26 - Logic Gate editor surfaces participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, and table semantics must apply to Logic Gate editor text wherever it is opened.
 
 ## Scenarios
 
@@ -100,6 +101,7 @@ Business logic covered:
 - LG14
 - LG15
 - LG16
+- LG26
 
 Given:
 - A user edits a Logic Gate text body.
@@ -115,6 +117,7 @@ Expected:
 - Bold and underline buttons reflect the caret or selected text state and can be active at the same time.
 - Toggling bold or underline affects the selection or the next typed characters when the selection is collapsed.
 - Table insertion uses the current caret/selection position.
+- The same rich editing semantics come from the unified editor behavior used by node, project, and email compose/reply editor surfaces.
 
 ### Scenario LG-S5: Logic Gate Editor Projection Saves And Saved Versions
 
