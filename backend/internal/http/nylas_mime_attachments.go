@@ -37,7 +37,7 @@ func (s *Server) attachRawMIMEAttachmentsIfMissing(ctx context.Context, connecti
 		log.Printf("communications_attachment_raw_mime outcome=attachments_recovered user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s attachment_count=%d raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(attachments), len(rawMIME))
 		return message
 	}
-	merged, changed := mergeRawMIMEAttachments(message.Attachments, attachments)
+	merged, changed := mergeRawMIMEAttachments(message.Attachments, attachments, rawMIMEBodyCIDReferences(message.Body))
 	if !changed {
 		log.Printf("communications_attachment_raw_mime outcome=no_merge_needed user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s raw_attachment_count=%d raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(attachments), len(rawMIME))
 		return message
@@ -92,7 +92,7 @@ func findRawMIMEAttachmentByContentID(attachments []NylasAttachment, contentID s
 	return NylasAttachment{}, false
 }
 
-func mergeRawMIMEAttachments(existing, recovered []NylasAttachment) ([]NylasAttachment, bool) {
+func mergeRawMIMEAttachments(existing, recovered []NylasAttachment, referencedContentIDs map[string]bool) ([]NylasAttachment, bool) {
 	merged := append([]NylasAttachment(nil), existing...)
 	changed := false
 	for _, raw := range recovered {
@@ -106,12 +106,13 @@ func mergeRawMIMEAttachments(existing, recovered []NylasAttachment) ([]NylasAtta
 				}
 				continue
 			}
-		}
-		if rawMIMEAttachmentAlreadyPresent(merged, raw) {
+			if !referencedContentIDs[contentID] {
+				continue
+			}
+			merged = append(merged, raw)
+			changed = true
 			continue
 		}
-		merged = append(merged, raw)
-		changed = true
 	}
 	return merged, changed
 }
@@ -123,19 +124,6 @@ func rawMIMEAttachmentIndexByContentID(attachments []NylasAttachment, contentID 
 		}
 	}
 	return -1
-}
-
-func rawMIMEAttachmentAlreadyPresent(attachments []NylasAttachment, raw NylasAttachment) bool {
-	rawID := strings.TrimSpace(raw.ID)
-	for _, attachment := range attachments {
-		if rawID != "" && strings.TrimSpace(attachment.ID) == rawID {
-			return true
-		}
-		if normalizeRawMIMEContentID(raw.ContentID) != "" && normalizeRawMIMEContentID(attachment.ContentID) == normalizeRawMIMEContentID(raw.ContentID) {
-			return true
-		}
-	}
-	return false
 }
 
 func mergeRawMIMEAttachment(existing, raw NylasAttachment) NylasAttachment {

@@ -174,6 +174,9 @@ test("email cid image sources are rewritten to resolved sources", () => {
 
   assert.match(rewritten, /src="blob:http:\/\/localhost\/image-1"/);
   assert.doesNotMatch(rewritten, /src="cid:/);
+
+  const unquoted = rewriteEmailDocumentCIDSources(`<img src=cid:image-1%40local>`, { "image-1@local": "blob:http://localhost/image-1" });
+  assert.equal(unquoted, `<img src="blob:http://localhost/image-1">`);
 });
 
 test("shared inbox local mailbox mutation echoes include scoped and unscoped keys", () => {
