@@ -66,6 +66,7 @@ jobs:
           TF_CREATE_PRIVATE_ECS_SUBNETS: ${{ vars.TF_CREATE_PRIVATE_ECS_SUBNETS || 'false' }}
           TF_ECS_PRIVATE_SUBNET_CIDRS: ${{ vars.TF_ECS_PRIVATE_SUBNET_CIDRS || '[]' }}
           TF_ECS_NAT_GATEWAY_MODE: ${{ vars.TF_ECS_NAT_GATEWAY_MODE || 'single' }}
+          TF_ATTACHMENT_S3_BUCKET: ${{ vars.TF_ATTACHMENT_S3_BUCKET || 'mangorts-dev-attachments' }}
           TF_EXISTING_DB_HOST: ${{ vars.TF_EXISTING_DB_HOST }}
           TF_EXISTING_DB_PORT: ${{ vars.TF_EXISTING_DB_PORT || '5432' }}
           TF_EXISTING_DB_NAME: ${{ vars.TF_EXISTING_DB_NAME }}
@@ -162,6 +163,7 @@ jobs:
           existing_db_security_group_id = $(json_string "$TF_EXISTING_DB_SECURITY_GROUP_ID")
           backend_image_uri = ""
           deploy_revision = $(json_string "$GITHUB_SHA")
+          attachment_s3_bucket = $(json_string "$TF_ATTACHMENT_S3_BUCKET")
           dev_company_id = $(json_string "$TF_DEV_COMPANY_ID")
           cognito_domain_prefix = $(json_string "$TF_COGNITO_DOMAIN_PREFIX")
           email_from_address = $(json_string "$TF_EMAIL_FROM_ADDRESS")

@@ -1,6 +1,7 @@
 param(
   [string]$AwsRegion = "us-west-1",
   [string]$AwsProfile = $env:AWS_PROFILE,
+  [string]$AttachmentS3Bucket = "",
   [string]$CognitoUserPoolID = "us-west-1_g4Iavy1aU",
   [string]$CognitoClientID = "2a3i1n88t0jl9crll68tds4fhe",
   [string]$AllowedOrigin = "http://localhost:5173",
@@ -382,6 +383,18 @@ if ([string]::IsNullOrWhiteSpace($emailFromAddress)) {
 
 $env:AUTH_MODE = "cognito"
 $env:AWS_REGION = $AwsRegion
+$attachmentS3BucketName = First-NonBlank @(
+  $AttachmentS3Bucket,
+  $env:MANGORTS_ATTACHMENT_S3_BUCKET,
+  "mangorts-dev-attachments"
+)
+if ([string]::IsNullOrWhiteSpace($attachmentS3BucketName)) {
+  Remove-Item Env:\MANGORTS_ATTACHMENT_S3_BUCKET -ErrorAction SilentlyContinue
+  Remove-Item Env:\MANGORTS_ATTACHMENT_AWS_REGION -ErrorAction SilentlyContinue
+} else {
+  $env:MANGORTS_ATTACHMENT_S3_BUCKET = $attachmentS3BucketName
+  $env:MANGORTS_ATTACHMENT_AWS_REGION = $AwsRegion
+}
 $env:COGNITO_USER_POOL_ID = $CognitoUserPoolID
 $env:COGNITO_CLIENT_ID = $CognitoClientID
 $env:COGNITO_TOKEN_USE = "access,id"
@@ -437,6 +450,11 @@ Write-Host "DB host: $dbHost"
 Write-Host "Cognito user pool: $CognitoUserPoolID"
 Write-Host "Allowed origin: $AllowedOrigin"
 Write-Host "App URL: $appURL"
+if ([string]::IsNullOrWhiteSpace($attachmentS3BucketName)) {
+  Write-Host "Attachment S3 bucket: not configured."
+} else {
+  Write-Host "Attachment S3 bucket: $attachmentS3BucketName"
+}
 if ([string]::IsNullOrWhiteSpace($emailFromAddress)) {
   Write-Host "SES invite email: not configured. Set -EmailFrom, `$env:MANGORTS_EMAIL_FROM, `$MangoLocalEmailFrom, or tfvars email_from_address."
 } else {
