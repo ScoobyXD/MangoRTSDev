@@ -13,34 +13,25 @@ import {
   UNIFIED_NODE_SHELL_TOP_RIGHT_ACTION_ORDER,
 } from "../../../../frontend/src/modules/editor/unifiedNodeShellContract.js";
 
-const MAIL_ADAPTER_CONTROL_LABELS = [
-  "Numbered list",
-  "Outdent",
-  "Indent",
-  "Bullet list",
-  "Checklist",
-  "Create link",
-] as const;
-
 const SHARED_EDITOR_TAB_BAR_CONTROL_LABELS = [
   "Font size",
   "Font size value",
   "Bold",
   "Underline",
   "Outline styles",
-  "Insert table",
 ] as const;
 
 function assertMailToolbarControls(adapterSource: string, editorTabBarSource: string, preferencesSource: string) {
-  for (const label of MAIL_ADAPTER_CONTROL_LABELS) {
-    assert.match(adapterSource, new RegExp(`aria-label="${label}"`));
-  }
   for (const label of SHARED_EDITOR_TAB_BAR_CONTROL_LABELS) {
     assert.match(editorTabBarSource, new RegExp(`aria-label="${label}"`));
   }
-  for (const label of ["Automatic Numbering", "Bullet Points", "Checklist"]) {
+  for (const label of ["Automatic Numbering", "Indent Guides", "Bullet Points", "Checklist"]) {
     assert.match(preferencesSource, new RegExp(label));
   }
+  for (const staleLabel of ["Numbered list", "Outdent", "Indent", "Bullet list", "Checklist", "Create link"]) {
+    assert.doesNotMatch(adapterSource, new RegExp(`aria-label="${staleLabel}"`));
+  }
+  assert.doesNotMatch(adapterSource, /onInsertTable=/);
   assert.match(adapterSource, /<EditorTabBar/);
   assert.match(adapterSource, /visibleTabIDs=/);
   assert.match(adapterSource, /onSelectionFontSizeChange=/);
@@ -65,16 +56,10 @@ test("unified rich editor contract lists every Phase 1 target surface", () => {
   ]);
   assert.ok(UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS.every((surface) => surface.chatSurface === false));
   assert.deepEqual(UNIFIED_RICH_EDITOR_MAIL_CONTROL_IDS, [
-    "numbered-list",
-    "indent",
-    "outdent",
-    "bullet-list",
-    "checklist",
     "font-size",
     "bold",
     "underline",
-    "link",
-    "table",
+    "outline-style",
   ]);
 });
 
@@ -92,10 +77,8 @@ test("mail compose and attached-email reply mount unified rich editor adapters",
   assert.doesNotMatch(homeParts, /document\.execCommand/);
   assertMailToolbarControls(homeParts, editorTabBar, editorPreferences);
   assert.match(homeParts, /MAIL_RICH_EDITOR_TAB_IDS/);
-  assert.match(homeParts, /bodyEditorControllerRef\.current\?\.toggleNumberedList\(\)/);
-  assert.match(homeParts, /bodyEditorControllerRef\.current\?\.outdent\(\)/);
-  assert.match(homeParts, /bodyEditorControllerRef\.current\?\.indent\(\)/);
   assert.match(homeParts, /bodyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
+  assert.doesNotMatch(homeParts, /bodyEditorControllerRef\.current\?\.(toggleNumberedList|outdent|indent|insertList|insertLink|insertTable)\(/);
   assert.doesNotMatch(homeParts, /selectNumberedMode/);
 
   assert.match(nodeWorkspaceParts, /UnifiedRichEditorSurface/);
@@ -103,10 +86,8 @@ test("mail compose and attached-email reply mount unified rich editor adapters",
   assert.match(nodeWorkspaceParts, /unifiedRichEditorBodyToEmailHTML/);
   assertMailToolbarControls(nodeWorkspaceParts, editorTabBar, editorPreferences);
   assert.match(nodeWorkspaceParts, /ATTACHED_EMAIL_REPLY_EDITOR_TAB_IDS/);
-  assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.toggleNumberedList\(\)/);
-  assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.outdent\(\)/);
-  assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.indent\(\)/);
   assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
+  assert.doesNotMatch(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.(toggleNumberedList|outdent|indent|insertList|insertLink|insertTable)\(/);
   assert.doesNotMatch(nodeWorkspaceParts, /selectReplyNumberedMode/);
 
   assert.match(unifiedRichEditorSurface, /applyEditorNumberedListToRoot/);

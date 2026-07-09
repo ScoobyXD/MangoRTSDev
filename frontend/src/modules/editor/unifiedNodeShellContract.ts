@@ -50,7 +50,7 @@ export const UNIFIED_NODE_SHELL_SURFACE_CONTRACTS: readonly UnifiedNodeShellSurf
     persistenceBoundary: "node-information-projection",
     openerState: "opener-owned",
     chatPane: "separate",
-    actions: ["close", "minimize", "open-in-new-tab", "delete"],
+    actions: ["close", "fullscreen", "minimize", "open-in-new-tab", "delete"],
   },
   {
     id: "dock-restored-node-popup",
@@ -58,7 +58,7 @@ export const UNIFIED_NODE_SHELL_SURFACE_CONTRACTS: readonly UnifiedNodeShellSurf
     persistenceBoundary: "node-information-projection",
     openerState: "opener-owned",
     chatPane: "separate",
-    actions: ["close", "minimize", "open-in-new-tab", "delete"],
+    actions: ["close", "fullscreen", "minimize", "open-in-new-tab", "delete"],
   },
   {
     id: "updates-node-panel",

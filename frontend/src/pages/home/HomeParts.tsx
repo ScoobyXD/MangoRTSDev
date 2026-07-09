@@ -727,14 +727,21 @@ function defaultNodeEditorPopupRect(): NodeEditorPopupRect {
 
 function fullscreenNodeEditorPopupRect(): NodeEditorPopupRect {
   if (typeof window === "undefined") return defaultNodeEditorPopupRect();
-  const padding = nodeEditorPopupViewportPadding();
-  return clampNodeEditorPopupRect({
-    left: padding.x,
-    top: padding.y,
-    width: window.innerWidth - (padding.x * 2),
-    height: window.innerHeight - (padding.y * 2),
-  });
+  return {
+    left: 0,
+    top: 0,
+    width: window.innerWidth,
+    height: window.innerHeight,
+  };
 }
+
+const nodeEditorPopupFullscreenStyle: React.CSSProperties = {
+  minWidth: "100vw",
+  minHeight: "100vh",
+  maxWidth: "100vw",
+  maxHeight: "100vh",
+  borderRadius: 0,
+};
 
 export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRequestID, onClose, onCollapseToTab, onDeleteNode }: {
   nodeID: string;
@@ -867,7 +874,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
         actionButtonClassName="mango-elevated-action"
         actionButtonStyle={nodeEditorPopupCollapseButtonStyle}
         closeButtonStyle={nodeEditorPopupCloseButtonStyle}
-        style={{ ...nodeEditorPopupStyle, left: popupRect.left, top: popupRect.top, width: popupRect.width, height: popupRect.height }}
+        style={{ ...nodeEditorPopupStyle, ...(popupFullscreen ? nodeEditorPopupFullscreenStyle : {}), left: popupRect.left, top: popupRect.top, width: popupRect.width, height: popupRect.height }}
         onMouseDown={(event) => event.stopPropagation()}
         onTouchStart={(event) => event.stopPropagation()}
         actions={([
@@ -4618,25 +4625,6 @@ const composeRichToolbarStyle: React.CSSProperties = {
   background: "rgba(255, 255, 255, 0.72)",
 };
 
-const composeRichToolButtonStyle: React.CSSProperties = {
-  ...mailPanelSmallButtonStyle,
-  width: 30,
-  minWidth: 30,
-  height: 28,
-  minHeight: 28,
-  padding: 0,
-  fontSize: 12,
-  fontWeight: 850,
-};
-
-const composeRichToolWideButtonStyle: React.CSSProperties = {
-  ...mailPanelSmallButtonStyle,
-  minHeight: 28,
-  padding: "0 8px",
-  fontSize: 11,
-  fontWeight: 760,
-};
-
 const composeRichEditorStyle: React.CSSProperties = {
   ...mailPanelTextareaStyle,
   minHeight: 180,
@@ -5049,29 +5037,6 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     bodyEditorControllerRef.current?.toggleInlineFormat(command);
     syncBodyToolbarFormatState();
   };
-  const createHyperlink = () => {
-    const rawHref = window.prompt("Link URL") ?? "";
-    if (!rawHref.trim()) return;
-    bodyEditorControllerRef.current?.insertLink(rawHref);
-  };
-  const toggleNumberedList = () => {
-    setBodyOutlineStyle("automatic-outline-numbering");
-    bodyEditorControllerRef.current?.toggleNumberedList();
-  };
-  const insertBulletList = () => {
-    setBodyOutlineStyle("bullet-list");
-    bodyEditorControllerRef.current?.insertList("bullet");
-  };
-  const insertChecklist = () => {
-    setBodyOutlineStyle("checklist");
-    bodyEditorControllerRef.current?.insertList("checklist");
-  };
-  const outdentBody = () => {
-    bodyEditorControllerRef.current?.outdent();
-  };
-  const indentBody = () => {
-    bodyEditorControllerRef.current?.indent();
-  };
   const isReplyMode = !!replyMessage;
   const startReplyEditorResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -5170,16 +5135,9 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
               setBodyOutlineStyle(nextOutlineStyle);
               setBodyToolbarTab("outline-styles");
             }}
-            onInsertTable={() => bodyEditorControllerRef.current?.insertTable()}
             reserveHeaderOffset={false}
             visibleTabIDs={MAIL_RICH_EDITOR_TAB_IDS}
           />
-          <button type="button" title="Numbered list" aria-label="Numbered list" style={composeRichToolButtonStyle} onClick={toggleNumberedList}>1.</button>
-          <button type="button" title="Bullet list" aria-label="Bullet list" style={composeRichToolButtonStyle} onClick={insertBulletList}>-</button>
-          <button type="button" title="Checklist" aria-label="Checklist" style={composeRichToolWideButtonStyle} onClick={insertChecklist}>Check</button>
-          <button type="button" title="Outdent" aria-label="Outdent" style={composeRichToolButtonStyle} onClick={outdentBody}>{"<<"}</button>
-          <button type="button" title="Indent" aria-label="Indent" style={composeRichToolButtonStyle} onClick={indentBody}>{">>"}</button>
-          <button type="button" title="Create link" aria-label="Create link" style={composeRichToolWideButtonStyle} onClick={createHyperlink}>Link</button>
         </div>
         <UnifiedRichEditorSurface
           value={compose.body}
