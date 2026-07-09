@@ -3695,7 +3695,7 @@ const EMAIL_SELECTION_ACTION_GAP = 5;
 const EMAIL_SELECTION_ACTION_PADDING = 4;
 const EMAIL_SELECTION_ACTION_BORDER = 1;
 const EMAIL_SELECTION_ACTION_OFFSET = 8;
-const EMAIL_PICKER_MESSAGE_BATCH_SIZE = 20;
+const EMAIL_PICKER_MESSAGE_BATCH_SIZE = 12;
 const EMAIL_PICKER_PREFETCH_REMAINING_ROWS = 5;
 const EMAIL_PICKER_APPROX_ROW_HEIGHT = 80;
 
@@ -4017,7 +4017,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (cancelled) return;
         let ids = Array.from(new Set((thread.message_ids ?? []).map((item) => item.trim()).filter(Boolean)));
         if (ids.length === 0) {
-          const page = await listEmailMessages({ companyID, mailbox: "all", limit: 50, threadID, refresh: true });
+          const page = await listEmailMessages({ companyID, mailbox: "all", limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, threadID, refresh: true });
           ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
         }
         if (!ids.includes(payload.id)) ids.unshift(payload.id);
@@ -4032,7 +4032,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (!cancelled) setThreadMessages(details.filter((item): item is EmailMessage => Boolean(item)));
       } catch {
         try {
-          const page = await listEmailMessages({ companyID, mailbox: "all", limit: 50, threadID, refresh: true });
+          const page = await listEmailMessages({ companyID, mailbox: "all", limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, threadID, refresh: true });
           if (cancelled) return;
           const ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
           if (!ids.includes(payload.id)) ids.unshift(payload.id);

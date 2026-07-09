@@ -28,7 +28,7 @@ MT17 - Successful conversion returns converted/deleted triage message IDs for ba
 MT18 - Successful conversion emits the triage/workspace/projection events needed for other views to refresh.
 MT19 - Reverting a converted email restores the triage item from the email-node placement and removes the workspace record that was created from that conversion.
 MT20 - My Triage and Shared Triage must continue to live-reconcile mailbox messages when they are created, updated, or deleted without replacing the whole visible message list.
-MT21 - My Triage and Shared Triage primary inboxes must show a fixed, predictable message batch size of 20 messages per page.
+MT21 - My Triage and Shared Triage primary inboxes must show a fixed, predictable message batch size of 12 messages per page.
 MT22 - My Triage and Shared Triage primary inboxes must immediately prefetch the next message page after the first visible page loads, without waiting for scrolling or the archive/advance action.
 MT23 - Scrolling a My Triage or Shared Triage primary inbox must not archive messages and must not load the next primary-inbox page.
 MT24 - Advancing a My Triage or Shared Triage primary inbox page is an explicit user action that archives only the messages visible on the current page.
@@ -294,7 +294,7 @@ Business logic covered:
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
-- The mailbox has more than 20 messages available.
+- The mailbox has more than 12 messages available.
 - The first visible page and the next page can be read from the mailbox provider.
 - The user sends mail from the personal mailbox and later receives Nylas `message.opened` webhooks for those sent messages.
 - The active Nylas app has a public `/nylas/webhook` destination with Message tracking `message.opened` selected; selecting all 3 Message tracking triggers (`message.opened`, `message.link_clicked`, and `thread.replied`) is valid for this environment.
@@ -302,7 +302,7 @@ Given:
 - The mailbox contains Inbox, All, Sent, Draft, and Spam/Junk messages.
 
 Expected:
-- The visible page contains no more than 20 messages.
+- The visible page contains no more than 12 messages.
 - The next page is prefetched after the visible page loads.
 - Created, updated, and deleted message events reconcile the affected message live without replacing the whole triage list.
 - Clicking an email row, focusing the email body, and clicking back into the list do not reload, blank, or replace the message list.

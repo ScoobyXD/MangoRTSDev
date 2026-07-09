@@ -2474,7 +2474,7 @@ export function HomePage({
         if (threadMessageIDs.length <= 1) {
           try {
             const page = await listEmailMessages({
-              limit: 50,
+              limit: MESSAGE_BATCH_SIZE,
               mailbox: "all",
               threadID,
               companyID,

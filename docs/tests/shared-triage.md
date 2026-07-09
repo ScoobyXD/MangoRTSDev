@@ -50,7 +50,7 @@ ST39 - Plain Shared Triage folders are organizational containers only; selecting
 ST40 - Shared Triage mail reconciliation is driven by Nylas webhooks through backend communications realtime; browser focus and visibility-change events must not refresh the message list, and the browser must not poll the message list every 30 seconds.
 ST41 - Communications realtime events reconcile the active mail-capable mailbox view only; active Shared Triage root, plain Shared Triage folders, My Work, Updates, and GVIC matrix views must not issue mail refresh GETs from those events.
 ST42 - Shared Triage mailbox inboxes must continue to live-reconcile mailbox messages when they are created, updated, or deleted without replacing the whole visible message list.
-ST43 - Shared Triage mailbox inboxes must show a fixed, predictable message batch size of 20 messages per page.
+ST43 - Shared Triage mailbox inboxes must show a fixed, predictable message batch size of 12 messages per page.
 ST44 - Shared Triage mailbox inboxes must immediately prefetch the next message page after the first visible page loads, without waiting for scrolling or the archive/advance action.
 ST45 - Scrolling a Shared Triage mailbox inbox must not archive messages and must not load the next primary-inbox page.
 ST46 - Advancing a Shared Triage mailbox inbox page is an explicit user action that archives only the messages visible on the current page.
@@ -411,11 +411,11 @@ Business logic covered:
 
 Given:
 - A user opens a mailbox-capable Shared Triage inbox with view access to the shared mailbox.
-- The shared mailbox has more than 20 messages available.
+- The shared mailbox has more than 12 messages available.
 - The first visible page and the next page can be read from the mailbox provider.
 
 Expected:
-- The visible page contains no more than 20 messages.
+- The visible page contains no more than 12 messages.
 - The next page is prefetched after the visible page loads.
 - Created, updated, and deleted message events reconcile the affected message live without replacing the whole shared-inbox list.
 - New-email realtime events with a message ID fetch that single message and insert it into the current date-sorted list when it matches the active filters.
