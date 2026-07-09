@@ -48,7 +48,7 @@ import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDra
 import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, GVIC_INBOX_SECTIONS, GVIC_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeAttachment, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, GVICInboxRole, GVICInboxStatus } from "./homeTypes";
 import { createHomeMailDraftID } from "./homeMailDrafts";
-import { buildGVICRoleInboxGroupsByCell, cleanIDList, clampNumber, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData } from "./homeUtils";
+import { buildGVICRoleInboxGroupsByCell, cleanIDList, clampNumber, emailAttachmentContentIDKeys, emailAttachmentIsReferencedInline, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, rewriteEmailDocumentCIDSources, visibleEmailAttachmentsForBody, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData } from "./homeUtils";
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, shortcutRemoveStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
@@ -5363,6 +5363,91 @@ const emailBodyLoadingStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
+function emailAttachmentDownloadID(attachment: EmailAttachment): string {
+  return attachment.id?.trim() || attachment.attachment_id?.trim() || "";
+}
+
+function useEmailBodyDocument(messageID: string, body: string, attachments: EmailAttachment[], companyID: string, sharedInboxID?: string): { srcDoc: string; loading: boolean } {
+  const apiBase = readAuthConfig().apiBase;
+  const inlineAttachments = React.useMemo(
+    () => attachments.filter((attachment) => emailAttachmentIsReferencedInline(body, attachment)),
+    [attachments, body],
+  );
+  const inlineAttachmentKey = React.useMemo(() => (
+    inlineAttachments
+      .map((attachment) => [
+        emailAttachmentDownloadID(attachment),
+        attachment.content_id?.trim() ?? "",
+        attachment.filename?.trim() ?? "",
+        attachment.content_type?.trim() ?? "",
+        attachment.content?.trim() ? "inline-content" : "",
+      ].join(":"))
+      .join("|")
+  ), [inlineAttachments]);
+  const [sourceByContentID, setSourceByContentID] = React.useState<Record<string, string>>({});
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    setSourceByContentID({});
+    if (!body.trim() || inlineAttachments.length === 0) {
+      setLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    const objectURLs: string[] = [];
+    const controller = new AbortController();
+    setLoading(true);
+    const loadInlineAttachment = async (attachment: EmailAttachment): Promise<{ keys: string[]; sourceURL: string }> => {
+      const inlineURL = emailAttachmentDataURL(attachment);
+      if (inlineURL) return { keys: emailAttachmentContentIDKeys(attachment), sourceURL: inlineURL };
+      const mangoAttachmentID = attachment.attachment_id?.trim() ?? "";
+      const providerAttachmentID = attachment.id?.trim() ?? "";
+      let sourceURL = "";
+      if (mangoAttachmentID) {
+        sourceURL = await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal });
+      } else if (providerAttachmentID) {
+        const blob = await downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID);
+        if (cancelled) return { keys: emailAttachmentContentIDKeys(attachment), sourceURL: "" };
+        sourceURL = URL.createObjectURL(blob);
+      }
+      if (cancelled) {
+        if (sourceURL.startsWith("blob:")) URL.revokeObjectURL(sourceURL);
+        return { keys: emailAttachmentContentIDKeys(attachment), sourceURL: "" };
+      }
+      if (sourceURL && sourceURL.startsWith("blob:")) objectURLs.push(sourceURL);
+      return { keys: emailAttachmentContentIDKeys(attachment), sourceURL };
+    };
+    void Promise.all(inlineAttachments.map(loadInlineAttachment))
+      .then((items) => {
+        if (cancelled) return;
+        const nextSources: Record<string, string> = {};
+        for (const item of items) {
+          if (!item.sourceURL) continue;
+          for (const key of item.keys) nextSources[key] = item.sourceURL;
+        }
+        setSourceByContentID(nextSources);
+      })
+      .catch(() => {
+        if (!cancelled) setSourceByContentID({});
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+      objectURLs.forEach((objectURL) => URL.revokeObjectURL(objectURL));
+    };
+  }, [apiBase, body, companyID, inlineAttachmentKey, inlineAttachments, messageID, sharedInboxID]);
+
+  const srcDoc = React.useMemo(() => {
+    const documentHTML = messageDocument(body);
+    return rewriteEmailDocumentCIDSources(documentHTML, sourceByContentID);
+  }, [body, sourceByContentID]);
+
+  return { srcDoc, loading };
+}
+
 function EmailConversationMessage({ message, companyID, sharedInboxID, fill, loadingBody = false }: {
   message: EmailMessage;
   companyID: string;
@@ -5370,37 +5455,51 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, loa
   fill: boolean;
   loadingBody?: boolean;
 }) {
-  const attachments = (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || attachment.id?.trim());
-  const hasAttachments = attachments.length > 0;
+  const allAttachments = React.useMemo(
+    () => (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || attachment.id?.trim()),
+    [message.attachments],
+  );
   const messageDate = formatMessageDate(message.date);
   const body = message.body?.trim() ? message.body : loadingBody ? "" : (message.snippet || "");
+  const attachments = visibleEmailAttachmentsForBody(body, allAttachments);
+  const hasAttachments = attachments.length > 0;
+  const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID);
+  const showMessageMeta = !fill;
   const frameStyle: React.CSSProperties = fill
-    ? { ...iframeStyle, minHeight: hasAttachments ? 320 : 0, height: "100%" }
+    ? { ...iframeStyle, minHeight: hasAttachments ? 300 : 360, height: hasAttachments ? 360 : "100%" }
     : { ...iframeStyle, minHeight: 260, height: 320, boxShadow: "none" };
   const itemStyle: React.CSSProperties = {
-    minHeight: fill ? "100%" : undefined,
+    minHeight: fill ? 0 : undefined,
     minWidth: 0,
     display: "grid",
-    gridTemplateRows: hasAttachments ? "auto auto minmax(0, 1fr)" : "auto minmax(0, 1fr)",
+    gridTemplateRows: showMessageMeta ? "auto auto" : "auto",
     gap: 8,
     paddingTop: fill ? 0 : 10,
     borderTop: fill ? "none" : "1px solid rgba(148, 163, 184, 0.28)",
+    alignContent: "start",
   };
   return (
     <article style={itemStyle}>
-      <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
-        <div style={mutedSmallStyle}>
-          From {formatAddressList(message.from) || "Unknown sender"} to {formatAddressList(message.to) || "me"}
-          {messageDate && <span> - {messageDate}</span>}
-        </div>
-        {formatAddressList(message.cc) && <div style={mutedSmallStyle}>Cc {formatAddressList(message.cc)}</div>}
-        {formatAddressList(message.bcc) && <div style={mutedSmallStyle}>Bcc {formatAddressList(message.bcc)}</div>}
-        {messageIsSent(message) && (
-          <div style={{ ...messageTimestampStatusRowStyle, justifyContent: "flex-start" }}>
-            <MessageReadStatusText message={message} />
+      {showMessageMeta && (
+        <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+          <div style={mutedSmallStyle}>
+            From {formatAddressList(message.from) || "Unknown sender"} to {formatAddressList(message.to) || "me"}
+            {messageDate && <span> - {messageDate}</span>}
           </div>
-        )}
-      </div>
+          {formatAddressList(message.cc) && <div style={mutedSmallStyle}>Cc {formatAddressList(message.cc)}</div>}
+          {formatAddressList(message.bcc) && <div style={mutedSmallStyle}>Bcc {formatAddressList(message.bcc)}</div>}
+          {messageIsSent(message) && (
+            <div style={{ ...messageTimestampStatusRowStyle, justifyContent: "flex-start" }}>
+              <MessageReadStatusText message={message} />
+            </div>
+          )}
+        </div>
+      )}
+      {(loadingBody && !body) || bodyDocument.loading ? (
+        <div style={emailBodyLoadingStyle}>Loading message</div>
+      ) : (
+        <iframe title="Email body" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={bodyDocument.srcDoc} style={frameStyle} />
+      )}
       {hasAttachments && (
         <div style={mailAttachmentSectionStyle}>
           <div style={mailAttachmentHeaderStyle}>
@@ -5418,11 +5517,6 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, loa
             ))}
           </div>
         </div>
-      )}
-      {loadingBody && !body ? (
-        <div style={emailBodyLoadingStyle}>Loading message</div>
-      ) : (
-        <iframe title="Email body" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={messageDocument(body)} style={frameStyle} />
       )}
     </article>
   );

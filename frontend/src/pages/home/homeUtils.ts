@@ -1,4 +1,4 @@
-import type { CommunicationsSharedInbox, EmailAddress, EmailFolder, EmailMailbox, EmailMessage, EmailReadStatus, UserLogicGateShortcut } from "../../modules/communications/communicationsApi.js";
+import type { CommunicationsSharedInbox, EmailAddress, EmailAttachment, EmailFolder, EmailMailbox, EmailMessage, EmailReadStatus, UserLogicGateShortcut } from "../../modules/communications/communicationsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders.js";
 import { collectFolderSubtreeIDs, EXPLORER_DRAG_MIME } from "../../modules/company-explorer/companyExplorerDragDrop.js";
 import { getExplorerDropPayloadItems } from "../../modules/company-explorer/treePresentation.js";
@@ -1119,6 +1119,85 @@ function normalizeEmailFolderToken(value: string | undefined): string {
 
 export function messageDocument(body: string): string {
   return editorEmailDisplayDocument(body, { baseTarget: true });
+}
+
+const EMAIL_CID_REFERENCE_PATTERN = /\bcid:([^"'\s>)]+)/gi;
+const EMAIL_CID_SRC_ATTRIBUTE_PATTERN = /\bsrc\s*=\s*(["'])\s*cid:([^"']+)\1/gi;
+
+export function normalizeEmailContentID(value: string | undefined): string {
+  let clean = value?.trim() ?? "";
+  if (!clean) return "";
+  clean = clean.replace(/^cid:/i, "").trim();
+  clean = clean.replace(/^["']|["']$/g, "").trim();
+  clean = clean.replace(/^<|>$/g, "").trim();
+  clean = clean.replace(/^&lt;/i, "").replace(/&gt;$/i, "").trim();
+  try {
+    clean = decodeURIComponent(clean);
+  } catch {
+    // Some providers send raw Content-ID values; keep the undecoded value.
+  }
+  return clean.trim().toLowerCase();
+}
+
+function emailAttachmentLooksInline(attachment: Pick<EmailAttachment, "content_disposition" | "content_id" | "is_inline">): boolean {
+  return Boolean(attachment.is_inline)
+    || Boolean(attachment.content_id?.trim())
+    || attachment.content_disposition?.trim().toLowerCase() === "inline";
+}
+
+export function emailAttachmentContentIDKeys(attachment: Pick<EmailAttachment, "content_disposition" | "content_id" | "filename" | "id" | "is_inline">): string[] {
+  const keys = new Set<string>();
+  const add = (value: string | undefined) => {
+    const key = normalizeEmailContentID(value);
+    if (key) keys.add(key);
+  };
+  add(attachment.content_id);
+  if (emailAttachmentLooksInline(attachment)) {
+    add(attachment.id);
+    add(attachment.filename);
+  }
+  return Array.from(keys);
+}
+
+export function emailBodyContentIDReferences(body: string): Set<string> {
+  const references = new Set<string>();
+  EMAIL_CID_REFERENCE_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = EMAIL_CID_REFERENCE_PATTERN.exec(body)) !== null) {
+    const key = normalizeEmailContentID(match[1]);
+    if (key) references.add(key);
+  }
+  return references;
+}
+
+export function emailAttachmentIsReferencedInline(body: string, attachment: EmailAttachment): boolean {
+  const references = emailBodyContentIDReferences(body);
+  if (references.size === 0) return false;
+  return emailAttachmentContentIDKeys(attachment).some((key) => references.has(key));
+}
+
+export function visibleEmailAttachmentsForBody(body: string, attachments: EmailAttachment[]): EmailAttachment[] {
+  if (!body.trim() || attachments.length === 0) return attachments;
+  return attachments.filter((attachment) => !emailAttachmentIsReferencedInline(body, attachment));
+}
+
+function escapeEmailDocumentAttribute(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+export function rewriteEmailDocumentCIDSources(documentHTML: string, sourceByContentID: Record<string, string>): string {
+  if (!documentHTML.trim()) return documentHTML;
+  EMAIL_CID_SRC_ATTRIBUTE_PATTERN.lastIndex = 0;
+  return documentHTML.replace(EMAIL_CID_SRC_ATTRIBUTE_PATTERN, (match, quote: string, rawContentID: string) => {
+    const replacement = sourceByContentID[normalizeEmailContentID(rawContentID)];
+    if (!replacement) return match;
+    return `src=${quote}${escapeEmailDocumentAttribute(replacement)}${quote}`;
+  });
 }
 
 export function formatError(error: unknown, fallback: string): string {
