@@ -48,7 +48,10 @@ test("lists resource attachments through the encoded resource endpoint", async (
   };
   let requestedPath = "";
   let requestedMethod = "";
-  const request: AttachmentRequestJSON = async <T>(path, init) => {
+  const request: AttachmentRequestJSON = async <T>(
+    path: string,
+    init?: Parameters<AttachmentRequestJSON>[1],
+  ): Promise<T> => {
     requestedPath = path;
     requestedMethod = init?.method ?? "GET";
     return expected as unknown as T;

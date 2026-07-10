@@ -112,7 +112,8 @@ export function filterMangoResourceAttachments(
     (!filter.relationshipKind || item.relationship_kind === filter.relationshipKind)
     && (!editorSurface || item.editor_surface?.trim() === editorSurface)
     && !item.deleted_timestamp
-    && !item.attachment?.deleted_timestamp
+    && !!item.attachment
+    && !item.attachment.deleted_timestamp
   ));
 }
 
