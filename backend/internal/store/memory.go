@@ -68,6 +68,8 @@ type MemoryRepo struct {
 	emailConnections               map[string]domain.UserEmailConnection
 	companyEmailConnections        map[string]domain.CompanyEmailConnection
 	messageReadStatuses            map[string]domain.CommunicationsMessageReadStatus
+	emailDrafts                    map[string]domain.CommunicationsEmailDraft
+	emailSignatures                map[string]domain.CommunicationsEmailSignature
 	triageItems                    map[string]domain.CommunicationsTriageItem
 	attachments                    map[string]domain.Attachment
 	attachmentVariants             map[string]domain.AttachmentVariant
@@ -149,6 +151,8 @@ func NewMemoryRepo() *MemoryRepo {
 		emailConnections:               map[string]domain.UserEmailConnection{},
 		companyEmailConnections:        map[string]domain.CompanyEmailConnection{},
 		messageReadStatuses:            map[string]domain.CommunicationsMessageReadStatus{},
+		emailDrafts:                    map[string]domain.CommunicationsEmailDraft{},
+		emailSignatures:                map[string]domain.CommunicationsEmailSignature{},
 		triageItems:                    map[string]domain.CommunicationsTriageItem{},
 		attachments:                    map[string]domain.Attachment{},
 		attachmentVariants:             map[string]domain.AttachmentVariant{},

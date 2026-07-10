@@ -10,6 +10,8 @@ type PostgresRepo struct {
 
 	communicationsMessageReadStatusSchemaOnce sync.Once
 	communicationsMessageReadStatusSchemaErr  error
+	communicationsEmailDraftsSchemaOnce       sync.Once
+	communicationsEmailDraftsSchemaErr        error
 	userEmailConnectionsPerAccountSchemaOnce  sync.Once
 	userEmailConnectionsPerAccountSchemaErr   error
 }

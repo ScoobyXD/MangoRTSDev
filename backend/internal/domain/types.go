@@ -355,6 +355,46 @@ type CommunicationsMessageReadStatus struct {
 	UpdatedTimestamp         time.Time `json:"updated_timestamp,omitempty"`
 }
 
+type CommunicationsEmailDraft struct {
+	CompanyID              string     `json:"company_id"`
+	DraftID                string     `json:"draft_id"`
+	ScopeType              string     `json:"scope_type"`
+	PersonalUserID         string     `json:"personal_user_id,omitempty"`
+	PersonalAccountEmail   string     `json:"personal_account_email,omitempty"`
+	SharedInboxID          string     `json:"shared_inbox_id,omitempty"`
+	CreatedByUserID        string     `json:"created_by_user_id,omitempty"`
+	UpdatedByUserID        string     `json:"updated_by_user_id,omitempty"`
+	Kind                   string     `json:"kind"`
+	SourceMessageID        string     `json:"source_message_id,omitempty"`
+	AccountEmail           string     `json:"account_email,omitempty"`
+	ToRecipients           string     `json:"to_recipients"`
+	CcRecipients           string     `json:"cc_recipients"`
+	BccRecipients          string     `json:"bcc_recipients"`
+	Subject                string     `json:"subject"`
+	BodyEditorHTML         string     `json:"body_editor_html"`
+	ReplyToMessageJSON     string     `json:"-"`
+	ScheduledSendTimestamp *time.Time `json:"scheduled_send_timestamp,omitempty"`
+	CreatedTimestamp       time.Time  `json:"created_timestamp"`
+	UpdatedTimestamp       time.Time  `json:"updated_timestamp"`
+	DeletedTimestamp       *time.Time `json:"deleted_timestamp,omitempty"`
+}
+
+type CommunicationsEmailSignature struct {
+	CompanyID            string    `json:"company_id"`
+	SignatureID          string    `json:"signature_id"`
+	ScopeType            string    `json:"scope_type"`
+	PersonalUserID       string    `json:"personal_user_id,omitempty"`
+	PersonalAccountEmail string    `json:"personal_account_email,omitempty"`
+	SharedInboxID        string    `json:"shared_inbox_id,omitempty"`
+	Name                 string    `json:"name"`
+	BodyEditorHTML       string    `json:"body_editor_html"`
+	IsDefault            bool      `json:"is_default"`
+	CreatedByUserID      string    `json:"created_by_user_id,omitempty"`
+	UpdatedByUserID      string    `json:"updated_by_user_id,omitempty"`
+	CreatedTimestamp     time.Time `json:"created_timestamp"`
+	UpdatedTimestamp     time.Time `json:"updated_timestamp"`
+}
+
 type CommunicationsTriageItem struct {
 	UserID           string               `json:"user_id"`
 	MessageID        string               `json:"message_id"`

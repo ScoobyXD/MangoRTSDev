@@ -86,7 +86,7 @@ import { markMyWorkMatrixCachesStaleForCompany, markMyWorkMatrixCachesStaleForTa
 import { myWorkDebugLog, recordMyWorkDebugCause } from "./myWorkPerformanceDebug";
 import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
-import { composeHasDraftContent, createHomeMailDraftID, createHomeMailForwardDraftID, createHomeMailReplyDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, homeMailDraftToCompose, homeMailDraftToMessage, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignature, type HomeMailDraft } from "./homeMailDrafts";
+import { composeHasDraftContent, createHomeMailDraftID, createHomeMailForwardDraftID, createHomeMailReplyDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, deleteHomeMailDraftRemote, deleteHomeMailDraftsRemote, homeMailDraftToCompose, homeMailDraftToMessage, loadHomeMailDrafts, loadHomeMailSignature, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignatureRemote, syncHomeMailDraftFromCompose, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_QUEUE_MAX_EMAILS, EVENT_HOME_TRIAGE_CONVERSION_APPLIED, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME, type HomeTriageConversionAppliedDetail } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
 import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, communicationStreamEventIsArchiveConfirmation, communicationStreamEventIsStarConfirmation, condenseEmailThreadMessages, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, formatMessageDate, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, localMailboxMutationEchoKeys, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortLogicGateShortcuts, sortSharedInboxes, triageMessageIDsFromStreamMessageID, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
@@ -721,6 +721,18 @@ export function HomePage({
   useEffect(() => {
     setMailDrafts(readHomeMailDrafts(companyID, currentUserID));
     setEmailSignature(readHomeMailSignature(companyID, currentUserID));
+    let cancelled = false;
+    void loadHomeMailDrafts(companyID, currentUserID)
+      .then((drafts) => {
+        if (!cancelled) setMailDrafts(drafts);
+      });
+    void loadHomeMailSignature(companyID, currentUserID)
+      .then((signature) => {
+        if (!cancelled) setEmailSignature(signature);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [companyID, currentUserID]);
   const draftMessages = useMemo(() => (
     unreadOnly
@@ -2804,9 +2816,9 @@ export function HomePage({
     const currentDraftID = value.draftID.trim();
     if (currentDraftID) return currentDraftID;
     const replyToMessageID = value.replyToMessageID.trim();
-    if (replyToMessageID) return createHomeMailReplyDraftID(value.sharedInboxID, replyToMessageID);
+    if (replyToMessageID) return createHomeMailReplyDraftID(value.sharedInboxID, replyToMessageID, value.accountEmail, currentUserID);
     return createHomeMailDraftID();
-  }, []);
+  }, [currentUserID]);
   const saveCurrentComposeDraft = useCallback((options?: { quiet?: boolean; keepOpen?: boolean }) => {
     if (!compose.open) return false;
     const shouldSave = composeHasDraftContent(compose, emailSignature);
@@ -2815,6 +2827,8 @@ export function HomePage({
       : compose;
     const nextDrafts = saveHomeMailDraftFromCompose(companyID, currentUserID, composeForSave, emailSignature);
     setMailDrafts(nextDrafts);
+    void syncHomeMailDraftFromCompose(companyID, currentUserID, composeForSave, emailSignature)
+      .then(setMailDrafts);
     if (options?.keepOpen && composeForSave.draftID !== compose.draftID) {
       setCompose(composeForSave);
     } else if (options?.keepOpen && !shouldSave && compose.draftID) {
@@ -2896,8 +2910,10 @@ export function HomePage({
     saveCurrentComposeDraft({ quiet: true });
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     const accountEmail = (activeMailAccountEmail ?? "").trim();
-    const existingDraftID = createHomeMailReplyDraftID(sharedInboxID, selectedMessage.id);
-    const existingDraft = mailDrafts.find((draft) => draft.id === existingDraftID);
+    const existingDraftID = createHomeMailReplyDraftID(sharedInboxID, selectedMessage.id, accountEmail, currentUserID);
+    const legacyDraftID = createHomeMailReplyDraftID(sharedInboxID, selectedMessage.id);
+    const existingDraft = mailDrafts.find((draft) => draft.id === existingDraftID)
+      ?? (legacyDraftID !== existingDraftID ? mailDrafts.find((draft) => draft.id === legacyDraftID) : undefined);
     if (existingDraft) {
       setCompose({
         ...homeMailDraftToCompose(existingDraft),
@@ -2932,8 +2948,11 @@ export function HomePage({
     }
     saveCurrentComposeDraft({ quiet: true });
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
-    const forwardDraftID = createHomeMailForwardDraftID(sharedInboxID, selectedMessage.id);
-    const existingDraft = mailDrafts.find((draft) => draft.id === forwardDraftID);
+    const accountEmail = (activeMailAccountEmail ?? "").trim();
+    const forwardDraftID = createHomeMailForwardDraftID(sharedInboxID, selectedMessage.id, accountEmail, currentUserID);
+    const legacyDraftID = createHomeMailForwardDraftID(sharedInboxID, selectedMessage.id);
+    const existingDraft = mailDrafts.find((draft) => draft.id === forwardDraftID)
+      ?? (legacyDraftID !== forwardDraftID ? mailDrafts.find((draft) => draft.id === legacyDraftID) : undefined);
     if (existingDraft) {
       setCompose(homeMailDraftToCompose(existingDraft));
       return;
@@ -2943,7 +2962,7 @@ export function HomePage({
       open: true,
       draftID: forwardDraftID,
       sharedInboxID,
-      accountEmail: (activeMailAccountEmail ?? "").trim(),
+      accountEmail,
       subject: forwardSubject(selectedMessage.subject || ""),
       body: forwardBodyWithSignature(selectedMessage, emailSignature),
     });
@@ -2972,6 +2991,8 @@ export function HomePage({
           ? submittedCompose
           : { ...submittedCompose, draftID: composeDraftID(submittedCompose) };
         setMailDrafts(saveHomeMailDraftFromCompose(companyID, currentUserID, scheduledCompose, emailSignature));
+        void syncHomeMailDraftFromCompose(companyID, currentUserID, scheduledCompose, emailSignature)
+          .then(setMailDrafts);
         setCompose(emptyCompose);
         setNotice(formatScheduledSendNotice(scheduledCompose.scheduledAt));
         return;
@@ -2979,6 +3000,8 @@ export function HomePage({
       const result = await sendHomeMailComposeCommand({ companyID, sharedInboxID: targetSharedInboxID, compose, connectedAccountEmail });
       if (submittedCompose.draftID.trim()) {
         setMailDrafts(deleteHomeMailDraft(companyID, currentUserID, submittedCompose.draftID));
+        void deleteHomeMailDraftRemote(companyID, currentUserID, submittedCompose.draftID)
+          .then(setMailDrafts);
       }
       setCompose(emptyCompose);
       setNotice("Message sent.");
@@ -3024,6 +3047,10 @@ export function HomePage({
           .then((result) => {
             if (cancelled) return;
             setMailDrafts(deleteHomeMailDraft(companyID, currentUserID, draft.id));
+            void deleteHomeMailDraftRemote(companyID, currentUserID, draft.id)
+              .then((drafts) => {
+                if (!cancelled) setMailDrafts(drafts);
+              });
             setNotice("Scheduled message sent.");
             const replyToMessageID = scheduledCompose.replyToMessageID.trim();
             if (replyToMessageID) {
@@ -3502,6 +3529,8 @@ export function HomePage({
     if (ids.length === 0) return;
     setError("");
     setMailDrafts(deleteHomeMailDrafts(companyID, currentUserID, ids));
+    void deleteHomeMailDraftsRemote(companyID, currentUserID, ids)
+      .then(setMailDrafts);
     removeMessagesFromVisibleMailList(ids);
     if (compose.open && compose.draftID.trim() && ids.includes(compose.draftID.trim())) {
       setCompose(emptyCompose);
@@ -4613,7 +4642,7 @@ export function HomePage({
     saveCurrentComposeDraft({ keepOpen: true });
   }, [saveCurrentComposeDraft]);
   const handleSaveEmailSignature = useCallback(() => {
-    saveHomeMailSignature(companyID, currentUserID, emailSignature);
+    void saveHomeMailSignatureRemote(companyID, currentUserID, emailSignature);
     setNotice("Signature saved.");
   }, [companyID, currentUserID, emailSignature]);
   const activeMessageListKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);

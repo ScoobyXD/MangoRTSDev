@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { sanitizeAPIErrorMessage } from "../../../../frontend/src/modules/api/requestJSON.js";
-import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_EMAIL_BODY_ATTRIBUTE, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, editorEmailDisplayDocument, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML, serializeEditorBodyForEmailHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_EMAIL_BODY_ATTRIBUTE, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, EDITOR_LIST_ATTRIBUTE, EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, editorEmailDisplayDocument, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML, serializeEditorBodyForEmailHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { clampEditorImageVerticalOffset, createStandaloneImageClipboardHTML, editorAttachmentIDFromImageSource, editorAttachmentImageSource, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isEditorAttachmentImageSource, isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
@@ -46,6 +46,13 @@ test("email serialization keeps plain text links and explicit line breaks", () =
 
   assert.match(html, /Hello<br>  <a href="https:\/\/example\.test\/path"/);
   assert.match(html, /<\/a>\./);
+});
+
+test("email serialization preserves rich lists and indented blocks", () => {
+  const html = serializeEditorBodyForEmailHTML(`${EDITOR_RICH_TEXT_PREFIX}<ul ${EDITOR_LIST_ATTRIBUTE}="bullet"><li>One</li><li>Two</li></ul><div style="margin-left: 40px;">Indented</div>`);
+
+  assert.match(html, /<ul data-mango-editor-list="bullet"><li>One<\/li><li>Two<\/li><\/ul>/);
+  assert.match(html, /<div style="margin-left: 40px;">Indented<\/div>/);
 });
 
 test("editor link href normalization supports appended URL characters", () => {

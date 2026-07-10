@@ -283,6 +283,71 @@ export type SendEmailInput = {
   shared_inbox_id?: string;
 };
 
+export type CommunicationsEmailDraftAttachment = {
+  resource_attachment_id: string;
+  attachment_id: string;
+  relationship_kind?: string;
+  attachment?: {
+    attachment_id: string;
+    original_filename: string;
+    mime_type: string;
+    byte_size: number;
+  };
+};
+
+export type CommunicationsEmailDraft = {
+  company_id: string;
+  draft_id: string;
+  scope_type: "personal" | "shared" | string;
+  personal_user_id?: string;
+  personal_account_email?: string;
+  shared_inbox_id?: string;
+  kind: "compose" | "reply" | "forward" | string;
+  source_message_id?: string;
+  account_email?: string;
+  to_recipients: string;
+  cc_recipients: string;
+  bcc_recipients: string;
+  subject: string;
+  body_editor_html: string;
+  reply_to_message?: EmailMessage | null;
+  scheduled_send_timestamp?: string;
+  created_timestamp: string;
+  updated_timestamp: string;
+  attachments?: CommunicationsEmailDraftAttachment[];
+};
+
+export type CommunicationsEmailSignature = {
+  company_id: string;
+  signature_id: string;
+  scope_type: "personal" | "shared" | string;
+  personal_user_id?: string;
+  personal_account_email?: string;
+  shared_inbox_id?: string;
+  name: string;
+  body_editor_html: string;
+  is_default: boolean;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+export type SaveCommunicationsEmailDraftInput = {
+  companyID: string;
+  draftID: string;
+  sharedInboxID?: string;
+  accountEmail?: string;
+  kind?: "compose" | "reply" | "forward";
+  sourceMessageID?: string;
+  replyToMessageID?: string;
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  bodyEditorHTML: string;
+  replyToMessage?: EmailMessage | null;
+  scheduledSendTimestamp?: string;
+};
+
 type CacheEntry<T> = {
   value: T;
   fetchedAt: number;
@@ -611,6 +676,80 @@ export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
   applyEmailMessageToCachedPages(message, { prependIfMissing: true });
   if (input.reply_to_message_id?.trim()) addLocalEmailReply(input.reply_to_message_id, message);
   return message;
+}
+
+export async function listEmailDrafts(companyID: string): Promise<CommunicationsEmailDraft[]> {
+  const cleanCompanyID = companyID.trim();
+  if (!cleanCompanyID) return [];
+  const payload = await apiFetchJSON<{ drafts?: CommunicationsEmailDraft[] }>(`/v1/communications/drafts?company_id=${encodeURIComponent(cleanCompanyID)}`);
+  return (payload.drafts ?? []).map(cloneCommunicationsEmailDraft);
+}
+
+export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): Promise<CommunicationsEmailDraft> {
+  const cleanCompanyID = input.companyID.trim();
+  const cleanDraftID = input.draftID.trim();
+  if (!cleanCompanyID || !cleanDraftID) throw new Error("email_draft_id_required");
+  const scheduledSendTimestamp = normalizeDraftTimestampForAPI(input.scheduledSendTimestamp);
+  const payload = await apiFetchJSON<{ draft: CommunicationsEmailDraft }>(`/v1/communications/drafts/${encodeURIComponent(cleanDraftID)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      company_id: cleanCompanyID,
+      draft_id: cleanDraftID,
+      shared_inbox_id: input.sharedInboxID?.trim() || undefined,
+      account_email: input.accountEmail?.trim() || undefined,
+      kind: input.kind,
+      source_message_id: input.sourceMessageID?.trim() || undefined,
+      reply_to_message_id: input.replyToMessageID?.trim() || undefined,
+      to_recipients: input.to,
+      cc_recipients: input.cc,
+      bcc_recipients: input.bcc,
+      subject: input.subject,
+      body_editor_html: input.bodyEditorHTML,
+      reply_to_message: input.replyToMessage ?? null,
+      scheduled_send_timestamp: scheduledSendTimestamp,
+    }),
+  });
+  return cloneCommunicationsEmailDraft(payload.draft);
+}
+
+export async function deleteEmailDraft(companyID: string, draftID: string): Promise<void> {
+  const cleanCompanyID = companyID.trim();
+  const cleanDraftID = draftID.trim();
+  if (!cleanCompanyID || !cleanDraftID) return;
+  await apiFetchJSON<{ status?: string }>(`/v1/communications/drafts/${encodeURIComponent(cleanDraftID)}?company_id=${encodeURIComponent(cleanCompanyID)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function getEmailSignature(companyID: string, sharedInboxID?: string): Promise<CommunicationsEmailSignature | null> {
+  const cleanCompanyID = companyID.trim();
+  if (!cleanCompanyID) return null;
+  const query = new URLSearchParams({ company_id: cleanCompanyID });
+  if (sharedInboxID?.trim()) query.set("shared_inbox_id", sharedInboxID.trim());
+  const payload = await apiFetchJSON<{ signature?: CommunicationsEmailSignature | null }>(`/v1/communications/signature?${query.toString()}`);
+  return payload.signature ? cloneCommunicationsEmailSignature(payload.signature) : null;
+}
+
+export async function saveEmailSignature(input: {
+  companyID: string;
+  sharedInboxID?: string;
+  bodyEditorHTML: string;
+  name?: string;
+  isDefault?: boolean;
+}): Promise<CommunicationsEmailSignature> {
+  const cleanCompanyID = input.companyID.trim();
+  if (!cleanCompanyID) throw new Error("company_id_required");
+  const payload = await apiFetchJSON<{ signature: CommunicationsEmailSignature }>("/v1/communications/signature", {
+    method: "PUT",
+    body: JSON.stringify({
+      company_id: cleanCompanyID,
+      shared_inbox_id: input.sharedInboxID?.trim() || undefined,
+      name: input.name?.trim() || undefined,
+      body_editor_html: input.bodyEditorHTML,
+      is_default: input.isDefault ?? true,
+    }),
+  });
+  return cloneCommunicationsEmailSignature(payload.signature);
 }
 
 export async function listCommunicationsSharedInboxes(companyID: string): Promise<CommunicationsSharedInbox[]> {
@@ -1884,6 +2023,13 @@ function createSharedInboxMessageMutationQuery(sharedInboxID?: string, companyID
   return raw ? `?${raw}` : "";
 }
 
+function normalizeDraftTimestampForAPI(value: string | undefined): string {
+  const cleanValue = value?.trim() ?? "";
+  if (!cleanValue) return "";
+  const parsed = Date.parse(cleanValue);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : cleanValue;
+}
+
 function isEmailMessageDetailed(message: EmailMessage): boolean {
   return typeof message.body === "string" && message.body.trim().length > 0;
 }
@@ -1925,6 +2071,21 @@ function cloneMessage(message: EmailMessage): EmailMessage {
     read_status: message.read_status ? { ...message.read_status } : undefined,
     local_replies: message.local_replies ? message.local_replies.map((reply) => cloneMessage(reply)) : undefined,
   };
+}
+
+function cloneCommunicationsEmailDraft(draft: CommunicationsEmailDraft): CommunicationsEmailDraft {
+  return {
+    ...draft,
+    reply_to_message: draft.reply_to_message ? cloneMessage(draft.reply_to_message) : draft.reply_to_message ?? undefined,
+    attachments: draft.attachments ? draft.attachments.map((item) => ({
+      ...item,
+      attachment: item.attachment ? { ...item.attachment } : undefined,
+    })) : undefined,
+  };
+}
+
+function cloneCommunicationsEmailSignature(signature: CommunicationsEmailSignature): CommunicationsEmailSignature {
+  return { ...signature };
 }
 
 function cloneEmailAddresses(addresses: EmailAddress[] | undefined): EmailAddress[] | undefined {
