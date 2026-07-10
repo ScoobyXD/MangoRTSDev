@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -137,6 +138,17 @@ test("delete helpers can tag notification update event source", async () => {
     globalThis.fetch = originalFetch;
     restore();
   }
+});
+
+test("notification summary realtime refresh does not rebroadcast a second global update event", () => {
+  const source = readFileSync("frontend/src/modules/notifications/useNotificationSummary.ts", "utf8");
+  const start = source.indexOf("function ensureNotificationRealtime");
+  const end = source.indexOf("function currentUserCanUseCompany", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const realtimeBlock = source.slice(start, end);
+  assert.doesNotMatch(realtimeBlock, /emitNotificationsUpdated/);
+  assert.equal(realtimeBlock.match(/requestNotificationSummaryLoadsForCompany/g)?.length, 3);
 });
 
 test("read and unread helpers still use notification read endpoints", async () => {
