@@ -1,4 +1,4 @@
-Last updated: 2026-07-06
+Last updated: 2026-07-10
 
 # Explorer Tests
 
@@ -60,6 +60,8 @@ E49 - A successful Company Explorer email-to-Logic-Gate drop shows a temporary g
 E50 - A successful Company Explorer email-to-Logic-Gate, pinned Logic Gate, or non-Explorer eligible node drop sets source emails to unstarred through the source mailbox scope, returns `unstarred_message_ids`, and reconciles Home locally without pulling replacement rows into Inbox, All, Starred, My Triage, or Shared Triage.
 E51 - Double-clicking a Company Explorer row label must not enter inline rename mode; renaming folders, projects, and Logic Gates requires an explicit rename action that is already authorized for the target.
 E52 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
+E53 - Permissions opened from Company Explorer for folders, projects, or Logic Gates use the shared permission view and always expose a visible **Save** action when editable. Node search results remain open-only and do not gain Explorer permission actions.
+E54 - An email conversion through Company Explorer persists mailbox provenance in the created node's attached-email projection: personal/My Triage conversions retain `account_email`, and Shared Triage conversions retain both `shared_inbox_id` and `account_email`, so later reads, replies, attachments, drafts, and invitation responses use the source mailbox scope.
 
 
 ## Bug History
@@ -248,6 +250,7 @@ Business logic covered:
 - E48
 - E49
 - E50
+- E54
 
 Given:
 - A user has a My Triage or mailbox-capable Shared Triage email selected.
@@ -255,7 +258,7 @@ Given:
 - The active Home triage list is visible and has a cached message page/detail entry for that email.
 
 Expected:
-- The conversion request preserves the source mailbox scope, including `shared_inbox_id` for Shared Triage.
+- The conversion request and created attached-email projection preserve the source mailbox scope: personal conversions retain `account_email`, while Shared Triage conversions retain both `shared_inbox_id` and `account_email`.
 - The backend creates a Pending direct email-created node/card in the target Logic Gate.
 - Company Explorer folder rows are not email conversion targets; project-surface email drops use project relationship conversion instead of Company Explorer placement.
 - The created email node/card is owned by the Logic Gate/Kanban work path and does not create a Company Explorer folder item, Explorer V2 row, or `company_explorer_items` row.
@@ -279,3 +282,17 @@ Expected:
 - Double-clicking a Company Explorer row label does not replace the label with an inline text editor.
 - The text caret does not appear inside the row title as a result of double-clicking.
 - Renaming remains available only through the explicit rename command for resources that support rename and pass access checks.
+
+### Scenario E-S9: Explorer Permission Save
+
+Business logic covered:
+- E53
+
+Given:
+- A user opens permissions for an Explorer folder, project, or Logic Gate from Company Explorer.
+
+Expected:
+- Every editable permission view visibly exposes **Save** and follows `docs/tests/permissions.md`.
+- Saving persists the current selection without closing the view and reports loading or failure state.
+- Read-only and denied views remain dismissible and do not issue a permission mutation.
+- Node search rows remain open-only and do not expose Explorer permission or mutation controls.

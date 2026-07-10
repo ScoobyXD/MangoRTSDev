@@ -163,6 +163,8 @@ test("parses attached email projection payloads", () => {
   const payload = buildEditorAttachedEmailPayload({
     messageID: "message-1",
     threadID: "thread-1",
+    sharedInboxID: "shared-1",
+    accountEmail: "shared@example.test",
     subject: "Contract terms",
     from: "Lee <lee@example.test>",
     attachedTimestamp: "2026-05-04T03:00:00.000Z",
@@ -173,6 +175,8 @@ test("parses attached email projection payloads", () => {
 
   assert.equal(emails.length, 1);
   assert.equal(emails[0].messageID, "message-1");
+  assert.equal(emails[0].sharedInboxID, "shared-1");
+  assert.equal(emails[0].accountEmail, "shared@example.test");
   assert.equal(emails[0].subject, "Contract terms");
 });
 

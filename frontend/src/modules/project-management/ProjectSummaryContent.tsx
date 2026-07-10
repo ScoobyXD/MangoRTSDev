@@ -646,14 +646,16 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [attachmentRequestJSON, companyID, projectID]);
 
-  const attachEmailToBlock = useCallback(async (blockID: string, message: Parameters<typeof messageAttachmentPayload>[0]) => {
-    const payload = messageAttachmentPayload(message);
+  const attachEmailToBlock = useCallback(async (blockID: string, message: Parameters<typeof messageAttachmentPayload>[0], scope: { sharedInboxID?: string; accountEmail?: string } = {}) => {
+    const payload = messageAttachmentPayload(message, scope.sharedInboxID, scope.accountEmail);
     const id = generateStableInformationID();
     const nextEmail: EditorAttachedEmail = {
       id,
       blockID,
       messageID: payload.messageID,
       threadID: payload.threadID,
+      sharedInboxID: payload.sharedInboxID,
+      accountEmail: payload.accountEmail,
       subject: payload.subject,
       snippet: payload.snippet,
       from: payload.from,
@@ -1781,7 +1783,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           panelBackground={EDITOR_NEU_PANEL_BACKGROUND}
           strokeColor={EDITOR_NEU_SOFT_BORDER}
           onClose={() => setEmailPickerBlockID("")}
-          onAttach={(message) => void attachEmailToBlock(emailPickerBlockID, message)}
+          onAttach={(message, scope) => void attachEmailToBlock(emailPickerBlockID, message, scope)}
         />
       ) : null}
     </div>

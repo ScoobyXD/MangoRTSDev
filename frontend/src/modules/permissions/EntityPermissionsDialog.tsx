@@ -533,7 +533,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
   const containerStyle = dialogMode ? permissionDialogStyle : permissionEmbeddedStyle;
   const closeWithSave = () => {
     if (!onClose) return;
-    if (effectiveReadOnly || permissionsLoadFailed) {
+    if (effectiveReadOnly || permissionsLoadFailed || saved) {
       onClose();
       return;
     }
@@ -557,7 +557,7 @@ export const EntityPermissionsPanel: React.FC<EntityPermissionsPanelProps> = ({
           Apply to descendants
         </label>
       )}
-      {!dialogMode && <button className="mango-elevated-action" type="button" style={permissionPrimaryButtonStyle} onClick={() => { void save(false); }} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>}
+      <button className="mango-elevated-action" type="button" style={permissionPrimaryButtonStyle} onClick={() => { void save(false); }} disabled={controlsDisabled}>{busy ? "Saving" : "Save"}</button>
       {onClose && (
         <button className="mango-elevated-action" type="button" style={permissionIconButtonStyle} onClick={closeWithSave} disabled={busy} aria-label="Close permissions">x</button>
       )}

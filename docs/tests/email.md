@@ -5,6 +5,7 @@ Last updated: 2026-07-10
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction and Mango attachment references; `tests/frontend/modules/editor/richTextEditing.test.ts` covers rich email HTML serialization, spacing, indentation, lists, links, and safe sanitization; backend communications and attachment handler tests cover provider send boundaries, S3 attachment resolution, and email draft attachment authorization. Draft/signature persistence endpoint coverage should be expanded with focused backend HTTP tests.)
+- Thread viewer parity and Reply All focus are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; recipient deduplication/mailbox exclusion by `tests/frontend/modules/communications/emailRecipients.test.ts`; semantic reply-draft identity by `tests/frontend/pages/home/homeMailDrafts.test.ts`; and calendar RSVP request construction by `tests/frontend/modules/communications/communicationsApi.test.ts`.
 
 - Automatic signature insertion, rich-body deduplication, signature-only draft detection, mailbox scope keys, and personal/shared signature request scope are covered by `tests/frontend/pages/home/homeCommands.test.ts`, `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`, and `tests/frontend/modules/communications/communicationsApi.test.ts`.
 
@@ -50,6 +51,11 @@ EMAIL26 - Shared font-size/Bold/Underline controls preserve the editor range whe
 EMAIL27 - Durable pasted-image bodies store Mango attachment references. At the backend send boundary, authorized references are deduplicated, resolved from S3, converted to inline attachments with unique alphanumeric content IDs, and rewritten to matching `cid:` image sources; normal files remain non-inline and broken/unauthorized inline references reject the send.
 
 EMAIL28 - The default signature for the exact active personal mailbox or Shared Triage inbox is automatically inserted exactly once into every newly created compose, reply, and reply-all body. If database hydration completes after the editor opens, Mango backfills only that still-open new draft, preserves text already typed, never rewrites a reopened saved draft, and never duplicates a signature already present in rich or legacy body content.
+EMAIL29 - When remote hydration returns multiple reply drafts for the same company, user, mailbox scope, and source message, Mango keeps the newest semantic draft and deletes the superseded remote draft rows. A stale duplicate must not reappear after the surviving draft is sent, deleted, or reopened.
+EMAIL30 - Personal, shared, node-attached, and project-attached thread viewers expose the same expand-all, To/Cc/Bcc, Reply/Reply All, authenticated attachment, inline-image download/fullscreen, and original-message context behavior while preserving the originating mailbox scope.
+EMAIL31 - Vertical reply resizing ends on pointer-up even outside the handle, pointer-cancel, lost pointer capture, or window blur. Pointer movement after any of those events must not continue changing editor height.
+EMAIL32 - Calendar-invitation metadata (`text/calendar` or `.ics`) may identify a candidate invitation in the viewer, but the backend always derives `METHOD`, `VEVENT`, and UID from authenticated raw MIME. RSVP controls prevent duplicate submission while pending and display a saved/selected response only after provider success; malformed invitations, missing/ambiguous events, expired grants, and provider failures leave no false selected state and surface a recoverable error.
+EMAIL33 - Reopening a saved Reply All draft restores its saved To, Cc, and Bcc fields while still applying the active-mailbox exclusion and case-insensitive recipient deduplication rules.
 
 ## Scenarios
 
@@ -102,6 +108,7 @@ Business logic covered:
 - EMAIL9
 - EMAIL17
 - EMAIL21
+- EMAIL29
 
 Given:
 - A user replies to or forwards a provider message, closes compose, and later clicks Reply or Forward on the same source message in the same mailbox scope.
@@ -110,6 +117,7 @@ Expected:
 - Mango resumes the existing stable draft ID instead of creating a duplicate.
 - Reply context is restored so the original message being answered is visible.
 - Choosing the action on an older thread card uses that exact message ID and context rather than the newest card.
+- If legacy or remote state contains duplicate semantic reply drafts, Mango retains the newest draft, removes the superseded remote rows, and does not expose an older draft after the current one is sent or deleted.
 - After a successful send, Mango deletes the saved draft.
 
 ### Scenario EMAIL-S4: Signature Persistence
@@ -177,6 +185,7 @@ Business logic covered:
 - EMAIL22
 - EMAIL23
 - EMAIL24
+- EMAIL31
 
 Given:
 - A hydrated email thread contains several messages and the user sends or receives another message.
@@ -186,3 +195,43 @@ Expected:
 - The new message appears at the top immediately and becomes the sole automatically expanded card.
 - Users can expand older cards and see their complete bodies without an internal message scrollbar; the thread pane remains the only vertical scroll surface.
 - A resized reply body restores its saved mailbox-scope height and cannot be squeezed below the minimum.
+- Pointer-up inside or outside the resize handle, pointer-cancel, lost capture, and window blur all end resizing; later pointer movement does not change the height.
+
+### Scenario EMAIL-S8: Expand-All, Recipient Metadata, And Image Inspection
+
+Business logic covered:
+- EMAIL21
+- EMAIL23
+- EMAIL30
+- EMAIL33
+
+Given:
+- A personal, shared, node-attached, or project-attached thread includes several messages, Cc/Bcc metadata, provider attachments, and inline CID screenshots.
+
+Expected:
+- `Expand all threads` expands every message/thread group without changing message order.
+- To, Cc, and provider-supplied Bcc recipients remain visible for each message.
+- Reply all includes every visible reply-to/from, To, and Cc address exactly once and excludes the active mailbox where its identity is known.
+- Reopening a saved Reply All draft restores its To/Cc/Bcc addressing without reintroducing the active mailbox or duplicate recipients.
+- Selecting an inline screenshot exposes a download action; double-click opens the original image in a full-screen overlay.
+- Image and file attachments remain downloadable through authenticated provider/Mango attachment reads.
+
+### Scenario EMAIL-S9: Calendar Invitation RSVP
+
+Business logic covered:
+- EMAIL18
+- EMAIL20
+- EMAIL30
+- EMAIL32
+
+Given:
+- A connected Google or Microsoft mailbox receives one valid `METHOD:REQUEST` iCalendar message containing exactly one `VEVENT` and UID.
+
+Expected:
+- The expanded message displays Accept, Tentative, and Decline.
+- Provider attachment metadata may mark the message as a candidate invitation, but Mango resolves `METHOD`, `VEVENT`, and UID from authenticated raw MIME rather than client-supplied provider identifiers.
+- Mango finds exactly one non-cancelled provider event and sends `yes`, `maybe`, or `no` through Nylas.
+- Missing, cancelled, malformed, unmatched, or ambiguous invitations fail visibly without sending an RSVP.
+- Shared Triage RSVP requires edit access to the shared inbox.
+- Response controls are disabled while the request is pending, and a selected/saved state appears only after provider success.
+- Insufficient calendar scope, expired/revoked grants, and provider failures surface a recoverable reconnect/provider error, leave the user signed in to Mango, and never report or display a saved response.

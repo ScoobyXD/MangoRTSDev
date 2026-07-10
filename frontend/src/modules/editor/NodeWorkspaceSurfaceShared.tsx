@@ -163,9 +163,11 @@ export function formatTimestamp(value: string | number | undefined, granularity:
   return new Intl.DateTimeFormat(undefined, options).format(date);
 }
 
-export function messageAttachmentPayload(message: EmailMessage): {
+export function messageAttachmentPayload(message: EmailMessage, sharedInboxID = "", accountEmail = ""): {
   messageID: string;
   threadID?: string;
+  sharedInboxID?: string;
+  accountEmail?: string;
   subject: string;
   snippet?: string;
   from?: string;
@@ -175,6 +177,8 @@ export function messageAttachmentPayload(message: EmailMessage): {
   return {
     messageID: message.id,
     threadID: message.thread_id,
+    sharedInboxID: sharedInboxID.trim() || undefined,
+    accountEmail: accountEmail.trim() || undefined,
     subject: message.subject || "(no subject)",
     snippet: message.snippet,
     from: formatAddressList(message.from),

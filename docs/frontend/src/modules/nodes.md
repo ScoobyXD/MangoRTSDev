@@ -584,3 +584,11 @@ Primary implementation is in:
 - **Company Explorer** is now navigation/context handoff focused (tree selection + linked-context broadcast), not a node-details surface.
 - **Editor** is now the canonical module for node metadata + history context alongside text-box information editing.
 - The old Company Explorer **Related Artifacts** placeholder section has been removed.
+
+## 17) Attached email and chat parity update (2026-07-10)
+
+- The node-attached email organizer hydrates complete provider threads and shows To, Cc, Bcc, Reply, Reply all, attachments, CID screenshots, image download/full-screen preview, and an explicit `Expand all threads` action.
+- The node-wide attached-email dialog uses the available viewport; opening a reply focuses the shared rich editor while retaining the source message above it.
+- Email-count and attachment-count rows expose a red `Remove from node` context action for editors. Attachment removal unlinks the node resource relationship rather than deleting the stored object.
+- Node chat renders safe HTTP(S)/`www.` URLs as blue underlined links while preserving mentions and escaping arbitrary URI schemes.
+- Calendar RSVP is available when the attached message can be resolved through the active mailbox grant. Shared-inbox provenance is not yet stored in attached-email projections and must be added before shared-node RSVP can be guaranteed.

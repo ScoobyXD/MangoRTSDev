@@ -84,7 +84,7 @@ func (c NylasConfig) ScopesForProvider(provider string) []string {
 		if len(c.MicrosoftScopes) > 0 {
 			return normalizeNylasProviderScopes("microsoft", c.MicrosoftScopes)
 		}
-		return []string{"offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send"}
+		return []string{"offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite"}
 	default:
 		return nil
 	}
@@ -142,6 +142,11 @@ type NylasClient interface {
 	UpdateMessage(ctx context.Context, grantID, messageID string, update NylasMessageUpdate) (NylasMessage, error)
 	DeleteMessage(ctx context.Context, grantID, messageID string) error
 	SendMessage(ctx context.Context, grantID string, request NylasSendMessageRequest) (NylasMessage, error)
+}
+
+type NylasCalendarClient interface {
+	ListEventsByICalUID(ctx context.Context, grantID, iCalUID string) ([]NylasEvent, error)
+	SendEventRSVP(ctx context.Context, grantID, eventID, calendarID, status string) error
 }
 
 type NylasRESTClient struct {
@@ -249,6 +254,7 @@ type NylasMessage struct {
 	LogicGateCount  int                                     `json:"logic_gate_count,omitempty"`
 	TrackingOptions *NylasTrackingOptions                   `json:"tracking_options,omitempty"`
 	ReadStatus      *domain.CommunicationsMessageReadStatus `json:"read_status,omitempty"`
+	RawMIMEAttachmentsRecovered bool                         `json:"-"`
 }
 
 type NylasThread struct {
@@ -335,6 +341,14 @@ type NylasAttachment struct {
 	ContentDisposition string `json:"content_disposition,omitempty"`
 	IsInline           bool   `json:"is_inline,omitempty"`
 	Size               int64  `json:"size,omitempty"`
+}
+
+type NylasEvent struct {
+	ID         string `json:"id"`
+	CalendarID string `json:"calendar_id,omitempty"`
+	ICalUID    string `json:"ical_uid,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Status     string `json:"status,omitempty"`
 }
 
 func (c *NylasRESTClient) ExchangeCode(ctx context.Context, code, redirectURI string) (NylasGrant, error) {
@@ -494,6 +508,33 @@ func (c *NylasRESTClient) SendMessage(ctx context.Context, grantID string, reque
 		return NylasMessage{}, err
 	}
 	return response.Data, nil
+}
+
+func (c *NylasRESTClient) ListEventsByICalUID(ctx context.Context, grantID, iCalUID string) ([]NylasEvent, error) {
+	values := url.Values{}
+	values.Set("calendar_id", "primary")
+	values.Set("ical_uid", strings.TrimSpace(iCalUID))
+	var response struct {
+		Data []NylasEvent `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, grantPath(grantID, "events"), values, nil, &response, true); err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}
+
+func (c *NylasRESTClient) SendEventRSVP(ctx context.Context, grantID, eventID, calendarID, status string) error {
+	values := url.Values{}
+	calendarID = strings.TrimSpace(calendarID)
+	if calendarID == "" {
+		calendarID = "primary"
+	}
+	values.Set("calendar_id", calendarID)
+	values.Set("skip_nylas_email", "true")
+	payload := struct {
+		Status string `json:"status"`
+	}{Status: strings.TrimSpace(status)}
+	return c.do(ctx, http.MethodPost, grantPath(grantID, "events", eventID, "send-rsvp"), values, payload, nil, true)
 }
 
 func (c *NylasRESTClient) sendMessageMultipart(ctx context.Context, grantID string, request NylasSendMessageRequest) (NylasMessage, error) {

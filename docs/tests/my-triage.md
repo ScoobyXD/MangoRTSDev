@@ -101,7 +101,7 @@ MT88 - My Triage mailbox rows group messages by provider/Nylas `thread_id` when 
 MT89 - A grouped My Triage row uses the newest loaded message as the visible row representative while unread, starred, attachment, and thread-count indicators roll up from the loaded messages in that thread.
 MT90 - Selecting a My Triage thread row opens a full-height conversation detail pane that hydrates the thread through Nylas thread `message_ids` plus individual message-detail reads for HTML bodies; the thread endpoint alone must not be treated as containing full message bodies.
 MT91 - Personal rich compose send must preserve sanitized block indentation, explicit line breaks, blank lines, and spacing, including indent/outdent and blockquote-style indents, so sent email HTML does not flatten intended paragraph indentation or collapse the body into one long line.
-MT92 - Expired or revoked personal My Triage mailbox provider credentials return a My Triage reconnect/repair state, not a Mango auth logout. Personal mailbox folder, message-list, message-detail, send, archive, star, and draft endpoints must not represent provider reauthorization as a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response; they must return a recoverable provider-specific response, such as `409 nylas_reauth_required`, while the user remains signed in to Mango.
+MT92 - Expired or revoked personal My Triage mailbox provider credentials return a My Triage reconnect/repair state, not a Mango auth logout. Personal mailbox folder, message-list, message-detail, send, archive, star, draft, and calendar RSVP endpoints must not represent provider reauthorization as a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response; they must return a recoverable provider-specific response, such as `409 nylas_reauth_required`, while the user remains signed in to Mango.
 MT93 - Any future change to unified editor semantics or shared editor format/outline controls must apply to My Triage compose and reply through the shared editor behavior and shared toolbar controls, not through a separate personal-compose-only implementation.
 MT94 - Personal email compose/reply file attachments must follow `docs/tests/attachments.md`: files upload to Mango attachments before durable draft/send state is saved, and normal durable payloads store attachment references instead of raw base64 `content`.
 MT95 - Personal compose/reply inline body images use the unified rich-editor image attachment path and remain durable Mango attachment references until the backend send boundary, while normal file attachments use the mail attachment path.
@@ -132,6 +132,8 @@ Personal read receipts depend on both outbound send tracking and webhook deliver
 My Triage uses Nylas `thread_id` and thread `message_ids` to group related messages into one inbox row and to load the selected conversation history. Message bodies still come from single-message detail reads because list/thread responses can omit full HTML bodies. Detail cards are ordered newest first; the newest card expands while older cards collapse, and expanded cards auto-size inside the thread's single scroll surface.
 
 MT107 - My Triage automatically inserts the default signature for the exact active personal account exactly once into each new compose, reply, and reply-all editor. A late database load may backfill only the matching still-open new draft while preserving typed text; reopening a saved draft must not add or replace a signature.
+MT108 - My Triage thread inspection exposes expand-all, To/Cc/Bcc, authenticated image download/fullscreen, immediate reply focus, and bounded vertical resizing. Pointer-up, pointer-cancel, lost capture, or window blur ends resizing, and calendar RSVP controls prevent duplicate submission and show a selected response only after provider success.
+MT109 - Personal remote-draft reconciliation keeps the newest reply draft for each mailbox/source-message scope, deletes superseded remote duplicates, and restores saved Reply All To/Cc/Bcc addressing without reintroducing the active mailbox or duplicate recipients.
 
 ## Scenarios
 
@@ -490,6 +492,7 @@ Business logic covered:
 - MT103
 - MT104
 - MT105
+- MT109
 
 Given:
 - A user has a multi-message personal thread open.
@@ -497,6 +500,32 @@ Given:
 
 Expected:
 - Choosing Reply, Reply All, or Forward on an older card builds the action from that exact message and resumes only that message's stable draft.
+- Reconciliation removes older remote reply drafts for the same mailbox/source-message scope, and reopening Reply All restores saved To/Cc/Bcc recipients with active-mailbox exclusion intact.
 - The reply editor never collapses below its minimum, saves its resized height automatically, and restores the preference when another personal reply opens.
 - Font size applies to the preserved selection; Bold and Underline can each be turned on and off, and their active indicators follow the current caret/selection.
 - Clicking a different email row quietly saves the active draft, closes compose, and shows the clicked message on the first click without replacing the visible list.
+
+### Scenario MT-S11: Thread Inspection, Resize Release, And Calendar RSVP
+
+Business logic covered:
+- MT82
+- MT88
+- MT90
+- MT92
+- MT100
+- MT101
+- MT102
+- MT103
+- MT108
+
+Given:
+- A personal thread contains multiple messages, Cc/Bcc metadata, screenshots, attachments, or a calendar invitation.
+
+Expected:
+- `Expand all threads` expands every card and leaves the thread pane as the single scroll surface.
+- Every message displays To, Cc, and provider-visible Bcc metadata when present.
+- Selecting a body screenshot exposes Download and double-click opens a full-screen preview.
+- Reply/Reply all focuses the body editor immediately and keeps the original target message visible.
+- Releasing the reply resize pointer, cancelling it, losing pointer capture, or moving focus outside the browser ends resizing immediately; later cursor movement cannot change the height.
+- A valid calendar invitation exposes Accept, Tentative, and Decline, disables duplicate submission while pending, and shows a selected response only after the provider RSVP succeeds.
+- An expired/revoked grant, missing calendar scope, or provider failure leaves the RSVP unselected and presents a recoverable mailbox reconnect/provider error without logging the user out of Mango.

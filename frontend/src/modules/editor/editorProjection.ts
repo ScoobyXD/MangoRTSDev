@@ -51,6 +51,8 @@ export type EditorAttachedEmail = {
   blockID?: string;
   messageID: string;
   threadID?: string;
+  sharedInboxID?: string;
+  accountEmail?: string;
   subject: string;
   snippet?: string;
   from?: string;
@@ -148,6 +150,8 @@ export function buildEditorAttachedEmailPayload(input: {
   blockID?: string;
   messageID: string;
   threadID?: string;
+  sharedInboxID?: string;
+  accountEmail?: string;
   subject: string;
   snippet?: string;
   from?: string;
@@ -158,6 +162,8 @@ export function buildEditorAttachedEmailPayload(input: {
     block_id: input.blockID?.trim() ?? "",
     message_id: input.messageID,
     thread_id: input.threadID ?? "",
+    shared_inbox_id: input.sharedInboxID?.trim() ?? "",
+    account_email: input.accountEmail?.trim() ?? "",
     subject: input.subject,
     snippet: input.snippet ?? "",
     from: input.from ?? "",
@@ -314,6 +320,8 @@ function parseEditorAttachedEmail(item: EditorProjectionItem): EditorAttachedEma
   if (!messageID) return null;
   const blockID = stringValue(record, "block_id");
   const threadID = stringValue(record, "thread_id");
+  const sharedInboxID = stringValue(record, "shared_inbox_id");
+  const accountEmail = stringValue(record, "account_email");
   const snippet = stringValue(record, "snippet");
   const from = stringValue(record, "from");
   return {
@@ -321,6 +329,8 @@ function parseEditorAttachedEmail(item: EditorProjectionItem): EditorAttachedEma
     blockID: blockID || undefined,
     messageID,
     threadID: threadID || undefined,
+    sharedInboxID: sharedInboxID || undefined,
+    accountEmail: accountEmail || undefined,
     subject: stringValue(record, "subject") || "(no subject)",
     snippet: snippet || undefined,
     from: from || undefined,

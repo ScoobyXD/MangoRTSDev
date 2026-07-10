@@ -4,6 +4,8 @@ Last updated: 2026-07-10
 
 Coverage Status:
 - Node attachment presentation and visibility-gated thumbnail behavior are covered by `tests/frontend/modules/attachments/attachmentPresentation.test.ts`; upload concurrency, partial-success, byte-limit, scope/permission invalidation, and delete-while-uploading behavior are covered by `tests/frontend/modules/editor/nodeTextBlockAttachments.test.ts`; shared people-palette behavior is covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
+- Attached-email thread parity, resize cleanup, red removal actions, Reply/Reply All focus, and permission Save visibility are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; node chat URL detection is covered by `tests/frontend/modules/editor/nodeChatLinks.test.ts`.
+- Shared conversion projection provenance is covered by `backend/internal/http/communications_triage_handlers_test.go` and `backend/internal/store/communications_email_conversion_test.go`.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial. Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; Company Explorer search resource-type filtering has backend coverage; node editor projection-save helpers have frontend coverage; Tab-at-caret editor behavior is covered by `tests/frontend/modules/editor/plainTextEditing.test.ts`; Mango email body marking/display preservation is covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; the unified editor contract, attached-email reply bottom buffer, EmailPickerModal attach-only boundary, red unified close chrome, and unified node-shell contract/adapter mounting are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; shared attachment tests cover node resource links/content authorization and `attached_email` resource authorization; GVIC picker rule IDs, the Assign to Logic Gate picker no-preload UI behavior, and node header project-assignment layout rules are not mapped to automated tests yet.
 
@@ -11,7 +13,7 @@ Coverage Status:
 
 ### 2026-07-10 Text-Box Deletion Retention And Node-Level Viewers
 
-- Deleting a node text box removes that text-box projection and its local UI, but it must not treat node files or attached emails referenced from that box as child records to delete. File `resource_attachments` links and attached-email projections remain associated with the node until a separate explicit unlink/remove operation is implemented and invoked.
+- Deleting a node text box removes that text-box projection and its local UI, but it must not treat node files or attached emails referenced from that box as child records to delete. File `resource_attachments` links and attached-email projections remain associated with the node unless an editor separately invokes **Remove from node** for the specific row.
 - The node header attachment counter/list remains available independently of text boxes and includes files uploaded from deleted text boxes. A missing `information_id` target is displayed with an explicit deleted-text-box origin label instead of hiding the file or assigning it to another box.
 - The node header attached-email counter/list also remains available independently of text boxes. Opening it uses a standalone node-level attached-email organizer modal with its folders/list and selected conversation, not an automatically created or arbitrarily selected text box.
 - A retained attached email must be viewable from the global node header when the node has no text boxes and when the user has view-only access. Existing per-text-box email conversation panes remain available for live text boxes and are not the required host for the global viewer.
@@ -93,6 +95,11 @@ N67 - A node attachment row displays the original filename and byte size and exp
 N68 - Node users with view access may see attachment counts/lists and download authorized files even when the node is read-only. Upload remains limited to users with edit access.
 N69 - Node attachment counts and lists are rebuilt from the backend node resource-link list when the workspace loads. Projection attachment references may support editor persistence, but they are not the canonical source for list/download availability.
 N70 - Per-text-box and node-wide attachment controls are part of the shared node workspace body, so every full node-window surface using that body receives the same attachment scope, count, list, permission, and download behavior.
+N71 - Node permissions opened from any full node-window entry point use the shared permissions contract in `docs/tests/permissions.md`: editable views always display `Save`, successful Save persists the current selection without closing, and read-only, denied, or failed-load views remain dismissible without writing.
+N72 - Node-attached email viewers use the shared email-thread contract: full-height body, expand-all, To/Cc/Bcc, exact-message Reply/Reply All, authenticated attachments and image actions, immediate reply focus, original-message context, calendar RSVP, and resize termination after pointer-up/cancel, lost capture, or window blur.
+N73 - Editors can right-click an attached-email or attachment row and choose a red `Remove from node`; the action removes only that attached-email projection or node attachment relationship, while view-only users receive no destructive action.
+N74 - Node chat detects safe `http://`, `https://`, `www.`, and bare-domain links, excludes trailing punctuation and email-address domains, renders links blue and underlined with opener isolation, and leaves unsafe/non-HTTP schemes as plain text.
+N75 - A personal attached-email projection stores `account_email`; a Shared Triage conversion stores both `shared_inbox_id` and `account_email`. Thread, attachment, Reply/Reply All, draft, and calendar operations use those stored fields instead of falling back to another grant.
 
 ## Scenarios
 
@@ -379,3 +386,79 @@ Expected:
 - Download reads the authorized `original` S3-backed variant through Mango's attachment-content API and uses the original filename.
 - The view-only user can open both lists and download attachments but cannot upload new attachments.
 - Reloading the node reconstructs the same lists from active backend node resource links even if a projection attachment reference is stale or absent.
+
+### Scenario N-S12: Node-Attached Email Thread Parity
+
+Business logic covered:
+- N53
+- N57
+- N58
+- N59
+- N62
+- N63
+- N72
+- N75
+
+Given:
+- A text box or node has an attached multi-message email thread with To, Cc, Bcc, ordinary attachments, and CID screenshots.
+
+Expected:
+- The email-count viewer fills the available viewport and preserves one scroll surface for the conversation.
+- Every message exposes its sender, To, Cc, and provider-supplied Bcc metadata plus Reply and Reply all actions.
+- `Expand all threads` opens every collapsed attached-email thread group.
+- Reply all deduplicates the visible reply-to/from, To, and Cc addresses and never invents hidden Bcc recipients.
+- Personal attachments retain `account_email`, and shared conversions retain both `shared_inbox_id` and `account_email`, so Reply all excludes the active mailbox and all provider reads/mutations use the originating grant.
+- Selecting an inline image exposes Download; double-clicking it opens a full-screen preview.
+- Text selected in rich/image email bodies still exposes the existing chat/create-node actions.
+- Non-inline attachments show filename/type/size, download, and full-screen image preview.
+- Calendar invitations expose Accept, Tentative, and Decline when the viewer has edit access, prevent duplicate submission while pending, and show a selected response only after provider success.
+- Opening a reply focuses the unified reply editor immediately while the original message remains visible.
+- Releasing a vertical resize, cancelling it, losing pointer capture, or blurring the window ends resizing; later pointer movement cannot continue changing the editor height.
+
+### Scenario N-S13: Remove Attached Rows From Node
+
+Business logic covered:
+- N53
+- N65
+- N66
+- N69
+- N73
+
+Given:
+- An editor has edit access and opens an email-count or attachment-count list.
+
+Expected:
+- Right-clicking an email row or attachment row shows `Remove from node` in red.
+- Removing an email deletes only its attached-email projection from the node.
+- Removing an attachment unlinks the active node resource attachment and refreshes counts without deleting the stored attachment object.
+- View-only users do not receive either removal action.
+
+### Scenario N-S14: Node Chat Links
+
+Business logic covered:
+- N36
+- N74
+
+Given:
+- A node chat message contains `https://`, `http://`, `www.`, or a bare web domain beside ordinary text, punctuation, an email address, or a mention.
+
+Expected:
+- Safe web URLs render blue, underlined, and open in a new tab with opener isolation.
+- Sentence punctuation remains outside the clickable URL.
+- Mention highlighting remains intact.
+- Non-HTTP schemes such as `javascript:` remain plain text.
+
+### Scenario N-S15: Node Permission Save
+
+Business logic covered:
+- N33
+- N71
+
+Given:
+- A manager or administrator opens node permissions from more than one full node-window entry point.
+- A second viewer can open the node but cannot edit its permission settings.
+
+Expected:
+- Every editable node permission view displays the shared `Save` button in a stable action area.
+- Save commits the current selection, reports loading or failure state, leaves the view open on success, and follows the close behavior in `docs/tests/permissions.md`.
+- The read-only, denied, or failed-load view remains dismissible and does not issue a permission write.

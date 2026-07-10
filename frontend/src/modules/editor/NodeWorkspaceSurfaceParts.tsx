@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
-import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
+import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailMessage, getEmailThread, listEmailMessages, respondToCalendarInvite, sendEmail, type CalendarInviteRSVPStatus, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
+import { buildReplyAllRecipients } from "../communications/emailRecipients";
 import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
@@ -22,6 +23,7 @@ import {
   serializeEditorBodyForEmailHTML,
 } from "./richTextEditing";
 import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
+import { splitChatTextLinks } from "./nodeChatLinks";
 import {
   applyEditorIndentCommandToRoot,
   applyEditorInlineFormatToRoot,
@@ -2174,9 +2176,21 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
         >
           {segment.text}
         </span>
+      ) : splitChatTextLinks(segment.text).map((linkSegment, linkIndex) => linkSegment.href ? (
+        <a
+          key={`${segment.text}:${index}:${linkIndex}`}
+          href={linkSegment.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          style={{ color: "#0369a1", textDecoration: "underline", textDecorationThickness: 1.5, textUnderlineOffset: 2, fontWeight: 700 }}
+        >
+          {linkSegment.text}
+        </a>
       ) : (
-        <React.Fragment key={`${segment.text}:${index}`}>{segment.text}</React.Fragment>
-      ))}
+        <React.Fragment key={`${segment.text}:${index}:${linkIndex}`}>{linkSegment.text}</React.Fragment>
+      )))}
     </div>
   );
 };
@@ -2615,6 +2629,7 @@ type EmailCountDropdownProps = {
   align?: "left" | "right";
   compact?: boolean;
   onOpenEmail: (messageID: string) => void;
+  onRemoveEmail?: (emailID: string) => void;
 };
 
 const ATTACHED_EMAIL_DRAG_MIME = "application/x-mango-node-attached-email";
@@ -2633,11 +2648,15 @@ function hasAttachedEmailDragData(dataTransfer: DataTransfer): boolean {
   return dataTransfer.types.includes(ATTACHED_EMAIL_DRAG_MIME);
 }
 
-export const EmailCountDropdown: React.FC<EmailCountDropdownProps> = ({ emails, accent, surfaceText, align = "right", compact = false, onOpenEmail }) => {
+export const EmailCountDropdown: React.FC<EmailCountDropdownProps> = ({ emails, accent, surfaceText, align = "right", compact = false, onOpenEmail, onRemoveEmail }) => {
   const [open, setOpen] = useState(false);
+  const [emailMenu, setEmailMenu] = useState<{ emailID: string; x: number; y: number } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useCloseFloatingMenu(open, rootRef, close);
+  const close = useCallback(() => {
+    setOpen(false);
+    setEmailMenu(null);
+  }, []);
+  useCloseFloatingMenu(open || Boolean(emailMenu), rootRef, close);
   return (
     <div ref={rootRef} style={{ position: "relative", flex: "0 0 auto", minWidth: 0 }}>
       <button
@@ -2705,6 +2724,12 @@ export const EmailCountDropdown: React.FC<EmailCountDropdownProps> = ({ emails, 
               title={email.subject}
               draggable
               onDragStart={(event) => writeAttachedEmailDragData(event.dataTransfer, email)}
+              onContextMenu={(event) => {
+                if (!onRemoveEmail) return;
+                event.preventDefault();
+                event.stopPropagation();
+                setEmailMenu({ emailID: email.id, x: event.clientX, y: event.clientY });
+              }}
               onClick={() => {
                 setOpen(false);
                 onOpenEmail(email.messageID);
@@ -2737,6 +2762,27 @@ export const EmailCountDropdown: React.FC<EmailCountDropdownProps> = ({ emails, 
           ))}
         </div>
       )}
+      {emailMenu && onRemoveEmail && (
+        <div
+          role="menu"
+          aria-label="Attached email actions"
+          onContextMenu={(event) => event.preventDefault()}
+          style={{ position: "fixed", zIndex: 160, top: emailMenu.y, left: emailMenu.x, minWidth: 164, display: "grid", gap: 3, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, padding: 5 }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const emailID = emailMenu.emailID;
+              setEmailMenu(null);
+              onRemoveEmail(emailID);
+            }}
+            style={{ minHeight: 30, border: "1px solid transparent", borderRadius: 7, background: "transparent", color: "#dc2626", cursor: "pointer", padding: "5px 8px", textAlign: "left", font: "inherit", fontSize: 11, fontWeight: 850 }}
+          >
+            Remove from node
+          </button>
+        </div>
+      )}
     </div>
   );
 };
@@ -2757,6 +2803,7 @@ type AttachmentCountDropdownProps = {
   loading?: boolean;
   loadError?: string;
   onRetry?: () => void;
+  onRemove?: (item: AttachmentCountDropdownItem) => void;
   onError: (message: string) => void;
 };
 
@@ -3088,15 +3135,20 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
   loading = false,
   loadError = "",
   onRetry,
+  onRemove,
   onError,
 }) => {
   const [open, setOpen] = useState(false);
+  const [attachmentMenu, setAttachmentMenu] = useState<{ item: AttachmentCountDropdownItem; x: number; y: number } | null>(null);
   const [previewItem, setPreviewItem] = useState<AttachmentCountDropdownItem | null>(null);
   const [downloadingResourceAttachmentID, setDownloadingResourceAttachmentID] = useState("");
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const close = useCallback(() => setOpen(false), []);
-  useCloseFloatingMenu(open, rootRef, close);
+  const close = useCallback(() => {
+    setOpen(false);
+    setAttachmentMenu(null);
+  }, []);
+  useCloseFloatingMenu(open || Boolean(attachmentMenu), rootRef, close);
   const closePreview = useCallback(() => {
     setPreviewItem(null);
     window.requestAnimationFrame(() => triggerRef.current?.focus());
@@ -3227,6 +3279,12 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
               title={`Preview ${filename}`}
               aria-label={`Preview ${filename}`}
               onClick={() => openAttachmentPreview(item)}
+              onContextMenu={(event) => {
+                if (!onRemove) return;
+                event.preventDefault();
+                event.stopPropagation();
+                setAttachmentMenu({ item, x: event.clientX, y: event.clientY });
+              }}
               onKeyDown={(event) => {
                 if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
                 event.preventDefault();
@@ -3286,6 +3344,27 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
             </div>
             );
           })}
+        </div>
+      )}
+      {attachmentMenu && onRemove && (
+        <div
+          role="menu"
+          aria-label="Attachment actions"
+          onContextMenu={(event) => event.preventDefault()}
+          style={{ position: "fixed", zIndex: 160, top: attachmentMenu.y, left: attachmentMenu.x, minWidth: 164, display: "grid", gap: 3, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, padding: 5 }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              const item = attachmentMenu.item;
+              setAttachmentMenu(null);
+              onRemove(item);
+            }}
+            style={{ minHeight: 30, border: "1px solid transparent", borderRadius: 7, background: "transparent", color: "#dc2626", cursor: "pointer", padding: "5px 8px", textAlign: "left", font: "inherit", fontSize: 11, fontWeight: 850 }}
+          >
+            Remove from node
+          </button>
         </div>
       )}
     </div>
@@ -3469,17 +3548,17 @@ function createAttachedEmailFolderID(): string {
 }
 
 async function loadAttachedEmailThreadPreview(email: EditorAttachedEmail, companyID: string): Promise<EmailMessage[]> {
-  const primary = await getEmailMessage(email.messageID, companyID);
+  const primary = await getEmailMessage(email.messageID, companyID, email.sharedInboxID);
   const threadID = primary.thread_id?.trim() || email.threadID?.trim() || "";
   if (!threadID) return mergeEmailThreadMessages(primary, [primary], primary.local_replies ?? []);
   try {
-    const thread = await getEmailThread(threadID, companyID);
+    const thread = await getEmailThread(threadID, companyID, email.sharedInboxID);
     const ids = Array.from(new Set((thread.message_ids ?? []).map((id) => id.trim()).filter(Boolean)));
     if (!ids.includes(primary.id)) ids.unshift(primary.id);
     const details = await Promise.all(ids.map(async (id) => {
       if (id === primary.id) return primary;
       try {
-        return await getEmailMessage(id, companyID);
+        return await getEmailMessage(id, companyID, email.sharedInboxID);
       } catch {
         return thread.latest_draft_or_message?.id === id ? thread.latest_draft_or_message : null;
       }
@@ -3505,11 +3584,12 @@ const AttachedEmailThreadCard: React.FC<{
   collapsed: boolean;
   draggable: boolean;
   replyTargetMessageID?: string;
+  replyAll?: boolean;
   activeSelection?: EmailActiveSelection | null;
   highlightRemovalRequest?: EmailHighlightRemovalRequest | null;
   onToggleCollapsed: () => void;
   onSelect: () => void;
-  onReply: (messageID: string) => void;
+  onReply: (messageID: string, replyAll: boolean) => void;
   onReplyComplete: () => void;
   onError: (message: string) => void;
   onContextMenu: (event: React.MouseEvent<HTMLDivElement>, email: EditorAttachedEmail) => void;
@@ -3518,7 +3598,7 @@ const AttachedEmailThreadCard: React.FC<{
   onDropOnEmail: React.DragEventHandler<HTMLDivElement>;
   onSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (messageID: string, quote: string) => void;
-}> = ({ email, nodeID = "", apiBase = "", companyID, attachmentRequestJSON, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", activeSelection = null, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
+}> = ({ email, nodeID = "", apiBase = "", companyID, attachmentRequestJSON, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyAll = false, activeSelection = null, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -3616,7 +3696,7 @@ const AttachedEmailThreadCard: React.FC<{
             padding: selected ? "9px 10px 6px" : "9px 10px",
           }}
         >
-          <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto auto${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
+          <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto auto auto${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{email.subject}</span>
             <span style={{ fontSize: 9.5, fontWeight: 800, color: accent, whiteSpace: "nowrap" }}>{formatTimestamp(email.date)}</span>
             <button
@@ -3626,12 +3706,25 @@ const AttachedEmailThreadCard: React.FC<{
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                if (editable) onReply(email.messageID);
+                if (editable) onReply(email.messageID, false);
               }}
               style={replyButtonStyle(editable)}
             >
               <ChatIcon color={accent} />
               Reply
+            </button>
+            <button
+              type="button"
+              disabled={!editable}
+              title="Reply all"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (editable) onReply(email.messageID, true);
+              }}
+              style={replyButtonStyle(editable)}
+            >
+              Reply all
             </button>
             {hasThreadChildren && (
               <button
@@ -3674,6 +3767,8 @@ const AttachedEmailThreadCard: React.FC<{
               nodeID={nodeID}
               apiBase={apiBase}
               companyID={companyID}
+              sharedInboxID={email.sharedInboxID}
+              accountEmail={email.accountEmail}
               attachmentRequestJSON={attachmentRequestJSON}
               editable={editable}
               accent={accent}
@@ -3683,6 +3778,7 @@ const AttachedEmailThreadCard: React.FC<{
               activeSelection={activeSelection}
               highlightRemovalRequest={highlightRemovalRequest}
               initialReplyTargetMessageID={replyTargetMessageID}
+              initialReplyAll={replyAll}
               inlineExpansion
               onReplyComplete={onReplyComplete}
               onError={onError}
@@ -3710,7 +3806,7 @@ const AttachedEmailThreadCard: React.FC<{
                 }}
                 style={{ minWidth: 0, display: "grid", gap: 3, border: `1px solid ${strokeColor}`, borderRadius: 9, background: "rgba(255,255,255,0.82)", color: surfaceText, cursor: "pointer", padding: "7px 8px", textAlign: "left", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.78)" }}
               >
-                <span style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", gap: 7, alignItems: "center" }}>
+                <span style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto auto", gap: 7, alignItems: "center" }}>
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10.8, fontWeight: 900 }}>{formatAddressList(message.from) || "Unknown sender"}</span>
                   <span style={{ color: "rgba(100,116,139,0.76)", fontSize: 9.3, fontWeight: 760, whiteSpace: "nowrap" }}>{formatTimestamp(message.date)}{relative ? ` (${relative})` : ""}</span>
                   <button
@@ -3720,12 +3816,25 @@ const AttachedEmailThreadCard: React.FC<{
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      if (editable) onReply(message.id);
+                      if (editable) onReply(message.id, false);
                     }}
                     style={replyButtonStyle(editable)}
                   >
                     <ChatIcon color={accent} />
                     Reply
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!editable}
+                    title="Reply all"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (editable) onReply(message.id, true);
+                    }}
+                    style={replyButtonStyle(editable)}
+                  >
+                    Reply all
                   </button>
                 </span>
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.76)", fontSize: 10, fontWeight: 650 }}>{emailBodyText(message.body || message.snippet || "") || "(empty email)"}</span>
@@ -3742,7 +3851,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [localSelectedMessageID, setLocalSelectedMessageID] = useState("");
-  const [replyComposer, setReplyComposer] = useState<{ rootMessageID: string; targetMessageID: string } | null>(null);
+  const [replyComposer, setReplyComposer] = useState<{ rootMessageID: string; targetMessageID: string; replyAll: boolean } | null>(null);
   const [folderMenu, setFolderMenu] = useState<{ folderID: string; x: number; y: number } | null>(null);
   const [emailMenu, setEmailMenu] = useState<{ messageID: string; x: number; y: number } | null>(null);
   const [editingFolder, setEditingFolder] = useState<{ folderID: string; draft: string; isNew: boolean } | null>(null);
@@ -3940,6 +4049,10 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     });
   }, [updateLayout]);
 
+  const expandAllThreads = useCallback(() => {
+    updateLayout((current) => ({ ...current, collapsedThreadIDs: [] }));
+  }, [updateLayout]);
+
   const selectMessage = useCallback((messageID: string) => {
     const cleanMessageID = messageID.trim();
     if (!cleanMessageID) return;
@@ -3990,13 +4103,14 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       collapsed={collapsedThreadIDs.has(email.messageID)}
       draggable={editable}
       replyTargetMessageID={replyComposer?.rootMessageID === email.messageID ? replyComposer.targetMessageID : ""}
+      replyAll={replyComposer?.rootMessageID === email.messageID ? replyComposer.replyAll : false}
       activeSelection={activeEmailSelection}
       highlightRemovalRequest={emailHighlightRemovalRequest?.messageID === email.messageID ? emailHighlightRemovalRequest : null}
       onToggleCollapsed={() => toggleThread(email.messageID)}
       onSelect={() => toggleSelectedMessage(email.messageID)}
-      onReply={(targetMessageID) => {
+      onReply={(targetMessageID, replyAll) => {
         selectMessage(email.messageID);
-        setReplyComposer({ rootMessageID: email.messageID, targetMessageID });
+        setReplyComposer({ rootMessageID: email.messageID, targetMessageID, replyAll });
       }}
       onReplyComplete={() => {
         setReplyComposer((current) => current?.rootMessageID === email.messageID ? null : current);
@@ -4171,6 +4285,16 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       <div style={{ minHeight: 34, display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${ruleColor}`, padding: "5px 7px", color: surfaceText, fontSize: 11, fontWeight: 900, background: "linear-gradient(90deg, rgba(255,241,242,0.60), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.62))" }}>
         <MailIcon color={accent} />
         <span style={{ minWidth: 0, flex: "1 1 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Email</span>
+        {uniqueEmails.length > 0 && (
+          <button
+            type="button"
+            disabled={collapsedThreadIDs.size === 0}
+            onClick={expandAllThreads}
+            style={{ minHeight: 24, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, cursor: collapsedThreadIDs.size === 0 ? "default" : "pointer", opacity: collapsedThreadIDs.size === 0 ? 0.56 : 1, padding: "2px 8px", font: "inherit", fontSize: 10.5, fontWeight: 850, letterSpacing: 0, boxShadow: EDITOR_NEU_SHADOW }}
+          >
+            Expand all threads
+          </button>
+        )}
         {editable && (
           <button type="button" title="Create email folder" onClick={() => createFolder("")} style={{ width: 26, height: 24, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0, boxShadow: "2px 2px 7px rgba(174,174,192,0.16), -2px -2px 7px rgba(255,255,255,0.78)" }}>
             <FolderPlusIcon color={accent} />
@@ -4279,6 +4403,8 @@ type EmailConversationPaneProps = {
   nodeID?: string;
   apiBase?: string;
   companyID: string;
+  sharedInboxID?: string;
+  accountEmail?: string;
   attachmentRequestJSON?: AttachmentRequestJSON;
   editable: boolean;
   accent: string;
@@ -4288,6 +4414,7 @@ type EmailConversationPaneProps = {
   activeSelection?: EmailActiveSelection | null;
   highlightRemovalRequest?: EmailHighlightRemovalRequest | null;
   initialReplyTargetMessageID?: string;
+  initialReplyAll?: boolean;
   inlineExpansion?: boolean;
   onReplyComplete?: () => void;
   onError: (message: string) => void;
@@ -4302,6 +4429,13 @@ type EmailSelectionDraft = {
   endOffset: number;
   x: number;
   y: number;
+};
+
+type EmailFrameSelection = Pick<EmailSelectionDraft, "quote" | "startOffset" | "endOffset"> & {
+  clientLeft: number;
+  clientTop: number;
+  clientRight: number;
+  clientBottom: number;
 };
 
 type EmailLocalHighlight = {
@@ -4349,6 +4483,409 @@ type EmailPickerPrefetchedPage = {
   filterKey: string;
   pageToken: string;
   page: MessagePage;
+};
+
+type EmailBodyImageSelection = {
+  src: string;
+  filename: string;
+};
+
+function emailAttachmentFilename(attachment: EmailAttachment): string {
+  return attachment.filename?.trim() || "attachment";
+}
+
+function emailAttachmentContentType(attachment: EmailAttachment): string {
+  return attachment.content_type?.trim() || "application/octet-stream";
+}
+
+function emailAttachmentIsCalendarInvite(attachment: EmailAttachment): boolean {
+  return (emailAttachmentContentType(attachment).toLowerCase().split(";", 1)[0] ?? "").trim() === "text/calendar"
+    || emailAttachmentFilename(attachment).toLowerCase().endsWith(".ics");
+}
+
+function emailAttachmentDataURL(attachment: EmailAttachment): string {
+  const content = attachment.content?.trim() ?? "";
+  return content ? `data:${emailAttachmentContentType(attachment)};base64,${content}` : "";
+}
+
+function emailAttachmentContentIDKeys(attachment: EmailAttachment): string[] {
+  const keys = [attachment.content_id, attachment.filename]
+    .map((value) => value?.trim().replace(/^cid:/i, "").replace(/^<|>$/g, "") ?? "")
+    .filter(Boolean);
+  return Array.from(new Set(keys));
+}
+
+function escapeRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function rewriteEmailCIDImages(documentHTML: string, sources: Array<{ attachment: EmailAttachment; sourceURL: string }>): string {
+  let next = documentHTML;
+  for (const item of sources) {
+    if (!item.sourceURL) continue;
+    for (const key of emailAttachmentContentIDKeys(item.attachment)) {
+      next = next.replace(new RegExp(`cid:${escapeRegularExpression(key)}`, "gi"), item.sourceURL);
+    }
+  }
+  return next;
+}
+
+function triggerEmailBodyImageDownload(image: EmailBodyImageSelection): void {
+  if (typeof document === "undefined" || !image.src) return;
+  const anchor = document.createElement("a");
+  anchor.href = image.src;
+  anchor.download = image.filename || "email-image";
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+const EmailBodyFrame: React.FC<{
+  message: EmailMessage;
+  apiBase: string;
+  companyID: string;
+  sharedInboxID?: string;
+  compact: boolean;
+  strokeColor: string;
+  accent: string;
+  onSelectionChange?: (selection: EmailFrameSelection | null) => void;
+}> = ({ message, apiBase, companyID, sharedInboxID, compact, strokeColor, accent, onSelectionChange }) => {
+  const body = message.body || message.snippet || "";
+  const attachments = useMemo(() => message.attachments ?? [], [message.attachments]);
+  const [srcDoc, setSrcDoc] = useState(() => messageDocument(body, compact));
+  const [height, setHeight] = useState(compact ? 96 : 420);
+  const [selectedImage, setSelectedImage] = useState<EmailBodyImageSelection | null>(null);
+  const [previewImage, setPreviewImage] = useState<EmailBodyImageSelection | null>(null);
+  const frameCleanupRef = useRef<() => void>(() => undefined);
+  const filenameBySourceRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const objectURLs: string[] = [];
+    setSelectedImage(null);
+    setPreviewImage(null);
+    setSrcDoc(messageDocument(body, compact));
+    filenameBySourceRef.current = {};
+    const inlineAttachments = attachments.filter((attachment) => (
+      attachment.is_inline
+      || Boolean(attachment.content_id?.trim())
+      || emailAttachmentContentIDKeys(attachment).some((key) => body.toLowerCase().includes(`cid:${key.toLowerCase()}`))
+    ));
+    if (inlineAttachments.length === 0) return undefined;
+    const controller = new AbortController();
+    void Promise.all(inlineAttachments.map(async (attachment) => {
+      const inlineURL = emailAttachmentDataURL(attachment);
+      if (inlineURL) return { attachment, sourceURL: inlineURL };
+      const mangoAttachmentID = attachment.attachment_id?.trim() ?? "";
+      const providerAttachmentID = attachment.id?.trim() ?? "";
+      try {
+        const sourceURL = mangoAttachmentID
+          ? await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal })
+          : providerAttachmentID
+            ? URL.createObjectURL(await downloadEmailAttachment(message.id, providerAttachmentID, companyID, sharedInboxID))
+            : "";
+        if (cancelled) {
+          if (sourceURL.startsWith("blob:")) URL.revokeObjectURL(sourceURL);
+          return { attachment, sourceURL: "" };
+        }
+        if (sourceURL.startsWith("blob:")) objectURLs.push(sourceURL);
+        return { attachment, sourceURL };
+      } catch {
+        return { attachment, sourceURL: "" };
+      }
+    })).then((sources) => {
+      if (cancelled) return;
+      filenameBySourceRef.current = Object.fromEntries(sources.filter((item) => item.sourceURL).map((item) => [item.sourceURL, emailAttachmentFilename(item.attachment)]));
+      setSrcDoc(rewriteEmailCIDImages(messageDocument(body, compact), sources));
+    });
+    return () => {
+      cancelled = true;
+      controller.abort();
+      objectURLs.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [apiBase, attachments, body, compact, companyID, message.id, sharedInboxID]);
+
+  useEffect(() => () => frameCleanupRef.current(), []);
+
+  const handleLoad = useCallback((event: React.SyntheticEvent<HTMLIFrameElement>) => {
+    frameCleanupRef.current();
+    frameCleanupRef.current = () => undefined;
+    const frame = event.currentTarget;
+    const frameDocument = frame.contentDocument;
+    if (!frameDocument?.body || !frameDocument.documentElement) return;
+    const resize = () => {
+      const measured = Math.max(frameDocument.body.scrollHeight, frameDocument.documentElement.scrollHeight);
+      setHeight(Math.min(1600, Math.max(compact ? 64 : 190, measured + 4)));
+    };
+    const imageCleanups: Array<() => void> = [];
+    Array.from(frameDocument.images).forEach((image, index) => {
+      image.style.cursor = "zoom-in";
+      const select = (mouseEvent: MouseEvent) => {
+        mouseEvent.preventDefault();
+        mouseEvent.stopPropagation();
+        Array.from(frameDocument.images).forEach((candidate) => { candidate.style.outline = ""; });
+        image.style.outline = `2px solid ${accent}`;
+        image.style.outlineOffset = "2px";
+        const src = image.currentSrc || image.src;
+        setSelectedImage({ src, filename: filenameBySourceRef.current[src] || image.alt?.trim() || `email-image-${index + 1}` });
+      };
+      const preview = (mouseEvent: MouseEvent) => {
+        select(mouseEvent);
+        const src = image.currentSrc || image.src;
+        setPreviewImage({ src, filename: filenameBySourceRef.current[src] || image.alt?.trim() || `email-image-${index + 1}` });
+      };
+      image.addEventListener("click", select);
+      image.addEventListener("dblclick", preview);
+      image.addEventListener("load", resize);
+      image.addEventListener("error", resize);
+      imageCleanups.push(() => {
+        image.removeEventListener("click", select);
+        image.removeEventListener("dblclick", preview);
+        image.removeEventListener("load", resize);
+        image.removeEventListener("error", resize);
+      });
+    });
+    const publishSelection = () => {
+      if (!onSelectionChange) return;
+      const selection = frameDocument.getSelection();
+      if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+        onSelectionChange(null);
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      if (!frameDocument.body.contains(range.startContainer) || !frameDocument.body.contains(range.endContainer)) {
+        onSelectionChange(null);
+        return;
+      }
+      const rawQuote = range.toString();
+      const quote = rawQuote.trim();
+      if (!quote) {
+        onSelectionChange(null);
+        return;
+      }
+      const leadingTrim = rawQuote.length - rawQuote.trimStart().length;
+      const beforeRange = frameDocument.createRange();
+      beforeRange.selectNodeContents(frameDocument.body);
+      beforeRange.setEnd(range.startContainer, range.startOffset);
+      const startOffset = beforeRange.toString().length + leadingTrim;
+      const endOffset = startOffset + quote.length;
+      const rangeRect = range.getBoundingClientRect();
+      const frameRect = frame.getBoundingClientRect();
+      onSelectionChange({
+        quote,
+        startOffset,
+        endOffset,
+        clientLeft: frameRect.left + rangeRect.left,
+        clientTop: frameRect.top + rangeRect.top,
+        clientRight: frameRect.left + rangeRect.right,
+        clientBottom: frameRect.top + rangeRect.bottom,
+      });
+    };
+    frameDocument.addEventListener("mouseup", publishSelection);
+    frameDocument.addEventListener("keyup", publishSelection);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
+    observer?.observe(frameDocument.body);
+    resize();
+    frameCleanupRef.current = () => {
+      observer?.disconnect();
+      frameDocument.removeEventListener("mouseup", publishSelection);
+      frameDocument.removeEventListener("keyup", publishSelection);
+      imageCleanups.forEach((cleanup) => cleanup());
+    };
+  }, [accent, compact, onSelectionChange]);
+
+  return (
+    <>
+      <div style={{ position: "relative", minWidth: 0 }}>
+        {selectedImage && (
+          <button
+            type="button"
+            title={`Download ${selectedImage.filename}`}
+            onClick={() => triggerEmailBodyImageDownload(selectedImage)}
+            style={{ position: "absolute", zIndex: 3, top: 8, right: 8, minHeight: 30, display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, cursor: "pointer", padding: "4px 9px", fontSize: 10.5, fontWeight: 850, boxShadow: EDITOR_NEU_SHADOW }}
+          >
+            <DownloadIcon color={accent} />
+            Download image
+          </button>
+        )}
+        <iframe
+          title={`Email body ${message.id}`}
+          sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+          srcDoc={srcDoc}
+          onLoad={handleLoad}
+          style={{ width: "100%", height, border: compact ? 0 : `1px solid ${strokeColor}`, borderRadius: compact ? 0 : 8, background: "#ffffff", boxSizing: "border-box" }}
+        />
+      </div>
+      {previewImage && typeof document !== "undefined" && createPortal(
+        <div role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewImage(null); }} style={{ position: "fixed", zIndex: 260, inset: 0, display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", placeItems: "center", background: "rgba(15,23,42,0.82)", padding: 18 }}>
+          <img src={previewImage.src} alt={previewImage.filename} style={{ display: "block", maxWidth: "100%", maxHeight: "calc(100vh - 90px)", objectFit: "contain" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 10 }}>
+            <button type="button" onClick={() => triggerEmailBodyImageDownload(previewImage)} style={{ minHeight: 34, display: "inline-flex", alignItems: "center", gap: 7, border: "1px solid rgba(255,255,255,0.52)", borderRadius: 8, background: "rgba(255,255,255,0.94)", color: "#0f172a", cursor: "pointer", padding: "5px 11px", fontSize: 11.5, fontWeight: 850 }}>
+              <DownloadIcon color="#0f172a" />
+              Download
+            </button>
+            <button type="button" onClick={() => setPreviewImage(null)} style={{ minHeight: 34, border: "1px solid rgba(255,255,255,0.52)", borderRadius: 8, background: "rgba(255,255,255,0.94)", color: "#0f172a", cursor: "pointer", padding: "5px 11px", fontSize: 11.5, fontWeight: 850 }}>Close</button>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+};
+
+const EmailMessageAttachments: React.FC<{
+  message: EmailMessage;
+  apiBase: string;
+  companyID: string;
+  sharedInboxID?: string;
+  respondable: boolean;
+  accent: string;
+  surfaceText: string;
+  strokeColor: string;
+  onError: (message: string) => void;
+}> = ({ message, apiBase, companyID, sharedInboxID, respondable, accent, surfaceText, strokeColor, onError }) => {
+  const attachments = (message.attachments ?? []).filter((attachment) => !attachment.is_inline && !attachment.content_id?.trim());
+  const hasCalendarInvite = (message.attachments ?? []).some(emailAttachmentIsCalendarInvite);
+  const [previewAttachment, setPreviewAttachment] = useState<EmailAttachment | null>(null);
+  const [previewURL, setPreviewURL] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [calendarResponse, setCalendarResponse] = useState<CalendarInviteRSVPStatus | "">("");
+  const [calendarResponseBusy, setCalendarResponseBusy] = useState(false);
+
+  const respondToInvite = useCallback((status: CalendarInviteRSVPStatus) => {
+    if (calendarResponseBusy || !respondable) return;
+    setCalendarResponseBusy(true);
+    void respondToCalendarInvite({ messageID: message.id, status, companyID, sharedInboxID })
+      .then(() => setCalendarResponse(status))
+      .catch((cause) => onError(cause instanceof Error ? cause.message : "failed_to_respond_to_calendar_invite"))
+      .finally(() => setCalendarResponseBusy(false));
+  }, [calendarResponseBusy, companyID, message.id, onError, respondable, sharedInboxID]);
+
+  const loadAttachmentURL = useCallback(async (attachment: EmailAttachment, variant: "display" | "original") => {
+    const inlineURL = emailAttachmentDataURL(attachment);
+    if (inlineURL) return { url: inlineURL, revoke: false };
+    const mangoAttachmentID = attachment.attachment_id?.trim() ?? "";
+    if (mangoAttachmentID) {
+      return { url: await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, variant), revoke: true };
+    }
+    const providerAttachmentID = attachment.id?.trim() ?? "";
+    if (!providerAttachmentID) throw new Error("attachment_unavailable");
+    return { url: URL.createObjectURL(await downloadEmailAttachment(message.id, providerAttachmentID, companyID, sharedInboxID)), revoke: true };
+  }, [apiBase, companyID, message.id, sharedInboxID]);
+
+  const downloadAttachment = useCallback(async (attachment: EmailAttachment) => {
+    const filename = emailAttachmentFilename(attachment);
+    const mangoAttachmentID = attachment.attachment_id?.trim() ?? "";
+    try {
+      if (mangoAttachmentID) {
+        await downloadMangoAttachment({ apiBase, companyID, attachmentID: mangoAttachmentID, filename, variant: "original" });
+        return;
+      }
+      const loaded = await loadAttachmentURL(attachment, "original");
+      triggerEmailBodyImageDownload({ src: loaded.url, filename });
+      if (loaded.revoke) window.setTimeout(() => URL.revokeObjectURL(loaded.url), 1000);
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_download_attachment");
+    }
+  }, [apiBase, companyID, loadAttachmentURL, onError]);
+
+  useEffect(() => {
+    if (!previewAttachment) {
+      setPreviewURL("");
+      setPreviewLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    let revokeURL = false;
+    let loadedURL = "";
+    setPreviewURL("");
+    setPreviewLoading(true);
+    void loadAttachmentURL(previewAttachment, "display")
+      .then((loaded) => {
+        if (cancelled) {
+          if (loaded.revoke) URL.revokeObjectURL(loaded.url);
+          return;
+        }
+        loadedURL = loaded.url;
+        revokeURL = loaded.revoke;
+        setPreviewURL(loaded.url);
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          onError(cause instanceof Error ? cause.message : "failed_to_preview_attachment");
+          setPreviewAttachment(null);
+        }
+      })
+      .finally(() => { if (!cancelled) setPreviewLoading(false); });
+    return () => {
+      cancelled = true;
+      if (revokeURL && loadedURL) URL.revokeObjectURL(loadedURL);
+    };
+  }, [loadAttachmentURL, onError, previewAttachment]);
+
+  if (attachments.length === 0 && !hasCalendarInvite) return null;
+  return (
+    <>
+      <div style={{ minWidth: 0, display: "grid", gap: 6, marginTop: 6, paddingTop: 7, borderTop: `1px solid ${strokeColor}` }}>
+        <div style={{ color: "rgba(71,85,105,0.82)", fontSize: 10.5, fontWeight: 850 }}>
+          {attachments.length === 1 ? "1 attachment" : `${attachments.length} attachments`}
+        </div>
+        {hasCalendarInvite && (
+          <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: "rgba(240,253,250,0.76)", padding: "7px 8px" }}>
+            <strong style={{ color: "#0f172a", fontSize: 10.8 }}>Calendar invitation</strong>
+            {([{"status":"yes","label":"Accept"},{"status":"maybe","label":"Tentative"},{"status":"no","label":"Decline"}] as const).map((option) => (
+              <button key={option.status} type="button" disabled={calendarResponseBusy || !respondable} onClick={() => respondToInvite(option.status)} style={{ minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: calendarResponse === option.status ? EDITOR_NEU_ACTIVE_SURFACE : EDITOR_NEU_SURFACE, color: option.status === "no" ? "#b91c1c" : accent, cursor: calendarResponseBusy ? "wait" : respondable ? "pointer" : "default", padding: "3px 8px", fontSize: 10.5, fontWeight: 850 }}>
+                {option.label}
+              </button>
+            ))}
+            {calendarResponse && <span role="status" style={{ color: "rgba(71,85,105,0.82)", fontSize: 10.5, fontWeight: 800 }}>Response saved: {calendarResponse === "yes" ? "Accepted" : calendarResponse === "maybe" ? "Tentative" : "Declined"}</span>}
+          </div>
+        )}
+        <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 7 }}>
+          {attachments.map((attachment, index) => {
+            const filename = emailAttachmentFilename(attachment);
+            const presentationKind = classifyAttachmentPresentation({ filename, mimeType: emailAttachmentContentType(attachment) });
+            const image = presentationKind === "image";
+            return (
+              <div
+                key={attachment.id?.trim() || attachment.attachment_id?.trim() || `${filename}:${index}`}
+                role={image ? "button" : undefined}
+                tabIndex={image ? 0 : undefined}
+                title={image ? `Double-click to preview ${filename}` : filename}
+                onDoubleClick={() => { if (image) setPreviewAttachment(attachment); }}
+                onKeyDown={(event) => { if (image && event.key === "Enter") setPreviewAttachment(attachment); }}
+                style={{ minWidth: 0, display: "grid", gridTemplateColumns: "36px minmax(0, 1fr) 30px", alignItems: "center", gap: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: "#ffffff", color: surfaceText, padding: "6px 7px", cursor: image ? "zoom-in" : "default", boxShadow: "2px 2px 7px rgba(174,174,192,0.14), -2px -2px 7px rgba(255,255,255,0.76)" }}
+              >
+                {attachment.attachment_id?.trim() && image ? (
+                  <AuthenticatedAttachmentThumbnail apiBase={apiBase} companyID={companyID} attachmentID={attachment.attachment_id.trim()} />
+                ) : (
+                  <AttachmentTypeVisual kind={presentationKind} />
+                )}
+                <span style={{ minWidth: 0, display: "grid", gap: 3 }}>
+                  <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10.8 }}>{filename}</strong>
+                  <span style={{ color: "rgba(100,116,139,0.76)", fontSize: 9.5, fontWeight: 700 }}>{formatFileSize(attachment.size ?? 0)}</span>
+                </span>
+                <button type="button" title={`Download ${filename}`} aria-label={`Download ${filename}`} onClick={(event) => { event.stopPropagation(); void downloadAttachment(attachment); }} style={{ width: 28, height: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}>
+                  <DownloadIcon color={accent} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {previewAttachment && typeof document !== "undefined" && createPortal(
+        <div role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewAttachment(null); }} style={{ position: "fixed", zIndex: 260, inset: 0, display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", placeItems: "center", background: "rgba(15,23,42,0.82)", padding: 18 }}>
+          {previewLoading ? <div style={{ color: "#ffffff", fontSize: 12, fontWeight: 850 }}>Loading image</div> : <img src={previewURL} alt={emailAttachmentFilename(previewAttachment)} style={{ display: "block", maxWidth: "100%", maxHeight: "calc(100vh - 90px)", objectFit: "contain" }} />}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 10 }}>
+            <button type="button" onClick={() => { void downloadAttachment(previewAttachment); }} style={{ minHeight: 34, display: "inline-flex", alignItems: "center", gap: 7, border: "1px solid rgba(255,255,255,0.52)", borderRadius: 8, background: "rgba(255,255,255,0.94)", color: "#0f172a", cursor: "pointer", padding: "5px 11px", fontSize: 11.5, fontWeight: 850 }}><DownloadIcon color="#0f172a" />Download</button>
+            <button type="button" onClick={() => setPreviewAttachment(null)} style={{ minHeight: 34, border: "1px solid rgba(255,255,255,0.52)", borderRadius: 8, background: "rgba(255,255,255,0.94)", color: "#0f172a", cursor: "pointer", padding: "5px 11px", fontSize: 11.5, fontWeight: 850 }}>Close</button>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
 };
 
 function emailSelectionActionToolbarWidth(actionCount: number): number {
@@ -4510,6 +5047,14 @@ function parseEmailAddressDraft(value: string): EmailAddress[] {
     .filter((address) => address.email.includes("@"));
 }
 
+export function replyAllAddressDrafts(message: EmailMessage, accountEmail = ""): { to: string; cc: string } {
+  const recipients = buildReplyAllRecipients(message, accountEmail.trim() ? [accountEmail] : []);
+  return {
+    to: formatAddressList(recipients.to),
+    cc: formatAddressList(recipients.cc),
+  };
+}
+
 function emailBodyText(body: string): string {
   const value = body.trim();
   if (!value) return "";
@@ -4613,6 +5158,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   nodeID = "",
   apiBase = "",
   companyID,
+  sharedInboxID,
+  accountEmail = "",
   attachmentRequestJSON,
   editable,
   accent,
@@ -4622,6 +5169,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   activeSelection,
   highlightRemovalRequest,
   initialReplyTargetMessageID,
+  initialReplyAll = false,
   inlineExpansion = false,
   onReplyComplete,
   onError,
@@ -4632,9 +5180,12 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [sentReplies, setSentReplies] = useState<EmailMessage[]>([]);
   const [toDraft, setToDraft] = useState("");
+  const [ccDraft, setCcDraft] = useState("");
+  const [bccDraft, setBccDraft] = useState("");
   const [subjectDraft, setSubjectDraft] = useState("");
   const [bodyDraft, setBodyDraft] = useState("");
   const [replyTargetMessageID, setReplyTargetMessageID] = useState("");
+  const [replyAllMode, setReplyAllMode] = useState(false);
   const [draftAttachments, setDraftAttachments] = useState<EditorChatAttachment[]>([]);
   const [previewAttachment, setPreviewAttachment] = useState<EditorChatAttachment | null>(null);
   const [replyOutlineStyle, setReplyOutlineStyle] = useState<EditorOutlineStyleID>("automatic-outline-numbering");
@@ -4654,7 +5205,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [emailHighlightsByMessageID, setEmailHighlightsByMessageID] = useState<EmailLocalHighlightsByMessageID>(() => ({
     [messageID]: readStoredEmailLocalHighlights(messageID),
   }));
-  const [bodyFrameHeights, setBodyFrameHeights] = useState<Record<string, number>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -4664,39 +5214,43 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setThreadMessages([]);
     setSentReplies([]);
     setReplyTargetMessageID("");
+    setReplyAllMode(false);
     setReplyToolbarTab("format");
     setReplySelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
     setReplySelectionInlineFormat({ bold: false, underline: false });
     setDraftAttachments([]);
+    setCcDraft("");
+    setBccDraft("");
     setPreviewAttachment(null);
     setSelectionDraft(null);
     setEmailHighlightsByMessageID({ [messageID]: readStoredEmailLocalHighlights(messageID) });
-    setBodyFrameHeights({});
     void (async () => {
-      const payload = await getEmailMessage(messageID, companyID);
+      const payload = await getEmailMessage(messageID, companyID, sharedInboxID);
       if (cancelled) return;
       setMessage(payload);
       setThreadMessages([payload]);
       setSentReplies(payload.local_replies ?? []);
       setToDraft(formatAddressList(payload.reply_to?.length ? payload.reply_to : payload.from));
+      setCcDraft("");
+      setBccDraft("");
       setSubjectDraft(replySubject(payload.subject));
       setBodyDraft("");
 
       const threadID = payload.thread_id?.trim();
       if (!threadID) return;
       try {
-        const thread = await getEmailThread(threadID, companyID);
+        const thread = await getEmailThread(threadID, companyID, sharedInboxID);
         if (cancelled) return;
         let ids = Array.from(new Set((thread.message_ids ?? []).map((item) => item.trim()).filter(Boolean)));
         if (ids.length === 0) {
-          const page = await listEmailMessages({ companyID, mailbox: "all", limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, threadID, refresh: true });
+          const page = await listEmailMessages({ companyID, sharedInboxID, mailbox: "all", limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, threadID, refresh: true });
           ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
         }
         if (!ids.includes(payload.id)) ids.unshift(payload.id);
         const details = await Promise.all(ids.map(async (id) => {
           if (id === payload.id) return payload;
           try {
-            return await getEmailMessage(id, companyID);
+            return await getEmailMessage(id, companyID, sharedInboxID);
           } catch {
             return thread.latest_draft_or_message?.id === id ? thread.latest_draft_or_message : null;
           }
@@ -4704,14 +5258,14 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (!cancelled) setThreadMessages(details.filter((item): item is EmailMessage => Boolean(item)));
       } catch {
         try {
-          const page = await listEmailMessages({ companyID, mailbox: "all", limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, threadID, refresh: true });
+          const page = await listEmailMessages({ companyID, sharedInboxID, mailbox: "all", limit: EMAIL_PICKER_MESSAGE_BATCH_SIZE, threadID, refresh: true });
           if (cancelled) return;
           const ids = Array.from(new Set((page.messages ?? []).map((item) => item.id).filter(Boolean)));
           if (!ids.includes(payload.id)) ids.unshift(payload.id);
           const details = await Promise.all(ids.map(async (id) => {
             if (id === payload.id) return payload;
             try {
-              return await getEmailMessage(id, companyID);
+              return await getEmailMessage(id, companyID, sharedInboxID);
             } catch {
               return (page.messages ?? []).find((item) => item.id === id) ?? null;
             }
@@ -4729,7 +5283,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [companyID, messageID]);
+  }, [companyID, messageID, sharedInboxID]);
 
   useEffect(() => {
     if (!highlightRemovalRequest) return;
@@ -4744,7 +5298,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   }, [highlightRemovalRequest?.requestID, highlightRemovalRequest?.messageID, messageID]);
 
   const recipients = parseEmailAddressDraft(toDraft);
-  const canSend = editable && !sending && Boolean(message) && Boolean(replyTargetMessageID) && recipients.length > 0 && subjectDraft.trim() && editorBodyHasEmailContent(bodyDraft);
+  const ccRecipients = parseEmailAddressDraft(ccDraft);
+  const bccRecipients = parseEmailAddressDraft(bccDraft);
+  const canSend = editable && !sending && Boolean(message) && Boolean(replyTargetMessageID) && (recipients.length + ccRecipients.length + bccRecipients.length) > 0 && subjectDraft.trim() && editorBodyHasEmailContent(bodyDraft);
   const replyEditorLineCount = useMemo(() => estimateEditorBodyLineCount(bodyDraft), [bodyDraft]);
   const replyEditorMinHeight = inlineExpansion ? 112 : 138;
   const replyEditorMaxHeight = inlineExpansion ? 272 : 340;
@@ -4763,7 +5319,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     }
     : undefined;
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
-  const useRichEmailBody = !canUseEmailSelection;
   const selectedEmailBodyText = useMemo(() => (message ? emailBodyText(message.body || message.snippet || "") : ""), [message]);
   const displayThreadMessages = useMemo(() => mergeEmailThreadMessages(message, threadMessages, sentReplies), [message, sentReplies, threadMessages]);
   useEffect(() => {
@@ -4782,22 +5337,57 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const selectionActionCount = (onSelectionChatRequest ? 1 : 0) + (onSelectionNodeRequest ? 1 : 0);
   const selectionActionToolbarWidth = emailSelectionActionToolbarWidth(selectionActionCount);
   const selectionActionToolbarHeight = EMAIL_SELECTION_ACTION_BUTTON_SIZE + (EMAIL_SELECTION_ACTION_PADDING * 2) + (EMAIL_SELECTION_ACTION_BORDER * 2);
+  const updateFrameSelection = useCallback((selectionMessageID: string, frameSelection: EmailFrameSelection | null) => {
+    if (!canUseEmailSelection) return;
+    if (!frameSelection) {
+      setSelectionDraft((current) => current?.messageID === selectionMessageID ? null : current);
+      return;
+    }
+    const root = bodyRef.current;
+    if (!root) return;
+    const rootRect = root.getBoundingClientRect();
+    const minX = root.scrollLeft + EMAIL_SELECTION_ACTION_OFFSET;
+    const maxX = root.scrollLeft + root.clientWidth - selectionActionToolbarWidth - EMAIL_SELECTION_ACTION_OFFSET;
+    const minY = root.scrollTop + EMAIL_SELECTION_ACTION_OFFSET;
+    const maxY = root.scrollTop + root.clientHeight - selectionActionToolbarHeight - EMAIL_SELECTION_ACTION_OFFSET;
+    const rawX = frameSelection.clientRight - rootRect.left + root.scrollLeft + EMAIL_SELECTION_ACTION_OFFSET;
+    const centeredX = frameSelection.clientLeft - rootRect.left + root.scrollLeft + ((frameSelection.clientRight - frameSelection.clientLeft - selectionActionToolbarWidth) / 2);
+    const x = rawX >= minX && rawX <= maxX ? rawX : clampEmailSelectionActionPosition(centeredX, minX, maxX);
+    const centeredY = frameSelection.clientTop - rootRect.top + root.scrollTop + ((frameSelection.clientBottom - frameSelection.clientTop - selectionActionToolbarHeight) / 2);
+    const y = clampEmailSelectionActionPosition(centeredY, minY, maxY);
+    setSelectionDraft({
+      messageID: selectionMessageID,
+      quote: frameSelection.quote,
+      startOffset: frameSelection.startOffset,
+      endOffset: frameSelection.endOffset,
+      x,
+      y,
+    });
+  }, [canUseEmailSelection, selectionActionToolbarHeight, selectionActionToolbarWidth]);
   const replyTargetMessage = useMemo(() => (
     replyTargetMessageID ? displayThreadMessages.find((item) => item.id === replyTargetMessageID) ?? null : null
   ), [displayThreadMessages, replyTargetMessageID]);
 
   useEffect(() => {
     const targetID = initialReplyTargetMessageID?.trim() ?? "";
-    const targetKey = `${messageID}:${targetID}`;
-    if (!editable || !targetID || appliedInitialReplyTargetRef.current === targetKey) return;
+    if (!targetID) {
+      appliedInitialReplyTargetRef.current = "";
+      return;
+    }
+    const targetKey = `${messageID}:${targetID}:${initialReplyAll ? "all" : "reply"}`;
+    if (!editable || appliedInitialReplyTargetRef.current === targetKey) return;
     const target = displayThreadMessages.find((item) => item.id === targetID);
     if (!target) return;
     appliedInitialReplyTargetRef.current = targetKey;
     setReplyTargetMessageID(target.id);
-    setToDraft(formatAddressList(target.reply_to?.length ? target.reply_to : target.from));
+    setReplyAllMode(initialReplyAll);
+    const replyDrafts = initialReplyAll ? replyAllAddressDrafts(target, accountEmail) : null;
+    setToDraft(replyDrafts?.to ?? formatAddressList(target.reply_to?.length ? target.reply_to : target.from));
+    setCcDraft(replyDrafts?.cc ?? "");
+    setBccDraft("");
     setSubjectDraft(replySubject(target.subject || message?.subject || ""));
     window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
-  }, [displayThreadMessages, editable, initialReplyTargetMessageID, message?.subject, messageID]);
+  }, [accountEmail, displayThreadMessages, editable, initialReplyAll, initialReplyTargetMessageID, message?.subject, messageID]);
 
   const readEmailSelectionDraft = useCallback((): EmailSelectionDraft | null => {
     if (!canUseEmailSelection) return null;
@@ -4933,23 +5523,30 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setDraftAttachments((current) => current.filter((attachment) => attachment.id !== attachmentID));
   }, []);
 
-  const selectReplyTarget = useCallback((target: EmailMessage) => {
+  const selectReplyTarget = useCallback((target: EmailMessage, replyAll = false) => {
     if (!editable) return;
-    if (replyTargetMessageID === target.id) {
+    if (replyTargetMessageID === target.id && replyAllMode === replyAll) {
       setReplyTargetMessageID("");
+      setReplyAllMode(false);
       return;
     }
     setReplyTargetMessageID(target.id);
-    setToDraft(formatAddressList(target.reply_to?.length ? target.reply_to : target.from));
+    setReplyAllMode(replyAll);
+    const replyDrafts = replyAll ? replyAllAddressDrafts(target, accountEmail) : null;
+    setToDraft(replyDrafts?.to ?? formatAddressList(target.reply_to?.length ? target.reply_to : target.from));
+    setCcDraft(replyDrafts?.cc ?? "");
+    setBccDraft("");
     setSubjectDraft(replySubject(target.subject || message?.subject || ""));
     window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
-  }, [editable, message?.subject, replyTargetMessageID]);
+  }, [accountEmail, editable, message?.subject, replyAllMode, replyTargetMessageID]);
 
   const submitReply = () => {
     if (!message || !replyTargetMessage || !canSend) return;
     setSending(true);
     void sendEmail({
       to: recipients,
+      cc: ccRecipients,
+      bcc: bccRecipients,
       subject: subjectDraft.trim(),
       body: serializeEditorBodyForEmailHTML(bodyDraft),
       attachments: draftAttachments
@@ -4966,6 +5563,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         .filter((attachment) => attachment.attachment_id),
       reply_to_message_id: replyTargetMessage.id,
       company_id: companyID,
+      shared_inbox_id: sharedInboxID,
     })
       .then((sent) => {
         const sentWithTimestamp = sent.date ? sent : { ...sent, date: Math.floor(Date.now() / 1000) };
@@ -4973,6 +5571,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         setBodyDraft("");
         setDraftAttachments([]);
         setReplyTargetMessageID("");
+        setReplyAllMode(false);
         onReplyComplete?.();
       })
       .catch((cause) => {
@@ -4982,18 +5581,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       })
       .finally(() => setSending(false));
   };
-
-  const updateBodyFrameHeight = useCallback((messageIDForFrame: string, iframe: HTMLIFrameElement) => {
-    try {
-      const bodyHeight = iframe.contentDocument?.body?.scrollHeight ?? 0;
-      const documentHeight = iframe.contentDocument?.documentElement?.scrollHeight ?? 0;
-      const measuredHeight = inlineExpansion ? bodyHeight : Math.max(bodyHeight, documentHeight);
-      const nextHeight = Math.min(1400, Math.max(inlineExpansion ? 44 : 190, measuredHeight + (inlineExpansion ? 2 : 4)));
-      setBodyFrameHeights((current) => current[messageIDForFrame] === nextHeight ? current : { ...current, [messageIDForFrame]: nextHeight });
-    } catch {
-      setBodyFrameHeights((current) => current[messageIDForFrame] ? current : { ...current, [messageIDForFrame]: inlineExpansion ? 64 : 420 });
-    }
-  }, [inlineExpansion]);
 
   const syncReplyToolbarFormatState = useCallback(() => {
     const state = replyEditorControllerRef.current?.readFormatState();
@@ -5024,6 +5611,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     if (!replyDockVisible) return undefined;
     const frame = window.requestAnimationFrame(() => {
       replyDockRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      window.setTimeout(() => replyEditorControllerRef.current?.focus(), 0);
     });
     return () => window.cancelAnimationFrame(frame);
   }, [replyDockVisible, replyTargetMessage?.id]);
@@ -5073,8 +5661,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             {displayThreadMessages.map((threadMessage, index) => {
               const threadMessageID = threadMessage.id || messageID;
               const isSelectedMessage = threadMessage.id === message.id;
-              const hideInlineMessageChrome = inlineExpansion && isSelectedMessage;
+              const hideInlineMessageChrome = false;
               const threadBody = isSelectedMessage ? selectedEmailBodyText : emailBodyText(threadMessage.body || threadMessage.snippet || "");
+              const useRichThreadBody = !canUseEmailSelection || /<(?:img|table|video|audio)\b|\bcid:/i.test(threadMessage.body ?? "") || (threadMessage.attachments ?? []).some((attachment) => attachment.is_inline || Boolean(attachment.content_id));
               const fromLine = formatAddressList(threadMessage.from) || "Unknown sender";
               const toLine = formatAddressList(threadMessage.to) || "Me";
               const isReplyTarget = replyTargetMessage?.id === threadMessage.id;
@@ -5097,7 +5686,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 >
                   {!hideInlineMessageChrome && (
                     <>
-                      <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto", alignItems: "start", gap: 8 }}>
+                      <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto auto auto", alignItems: "start", gap: 8 }}>
                         <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: surfaceText, fontSize: 12, fontWeight: 900 }}>
                           {fromLine}
                         </div>
@@ -5107,7 +5696,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                         <button
                           type="button"
                           disabled={!editable}
-                          onClick={() => selectReplyTarget(threadMessage)}
+                          onClick={() => selectReplyTarget(threadMessage, false)}
                           style={{
                             minHeight: 22,
                             border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
@@ -5125,26 +5714,53 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                         >
                           Reply
                         </button>
+                        <button
+                          type="button"
+                          disabled={!editable}
+                          onClick={() => selectReplyTarget(threadMessage, true)}
+                          style={{
+                            minHeight: 22,
+                            border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                            borderRadius: 7,
+                            background: EDITOR_NEU_SURFACE,
+                            color: accent,
+                            cursor: editable ? "pointer" : "default",
+                            opacity: editable ? 1 : 0.46,
+                            padding: "0 8px",
+                            fontSize: 10.5,
+                            fontWeight: 900,
+                            letterSpacing: 0,
+                            boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)",
+                          }}
+                        >
+                          Reply all
+                        </button>
                       </div>
                       <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 700 }}>
                         to {toLine}
                       </div>
+                      {formatAddressList(threadMessage.cc) && (
+                        <div style={{ minWidth: 0, overflowWrap: "anywhere", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 700 }}>
+                          cc {formatAddressList(threadMessage.cc)}
+                        </div>
+                      )}
+                      {formatAddressList(threadMessage.bcc) && (
+                        <div style={{ minWidth: 0, overflowWrap: "anywhere", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 700 }}>
+                          bcc {formatAddressList(threadMessage.bcc)}
+                        </div>
+                      )}
                     </>
                   )}
-                  {useRichEmailBody ? (
-                    <iframe
-                      title={`Email body ${index + 1}`}
-                      sandbox="allow-same-origin"
-                      srcDoc={messageDocument(threadMessage.body || threadMessage.snippet || "", inlineExpansion)}
-                      onLoad={(event) => updateBodyFrameHeight(threadMessage.id || `${index}`, event.currentTarget)}
-                      style={{
-                        width: "100%",
-                        height: bodyFrameHeights[threadMessage.id || `${index}`] ?? (inlineExpansion ? 64 : 420),
-                        border: inlineExpansion ? 0 : `1px solid ${strokeColor}`,
-                        borderRadius: inlineExpansion ? 0 : 8,
-                        background: "#ffffff",
-                        boxSizing: "border-box",
-                      }}
+                  {useRichThreadBody ? (
+                    <EmailBodyFrame
+                      message={threadMessage}
+                      apiBase={apiBase}
+                      companyID={companyID}
+                      sharedInboxID={sharedInboxID}
+                      compact={inlineExpansion}
+                      strokeColor={strokeColor}
+                      accent={accent}
+                      onSelectionChange={canUseEmailSelection ? (selection) => updateFrameSelection(threadMessageID, selection) : undefined}
                     />
                   ) : (
                     <div
@@ -5168,6 +5784,17 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                       )}
                     </div>
                   )}
+                  <EmailMessageAttachments
+                    message={threadMessage}
+                    apiBase={apiBase}
+                    companyID={companyID}
+                    sharedInboxID={sharedInboxID}
+                    respondable={editable}
+                    accent={accent}
+                    surfaceText={surfaceText}
+                    strokeColor={strokeColor}
+                    onError={onError}
+                  />
                 </div>
               );
             })}
@@ -5263,12 +5890,16 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
           >
             {!inlineExpansion && (
               <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800 }}>
-                Replying to {formatAddressList(replyTargetMessage.from) || "Unknown sender"} - {formatTimestamp(replyTargetMessage.date)}{formatEmailRelativeTime(replyTargetMessage.date) ? ` (${formatEmailRelativeTime(replyTargetMessage.date)})` : ""}
+                {replyAllMode ? "Replying all" : "Replying"} to {formatAddressList(replyTargetMessage.from) || "Unknown sender"} - {formatTimestamp(replyTargetMessage.date)}{formatEmailRelativeTime(replyTargetMessage.date) ? ` (${formatEmailRelativeTime(replyTargetMessage.date)})` : ""}
               </div>
             )}
             <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
               <span>To:</span>
               <input value={toDraft} disabled={!editable} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+              <span>Cc:</span>
+              <input value={ccDraft} disabled={!editable} onChange={(event) => setCcDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+              <span>Bcc:</span>
+              <input value={bccDraft} disabled={!editable} onChange={(event) => setBccDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
               <span>Subject:</span>
               <input value={subjectDraft} disabled={!editable} onChange={(event) => setSubjectDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
             </div>
@@ -5386,7 +6017,7 @@ type EmailPickerModalProps = {
   panelBackground: string;
   strokeColor: string;
   onClose: () => void;
-  onAttach: (message: EmailMessage) => void;
+  onAttach: (message: EmailMessage, scope: { sharedInboxID?: string; accountEmail?: string }) => void;
 };
 
 export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surfaceText, panelBackground, strokeColor, onClose, onAttach }) => {
@@ -5399,6 +6030,7 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const requestSeqRef = useRef(0);
   const prefetchedPageRef = useRef<EmailPickerPrefetchedPage | null>(null);
@@ -5410,6 +6042,16 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
   const nextPageTokenRef = useRef(nextPageToken);
   const loadingRef = useRef(loading);
   const loadingMoreRef = useRef(loadingMore);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCommunicationsStatus()
+      .then((status) => {
+        if (!cancelled) setAccountEmail(status.connection?.account_email?.trim() ?? "");
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     filterKeyRef.current = filterKey;
@@ -5717,9 +6359,9 @@ export const EmailPickerModal: React.FC<EmailPickerModalProps> = ({ accent, surf
                   draggable
                   onDragStart={(event) => {
                     event.dataTransfer.effectAllowed = "copy";
-                    event.dataTransfer.setData(EMAIL_DRAG_MIME, JSON.stringify(messageAttachmentPayload(message)));
+                    event.dataTransfer.setData(EMAIL_DRAG_MIME, JSON.stringify(messageAttachmentPayload(message, "", accountEmail)));
                   }}
-                  onClick={() => onAttach(message)}
+                  onClick={() => onAttach(message, { accountEmail })}
                   style={{
                     display: "grid",
                     gridTemplateColumns: "18px minmax(0, 1fr) auto",

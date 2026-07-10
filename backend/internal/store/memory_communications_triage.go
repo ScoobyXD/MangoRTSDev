@@ -11,6 +11,8 @@ import (
 type communicationsEmailNodeLink struct {
 	CompanyID        string
 	UserID           string
+	SharedInboxID    string
+	AccountEmail     string
 	MessageID        string
 	NodeID           string
 	BoardID          string
@@ -311,6 +313,8 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 		link := communicationsEmailNodeLink{
 			CompanyID:        input.CompanyID,
 			UserID:           input.UserID,
+			SharedInboxID:    input.SharedInboxID,
+			AccountEmail:     input.AccountEmail,
 			MessageID:        messageID,
 			NodeID:           nodeID,
 			BoardID:          board.BoardID,
@@ -321,7 +325,7 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 			UpdatedTimestamp: now,
 		}
 		r.emailNodeLinks[emailNodeLinkKey(input.CompanyID, board.BoardID, card.CardID)] = link
-		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now, true)
+		r.addEmailProjectionLocked(input.CompanyID, nodeID, input.SharedInboxID, input.AccountEmail, triageItem.Message, now, true)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		if input.Target.ProjectID != "" {
 			relationship, deltas, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
@@ -386,7 +390,7 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToStandaloneNodeLocked(input
 		if !ok {
 			return CommunicationsTriageConversionResult{}, ErrNotFound
 		}
-		r.addEmailProjectionLocked(input.CompanyID, input.NodeID, triageItem.Message, now, false)
+		r.addEmailProjectionLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, triageItem.Message, now, false)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		updatedNode := r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, input.NodeID)])
 		result.Nodes = append(result.Nodes, updatedNode)
@@ -433,7 +437,7 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 			Y:                120 + float64(index*28),
 			UpdatedTimestamp: now,
 		}
-		r.addEmailProjectionLocked(input.CompanyID, nodeID, triageItem.Message, now, true)
+		r.addEmailProjectionLocked(input.CompanyID, nodeID, input.SharedInboxID, input.AccountEmail, triageItem.Message, now, true)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		if input.Target.ProjectID != "" {
 			relationship, deltas, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
@@ -546,6 +550,8 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input C
 		link := communicationsEmailNodeLink{
 			CompanyID:        input.CompanyID,
 			UserID:           input.UserID,
+			SharedInboxID:    input.SharedInboxID,
+			AccountEmail:     input.AccountEmail,
 			MessageID:        messageID,
 			NodeID:           input.NodeID,
 			BoardID:          board.BoardID,
@@ -556,7 +562,7 @@ func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input C
 			UpdatedTimestamp: now,
 		}
 		r.emailNodeLinks[emailNodeAttachmentLinkKey(input.CompanyID, input.UserID, messageID, input.NodeID)] = link
-		r.addEmailProjectionLocked(input.CompanyID, input.NodeID, triageItem.Message, now, false)
+		r.addEmailProjectionLocked(input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, triageItem.Message, now, false)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 
 		updatedNode := r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, input.NodeID)])
@@ -667,7 +673,7 @@ func (r *MemoryRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNo
 		attachmentLink.CreatedTimestamp = existing.CreatedTimestamp
 	}
 	r.emailNodeLinks[attachmentKey] = attachmentLink
-	r.addEmailProjectionLocked(input.CompanyID, targetCard.NodeID, sourceLink.Message, now, false)
+	r.addEmailProjectionLocked(input.CompanyID, targetCard.NodeID, sourceLink.SharedInboxID, sourceLink.AccountEmail, sourceLink.Message, now, false)
 	r.deleteCommunicationsEmailSourceNodeLocked(input.CompanyID, sourceKey, sourceLink)
 
 	return CommunicationsEmailNodeTransferResult{
@@ -867,8 +873,8 @@ func (r *MemoryRepo) pendingKanbanColumnIDLocked(companyID, boardID string) stri
 	return ""
 }
 
-func (r *MemoryRepo) addEmailProjectionLocked(companyID, nodeID string, message domain.EmailMessageSnapshot, now time.Time, createdFromEmail bool) {
-	information := attachedEmailProjectionInformation(message, now, createdFromEmail)
+func (r *MemoryRepo) addEmailProjectionLocked(companyID, nodeID, sharedInboxID, accountEmail string, message domain.EmailMessageSnapshot, now time.Time, createdFromEmail bool) {
+	information := attachedEmailProjectionInformation(message, sharedInboxID, accountEmail, now, createdFromEmail)
 	informationID := newUUIDv7String()
 	info := domain.NodeInformation{
 		CompanyID:        companyID,
@@ -895,7 +901,7 @@ func (r *MemoryRepo) addEmailProjectionLocked(companyID, nodeID string, message 
 	}
 }
 
-func attachedEmailProjectionInformation(message domain.EmailMessageSnapshot, attachedAt time.Time, createdFromEmail bool) string {
+func attachedEmailProjectionInformation(message domain.EmailMessageSnapshot, sharedInboxID, accountEmail string, attachedAt time.Time, createdFromEmail bool) string {
 	var date *int64
 	if message.Date > 0 {
 		value := message.Date
@@ -904,6 +910,8 @@ func attachedEmailProjectionInformation(message domain.EmailMessageSnapshot, att
 	payload := struct {
 		MessageID         string `json:"message_id"`
 		ThreadID          string `json:"thread_id"`
+		SharedInboxID     string `json:"shared_inbox_id,omitempty"`
+		AccountEmail      string `json:"account_email,omitempty"`
 		Subject           string `json:"subject"`
 		Snippet           string `json:"snippet"`
 		From              string `json:"from"`
@@ -913,6 +921,8 @@ func attachedEmailProjectionInformation(message domain.EmailMessageSnapshot, att
 	}{
 		MessageID:         strings.TrimSpace(message.ID),
 		ThreadID:          strings.TrimSpace(message.ThreadID),
+		SharedInboxID:     strings.TrimSpace(sharedInboxID),
+		AccountEmail:      strings.TrimSpace(accountEmail),
 		Subject:           emailNodeTitle(message),
 		Snippet:           strings.TrimSpace(message.Snippet),
 		From:              emailAddressSnapshotListLabel(message.From),

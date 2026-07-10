@@ -7,6 +7,7 @@ Coverage Status:
 - Business Logic Covered By Automated Tests: Partial (backend coverage exists for destructive delete vs remove-only and OAuth linkage; frontend helper coverage exists for mailbox-capable Shared Triage rows; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting and full rich-control exposure for Shared Triage compose/reply; `tests/frontend/pages/home/homeCommands.test.ts` covers shared compose attachment reference payload shape; `backend/internal/http/communications_handlers_test.go` covers shared-inbox send-time Mango attachment resolution and edit-access enforcement; Mango email body marking/display preservation is covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; local sent-body cache priming is covered by `tests/frontend/modules/communications/communicationsApi.test.ts`; rule IDs are not fully mapped to automated tests yet)
 
 - Automatic shared-inbox signature insertion, cross-mailbox scope isolation, rich-body deduplication, and compose-scope wiring are covered by `tests/frontend/pages/home/homeCommands.test.ts`, `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`, and `tests/frontend/modules/communications/communicationsApi.test.ts`.
+- Shared conversion persistence of `shared_inbox_id` and `account_email` is covered by `backend/internal/http/communications_triage_handlers_test.go` and `backend/internal/store/communications_email_conversion_test.go`.
 
 ## Business Logic
 
@@ -127,7 +128,7 @@ ST114 - Shared Triage mailbox rows group messages by provider/Nylas `thread_id` 
 ST115 - A grouped Shared Triage row uses the newest loaded message as the visible row representative while unread, starred, attachment, and thread-count indicators roll up from the loaded messages in that thread.
 ST116 - Selecting a Shared Triage thread row opens a full-height conversation detail pane that hydrates the thread through Nylas thread `message_ids` plus individual message-detail reads for HTML bodies, all scoped to the selected `shared_inbox_id` and company-owned shared grant.
 ST117 - Shared Triage rich compose send must preserve sanitized block indentation, explicit line breaks, blank lines, and spacing, including indent/outdent and blockquote-style indents, so sent shared email HTML does not flatten intended paragraph indentation or collapse the body into one long line.
-ST118 - Expired or revoked company-owned Shared Triage mailbox provider credentials return a Shared Triage reconnect/repair state, not a Mango auth logout; permitted users remain signed in and managers/admins with edit access can repair the shared connection. Shared mailbox folder, message-list, message-detail, send, archive, star, and draft endpoints must not represent provider reauthorization as a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response; they must return a recoverable provider-specific response, such as `409 nylas_reauth_required`.
+ST118 - Expired or revoked company-owned Shared Triage mailbox provider credentials return a Shared Triage reconnect/repair state, not a Mango auth logout; permitted users remain signed in and managers/admins with edit access can repair the shared connection. Shared mailbox folder, message-list, message-detail, send, archive, star, draft, and calendar RSVP endpoints must not represent provider reauthorization as a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response; they must return a recoverable provider-specific response, such as `409 nylas_reauth_required`.
 ST119 - Any future change to unified editor semantics or shared editor format/outline controls must apply to Shared Triage compose and reply through the shared editor behavior and shared toolbar controls, not through a separate shared-compose-only implementation.
 ST120 - Shared Triage compose/reply file attachments must follow `docs/tests/attachments.md`: files upload to Mango attachments before durable draft/send state is saved, attachment references remain scoped to the selected `shared_inbox_id`, and normal durable payloads do not store raw base64 `content`.
 ST121 - Shared Triage compose/reply inline body images use the unified rich-editor image attachment path and remain durable Mango attachment references until the backend send boundary, while normal file attachments use the shared-mail attachment path.
@@ -158,6 +159,8 @@ Shared mailbox read receipts depend on both outbound send tracking and webhook d
 Shared Triage uses Nylas `thread_id` and thread `message_ids` to group related messages into one inbox row and to load the selected conversation history. Message bodies still come from single-message detail reads because list/thread responses can omit full HTML bodies. Detail cards are newest first; the newest expands while older cards collapse, and expanded cards auto-size inside the thread's single scroll surface. Every thread, message, body, and send remains scoped to the selected `shared_inbox_id` and company-owned shared mailbox grant.
 
 ST133 - Shared Triage automatically inserts the default signature scoped to the exact selected `shared_inbox_id` exactly once into each new compose, reply, and reply-all editor. A late database load may backfill only the matching still-open new draft while preserving typed text; personal or other shared-inbox signatures must never leak into it, and reopening a saved draft must not add or replace a signature.
+ST134 - Shared Triage thread inspection exposes expand-all, To/Cc/Bcc, authenticated image download/fullscreen, immediate reply focus, and bounded vertical resizing under the selected shared-inbox scope. Pointer-up, pointer-cancel, lost capture, or window blur ends resizing, and calendar RSVP controls prevent duplicate submission and show a selected response only after provider success.
+ST135 - Shared remote-draft reconciliation keeps the newest reply draft for each user/shared-inbox/source-message scope, deletes superseded remote duplicates, and restores saved Reply All To/Cc/Bcc addressing without adding the active shared mailbox or duplicate recipients.
 
 ## Scenarios
 
@@ -633,6 +636,7 @@ Expected:
 - File attachments upload to Mango attachments before durable draft/send state is saved.
 - Shared draft/send payloads store Mango attachment references, not raw base64 attachment content.
 - Attachment references preserve the selected `shared_inbox_id` and company-owned shared mailbox scope.
+- Converting a shared message to a node persists `shared_inbox_id` and `account_email` in the attached-email projection; later node thread reads, downloads, replies, Reply All exclusion, and calendar RSVP stay on that shared grant.
 - Inline body images use the unified rich-editor image attachment path and durable shared drafts keep Mango attachment references.
 - At send time the backend deduplicates inline references, authorizes and reads the S3 bytes under the selected `shared_inbox_id`, creates matching inline provider/CID attachments, rewrites image sources to `cid:`, and sends through the company-owned shared grant.
 - The send response/cache fallback contains provider-ready CID HTML and metadata-only attachment references, never raw bytes; missing or unauthorized references reject the send visibly.
@@ -648,6 +652,7 @@ Business logic covered:
 - ST129
 - ST130
 - ST131
+- ST135
 
 Given:
 - A user with edit access has a multi-message Shared Triage thread open.
@@ -655,6 +660,33 @@ Given:
 
 Expected:
 - Choosing Reply, Reply All, or Forward on an older card builds the action from that exact message and resumes only that message's stable shared draft.
+- Reconciliation removes older remote reply drafts for the same shared-inbox/source-message scope, and reopening Reply All restores saved To/Cc/Bcc recipients with active-mailbox exclusion intact.
 - The reply editor never collapses below its minimum, saves its resized height automatically, and restores the preference for that shared mailbox scope.
 - Font size applies to the preserved selection; Bold and Underline can each be turned on and off, and their active indicators follow the current caret/selection.
 - Clicking a different shared email row quietly saves the active shared draft, closes compose, and shows the clicked message on the first click without replacing the visible list.
+
+### Scenario ST-S16: Shared Thread Inspection And Calendar RSVP
+
+Business logic covered:
+- ST107
+- ST114
+- ST116
+- ST118
+- ST126
+- ST127
+- ST128
+- ST129
+- ST134
+
+Given:
+- A user with edit access opens a Shared Triage thread containing Cc/Bcc metadata, screenshots, attachments, or an iCalendar invitation.
+
+Expected:
+- `Expand all threads` expands the complete shared conversation.
+- Every message displays To, Cc, and provider-visible Bcc metadata when present.
+- Reply all uses the exact selected message and includes every visible reply-to/from, To, and Cc recipient once.
+- Selecting a screenshot exposes Download and double-click opens a full-screen preview.
+- Reply/Reply all focuses the shared unified editor immediately; pointer-up, pointer-cancel, lost capture, and window blur all terminate vertical resize.
+- Accept, Tentative, and Decline use the shared inbox grant, require edit access, prevent duplicate submission while pending, and show a selected response only after provider success.
+- An expired/revoked shared grant, missing calendar scope, or provider failure leaves the RSVP unselected and presents a recoverable shared-mailbox reconnect/provider error without logging the user out of Mango.
+- A user with view-only access can inspect the invite but cannot send an RSVP.

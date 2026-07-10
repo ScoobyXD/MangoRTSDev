@@ -146,5 +146,11 @@ The Editor module is the linked document workspace for MangoRTS. It gives the se
 - Editor document controls mark themselves as frame-interactive so tab clicks, outline-style buttons, and typing do not select or drag the containing frame.
 - Text value is persisted server-side through append-only history plus latest-value projections.
 
+## Unified image selection update (2026-07-10)
+
+- Selecting a shared editor image frame also places a collapsed caret immediately before the image.
+- Text or spaces can be inserted before the selected frame without forking per-surface behavior.
+- Pointer dragging, edge/corner resizing, copy/cut, and double-click preview continue to come from the shared editor image and document-surface handlers used by node, Logic Gate, project, personal mail, shared mail, and attached-email reply editors.
+
 ## Commenting Convention Reminder
 When editing this module, prefer comments that summarize intent and feature responsibilities (what this block controls), not line-by-line implementation mechanics.

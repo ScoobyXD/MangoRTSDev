@@ -1,4 +1,4 @@
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 # Kanban Board Tests
 
@@ -141,6 +141,7 @@ KB104 - After a direct email-to-Kanban column drop succeeds, the created node op
 KB105 - We want multi browser click-drag ability. So I can drag an email from My Triage or Shared Triage and click drag it to another browser window (but the same account) and drop it off on the company explorer logic gate and create a node within that logic gate's kanban board with an email icon (but obviously not create a node on the company explorer)
 KB106 - Email-card transfer must follow `docs/tests/attachments.md`: the target node attached-email projection stores provider/email metadata and Mango attachment references only, not attachment bytes, data URLs, base64 blobs, or S3 object contents.
 KB107 - Fullscreen node editor popups keep a small browser-edge inset, about 12px on the left/right and 8px on the top/bottom, so background context remains visible; while a node editor is fullscreen, the Explorer search box is hidden without clearing the user's current search query.
+KB108 - Direct email-to-Kanban conversion and later email-card transfer preserve mailbox provenance in the attached-email projection: personal mail retains `account_email`, and Shared Triage mail retains both `shared_inbox_id` and `account_email`, so later node email operations use the originating grant.
 
 ## Scenarios
 
@@ -376,6 +377,7 @@ Business logic covered:
 - KB98
 - KB99
 - KB106
+- KB108
 
 Given:
 - A user drags an email from My Triage or from a mailbox-capable Shared Triage inbox into a Logic Gate so the system creates a Pending node card from that email.
@@ -392,6 +394,7 @@ Expected:
 - The transferred email does not return to My Triage.
 - The transfer works from the stored email-node provenance even if the actor's personal mailbox is not connected.
 - The target node's attached-email projection stores metadata and Mango attachment references only.
+- The transferred projection retains the source `account_email` and, for Shared Triage, `shared_inbox_id`; later thread, attachment, reply, draft, and calendar operations remain on that originating grant.
 - The initial conversion sets the original source email to unstarred and reconciles Home from `unstarred_message_ids`; the later card-to-card transfer does not call the mailbox provider to star or unstar the email.
 - Matching workspace events from the original local conversion do not repeatedly reload the Home workspace panel or source mail list, do not remove the source email row, and do not refill the source list from stale prefetched pages, after the board has already been updated from the conversion response.
 
@@ -425,6 +428,7 @@ Business logic covered:
 - KB101
 - KB102
 - KB103
+- KB108
 
 Given:
 - A user has an email row from My Triage or a mailbox-capable Shared Triage inbox.
@@ -439,4 +443,5 @@ Expected:
 - The conversion records the actor as the placed-by user.
 - If the drop target is a supported priority group, the created node/card uses that priority; otherwise the backend default priority is used.
 - The source Home mail row is reconciled through the local conversion event, including Logic Gate placement and `unstarred_message_ids`.
+- The created attached-email projection records `account_email` and, for Shared Triage, `shared_inbox_id` so later node email actions retain the source mailbox scope.
 - Matching workspace or communications events do not force a broad Home reload after the board has already been updated from the conversion response.

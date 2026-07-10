@@ -331,6 +331,17 @@ export function clearEditorImageSelection(root: HTMLElement) {
 export function selectEditorImageFrame(root: HTMLElement, frame: HTMLElement) {
   clearEditorImageSelection(root);
   frame.setAttribute(EDITOR_IMAGE_SELECTED_ATTRIBUTE, "true");
+  const selection = root.ownerDocument.getSelection();
+  if (!selection || !root.contains(frame)) return;
+  const range = root.ownerDocument.createRange();
+  try {
+    range.setStartBefore(frame);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  } catch {
+    // Selection support varies for nested contenteditable hosts; visual selection still applies.
+  }
 }
 
 export function getSelectedEditorImageFrame(root: HTMLElement): HTMLSpanElement | null {

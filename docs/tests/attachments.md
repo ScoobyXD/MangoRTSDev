@@ -4,6 +4,7 @@ Last updated: 2026-07-10
 
 Coverage Status:
 - Node attachment filename/type and visibility-gated thumbnail presentation are covered by `tests/frontend/modules/attachments/attachmentPresentation.test.ts`; concurrent byte reservations, deduplicated totals, partial success, latest-state append, stale navigation/scope/permission invalidation, and delete-while-uploading protection are covered by `tests/frontend/modules/editor/nodeTextBlockAttachments.test.ts`.
+- Incoming email image selection/download/fullscreen behavior and node attachment removal controls are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; shared editor image-reference behavior is covered by `tests/frontend/modules/editor/editorProjection.test.ts` and `tests/frontend/modules/editor/richTextEditing.test.ts`.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/api/requestJSON.test.ts` covers multipart upload request headers; `tests/frontend/modules/editor/editorProjection.test.ts` covers attachment-reference serialization for editor text-block/chat payloads and legacy data-url parsing without emitting new durable data URLs; `tests/frontend/modules/editor/richTextEditing.test.ts` covers the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers email compose payloads sending Mango attachment references without durable `content`; `backend/internal/http/attachment_handlers_test.go` covers attachment metadata/resource links, content permission checks, and `email_draft`/`attached_email` resource authorization; `backend/internal/http/communications_handlers_test.go` covers email send-time S3 resolution into provider payloads, rejection of raw attachment content, and rejection of inline data URL send bodies; `backend/internal/http/durable_inline_guard_test.go` covers backend durable-inline-byte guard shapes; `backend/internal/attachments/migration/scanner_test.go` covers scanner rewrite/idempotency/signals; `backend/cmd/mango-attachment-migrate/main_test.go` covers dry-run report mapping and apply confirmation)
 
@@ -48,6 +49,9 @@ ATT19 - A text-box attachment list contains only active node `file_attachment` l
 ATT20 - Node attachment lists use the backend resource-link list as canonical data and display attachment metadata returned with each link. A text-box title may label or group a node-wide row when its `information_id` resolves to a current block; an unresolved block must not make an otherwise active node `file_attachment` disappear from the node-wide list.
 ATT21 - User downloads request the `original` attachment variant through Mango's authenticated content endpoint, which rechecks resource authorization before reading private S3 bytes. The browser download uses `original_filename`; clients must not expose or navigate directly to `storage_bucket` or `storage_key`.
 ATT22 - Read access to the owning node permits listing and downloading its attachments. Creating a new node attachment remains an edit operation and must stay hidden or disabled for a view-only user.
+ATT23 - Right-clicking an attachment row in a node-wide or text-box attachment list exposes a red `Remove from node` action only when the viewer can edit that node. The action removes the active node resource link; it does not delete shared attachment metadata, private S3 bytes, or links owned by another resource.
+ATT24 - An inline image in an incoming email body can be selected with one click to expose an authenticated download action and opened in fullscreen preview with a double-click. Inline `cid:` sources must resolve through an authorized Mango or provider attachment endpoint rather than exposing a public object URL.
+ATT25 - Selecting an inline image in a unified rich editor preserves its visual selection/resize handles and establishes a collapsed document caret immediately before the image frame. Text or spaces typed at that caret appear before the image, and image resizing remains available in node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply editors.
 
 ## Scenarios
 
@@ -86,7 +90,8 @@ Expected:
 - The shared rich-editor image path uploads the file through the Mango attachment API.
 - The saved editor/email body stores an attachment reference, not a data URL or base64 blob.
 - The first rendered inline image is high quality.
-- Double-click/fullscreen opens the original or highest-quality available variant.
+- Clicking an email-body image selects it and exposes an authenticated download action; double-click/fullscreen opens the original or highest-quality available variant.
+- In editable content, image selection establishes a usable caret immediately before the image, and the same drag and resize behavior works in node, Logic Gate, project, compose, and reply editors.
 - Backend guards reject attempts to persist durable inline image bytes.
 
 ### Scenario ATT-S3: Node, Logic Gate, And Project Attachments
@@ -217,3 +222,46 @@ Expected:
 - An active node `file_attachment` whose text box no longer resolves remains visible in the node-wide list with fallback context.
 - Both users can download authorized original bytes through the Mango API using the original filename; neither receives a raw S3 URL or storage key.
 - Only the user with edit access can upload another attachment.
+
+### Scenario ATT-S9: Remove An Attachment From A Node
+
+Business logic covered:
+- ATT13
+- ATT18
+- ATT19
+- ATT20
+- ATT23
+
+Given:
+- One attachment is linked to a node text box and appears in both that text-box list and the node-wide list.
+- The same attachment may also be referenced by another authorized resource.
+- One viewer can edit the node and another viewer has view-only access.
+
+Expected:
+- Right-clicking the row as the editor shows `Remove from node` in red.
+- Choosing the action unlinks the attachment from the node and refreshes the text-box and node-wide counts/lists.
+- The operation does not delete attachment metadata, private S3 bytes, or a link owned by another resource.
+- The view-only user can list, preview, and download according to node access but cannot invoke the removal action.
+
+### Scenario ATT-S10: Incoming Email And Unified Editor Image Actions
+
+Business logic covered:
+- ATT5
+- ATT6
+- ATT11
+- ATT12
+- ATT13
+- ATT24
+- ATT25
+
+Given:
+- A personal, shared, or node-attached email body contains an inline screenshot referenced by `cid:` or provider attachment metadata.
+- A user selects an inline image in any unified rich editor surface.
+
+Expected:
+- Mango resolves the incoming image through the authorized attachment boundary and renders it inside the email body.
+- A single click on the incoming image exposes an explicit authenticated download action, and a double-click opens fullscreen preview.
+- Selecting the editable image preserves its resize selection and places a document caret immediately before its frame.
+- Typing text or spaces at that caret moves the editable image forward, and resize behavior is consistent in node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply editors.
+- Closing or replacing previews releases transient browser object URLs.
+- The DOM and download action do not expose provider credentials, private S3 keys, or a public object URL.

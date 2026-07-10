@@ -11,6 +11,8 @@ const CommunicationsTriageConversionDefaultPriority = 3
 func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionInput, error) {
 	input.UserID = strings.TrimSpace(input.UserID)
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
+	input.SharedInboxID = strings.TrimSpace(input.SharedInboxID)
+	input.AccountEmail = strings.TrimSpace(input.AccountEmail)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
