@@ -1386,6 +1386,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                     </div>
                     <NodeTextBlockEditor
                       blockID={block.id}
+                      surfaceKind="project"
                       editable
                       nodeID={`project:${projectID}`}
                       apiBase={apiBase}

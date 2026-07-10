@@ -1,6 +1,6 @@
 import type { CommunicationsEmailDraft, EmailMessage } from "../../modules/communications/communicationsApi.js";
 import { deleteEmailDraft, getEmailSignature, listEmailDrafts, parseEmailAddressList, saveEmailDraft, saveEmailSignature } from "../../modules/communications/communicationsApi.js";
-import { EDITOR_RICH_TEXT_PREFIX, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing.js";
+import { EDITOR_RICH_TEXT_PREFIX, editorBodyHasEmailContent, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing.js";
 import { emptyCompose, type ComposeAttachment, type ComposeState } from "./homeTypes.js";
 
 const HOME_MAIL_DRAFTS_STORAGE_PREFIX = "mangorts.home.mailDrafts.v1";
@@ -74,6 +74,24 @@ function storedSignatureEditorHTML(signature: string): string {
 
 function normalizedEditorText(value: string): string {
   return composeBodyDraftText(value).replace(/\s+/g, " ").trim();
+}
+
+function homeMailBodyWithoutSignature(body: string, signature: string): string {
+  const cleanBody = body.trimEnd();
+  const cleanSignature = signature.trim();
+  if (!cleanBody || !cleanSignature) return cleanBody;
+  if (!cleanBody.startsWith(EDITOR_RICH_TEXT_PREFIX)) {
+    return cleanBody.endsWith(cleanSignature)
+      ? cleanBody.slice(0, -cleanSignature.length).trimEnd()
+      : cleanBody;
+  }
+
+  const bodyHTML = sanitizeEditorDocumentHTML(cleanBody.slice(EDITOR_RICH_TEXT_PREFIX.length)).trimEnd();
+  const signatureHTML = storedSignatureEditorHTML(cleanSignature).trim();
+  if (signatureHTML && bodyHTML.endsWith(signatureHTML)) {
+    return EDITOR_RICH_TEXT_PREFIX + bodyHTML.slice(0, -signatureHTML.length).trimEnd();
+  }
+  return normalizedEditorText(cleanBody) === normalizedEditorText(cleanSignature) ? "" : cleanBody;
 }
 
 export function homeMailBodyHasSignature(body: string, signature: string): boolean {
@@ -367,8 +385,7 @@ export function deleteHomeMailDrafts(companyID: string, userID: string, draftIDs
 }
 
 export function composeHasDraftContent(compose: ComposeState, signature: string): boolean {
-  const signatureBody = normalizedEditorText(signature);
-  const body = composeBodyDraftText(compose.body);
+  const body = homeMailBodyWithoutSignature(compose.body, signature);
   return !!(
     compose.to.trim()
     || compose.cc.trim()
@@ -376,7 +393,7 @@ export function composeHasDraftContent(compose: ComposeState, signature: string)
     || compose.subject.trim()
     || compose.attachments.length > 0
     || compose.scheduledAt.trim()
-    || (body && body.replace(/\s+/g, " ").trim() !== signatureBody)
+    || editorBodyHasEmailContent(body)
   );
 }
 
@@ -453,12 +470,13 @@ export function homeMailDraftToCompose(draft: HomeMailDraft): ComposeState {
 
 export function homeMailDraftToMessage(draft: HomeMailDraft): EmailMessage {
   const updatedAtMs = Date.parse(draft.updatedAt);
-  const bodySnippet = draft.body.trim().replace(/\s+/g, " ");
+  const bodySnippet = composeBodyDraftText(draft.body).replace(/\s+/g, " ").trim();
+  const inlineContentSnippet = !bodySnippet && editorBodyHasEmailContent(draft.body) ? "Inline image" : "";
   const attachmentSnippet = draft.attachments.length === 0 ? "" : `${draft.attachments.length} attachment${draft.attachments.length === 1 ? "" : "s"}`;
   return {
     id: draft.id,
     subject: draft.subject.trim() || "(no subject)",
-    snippet: bodySnippet || attachmentSnippet || "Draft",
+    snippet: bodySnippet || inlineContentSnippet || attachmentSnippet || "Draft",
     body: draft.body,
     date: Number.isFinite(updatedAtMs) ? Math.floor(updatedAtMs / 1000) : undefined,
     unread: false,

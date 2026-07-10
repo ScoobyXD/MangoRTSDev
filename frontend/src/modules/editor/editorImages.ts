@@ -119,7 +119,7 @@ export function createEditorImageFrame(ownerDocument: Document, data: EditorImag
   return frame;
 }
 
-function resolveEditorImageFrameSource(src: string, attachmentID: string, durable: boolean): string {
+export function resolveEditorImageFrameSource(src: string, attachmentID: string, durable: boolean): string {
   const cleanSrc = src.trim();
   if (attachmentID) {
     if (durable) return editorAttachmentImageSource(attachmentID);
@@ -160,7 +160,7 @@ export function readEditorImageData(source: HTMLElement): EditorImageData | null
 }
 
 export function createEditorImageClipboardHTML(ownerDocument: Document, data: EditorImageData): string {
-  const frame = createEditorImageFrame(ownerDocument, { ...data, id: undefined });
+  const frame = createEditorImageFrame(ownerDocument, { ...data, id: undefined }, { durable: true });
   frame.removeAttribute(EDITOR_IMAGE_SELECTED_ATTRIBUTE);
   return frame.outerHTML;
 }
@@ -170,36 +170,98 @@ export function createStandaloneImageClipboardHTML(src: string, alt = "Image"): 
   return `<img src="${src}" alt="${escapeHTMLAttribute(alt)}">`;
 }
 
-export function writeImageClipboardData(clipboardData: DataTransfer, src: string, html: string, plainText = "Image"): boolean {
-  if (!isSafeEditorImageSource(src) || !html.trim()) return false;
-  clipboardData.setData("text/html", html);
-  clipboardData.setData("text/plain", plainText.trim() || "Image");
-  return true;
+export function writeImageClipboardData(clipboardData: DataTransfer, _src: string, html: string, plainText = "Image"): boolean {
+  if (!html.trim()) return false;
+  try {
+    clipboardData.setData("text/html", html);
+    clipboardData.setData("text/plain", plainText.trim() || "Image");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function writeImageToSystemClipboard(src: string, html: string, plainText = "Image"): boolean {
   const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : undefined;
-  if (!clipboard?.write || typeof ClipboardItem === "undefined") return false;
+  if (!clipboard?.write || typeof ClipboardItem === "undefined" || !html.trim()) return false;
   const imageBlob = createEditorImageBlob(src);
-  if (!imageBlob) return false;
   const supportsType = (ClipboardItem as unknown as { supports?: (type: string) => boolean }).supports;
   const itemPayload: Record<string, Blob> = {};
   const addClipboardType = (type: string, blob: Blob) => {
     if (typeof supportsType === "function" && !supportsType(type)) return;
     itemPayload[type] = blob;
   };
-  addClipboardType(imageBlob.type, imageBlob);
-  addClipboardType("text/html", new Blob([html], { type: "text/html" }));
-  addClipboardType("text/plain", new Blob([plainText.trim() || "Image"], { type: "text/plain" }));
-  if (Object.keys(itemPayload).length === 0) return false;
-  void clipboard.write([
-    new ClipboardItem(itemPayload),
-  ]).catch(() => undefined);
-  return true;
+  if (imageBlob) addClipboardType(imageBlob.type, imageBlob);
+  itemPayload["text/html"] = new Blob([html], { type: "text/html" });
+  itemPayload["text/plain"] = new Blob([plainText.trim() || "Image"], { type: "text/plain" });
+  try {
+    void clipboard.write([new ClipboardItem(itemPayload)]).catch(() => undefined);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export type EditorImageTransferHTMLKind = "none" | "single-image" | "other";
+
+export function shouldUseEditorImageFileTransferShortcut(
+  hasImageFile: boolean,
+  htmlKind: EditorImageTransferHTMLKind,
+  plainText: string,
+): boolean {
+  if (!hasImageFile) return false;
+  if (htmlKind === "single-image") return true;
+  if (htmlKind === "other") return false;
+  return !plainText.trim();
+}
+
+const EDITOR_CLIPBOARD_IGNORABLE_ELEMENT_TAGS = new Set(["BR", "LINK", "META", "SCRIPT", "STYLE", "TITLE"]);
+const EDITOR_CLIPBOARD_STRUCTURAL_ELEMENT_TAGS = new Set([
+  "HR",
+  "INPUT",
+  "LI",
+  "OL",
+  "TABLE",
+  "TBODY",
+  "TD",
+  "TFOOT",
+  "TH",
+  "THEAD",
+  "TR",
+  "UL",
+]);
+
+function editorClipboardNodeHasContentOutsideImage(node: Node, imageNode: Element): boolean {
+  if (node === imageNode) return false;
+  if (node.nodeType === Node.TEXT_NODE) return Boolean((node.textContent ?? "").trim());
+  if (node.nodeType !== Node.ELEMENT_NODE) return false;
+
+  const element = node as Element;
+  if (EDITOR_CLIPBOARD_IGNORABLE_ELEMENT_TAGS.has(element.tagName)) return false;
+  for (const child of Array.from(element.childNodes)) {
+    if (editorClipboardNodeHasContentOutsideImage(child, imageNode)) return true;
+  }
+  return EDITOR_CLIPBOARD_STRUCTURAL_ELEMENT_TAGS.has(element.tagName);
+}
+
+export function editorClipboardHTMLContainsOnlyOneImage(ownerDocument: Document, html: string): boolean {
+  if (!html.trim()) return false;
+  const template = ownerDocument.createElement("template");
+  template.innerHTML = html;
+
+  const editorFrames = Array.from(template.content.querySelectorAll(`span[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"]`));
+  const standaloneImages = Array.from(template.content.querySelectorAll("img[src]"))
+    .filter((image) => !image.closest(`span[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"]`));
+  const imageNodes = [...editorFrames, ...standaloneImages];
+  if (imageNodes.length !== 1) return false;
+
+  const imageNode = imageNodes[0];
+  return !Array.from(template.content.childNodes)
+    .some((node) => editorClipboardNodeHasContentOutsideImage(node, imageNode));
 }
 
 export function readEditorImageClipboardDataFromHTML(ownerDocument: Document, html: string): EditorImageClipboardData | null {
-  if (!html.trim()) return null;
+  if (!editorClipboardHTMLContainsOnlyOneImage(ownerDocument, html)) return null;
   const template = ownerDocument.createElement("template");
   template.innerHTML = html;
 

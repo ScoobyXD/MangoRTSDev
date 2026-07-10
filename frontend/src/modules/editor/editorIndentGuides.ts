@@ -6,6 +6,30 @@ export type EditorIndentGuideSegment = {
 
 const EDITOR_INDENT_GUIDE_SPACE_WIDTH_EM = 0.25;
 
+function positiveCSSNumber(value: string | number | undefined, allowPixels = false): number | null {
+  const cleanValue = typeof value === "string" ? value.trim().toLowerCase() : value;
+  if (typeof cleanValue === "string") {
+    const pattern = allowPixels ? /^(?:\d+(?:\.\d+)?|\.\d+)(?:px)?$/ : /^(?:\d+(?:\.\d+)?|\.\d+)$/;
+    if (!pattern.test(cleanValue)) return null;
+  }
+  const parsed = typeof cleanValue === "number" ? cleanValue : Number.parseFloat(cleanValue ?? "");
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function resolveEditorIndentGuideLineHeightPx(
+  fontSize: string | number | undefined,
+  lineHeight: string | number | undefined,
+  fallbackFontSizePx: number,
+  fallbackLineHeight: number,
+): number {
+  const resolvedFontSize = positiveCSSNumber(fontSize, true) ?? fallbackFontSizePx;
+  if (typeof lineHeight === "string" && lineHeight.trim().toLowerCase().endsWith("px")) {
+    return positiveCSSNumber(lineHeight, true) ?? (resolvedFontSize * fallbackLineHeight);
+  }
+  const resolvedLineHeight = positiveCSSNumber(lineHeight) ?? fallbackLineHeight;
+  return resolvedFontSize * resolvedLineHeight;
+}
+
 // Indent guide left positions must follow the rendered width of EDITOR_TAB_TEXT's
 // five spaces. Do not use `ch` here: `ch` is the width of "0", which only lined
 // up when the editor was forced to monospace. Node and Logic Gate editors use the

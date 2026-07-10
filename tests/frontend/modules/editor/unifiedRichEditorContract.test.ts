@@ -80,6 +80,40 @@ test("unified rich editor contract lists every Phase 1 target surface", () => {
   assert.deepEqual(UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, ["format", "outline-styles"]);
 });
 
+test("shared editor surfaces retain semantic identity, placeholders, and urgent mentions", () => {
+  const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
+  const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+  const richTextEditing = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/richTextEditing.ts"), "utf8");
+  const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+  const indexCSS = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
+
+  assert.match(unifiedRichEditorSurface, /data-mango-editor-empty=/);
+  assert.match(indexCSS, /\[data-mango-editor-empty="true"\]\[data-placeholder\]::before/);
+  assert.match(nodeWorkspaceParts, /data-project-text-block-id=/);
+  assert.match(nodeWorkspaceParts, /"Project text block"/);
+  assert.match(projectSummary, /surfaceKind="project"/);
+  assert.match(richTextEditing, /element\.getAttribute\(EDITOR_MENTION_KIND_ATTRIBUTE\)/);
+  assert.match(richTextEditing, /span\.setAttribute\(EDITOR_MENTION_KIND_ATTRIBUTE, mentionKind\)/);
+  assert.match(editorSurfaceHandlers, /event\.key === "Tab" && !activeTableCell\.contains\(getCurrentEditorListItem\(root\)\)/);
+});
+
+test("shared editor clipboard routing keeps mixed content and copies images before cut deletion", () => {
+  const editorImages = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorImages.ts"), "utf8");
+  const editorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorDocumentSurface.tsx"), "utf8");
+  const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+  const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
+
+  assert.match(editorImages, /createEditorImageFrame\(ownerDocument, \{ \.\.\.data, id: undefined \}, \{ durable: true \}\)/);
+  assert.match(editorSurfaceHandlers, /editorImageTransferHTMLKind\(root\.ownerDocument, html\)/);
+  assert.match(editorSurfaceHandlers, /shouldUseEditorImageFileTransferShortcut\(true, htmlKind, text\)/);
+  assert.match(editorSurfaceHandlers, /onCut\(event\)[\s\S]*copySelectedEditorImage\(root, event\.clipboardData\)[\s\S]*removeSelectedEditorImage\(root\)/);
+  for (const surfaceSource of [editorSurface, nodeWorkspaceParts, unifiedRichEditorSurface]) {
+    assert.match(surfaceSource, /onCut=/);
+  }
+});
+
 test("mail compose and attached-email reply mount unified rich editor adapters and toolbar", () => {
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");

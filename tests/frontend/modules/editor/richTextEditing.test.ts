@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { sanitizeAPIErrorMessage } from "../../../../frontend/src/modules/api/requestJSON.js";
 import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_EMAIL_BODY_ATTRIBUTE, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, EDITOR_LIST_ATTRIBUTE, EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, editorBodyHasEmailContent, editorEmailDisplayDocument, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML, serializeEditorBodyForEmailHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
-import { clampEditorImageVerticalOffset, createStandaloneImageClipboardHTML, editorAttachmentIDFromImageSource, editorAttachmentImageSource, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isEditorAttachmentImageSource, isSafeEditorImageSource } from "../../../../frontend/src/modules/editor/editorImages.js";
+import { clampEditorImageVerticalOffset, createStandaloneImageClipboardHTML, editorAttachmentIDFromImageSource, editorAttachmentImageSource, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isEditorAttachmentImageSource, isSafeEditorImageSource, resolveEditorImageFrameSource, shouldUseEditorImageFileTransferShortcut, writeImageClipboardData } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
   assert.equal(EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, 20);
@@ -111,9 +111,19 @@ test("editor attachment images use durable reference sources instead of data url
   assert.equal(editorAttachmentIDFromImageSource("mango-attachment:attachment%20one"), "attachment one");
 });
 
-test("an attachment-backed screenshot counts as email body content without text", () => {
+test("durable clipboard sources replace attachment blobs but preserve data-only images", () => {
+  const dataURL = "data:image/png;base64,iVBORw0KGgo=";
+
+  assert.equal(resolveEditorImageFrameSource("blob:attachment-preview", "attachment-1", true), "mango-attachment:attachment-1");
+  assert.equal(resolveEditorImageFrameSource(dataURL, "", true), dataURL);
+});
+
+test("meaningful rich structures count as body content without text", () => {
   const body = `${EDITOR_RICH_TEXT_PREFIX}<span data-mango-editor-image="true" data-mango-editor-attachment-id="attachment-1"><img src="mango-attachment:attachment-1" alt=""></span>`;
   assert.equal(editorBodyHasEmailContent(body), true);
+  assert.equal(editorBodyHasEmailContent(EDITOR_RICH_TEXT_PREFIX + '<img src="blob:preview">'), true);
+  assert.equal(editorBodyHasEmailContent(EDITOR_RICH_TEXT_PREFIX + '<table data-mango-editor-table="true"></table>'), true);
+  assert.equal(editorBodyHasEmailContent(EDITOR_RICH_TEXT_PREFIX + '<ul data-mango-editor-list="bullet"><li data-mango-editor-list-item="bullet"><br></li></ul>'), true);
   assert.equal(editorBodyHasEmailContent(`${EDITOR_RICH_TEXT_PREFIX}<div><br></div>`), false);
 });
 
@@ -122,6 +132,35 @@ test("standalone image clipboard HTML uses safe raster sources and escaped alt t
 
   assert.equal(html, '<img src="data:image/png;base64,iVBORw0KGgo=" alt="Screen &quot;one&quot; &lt;copy&gt;">');
   assert.equal(createStandaloneImageClipboardHTML("https://example.test/image.png"), "");
+});
+
+test("attachment-backed image clipboard writes keep durable HTML and plain fallbacks", () => {
+  const values = new Map<string, string>();
+  const clipboardData = {
+    setData(type: string, value: string) {
+      values.set(type, value);
+    },
+  } as DataTransfer;
+  const html = '<span data-mango-editor-image="true"><img src="mango-attachment:attachment-1" alt=""></span>';
+
+  assert.equal(writeImageClipboardData(clipboardData, "blob:attachment-preview", html), true);
+  assert.equal(values.get("text/html"), html);
+  assert.equal(values.get("text/plain"), "Image");
+
+  const rejectedClipboard = {
+    setData(type: string, _value: string) {
+      if (type === "text/plain") throw new Error("clipboard unavailable");
+    },
+  } as DataTransfer;
+  assert.equal(writeImageClipboardData(rejectedClipboard, "mango-attachment:attachment-1", html), false);
+});
+
+test("image file paste shortcut is reserved for image-only transfers", () => {
+  assert.equal(shouldUseEditorImageFileTransferShortcut(true, "single-image", "Image"), true);
+  assert.equal(shouldUseEditorImageFileTransferShortcut(true, "none", ""), true);
+  assert.equal(shouldUseEditorImageFileTransferShortcut(true, "other", "caption and list"), false);
+  assert.equal(shouldUseEditorImageFileTransferShortcut(true, "none", "caption"), false);
+  assert.equal(shouldUseEditorImageFileTransferShortcut(false, "single-image", ""), false);
 });
 
 test("editor image pointer zones support every edge and corner", () => {

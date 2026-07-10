@@ -6,6 +6,7 @@ import {
 } from "./editorImages.js";
 import {
   applyEditorMentionStyle,
+  EDITOR_MENTION_KIND_ATTRIBUTE,
   EDITOR_MENTION_USER_ID_ATTRIBUTE,
   isEditorMentionElement,
 } from "./editorMentions.js";
@@ -654,6 +655,8 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
     }
     if (isEditorMentionElement(element)) {
       const span = ownerDocument.createElement("span");
+      const mentionKind = element.getAttribute(EDITOR_MENTION_KIND_ATTRIBUTE)?.trim() ?? "";
+      if (mentionKind === "urgent") span.setAttribute(EDITOR_MENTION_KIND_ATTRIBUTE, mentionKind);
       applyEditorMentionStyle(span);
       const userID = element.getAttribute(EDITOR_MENTION_USER_ID_ATTRIBUTE)?.trim() ?? "";
       if (userID) span.setAttribute(EDITOR_MENTION_USER_ID_ATTRIBUTE, userID);
@@ -859,7 +862,8 @@ export function editorBodyHasEmailContent(value: string): boolean {
   if (!body) return false;
   if (!body.startsWith(EDITOR_RICH_TEXT_PREFIX)) return true;
   const richHTML = body.slice(EDITOR_RICH_TEXT_PREFIX.length);
-  if (/<img\b[^>]*\bsrc\s*=\s*["']mango-attachment:/i.test(richHTML)) return true;
+  if (/<(?:img|table|ol|ul|li|hr)\b/i.test(richHTML)) return true;
+  if (/\bdata-mango-(?:mention|editor-(?:image|table|list|list-item))\s*=/i.test(richHTML)) return true;
   return richHTML
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
