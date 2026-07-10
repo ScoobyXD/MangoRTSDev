@@ -91,6 +91,7 @@ import {
   createEditorImageDataFromFile,
   createEditorImageDataFromSource,
   createEditorImageFrame,
+  editorClipboardHTMLContainsOnlyOneImage,
   estimateEditorDocumentBytes,
   findEditorImageFrame,
   getEditorImageCursorForInteraction,
@@ -105,8 +106,10 @@ import {
   readEditorImageFloatSide,
   getSelectedEditorImageFrame,
   selectEditorImageFrame,
+  shouldUseEditorImageFileTransferShortcut,
   writeImageClipboardData,
   writeImageToSystemClipboard,
+  type EditorImageTransferHTMLKind,
   type EditorImageClipboardData,
   type EditorImageData,
 } from "./editorImages";
@@ -116,6 +119,7 @@ export type EditorDocumentSurfaceHandlers = Pick<
   | "onBeforeInput"
   | "onPaste"
   | "onCopy"
+  | "onCut"
   | "onDrop"
   | "onInput"
   | "onSelect"
@@ -1325,7 +1329,15 @@ function readEditorListItemOwnText(item: HTMLLIElement): string {
 }
 
 function editorListItemContentIsEmpty(item: HTMLLIElement): boolean {
-  return readEditorListItemOwnText(item).replace(/\u200b/g, "").trim().length === 0;
+  if (readEditorListItemOwnText(item).replace(/\u200b/g, "").trim().length > 0) return false;
+  return !item.querySelector([
+    `[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"]`,
+    `[${EDITOR_MENTION_ATTRIBUTE}]`,
+    `table[${EDITOR_TABLE_ATTRIBUTE}]`,
+    "table",
+    "img",
+    `ul[${EDITOR_LIST_ATTRIBUTE}]`,
+  ].join(","));
 }
 
 function directNestedEditorList(item: HTMLLIElement): HTMLUListElement | null {
@@ -1641,10 +1653,25 @@ function insertEditorTableCellListFromEnter(root: HTMLElement, cell: HTMLTableCe
 function exitEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean {
   const list = getEditorListForItem(item);
   if (!list) return false;
+
+  const parentItem = list.parentElement instanceof HTMLLIElement ? list.parentElement : null;
+  if (parentItem) {
+    parentItem.after(item);
+    if (list.children.length === 0) list.remove();
+    selectEditorListItem(root, item, "start");
+    return true;
+  }
+
+  const trailingList = item.nextSibling ? list.cloneNode(false) as HTMLUListElement : null;
+  while (trailingList && item.nextSibling) trailingList.appendChild(item.nextSibling);
   const lineBreak = root.ownerDocument.createTextNode("\n");
   item.remove();
-  if (list.querySelector(EDITOR_LIST_ITEM_SELECTOR)) list.after(lineBreak);
+  if (list.children.length > 0) list.after(lineBreak);
   else list.replaceWith(lineBreak);
+  if (trailingList?.children.length) {
+    lineBreak.after(trailingList);
+    applyEditorListMarkerStyles(trailingList);
+  }
   const range = root.ownerDocument.createRange();
   range.setStart(lineBreak, lineBreak.data.length);
   range.collapse(true);
@@ -1676,10 +1703,37 @@ function outdentEditorListItem(root: HTMLElement, item: HTMLLIElement): boolean 
   const list = getEditorListForItem(item);
   if (!list) return false;
   const parentItem = list.parentElement instanceof HTMLLIElement ? list.parentElement : null;
-  if (!parentItem) return false;
-  parentItem.after(item);
-  if (!list.querySelector(EDITOR_LIST_ITEM_SELECTOR)) list.remove();
-  selectEditorListItem(root, item, "end");
+  if (parentItem) {
+    parentItem.after(item);
+    if (list.children.length === 0) list.remove();
+    selectEditorListItem(root, item, "end");
+    return true;
+  }
+
+  const trailingList = item.nextSibling ? list.cloneNode(false) as HTMLUListElement : null;
+  while (trailingList && item.nextSibling) trailingList.appendChild(item.nextSibling);
+  const ownTextNodes = editorListItemOwnTextNodes(item);
+  const preferredTextNode = ownTextNodes[ownTextNodes.length - 1] ?? null;
+  const plainBlock = root.ownerDocument.createElement("div");
+  while (item.firstChild) plainBlock.appendChild(item.firstChild);
+  if (plainBlock.childNodes.length === 0) plainBlock.appendChild(root.ownerDocument.createElement("br"));
+  item.remove();
+  if (list.children.length > 0) list.after(plainBlock);
+  else list.replaceWith(plainBlock);
+  if (trailingList?.children.length) {
+    plainBlock.after(trailingList);
+    applyEditorListMarkerStyles(trailingList);
+  }
+  if (preferredTextNode && plainBlock.contains(preferredTextNode)) {
+    setCollapsedSelectionInTextNode(root, preferredTextNode, preferredTextNode.data.length);
+  } else {
+    const selection = root.ownerDocument.getSelection();
+    const range = root.ownerDocument.createRange();
+    range.selectNodeContents(plainBlock);
+    range.collapse(false);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
   return true;
 }
 
@@ -1798,6 +1852,60 @@ function replaceTextByPlainTextOffsets(
   return true;
 }
 
+function readAutomaticOutlineLinePrefix(line: string): { prefix: string; indentation: string; body: string } | null {
+  const match = /^([ \t\u00a0]*)(?:\d+(?:\.\d+)*|[a-z]+|[ivxlcdm]+)[.)][ \t\u00a0]*/i.exec(line);
+  if (!match) return null;
+  return {
+    prefix: match[0],
+    indentation: match[1],
+    body: line.slice(match[0].length),
+  };
+}
+
+function applyLineIndentEditToRichDocument(
+  root: HTMLElement,
+  currentText: string,
+  edit: { value: string; selectionStart: number; selectionEnd?: number },
+): boolean {
+  const currentLines = currentText.split("\n");
+  const nextLines = edit.value.split("\n");
+  if (currentLines.length !== nextLines.length) return false;
+
+  const changes: Array<{ start: number; end: number; text: string }> = [];
+  let lineStart = 0;
+  for (let index = 0; index < currentLines.length; index += 1) {
+    const currentLine = currentLines[index];
+    const nextLine = nextLines[index];
+    if (nextLine !== currentLine) {
+      if (nextLine === `${EDITOR_TAB_TEXT}${currentLine}`) {
+        changes.push({ start: lineStart, end: lineStart, text: EDITOR_TAB_TEXT });
+      } else {
+        const currentOutline = readAutomaticOutlineLinePrefix(currentLine);
+        const nextOutline = readAutomaticOutlineLinePrefix(nextLine);
+        if (currentOutline && nextOutline && currentOutline.body === nextOutline.body) {
+          changes.push({ start: lineStart, end: lineStart + currentOutline.prefix.length, text: nextOutline.prefix });
+        } else if (currentOutline && nextLine === `${currentOutline.indentation}${currentOutline.body}`) {
+          changes.push({ start: lineStart, end: lineStart + currentOutline.prefix.length, text: currentOutline.indentation });
+        } else {
+          const removableSpaces = Math.min(EDITOR_TAB_TEXT.length, currentLine.match(/^[ \u00a0]*/)?.[0].length ?? 0);
+          const removeCount = currentLine.startsWith("\t") ? 1 : removableSpaces;
+          if (removeCount <= 0 || nextLine !== currentLine.slice(removeCount)) return false;
+          changes.push({ start: lineStart, end: lineStart + removeCount, text: "" });
+        }
+      }
+    }
+    lineStart += currentLine.length + 1;
+  }
+  if (changes.length === 0) return false;
+
+  for (let index = changes.length - 1; index >= 0; index -= 1) {
+    const change = changes[index];
+    if (!replaceTextByPlainTextOffsets(root, change.start, change.end, change.text, change.start + change.text.length)) return false;
+  }
+  setEditorSelectionByPlainTextOffsets(root, edit.selectionStart, edit.selectionEnd ?? edit.selectionStart);
+  return true;
+}
+
 function applyPlainTextEditToRichDocument(
   root: HTMLElement,
   currentText: string,
@@ -1807,6 +1915,7 @@ function applyPlainTextEditToRichDocument(
     setEditorSelectionByPlainTextOffsets(root, edit.selectionStart, edit.selectionEnd ?? edit.selectionStart);
     return true;
   }
+  if (applyLineIndentEditToRichDocument(root, currentText, edit)) return true;
 
   let prefixLength = 0;
   const maxPrefixLength = Math.min(currentText.length, edit.value.length);
@@ -2241,9 +2350,14 @@ function copySelectedEditorImage(root: HTMLElement, clipboardData: DataTransfer)
   const data = readEditorImageData(frame);
   if (!data) return false;
   const html = createEditorImageClipboardHTML(root.ownerDocument, data);
-  writeImageClipboardData(clipboardData, data.src, html);
+  if (!writeImageClipboardData(clipboardData, data.src, html)) return false;
   writeImageToSystemClipboard(data.src, html);
   return true;
+}
+
+function editorImageTransferHTMLKind(ownerDocument: Document, html: string): EditorImageTransferHTMLKind {
+  if (!html.trim()) return "none";
+  return editorClipboardHTMLContainsOnlyOneImage(ownerDocument, html) ? "single-image" : "other";
 }
 
 function selectedHTMLPreservesEditorList(html: string): boolean {
@@ -3619,8 +3733,11 @@ export function useEditorDocumentSurfaceHandlers({
       const root = event.currentTarget;
       rememberEditorSelectionRange(root);
       const undoBefore = snapshotEditorDocumentRoot(root);
+      const html = event.clipboardData.getData("text/html");
+      const text = event.clipboardData.getData("text/plain");
+      const htmlKind = editorImageTransferHTMLKind(root.ownerDocument, html);
       const imageFile = getImageFileFromDataTransfer(event.clipboardData);
-      if (imageFile) {
+      if (imageFile && shouldUseEditorImageFileTransferShortcut(true, htmlKind, text)) {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
         const savedRange = getEditorSelectionRange(root)?.cloneRange() ?? null;
@@ -3629,7 +3746,6 @@ export function useEditorDocumentSurfaceHandlers({
         return;
       }
 
-      const html = event.clipboardData.getData("text/html");
       const clipboardImageData = readEditorImageClipboardDataFromHTML(root.ownerDocument, html);
       if (clipboardImageData) {
         event.preventDefault();
@@ -3659,7 +3775,6 @@ export function useEditorDocumentSurfaceHandlers({
         return;
       }
 
-      const text = event.clipboardData.getData("text/plain");
       if (!text) return;
       event.preventDefault();
       pendingEditorFontSizeRef.current = null;
@@ -3680,12 +3795,26 @@ export function useEditorDocumentSurfaceHandlers({
         event.preventDefault();
       }
     },
+    onCut(event) {
+      const root = event.currentTarget;
+      if (!getSelectedEditorImageFrame(root)) return;
+      event.preventDefault();
+      const undoBefore = snapshotEditorDocumentRoot(root);
+      if (!copySelectedEditorImage(root, event.clipboardData)) return;
+      if (!removeSelectedEditorImage(root)) return;
+      pendingEditorFontSizeRef.current = null;
+      recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "image");
+      commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
+    },
     onDrop(event) {
       const root = event.currentTarget;
       rememberEditorSelectionRange(root);
       const undoBefore = snapshotEditorDocumentRoot(root);
+      const html = event.dataTransfer.getData("text/html");
+      const text = event.dataTransfer.getData("text/plain");
+      const htmlKind = editorImageTransferHTMLKind(root.ownerDocument, html);
       const imageFile = getImageFileFromDataTransfer(event.dataTransfer);
-      if (imageFile) {
+      if (imageFile && shouldUseEditorImageFileTransferShortcut(true, htmlKind, text)) {
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;
         root.focus({ preventScroll: true });
@@ -3695,7 +3824,6 @@ export function useEditorDocumentSurfaceHandlers({
         return;
       }
 
-      const html = event.dataTransfer.getData("text/html");
       const clipboardImageData = readEditorImageClipboardDataFromHTML(root.ownerDocument, html);
       if (clipboardImageData) {
         event.preventDefault();
@@ -3727,7 +3855,6 @@ export function useEditorDocumentSurfaceHandlers({
         return;
       }
 
-      const text = event.dataTransfer.getData("text/plain");
       if (!text) return;
       event.preventDefault();
       pendingEditorFontSizeRef.current = null;
@@ -3983,7 +4110,7 @@ export function useEditorDocumentSurfaceHandlers({
 
       const activeTableCell = getCurrentEditorTableCell(root);
       if (activeTableCell) {
-        if (event.key === "Tab") {
+        if (event.key === "Tab" && !activeTableCell.contains(getCurrentEditorListItem(root))) {
           event.preventDefault();
           pendingEditorFontSizeRef.current = null;
           pendingNativeUndoSnapshotRef.current = null;
@@ -4049,7 +4176,7 @@ export function useEditorDocumentSurfaceHandlers({
             setActiveTableContextMenu(null);
             return;
           }
-          return;
+          if (!getCurrentEditorListItem(root)) return;
         }
       }
 
@@ -4063,17 +4190,6 @@ export function useEditorDocumentSurfaceHandlers({
       }
 
       if (PENDING_FONT_SIZE_CANCEL_KEYS.has(event.key)) pendingEditorFontSizeRef.current = null;
-
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "x") {
-        const undoBefore = snapshotEditorDocumentRoot(root);
-        if (removeSelectedEditorImage(root)) {
-          event.preventDefault();
-          pendingEditorFontSizeRef.current = null;
-          recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "image");
-          commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate, true);
-          return;
-        }
-      }
 
       if (event.key === "Backspace" || event.key === "Delete") {
         const undoBefore = snapshotEditorDocumentRoot(root);
@@ -4166,6 +4282,18 @@ export function useEditorDocumentSurfaceHandlers({
         }
         const edit = insertEditorEnterText(currentText, offsets.start, offsets.end, outlineStyle, { continueAutomaticOutline: !event.shiftKey });
         const insertedText = edit.value.slice(offsets.start, edit.selectionStart);
+        const simpleReplacement = `${currentText.slice(0, offsets.start)}${insertedText}${currentText.slice(offsets.end)}`;
+        if (simpleReplacement !== edit.value) {
+          const appliedRichEdit = applyPlainTextEditToRichDocument(root, currentText, edit);
+          if (!appliedRichEdit) {
+            if (documentHasEditorImages(root)) return;
+            replaceDocumentWithPlainText(root, edit.value, edit.selectionStart, edit.selectionEnd);
+          }
+          scrollEditorToLineStart(root);
+          recordEditorDocumentMutation(documentUndoHistoryRef.current, root, undoBefore, "lineBreak");
+          commitEditorDocument(root, scheduleDocumentSave, scheduleIndentGuideUpdate);
+          return;
+        }
         const preserveTrailingNewline = edit.value.endsWith("\n") && offsets.end >= currentText.length;
         const anchor = getCollapsedAnchorAtSelectionEnd(root);
         const inserted = anchor
@@ -4184,7 +4312,7 @@ export function useEditorDocumentSurfaceHandlers({
         if (!offsets) return;
         const undoBefore = snapshotEditorDocumentRoot(root);
         const currentText = readEditorDocumentText(root);
-        const edit = deleteEditorBackspaceText(currentText, offsets.start, offsets.end);
+        const edit = deleteEditorBackspaceText(currentText, offsets.start, offsets.end, outlineStyle);
         if (!edit) return;
         event.preventDefault();
         pendingEditorFontSizeRef.current = null;

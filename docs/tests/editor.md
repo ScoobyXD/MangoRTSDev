@@ -291,7 +291,7 @@ These surfaces do not inherit the rich editor's list, indentation, paste, image,
 | Context | Enter | Shift+Enter | Tab | Shift+Tab |
 |---|---|---|---|---|
 | Ordinary text in Automatic Numbering mode | Plain newline unless the current line parses as an outline marker | Plain newline with continuation disabled and no copied automatic indentation | Five spaces unless the line parses as an outline item | Removes leading indentation; a parsed marker moves toward the parent marker family |
-| Parsed automatic outline item | Continues the current marker and delimiter | Inserts a raw newline without copying the item's indentation | Adds one five-space depth and changes family decimal -> alpha -> Roman -> decimal | Removes one five-space depth and recomputes the marker for the destination depth |
+| Parsed automatic outline item | Nonempty items continue the current marker and delimiter; empty root or nested items exit numbering and leave only their indentation | Inserts a raw newline without copying the item's indentation | Adds one five-space depth and changes family decimal -> alpha -> Roman -> decimal | Removes one five-space depth and recomputes the marker for the destination depth; a root item removes the marker |
 | Indent Guides mode | Newline plus the current line's exact leading whitespace | Same as Enter | Inserts five literal spaces at the selection | Removes one leading tab or up to five leading spaces from the start of the active line |
 | Bullet/Checklist mode outside a structural list | Creates a new structural list at the insertion point; a whitespace-only line becomes the first item | Inserts a soft newline and copies the current leading whitespace | Inserts five spaces | Removes leading whitespace from the active line |
 | Existing Mango bullet/checklist item | Splits a nonempty item; an item classified as empty exits the list | Inserts a soft newline inside the same item | Nests the current item under its previous sibling | Moves the current item outward by one structural list level |
@@ -306,13 +306,13 @@ These surfaces do not inherit the rich editor's list, indentation, paste, image,
 
 - The recognized marker grammar accepts digits, dotted digits, or any alphabetic word followed by `.` or `)`, with optional spacing.
 - Depth zero expects decimal markers, depth one alphabetic markers, and depth two Roman markers; the families repeat every three levels.
-- Enter increments the current marker. It does not renumber the rest of the outline.
+- Enter increments the current marker for nonempty outline items. It does not renumber the rest of the outline.
 - Tab and Shift+Tab recompute only the active line's marker based on previous lines at the destination depth.
 - A newly typed first non-whitespace character on an indentation-only line automatically receives the next marker for that depth.
 - Marker delimiter and spacing are preserved when possible.
-- A blank automatic item does not have normal list-exit behavior. Enter on `2. ` creates `3. ` rather than ending the list.
-- Top-level Shift+Tab does not end automatic numbering. It is normally a no-op and can also renumber an out-of-sequence marker.
-- Backspace does not treat an empty automatic marker atomically; users remove it character by character unless the caret is immediately after an exact five-space run.
+- A blank automatic item exits numbering. Enter on `2. ` leaves a plain blank line after the previous item, and Enter on a nested empty alphabetic item such as `     a. ` leaves a five-space indented blank line instead of creating `     b. `.
+- Top-level Shift+Tab removes the automatic marker and leaves the item body as plain text.
+- Backspace treats an empty automatic marker atomically and removes it back to the previous plain line/indentation.
 - Shift+Enter in a nested automatic item creates an unindented next line rather than a visually aligned soft line.
 - The parser is over-broad: ordinary text such as `Note. details` is parsed as an outline marker. Tab or numbered-toggle commands can rewrite it as a list item.
 - Marker text is normalized to lowercase when parsed and rewritten.
@@ -944,7 +944,7 @@ Primary reference:
 
 Existing automated coverage:
 
-- `plainTextEditing.test.ts` covers five-space Tab, Automatic Numbering happy paths, Indent Guides Enter/Shift+Tab, five-space Backspace, marker-family cycling, and one automatic outdent path.
+- `plainTextEditing.test.ts` covers five-space Tab, Automatic Numbering happy paths, empty root and nested automatic-item exit behavior, Indent Guides Enter/Shift+Tab, five-space Backspace, marker-family cycling, root marker removal, and one automatic outdent path.
 - `richTextEditing.test.ts` covers linkification, email serialization strings, legacy escaping, a limited sanitizer fallback, attachment source helpers, and image geometry helpers.
 - `unifiedRichEditorContract.test.ts` verifies the surface inventory and adapter wiring by reading source files and matching regular expressions.
 - `editorUndoHistory.test.ts` covers pure undo-history snapshots/classification.
@@ -970,7 +970,7 @@ Major coverage gaps:
 14. Cross-surface tests prove imports/source strings, not identical runtime behavior across Logic Gate, node, project, My Triage, Shared Triage, and attached-email surfaces.
 15. Node-based sanitizer tests do not exercise the browser DOM sanitizer. When `document` is unavailable, `sanitizeEditorDocumentHTML` uses a much smaller regex-only fallback.
 16. `editorProjectionDeltas.test.ts` exists but is not included in the frontend node-test runner or its test TypeScript configuration.
-17. The specification does not define deterministic expected behavior for empty root/nested items, first-item Tab, root Shift+Tab, Shift+Enter in automatic outlines, multiline selection indentation, pasted native ordered lists, image-only list items, mixed image/text paste, list paste at a mid-item caret, or lists inside tables.
+17. The specification does not define deterministic expected behavior for first-item Tab, Shift+Enter in automatic outlines, multiline selection indentation, pasted native ordered lists, image-only list items, mixed image/text paste, list paste at a mid-item caret, or lists inside tables.
 18. No literal TODO/FIXME in the core editor files calls out these gaps; the main documented signal is the generic Partial coverage status.
 
 ### What Codex Found To Be Working Well

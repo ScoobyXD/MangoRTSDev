@@ -85,13 +85,22 @@ function parseOutlineLine(line: string): ParsedOutlineLine | null {
   const match = /^([ \t\u00a0]*)(\d+(?:\.\d+)*|[a-z]+|[ivxlcdm]+)([.)])([ \t\u00a0]*)(.*)$/i.exec(line);
   if (!match) return null;
   const [, indentation, marker, delimiter, spacing, rest] = match;
+  const depth = countIndentDepth(indentation);
+  const markerKind = outlineMarkerKindForDepth(depth);
+  const normalizedMarker = marker.toLowerCase();
+  const markerMatchesDepth = markerKind === "decimal"
+    ? /^\d+(?:\.\d+)*$/.test(normalizedMarker)
+    : markerKind === "alpha"
+      ? /^[a-z]+$/.test(normalizedMarker)
+      : romanToNumber(normalizedMarker) !== null;
+  if (!markerMatchesDepth) return null;
   return {
     indentation,
-    marker: marker.toLowerCase(),
+    marker: normalizedMarker,
     delimiter,
     spacing,
     rest,
-    depth: countIndentDepth(indentation),
+    depth,
   };
 }
 
@@ -235,6 +244,16 @@ function updateAutomaticOutlineIndent(value: string, selectionStart: number, dir
     };
   }
 
+  if (direction === "outdent" && parsed.depth === 0) {
+    const markerEnd = parsed.indentation.length + parsed.marker.length + parsed.delimiter.length + parsed.spacing.length;
+    const replacementLine = `${parsed.indentation}${parsed.rest}`;
+    const relativeCursor = Math.max(0, selectionStart - lineStart);
+    const nextCursorOffset = relativeCursor <= markerEnd
+      ? parsed.indentation.length
+      : parsed.indentation.length + (relativeCursor - markerEnd);
+    return replaceCurrentLine(value, selectionStart, replacementLine, nextCursorOffset);
+  }
+
   const nextDepth = direction === "outdent" ? Math.max(0, parsed.depth - 1) : parsed.depth + 1;
   const linesBeforeCurrent = value.slice(0, lineStart).split(/\r\n|\n|\r/);
   if (linesBeforeCurrent.length > 0 && linesBeforeCurrent[linesBeforeCurrent.length - 1] === "") linesBeforeCurrent.pop();
@@ -251,6 +270,174 @@ function updateAutomaticOutlineIndent(value: string, selectionStart: number, dir
   return replaceCurrentLine(value, selectionStart, replacementLine, nextCursorOffset);
 }
 
+type LineIndentChange = {
+  start: number;
+  removeCount: number;
+  insertedText: string;
+};
+
+function selectedLineIndentChanges(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  direction: EditorTabDirection,
+): LineIndentChange[] {
+  const firstLineStart = getLineStart(value, selectionStart);
+  const lastSelectedIndex = selectionEnd > selectionStart ? selectionEnd - 1 : selectionEnd;
+  const lastLineStart = getLineStart(value, lastSelectedIndex);
+  const changes: LineIndentChange[] = [];
+  let lineStart = firstLineStart;
+
+  while (lineStart <= lastLineStart) {
+    if (direction === "indent") {
+      changes.push({ start: lineStart, removeCount: 0, insertedText: EDITOR_TAB_TEXT });
+    } else {
+      const line = value.slice(lineStart, getLineEnd(value, lineStart));
+      const removableSpaces = Math.min(EDITOR_TAB_TEXT.length, line.match(/^[ \u00a0]*/)?.[0].length ?? 0);
+      const removeCount = line.startsWith("\t") ? 1 : removableSpaces;
+      if (removeCount > 0) changes.push({ start: lineStart, removeCount, insertedText: "" });
+    }
+
+    const nextBreak = value.indexOf("\n", lineStart);
+    if (nextBreak === -1 || nextBreak + 1 > lastLineStart) break;
+    lineStart = nextBreak + 1;
+  }
+  return changes;
+}
+
+function remapOffsetAfterLineIndentChanges(offset: number, changes: LineIndentChange[]): number {
+  let delta = 0;
+  for (const change of changes) {
+    if (offset < change.start) break;
+    const changedEnd = change.start + change.removeCount;
+    if (offset <= changedEnd) return change.start + delta + change.insertedText.length;
+    delta += change.insertedText.length - change.removeCount;
+  }
+  return offset + delta;
+}
+
+function updateSelectedLineIndentation(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  direction: EditorTabDirection,
+): PlainTextEdit {
+  const changes = selectedLineIndentChanges(value, selectionStart, selectionEnd, direction);
+  if (changes.length === 0) return { value, selectionStart, selectionEnd };
+
+  let cursor = 0;
+  let nextValue = "";
+  for (const change of changes) {
+    nextValue += value.slice(cursor, change.start);
+    nextValue += change.insertedText;
+    cursor = change.start + change.removeCount;
+  }
+  nextValue += value.slice(cursor);
+  return {
+    value: nextValue,
+    selectionStart: remapOffsetAfterLineIndentChanges(selectionStart, changes),
+    selectionEnd: remapOffsetAfterLineIndentChanges(selectionEnd, changes),
+  };
+}
+
+type SelectedLineReplacement = {
+  start: number;
+  end: number;
+  replacement: string;
+  remapRelativeOffset: (offset: number) => number;
+};
+
+function updateSelectedAutomaticOutlineIndentation(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  direction: EditorTabDirection,
+): PlainTextEdit {
+  const firstLineStart = getLineStart(value, selectionStart);
+  const lastSelectedIndex = selectionEnd > selectionStart ? selectionEnd - 1 : selectionEnd;
+  const lastLineStart = getLineStart(value, lastSelectedIndex);
+  const replacements: SelectedLineReplacement[] = [];
+  let lineStart = firstLineStart;
+  let transformedPrefix = value.slice(0, firstLineStart);
+
+  while (lineStart <= lastLineStart) {
+    const lineEnd = getLineEnd(value, lineStart);
+    const line = value.slice(lineStart, lineEnd);
+    const parsed = parseOutlineLine(line);
+    let replacement = line;
+    let remapRelativeOffset = (offset: number) => offset;
+
+    if (parsed) {
+      const oldBodyOffset = parsed.indentation.length + parsed.marker.length + parsed.delimiter.length + parsed.spacing.length;
+      if (direction === "outdent" && parsed.depth === 0) {
+        replacement = `${parsed.indentation}${parsed.rest}`;
+        const nextBodyOffset = parsed.indentation.length;
+        remapRelativeOffset = (offset) => offset <= oldBodyOffset
+          ? nextBodyOffset
+          : nextBodyOffset + (offset - oldBodyOffset);
+      } else {
+        const nextDepth = direction === "outdent" ? Math.max(0, parsed.depth - 1) : parsed.depth + 1;
+        const linesBeforeCurrent = transformedPrefix.split(/\r\n|\n|\r/);
+        if (linesBeforeCurrent.length > 0 && linesBeforeCurrent[linesBeforeCurrent.length - 1] === "") linesBeforeCurrent.pop();
+        const nextIndentation = EDITOR_TAB_TEXT.repeat(nextDepth);
+        const nextMarker = nextMarkerForOutlineDepth(linesBeforeCurrent, nextDepth);
+        const spacing = parsed.spacing || " ";
+        replacement = `${nextIndentation}${nextMarker}${parsed.delimiter}${spacing}${parsed.rest}`;
+        const nextBodyOffset = nextIndentation.length + nextMarker.length + parsed.delimiter.length + spacing.length;
+        remapRelativeOffset = (offset) => offset <= oldBodyOffset
+          ? nextBodyOffset
+          : nextBodyOffset + (offset - oldBodyOffset);
+      }
+    } else if (direction === "indent") {
+      replacement = `${EDITOR_TAB_TEXT}${line}`;
+      remapRelativeOffset = (offset) => offset + EDITOR_TAB_TEXT.length;
+    } else {
+      const removableSpaces = Math.min(EDITOR_TAB_TEXT.length, line.match(/^[ \u00a0]*/)?.[0].length ?? 0);
+      const removeCount = line.startsWith("\t") ? 1 : removableSpaces;
+      if (removeCount > 0) {
+        replacement = line.slice(removeCount);
+        remapRelativeOffset = (offset) => Math.max(0, offset - removeCount);
+      }
+    }
+
+    if (replacement !== line) {
+      replacements.push({ start: lineStart, end: lineEnd, replacement, remapRelativeOffset });
+    }
+    transformedPrefix += replacement;
+    if (lineEnd < value.length) transformedPrefix += "\n";
+    const nextBreak = value.indexOf("\n", lineStart);
+    if (nextBreak === -1 || nextBreak + 1 > lastLineStart) break;
+    lineStart = nextBreak + 1;
+  }
+  if (replacements.length === 0) return { value, selectionStart, selectionEnd };
+
+  let cursor = 0;
+  let nextValue = "";
+  for (const replacement of replacements) {
+    nextValue += value.slice(cursor, replacement.start);
+    nextValue += replacement.replacement;
+    cursor = replacement.end;
+  }
+  nextValue += value.slice(cursor);
+
+  const remapOffset = (offset: number): number => {
+    let delta = 0;
+    for (const replacement of replacements) {
+      if (offset < replacement.start) break;
+      if (offset <= replacement.end) {
+        return replacement.start + delta + replacement.remapRelativeOffset(offset - replacement.start);
+      }
+      delta += replacement.replacement.length - (replacement.end - replacement.start);
+    }
+    return offset + delta;
+  };
+  return {
+    value: nextValue,
+    selectionStart: remapOffset(selectionStart),
+    selectionEnd: remapOffset(selectionEnd),
+  };
+}
+
 export function insertEditorTabText(
   value: string,
   selectionStart: number,
@@ -259,6 +446,11 @@ export function insertEditorTabText(
   direction: EditorTabDirection = "indent",
 ): PlainTextEdit {
   const { start, end } = clampSelection(value, selectionStart, selectionEnd);
+  if (start !== end) {
+    return outlineStyle === "automatic-outline-numbering"
+      ? updateSelectedAutomaticOutlineIndentation(value, start, end, direction)
+      : updateSelectedLineIndentation(value, start, end, direction);
+  }
   if (direction === "outdent") {
     if (outlineStyle === "automatic-outline-numbering") return updateAutomaticOutlineIndent(value, start, "outdent");
     return outdentPlainLine(value, start);
@@ -285,6 +477,19 @@ export function getAutomaticOutlineContinuation(value: string, selectionStart: n
   return `\n${parsed.indentation}${nextMarker}${parsed.delimiter}${parsed.spacing || " "}`;
 }
 
+function exitEmptyAutomaticOutlineLine(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+): PlainTextEdit | null {
+  const { start, end } = clampSelection(value, selectionStart, selectionEnd);
+  if (start !== end) return null;
+  const { line } = readLine(value, start);
+  const parsed = parseOutlineLine(line);
+  if (!parsed || parsed.rest.replace(/\u200b/g, "").trim().length > 0) return null;
+  return replaceCurrentLine(value, start, parsed.indentation, parsed.indentation.length);
+}
+
 function getIndentGuideContinuation(value: string, selectionStart: number): string {
   const { line } = readLine(value, selectionStart);
   return `\n${readLineIndentation(line)}`;
@@ -297,6 +502,10 @@ export function insertEditorEnterText(
   outlineStyle: EditorOutlineStyleID,
   options: { continueAutomaticOutline?: boolean } = {},
 ): PlainTextEdit {
+  if (outlineStyle === "automatic-outline-numbering" && options.continueAutomaticOutline !== false) {
+    const exitEdit = exitEmptyAutomaticOutlineLine(value, selectionStart, selectionEnd);
+    if (exitEdit) return exitEdit;
+  }
   const continuation = outlineStyle === "automatic-outline-numbering"
     ? (options.continueAutomaticOutline === false ? null : getAutomaticOutlineContinuation(value, selectionStart))
     : getIndentGuideContinuation(value, selectionStart);
@@ -319,6 +528,12 @@ export function insertAutomaticOutlineFirstText(
   const beforeCaret = line.slice(0, relativeStart);
   const afterCaret = line.slice(relativeStart);
   if (!isIndentationOnly(beforeCaret) || !isIndentationOnly(afterCaret)) return null;
+
+  if (lineStart > 0) {
+    const previousLineEnd = lineStart - 1;
+    const previousLineStart = getLineStart(value, previousLineEnd);
+    if (parseOutlineLine(value.slice(previousLineStart, previousLineEnd))) return null;
+  }
 
   const indentation = normalizeIndentationWhitespace(beforeCaret);
   const depth = countIndentDepth(indentation);
@@ -378,8 +593,17 @@ export function toggleAutomaticOutlineNumberingText(
   };
 }
 
-export function deleteEditorBackspaceText(value: string, selectionStart: number, selectionEnd: number): PlainTextEdit | null {
+export function deleteEditorBackspaceText(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  outlineStyle: EditorOutlineStyleID = "indent-guides",
+): PlainTextEdit | null {
   const { start, end } = clampSelection(value, selectionStart, selectionEnd);
+  if (outlineStyle === "automatic-outline-numbering") {
+    const exitEdit = exitEmptyAutomaticOutlineLine(value, start, end);
+    if (exitEdit) return exitEdit;
+  }
   if (start !== end || start < EDITOR_TAB_TEXT.length) return null;
   const deleteStart = start - EDITOR_TAB_TEXT.length;
   if (deleteStart < getLineStart(value, start)) return null;

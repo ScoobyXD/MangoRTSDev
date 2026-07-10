@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEditorIndentGuideSegments, editorIndentGuideLeftForDepth } from "../../../../frontend/src/modules/editor/editorIndentGuides.js";
+import { buildEditorIndentGuideSegments, editorIndentGuideLeftForDepth, resolveEditorIndentGuideLineHeightPx } from "../../../../frontend/src/modules/editor/editorIndentGuides.js";
 import { EDITOR_DOCUMENT_PROPORTIONAL_FONT_FAMILY, getEditorDocumentFontFamily } from "../../../../frontend/src/modules/editor/useEditorPreferences.js";
 
 test("indent guides are empty for unindented text", () => {
@@ -47,4 +47,10 @@ test("indent guides keep Inter text while guide positions follow rendered spaces
   assert.equal(editorIndentGuideLeftForDepth(2, 5), "1.25em");
   assert.equal(editorIndentGuideLeftForDepth(3, 5), "2.5em");
   assert.doesNotMatch(editorIndentGuideLeftForDepth(3, 5), /ch/);
+});
+
+test("indent guide rows use each editor surface's rendered font metrics", () => {
+  assert.ok(Math.abs(resolveEditorIndentGuideLineHeightPx(12, 1.35, 15, 1.55) - 16.2) < 0.001);
+  assert.equal(resolveEditorIndentGuideLineHeightPx("12px", "18px", 15, 1.55), 18);
+  assert.ok(Math.abs(resolveEditorIndentGuideLineHeightPx(undefined, undefined, 15, 1.55) - 23.25) < 0.001);
 });

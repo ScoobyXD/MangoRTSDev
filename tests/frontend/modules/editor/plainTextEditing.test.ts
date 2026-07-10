@@ -1,20 +1,55 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyEditorInlineFormat, DEFAULT_EDITOR_OUTLINE_STYLE, deleteEditorBackspaceText, EDITOR_TAB_TEXT, getAutomaticOutlineContinuation, insertEditorEnterText, insertEditorTabText, isEditorOutlineStyleID, toggleAutomaticOutlineNumberingText } from "../../../../frontend/src/modules/editor/plainTextEditing.js";
+import { applyEditorInlineFormat, DEFAULT_EDITOR_OUTLINE_STYLE, deleteEditorBackspaceText, EDITOR_TAB_TEXT, getAutomaticOutlineContinuation, insertAutomaticOutlineFirstText, insertEditorEnterText, insertEditorTabText, isEditorOutlineStyleID, toggleAutomaticOutlineNumberingText } from "../../../../frontend/src/modules/editor/plainTextEditing.js";
 
 test("editor Tab inserts exactly five plain spaces", () => {
   assert.equal(EDITOR_TAB_TEXT, "     ");
   assert.equal(EDITOR_TAB_TEXT.length, 5);
 });
 
-test("editor Tab replaces selected text with five spaces and moves caret after them", () => {
+test("editor Tab preserves selected text and indents its line", () => {
   const edit = insertEditorTabText("alpha beta", 6, 10);
 
   assert.deepEqual(edit, {
-    value: "alpha      ",
+    value: "     alpha beta",
     selectionStart: 11,
-    selectionEnd: 11,
+    selectionEnd: 15,
   });
+});
+
+test("editor Tab indents every selected line without selecting an untouched trailing line", () => {
+  const value = "alpha\nbeta\ngamma";
+  const edit = insertEditorTabText(value, 0, "alpha\nbeta\n".length);
+
+  assert.deepEqual(edit, {
+    value: `${EDITOR_TAB_TEXT}alpha\n${EDITOR_TAB_TEXT}beta\ngamma`,
+    selectionStart: EDITOR_TAB_TEXT.length,
+    selectionEnd: "     alpha\n     beta\n".length,
+  });
+});
+
+test("editor Shift+Tab outdents every selected line while preserving its content", () => {
+  const value = `${EDITOR_TAB_TEXT}alpha\n\tbeta\n  gamma`;
+  const edit = insertEditorTabText(value, 0, value.length, "indent-guides", "outdent");
+
+  assert.deepEqual(edit, {
+    value: "alpha\nbeta\ngamma",
+    selectionStart: 0,
+    selectionEnd: "alpha\nbeta\ngamma".length,
+  });
+});
+
+test("automatic numbering Tab updates every selected marker family and continues the new depth", () => {
+  const value = "1. A\n2. B";
+  const edit = insertEditorTabText(value, 0, value.length, "automatic-outline-numbering", "indent");
+  const expectedValue = `${EDITOR_TAB_TEXT}a. A\n${EDITOR_TAB_TEXT}b. B`;
+
+  assert.equal(edit.value, expectedValue);
+  assert.equal(edit.selectionEnd, expectedValue.length);
+  assert.equal(getAutomaticOutlineContinuation(edit.value, edit.selectionEnd), `\n${EDITOR_TAB_TEXT}c. `);
+
+  const outdent = insertEditorTabText(expectedValue, 0, expectedValue.length, "automatic-outline-numbering", "outdent");
+  assert.equal(outdent.value, value);
 });
 
 test("outline style ids stay explicit for UI and headless callers", () => {
@@ -144,6 +179,17 @@ test("automatic outline continuation only looks at the new edit point", () => {
   assert.equal(getAutomaticOutlineContinuation("already typed\nplain line", "already typed\nplain line".length), null);
 });
 
+test("automatic outline parsing rejects marker families that do not belong at the current depth", () => {
+  assert.equal(getAutomaticOutlineContinuation("Note. details", "Note. details".length), null);
+  assert.equal(getAutomaticOutlineContinuation(`${EDITOR_TAB_TEXT}2. details`, `${EDITOR_TAB_TEXT}2. details`.length), null);
+  assert.equal(getAutomaticOutlineContinuation(`${EDITOR_TAB_TEXT.repeat(2)}a. details`, `${EDITOR_TAB_TEXT.repeat(2)}a. details`.length), null);
+});
+
+test("typing after a deliberately exited automatic item stays plain", () => {
+  const value = "1. alpha\n";
+  assert.equal(insertAutomaticOutlineFirstText(value, value.length, value.length, "plain"), null);
+});
+
 test("automatic numbering Tab changes a numeric item into an alphabetic child", () => {
   const value = "1. alpha\n2. ";
   const edit = insertEditorTabText(value, value.length, value.length, "automatic-outline-numbering", "indent");
@@ -168,10 +214,10 @@ test("automatic numbering Tab in ordinary text inserts at the caret", () => {
   });
 });
 
-test("automatic numbering continues alphabetic child items on Enter", () => {
+test("Enter on an empty alphabetic child item exits numbering", () => {
   const value = `1. alpha\n${EDITOR_TAB_TEXT}a. `;
   const edit = insertEditorEnterText(value, value.length, value.length, "automatic-outline-numbering");
-  const expectedValue = `1. alpha\n${EDITOR_TAB_TEXT}a. \n${EDITOR_TAB_TEXT}b. `;
+  const expectedValue = `1. alpha\n${EDITOR_TAB_TEXT}`;
 
   assert.deepEqual(edit, {
     value: expectedValue,
@@ -234,6 +280,33 @@ test("automatic numbering Shift+Tab returns an alphabetic child to the numeric p
     value: expectedValue,
     selectionStart: expectedValue.length,
     selectionEnd: expectedValue.length,
+  });
+});
+
+test("automatic numbering Shift+Tab removes a root marker instead of swallowing the command", () => {
+  const value = "1. alpha";
+  assert.deepEqual(insertEditorTabText(value, value.length, value.length, "automatic-outline-numbering", "outdent"), {
+    value: "alpha",
+    selectionStart: "alpha".length,
+    selectionEnd: "alpha".length,
+  });
+});
+
+test("Enter on an empty automatic item exits numbering", () => {
+  const value = "1. alpha\n2. ";
+  assert.deepEqual(insertEditorEnterText(value, value.length, value.length, "automatic-outline-numbering"), {
+    value: "1. alpha\n",
+    selectionStart: "1. alpha\n".length,
+    selectionEnd: "1. alpha\n".length,
+  });
+});
+
+test("Backspace removes an empty automatic marker atomically", () => {
+  const value = "1. alpha\n2. ";
+  assert.deepEqual(deleteEditorBackspaceText(value, value.length, value.length, "automatic-outline-numbering"), {
+    value: "1. alpha\n",
+    selectionStart: "1. alpha\n".length,
+    selectionEnd: "1. alpha\n".length,
   });
 });
 

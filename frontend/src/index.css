@@ -550,6 +550,13 @@ button, input, textarea, select {
   transition: box-shadow 170ms ease, outline-color 170ms ease;
 }
 
+.editor-document-scroll[contenteditable="true"][data-mango-editor-empty="true"][data-placeholder]::before {
+  content: attr(data-placeholder);
+  color: rgba(71, 85, 105, 0.56);
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
 .editor-document-scroll:hover,
 .editor-document-scroll:focus-within {
   box-shadow:

@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { buildEditorIndentGuideSegments, editorIndentGuideLeftForDepth, type EditorIndentGuideSegment } from "./editorIndentGuides";
+import { buildEditorIndentGuideSegments, editorIndentGuideLeftForDepth, resolveEditorIndentGuideLineHeightPx, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import { createEditorScrollMemory } from "./editorScroll";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { EDITOR_TAB_TEXT, type EditorOutlineStyleID } from "./plainTextEditing";
 import {
   deserializeEditorDocumentHTML,
+  editorBodyHasEmailContent,
   readEditorDocumentText,
   serializeEditorDocumentHTML,
   type EditorListKind,
@@ -99,7 +100,13 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
-  const documentLineHeightPx = EDITOR_DOCUMENT_FONT_SIZE_PX * EDITOR_DOCUMENT_LINE_HEIGHT;
+  const documentLineHeightPx = resolveEditorIndentGuideLineHeightPx(
+    style?.fontSize,
+    style?.lineHeight,
+    EDITOR_DOCUMENT_FONT_SIZE_PX,
+    EDITOR_DOCUMENT_LINE_HEIGHT,
+  );
+  const documentIsEmpty = !editorBodyHasEmailContent(value);
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
 
   useEffect(() => {
@@ -379,6 +386,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
         className={className ? `editor-document-scroll mango-editor-hover-highlight ${className}` : "editor-document-scroll mango-editor-hover-highlight"}
         data-mango-unified-rich-editor={surfaceID}
         data-mango-rich-editor-behavior-source={UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE}
+        data-mango-editor-empty={documentIsEmpty ? "true" : undefined}
         data-placeholder={placeholder}
         role="textbox"
         aria-label={ariaLabel}
@@ -408,6 +416,13 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
           documentSurfaceHandlers.onPaste(event);
         }}
         onCopy={documentSurfaceHandlers.onCopy}
+        onCut={(event) => {
+          if (!documentIsEditable) {
+            event.preventDefault();
+            return;
+          }
+          documentSurfaceHandlers.onCut(event);
+        }}
         onDrop={(event) => {
           if (!documentIsEditable) {
             event.preventDefault();

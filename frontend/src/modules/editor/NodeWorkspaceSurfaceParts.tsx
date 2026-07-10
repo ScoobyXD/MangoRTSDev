@@ -252,6 +252,7 @@ export const DeleteTextBlockConfirmationModal: React.FC<DeleteTextBlockConfirmat
 
 type NodeTextBlockEditorProps = {
   blockID: string;
+  surfaceKind?: "node" | "project";
   editable: boolean;
   nodeID: string;
   apiBase: string;
@@ -661,6 +662,7 @@ function readImageDraftFromFrame(blockID: string, frame: HTMLElement, wrapper: H
 
 export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   blockID,
+  surfaceKind = "node",
   editable,
   nodeID,
   apiBase,
@@ -1211,9 +1213,10 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
       <div
         ref={editorRef}
         className="editor-document-scroll mango-editor-hover-highlight"
-        data-node-text-block-id={blockID}
+        data-node-text-block-id={surfaceKind === "node" ? blockID : undefined}
+        data-project-text-block-id={surfaceKind === "project" ? blockID : undefined}
         role="textbox"
-        aria-label="Node text block"
+        aria-label={surfaceKind === "project" ? "Project text block" : "Node text block"}
         aria-multiline="true"
         aria-readonly={!editable || undefined}
         tabIndex={editable ? undefined : -1}
@@ -1241,6 +1244,13 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           documentSurfaceHandlers.onPaste(event);
         }}
         onCopy={documentSurfaceHandlers.onCopy}
+        onCut={(event) => {
+          if (!editable) {
+            event.preventDefault();
+            return;
+          }
+          documentSurfaceHandlers.onCut(event);
+        }}
         onDrop={(event) => {
           if (!editable) {
             event.preventDefault();

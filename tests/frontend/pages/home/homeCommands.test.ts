@@ -8,7 +8,7 @@ import type { NodeRecord } from "../../../../frontend/src/modules/node-map/share
 import { EDITOR_RICH_TEXT_PREFIX } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "../../../../frontend/src/pages/home/homeConstants.js";
 import { addMyLogicGateShortcutsCommand, addSharedInboxGVICPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeGVICMatrixNodeCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, removeSharedInboxGVICPrincipalCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateGVICMatrixNode, type HomeDeleteEmailMessage, type HomeDropAssignNodeToLogicGateStatus, type HomeMoveMyWorkNodeToCell, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInboxGVICAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
-import { appendHomeMailPlainText, applyHomeMailSignature, composeHasDraftContent, homeMailBodyHasSignature, homeMailSignatureScopeKey } from "../../../../frontend/src/pages/home/homeMailDrafts.js";
+import { appendHomeMailPlainText, applyHomeMailSignature, composeHasDraftContent, homeMailBodyHasSignature, homeMailDraftToMessage, homeMailSignatureScopeKey } from "../../../../frontend/src/pages/home/homeMailDrafts.js";
 import { emptyCompose } from "../../../../frontend/src/pages/home/homeTypes.js";
 
 test("new compose and reply bodies receive one idempotent rich-editor signature", () => {
@@ -29,6 +29,45 @@ test("new compose and reply bodies receive one idempotent rich-editor signature"
   assert.match(repliedBody, /Thanks for the update[\s\S]*Best,<br>Mango Team/);
   assert.equal(applyHomeMailSignature(repliedBody, signature), repliedBody);
   assert.equal(composeHasDraftContent({ ...emptyCompose, open: true, body: repliedBody }, signature), true);
+});
+
+test("image-only mail drafts are retained and draft snippets never expose editor markup", () => {
+  const inlineImageBody = EDITOR_RICH_TEXT_PREFIX
+    + "<span data-mango-editor-image=\"true\" data-mango-editor-attachment-id=\"attachment-1\"><img src=\"mango-attachment:attachment-1\" alt=\"\"></span>";
+  const signature = "Best,\nMango Team";
+
+  assert.equal(composeHasDraftContent({ ...emptyCompose, open: true, body: inlineImageBody }, ""), true);
+  assert.equal(
+    composeHasDraftContent({ ...emptyCompose, open: true, body: applyHomeMailSignature(inlineImageBody, signature) }, signature),
+    true,
+  );
+  const logoSignature = EDITOR_RICH_TEXT_PREFIX
+    + "<div>Mango Team</div><span data-mango-editor-image=\"true\" data-mango-editor-attachment-id=\"logo-1\"><img src=\"mango-attachment:logo-1\" alt=\"\"></span>";
+  assert.equal(
+    composeHasDraftContent({ ...emptyCompose, open: true, body: applyHomeMailSignature("", logoSignature) }, logoSignature),
+    false,
+  );
+
+  const draft = {
+    id: "draft-1",
+    userID: "user-1",
+    companyID: "company-1",
+    sharedInboxID: "",
+    accountEmail: "sender@example.test",
+    replyToMessageID: "",
+    replyToMessage: null,
+    to: "",
+    cc: "",
+    bcc: "",
+    subject: "",
+    body: EDITOR_RICH_TEXT_PREFIX + "<div><strong>Hello</strong> &amp; welcome</div>",
+    attachments: [],
+    scheduledAt: "",
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  };
+  assert.equal(homeMailDraftToMessage(draft).snippet, "Hello & welcome");
+  assert.equal(homeMailDraftToMessage({ ...draft, body: inlineImageBody }).snippet, "Inline image");
 });
 
 test("rich signatures retain formatting and signature storage keys stay mailbox scoped", () => {

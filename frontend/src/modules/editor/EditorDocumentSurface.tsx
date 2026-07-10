@@ -24,6 +24,7 @@ export type EditorDocumentSurfaceProps = {
   onBeforeInput: React.FormEventHandler<HTMLDivElement>;
   onPaste: React.ClipboardEventHandler<HTMLDivElement>;
   onCopy: React.ClipboardEventHandler<HTMLDivElement>;
+  onCut: React.ClipboardEventHandler<HTMLDivElement>;
   onDrop: React.DragEventHandler<HTMLDivElement>;
   onInput: React.FormEventHandler<HTMLDivElement>;
   onSelect: React.ReactEventHandler<HTMLDivElement>;
@@ -59,6 +60,7 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
   onBeforeInput,
   onPaste,
   onCopy,
+  onCut,
   onDrop,
   onInput,
   onSelect,
@@ -142,6 +144,13 @@ export const EditorDocumentSurface: React.FC<EditorDocumentSurfaceProps> = ({
         onPaste(event);
       }}
       onCopy={onCopy}
+      onCut={(event) => {
+        if (!documentIsEditable) {
+          event.preventDefault();
+          return;
+        }
+        onCut(event);
+      }}
       onDrop={(event) => {
         if (!documentIsEditable) {
           event.preventDefault();
