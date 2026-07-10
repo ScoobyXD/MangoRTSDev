@@ -1,4 +1,5 @@
 export const UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE = "useEditorDocumentSurfaceHandlers";
+export const UNIFIED_RICH_EDITOR_TOOLBAR_SOURCE = "EditorTabBar";
 
 export type UnifiedRichEditorSurfaceID =
   | "logic-gate-editor"

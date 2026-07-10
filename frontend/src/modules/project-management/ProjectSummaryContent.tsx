@@ -33,7 +33,7 @@ import {
   type EditorTextBlockChatMessage,
 } from "../editor/editorProjection.js";
 import { EditorTabBar } from "../editor/EditorTabBar.js";
-import type { EditorTabID } from "../editor/editorTabs.js";
+import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS } from "../editor/editorTabs.js";
 import { EditorContent } from "../editor/EditorContent.js";
 import { generateStableInformationID } from "../editor/editorTypes.js";
 import { UnifiedNodeShell } from "../editor/UnifiedNodeShell.js";
@@ -182,8 +182,6 @@ const PROJECT_SUMMARY_SPLIT_MAX = 74;
 const PROJECT_RELATIONSHIP_NODE_DRAG_MIME = "application/x-mangorts-project-relationship-node";
 const PROJECT_CRITICAL_STEP_DRAG_MIME = "application/x-mangorts-project-critical-step";
 const PROJECT_HEALTH_OPTIONS: ProjectHealth[] = ["On Track", "AT RISK", "Off Track"];
-const PROJECT_TEXT_EDITOR_TOOLBAR_TAB_IDS: readonly EditorTabID[] = ["format", "outline-styles"];
-
 function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent<HomeTriageConversionAppliedDetail>(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, { detail }));
@@ -1295,7 +1293,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   setTableInsertRequests((current) => ({ ...current, [targetBlockID]: (current[targetBlockID] ?? 0) + 1 }));
                 }}
                 reserveHeaderOffset={false}
-                visibleTabIDs={PROJECT_TEXT_EDITOR_TOOLBAR_TAB_IDS}
+                visibleTabIDs={UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS}
                 disabled={!focusedTextBlockID}
               />
             </div>

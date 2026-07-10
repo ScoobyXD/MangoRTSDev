@@ -4,7 +4,7 @@ Last updated: 2026-07-09
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified surface contract, full mail compose/attached-reply control exposure, shared controller wiring, and EmailPickerModal attach-only source guard; shared editing primitives also have rich/plain editor module tests, including automatic outline numbering toggle behavior and the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers rich email compose send serialization and Mango attachment-reference payloads; backend communications tests cover send-time attachment byte resolution outside the shared editor contract)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified surface contract, unified toolbar source/inventory, full mail compose/attached-reply control exposure, shared controller wiring, and EmailPickerModal attach-only source guard; shared editing primitives also have rich/plain editor module tests, including automatic outline numbering toggle behavior and the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers rich email compose send serialization and Mango attachment-reference payloads; backend communications tests cover send-time attachment byte resolution outside the shared editor contract)
 
 ## Business Logic
 
@@ -36,6 +36,9 @@ ED25 - Backend persistence unification is explicitly outside the unified editor 
 ED26 - Rich-editor pasted or dropped inline images in unified editor surfaces must follow the global attachment contract in `docs/tests/attachments.md`: temporary previews are allowed, but durable editor/email content stores attachment references instead of data URLs or base64 bytes.
 ED27 - Chat attachments remain outside the unified rich-editor contract; they must use the global attachment contract as chat attachments rather than inheriting rich-editor body semantics.
 ED28 - Project text boxes must expose the same shared format and outline toolbar controls as node text boxes, including font-size controls, bold, underline, automatic numbering, bullets, checklist, and outline-style selection; project-specific toolbar toggles must call the shared editor controller instead of defining separate semantics.
+ED29 - The unified rich-editor toolbar source is `EditorTabBar`. Any rich editor surface that exposes formatting controls must use the same font-size minus/value/plus controls, bold/underline controls, and outline-style dropdown UI instead of reimplementing a look-alike toolbar.
+ED30 - The shared outline-style dropdown inventory is Automatic Numbering, Indent Guides, Bullet Points, and Checklist. The compact toolbar inventory used by project text boxes, mail compose/reply, and attached-email reply must come from one shared toolbar tab list so adding, removing, renaming, or restyling those controls changes every compact editor surface together.
+ED31 - Font-size toolbar actions must route through the shared editor formatting controller/helper for every unified rich editor surface, including Logic Gate editor text, node text boxes, project text boxes, My Triage/Shared Triage compose and reply bodies, and attached-email reply bodies. A surface must not keep a local font-size span mutation path behind the shared toolbar.
 
 ## Scenarios
 
@@ -58,11 +61,14 @@ Business logic covered:
 - ED20
 - ED21
 - ED28
+- ED29
+- ED30
+- ED31
 
 Given:
 - A user can edit a Logic Gate body, a node text box, a project text box, a My Triage compose body, a Shared Triage compose body, and an attached-email reply body.
 - A user can open a node from a Project critical-path row and by double-clicking a node in the Project Logic Gates / Nodes tab.
-- The implementation changes indentation, paste cleanup, list behavior, hyperlink creation, font size, Delete/Backspace, copy/cut/paste, or keyboard routing.
+- The implementation changes indentation, paste cleanup, list behavior, hyperlink creation, font size, the format toolbar, the outline-style dropdown, Delete/Backspace, copy/cut/paste, or keyboard routing.
 
 Expected:
 - The behavior change is made in the shared editor behavior source or deliberately shared helper.
@@ -73,7 +79,10 @@ Expected:
 - Tests cover the shared behavior once and prove each adapter/mount uses that shared behavior.
 - Mail compose/reply adapters do not call browser `document.execCommand` directly for rich editing commands when a shared editor command exists.
 - Mail compose/reply and attached-email reply adapters expose numbered list, indent, outdent, bullet list, checklist, font size, bold, underline, link, and table controls where table insertion is supported.
-- Font size, bold, underline, outline-style dropdown, and table insertion are supplied by the shared editor toolbar control source rather than a compose-only or attached-reply-only toolbar implementation.
+- Font size, bold, underline, the outline-style dropdown, and table insertion where supported are supplied by the shared editor toolbar control source rather than a compose-only, project-only, Logic Gate-only, node-only, or attached-reply-only toolbar implementation.
+- The same visible toolbar styling is used for the format controls wherever the shared toolbar appears.
+- The outline-style dropdown lists Automatic Numbering, Indent Guides, Bullet Points, and Checklist from the shared inventory.
+- Font-size minus/value/plus actions route through the shared formatting helper/controller for selected text and sticky collapsed-caret formatting.
 - Project text-box adapters expose the shared node-style format and outline controls and route those actions through the shared editor controller.
 
 ### Scenario ED-S2: Domain Persistence Stays Separate

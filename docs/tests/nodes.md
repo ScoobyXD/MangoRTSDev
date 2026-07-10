@@ -71,6 +71,7 @@ N60 - In automatic numbering mode, pressing Tab in ordinary non-outline node tex
 N61 - Full node-window close actions render through the unified node shell's red close chrome with a white X across Home, app/sidebar, Kanban/My Work, Updates, Project, and dock-restored node shell surfaces.
 N62 - Attached-email reply body editors include a visual one-row bottom buffer through editor padding/scroll padding so the caret stays visible at the bottom; the buffer must not add fake blank lines to the sent email body.
 N63 - Mango-authored outgoing email bodies are marked and displayed in Mango with preserved line breaks, spaces, and indentation in node-attached email detail views instead of being normalized into a flat sentence.
+N64 - Node text-box formatting is driven by the shared editor toolbar and formatting controller: the font-size minus/value/plus controls, bold/underline controls, and outline-style dropdown must match Logic Gate, project, and mail editor surfaces in look and behavior wherever a full node editor is opened.
 
 ## Scenarios
 
@@ -167,6 +168,7 @@ Business logic covered:
 - N16
 - N17
 - N18
+- N64
 - N60
 
 Given:
@@ -182,6 +184,7 @@ Expected:
 - Changing font size with only a caret sets the font size for the next typed characters.
 - Bold and underline buttons reflect the caret or selected text state and can be active at the same time.
 - Toggling bold or underline affects the selection or the next typed characters when the selection is collapsed.
+- The shared toolbar controls for font size, bold, underline, and outline style have the same visual styling and command behavior as Logic Gate, project, and mail editor surfaces.
 - Table insertion uses the current caret/selection position.
 - Pressing Tab at the end of ordinary non-outline text inserts a five-space tab at the caret without shifting the whole text block; structural indent runs only for a parsed outline/list line.
 
@@ -269,6 +272,7 @@ Business logic covered:
 - N49
 - N50
 - N61
+- N64
 
 Given:
 - A user opens the same node from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, a Project critical-path row, and a Project Logic Gates / Nodes row.
@@ -283,6 +287,7 @@ Expected:
 - The Kanban/My Work full node overlay exposes the shared fullscreen control between minimize and close and restores its prior board-relative overlay size when fullscreen is turned off or the overlay closes.
 - Activating that Kanban/My Work fullscreen control pins the node overlay to the browser viewport, not merely to the visible Kanban board bounds.
 - Node text boxes use the unified editor semantics on every node-window surface.
+- The shared format toolbar controls the focused node text box through the shared formatting controller, so font size and outline-style behavior cannot diverge by node opener.
 - Node text-box edits continue to save through node information/projection persistence.
 - Text-block chats remain chat composers and do not receive rich editor toolbar or rich editor keyboard semantics.
 - Opening the node email picker allows attaching existing email but does not expose compose, send, scheduled send, or draft-save controls.
