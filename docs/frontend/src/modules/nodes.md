@@ -70,6 +70,17 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - Node chats remain separate chat UI; they store attachment references without inheriting rich-editor toolbar/list/indent semantics.
 - Incoming provider attachments on attached emails remain provider-referenced until a product path explicitly selects them for Mango ownership/cache.
 
+### Node Attachment Lists And Downloads (2026-07-10)
+
+- An explicit file uploaded from a node text box is linked to the node with `relationship_kind=file_attachment`, `information_id=<text block ID>`, and `editor_surface=node_text_block`.
+- The attachment-list control beside a text box's upload paperclip shows only active `file_attachment` links whose `information_id` matches that text box.
+- The shared node toolbar has one aggregate attachment control for all active node `file_attachment` links. It uses the matching text-box title as row context when available and keeps unresolved-but-active node file links visible with fallback context.
+- These explicit-file lists do not include `inline_image`, `chat_attachment`, `email_attachment`, attached-email records, or any other relationship kind.
+- Each row displays the original filename and file size and places a download action on the right.
+- Downloads request the `original` variant through the authenticated Mango attachment-content API and use the original filename; the frontend never opens a private S3 key/URL or a legacy `dataURL` as the download source.
+- Counts/lists/downloads are read behavior and remain available in a read-only node workspace. The upload control remains edit-only.
+- Backend node resource links are the canonical list source after load or upload. Projection references remain useful for editor persistence but do not decide whether an authorized S3-backed attachment can be listed or downloaded.
+
 ---
 
 ## 2) API contracts used by the module
@@ -103,6 +114,12 @@ Base values are read from:
   - bulk upserts changed node positions with `{ company_id, map_type: "node", positions: [{ entity_id, x, y }] }`.
 - `GET /v1/workspace/snapshot?company_id=...`
   - hot initial read includes `node_map_positions` alongside nodes and relationships.
+- `POST /v1/attachments`
+  - uploads multipart attachment bytes and creates the attachment metadata, original variant, and node resource link.
+- `GET /v1/resources/node/:node_id/attachments?company_id=...`
+  - lists authorized node resource links with attachment metadata; the node workspace filters active `file_attachment` links for its explicit-file controls.
+- `GET /v1/attachments/:attachment_id/content?company_id=...&variant=original`
+  - performs an authorized read of the original S3-backed bytes used by the attachment-row download action.
 
 ### Error handling
 
@@ -532,6 +549,9 @@ Primary implementation is in:
 
 - `frontend/src/modules/node-map/NodeMapContent.tsx` (Node Map behavior)
 - `frontend/src/modules/editor/EditorContent.tsx` (Node Doc behavior)
+- `frontend/src/modules/editor/NodeWorkspaceSurface.tsx` (shared node text-box upload, scoped lists, and node-wide attachment aggregation)
+- `frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx` (attachment count/list controls and row actions)
+- `frontend/src/modules/attachments/attachmentApi.ts` (typed upload/list metadata and authenticated original-file download)
 - `frontend/src/modules/node-map/shared.ts` (shared node types/constants/helpers)
 - `frontend/src/app/applayout.tsx` (frame/menu integration and link action wiring)
 

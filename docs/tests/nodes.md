@@ -1,4 +1,4 @@
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 # Nodes Tests
 
@@ -72,6 +72,12 @@ N61 - Full node-window close actions render through the unified node shell's red
 N62 - Attached-email reply body editors include a visual one-row bottom buffer through editor padding/scroll padding so the caret stays visible at the bottom; the buffer must not add fake blank lines to the sent email body.
 N63 - Mango-authored outgoing email bodies are marked and displayed in Mango with preserved line breaks, spaces, and indentation in node-attached email detail views instead of being normalized into a flat sentence.
 N64 - Node text-box formatting is driven by the shared editor toolbar and formatting controller: the font-size minus/value/plus controls, bold/underline controls, and outline-style dropdown must match Logic Gate, project, and mail editor surfaces in look and behavior wherever a full node editor is opened.
+N65 - Each node text box exposes an attachment-list control beside its attachment-upload control. Its count and rows include only active node `file_attachment` resource links whose `information_id` matches that text block.
+N66 - The shared node workspace toolbar exposes one node-wide attachment counter and list. It aggregates all active `file_attachment` resource links for the node across its text boxes, labels each row with its text-box title when available, and excludes inline images, chat attachments, email attachments, and attached emails.
+N67 - A node attachment row displays the original filename and byte size and exposes a download action on the right. Download requests the attachment's `original` variant through Mango's authenticated attachment-content API and preserves the original filename; the UI must not use a raw S3 URL, storage key, or legacy durable `dataURL` as the download source.
+N68 - Node users with view access may see attachment counts/lists and download authorized files even when the node is read-only. Upload remains limited to users with edit access.
+N69 - Node attachment counts and lists are rebuilt from the backend node resource-link list when the workspace loads. Projection attachment references may support editor persistence, but they are not the canonical source for list/download availability.
+N70 - Per-text-box and node-wide attachment controls are part of the shared node workspace body, so every full node-window surface using that body receives the same attachment scope, count, list, permission, and download behavior.
 
 ## Scenarios
 
@@ -328,3 +334,28 @@ Expected:
 - Outbound attached-email reply HTML preserves explicit line breaks, spacing, and indentation from the unified editor.
 - Mango's node-attached email display preserves Mango-authored outbound line breaks, spaces, and indentation when the same message is viewed later inside Mango.
 - Loading the node does not require reading multi-megabyte inline base64 strings from node projection rows.
+
+### Scenario N-S11: Text-Box And Node-Wide Attachment Lists
+
+Business logic covered:
+- N51
+- N65
+- N66
+- N67
+- N68
+- N69
+- N70
+
+Given:
+- A node has two text boxes with explicit file attachments uploaded from each text box's attachment control.
+- The same node may also contain inline images, chat attachments, attached emails, or email attachments.
+- One user has edit access and another user has view-only access to the node.
+
+Expected:
+- Each text box shows a list/count control beside its upload control and includes only `file_attachment` links whose `information_id` is that text-box ID.
+- The shared node toolbar shows one aggregate count/list containing explicit node `file_attachment` links from both text boxes and labels rows with their text-box title when available.
+- Inline images, chat attachments, email attachments, and attached emails do not inflate either explicit-file count.
+- Every row shows the original filename and byte size with a download action on its right edge.
+- Download reads the authorized `original` S3-backed variant through Mango's attachment-content API and uses the original filename.
+- The view-only user can open both lists and download attachments but cannot upload new attachments.
+- Reloading the node reconstructs the same lists from active backend node resource links even if a projection attachment reference is stale or absent.

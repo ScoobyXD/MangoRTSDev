@@ -24,6 +24,8 @@
     "../auth/authRoutes.test.ts",
     "../../../frontend/src/modules/api/requestJSON.ts",
     "../modules/api/requestJSON.test.ts",
+    "../../../frontend/src/modules/attachments/attachmentApi.ts",
+    "../modules/attachments/attachmentApi.test.ts",
     "../../../frontend/src/modules/communications/communicationsApi.ts",
     "../modules/communications/communicationsApi.test.ts",
     "../../../frontend/src/modules/notifications/notificationsApi.ts",

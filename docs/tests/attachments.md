@@ -25,6 +25,11 @@ ATT14 - Developer inspection uses DBeaver for `attachments`, `attachment_variant
 ATT15 - Backend validation must reject new durable inline file-byte payloads in normal editor, chat, projection, saved-version, and email send/draft paths.
 ATT16 - Migration must be dry-run first, idempotent, resumable, auditable, and must record old-to-new attachment mappings before rewriting existing inline/base64 payloads.
 ATT17 - Email send preparation must find each `mango-attachment:` image source, deduplicate repeated IDs, authorize the existing resource link, resolve original S3 bytes within the total attachment limit, assign an alphanumeric content ID, add one inline provider attachment, and rewrite the image source to the matching `cid:` URI. It must reject missing/unauthorized references and return only metadata—not base64 bytes—in local sent-message fallback data.
+ATT18 - Explicit files uploaded from a node text box are node resource links with `relationship_kind=file_attachment`, `information_id` set to that text-box ID, and `editor_surface=node_text_block`. This metadata determines list scope; file bytes and legacy `dataURL` values do not.
+ATT19 - A text-box attachment list contains only active node `file_attachment` links whose `information_id` matches that text box. A node-wide attachment list contains every active node `file_attachment` link regardless of text box and must not count other relationship kinds.
+ATT20 - Node attachment lists use the backend resource-link list as canonical data and display attachment metadata returned with each link. A text-box title may label or group a node-wide row when its `information_id` resolves to a current block; an unresolved block must not make an otherwise active node `file_attachment` disappear from the node-wide list.
+ATT21 - User downloads request the `original` attachment variant through Mango's authenticated content endpoint, which rechecks resource authorization before reading private S3 bytes. The browser download uses `original_filename`; clients must not expose or navigate directly to `storage_bucket` or `storage_key`.
+ATT22 - Read access to the owning node permits listing and downloading its attachments. Creating a new node attachment remains an edit operation and must stay hidden or disabled for a view-only user.
 
 ## Scenarios
 
@@ -158,3 +163,28 @@ Expected:
 - Migrated content contains attachment references and no durable inline file bytes.
 - Backend validation prevents normal product paths from reintroducing the removed durable inline file-byte shapes.
 - Live database/S3 dry-run or apply steps remain manual operations requiring the agent DB access boundary verifier, report review, and explicit approval.
+
+### Scenario ATT-S8: Node Attachment Discovery And Download
+
+Business logic covered:
+- ATT7
+- ATT13
+- ATT18
+- ATT19
+- ATT20
+- ATT21
+- ATT22
+
+Given:
+- A user uploads explicit files from two different text boxes on the same node.
+- The node also has resources linked as `inline_image`, `chat_attachment`, or `email_attachment`.
+- A second user can view but cannot edit the node.
+
+Expected:
+- Each upload creates a node `file_attachment` link with the originating text-box ID in `information_id` and `node_text_block` in `editor_surface`.
+- Each text-box list returns only active `file_attachment` links matching that text-box ID.
+- The node-wide list returns all active node `file_attachment` links and excludes links with every other relationship kind.
+- Rows use returned attachment metadata for original filename and byte size and may use the matching text-box title as context.
+- An active node `file_attachment` whose text box no longer resolves remains visible in the node-wide list with fallback context.
+- Both users can download authorized original bytes through the Mango API using the original filename; neither receives a raw S3 URL or storage key.
+- Only the user with edit access can upload another attachment.

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
-import { downloadMangoAttachment, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachmentResourceType, type MangoAttachmentVariantType } from "../attachments/attachmentApi";
+import { downloadMangoAttachment, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachmentResourceType, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
@@ -2727,33 +2727,78 @@ export const EmailCountDropdown: React.FC<EmailCountDropdownProps> = ({ emails, 
   );
 };
 
-export type TextBlockAttachmentListItem = {
-  blockID: string;
-  blockTitle: string;
-  attachment: EditorChatAttachment;
+export type AttachmentCountDropdownItem = {
+  resourceAttachment: MangoResourceAttachment;
+  contextLabel?: string;
 };
 
 type AttachmentCountDropdownProps = {
-  items: TextBlockAttachmentListItem[];
+  items: AttachmentCountDropdownItem[];
+  apiBase: string;
+  companyID: string;
   accent: string;
   surfaceText: string;
   align?: "left" | "right";
   compact?: boolean;
-  editable?: boolean;
-  onRemove?: (blockID: string, attachmentID: string) => void;
+  loading?: boolean;
+  loadError?: string;
+  onRetry?: () => void;
+  onError: (message: string) => void;
 };
 
-export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = ({ items, accent, surfaceText, align = "right", compact = false, editable = false, onRemove }) => {
+const DownloadIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 18 18" style={{ display: "block" }}>
+    <path d="M9 2.7v8.1m-3-3 3 3 3-3M3.2 13v2.2h11.6V13" fill="none" stroke={color} strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = ({
+  items,
+  apiBase,
+  companyID,
+  accent,
+  surfaceText,
+  align = "right",
+  compact = false,
+  loading = false,
+  loadError = "",
+  onRetry,
+  onError,
+}) => {
   const [open, setOpen] = useState(false);
+  const [downloadingResourceAttachmentID, setDownloadingResourceAttachmentID] = useState("");
   const rootRef = useRef<HTMLDivElement | null>(null);
   const close = useCallback(() => setOpen(false), []);
   useCloseFloatingMenu(open, rootRef, close);
+  const downloadAttachment = useCallback(async (item: AttachmentCountDropdownItem) => {
+    const { resourceAttachment } = item;
+    const attachment = resourceAttachment.attachment;
+    if (!attachment) {
+      onError("attachment_metadata_unavailable");
+      return;
+    }
+    setDownloadingResourceAttachmentID(resourceAttachment.resource_attachment_id);
+    try {
+      await downloadMangoAttachment({
+        apiBase,
+        companyID,
+        attachmentID: attachment.attachment_id,
+        filename: attachment.original_filename,
+        variant: "original",
+      });
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_download_attachment");
+    } finally {
+      setDownloadingResourceAttachmentID("");
+    }
+  }, [apiBase, companyID, onError]);
   return (
     <div ref={rootRef} style={{ position: "relative", flex: "0 0 auto", minWidth: 0 }}>
       <button
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={loadError ? "Attachments unavailable" : `Attachments (${items.length})`}
         title="Attachments"
         onClick={() => setOpen((nextOpen) => !nextOpen)}
         style={{
@@ -2777,7 +2822,7 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
         }}
       >
         <PaperclipIcon color={open ? accent : "rgba(100,116,139,0.85)"} />
-        <span>{items.length}</span>
+        <span>{loading ? "..." : loadError ? "!" : items.length}</span>
       </button>
       {open && (
         <div
@@ -2802,19 +2847,42 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
             padding: 6,
           }}
         >
-          {items.length === 0 && (
+          {loading && (
+            <div role="status" style={{ padding: "8px 10px", color: surfaceText, opacity: 0.62, fontSize: 11, fontWeight: 800 }}>
+              Loading attachments...
+            </div>
+          )}
+          {!loading && loadError && (
+            <div role="alert" style={{ minWidth: 0, display: "grid", gridTemplateColumns: onRetry ? "minmax(0, 1fr) auto" : "minmax(0, 1fr)", alignItems: "center", gap: 8, padding: "8px 10px", color: surfaceText, fontSize: 11, fontWeight: 800 }}>
+              <span>Could not load attachments</span>
+              {onRetry && (
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  style={{ minHeight: 24, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: accent, cursor: "pointer", padding: "2px 8px", font: "inherit", fontSize: 10.5, fontWeight: 900, letterSpacing: 0 }}
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+          {!loading && !loadError && items.length === 0 && (
             <div style={{ padding: "8px 10px", color: surfaceText, opacity: 0.62, fontSize: 11, fontWeight: 800 }}>
               No attachments
             </div>
           )}
-          {items.map(({ blockID, blockTitle, attachment }) => (
-            <div
-              key={`${blockID}:${attachment.id}`}
-              role="menuitem"
+          {!loading && !loadError && items.map((item) => {
+            const { resourceAttachment, contextLabel } = item;
+            const attachment = resourceAttachment.attachment;
+            const filename = attachment?.original_filename?.trim() || "Attachment";
+            const downloading = downloadingResourceAttachmentID === resourceAttachment.resource_attachment_id;
+            return (
+              <div
+              key={resourceAttachment.resource_attachment_id}
               style={{
                 minWidth: 0,
                 display: "grid",
-                gridTemplateColumns: editable ? "minmax(0, 1fr) auto" : "minmax(0, 1fr)",
+                gridTemplateColumns: "minmax(0, 1fr) auto",
                 alignItems: "center",
                 gap: 7,
                 border: "1px solid transparent",
@@ -2825,31 +2893,26 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
                 boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 2px 2px 8px rgba(174,174,192,0.14), -2px -2px 8px rgba(255,255,255,0.76)",
               }}
             >
-              <a
-                href={attachment.dataURL || undefined}
-                download={attachment.name}
-                title={attachment.name}
-                onClick={() => setOpen(false)}
-                style={{ minWidth: 0, display: "grid", gap: 3, color: surfaceText, textDecoration: "none", pointerEvents: attachment.dataURL ? "auto" : "none", opacity: attachment.dataURL ? 1 : 0.62 }}
-              >
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 900 }}>{attachment.name}</span>
+              <span style={{ minWidth: 0, display: "grid", gap: 3, color: surfaceText }}>
+                <span title={filename} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 900 }}>{filename}</span>
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontWeight: 750, color: "rgba(100,116,139,0.86)" }}>
-                  {blockTitle || "Text box"} - {formatFileSize(attachment.size)}
+                  {[contextLabel?.trim(), attachment ? formatFileSize(attachment.byte_size) : "File unavailable"].filter(Boolean).join(" - ")}
                 </span>
-              </a>
-              {editable && onRemove && (
-                <button
-                  type="button"
-                  title="Remove attachment"
-                  aria-label="Remove attachment"
-                  onClick={() => onRemove(blockID, attachment.id)}
-                  style={{ width: 24, height: 24, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: "#be123c", cursor: "pointer", fontSize: 14, fontWeight: 900, lineHeight: 1, padding: 0, boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
-                >
-                  X
-                </button>
-              )}
+              </span>
+              <button
+                type="button"
+                role="menuitem"
+                title={`Download ${filename}`}
+                aria-label={`Download ${filename}`}
+                disabled={!attachment || downloading}
+                onClick={() => void downloadAttachment(item)}
+                style={{ width: 28, height: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: !attachment || downloading ? "not-allowed" : "pointer", opacity: !attachment || downloading ? 0.5 : 1, padding: 0, boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
+              >
+                <DownloadIcon color={accent} />
+              </button>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
