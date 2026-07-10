@@ -23,6 +23,7 @@ import {
   filterMangoResourceAttachments,
   groupMangoResourceAttachmentsByInformationID,
   listMangoResourceAttachments,
+  type MangoAttachmentUploadProgress,
   type MangoResourceAttachment,
 } from "../attachments/attachmentApi";
 import {
@@ -50,9 +51,10 @@ import {
 } from "./nodeTextBlockProjectionSaves";
 import {
   appendUniqueEditorAttachments,
-  selectAttachmentUploadCandidates,
+  nodeAttachmentUploadScopeMatches,
   textBlockAttachmentContextLabel,
-  totalTextBlockAttachmentBytes,
+  visibleNodeAttachmentUploads,
+  type NodeAttachmentUploadScope,
 } from "./nodeTextBlockAttachments";
 import {
   projectionIDsForTextBlockDeletion,
@@ -73,10 +75,9 @@ import {
   TextBlockActionsMenu,
   TimelineCell,
   type EmailHighlightRemovalRequest,
+  type AttachmentUploadDropdownItem,
 } from "./NodeWorkspaceSurfaceParts";
 import {
-  CHAT_ATTACHMENT_MAX_BYTES,
-  CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES,
   CHAT_PANE_DEFAULT_HEIGHT,
   DEFAULT_TEXT_BLOCK_TITLE,
   EMAIL_DRAG_MIME,
@@ -86,7 +87,6 @@ import {
   EDITOR_NEU_SHADOW,
   EDITOR_NEU_SOFT_BORDER,
   EDITOR_NEU_SURFACE,
-  formatFileSize,
   ChatIcon,
   MailIcon,
   messageAttachmentPayload,
@@ -358,8 +358,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const projectAssignerRef = useRef<HTMLDivElement | null>(null);
   const nodeEmailModalCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const saveTimersRef = useRef(new Map<string, number>());
-  const pendingTextBlockAttachmentBytesRef = useRef(new Map<string, number>());
   const attachmentUploadScopeRef = useRef({ companyID, nodeID, canEdit, generation: 0 });
+  const nodeAttachmentUploadFilesRef = useRef(new Map<string, { file: File; blockID: string; controller?: AbortController }>());
   const logicGateAssignStatusTimerRef = useRef<number | null>(null);
   const logicGateAssignFlashTimerRef = useRef<number | null>(null);
   const contentByBlockRef = useRef(new Map<string, EditorTextBlockContent>());
@@ -377,6 +377,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [nodeAttachmentsLoading, setNodeAttachmentsLoading] = useState(false);
   const [nodeAttachmentsLoadError, setNodeAttachmentsLoadError] = useState("");
   const [nodeAttachmentsRefreshKey, setNodeAttachmentsRefreshKey] = useState(0);
+  const [nodeAttachmentUploads, setNodeAttachmentUploads] = useState<AttachmentUploadDropdownItem[]>([]);
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
   const [chatDraftAttachments, setChatDraftAttachments] = useState<Record<string, EditorChatAttachment[]>>({});
   const [chatReplyTargets, setChatReplyTargets] = useState<Record<string, string>>({});
@@ -459,6 +460,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       contextLabel: textBlockAttachmentContextLabel(resourceAttachment.information_id, textBlockTitleByID),
     };
   }), [nodeFileAttachments, textBlockTitleByID]);
+  const nodeAttachmentUploadDropdownItems = useMemo(() => {
+    const completedAttachmentIDs = new Set(nodeFileAttachments.map((item) => item.attachment_id.trim()).filter(Boolean));
+    return visibleNodeAttachmentUploads(nodeAttachmentUploads, completedAttachmentIDs);
+  }, [nodeAttachmentUploads, nodeFileAttachments]);
   const compact = width > 0 && width < 720;
   const textCommunicationContentWidth = Math.max(
     TEXT_BLOCK_RESIZE_MIN_WIDTH_PX + TEXT_SIDE_PANE_MIN_WIDTH_PX,
@@ -597,10 +602,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   useLayoutEffect(() => {
     const generation = attachmentUploadScopeRef.current.generation + 1;
     attachmentUploadScopeRef.current = { companyID, nodeID, canEdit, generation };
+    setNodeAttachmentUploads([]);
     return () => {
       if (attachmentUploadScopeRef.current.generation !== generation) return;
       attachmentUploadScopeRef.current = { companyID: "", nodeID: "", canEdit: false, generation: generation + 1 };
-      pendingTextBlockAttachmentBytesRef.current.clear();
+      for (const upload of nodeAttachmentUploadFilesRef.current.values()) upload.controller?.abort();
+      nodeAttachmentUploadFilesRef.current.clear();
     };
   }, [canEdit, companyID, nodeID]);
 
@@ -1149,65 +1156,110 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     updateTextBlockContent(blockID, { attachments: mergedAttachments });
   }, [canEdit, updateTextBlockContent]);
 
+  const uploadNodeAttachmentItem = useCallback(async (
+    uploadID: string,
+    uploadScope: NodeAttachmentUploadScope,
+  ): Promise<EditorChatAttachment> => {
+    const pending = nodeAttachmentUploadFilesRef.current.get(uploadID);
+    if (!pending) throw new Error("attachment_upload_file_unavailable");
+    if (pending.controller) throw new Error("attachment_upload_already_running");
+    const controller = new AbortController();
+    nodeAttachmentUploadFilesRef.current.set(uploadID, { ...pending, controller });
+    const uploadStillBelongsToCurrentNode = () => nodeAttachmentUploadScopeMatches(uploadScope, attachmentUploadScopeRef.current);
+    let succeeded = false;
+    try {
+      const attachment = await uploadEditorAttachment(pending.file, {
+        requestJSON,
+        companyID: uploadScope.companyID,
+        resourceType: "node",
+        resourceID: uploadScope.nodeID,
+        sourceKind: "user_upload",
+        relationshipKind: "file_attachment",
+        informationID: pending.blockID,
+        editorSurface: "node_text_block",
+        signal: controller.signal,
+        onProgress: (progress: MangoAttachmentUploadProgress) => {
+          if (!uploadStillBelongsToCurrentNode()) return;
+          setNodeAttachmentUploads((current) => current.map((item) => (
+            item.id === uploadID ? { ...item, progress } : item
+          )));
+        },
+      });
+      succeeded = true;
+      if (uploadStillBelongsToCurrentNode()) {
+        appendTextBlockAttachments(pending.blockID, [attachment]);
+        setNodeAttachmentUploads((current) => current.map((item) => (
+          item.id === uploadID ? { ...item, attachmentID: attachment.attachmentID } : item
+        )));
+        refreshNodeAttachments();
+      }
+      return attachment;
+    } finally {
+      const latest = nodeAttachmentUploadFilesRef.current.get(uploadID);
+      if (succeeded) nodeAttachmentUploadFilesRef.current.delete(uploadID);
+      else if (latest?.controller === controller) nodeAttachmentUploadFilesRef.current.set(uploadID, { ...latest, controller: undefined });
+    }
+  }, [appendTextBlockAttachments, refreshNodeAttachments, requestJSON]);
+
   const addTextBlockAttachments = useCallback(async (blockID: string, files: FileList | File[]) => {
     if (!canEdit) return;
     const incoming = Array.from(files);
     if (incoming.length === 0) return;
     const uploadScope = attachmentUploadScopeRef.current;
-    const reservationKey = `${uploadScope.generation}:${blockID}`;
-    const uploadStillBelongsToCurrentNode = () => (
-      attachmentUploadScopeRef.current.generation === uploadScope.generation
-      && attachmentUploadScopeRef.current.companyID === companyID
-      && attachmentUploadScopeRef.current.nodeID === nodeID
-      && attachmentUploadScopeRef.current.canEdit
-    );
-    const existing = contentByBlockRef.current.get(blockID) ?? { title: "", document: "", attachments: [] };
-    const existingAttachments = existing.attachments ?? [];
-    const resourceAttachments = nodeTextBlockAttachmentsByInformationID.get(blockID) ?? [];
-    const pendingBytes = pendingTextBlockAttachmentBytesRef.current.get(reservationKey) ?? 0;
-    const selection = selectAttachmentUploadCandidates({
-      candidates: incoming,
-      existingBytes: totalTextBlockAttachmentBytes(existingAttachments, resourceAttachments),
-      pendingBytes,
-      maxFileBytes: CHAT_ATTACHMENT_MAX_BYTES,
-      maxTotalBytes: CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES,
+    const uploadStillBelongsToCurrentNode = () => nodeAttachmentUploadScopeMatches(uploadScope, attachmentUploadScopeRef.current);
+    const scheduled = incoming.map((file) => {
+      const id = generateStableInformationID();
+      nodeAttachmentUploadFilesRef.current.set(id, { file, blockID });
+      return { id, file };
     });
-    const accepted = selection.accepted;
-    const selectionErrors: string[] = [];
-    if (selection.rejected.some(({ reason }) => reason === "file_too_large")) selectionErrors.push(`Attachments are limited to ${formatFileSize(CHAT_ATTACHMENT_MAX_BYTES)} each.`);
-    if (selection.rejected.some(({ reason }) => reason === "total_too_large")) selectionErrors.push(`Text box attachments are limited to ${formatFileSize(CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES)} total.`);
-    if (selectionErrors.length > 0) onError(selectionErrors.join(" "));
-    if (accepted.length === 0) return;
-    const reservedBytes = selection.acceptedBytes;
-    pendingTextBlockAttachmentBytesRef.current.set(reservationKey, pendingBytes + reservedBytes);
-    try {
-      const uploadResults = await Promise.allSettled(accepted.map((file) => uploadEditorAttachment(file, {
-        requestJSON,
-        companyID,
-        resourceType: "node",
-        resourceID: nodeID,
-        sourceKind: "user_upload",
-        relationshipKind: "file_attachment",
-        informationID: blockID,
-        editorSurface: "node_text_block",
-      })));
-      const uploadedAttachments = uploadResults.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-      if (uploadStillBelongsToCurrentNode()) appendTextBlockAttachments(blockID, uploadedAttachments);
-      const failures = uploadResults.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-      if (failures.length > 0 && uploadStillBelongsToCurrentNode()) {
-        const firstFailureMessage = failures[0]?.reason instanceof Error ? failures[0].reason.message : "failed_to_upload_attachment";
-        const summary = uploadedAttachments.length > 0
-          ? `${uploadedAttachments.length} ${uploadedAttachments.length === 1 ? "attachment" : "attachments"} uploaded; ${failures.length} failed.`
-          : `${failures.length} ${failures.length === 1 ? "attachment" : "attachments"} failed to upload.`;
-        onError(firstFailureMessage === "failed_to_upload_attachment" ? summary : `${summary} ${firstFailureMessage}`);
-      }
-    } finally {
-      const remainingPendingBytes = Math.max(0, (pendingTextBlockAttachmentBytesRef.current.get(reservationKey) ?? reservedBytes) - reservedBytes);
-      if (remainingPendingBytes > 0) pendingTextBlockAttachmentBytesRef.current.set(reservationKey, remainingPendingBytes);
-      else pendingTextBlockAttachmentBytesRef.current.delete(reservationKey);
-      if (uploadStillBelongsToCurrentNode()) refreshNodeAttachments();
+    const initialUploads: AttachmentUploadDropdownItem[] = scheduled.map(({ id, file }) => ({
+      id,
+      filename: file.name || "attachment",
+      size: file.size,
+      progress: {
+        state: "preparing",
+        bytesUploaded: 0,
+        bytesPrepared: 0,
+        totalBytes: file.size,
+        fraction: 0,
+      },
+    }));
+    setNodeAttachmentUploads((current) => [...current, ...initialUploads]);
+    const uploadResults = await Promise.allSettled(scheduled.map(({ id }) => uploadNodeAttachmentItem(id, uploadScope)));
+    const uploadedAttachments = uploadResults.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    const failures = uploadResults.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length > 0 && uploadStillBelongsToCurrentNode()) {
+      const firstFailureMessage = failures[0]?.reason instanceof Error ? failures[0].reason.message : "failed_to_upload_attachment";
+      const summary = uploadedAttachments.length > 0
+        ? `${uploadedAttachments.length} ${uploadedAttachments.length === 1 ? "attachment" : "attachments"} uploaded; ${failures.length} failed.`
+        : `${failures.length} ${failures.length === 1 ? "attachment" : "attachments"} failed to upload.`;
+      onError(firstFailureMessage === "failed_to_upload_attachment" ? summary : `${summary} ${firstFailureMessage}`);
     }
-  }, [appendTextBlockAttachments, canEdit, companyID, nodeID, nodeTextBlockAttachmentsByInformationID, onError, refreshNodeAttachments, requestJSON]);
+  }, [canEdit, companyID, nodeID, onError, uploadNodeAttachmentItem]);
+
+  const cancelNodeAttachmentUpload = useCallback((uploadID: string) => {
+    nodeAttachmentUploadFilesRef.current.get(uploadID)?.controller?.abort();
+  }, []);
+
+  const retryNodeAttachmentUpload = useCallback((uploadID: string) => {
+    const upload = nodeAttachmentUploadFilesRef.current.get(uploadID);
+    if (!upload || upload.controller || !attachmentUploadScopeRef.current.canEdit) return;
+    const uploadScope = attachmentUploadScopeRef.current;
+    setNodeAttachmentUploads((current) => current.map((item) => item.id === uploadID ? {
+      ...item,
+      progress: {
+        state: "preparing",
+        bytesUploaded: 0,
+        bytesPrepared: 0,
+        totalBytes: upload.file.size,
+        fraction: 0,
+      },
+    } : item));
+    void uploadNodeAttachmentItem(uploadID, uploadScope).catch((cause) => {
+      if (cause instanceof Error && cause.name === "AbortError") return;
+      onError(cause instanceof Error ? cause.message : "failed_to_upload_attachment");
+    });
+  }, [onError, uploadNodeAttachmentItem]);
 
   const deleteTextBlock = useCallback(async (blockID: string) => {
     if (!canEdit) return;
@@ -1485,41 +1537,29 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!canEdit) return;
     const candidates = Array.from(files);
     if (candidates.length === 0) return;
-    const existingBytes = (chatDraftAttachments[blockID] ?? []).reduce((total, attachment) => total + attachment.size, 0);
-    let nextBytes = existingBytes;
-    const accepted: File[] = [];
-    for (const file of candidates) {
-      if (file.size > CHAT_ATTACHMENT_MAX_BYTES) {
-        onError(`${file.name} is larger than ${formatFileSize(CHAT_ATTACHMENT_MAX_BYTES)}.`);
-        continue;
-      }
-      if (nextBytes + file.size > CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES) {
-        onError(`Chat attachments are limited to ${formatFileSize(CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES)} per message.`);
-        break;
-      }
-      accepted.push(file);
-      nextBytes += file.size;
-    }
-    if (accepted.length === 0) return;
-    try {
-      const attachments = await Promise.all(accepted.map((file) => uploadEditorAttachment(file, {
-        requestJSON,
-        companyID,
-        resourceType: "node",
-        resourceID: nodeID,
-        sourceKind: "chat_upload",
-        relationshipKind: "chat_attachment",
-        informationID: blockID,
-        editorSurface: "node_text_block_chat",
-      })));
+    const results = await Promise.allSettled(candidates.map((file) => uploadEditorAttachment(file, {
+      requestJSON,
+      companyID,
+      resourceType: "node",
+      resourceID: nodeID,
+      sourceKind: "chat_upload",
+      relationshipKind: "chat_attachment",
+      informationID: blockID,
+      editorSurface: "node_text_block_chat",
+    })));
+    const attachments = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    if (attachments.length > 0) {
       setChatDraftAttachments((current) => ({
         ...current,
         [blockID]: [...(current[blockID] ?? []), ...attachments],
       }));
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "failed_to_upload_attachment");
     }
-  }, [canEdit, chatDraftAttachments, companyID, nodeID, onError, requestJSON]);
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length > 0) {
+      const first = failures[0]?.reason;
+      onError(first instanceof Error ? first.message : `${failures.length} attachment upload${failures.length === 1 ? "" : "s"} failed.`);
+    }
+  }, [canEdit, companyID, nodeID, onError, requestJSON]);
 
   const removeChatDraftAttachment = useCallback((blockID: string, attachmentID: string) => {
     if (!canEdit) return;
@@ -2373,6 +2413,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           />
           <AttachmentCountDropdown
             items={nodeAttachmentDropdownItems}
+            uploads={nodeAttachmentUploadDropdownItems}
             apiBase={apiBase}
             companyID={companyID}
             accent={accent}
@@ -2381,6 +2422,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             loading={nodeAttachmentsLoading}
             loadError={nodeAttachmentsLoadError}
             onRetry={refreshNodeAttachments}
+            onCancelUpload={cancelNodeAttachmentUpload}
+            onRetryUpload={retryNodeAttachmentUpload}
             onError={onError}
           />
           {canEdit && (

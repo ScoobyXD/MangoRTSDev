@@ -48,15 +48,12 @@ import {
   TimelineCell,
 } from "../editor/NodeWorkspaceSurfaceParts.js";
 import {
-  CHAT_ATTACHMENT_MAX_BYTES,
-  CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES,
   EDITOR_NEU_ACTIVE_SURFACE,
   EDITOR_NEU_EDGE_FRAME,
   EDITOR_NEU_PANEL_BACKGROUND,
   EDITOR_NEU_SHADOW,
   EDITOR_NEU_SOFT_BORDER,
   EDITOR_NEU_SURFACE,
-  formatFileSize,
   MailIcon,
   messageAttachmentPayload,
   PaperclipIcon,
@@ -492,28 +489,30 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const addTextBlockAttachments = useCallback(async (block: ProjectTextBlockDraft, files: FileList | File[]) => {
     const incomingFiles = Array.from(files);
     if (incomingFiles.length === 0) return;
-    const acceptedFiles = incomingFiles.filter((file) => {
-      if (file.size <= CHAT_ATTACHMENT_MAX_BYTES) return true;
-      setError(`${file.name} is larger than ${formatFileSize(CHAT_ATTACHMENT_MAX_BYTES)}.`);
-      return false;
-    });
-    if (acceptedFiles.length === 0) return;
-    try {
-      const attachments = await Promise.all(acceptedFiles.map((file) => uploadEditorAttachment(file, {
-        requestJSON: attachmentRequestJSON,
-        companyID,
-        resourceType: "project",
-        resourceID: projectID,
-        sourceKind: "user_upload",
-        relationshipKind: "file_attachment",
-        informationID: block.id,
-        editorSurface: "project_text_block",
-      })));
+    const results = await Promise.allSettled(incomingFiles.map((file) => uploadEditorAttachment(file, {
+      requestJSON: attachmentRequestJSON,
+      companyID,
+      resourceType: "project",
+      resourceID: projectID,
+      sourceKind: "user_upload",
+      relationshipKind: "file_attachment",
+      informationID: block.id,
+      editorSurface: "project_text_block",
+    })));
+    const attachments = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    if (attachments.length > 0) {
       const nextAttachments = [...block.attachments, ...attachments];
       setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, attachments: nextAttachments } : item));
-      await saveTextBlock(block, { attachments: nextAttachments });
-    } catch (attachmentError) {
-      setError(attachmentError instanceof Error ? attachmentError.message : "Failed to add attachment");
+      try {
+        await saveTextBlock(block, { attachments: nextAttachments });
+      } catch (attachmentError) {
+        setError(attachmentError instanceof Error ? attachmentError.message : "Failed to save attachment references");
+      }
+    }
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length > 0) {
+      const first = failures[0]?.reason;
+      setError(first instanceof Error ? first.message : "Failed to add attachment");
     }
   }, [attachmentRequestJSON, companyID, projectID, saveTextBlock]);
 
@@ -586,37 +585,26 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const attachChatDraftFiles = useCallback(async (blockID: string, files: FileList | File[]) => {
     const incomingFiles = Array.from(files);
     if (incomingFiles.length === 0) return;
-    let nextTotalSize = (chatDraftAttachments[blockID] ?? []).reduce((total, attachment) => total + attachment.size, 0);
-    const acceptedFiles: File[] = [];
-    for (const file of incomingFiles) {
-      if (file.size > CHAT_ATTACHMENT_MAX_BYTES) {
-        setError(`${file.name} is larger than ${formatFileSize(CHAT_ATTACHMENT_MAX_BYTES)}.`);
-        continue;
-      }
-      if (nextTotalSize + file.size > CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES) {
-        setError(`Chat attachments are limited to ${formatFileSize(CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES)} per message.`);
-        break;
-      }
-      acceptedFiles.push(file);
-      nextTotalSize += file.size;
-    }
-    if (acceptedFiles.length === 0) return;
-    try {
-      const attachments = await Promise.all(acceptedFiles.map((file) => uploadEditorAttachment(file, {
-        requestJSON: attachmentRequestJSON,
-        companyID,
-        resourceType: "project",
-        resourceID: projectID,
-        sourceKind: "chat_upload",
-        relationshipKind: "chat_attachment",
-        informationID: blockID,
-        editorSurface: "project_text_block_chat",
-      })));
+    const results = await Promise.allSettled(incomingFiles.map((file) => uploadEditorAttachment(file, {
+      requestJSON: attachmentRequestJSON,
+      companyID,
+      resourceType: "project",
+      resourceID: projectID,
+      sourceKind: "chat_upload",
+      relationshipKind: "chat_attachment",
+      informationID: blockID,
+      editorSurface: "project_text_block_chat",
+    })));
+    const attachments = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    if (attachments.length > 0) {
       setChatDraftAttachments((current) => ({ ...current, [blockID]: [...(current[blockID] ?? []), ...attachments] }));
-    } catch (attachmentError) {
-      setError(attachmentError instanceof Error ? attachmentError.message : "Failed to add chat attachment");
     }
-  }, [attachmentRequestJSON, chatDraftAttachments, companyID, projectID]);
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length > 0) {
+      const first = failures[0]?.reason;
+      setError(first instanceof Error ? first.message : "Failed to add chat attachment");
+    }
+  }, [attachmentRequestJSON, companyID, projectID]);
 
   const addImageChatComment = useCallback(async (image: TextBlockImageDraft) => {
     const file = fileFromDataURL(image.dataURL, "selected-image.png");

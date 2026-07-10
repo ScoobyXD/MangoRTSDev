@@ -31,7 +31,8 @@ RW20 - WebSocket reconnect recovery must be scoped: reconnecting must not refetc
 RW21 - A `404` for a node, Logic Gate, or other resource is terminal for that resource until explicit user navigation or an authoritative event says the resource exists; the client must stop refetching that exact missing resource and unsubscribe from its realtime scope.
 RW22 - Failure handling for `401`, `404`, and WebSocket disconnects must reduce frontend/backend work rather than creating retry, reconnect, or fallback-refetch storms.
 RW23 - Realtime WebSocket tickets must be short-lived, HTTP-only, and valid across backend worker instances in the same environment so a ticket issued by one ECS task can be accepted by another task during WebSocket upgrade.
-RW24 - Attachment upload, metadata, linking, and content reads are HTTP API operations; WebSocket messages may notify that attachment metadata changed, but WebSocket payloads must not carry file bytes, base64 blobs, or S3 object contents.
+RW24 - Attachment upload control, metadata, linking, and content reads are HTTP operations; WebSocket messages may notify that attachment metadata changed, but WebSocket payloads must not carry file bytes, base64 blobs, presigned URLs, or S3 object contents.
+RW25 - Normal browser upload uses Mango HTTP JSON endpoints for policy, intent creation/state, multipart signing, completion, and abort, then raw HTTPS PUT directly to private S3 through the presigned URL. Mango API requests and WebSocket payloads never carry the browser file body. Intent creation carries active company context only in the membership-validated `X-Mango-Company-ID` Mango header, never in intent JSON or an S3 request; the S3 request also never carries Mango Authorization/cookies.
 
 ## Scenarios
 
@@ -233,13 +234,16 @@ Business logic covered:
 - RW10
 - RW11
 - RW24
+- RW25
 
 Given:
 - A user uploads, links, unlinks, or reads an attachment.
 - Other clients may be subscribed to the affected resource.
 
 Expected:
-- Uploads, metadata reads, link/unlink writes, and content reads use permissioned HTTP routes.
+- Browser upload policy/intent/part/complete/abort, metadata reads, link/unlink writes, and authenticated content reads use permissioned Mango HTTP routes.
+- Browser raw File/Blob bytes use the short-lived presigned S3 HTTPS PUT and bypass Mango API; backend-originated producers retain the server streaming storage path.
 - Realtime events may invalidate or update scoped attachment metadata.
-- Realtime payloads do not include raw file bytes, base64 strings, or S3 object content.
+- Realtime payloads do not include raw file bytes, base64 strings, presigned URLs, or S3 object content.
+- S3 PUT requests include only exact signed headers and no Mango access token, cookies, company headers, or API-client interceptors.
 - Clients fetch attachment content through the attachment HTTP content route only when they need to render or download it.

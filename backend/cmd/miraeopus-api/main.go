@@ -348,7 +348,7 @@ func withCORS(next http.Handler) http.Handler {
 		// Keep CORS allow-list aligned with hot-path API verbs used by frontend modules.
 		// Node title updates use PUT, and destructive confirmations use a custom header.
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,Cache-Control,If-None-Match,Last-Event-ID,X-Mango-Confirmation-Display-Name")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,Cache-Control,If-None-Match,Last-Event-ID,X-Mango-Confirmation-Display-Name,X-Mango-Company-ID")
 		w.Header().Set("Access-Control-Expose-Headers", "ETag")
 		w.Header().Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {

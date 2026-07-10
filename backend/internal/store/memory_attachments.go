@@ -190,7 +190,11 @@ func normalizeAttachmentCreateInput(input AttachmentCreateInput) (domain.Attachm
 		OriginalFilename: strings.TrimSpace(input.OriginalFilename),
 		MimeType:         strings.TrimSpace(input.MimeType),
 		ByteSize:         input.ByteSize,
-		SHA256:           strings.TrimSpace(input.SHA256),
+		SHA256:           strings.ToLower(strings.TrimSpace(input.SHA256)),
+		SHA256VerificationMethod: strings.TrimSpace(input.SHA256VerificationMethod),
+		StorageChecksumAlgorithm: strings.TrimSpace(input.StorageChecksumAlgorithm),
+		StorageChecksumValue: strings.TrimSpace(input.StorageChecksumValue),
+		StorageChecksumType: strings.TrimSpace(input.StorageChecksumType),
 		StorageBucket:    strings.TrimSpace(input.StorageBucket),
 		StorageKey:       strings.TrimSpace(input.StorageKey),
 		OriginalWidth:    cloneAttachmentIntPointer(input.OriginalWidth),
@@ -199,8 +203,12 @@ func normalizeAttachmentCreateInput(input AttachmentCreateInput) (domain.Attachm
 		SourceProvider:   strings.TrimSpace(input.SourceProvider),
 		CreatedTimestamp: now,
 	}
+	if attachment.SHA256VerificationMethod == "" {
+		attachment.SHA256VerificationMethod = "server_stream"
+	}
 	if attachment.CompanyID == "" || attachment.OriginalFilename == "" || attachment.MimeType == "" ||
-		attachment.ByteSize < 0 || attachment.SHA256 == "" || attachment.StorageBucket == "" || attachment.StorageKey == "" {
+		attachment.ByteSize < 0 || !validRawSHA256(attachment.SHA256) || attachment.StorageBucket == "" || attachment.StorageKey == "" ||
+		!validAttachmentSHA256VerificationMethod(attachment.SHA256VerificationMethod) {
 		return domain.Attachment{}, domain.ResourceAttachment{}, ErrInvalid
 	}
 	linkInput := input.ResourceLink
@@ -214,6 +222,15 @@ func normalizeAttachmentCreateInput(input AttachmentCreateInput) (domain.Attachm
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
 	return attachment, link, nil
+}
+
+func validAttachmentSHA256VerificationMethod(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "s3_full", "server_stream", "client_reported":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeResourceAttachmentInput(input ResourceAttachmentInput) (domain.ResourceAttachment, error) {

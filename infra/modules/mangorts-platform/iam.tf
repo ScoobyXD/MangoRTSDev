@@ -77,11 +77,14 @@ resource "aws_iam_role_policy_attachment" "ecs_task_cognito" {
 }
 
 data "aws_iam_policy_document" "ecs_task_attachments" {
-  count = trimspace(var.attachment_s3_bucket) == "" ? 0 : 1
+  count = local.attachment_storage_enabled ? 1 : 0
 
   statement {
     actions = [
+      "s3:AbortMultipartUpload",
+      "s3:DeleteObject",
       "s3:GetObject",
+      "s3:ListMultipartUploadParts",
       "s3:PutObject"
     ]
     resources = ["arn:aws:s3:::${trimspace(var.attachment_s3_bucket)}/companies/*"]
@@ -89,13 +92,13 @@ data "aws_iam_policy_document" "ecs_task_attachments" {
 }
 
 resource "aws_iam_policy" "ecs_task_attachments" {
-  count  = trimspace(var.attachment_s3_bucket) == "" ? 0 : 1
+  count  = local.attachment_storage_enabled ? 1 : 0
   name   = "${local.name_prefix}-ecs-task-attachments"
   policy = data.aws_iam_policy_document.ecs_task_attachments[0].json
 }
 
 resource "aws_iam_role_policy_attachment" "ecs_task_attachments" {
-  count      = trimspace(var.attachment_s3_bucket) == "" ? 0 : 1
+  count      = local.attachment_storage_enabled ? 1 : 0
   role       = aws_iam_role.ecs_task.name
   policy_arn = aws_iam_policy.ecs_task_attachments[0].arn
 }

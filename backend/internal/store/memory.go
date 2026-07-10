@@ -74,6 +74,9 @@ type MemoryRepo struct {
 	attachments                    map[string]domain.Attachment
 	attachmentVariants             map[string]domain.AttachmentVariant
 	resourceAttachments            map[string]domain.ResourceAttachment
+	attachmentUploadIntents         map[string]domain.AttachmentUploadIntent
+	attachmentUploadRequestIDs      map[string]string
+	attachmentUploadParts           map[string]map[int]domain.AttachmentUploadPart
 	communicationsArchiveJobs      map[string]CommunicationsArchiveJob
 	communicationsArchiveJobItems  map[string]CommunicationsArchiveJobItem
 	emailNodeLinks                 map[string]communicationsEmailNodeLink
@@ -157,6 +160,9 @@ func NewMemoryRepo() *MemoryRepo {
 		attachments:                    map[string]domain.Attachment{},
 		attachmentVariants:             map[string]domain.AttachmentVariant{},
 		resourceAttachments:            map[string]domain.ResourceAttachment{},
+		attachmentUploadIntents:         map[string]domain.AttachmentUploadIntent{},
+		attachmentUploadRequestIDs:      map[string]string{},
+		attachmentUploadParts:           map[string]map[int]domain.AttachmentUploadPart{},
 		communicationsArchiveJobs:      map[string]CommunicationsArchiveJob{},
 		communicationsArchiveJobItems:  map[string]CommunicationsArchiveJobItem{},
 		emailNodeLinks:                 map[string]communicationsEmailNodeLink{},

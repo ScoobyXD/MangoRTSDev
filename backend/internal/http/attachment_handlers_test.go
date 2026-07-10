@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,8 +41,10 @@ func (s *fakeAttachmentObjectStorage) PutObject(ctx context.Context, input Attac
 	if input.Body == nil {
 		return fmt.Errorf("missing attachment body")
 	}
-	if _, err := input.Body.Seek(0, io.SeekStart); err != nil {
-		return err
+	if seeker, ok := any(input.Body).(io.Seeker); ok {
+		if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
 	}
 	body, err := io.ReadAll(input.Body)
 	if err != nil {
@@ -72,119 +73,24 @@ func (s *fakeAttachmentObjectStorage) GetObject(ctx context.Context, input Attac
 	}, nil
 }
 
-func TestAttachmentUploadCreatesMetadataS3KeyAndResourceLinks(t *testing.T) {
-	repo, server, storage, companyID, allowed, _, nodeA := newAttachmentRouteTestFixture(t)
-	nodeB, err := repo.CreateNode(companyID, "Attachment linked node")
-	if err != nil {
-		t.Fatalf("CreateNode B: %v", err)
-	}
-	grantAttachmentTestAccess(t, repo, companyID, nodeB.NodeID, allowed.UserID)
-
-	handler := server.Routes()
-	body, contentType := attachmentMultipartBody(t, map[string]string{
-		"company_id":        companyID,
-		"resource_type":     "node",
-		"resource_id":       nodeA.NodeID,
-		"relationship_kind": "file_attachment",
-		"source_kind":       "user_upload",
-	}, "hello.txt", "text/plain", []byte("hello attachment"))
-	req := httptest.NewRequest(http.MethodPost, "/v1/attachments", body)
-	req.Header.Set("Content-Type", contentType)
+func TestLegacyAttachmentUploadRouteRejectsBrowserBytes(t *testing.T) {
+	_, server, storage, companyID, allowed, _, _ := newAttachmentRouteTestFixture(t)
+	req := httptest.NewRequest(http.MethodPost, "/v1/attachments", strings.NewReader("browser-file-bytes"))
 	req = attachmentRequestWithActor(req, allowed, companyID, domain.RoleCompanyUser)
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("POST /v1/attachments status = %d body=%s", rec.Code, rec.Body.String())
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("legacy upload status = %d body=%s", rec.Code, rec.Body.String())
 	}
-
-	var created attachmentUploadResponse
-	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
-		t.Fatalf("decode attachment response: %v", err)
-	}
-	if created.Attachment.AttachmentID == "" {
-		t.Fatalf("attachment id was empty")
-	}
-	wantKey := attachmentOriginalObjectKey(companyID, created.Attachment.AttachmentID)
-	if created.Attachment.StorageBucket != storage.bucket || created.Attachment.StorageKey != wantKey {
-		t.Fatalf("storage metadata = bucket %q key %q, want %q %q", created.Attachment.StorageBucket, created.Attachment.StorageKey, storage.bucket, wantKey)
-	}
-	if created.Attachment.ByteSize != int64(len("hello attachment")) || created.Attachment.SHA256 == "" {
-		t.Fatalf("attachment metadata missing byte size/hash: %+v", created.Attachment)
-	}
-	stored, ok := storage.objects[wantKey]
-	if !ok {
-		t.Fatalf("fake storage missing key %s", wantKey)
-	}
-	if string(stored.body) != "hello attachment" {
-		t.Fatalf("stored body = %q", string(stored.body))
-	}
-	if strings.Contains(rec.Body.String(), "data:") {
-		t.Fatalf("attachment response included inline data URL: %s", rec.Body.String())
-	}
-
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/resources/node/"+nodeA.NodeID+"/attachments?company_id="+companyID, nil)
-	listReq = attachmentRequestWithActor(listReq, allowed, companyID, domain.RoleCompanyUser)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("GET resource attachments status = %d body=%s", listRec.Code, listRec.Body.String())
-	}
-	var listed struct {
-		Attachments []domain.ResourceAttachment `json:"attachments"`
-	}
-	if err := json.NewDecoder(listRec.Body).Decode(&listed); err != nil {
-		t.Fatalf("decode list: %v", err)
-	}
-	if len(listed.Attachments) != 1 || listed.Attachments[0].Attachment == nil || listed.Attachments[0].Attachment.AttachmentID != created.Attachment.AttachmentID {
-		t.Fatalf("listed attachments = %+v", listed.Attachments)
-	}
-
-	linkBody, _ := json.Marshal(map[string]string{
-		"company_id":        companyID,
-		"attachment_id":     created.Attachment.AttachmentID,
-		"relationship_kind": "file_attachment",
-	})
-	linkReq := httptest.NewRequest(http.MethodPost, "/v1/resources/node/"+nodeB.NodeID+"/attachments", bytes.NewReader(linkBody))
-	linkReq.Header.Set("Content-Type", "application/json")
-	linkReq = attachmentRequestWithActor(linkReq, allowed, companyID, domain.RoleCompanyUser)
-	linkRec := httptest.NewRecorder()
-	handler.ServeHTTP(linkRec, linkReq)
-	if linkRec.Code != http.StatusCreated {
-		t.Fatalf("POST resource attachment link status = %d body=%s", linkRec.Code, linkRec.Body.String())
-	}
-}
-
-func TestInspectAttachmentUploadHashesSizesSniffsAndRewinds(t *testing.T) {
-	content := bytes.Repeat([]byte("streamed attachment\n"), 100_000)
-	reader := bytes.NewReader(content)
-
-	inspection, err := inspectAttachmentUpload(reader)
-	if err != nil {
-		t.Fatalf("inspectAttachmentUpload: %v", err)
-	}
-	wantHash := sha256.Sum256(content)
-	if inspection.ByteSize != int64(len(content)) {
-		t.Fatalf("byte size = %d, want %d", inspection.ByteSize, len(content))
-	}
-	if inspection.SHA256 != fmt.Sprintf("%x", wantHash[:]) {
-		t.Fatalf("sha256 = %q, want %x", inspection.SHA256, wantHash)
-	}
-	if !strings.HasPrefix(inspection.DetectedContentType, "text/plain") {
-		t.Fatalf("detected content type = %q", inspection.DetectedContentType)
-	}
-	replayed, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatalf("read rewound upload: %v", err)
-	}
-	if !bytes.Equal(replayed, content) {
-		t.Fatalf("rewound upload did not reproduce original bytes")
+	if len(storage.objects) != 0 {
+		t.Fatalf("legacy upload wrote storage objects: %+v", storage.objects)
 	}
 }
 
 func TestAttachmentContentRequiresLinkedResourceAccess(t *testing.T) {
-	_, server, _, companyID, allowed, denied, node := newAttachmentRouteTestFixture(t)
+	repo, server, storage, companyID, allowed, denied, node := newAttachmentRouteTestFixture(t)
 	handler := server.Routes()
-	attachmentID := uploadAttachmentForTest(t, handler, companyID, node.NodeID, allowed)
+	attachmentID := seedAttachmentForTest(t, repo, storage, companyID, node.NodeID, allowed)
 
 	allowedReq := httptest.NewRequest(http.MethodGet, "/v1/attachments/"+attachmentID+"/content?company_id="+companyID+"&variant=thumbnail", nil)
 	allowedReq = attachmentRequestWithActor(allowedReq, allowed, companyID, domain.RoleCompanyUser)
@@ -207,9 +113,9 @@ func TestAttachmentContentRequiresLinkedResourceAccess(t *testing.T) {
 }
 
 func TestAttachmentUnlinkSoftDeletesResourceAccess(t *testing.T) {
-	_, server, _, companyID, allowed, _, node := newAttachmentRouteTestFixture(t)
+	repo, server, storage, companyID, allowed, _, node := newAttachmentRouteTestFixture(t)
 	handler := server.Routes()
-	attachmentID := uploadAttachmentForTest(t, handler, companyID, node.NodeID, allowed)
+	attachmentID := seedAttachmentForTest(t, repo, storage, companyID, node.NodeID, allowed)
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/resources/node/"+node.NodeID+"/attachments/"+attachmentID+"?company_id="+companyID, nil)
 	deleteReq = attachmentRequestWithActor(deleteReq, allowed, companyID, domain.RoleCompanyUser)
@@ -245,26 +151,6 @@ func TestAttachmentUnlinkSoftDeletesResourceAccess(t *testing.T) {
 	}
 }
 
-func TestAttachmentUploadRejectsMissingResourceContext(t *testing.T) {
-	_, server, storage, companyID, allowed, _, _ := newAttachmentRouteTestFixture(t)
-	handler := server.Routes()
-	body, contentType := attachmentMultipartBody(t, map[string]string{
-		"company_id":    companyID,
-		"resource_type": "node",
-	}, "bad.txt", "text/plain", []byte("bad"))
-	req := httptest.NewRequest(http.MethodPost, "/v1/attachments", body)
-	req.Header.Set("Content-Type", contentType)
-	req = attachmentRequestWithActor(req, allowed, companyID, domain.RoleCompanyUser)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("missing resource context status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if len(storage.objects) != 0 {
-		t.Fatalf("storage objects were written despite validation failure: %+v", storage.objects)
-	}
-}
-
 func TestAttachmentSystemDoesNotAddWebSocketFileBytePayloadRoute(t *testing.T) {
 	_, server, _, companyID, allowed, _, _ := newAttachmentRouteTestFixture(t)
 	handler := server.Routes()
@@ -274,63 +160,6 @@ func TestAttachmentSystemDoesNotAddWebSocketFileBytePayloadRoute(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code == http.StatusCreated || rec.Code == http.StatusOK {
 		t.Fatalf("realtime websocket accepted file-byte POST, status=%d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestAttachmentUploadAuthorizesEmailResourceTypes(t *testing.T) {
-	repo, server, _, companyID, allowed, denied, node := newAttachmentRouteTestFixture(t)
-	handler := server.Routes()
-
-	personalResourceID := "personal:" + allowed.UserID + ":draft-personal"
-	if rec := uploadAttachmentResourceForTest(t, handler, companyID, "email_draft", personalResourceID, allowed); rec.Code != http.StatusCreated {
-		t.Fatalf("personal email draft upload status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if rec := uploadAttachmentResourceForTest(t, handler, companyID, "email_draft", personalResourceID, denied); rec.Code != http.StatusNotFound {
-		t.Fatalf("denied personal email draft upload status = %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	if _, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
-		CompanyID:         companyID,
-		Provider:          "google",
-		AccountEmail:      "support@example.com",
-		GrantID:           "support-grant",
-		Status:            "connected",
-		ConnectedByUserID: allowed.UserID,
-	}); err != nil {
-		t.Fatalf("UpsertCompanyEmailConnection: %v", err)
-	}
-	folder, err := repo.CreateCommunicationsSharedInboxFolder(companyID, "", "Support", "support@example.com")
-	if err != nil {
-		t.Fatalf("CreateCommunicationsSharedInboxFolder: %v", err)
-	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        companyID,
-		EntityType:       store.EntityTypeSharedInbox,
-		EntityID:         folder.FolderID,
-		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-		DefaultAccessSet: true,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   allowed.UserID,
-			AccessLevel: store.EntityPermissionEdit,
-		}},
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions shared inbox: %v", err)
-	}
-	sharedResourceID := "shared:" + folder.FolderID + ":draft-shared"
-	if rec := uploadAttachmentResourceForTest(t, handler, companyID, "email_draft", sharedResourceID, allowed); rec.Code != http.StatusCreated {
-		t.Fatalf("shared email draft upload status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if rec := uploadAttachmentResourceForTest(t, handler, companyID, "email_draft", sharedResourceID, denied); rec.Code != http.StatusNotFound {
-		t.Fatalf("denied shared email draft upload status = %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	attachedEmailResourceID := "node:" + node.NodeID + ":message:message-1"
-	if rec := uploadAttachmentResourceForTest(t, handler, companyID, "attached_email", attachedEmailResourceID, allowed); rec.Code != http.StatusCreated {
-		t.Fatalf("attached email upload status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if rec := uploadAttachmentResourceForTest(t, handler, companyID, "attached_email", attachedEmailResourceID, denied); rec.Code != http.StatusNotFound {
-		t.Fatalf("denied attached email upload status = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -381,67 +210,43 @@ func grantAttachmentTestAccess(t *testing.T, repo *store.MemoryRepo, companyID, 
 	}
 }
 
-func uploadAttachmentForTest(t *testing.T, handler http.Handler, companyID, nodeID string, actor domain.User) string {
+func seedAttachmentForTest(t *testing.T, repo *store.MemoryRepo, storage *fakeAttachmentObjectStorage, companyID, nodeID string, actor domain.User) string {
 	t.Helper()
-	body, contentType := attachmentMultipartBody(t, map[string]string{
-		"company_id":        companyID,
-		"resource_type":     "node",
-		"resource_id":       nodeID,
-		"relationship_kind": "file_attachment",
-		"source_kind":       "user_upload",
-	}, "hello.txt", "text/plain", []byte("hello attachment"))
-	req := httptest.NewRequest(http.MethodPost, "/v1/attachments", body)
-	req.Header.Set("Content-Type", contentType)
-	req = attachmentRequestWithActor(req, actor, companyID, domain.RoleCompanyUser)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("upload attachment status = %d body=%s", rec.Code, rec.Body.String())
+	body := []byte("hello attachment")
+	sum := sha256.Sum256(body)
+	attachmentID := store.NewUUIDv7String()
+	storageKey := attachmentOriginalObjectKey(companyID, attachmentID)
+	storage.objects[storageKey] = fakeAttachmentObject{contentType: "text/plain", body: body}
+	if _, _, err := repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
+		CompanyID: companyID, AttachmentID: attachmentID, UploadedByUserID: actor.UserID,
+		OriginalFilename: "hello.txt", MimeType: "text/plain", ByteSize: int64(len(body)),
+		SHA256: fmt.Sprintf("%x", sum[:]), SHA256VerificationMethod: "server_stream",
+		StorageBucket: storage.bucket, StorageKey: storageKey, SourceKind: store.AttachmentSourceUserUpload,
+		ResourceLink: store.ResourceAttachmentInput{CompanyID: companyID, ResourceType: "node", ResourceID: nodeID,
+			RelationshipKind: store.AttachmentRelationshipFileAttachment, CreatedByUserID: actor.UserID},
+	}); err != nil {
+		t.Fatalf("seed attachment: %v", err)
 	}
-	var created attachmentUploadResponse
-	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
-		t.Fatalf("decode upload attachment: %v", err)
-	}
-	return created.Attachment.AttachmentID
+	return attachmentID
 }
 
-func uploadAttachmentResourceForTest(t *testing.T, handler http.Handler, companyID, resourceType, resourceID string, actor domain.User) *httptest.ResponseRecorder {
-	t.Helper()
-	body, contentType := attachmentMultipartBody(t, map[string]string{
-		"company_id":        companyID,
-		"resource_type":     resourceType,
-		"resource_id":       resourceID,
-		"relationship_kind": "email_attachment",
-		"source_kind":       "email_outgoing",
-	}, "hello.txt", "text/plain", []byte("hello attachment"))
-	req := httptest.NewRequest(http.MethodPost, "/v1/attachments", body)
-	req.Header.Set("Content-Type", contentType)
-	req = attachmentRequestWithActor(req, actor, companyID, domain.RoleCompanyUser)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	return rec
-}
-
-func attachmentMultipartBody(t *testing.T, fields map[string]string, filename, contentType string, content []byte) (*bytes.Buffer, string) {
-	t.Helper()
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	for key, value := range fields {
-		if err := writer.WriteField(key, value); err != nil {
-			t.Fatalf("WriteField %s: %v", key, err)
-		}
-	}
-	part, err := writer.CreateFormFile("file", filename)
+func TestAttachmentLinkRequiresSourceReadAccess(t *testing.T) {
+	repo, server, storage, companyID, allowed, denied, sourceNode := newAttachmentRouteTestFixture(t)
+	attachmentID := seedAttachmentForTest(t, repo, storage, companyID, sourceNode.NodeID, allowed)
+	targetNode, err := repo.CreateNode(companyID, "Destination")
 	if err != nil {
-		t.Fatalf("CreateFormFile: %v", err)
+		t.Fatalf("CreateNode target: %v", err)
 	}
-	if _, err := part.Write(content); err != nil {
-		t.Fatalf("write multipart file: %v", err)
+	grantAttachmentTestAccess(t, repo, companyID, targetNode.NodeID, denied.UserID)
+	body, _ := json.Marshal(map[string]string{"company_id": companyID, "attachment_id": attachmentID, "relationship_kind": "file_attachment"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/resources/node/"+targetNode.NodeID+"/attachments", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = attachmentRequestWithActor(req, denied, companyID, domain.RoleCompanyUser)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("source-inaccessible link status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
-	return &body, writer.FormDataContentType()
 }
 
 func attachmentRequestWithActor(req *http.Request, user domain.User, companyID, role string) *http.Request {

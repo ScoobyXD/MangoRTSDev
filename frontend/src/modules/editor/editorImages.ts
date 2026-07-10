@@ -455,9 +455,17 @@ export function createEditorImageBlob(src: string): Blob | null {
   return new Blob([bytes], { type: mimeType });
 }
 
-export async function createEditorImageDataFromFile(file: File, maxDisplayWidth: number, maxStoredBytes = MAX_STORED_IMAGE_BYTES): Promise<EditorImageData> {
-  const rawSource = await readFileAsDataURL(file);
-  return createEditorImageDataFromSource(rawSource, maxDisplayWidth, { maxStoredBytes });
+export async function createEditorImageDataFromFile(file: File, maxDisplayWidth: number, _maxStoredBytes = MAX_STORED_IMAGE_BYTES): Promise<EditorImageData> {
+  if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") throw new Error("failed_to_prepare_image");
+  const objectURL = URL.createObjectURL(file);
+  try {
+    const image = await loadImage(objectURL);
+    const dimensions = resolveEditorImageDisplaySize(image, maxDisplayWidth);
+    return { src: objectURL, width: dimensions.width, height: dimensions.height };
+  } catch (cause) {
+    URL.revokeObjectURL(objectURL);
+    throw cause;
+  }
 }
 
 export async function createEditorImageDataFromSource(
@@ -571,15 +579,6 @@ function resolveEditorImageDisplaySize(image: HTMLImageElement, maxDisplayWidth:
     width: clampEditorImageSize(width, MIN_EDITOR_IMAGE_WIDTH_PX, maxWidth),
     height: clampEditorImageSize(height, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX),
   };
-}
-
-function readFileAsDataURL(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => resolve(typeof reader.result === "string" ? reader.result : ""));
-    reader.addEventListener("error", () => reject(reader.error ?? new Error("failed_to_read_image")));
-    reader.readAsDataURL(file);
-  });
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {

@@ -73,7 +73,7 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - Preview content comes from Mango's authorized attachment-content path. The current endpoint may transfer the full authenticated blob before the client applies its text decode/render caps. Temporary object URLs and obsolete requests are cleaned up when the user closes the overlay or switches files; the 256 KiB decode and 200,000-character render caps prevent unbounded text preview work.
 - Deleting a text box also leaves attached-email projections intact. The global node-header email counter/list opens a node-level modal containing `AttachedEmailOrganizerPane`, including its folders/list and selected conversation, independent of any text box. Retained mail therefore remains viewable with zero boxes and under read-only access, while per-text-box email panes keep their existing behavior for surviving boxes.
 - No automatic replacement text box is created, and retained files or emails are not silently reassigned to a surviving box. Removal requires a separate explicit unlink/remove action.
-- Upload size policy is not changed by this work. The UI continues to enforce 10 MiB per file and 12 MiB total attachment bytes per text box while a future higher-limit policy is evaluated.
+- Browser uploads use Mango's direct-upload policy, which defaults to 250 MiB per file. Files through 64 MiB use one presigned S3 `PUT`; larger files use resumable 16 MiB multipart parts. The browser hashes bounded slices incrementally, sends no file bytes through the Mango API, and shows per-file progress, retry, and cancellation state.
 
 - Node text-box inline images, node attachment-button uploads, node text-block chat attachments, and attached-email reply attachments use the global Mango attachment system for new writes.
 - Durable node projection/information payloads store attachment references only. The known slow node with multi-megabyte pasted screenshots is the evidence case for removing inline data URLs/base64 from node content.
@@ -81,7 +81,7 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 - Node chats remain separate chat UI; they store attachment references without inheriting rich-editor toolbar/list/indent semantics.
 - Incoming provider attachments on attached emails remain provider-referenced until a product path explicitly selects them for Mango ownership/cache.
 - `NodeWorkspaceSurface` performs one node-scoped attachment metadata load, filters `file_attachment` relationships for the `node_text_block` editor surface, and derives both per-information-ID lists and the node-wide union from that result. Text-box dropdowns must not each issue their own list request.
-- Node attachment upload completion merges successful results into the latest text-block state, deduplicated by durable attachment ID. Overlapping picker batches reserve bytes per company/node/text block before validating the 12 MiB total, and partial multi-file failures preserve every successful S3-backed attachment instead of replacing a batch with stale captured state. Canonical resource metadata and projection-only references are deduplicated for the size calculation.
+- Node attachment upload completion merges successful results into the latest text-block state, deduplicated by durable attachment ID. The node is the durable attachment owner; a text-block information ID is only projection metadata. Partial multi-file failures preserve every successful S3-backed attachment instead of replacing a batch with stale captured state, and deleting a text block never deletes or hides its node attachments.
 - Upload callbacks carry the company/node/text-block generation and edit scope that started them. Navigation, attachment-scope changes, edit-permission loss, and text-block deletion invalidate pending callbacks, so late completion cannot mutate the newly opened node or recreate a deleted projection.
 - Attachment rows use shared presentation helpers to split the filename from its final extension and to classify common image, spreadsheet, document, presentation, PDF, archive, text/code, audio, and video formats. A recognized final extension takes priority over an unhelpful MIME value. The filename base may ellipsize, but its extension is rendered in a non-shrinking badge as uppercase `.EXT`; extensionless, hidden-dot, and trailing-dot names use `NO EXT` and retain their full base name. The download icon remains a separate far-right action.
 - Image rows use `IntersectionObserver` with a small vertical prefetch margin, so closed menus and off-screen aggregate rows do not fetch file bytes. A visible/near-visible row requests authenticated `thumbnail` content first, then `display` on failure; the backend may resolve a missing variant to the original.
@@ -137,8 +137,18 @@ Base values are read from:
   - bulk upserts changed node positions with `{ company_id, map_type: "node", positions: [{ entity_id, x, y }] }`.
 - `GET /v1/workspace/snapshot?company_id=...`
   - hot initial read includes `node_map_positions` alongside nodes and relationships.
-- `POST /v1/attachments`
-  - uploads multipart attachment bytes and creates the attachment metadata, original variant, and node resource link.
+- `GET /v1/attachments/upload-policy`
+  - returns the authenticated browser-upload policy and configured size, strategy, part-size, concurrency, and expiry limits.
+- `POST /v1/attachments/upload-intents`
+  - authenticates and authorizes the target resource, creates an idempotent durable upload intent, assigns the attachment ID and object key, and returns either a short-lived single-`PUT` request or multipart instructions. The active company is carried only as the membership-validated Mango control-plane header `X-Mango-Company-ID`; it is not part of the intent metadata or any S3 request.
+- `GET /v1/attachments/upload-intents/:intent_id`
+  - returns authoritative intent state and accepted multipart parts so an interrupted browser upload can resume without persisting presigned URLs.
+- `POST /v1/attachments/upload-intents/:intent_id/parts`
+  - validates and records a requested part and returns a refreshed short-lived presigned request for that exact part.
+- `POST /v1/attachments/upload-intents/:intent_id/complete`
+  - verifies S3 size/checksum state, atomically creates permanent attachment metadata and the node resource link, and idempotently returns the completed attachment.
+- `DELETE /v1/attachments/upload-intents/:intent_id`
+  - aborts an in-progress upload and schedules/removes any multipart or single-object residue.
 - `GET /v1/resources/node/:node_id/attachments?company_id=...`
   - lists authorized node resource links with attachment metadata; the node workspace filters active `file_attachment` links for its explicit-file controls.
 - `GET /v1/attachments/:attachment_id/content?company_id=...&variant=original`

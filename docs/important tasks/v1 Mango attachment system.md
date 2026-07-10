@@ -4,6 +4,8 @@ Investigation date: 2026-07-09
 
 Status: highest-priority planning and implementation brief
 
+Browser upload implementation: [V1 Browser-to-S3 Attachment Uploads](./v1browsertos3.md)
+
 Primary decision:
 
 This is no longer only "store pasted images better."
@@ -232,6 +234,18 @@ The Mango attachment system has two durable layers:
 
 The app and API sit in front of S3. Users should not need raw S3 access. The backend enforces Mango permissions before returning or signing access to an object.
 
+## Browser-To-S3 Upload Control Plane
+
+Normal browser-selected attachment bytes use the direct-upload flow in [V1 Browser-to-S3 Attachment Uploads](./v1browsertos3.md). Mango API remains the control plane: it authenticates the actor, validates the active-company `X-Mango-Company-ID` header against that actor's memberships, authorizes the durable parent resource, enforces the configured limit, creates the upload intent/attachment ID/object key, issues short-lived presigned instructions, completes or aborts multipart work, verifies S3 state, and transactionally writes attachment metadata plus the resource link. The company header is not part of intent JSON and is never forwarded to S3. The browser sends raw `File`/`Blob` bytes only to the private S3 bucket; it never sends those bytes, a data URL, or base64 to Mango API.
+
+The V1 browser policy defaults to 250 MiB per file (262,144,000 bytes). Files through and including 64 MiB use one presigned PUT; larger files use resumable multipart upload with 16 MiB parts. Browser hashing is incremental and bounded-memory. `attachments.sha256` continues to mean the raw file-content SHA-256, while S3 checksum algorithm/value/type and SHA verification provenance are recorded separately. Pending or failed upload intents are not permanent attachments and do not appear in normal resource counts or lists.
+
+This browser data plane does not replace backend-originated streaming. Incoming email, provider imports, migrations, and backend jobs continue to stream bytes through the server-side attachment storage boundary when the producer is the backend rather than a browser.
+
+For node uploads, the node resource link is the durable owner. A text-box `information_id` is origin/display context only. Deleting a text box does not delete the attachment row, node link, S3 object, or attached email; an in-flight upload may still complete against the node when the node exists and the actor retains edit permission.
+
+Infrastructure support for private-bucket CORS, task-role multipart/head/delete permissions, incomplete-multipart lifecycle cleanup, and backend configuration is source-controlled but is not evidence that any environment has been deployed. Before an approved Terraform apply, inventory and reconcile/import existing attachment-bucket CORS and lifecycle settings because each S3 configuration is singleton and Terraform will own the complete configuration.
+
 ## S3 Storage
 
 Use private S3 buckets.
@@ -419,7 +433,12 @@ V1 should use a shared attachment API.
 Possible endpoints:
 
 ```text
-POST /v1/attachments
+GET /v1/attachments/upload-policy
+POST /v1/attachments/upload-intents
+GET /v1/attachments/upload-intents/:upload_intent_id
+POST /v1/attachments/upload-intents/:upload_intent_id/parts
+POST /v1/attachments/upload-intents/:upload_intent_id/complete
+DELETE /v1/attachments/upload-intents/:upload_intent_id
 GET /v1/attachments/:attachment_id
 GET /v1/attachments/:attachment_id/content?variant=display
 GET /v1/attachments/:attachment_id/content?variant=original
@@ -436,6 +455,8 @@ Upload endpoint should support:
 - chat attachment
 - email compose attachment
 - node attachment button
+
+These are control-plane operations for browser uploads. Browser file bytes go to the intent-owned private S3 key through the returned presigned request. Backend-originated producers retain the server streaming storage service; they do not need to impersonate the browser flow.
 
 Download/content endpoint should:
 
@@ -479,13 +500,14 @@ When a user pastes an image into an editor:
 1. Browser intercepts paste.
 2. Browser sees an image file/blob.
 3. Browser inserts a temporary local preview.
-4. Frontend uploads the image to `POST /v1/attachments` with parent resource context.
-5. Backend checks edit permission on the parent resource.
-6. Backend stores bytes in S3.
-7. Backend inserts `attachments`, `attachment_variants`, and `resource_attachments`.
-8. Backend returns `attachment_id` plus display metadata.
-9. Frontend replaces temporary preview with an attachment reference.
-10. Editor projection save stores only the attachment reference.
+4. Frontend incrementally computes the raw file SHA-256 without loading the whole file into memory.
+5. Frontend creates an upload intent with JSON metadata and parent resource context; the backend checks edit permission and owns the IDs/key/limits.
+6. Browser PUTs raw file/blob bytes directly to the intent-owned private S3 key, using single PUT through 64 MiB or resumable 16 MiB multipart parts above it.
+7. Frontend asks Mango API to complete the intent; the backend verifies S3 size/checksum/encryption state and current permission.
+8. Backend transactionally inserts `attachments`, `attachment_variants` when applicable, and the durable parent `resource_attachments` link.
+9. Backend returns `attachment_id` plus display metadata.
+10. Frontend replaces temporary preview with an attachment reference.
+11. Editor projection save stores only the attachment reference.
 
 When upload fails:
 
@@ -512,11 +534,12 @@ Node attachment buttons should use the same global attachment system.
 
 Expected behavior:
 
-- Upload file to S3 through Mango API.
+- Create the authorized upload intent through Mango API and send browser file bytes directly to private S3.
 - Create `attachments` metadata.
-- Link file to the node with `resource_attachments`.
+- Link file durably to the node with `resource_attachments`; text-box identity remains origin context only.
 - Node view can list attachments by querying attachment metadata, not by embedding bytes.
 - Node editor text can reference an attachment inline when needed.
+- Deleting the originating text box does not delete or hide the completed node attachment or its S3 object.
 
 The app can show a node-level files panel or attachment list by listing `resource_attachments` for that node.
 

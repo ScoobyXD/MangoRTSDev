@@ -9,6 +9,11 @@ locals {
   origin_host      = "${local.origin_subdomain}.${local.root_domain}"
 
   backend_service_enabled        = trimspace(var.backend_image_uri) != ""
+  attachment_storage_enabled     = trimspace(var.attachment_s3_bucket) != ""
+  attachment_browser_origins = sort(distinct(concat(
+    ["https://${local.app_domain}"],
+    [for origin in var.attachment_additional_browser_origins : trimsuffix(trimspace(origin), "/")]
+  )))
   effective_origin_verify_secret = var.origin_verify_secret
   origin_verify_header_name      = "x-mangorts-origin-verify"
   origin_verify_header_value     = sha256("${local.name_prefix}:${local.effective_origin_verify_secret}")

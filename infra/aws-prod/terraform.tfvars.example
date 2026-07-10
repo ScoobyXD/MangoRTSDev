@@ -43,6 +43,19 @@ db_tunnel_local_port   = 15432
 # Phase-1 bootstrap should keep this empty. CI sets an immutable git-SHA image URI after ECR exists.
 backend_image_uri = ""
 
+# Private attachment storage and browser-to-S3 control-plane policy. Leave the
+# bucket empty until the real private production bucket exists and an approved
+# apply has reconciled/imported any existing singleton CORS/lifecycle settings.
+attachment_s3_bucket                      = ""
+attachment_direct_upload_enabled          = true
+attachment_max_browser_upload_bytes       = 262144000 # 250 MiB
+attachment_upload_intent_ttl_seconds       = 86400     # 24 hours
+attachment_single_put_url_ttl_seconds      = 3600      # 60 minutes
+attachment_multipart_part_url_ttl_seconds = 900       # 15 minutes
+attachment_s3_presign_endpoint             = ""        # Set only for a browser-reachable custom endpoint.
+attachment_additional_browser_origins      = []        # https://mangorts.com is automatic; wildcards are rejected.
+attachment_multipart_abort_days            = 2
+
 default_company_id = "replace-with-prod-company-uuid"
 
 # Must be verified in SES in aws_region before signup confirmation emails are enabled.

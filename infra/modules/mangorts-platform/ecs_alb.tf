@@ -116,10 +116,17 @@ resource "aws_ecs_task_definition" "backend" {
           { name = "DB_USER", value = local.db_user },
           { name = "DB_SSLMODE", value = "require" }
         ],
-        trimspace(var.attachment_s3_bucket) != "" ? [
+        local.attachment_storage_enabled ? concat([
           { name = "MANGORTS_ATTACHMENT_S3_BUCKET", value = trimspace(var.attachment_s3_bucket) },
-          { name = "MANGORTS_ATTACHMENT_AWS_REGION", value = var.aws_region }
-        ] : [],
+          { name = "MANGORTS_ATTACHMENT_AWS_REGION", value = var.aws_region },
+          { name = "MANGORTS_ATTACHMENT_DIRECT_UPLOAD_ENABLED", value = tostring(var.attachment_direct_upload_enabled) },
+          { name = "MANGORTS_ATTACHMENT_MAX_BROWSER_UPLOAD_BYTES", value = tostring(var.attachment_max_browser_upload_bytes) },
+          { name = "MANGORTS_ATTACHMENT_UPLOAD_INTENT_TTL_SECONDS", value = tostring(var.attachment_upload_intent_ttl_seconds) },
+          { name = "MANGORTS_ATTACHMENT_SINGLE_PUT_URL_TTL_SECONDS", value = tostring(var.attachment_single_put_url_ttl_seconds) },
+          { name = "MANGORTS_ATTACHMENT_MULTIPART_PART_URL_TTL_SECONDS", value = tostring(var.attachment_multipart_part_url_ttl_seconds) }
+          ], trimspace(var.attachment_s3_presign_endpoint) != "" ? [
+          { name = "MANGORTS_ATTACHMENT_S3_PRESIGN_ENDPOINT", value = trimspace(var.attachment_s3_presign_endpoint) }
+        ] : []) : [],
         local.nylas_enabled ? [
           { name = "NYLAS_CLIENT_ID", value = var.nylas_client_id },
           { name = "NYLAS_API_BASE_URL", value = var.nylas_api_base_url },

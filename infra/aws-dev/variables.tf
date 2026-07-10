@@ -198,6 +198,54 @@ variable "attachment_s3_bucket" {
   default     = "mangorts-dev-attachments"
 }
 
+variable "attachment_direct_upload_enabled" {
+  description = "Enable browser-to-S3 attachment uploads in dev when attachment storage is configured."
+  type        = bool
+  default     = true
+}
+
+variable "attachment_max_browser_upload_bytes" {
+  description = "Authoritative maximum size in bytes for one browser-originated attachment."
+  type        = number
+  default     = 262144000
+}
+
+variable "attachment_upload_intent_ttl_seconds" {
+  description = "Lifetime in seconds for a durable browser upload intent."
+  type        = number
+  default     = 86400
+}
+
+variable "attachment_single_put_url_ttl_seconds" {
+  description = "Lifetime in seconds for a presigned single-PUT URL."
+  type        = number
+  default     = 3600
+}
+
+variable "attachment_multipart_part_url_ttl_seconds" {
+  description = "Lifetime in seconds for a presigned multipart-part URL."
+  type        = number
+  default     = 900
+}
+
+variable "attachment_s3_presign_endpoint" {
+  description = "Optional browser-reachable S3 endpoint for dev custom/local object storage."
+  type        = string
+  default     = ""
+}
+
+variable "attachment_additional_browser_origins" {
+  description = "Additional exact browser origins allowed by attachment-bucket CORS; the dev app origin and http://localhost:5173 are automatic."
+  type        = set(string)
+  default     = []
+}
+
+variable "attachment_multipart_abort_days" {
+  description = "Days after initiation when S3 lifecycle aborts an incomplete multipart attachment upload."
+  type        = number
+  default     = 2
+}
+
 variable "default_company_id" {
   description = "Default company UUID used by the frontend until tenant selection exists. Prefer this over dev_company_id for new config."
   type        = string

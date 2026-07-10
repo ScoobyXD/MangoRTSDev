@@ -1,5 +1,11 @@
 import { getApiAccessToken, isAuthEnabled, isTerminalAuthFailureActive, markTerminalAuthFailure } from "../../auth/cognitoAuth.js";
 import { requestJSON, type RequestJSONInit } from "../api/requestJSON.js";
+import {
+  uploadBrowserAttachment,
+  type MangoAttachmentUploadProgress,
+} from "./attachmentDirectUpload.js";
+
+export type { MangoAttachmentUploadProgress, MangoAttachmentUploadState } from "./attachmentDirectUpload.js";
 
 export type MangoAttachmentVariantType = "original" | "display" | "thumbnail";
 export type MangoAttachmentSourceKind = "user_upload" | "editor_paste" | "chat_upload" | "email_incoming" | "email_outgoing" | "migration_inline_image";
@@ -27,6 +33,10 @@ export type MangoAttachment = {
   mime_type: string;
   byte_size: number;
   sha256: string;
+  sha256_verification_method?: "s3_full" | "server_stream" | "client_reported";
+  storage_checksum_algorithm?: string;
+  storage_checksum_value?: string;
+  storage_checksum_type?: string;
   storage_bucket: string;
   storage_key: string;
   original_width?: number;
@@ -80,6 +90,8 @@ export type UploadMangoAttachmentInput = {
   sourceProvider?: string;
   originalWidth?: number;
   originalHeight?: number;
+  signal?: AbortSignal;
+  onProgress?: (progress: MangoAttachmentUploadProgress) => void;
 };
 
 export type ListMangoResourceAttachmentsInput = {
@@ -134,20 +146,7 @@ export async function uploadMangoAttachment(
   request: AttachmentRequestJSON,
   input: UploadMangoAttachmentInput,
 ): Promise<MangoAttachmentUploadResponse> {
-  const form = new FormData();
-  form.set("company_id", input.companyID.trim());
-  form.set("resource_type", input.resourceType);
-  form.set("resource_id", input.resourceID.trim());
-  form.set("source_kind", input.sourceKind);
-  form.set("relationship_kind", input.relationshipKind);
-  appendNonBlankFormValue(form, "information_id", input.informationID);
-  appendNonBlankFormValue(form, "message_id", input.messageID);
-  appendNonBlankFormValue(form, "editor_surface", input.editorSurface);
-  appendNonBlankFormValue(form, "source_provider", input.sourceProvider);
-  appendPositiveNumberFormValue(form, "original_width", input.originalWidth);
-  appendPositiveNumberFormValue(form, "original_height", input.originalHeight);
-  form.set("file", input.file, input.file.name || "attachment");
-  return request<MangoAttachmentUploadResponse>("/v1/attachments", { method: "POST", body: form });
+  return uploadBrowserAttachment(request, input);
 }
 
 export function mangoAttachmentContentPath(companyID: string, attachmentID: string, variant: MangoAttachmentVariantType = "display"): string {
@@ -262,14 +261,4 @@ export function fileFromDataURL(dataURL: string, filename: string): File | null 
 
 export function defaultAttachmentRequestJSON(apiBase: string): AttachmentRequestJSON {
   return <T>(path: string, init?: RequestJSONInit) => requestJSON<T>(apiBase, path, init);
-}
-
-function appendNonBlankFormValue(form: FormData, key: string, value: string | undefined): void {
-  const clean = value?.trim() ?? "";
-  if (clean) form.set(key, clean);
-}
-
-function appendPositiveNumberFormValue(form: FormData, key: string, value: number | undefined): void {
-  if (!Number.isFinite(value) || (value ?? 0) <= 0) return;
-  form.set(key, String(Math.round(value as number)));
 }

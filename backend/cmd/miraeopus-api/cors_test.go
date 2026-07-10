@@ -34,7 +34,7 @@ func TestCORSAllowsFrontendRequestHeaders(t *testing.T) {
 		t.Fatalf("allow origin = %q, want configured origin", got)
 	}
 	allowedHeaders := strings.ToLower(rec.Header().Get("Access-Control-Allow-Headers"))
-	for _, header := range []string{"authorization", "cache-control", "if-none-match", "x-mango-confirmation-display-name"} {
+	for _, header := range []string{"authorization", "cache-control", "if-none-match", "x-mango-confirmation-display-name", "x-mango-company-id"} {
 		if !strings.Contains(allowedHeaders, header) {
 			t.Fatalf("allow headers = %q, missing %q", allowedHeaders, header)
 		}
