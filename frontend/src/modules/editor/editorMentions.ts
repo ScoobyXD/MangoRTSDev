@@ -19,6 +19,12 @@ export type MentionTextSegment = {
   user?: MentionableCompanyUser;
 };
 
+export type MentionUserProfileColor = Readonly<{
+  background: string;
+  foreground: string;
+  border: string;
+}>;
+
 export const EDITOR_MENTION_ATTRIBUTE = "data-mango-mention";
 export const EDITOR_MENTION_USER_ID_ATTRIBUTE = "data-mango-mention-user-id";
 export const EDITOR_MENTION_KIND_ATTRIBUTE = "data-mango-mention-kind";
@@ -27,6 +33,47 @@ export const EDITOR_MENTION_COLOR = "#0f172a";
 export const EDITOR_URGENT_MENTION_BACKGROUND = "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(255,237,213,0.8) 46%, rgba(254,226,226,0.74))";
 
 const MENTION_BOUNDARY_PATTERN = /[A-Za-z0-9_@!.-]/;
+const MENTION_USER_PROFILE_COLORS = [
+  { background: "#1D4ED8", foreground: "#FFFFFF", border: "#1E3A8A" },
+  { background: "#0F766E", foreground: "#FFFFFF", border: "#115E59" },
+  { background: "#7E22CE", foreground: "#FFFFFF", border: "#581C87" },
+  { background: "#BE123C", foreground: "#FFFFFF", border: "#881337" },
+  { background: "#A16207", foreground: "#FFFFFF", border: "#713F12" },
+  { background: "#047857", foreground: "#FFFFFF", border: "#065F46" },
+  { background: "#B91C1C", foreground: "#FFFFFF", border: "#7F1D1D" },
+  { background: "#4338CA", foreground: "#FFFFFF", border: "#312E81" },
+  { background: "#C2410C", foreground: "#FFFFFF", border: "#9A3412" },
+  { background: "#0369A1", foreground: "#FFFFFF", border: "#0C4A6E" },
+  { background: "#6D28D9", foreground: "#FFFFFF", border: "#4C1D95" },
+  { background: "#4D7C0F", foreground: "#FFFFFF", border: "#3F6212" },
+] as const satisfies readonly MentionUserProfileColor[];
+
+function normalizedMentionColorIdentity(value: string): string {
+  return value.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function mentionUserColorIdentity(user: MentionableCompanyUser): string {
+  const userID = normalizedMentionColorIdentity(user.user_id ?? "");
+  if (userID) return `user:${userID}`;
+  const email = normalizedMentionColorIdentity(user.email ?? "");
+  if (email) return `email:${email}`;
+  const displayName = normalizedMentionColorIdentity(user.display_name ?? "");
+  return displayName ? `name:${displayName}` : "unknown-user";
+}
+
+function stableMentionColorIndex(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % MENTION_USER_PROFILE_COLORS.length;
+}
+
+export function mentionUserProfileColor(user: MentionableCompanyUser): MentionUserProfileColor {
+  return MENTION_USER_PROFILE_COLORS[stableMentionColorIndex(mentionUserColorIdentity(user))]
+    ?? MENTION_USER_PROFILE_COLORS[0];
+}
 
 export function mentionUserDisplayName(user: MentionableCompanyUser): string {
   const name = (user.display_name ?? "").trim();

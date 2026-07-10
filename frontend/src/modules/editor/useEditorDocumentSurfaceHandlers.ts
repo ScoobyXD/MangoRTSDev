@@ -73,6 +73,7 @@ import {
   EDITOR_MENTION_ATTRIBUTE,
   mentionUserDisplayName,
   mentionUserOptionLabel,
+  mentionUserProfileColor,
   readActiveMentionDraft,
   type ActiveMentionDraft,
   type MentionableCompanyUser,
@@ -2224,11 +2225,6 @@ function initialsForMentionName(name: string): string {
   return `${first}${second}`.toUpperCase();
 }
 
-function avatarBackgroundForMentionName(name: string): string {
-  void name;
-  return `#475569`;
-}
-
 function isEditorUndoShortcut(event: React.KeyboardEvent<HTMLDivElement>): boolean {
   return (event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "z" && !event.shiftKey;
 }
@@ -3224,6 +3220,7 @@ export function useEditorDocumentSurfaceHandlers({
         const name = mentionUserDisplayName(user);
         const label = mentionUserOptionLabel(user);
         const email = (user.email ?? "").trim();
+        const profileColor = mentionUserProfileColor(user);
         return React.createElement(
           "button",
           {
@@ -3247,7 +3244,7 @@ export function useEditorDocumentSurfaceHandlers({
               gap: 8,
               border: "none",
               borderRadius: 6,
-              background: selected ? "rgba(100, 116, 139, 0.16)" : "transparent",
+              background: selected ? `${profileColor.background}12` : "transparent",
               boxShadow: selected ? `inset 3px 0 0 ${mentionAccent}` : "none",
               color: mentionSurfaceText,
               cursor: "pointer",
@@ -3260,7 +3257,19 @@ export function useEditorDocumentSurfaceHandlers({
             "span",
             {
               "aria-hidden": "true",
-              style: { width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForMentionName(name), color: "#ffffff", fontSize: 10, fontWeight: 900 } satisfies React.CSSProperties,
+              style: {
+                width: 24,
+                height: 24,
+                boxSizing: "border-box",
+                border: `1px solid ${profileColor.border}`,
+                borderRadius: 999,
+                display: "grid",
+                placeItems: "center",
+                background: profileColor.background,
+                color: profileColor.foreground,
+                fontSize: 10,
+                fontWeight: 900,
+              } satisfies React.CSSProperties,
             },
             initialsForMentionName(name),
           ),

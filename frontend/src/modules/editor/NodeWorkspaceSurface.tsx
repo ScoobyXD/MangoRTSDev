@@ -48,6 +48,15 @@ import {
   createTextBlockProjectionSaveController,
   type TextBlockProjectionSaveController,
 } from "./nodeTextBlockProjectionSaves";
+import {
+  appendUniqueEditorAttachments,
+  selectAttachmentUploadCandidates,
+  textBlockAttachmentContextLabel,
+  totalTextBlockAttachmentBytes,
+} from "./nodeTextBlockAttachments";
+import {
+  projectionIDsForTextBlockDeletion,
+} from "./nodeTextBlockDeletion";
 import { resolveEditorTextBlockChatAnchorMessageID } from "./editorTextBlockChatHighlights";
 import { createEditorImageFrame } from "./editorImages";
 import { serializeEditorDocumentHTML } from "./richTextEditing";
@@ -347,7 +356,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const logicGateAssignerRef = useRef<HTMLDivElement | null>(null);
   const logicGateSearchRequestRef = useRef(0);
   const projectAssignerRef = useRef<HTMLDivElement | null>(null);
+  const nodeEmailModalCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const saveTimersRef = useRef(new Map<string, number>());
+  const pendingTextBlockAttachmentBytesRef = useRef(new Map<string, number>());
+  const attachmentUploadScopeRef = useRef({ companyID, nodeID, canEdit, generation: 0 });
   const logicGateAssignStatusTimerRef = useRef<number | null>(null);
   const logicGateAssignFlashTimerRef = useRef<number | null>(null);
   const contentByBlockRef = useRef(new Map<string, EditorTextBlockContent>());
@@ -381,6 +393,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
   const [tableInsertRequests, setTableInsertRequests] = useState<Record<string, number>>({});
   const [emailPickerTargetBlockID, setEmailPickerTargetBlockID] = useState<string | null>(null);
+  const [nodeEmailModalMessageID, setNodeEmailModalMessageID] = useState("");
   const [logicGateAssignerOpen, setLogicGateAssignerOpen] = useState(false);
   const [logicGateSearch, setLogicGateSearch] = useState("");
   const [logicGateSearchResults, setLogicGateSearchResults] = useState<CompanyExplorerSearchResult[]>([]);
@@ -441,10 +454,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   ), [nodeFileAttachments]);
   const textBlockTitleByID = useMemo(() => new Map(blocks.map((block) => [block.id, block.title.trim() || "Text box"])), [blocks]);
   const nodeAttachmentDropdownItems = useMemo(() => nodeFileAttachments.map((resourceAttachment) => {
-    const informationID = resourceAttachment.information_id?.trim() ?? "";
     return {
       resourceAttachment,
-      contextLabel: informationID ? textBlockTitleByID.get(informationID) ?? "Text box" : "Node",
+      contextLabel: textBlockAttachmentContextLabel(resourceAttachment.information_id, textBlockTitleByID),
     };
   }), [nodeFileAttachments, textBlockTitleByID]);
   const compact = width > 0 && width < 720;
@@ -582,6 +594,16 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     });
   }, [companyID, nodeID, primaryAssignedProjectID, primaryAssignedProjectLabel]);
 
+  useLayoutEffect(() => {
+    const generation = attachmentUploadScopeRef.current.generation + 1;
+    attachmentUploadScopeRef.current = { companyID, nodeID, canEdit, generation };
+    return () => {
+      if (attachmentUploadScopeRef.current.generation !== generation) return;
+      attachmentUploadScopeRef.current = { companyID: "", nodeID: "", canEdit: false, generation: generation + 1 };
+      pendingTextBlockAttachmentBytesRef.current.clear();
+    };
+  }, [canEdit, companyID, nodeID]);
+
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -599,6 +621,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   useEffect(() => {
     setLogicGateAssignerOpen(false);
     setProjectAssignerOpen(false);
+    setNodeEmailModalMessageID("");
     setLogicGateSearch("");
     setAssigningLogicGateID("");
     setLastAssignedLogicGateID("");
@@ -651,6 +674,35 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setDropActive(false);
     setDeleteTextBlockConfirmation(null);
   }, [canEdit]);
+
+  useEffect(() => {
+    if (!nodeEmailModalMessageID || typeof document === "undefined") return undefined;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusFrame = window.requestAnimationFrame(() => nodeEmailModalCloseButtonRef.current?.focus());
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Tab") {
+        const dialog = nodeEmailModalCloseButtonRef.current?.closest('[role="dialog"]');
+        const focusable = dialog ? Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter((element) => element.getClientRects().length > 0) : [];
+        if (focusable.length === 0) return;
+        const activeIndex = focusable.indexOf(document.activeElement as HTMLElement);
+        const nextIndex = event.shiftKey
+          ? activeIndex <= 0 ? focusable.length - 1 : activeIndex - 1
+          : activeIndex < 0 || activeIndex === focusable.length - 1 ? 0 : activeIndex + 1;
+        event.preventDefault();
+        focusable[nextIndex]?.focus();
+        return;
+      }
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setNodeEmailModalMessageID("");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", onKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [nodeEmailModalMessageID]);
 
   useEffect(() => {
     if (!logicGateAssignerOpen) return;
@@ -803,6 +855,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   useEffect(() => {
     for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
     saveTimersRef.current.clear();
+    pendingTextBlockAttachmentBytesRef.current.clear();
     contentByBlockRef.current = new Map();
     textBlockProjectionSaveController.clear();
   }, [companyID, nodeID, textBlockProjectionSaveController]);
@@ -1086,29 +1139,49 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     scheduleTextBlockSave(blockID, nextContent);
   }, [canEdit, scheduleTextBlockSave]);
 
+  const appendTextBlockAttachments = useCallback((blockID: string, attachments: EditorChatAttachment[]) => {
+    if (!canEdit || attachments.length === 0) return;
+    const latest = contentByBlockRef.current.get(blockID);
+    if (!latest) return;
+    const latestAttachments = latest.attachments ?? [];
+    const mergedAttachments = appendUniqueEditorAttachments(latestAttachments, attachments);
+    if (mergedAttachments.length === latestAttachments.length) return;
+    updateTextBlockContent(blockID, { attachments: mergedAttachments });
+  }, [canEdit, updateTextBlockContent]);
+
   const addTextBlockAttachments = useCallback(async (blockID: string, files: FileList | File[]) => {
     if (!canEdit) return;
     const incoming = Array.from(files);
     if (incoming.length === 0) return;
+    const uploadScope = attachmentUploadScopeRef.current;
+    const reservationKey = `${uploadScope.generation}:${blockID}`;
+    const uploadStillBelongsToCurrentNode = () => (
+      attachmentUploadScopeRef.current.generation === uploadScope.generation
+      && attachmentUploadScopeRef.current.companyID === companyID
+      && attachmentUploadScopeRef.current.nodeID === nodeID
+      && attachmentUploadScopeRef.current.canEdit
+    );
     const existing = contentByBlockRef.current.get(blockID) ?? { title: "", document: "", attachments: [] };
     const existingAttachments = existing.attachments ?? [];
-    let nextTotalSize = existingAttachments.reduce((total, attachment) => total + attachment.size, 0);
-    const accepted: File[] = [];
-    for (const file of incoming) {
-      if (file.size > CHAT_ATTACHMENT_MAX_BYTES) {
-        onError(`Attachments are limited to ${formatFileSize(CHAT_ATTACHMENT_MAX_BYTES)} each.`);
-        continue;
-      }
-      if (nextTotalSize + file.size > CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES) {
-        onError(`Text box attachments are limited to ${formatFileSize(CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES)} total.`);
-        continue;
-      }
-      accepted.push(file);
-      nextTotalSize += file.size;
-    }
+    const resourceAttachments = nodeTextBlockAttachmentsByInformationID.get(blockID) ?? [];
+    const pendingBytes = pendingTextBlockAttachmentBytesRef.current.get(reservationKey) ?? 0;
+    const selection = selectAttachmentUploadCandidates({
+      candidates: incoming,
+      existingBytes: totalTextBlockAttachmentBytes(existingAttachments, resourceAttachments),
+      pendingBytes,
+      maxFileBytes: CHAT_ATTACHMENT_MAX_BYTES,
+      maxTotalBytes: CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES,
+    });
+    const accepted = selection.accepted;
+    const selectionErrors: string[] = [];
+    if (selection.rejected.some(({ reason }) => reason === "file_too_large")) selectionErrors.push(`Attachments are limited to ${formatFileSize(CHAT_ATTACHMENT_MAX_BYTES)} each.`);
+    if (selection.rejected.some(({ reason }) => reason === "total_too_large")) selectionErrors.push(`Text box attachments are limited to ${formatFileSize(CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES)} total.`);
+    if (selectionErrors.length > 0) onError(selectionErrors.join(" "));
     if (accepted.length === 0) return;
+    const reservedBytes = selection.acceptedBytes;
+    pendingTextBlockAttachmentBytesRef.current.set(reservationKey, pendingBytes + reservedBytes);
     try {
-      const attachments = await Promise.all(accepted.map((file) => uploadEditorAttachment(file, {
+      const uploadResults = await Promise.allSettled(accepted.map((file) => uploadEditorAttachment(file, {
         requestJSON,
         companyID,
         resourceType: "node",
@@ -1118,13 +1191,23 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         informationID: blockID,
         editorSurface: "node_text_block",
       })));
-      updateTextBlockContent(blockID, { attachments: [...existingAttachments, ...attachments] });
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "failed_to_upload_attachment");
+      const uploadedAttachments = uploadResults.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      if (uploadStillBelongsToCurrentNode()) appendTextBlockAttachments(blockID, uploadedAttachments);
+      const failures = uploadResults.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failures.length > 0 && uploadStillBelongsToCurrentNode()) {
+        const firstFailureMessage = failures[0]?.reason instanceof Error ? failures[0].reason.message : "failed_to_upload_attachment";
+        const summary = uploadedAttachments.length > 0
+          ? `${uploadedAttachments.length} ${uploadedAttachments.length === 1 ? "attachment" : "attachments"} uploaded; ${failures.length} failed.`
+          : `${failures.length} ${failures.length === 1 ? "attachment" : "attachments"} failed to upload.`;
+        onError(firstFailureMessage === "failed_to_upload_attachment" ? summary : `${summary} ${firstFailureMessage}`);
+      }
     } finally {
-      refreshNodeAttachments();
+      const remainingPendingBytes = Math.max(0, (pendingTextBlockAttachmentBytesRef.current.get(reservationKey) ?? reservedBytes) - reservedBytes);
+      if (remainingPendingBytes > 0) pendingTextBlockAttachmentBytesRef.current.set(reservationKey, remainingPendingBytes);
+      else pendingTextBlockAttachmentBytesRef.current.delete(reservationKey);
+      if (uploadStillBelongsToCurrentNode()) refreshNodeAttachments();
     }
-  }, [canEdit, companyID, nodeID, onError, refreshNodeAttachments, requestJSON, updateTextBlockContent]);
+  }, [appendTextBlockAttachments, canEdit, companyID, nodeID, nodeTextBlockAttachmentsByInformationID, onError, refreshNodeAttachments, requestJSON]);
 
   const deleteTextBlock = useCallback(async (blockID: string) => {
     if (!canEdit) return;
@@ -1135,8 +1218,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       saveTimersRef.current.delete(blockID);
     }
     await textBlockProjectionSaveController.waitForInProgressSaveThenRemoveBlock(blockID);
-    const relatedChatIDs = chatMessages.filter((message) => message.blockID === blockID).map((message) => message.id);
-    const deletedInformationIDs = [blockID, ...relatedChatIDs];
+    // Attached-email projections and resource attachment links are node-owned and intentionally retained.
+    const deletedInformationIDs = projectionIDsForTextBlockDeletion(blockID, chatMessages);
     contentByBlockRef.current.delete(blockID);
     setBlocks((current) => current.filter((block) => block.id !== blockID));
     setChatMessages((current) => current.filter((message) => message.blockID !== blockID));
@@ -1788,14 +1871,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const openAttachedEmailFromHeader = useCallback((messageID: string) => {
     const cleanMessageID = messageID.trim();
     if (!cleanMessageID) return;
-    const focusedBlockStillExists = blocks.some((block) => block.id === focusedTextBlockID);
-    const targetBlockID = focusedBlockStillExists ? focusedTextBlockID : blocks[0]?.id ?? "";
-    if (!targetBlockID) {
-      onError("Create a text box to show attached email.");
-      return;
-    }
-    openBlockEmail(targetBlockID, cleanMessageID);
-  }, [blocks, focusedTextBlockID, onError, openBlockEmail]);
+    setNodeEmailModalMessageID(cleanMessageID);
+  }, []);
 
   const sidePaneWidthForBlock = useCallback((blockID: string, pane: TextSidePaneKind, fallback: number, maxWidth = TEXT_SIDE_PANE_MAX_WIDTH_PX): number => {
     const localWidth = sidePaneWidths[blockID]?.[pane];
@@ -2837,6 +2914,58 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         />
       </div>
 
+      {nodeEmailModalMessageID && (
+        <div
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setNodeEmailModalMessageID("");
+          }}
+          style={{ position: "fixed", zIndex: 180, inset: 0, display: "grid", placeItems: "center", background: "rgba(15,23,42,0.44)", padding: 18 }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="node-attached-email-dialog-title"
+            style={{ width: "min(1080px, 94vw)", height: "min(780px, 88vh)", minHeight: 0, display: "grid", gridTemplateRows: "44px minmax(0, 1fr)", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: panelBackground, color: surfaceText, overflow: "hidden", boxShadow: "0 24px 64px rgba(15,23,42,0.28)" }}
+          >
+            <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", alignItems: "center", gap: 10, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px 6px 12px", background: EDITOR_NEU_SURFACE }}>
+              <div id="node-attached-email-dialog-title" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 900 }}>
+                Attached emails
+              </div>
+              <button
+                ref={nodeEmailModalCloseButtonRef}
+                type="button"
+                title="Close attached emails"
+                aria-label="Close attached emails"
+                onClick={() => setNodeEmailModalMessageID("")}
+                style={{ width: 30, height: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", fontSize: 14, fontWeight: 900, lineHeight: 1, padding: 0, boxShadow: EDITOR_NEU_SHADOW }}
+              >
+                X
+              </button>
+            </div>
+            <div style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+              <AttachedEmailOrganizerPane
+                emails={nodeAttachedEmails}
+                nodeID={nodeID}
+                apiBase={apiBase}
+                companyID={companyID}
+                attachmentRequestJSON={requestJSON}
+                storageKey={`node-editor-attached-email-layout-v1:${companyID || "company"}:${nodeID || "node"}`}
+                editable={canEdit}
+                accent={accent}
+                surfaceText={surfaceText}
+                strokeColor={strokeColor}
+                ruleColor={ruleColor}
+                selectedMessageID={nodeEmailModalMessageID}
+                onSelectMessage={setNodeEmailModalMessageID}
+                onClearSelectedMessage={() => setNodeEmailModalMessageID("")}
+                onRemoveEmail={canEdit ? (emailID) => { void removeAttachedEmail(emailID); } : undefined}
+                onError={onError}
+              />
+            </div>
+          </div>
+        </div>
+      )}
       {canEdit && emailPickerTargetBlockID !== null && (
         <EmailPickerModal
           accent={accent}

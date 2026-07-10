@@ -3,10 +3,23 @@ Last updated: 2026-07-10
 # Unified Editor Tests
 
 Coverage Status:
+- People-picker profile palette stability, fallback-key behavior, and minimum contrast are covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified surface contract, unified toolbar source/inventory, full mail compose/attached-reply control exposure, shared controller wiring, and EmailPickerModal attach-only source guard; shared editing primitives also have rich/plain editor module tests, including automatic outline numbering toggle behavior and the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers rich email compose send serialization and Mango attachment-reference payloads; backend communications tests cover send-time attachment byte resolution outside the shared editor contract)
 
 ## Business Logic
+
+### 2026-07-10 Node Text-Box Lifecycle Boundary
+
+- The unified node editor owns text-box editing and projection deletion, but deleting a text box must not cascade into node file resource links or attached-email projections. Attachment and email retention is a node-domain rule, not rich-editor document ownership.
+- Origin metadata may continue to identify the deleted text-box ID for provenance. Unified editor adapters must tolerate that missing live block without recreating a block, moving the association into another block, or dropping it from node-level lists.
+- Node-level attachment preview and the global attached-email organizer modal are overlay surfaces outside the editable rich-text document. Opening or closing them must not mutate editor content, steal a durable selection target, create a projection save, or mark a text block as changed.
+- The standalone global attached-email organizer, including its folders/list and selected conversation, must work with zero text boxes and in read-only node windows. Per-text-box conversation panes remain unchanged for surviving text boxes.
+- Attachment-row activation previews supported content in app; the row's explicit download action remains a separate command. Preview cleanup must release transient requests/object URLs when the overlay closes or switches files.
+
+Required regression scenario:
+- Delete a text box that originated files and attached emails while projection saving is active, then reopen the node through more than one unified node-shell opener.
+- Confirm the text-box projection stays deleted, no replacement block is created, retained associations remain in the node-level lists, previews and the standalone global email organizer do not dirty editor state, and view-only access can use both viewers.
 
 ED1 - Unified editor means shared user-facing editing semantics across rich editor surfaces; it does not require one shared backend table, API route, save controller, or storage owner.
 ED2 - The unified editor contract applies to Logic Gate editor text, node editor text boxes wherever a node editor is opened, project text boxes, project inline critical-path node windows, My Triage compose/reply, Shared Triage compose/reply, and attached-email reply bodies that send or draft real mail.
@@ -16,7 +29,7 @@ ED5 - Rich controls for numbered/alphanumerical lists, bullet lists, checklist, 
 ED6 - Pasted rich text in any unified editor surface must normalize to the app/editor font family and must not add extra blank rows around selected inline pasted text because of source boundary whitespace.
 ED7 - Legacy plain text loaded into a unified rich editor surface must load through safe escaping/linkification and must not bypass the same sanitization boundary used for rich HTML.
 ED8 - Email compose/reply bodies using the unified editor must send sanitized rich HTML and preserve sanitized block indentation, including indent/outdent and blockquote-style indentation.
-ED9 - Chat panes inside node/project text boxes are conversation UI, not unified editor surfaces; chat textareas must not inherit rich editor toolbar, indentation, paste, or delete semantics unless a future chat-specific rule explicitly adds that behavior.
+ED9 - Chat panes inside node/project text boxes are conversation UI, not unified editor surfaces; chat textareas must not inherit rich editor toolbar, indentation, paste, or delete semantics unless a future chat-specific rule explicitly adds that behavior. They may share the people suggestion component used by rich editors, including its visible per-user profile colors.
 ED10 - Node/project email pickers are attach/select surfaces only and must not expose compose, send, scheduled send, or draft-save behavior.
 ED11 - Map and legacy map-specific editing behavior is outside the V1 unified editor project unless a live non-map editor surface imports a helper that must be changed for the shared contract.
 ED12 - Any future change to unified editor semantics must update one shared behavior test plus adapter/mount coverage proving each target surface receives the shared behavior.
@@ -148,6 +161,10 @@ Expected:
 - Chat does not show the unified rich editor toolbar.
 - Chat does not receive rich editor indentation, paste, delete, list, or font-size semantics.
 - Chat-specific quote/prefill and mention behavior can continue independently.
+- Typing `@` or `!` in node, Logic Gate, or chat text opens a people list whose profile color is derived first from normalized user ID, then normalized email, then normalized display name, so the same user keeps the same color between openings and surfaces.
+- The shared palette uses opaque, dark profile backgrounds with readable white foregrounds and dark borders. Profile/avatar color remains visible on ordinary, hovered, keyboard-active, and selected suggestion rows and must meet the shared minimum contrast test.
+- A keyboard-active rich-editor row adds only a translucent tint of that user's profile color plus the existing active rail; it does not replace the opaque full-color avatar. Chat may retain its existing active-row treatment, but its avatar also remains opaque and full-color.
+- Missing optional profile data uses the shared deterministic fallback presentation rather than an uncolored or broken row.
 
 ### Scenario ED-S5: Node And Project Email Picker Is Attach Only
 
