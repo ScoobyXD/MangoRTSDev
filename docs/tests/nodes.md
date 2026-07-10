@@ -6,6 +6,7 @@ Coverage Status:
 - Node attachment presentation and visibility-gated thumbnail behavior are covered by `tests/frontend/modules/attachments/attachmentPresentation.test.ts`; upload concurrency, partial-success, byte-limit, scope/permission invalidation, and delete-while-uploading behavior are covered by `tests/frontend/modules/editor/nodeTextBlockAttachments.test.ts`; shared people-palette behavior is covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Attached-email thread parity, resize cleanup, red removal actions, Reply/Reply All focus, and permission Save visibility are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; node chat URL detection is covered by `tests/frontend/modules/editor/nodeChatLinks.test.ts`.
 - Shared conversion projection provenance is covered by `backend/internal/http/communications_triage_handlers_test.go` and `backend/internal/store/communications_email_conversion_test.go`.
+- Browser-direct additions must prove the 250 MiB/64 MiB/16 MiB policy, node-level progress/cancel/retry/resume, completed-only counts, one completion refresh, and completion after origin text-box deletion without projection recreation.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial. Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; Company Explorer search resource-type filtering has backend coverage; node editor projection-save helpers have frontend coverage; Tab-at-caret editor behavior is covered by `tests/frontend/modules/editor/plainTextEditing.test.ts`; Mango email body marking/display preservation is covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; the unified editor contract, attached-email reply bottom buffer, EmailPickerModal attach-only boundary, red unified close chrome, and unified node-shell contract/adapter mounting are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; shared attachment tests cover node resource links/content authorization and `attached_email` resource authorization; GVIC picker rule IDs, the Assign to Logic Gate picker no-preload UI behavior, and node header project-assignment layout rules are not mapped to automated tests yet.
 
@@ -18,7 +19,7 @@ Coverage Status:
 - The node header attached-email counter/list also remains available independently of text boxes. Opening it uses a standalone node-level attached-email organizer modal with its folders/list and selected conversation, not an automatically created or arbitrarily selected text box.
 - A retained attached email must be viewable from the global node header when the node has no text boxes and when the user has view-only access. Existing per-text-box email conversation panes remain available for live text boxes and are not the required host for the global viewer.
 - Clicking a file row opens an authenticated in-app preview without starting a download. Images, PDF, text/code/CSV/JSON/XML, audio, and video are previewable when browser-supported; text preview decodes only the first 256 KiB and renders at most 200,000 decoded characters. Larger text is shown as a bounded/truncated preview with `Preview limited to 256 KiB / 200,000 characters.`, while Office/archive/unknown binary files show preview-unavailable state and retain their explicit download control.
-- Node attachment upload limits remain at the current 10 MiB per file and 12 MiB total per text box while the higher-limit policy is still under discussion.
+- Browser node attachments default to a backend-authoritative 250 MiB per-file limit with no 12 MiB text-box aggregate. Files through 64 MiB use one presigned S3 PUT; larger files use resumable 16 MiB multipart parts. Pending work is node-level upload-progress state and never inflates the completed node attachment count.
 
 Required regression scenario:
 - Attach files and emails from multiple text boxes, select an attached email, delete one originating text box, and then delete all remaining text boxes.
@@ -100,6 +101,12 @@ N72 - Node-attached email viewers use the shared email-thread contract: full-hei
 N73 - Editors can right-click an attached-email or attachment row and choose a red `Remove from node`; the action removes only that attached-email projection or node attachment relationship, while view-only users receive no destructive action.
 N74 - Node chat detects safe `http://`, `https://`, `www.`, and bare-domain links, excludes trailing punctuation and email-address domains, renders links blue and underlined with opener isolation, and leaves unsafe/non-HTTP schemes as plain text.
 N75 - A personal attached-email projection stores `account_email`; a Shared Triage conversion stores both `shared_inbox_id` and `account_email`. Thread, attachment, Reply/Reply All, draft, and calendar operations use those stored fields instead of falling back to another grant.
+N76 - Normal browser node file bytes go directly to the private attachment S3 bucket through intent-owned presigned PUTs. Mango API authenticates/authorizes, chooses IDs and keys, enforces limits, completes/aborts/verifies storage, and writes metadata/node links, but it never receives the browser file body.
+N77 - Node browser upload policy defaults to 250 MiB per file, single PUT through and including 64 MiB, and 16 MiB multipart parts above it. The direct path does not apply the old 12 MiB-per-text-box aggregate.
+N78 - Node upload preparation computes raw SHA-256 incrementally with bounded memory. Multipart concurrency is capped, progress is byte-based, cancellation aborts active requests, retry refreshes expired URLs, and resume does not re-upload S3-confirmed parts.
+N79 - Upload progress belongs to the node rather than the origin text box. It shows each selected filename/extension/size once with preparing, uploading, retrying, completing, complete, canceled, or failed state plus progress/cancel/retry; it does not block node editing or enter the normal completed list/count.
+N80 - Deleting an origin text box while upload is active keeps node-level progress and permits completion when the node still exists and current node edit authorization passes. It must not recreate the deleted projection. Deleting the node or losing edit access rejects completion and cleans up the unfinalized S3 object.
+N81 - One successful completion invalidates the shared node attachment metadata once. Part progress/retry does not repeatedly refetch the completed list, and one failed file does not discard completed siblings.
 
 ## Scenarios
 
@@ -350,8 +357,10 @@ Given:
 Expected:
 - Node text-box projection saves preserve the latest text content but store attachment references for inline files.
 - Node attachment-button uploads create Mango attachment links instead of embedding bytes in node information/projection payloads.
-- Concurrent attachment picker batches reserve bytes before validating the text-box total and append successful uploads, deduplicated by durable attachment ID, to the latest text-box state; a failed file does not erase successful files from the same or another batch.
-- An upload callback belongs to the company/node/text-block generation and edit permission where it started. Navigation, attachment-scope changes, edit-permission loss, or deleting the text block invalidate that callback, so a late upload cannot mutate the current node or recreate a deleted projection.
+- Browser file bodies go directly to private S3; Mango API sees JSON intent/part/complete requests only. Incremental hashing and multipart slices keep memory bounded, and no whole-file array buffer/base64/data URL is created.
+- Exactly 250 MiB is accepted and one byte above is rejected before S3; 64 MiB uses single PUT and one byte above uses resumable 16 MiB multipart. The direct path has no 12 MiB text-box aggregate.
+- Concurrent picker batches append successful uploads, deduplicated by durable attachment ID, to the current node state; a failed file does not erase successful files from the same or another batch.
+- An upload intent belongs to the company/actor/node, while text-box ID remains origin context. Deleting the text block keeps progress at node level and can still complete without mutating or recreating the deleted projection; navigation may detach visible UI without changing durable intent authority. Permission loss or node deletion rejects completion and cleans up.
 - Each text box can list its own attachments, and one node-wide counter/list can show the union across all text boxes from the same node-level metadata read.
 - Attachment rows show an immediate type cue, visibility-gated image thumbnails through authenticated content reads, an always-visible extension badge (or `NO EXT`), and a right-side original-file download action. Only visible/near-visible image rows prefetch; closing the list aborts pending reads and releases object URLs.
 - Chat messages store attachment references and remain outside rich-editor semantics.
@@ -462,3 +471,29 @@ Expected:
 - Every editable node permission view displays the shared `Save` button in a stable action area.
 - Save commits the current selection, reports loading or failure state, leaves the view open on success, and follows the close behavior in `docs/tests/permissions.md`.
 - The read-only, denied, or failed-load view remains dismissible and does not issue a permission write.
+
+### Scenario N-S16: Direct Upload Progress, Resume, And Text-Box Deletion
+
+Business logic covered:
+- N51
+- N65
+- N66
+- N69
+- N76
+- N77
+- N78
+- N79
+- N80
+- N81
+
+Given:
+- A user selects several node files, including one multipart file, and deletes the originating text box while uploads continue.
+- A part URL expires, the page reloads, one file fails, and another completes.
+
+Expected:
+- Each file appears once in node-level progress with filename, visible extension, size, bytes transferred, state, cancel, and retry.
+- S3 receives raw File/Blob bytes without Mango authorization; Mango API receives metadata/control JSON only.
+- Retry refreshes only the necessary URL, resume reconciles accepted parts without uploading them twice, and node editing remains available throughout.
+- The deleted text-box projection stays deleted. Its completed attachment remains node-owned, appears in the node-wide list with deleted-origin context, and is previewable/downloadable through the authenticated Mango content path.
+- The failed sibling remains a retryable/failed progress item and does not remove the completed attachment.
+- Normal counts change only after successful completion and the shared node metadata query refreshes once for that completion, not on each part.

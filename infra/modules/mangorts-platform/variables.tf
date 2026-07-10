@@ -205,6 +205,92 @@ variable "attachment_s3_bucket" {
   default     = ""
 }
 
+variable "attachment_direct_upload_enabled" {
+  description = "Enable browser-to-S3 attachment uploads when attachment_s3_bucket is configured."
+  type        = bool
+  default     = true
+}
+
+variable "attachment_max_browser_upload_bytes" {
+  description = "Authoritative maximum size in bytes for one browser-originated attachment."
+  type        = number
+  default     = 262144000
+
+  validation {
+    condition     = var.attachment_max_browser_upload_bytes > 0 && floor(var.attachment_max_browser_upload_bytes) == var.attachment_max_browser_upload_bytes
+    error_message = "attachment_max_browser_upload_bytes must be a positive whole number."
+  }
+}
+
+variable "attachment_upload_intent_ttl_seconds" {
+  description = "Lifetime in seconds for a durable browser upload intent."
+  type        = number
+  default     = 86400
+
+  validation {
+    condition     = var.attachment_upload_intent_ttl_seconds > 0 && floor(var.attachment_upload_intent_ttl_seconds) == var.attachment_upload_intent_ttl_seconds
+    error_message = "attachment_upload_intent_ttl_seconds must be a positive whole number."
+  }
+}
+
+variable "attachment_single_put_url_ttl_seconds" {
+  description = "Lifetime in seconds for one presigned single-PUT URL; V1 permits at most 60 minutes."
+  type        = number
+  default     = 3600
+
+  validation {
+    condition     = var.attachment_single_put_url_ttl_seconds > 0 && var.attachment_single_put_url_ttl_seconds <= 3600 && floor(var.attachment_single_put_url_ttl_seconds) == var.attachment_single_put_url_ttl_seconds
+    error_message = "attachment_single_put_url_ttl_seconds must be a whole number from 1 through 3600."
+  }
+}
+
+variable "attachment_multipart_part_url_ttl_seconds" {
+  description = "Lifetime in seconds for a presigned multipart-part URL; V1 permits at most 15 minutes."
+  type        = number
+  default     = 900
+
+  validation {
+    condition     = var.attachment_multipart_part_url_ttl_seconds > 0 && var.attachment_multipart_part_url_ttl_seconds <= 900 && floor(var.attachment_multipart_part_url_ttl_seconds) == var.attachment_multipart_part_url_ttl_seconds
+    error_message = "attachment_multipart_part_url_ttl_seconds must be a whole number from 1 through 900."
+  }
+}
+
+variable "attachment_s3_presign_endpoint" {
+  description = "Optional browser-reachable S3 endpoint used only when generated presigned URLs must differ from the backend S3 endpoint."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = trimspace(var.attachment_s3_presign_endpoint) == "" || can(regex("^https?://[^[:space:]]+$", trimspace(var.attachment_s3_presign_endpoint)))
+    error_message = "attachment_s3_presign_endpoint must be empty or an http(s) URL."
+  }
+}
+
+variable "attachment_additional_browser_origins" {
+  description = "Additional exact browser origins allowed to PUT to the attachment bucket. The app origin is automatic; dev also includes http://localhost:5173."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for origin in var.attachment_additional_browser_origins :
+      can(regex("^https://[A-Za-z0-9.-]+(:[0-9]+)?$", trimspace(origin)))
+    ])
+    error_message = "attachment_additional_browser_origins must contain exact HTTPS origins without paths or wildcards. The documented dev loopback origin is added automatically."
+  }
+}
+
+variable "attachment_multipart_abort_days" {
+  description = "Days after initiation when S3 lifecycle aborts an incomplete multipart attachment upload as a cleanup backstop."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.attachment_multipart_abort_days >= 1 && floor(var.attachment_multipart_abort_days) == var.attachment_multipart_abort_days
+    error_message = "attachment_multipart_abort_days must be a positive whole number."
+  }
+}
+
 variable "default_company_id" {
   description = "Default company UUID used by the frontend until tenant selection exists."
   type        = string

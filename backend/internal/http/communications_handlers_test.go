@@ -189,28 +189,33 @@ func (f *fakeNylasClient) SendMessage(_ context.Context, grantID string, request
 	return NylasMessage{ID: "sent-message", Subject: request.Subject, To: request.To}, nil
 }
 
-func uploadEmailAttachmentForCommunicationsTest(t *testing.T, handler http.Handler, token, companyID, resourceID, filename, contentType string, content []byte) string {
+func seedEmailAttachmentForCommunicationsTest(t *testing.T, repo *store.MemoryRepo, storage *fakeAttachmentObjectStorage, actorUserID, companyID, resourceID, filename, contentType string, content []byte) string {
 	t.Helper()
-	body, multipartContentType := attachmentMultipartBody(t, map[string]string{
-		"company_id":        companyID,
-		"resource_type":     "email_draft",
-		"resource_id":       resourceID,
-		"relationship_kind": "email_attachment",
-		"source_kind":       "email_outgoing",
-	}, filename, contentType, content)
-	req := httptest.NewRequest(http.MethodPost, "/v1/attachments?company_id="+url.QueryEscape(companyID), body)
-	req.Header.Set("Content-Type", multipartContentType)
-	req.Header.Set("Authorization", token)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("upload email attachment status = %d body=%s", rec.Code, rec.Body.String())
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		filename = "attachment"
 	}
-	var created attachmentUploadResponse
-	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
-		t.Fatalf("decode email attachment upload: %v", err)
+	contentType = strings.TrimSpace(contentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
 	}
-	return created.Attachment.AttachmentID
+	attachmentID := store.NewUUIDv7String()
+	storageKey := attachmentOriginalObjectKey(companyID, attachmentID)
+	storage.objects[storageKey] = fakeAttachmentObject{contentType: contentType, body: append([]byte(nil), content...)}
+	sum := sha256.Sum256(content)
+	if _, _, err := repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
+		CompanyID: companyID, AttachmentID: attachmentID, UploadedByUserID: actorUserID,
+		OriginalFilename: filename, MimeType: contentType, ByteSize: int64(len(content)),
+		SHA256: fmt.Sprintf("%x", sum[:]), SHA256VerificationMethod: "server_stream",
+		StorageBucket: storage.bucket, StorageKey: storageKey, SourceKind: store.AttachmentSourceEmailOutgoing,
+		ResourceLink: store.ResourceAttachmentInput{
+			CompanyID: companyID, ResourceType: "email_draft", ResourceID: resourceID,
+			RelationshipKind: store.AttachmentRelationshipEmailAttachment, CreatedByUserID: actorUserID,
+		},
+	}); err != nil {
+		t.Fatalf("seed email attachment: %v", err)
+	}
+	return attachmentID
 }
 
 func personalEmailDraftResourceID(userID, draftID string) string {
@@ -1005,7 +1010,7 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	if nylas.update.Unread == nil || *nylas.update.Unread || len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "archive" {
 		t.Fatalf("update = %+v, want unread=false and archive folder", nylas.update)
 	}
-	attachmentID := uploadEmailAttachmentForCommunicationsTest(t, handler, token, companyID, personalEmailDraftResourceID(user.UserID, "draft-proxy"), "note.txt", "text/plain", []byte("hello"))
+	attachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, "draft-proxy"), "note.txt", "text/plain", []byte("hello"))
 	sendBody := `{"company_id":"` + companyID + `","to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"note.txt","content_type":"text/plain","size":5}]}`
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", sendBody, token, http.StatusCreated)
 	if nylas.sent.To[0].Email != "friend@example.com" || nylas.sent.Subject != "Hi" {
@@ -1017,7 +1022,7 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != attachmentID || nylas.sent.Attachments[0].Filename != "note.txt" || nylas.sent.Attachments[0].ContentType != "text/plain" || nylas.sent.Attachments[0].Content != "aGVsbG8=" {
 		t.Fatalf("attachments = %+v, want attachment resolved from Mango storage", nylas.sent.Attachments)
 	}
-	inlineAttachmentID := uploadEmailAttachmentForCommunicationsTest(t, handler, token, companyID, personalEmailDraftResourceID(user.UserID, "draft-inline"), "screenshot.png", "image/png", []byte("png-bytes"))
+	inlineAttachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, "draft-inline"), "screenshot.png", "image/png", []byte("png-bytes"))
 	inlineBody := `<div>Screenshot</div><img src="mango-attachment:` + url.PathEscape(inlineAttachmentID) + `" alt="screenshot"><img src='mango-attachment:` + url.PathEscape(inlineAttachmentID) + `' alt="duplicate reference">`
 	inlinePayload, err := json.Marshal(map[string]any{
 		"company_id": companyID,
@@ -1408,7 +1413,7 @@ func TestCommunicationsSendResolvesLargeMangoAttachmentWithQueryCompanyID(t *tes
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 	largeContent := []byte(strings.Repeat("ABC", 280000))
-	attachmentID := uploadEmailAttachmentForCommunicationsTest(t, handler, token, companyID, personalEmailDraftResourceID(user.UserID, "draft-large"), "large.txt", "text/plain", largeContent)
+	attachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, user.UserID, companyID, personalEmailDraftResourceID(user.UserID, "draft-large"), "large.txt", "text/plain", largeContent)
 	body := `{"to":[{"email":"friend@example.com"}],"subject":"Hi","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"large.txt","content_type":"text/plain","size":` + fmt.Sprint(len(largeContent)) + `}]}`
 
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send?company_id="+companyID, body, token, http.StatusCreated)
@@ -1717,7 +1722,7 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 		t.Fatal(err)
 	}
 	sharedContent := []byte("shared attachment bytes")
-	attachmentID := uploadEmailAttachmentForCommunicationsTest(t, handler, token, companyID, sharedEmailDraftResourceID(folder.FolderID, "draft-shared-send"), "shared-large.txt", "text/plain", sharedContent)
+	attachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, actor.UserID, companyID, sharedEmailDraftResourceID(folder.FolderID, "draft-shared-send"), "shared-large.txt", "text/plain", sharedContent)
 	largeBody := `{"to":[{"email":"customer@example.com"}],"subject":"Shared hello","body":"Body","attachments":[{"attachment_id":"` + attachmentID + `","filename":"shared-large.txt","content_type":"text/plain","size":` + fmt.Sprint(len(sharedContent)) + `}]}`
 	assertJSONStatus(t, handler, http.MethodPost, path, largeBody, token, http.StatusCreated)
 	if nylas.lastSendGrantID != "grant-support" {
@@ -1729,7 +1734,7 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != attachmentID || nylas.sent.Attachments[0].Filename != "shared-large.txt" || nylas.sent.Attachments[0].Content != base64.StdEncoding.EncodeToString(sharedContent) {
 		t.Fatalf("attachments = %+v, want shared inbox attachment resolved from Mango storage", nylas.sent.Attachments)
 	}
-	inlineAttachmentID := uploadEmailAttachmentForCommunicationsTest(t, handler, token, companyID, sharedEmailDraftResourceID(folder.FolderID, "draft-shared-inline"), "shared-screenshot.png", "image/png", []byte("shared-png"))
+	inlineAttachmentID := seedEmailAttachmentForCommunicationsTest(t, repo, storage, actor.UserID, companyID, sharedEmailDraftResourceID(folder.FolderID, "draft-shared-inline"), "shared-screenshot.png", "image/png", []byte("shared-png"))
 	inlinePayload, err := json.Marshal(map[string]any{
 		"to":      []map[string]string{{"email": "customer@example.com"}},
 		"subject": "Shared inline screenshot",

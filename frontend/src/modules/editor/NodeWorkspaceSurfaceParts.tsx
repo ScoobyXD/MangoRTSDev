@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { downloadEmailAttachment, fetchCommunicationsStatus, getEmailMessage, getEmailThread, listEmailMessages, respondToCalendarInvite, sendEmail, type CalendarInviteRSVPStatus, type EmailAddress, type EmailAttachment, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
 import { buildReplyAllRecipients } from "../communications/emailRecipients";
-import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
+import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentUploadProgress, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
 import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
@@ -65,8 +65,6 @@ import {
   ArrowRightIcon,
   avatarBackgroundForName,
   buildChatThreads,
-  CHAT_ATTACHMENT_MAX_BYTES,
-  CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES,
   clampChatPaneHeight,
   ChatIcon,
   type ChatThreadNode,
@@ -2792,8 +2790,17 @@ export type AttachmentCountDropdownItem = {
   contextLabel?: string;
 };
 
+export type AttachmentUploadDropdownItem = {
+  id: string;
+  filename: string;
+  size: number;
+  attachmentID?: string;
+  progress: MangoAttachmentUploadProgress;
+};
+
 type AttachmentCountDropdownProps = {
   items: AttachmentCountDropdownItem[];
+  uploads?: AttachmentUploadDropdownItem[];
   apiBase: string;
   companyID: string;
   accent: string;
@@ -2804,6 +2811,8 @@ type AttachmentCountDropdownProps = {
   loadError?: string;
   onRetry?: () => void;
   onRemove?: (item: AttachmentCountDropdownItem) => void;
+  onCancelUpload?: (uploadID: string) => void;
+  onRetryUpload?: (uploadID: string) => void;
   onError: (message: string) => void;
 };
 
@@ -3124,8 +3133,68 @@ const DownloadIcon: React.FC<{ color: string }> = ({ color }) => (
   </svg>
 );
 
+const ATTACHMENT_UPLOAD_STATE_LABELS: Record<MangoAttachmentUploadProgress["state"], string> = {
+  preparing: "Preparing",
+  uploading: "Uploading",
+  retrying: "Retrying",
+  completing: "Completing",
+  complete: "Complete",
+  canceled: "Canceled",
+  failed: "Failed",
+};
+
+const AttachmentUploadProgressRow: React.FC<{
+  item: AttachmentUploadDropdownItem;
+  accent: string;
+  surfaceText: string;
+  onCancel?: (uploadID: string) => void;
+  onRetry?: (uploadID: string) => void;
+}> = ({ item, accent, surfaceText, onCancel, onRetry }) => {
+  const filename = splitAttachmentFilename(item.filename);
+  const state = item.progress.state;
+  const percent = Math.max(0, Math.min(100, Math.round(item.progress.fraction * 100)));
+  const canCancel = state === "preparing" || state === "uploading" || state === "retrying" || state === "completing";
+  const canRetry = state === "failed" || state === "canceled";
+  const statusColor = state === "failed" ? "#be123c" : state === "complete" ? "#047857" : state === "canceled" ? "#64748b" : accent;
+  return (
+    <div
+      role={state === "failed" ? "alert" : "status"}
+      aria-live={state === "failed" ? "assertive" : "polite"}
+      style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 8, border: "1px solid rgba(100,116,139,0.16)", borderRadius: 10, background: "#ffffff", color: surfaceText, padding: "7px 8px" }}
+    >
+      <span style={{ minWidth: 0, display: "grid", gap: 5 }}>
+        <span title={filename.filename} style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 6 }}>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 900 }}>{filename.baseName}</span>
+          <span style={{ flex: "0 0 auto", border: "1px solid rgba(100,116,139,0.18)", borderRadius: 5, background: "#f8fafc", padding: "2px 4px", color: "rgba(71,85,105,0.92)", fontSize: 8.5, fontWeight: 950 }}>{filename.extensionLabel}</span>
+        </span>
+        <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, color: "rgba(100,116,139,0.86)", fontSize: 10, fontWeight: 750 }}>
+          <span>{formatFileSize(item.size)}</span>
+          <span style={{ color: statusColor }}>{ATTACHMENT_UPLOAD_STATE_LABELS[state]}{state === "uploading" || state === "preparing" || state === "retrying" ? ` ${percent}%` : ""}</span>
+        </span>
+        <span
+          role="progressbar"
+          aria-label={`${filename.filename} upload progress`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+          style={{ height: 4, borderRadius: 999, overflow: "hidden", background: "rgba(148,163,184,0.24)" }}
+        >
+          <span style={{ width: `${percent}%`, height: "100%", display: "block", borderRadius: 999, background: statusColor, transition: "width 120ms linear" }} />
+        </span>
+      </span>
+      {canCancel && onCancel && (
+        <button type="button" onClick={() => onCancel(item.id)} style={{ minHeight: 27, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: "#be123c", cursor: "pointer", padding: "2px 7px", font: "inherit", fontSize: 10, fontWeight: 900 }}>Cancel</button>
+      )}
+      {canRetry && onRetry && (
+        <button type="button" onClick={() => onRetry(item.id)} style={{ minHeight: 27, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: EDITOR_NEU_SURFACE, color: accent, cursor: "pointer", padding: "2px 7px", font: "inherit", fontSize: 10, fontWeight: 900 }}>Retry</button>
+      )}
+    </div>
+  );
+};
+
 export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = ({
   items,
+  uploads = [],
   apiBase,
   companyID,
   accent,
@@ -3136,12 +3205,15 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
   loadError = "",
   onRetry,
   onRemove,
+  onCancelUpload,
+  onRetryUpload,
   onError,
 }) => {
   const [open, setOpen] = useState(false);
   const [attachmentMenu, setAttachmentMenu] = useState<{ item: AttachmentCountDropdownItem; x: number; y: number } | null>(null);
   const [previewItem, setPreviewItem] = useState<AttachmentCountDropdownItem | null>(null);
   const [downloadingResourceAttachmentID, setDownloadingResourceAttachmentID] = useState("");
+  const activeUploadCount = uploads.filter((item) => item.progress.state === "preparing" || item.progress.state === "uploading" || item.progress.state === "retrying" || item.progress.state === "completing").length;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const close = useCallback(() => {
@@ -3149,6 +3221,9 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
     setAttachmentMenu(null);
   }, []);
   useCloseFloatingMenu(open || Boolean(attachmentMenu), rootRef, close);
+  useEffect(() => {
+    if (activeUploadCount > 0) setOpen(true);
+  }, [activeUploadCount]);
   const closePreview = useCallback(() => {
     setPreviewItem(null);
     window.requestAnimationFrame(() => triggerRef.current?.focus());
@@ -3191,8 +3266,8 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={loadError ? "Attachments unavailable" : `Attachments (${items.length})`}
-        title="Attachments"
+        aria-label={loadError ? "Attachments unavailable" : `Attachments (${items.length} complete${activeUploadCount ? `, ${activeUploadCount} uploading` : ""})`}
+        title={activeUploadCount ? `${activeUploadCount} attachment upload${activeUploadCount === 1 ? "" : "s"} in progress` : "Attachments"}
         onClick={() => setOpen((nextOpen) => !nextOpen)}
         style={{
           minHeight: compact ? 24 : 30,
@@ -3216,6 +3291,7 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
       >
         <PaperclipIcon color={open ? accent : "rgba(100,116,139,0.85)"} />
         <span>{loading ? "..." : loadError ? "!" : items.length}</span>
+        {activeUploadCount > 0 && <span aria-hidden="true" style={{ color: accent, fontSize: 9, fontWeight: 950 }}>+{activeUploadCount}</span>}
       </button>
       {open && (
         <div
@@ -3259,7 +3335,17 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
               )}
             </div>
           )}
-          {!loading && !loadError && items.length === 0 && (
+          {uploads.map((upload) => (
+            <AttachmentUploadProgressRow
+              key={`upload-${upload.id}`}
+              item={upload}
+              accent={accent}
+              surfaceText={surfaceText}
+              onCancel={onCancelUpload}
+              onRetry={onRetryUpload}
+            />
+          ))}
+          {!loading && !loadError && items.length === 0 && uploads.length === 0 && (
             <div style={{ padding: "8px 10px", color: surfaceText, opacity: 0.62, fontSize: 11, fontWeight: 800 }}>
               No attachments
             </div>
@@ -5472,25 +5558,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     if (!editable) return;
     const incomingFiles = Array.from(files);
     if (incomingFiles.length === 0) return;
-    let nextTotalSize = draftAttachments.reduce((total, attachment) => total + attachment.size, 0);
-    const acceptedFiles: File[] = [];
-    for (const file of incomingFiles) {
-      if (file.size > CHAT_ATTACHMENT_MAX_BYTES) {
-        const nextError = `${file.name} is larger than ${formatFileSize(CHAT_ATTACHMENT_MAX_BYTES)}.`;
-        setError(nextError);
-        onError(nextError);
-        continue;
-      }
-      if (nextTotalSize + file.size > CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES) {
-        const nextError = `Email draft attachments are limited to ${formatFileSize(CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES)} total.`;
-        setError(nextError);
-        onError(nextError);
-        continue;
-      }
-      acceptedFiles.push(file);
-      nextTotalSize += file.size;
-    }
-    if (acceptedFiles.length === 0) return;
     if (!attachmentRequestJSON || !apiBase.trim() || !companyID.trim() || !nodeID.trim()) {
       const nextError = "Email attachment upload context is unavailable.";
       setError(nextError);
@@ -5498,7 +5565,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       return;
     }
     const resourceID = mangoAttachedEmailResourceID({ nodeID, messageID });
-    void Promise.all(acceptedFiles.map((file) => uploadEditorAttachment(file, {
+    void Promise.allSettled(incomingFiles.map((file) => uploadEditorAttachment(file, {
       requestJSON: attachmentRequestJSON,
       companyID,
       resourceType: "attached_email",
@@ -5508,16 +5575,20 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       messageID: replyTargetMessageID || messageID,
       editorSurface: "attached-email-reply",
     })))
-      .then((attachments) => {
-        setError("");
-        setDraftAttachments((current) => [...current, ...attachments]);
-      })
-      .catch((cause) => {
-        const nextError = cause instanceof Error ? cause.message : "failed_to_read_attachment";
+      .then((results) => {
+        const attachments = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+        if (attachments.length > 0) setDraftAttachments((current) => [...current, ...attachments]);
+        const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+        if (failures.length === 0) {
+          setError("");
+          return;
+        }
+        const cause = failures[0]?.reason;
+        const nextError = cause instanceof Error ? cause.message : "failed_to_upload_attachment";
         setError(nextError);
         onError(nextError);
       });
-  }, [apiBase, attachmentRequestJSON, companyID, draftAttachments, editable, messageID, nodeID, onError, replyTargetMessageID]);
+  }, [apiBase, attachmentRequestJSON, companyID, editable, messageID, nodeID, onError, replyTargetMessageID]);
 
   const removeEmailDraftAttachment = useCallback((attachmentID: string) => {
     setDraftAttachments((current) => current.filter((attachment) => attachment.id !== attachmentID));

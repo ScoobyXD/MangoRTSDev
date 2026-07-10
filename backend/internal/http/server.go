@@ -79,11 +79,15 @@ type Server struct {
 	nylasClient                             NylasClient
 	nylasConfig                             NylasConfig
 	attachmentStorage                       AttachmentObjectStorage
+	attachmentDirectUpload                  attachmentDirectUploadConfig
+	attachmentUploadCleanupCancel           context.CancelFunc
+	attachmentUploadCleanupDisabled         bool
 	maxBodyBytes                            int64
 	legacyMapRoutesEnabled                  bool
 }
 
 type ServerOptions struct {
+	DisableAttachmentUploadCleanup          bool
 	AuthValidator                           AuthTokenValidator
 	AuthMembershipCacheTTL                  time.Duration
 	AuthMembershipCacheMaxEntries           int
@@ -232,12 +236,15 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		nylasClient:                             options.NylasClient,
 		nylasConfig:                             options.NylasConfig,
 		attachmentStorage:                       options.AttachmentStorage,
+		attachmentDirectUpload:                  attachmentDirectUploadConfigFromEnv(),
+		attachmentUploadCleanupDisabled:         options.DisableAttachmentUploadCleanup,
 		maxBodyBytes:                            options.MaxRequestBodyBytes,
 		legacyMapRoutesEnabled:                  options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
 	}
 	server.initializeNotificationDomainEventCheckpoints(context.Background())
 	server.initializeWorkspaceDerivedDomainEventCheckpoints(context.Background())
 	server.startWorkspaceEventFanout()
+	server.startAttachmentUploadCleanup()
 	server.startWorkspaceDerivedDomainEventCatchup()
 	server.startNotificationDomainEventCatchup()
 	server.startNotificationCleanup()
@@ -247,6 +254,9 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 }
 
 func (s *Server) Close() {
+	if s.attachmentUploadCleanupCancel != nil {
+		s.attachmentUploadCleanupCancel()
+	}
 	if s.workspaceFanoutCancel != nil {
 		s.workspaceFanoutCancel()
 	}

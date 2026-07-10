@@ -7,11 +7,11 @@ import {
   type MangoAttachmentRelationshipKind,
   type MangoAttachmentResourceType,
   type MangoAttachmentSourceKind,
+  type MangoAttachmentUploadProgress,
   type MangoAttachmentUploadResponse,
 } from "../attachments/attachmentApi";
 import type { MentionableCompanyUser } from "./editorMentions";
 import type { EditorChatAttachment, EditorTextBlockChatMessage } from "./editorProjection";
-import { generateStableInformationID } from "./editorTypes";
 import type { NodeContentChange } from "./nodeContentChanges";
 import type { EditorOutlineStyleID } from "./plainTextEditing";
 import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState } from "./useEditorDocumentSurfaceHandlers";
@@ -109,8 +109,6 @@ export type ChatThreadNode = {
 };
 
 export const EMAIL_DRAG_MIME = "application/x-mango-email-message";
-export const CHAT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
-export const CHAT_DRAFT_ATTACHMENT_MAX_TOTAL_BYTES = 12 * 1024 * 1024;
 export const CHAT_PANE_MIN_HEIGHT = 440;
 export const CHAT_PANE_MAX_HEIGHT = 900;
 export const TEXT_BLOCK_MIN_HEIGHT = 660;
@@ -224,23 +222,6 @@ export function formatFileSize(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
 }
 
-export function readChatAttachment(file: File): Promise<EditorChatAttachment> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("failed_to_read_attachment"));
-    reader.onload = () => {
-      resolve({
-        id: generateStableInformationID(),
-        name: file.name,
-        type: file.type || "application/octet-stream",
-        size: file.size,
-        dataURL: typeof reader.result === "string" ? reader.result : undefined,
-      });
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
 export type UploadEditorAttachmentOptions = {
   requestJSON: AttachmentRequestJSON;
   companyID: string;
@@ -251,6 +232,8 @@ export type UploadEditorAttachmentOptions = {
   informationID?: string;
   messageID?: string;
   editorSurface?: string;
+  signal?: AbortSignal;
+  onProgress?: (progress: MangoAttachmentUploadProgress) => void;
 };
 
 export async function uploadEditorAttachment(file: File, options: UploadEditorAttachmentOptions): Promise<EditorChatAttachment> {
@@ -264,6 +247,8 @@ export async function uploadEditorAttachment(file: File, options: UploadEditorAt
     informationID: options.informationID,
     messageID: options.messageID,
     editorSurface: options.editorSurface,
+    signal: options.signal,
+    onProgress: options.onProgress,
   });
   return editorChatAttachmentFromUpload(uploaded);
 }

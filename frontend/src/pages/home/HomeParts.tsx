@@ -4097,7 +4097,9 @@ export function LogicGateInboxNodeRow({
   );
 }
 
-const COMPOSE_ATTACHMENT_MAX_TOTAL_BYTES = 24_000_000;
+// Mail provider send constraint; Mango's browser-upload policy remains the
+// authoritative per-file storage limit.
+const EMAIL_PROVIDER_ATTACHMENT_MAX_TOTAL_BYTES = 24_000_000;
 
 function formatComposeAttachmentSize(size: number): string {
   if (!Number.isFinite(size) || size <= 0) return "";
@@ -5143,7 +5145,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
       return;
     }
     const selectedBytes = selectedFiles.reduce((sum, file) => sum + file.size, 0);
-    if (totalAttachmentBytes + selectedBytes > COMPOSE_ATTACHMENT_MAX_TOTAL_BYTES) {
+    if (totalAttachmentBytes + selectedBytes > EMAIL_PROVIDER_ATTACHMENT_MAX_TOTAL_BYTES) {
       setAttachmentError("Attachments are limited to 24 MB total.");
       return;
     }
@@ -5153,7 +5155,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
         userID: currentUserID,
         sharedInboxID: cleanSharedInboxID,
       });
-      const additions = await Promise.all(selectedFiles.map(async (file) => {
+      const results = await Promise.allSettled(selectedFiles.map(async (file) => {
         const uploaded = await uploadMangoAttachment(attachmentRequestJSON, {
           companyID: cleanCompanyID,
           resourceType: "email_draft",
@@ -5173,7 +5175,13 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           size: attachment.byte_size || file.size,
         };
       }));
-      update({ draftID: cleanDraftID, attachments: [...compose.attachments, ...additions] });
+      const additions = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      if (additions.length > 0) update({ draftID: cleanDraftID, attachments: [...compose.attachments, ...additions] });
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failures.length > 0) {
+        const first = failures[0]?.reason;
+        setAttachmentError(first instanceof Error ? first.message : `${failures.length} attachment upload${failures.length === 1 ? "" : "s"} failed.`);
+      }
     } catch (attachError) {
       setAttachmentError(attachError instanceof Error ? attachError.message : "Failed to upload attachment.");
     }

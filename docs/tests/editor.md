@@ -54,6 +54,9 @@ ED30 - The shared outline-style dropdown inventory is Automatic Numbering, Inden
 ED31 - Font-size toolbar actions must route through the shared editor formatting controller/helper for every unified rich editor surface, including Logic Gate editor text, node text boxes, project text boxes, My Triage/Shared Triage compose and reply bodies, and attached-email reply bodies. A surface must not keep a local font-size span mutation path behind the shared toolbar.
 ED32 - The shared formatting controller must restore the last valid editor range before toolbar actions that can move browser focus. Font size applies to the restored range or pending caret, and Bold/Underline state must reflect the browser command state so activating the same control again removes the format.
 ED33 - An image-only rich email body containing a durable Mango attachment image counts as sendable content. The frontend must preserve the reference without raw bytes, and the backend email adapter must authorize/resolve it and produce provider-ready CID HTML plus an inline attachment.
+ED34 - Normal browser attachment file bodies bypass Mango API and editor persistence: the editor requests an authorized upload intent with JSON metadata, incrementally hashes with bounded memory, and sends raw File/Blob bytes to private S3 through the exact presigned request. Server-originated email/import/migration/job uploads retain their separate streaming path.
+ED35 - Node attachment progress is transient node-level UI outside the rich document. It exposes per-file byte progress, preparing/uploading/retrying/completing/complete/canceled/failed states, cancel, and retry without blocking edits or creating projection saves; pending/failed/canceled items do not enter normal attachment counts.
+ED36 - Deleting the origin text box does not cancel node ownership, delete a completed attachment/attached email, or recreate the projection. An active upload can remain in node-level progress and finalize to the node only when the node exists and current edit permission still passes.
 
 ## Scenarios
 
@@ -195,6 +198,9 @@ Business logic covered:
 - ED26
 - ED27
 - ED33
+- ED34
+- ED35
+- ED36
 
 Given:
 - A user pastes or drops an image into a node text box, Logic Gate editor body, project text box, My Triage compose/reply body, Shared Triage compose/reply body, or attached-email reply body.
@@ -206,6 +212,9 @@ Expected:
 - For email surfaces, the backend send adapter deduplicates and resolves those references, rewrites outbound image sources to matching `cid:` values, and returns metadata-only attachment fallback data for immediate rendering.
 - Each rich-editor surface still saves or sends through its own node, Logic Gate, project, personal mailbox, or shared mailbox adapter.
 - Chat attachment behavior follows `docs/tests/attachments.md` as chat attachment behavior and does not become unified rich-editor content.
+- Browser file bytes use the direct S3 data plane rather than editor HTML/projection or Mango API byte bodies, while the Mango control plane remains authoritative.
+- Node upload progress stays outside the rich document, does not dirty editor content, and refreshes the shared completed-attachment query only after completion.
+- Deleting the origin text box keeps the projection deleted and preserves node-owned completed files/attached emails; an authorized in-flight upload may complete without recreating the box.
 
 Given:
 - A V1 unified editor implementation pass is changing rich editor behavior.

@@ -5,8 +5,9 @@ Last updated: 2026-07-10
 Coverage Status:
 - Node attachment filename/type and visibility-gated thumbnail presentation are covered by `tests/frontend/modules/attachments/attachmentPresentation.test.ts`; concurrent byte reservations, deduplicated totals, partial success, latest-state append, stale navigation/scope/permission invalidation, and delete-while-uploading protection are covered by `tests/frontend/modules/editor/nodeTextBlockAttachments.test.ts`.
 - Incoming email image selection/download/fullscreen behavior and node attachment removal controls are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; shared editor image-reference behavior is covered by `tests/frontend/modules/editor/editorProjection.test.ts` and `tests/frontend/modules/editor/richTextEditing.test.ts`.
+- Direct-upload coverage must additionally prove bounded hashing, JSON-only Mango control requests, raw credential-free S3 PUTs, exact signed headers, progress/cancel/retry/resume, completed-part reconciliation, node-scoped deletion survival, and completed-only list/count refresh.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/api/requestJSON.test.ts` covers multipart upload request headers; `tests/frontend/modules/editor/editorProjection.test.ts` covers attachment-reference serialization for editor text-block/chat payloads and legacy data-url parsing without emitting new durable data URLs; `tests/frontend/modules/editor/richTextEditing.test.ts` covers the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers email compose payloads sending Mango attachment references without durable `content`; `backend/internal/http/attachment_handlers_test.go` covers attachment metadata/resource links, content permission checks, and `email_draft`/`attached_email` resource authorization; `backend/internal/http/communications_handlers_test.go` covers email send-time S3 resolution into provider payloads, rejection of raw attachment content, and rejection of inline data URL send bodies; `backend/internal/http/durable_inline_guard_test.go` covers backend durable-inline-byte guard shapes; `backend/internal/attachments/migration/scanner_test.go` covers scanner rewrite/idempotency/signals; `backend/cmd/mango-attachment-migrate/main_test.go` covers dry-run report mapping and apply confirmation)
+- Business Logic Covered By Automated Tests: Partial. Existing attachment presentation, durable-reference serialization, authenticated content access, email send-time S3 resolution, durable-inline guards, and migration behavior are covered. The direct browser path requires focused frontend hashing/transport/node-lifecycle tests, backend intent/storage/repository tests, and the static IaC contract in `infra/tests/attachment_direct_upload.test.mjs`; normal suites must not require live AWS.
 
 ## Business Logic
 
@@ -19,13 +20,15 @@ Coverage Status:
 - In-app preview supports images, PDF, bounded plain-text and source-like content (including text, code, CSV, JSON, and XML), audio, and video when the browser can render the returned content type. Text preview may receive the full authenticated blob from the current content endpoint, but it decodes only `blob.slice(0, 256 KiB)` and renders at most 200,000 decoded characters so a large file cannot create unbounded decode or DOM work.
 - Office documents, spreadsheets, presentations, archives, and unknown/binary formats are not converted in the browser. Their in-app state must say that preview is unavailable while keeping metadata and the explicit original-file download action usable.
 - Preview requests and temporary object URLs are transient UI resources. Closing or replacing a preview must abort obsolete work where possible and revoke any object URL created for the previous file.
-- The existing upload policy remains unchanged while a higher limit is discussed: at most 10 MiB per selected file and 12 MiB total attachment bytes per node text box. This change must not be described or tested as a limit increase.
+- Browser attachment policy defaults to 250 MiB (262,144,000 bytes) per file and is backend-authoritative/configurable. The old 12 MiB aggregate-per-text-box limit does not apply to the direct browser path. Files through and including 64 MiB use one presigned PUT; larger files use resumable S3 multipart upload with 16 MiB parts.
+- Browser preparation and transfer remain bounded-memory: raw SHA-256 is computed incrementally, S3 receives raw `File`/`Blob` or bounded `File.slice` bodies, no whole-file `arrayBuffer()`/base64/data URL is created, and browser file bytes never pass through Mango API.
+- Upload-progress rows are node-level transient state with preparing, uploading, retrying, completing, complete, canceled, and failed states, byte progress, cancel, and retry. Pending/failed/canceled intents never appear in normal node counts/lists; successful sibling files remain attached.
 
 Required regression scenario:
 - Upload previewable and non-previewable files from two node text boxes, delete one originating text box, and reopen the node.
 - Confirm every retained file is still present in the node-level count/list, the deleted origin has the fallback label, supported rows preview in app without downloading, unsupported rows show preview-unavailable state, and the separate download control still returns the original file.
 - Confirm text preview truncates rather than rejects larger content, decodes no more than the first 256 KiB, renders no more than 200,000 decoded characters, and shows `Preview limited to 256 KiB / 200,000 characters.` when content exceeds either display bound.
-- Confirm closing/switching previews cleans up transient browser resources and upload validation still enforces the existing 10 MiB per-file and 12 MiB per-text-box policy.
+- Confirm closing/switching previews cleans up transient browser resources; upload validation accepts exactly 250 MiB and rejects one byte above before S3; the 64 MiB boundary selects single versus multipart correctly; and no 12 MiB text-box aggregate is applied to direct uploads.
 
 ATT1 - All durable user file bytes must be stored in private Amazon S3 through the Mango attachment system in local, dev, and prod environments; normal local development must not use a separate filesystem attachment backend.
 ATT2 - Postgres stores attachment metadata, S3 object keys, variants, ownership/resource links, and audit fields; editor, chat, email, projection, and saved-version payloads store attachment references, not file bytes.
@@ -52,6 +55,12 @@ ATT22 - Read access to the owning node permits listing and downloading its attac
 ATT23 - Right-clicking an attachment row in a node-wide or text-box attachment list exposes a red `Remove from node` action only when the viewer can edit that node. The action removes the active node resource link; it does not delete shared attachment metadata, private S3 bytes, or links owned by another resource.
 ATT24 - An inline image in an incoming email body can be selected with one click to expose an authenticated download action and opened in fullscreen preview with a double-click. Inline `cid:` sources must resolve through an authorized Mango or provider attachment endpoint rather than exposing a public object URL.
 ATT25 - Selecting an inline image in a unified rich editor preserves its visual selection/resize handles and establishes a collapsed document caret immediately before the image frame. Text or spaces typed at that caret appear before the image, and image resizing remains available in node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply editors.
+ATT26 - Browser-selected file bytes go directly to private S3 through short-lived presigned requests. Mango API remains the authoritative control plane for authentication, authorization, upload intents, IDs, object keys, limits, signing, completion/abort, S3 verification, metadata, and durable resource linking; browser bytes never traverse Mango API.
+ATT27 - The configurable browser limit defaults to 250 MiB per file. Single PUT applies through and including 64 MiB; larger files use 16 MiB multipart parts with at most three parts in flight per file and four S3 PUTs across the page. There is no 12 MiB aggregate-per-text-box limit on this path.
+ATT28 - Browser raw file SHA-256 is computed incrementally with bounded memory before intent creation. `attachments.sha256` remains the raw content hash; S3 checksum algorithm/value/type and SHA verification method are recorded separately, and multipart ETags/composite checksums never replace the raw hash.
+ATT29 - Upload intents and multipart part state are durable and idempotent. Creation uses actor/company/client-request identity; signing the same part/checksum may refresh its URL; completion and abort replay safely; resume reconciles authoritative accepted parts; expired intents cannot sign/complete and are cleaned up by the application with S3 lifecycle as a backstop.
+ATT30 - Only completed intents create/list permanent attachments. Node-level progress preserves filename/extension/size, byte progress, cancel/retry, and the states preparing, uploading, retrying, completing, complete, canceled, and failed. Each selected file is independent and one failure cannot discard completed siblings.
+ATT31 - Server-side streaming PutObject, including non-seekable producer streams, remains available for incoming email, provider imports, migrations, and backend jobs. Removing the old browser multipart-byte path must not remove or weaken backend-originated streaming or authenticated GetObject reads.
 
 ## Scenarios
 
@@ -68,7 +77,7 @@ Given:
 - The upload has a parent resource context such as node, Logic Gate, project, chat, or email.
 
 Expected:
-- The backend stores bytes in the configured private S3 attachment bucket.
+- For browser files, Mango authorizes and creates an intent while the browser sends raw bytes directly to the configured private S3 attachment bucket; backend-originated producers retain server streaming.
 - The backend writes metadata and resource links to Postgres.
 - Content reads go through Mango permission checks.
 - A developer can find metadata in DBeaver and use the stored object key to inspect the object in S3 when appropriate.
@@ -108,10 +117,10 @@ Given:
 
 Expected:
 - Node-level uploads create attachment metadata and node resource links.
-- A successful node upload is appended to the latest text-block attachment state after the request finishes, so two overlapping picker batches cannot overwrite one another. Concurrent batches reserve their selected byte totals per company/node/text block before upload validation, preventing each batch from independently passing the 12 MiB text-box limit.
-- The 12 MiB text-box total is calculated from deduplicated canonical node attachment metadata plus projection-only references that do not yet have a canonical relationship; the same durable attachment ID must not be counted twice.
+- Each selected file creates an independent node-owned direct-upload intent. Exactly 250 MiB is accepted and one byte above is rejected before S3; files through 64 MiB use single PUT and larger files use 16 MiB multipart parts without a 12 MiB text-box aggregate.
+- Overlapping picker batches cannot overwrite one another. Completed attachment IDs append to current node state, while each pending file appears once in node-level progress and uses the page/per-file concurrency caps.
 - When a multi-file upload only partly succeeds, every successfully uploaded attachment remains linked, visible, and downloadable; the failed files are reported without discarding the successful results.
-- Upload completion is scoped to the company/node/text-block generation and edit permission that started it. A late completion after navigation, attachment-scope change, edit-permission loss, or text-block deletion must not mutate, save, refresh, or recreate the current projection.
+- Upload completion is scoped to the authenticated company/actor and durable node resource. Deleting the origin text box does not invalidate node ownership or recreate the projection; completion still succeeds when the node exists and current node edit authorization passes. Node deletion or permission loss rejects completion and cleans up the unfinalized object.
 - Each node text box exposes a list/count containing only file attachments linked to that text block, while one node-wide list/count contains the union across all text boxes without issuing one attachment-list request per text box.
 - Node-wide and per-text-box rows show a recognizable image, spreadsheet, document, presentation, PDF, archive, text/code, audio, video, or generic-file icon. A recognized final extension takes precedence over an unhelpful MIME value; unknown types use the generic fallback rather than appearing broken.
 - Image rows use visibility observation with a small vertical prefetch margin, so only visible or near-visible rows request bytes; closed menus and off-screen aggregate rows do not fetch thumbnails.
@@ -265,3 +274,27 @@ Expected:
 - Typing text or spaces at that caret moves the editable image forward, and resize behavior is consistent in node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply editors.
 - Closing or replacing previews releases transient browser object URLs.
 - The DOM and download action do not expose provider credentials, private S3 keys, or a public object URL.
+
+### Scenario ATT-S11: Browser Direct Upload Reliability And Cleanup
+
+Business logic covered:
+- ATT26
+- ATT27
+- ATT28
+- ATT29
+- ATT30
+- ATT31
+
+Given:
+- A user selects empty, small, 64 MiB, multipart, and over-limit files from a node text box.
+- A multipart part URL expires, a request is retried, the page reloads, one sibling fails, and the user cancels another upload.
+- A backend email/import producer also stores an attachment.
+
+Expected:
+- Mango control-plane requests contain JSON metadata only, while S3 requests contain raw File/Blob bytes and exact signed headers without Mango authorization or cookies.
+- Hashing and multipart work stay bounded by active chunks rather than whole-file size, and SHA-256 keeps raw-file meaning with separate S3 checksum provenance.
+- Empty files complete through single PUT; 64 MiB is single PUT; one byte above uses multipart; exactly 250 MiB is allowed; one byte above the configured maximum is rejected before S3.
+- Retry obtains a fresh URL for the same part, confirmed parts are not uploaded twice, resume reconciles backend/ListParts state, and completion/abort are idempotent.
+- Cancel aborts active browser requests and best-effort aborts the intent. Expired or abandoned objects are cleaned by the application, with AbortIncompleteMultipartUpload lifecycle as a backstop.
+- Completed siblings remain in node lists, while pending/failed/canceled rows remain progress state only and trigger no permanent attachment count.
+- The backend-originated producer still streams through PutObject without a redundant full-file copy.

@@ -1085,8 +1085,12 @@ async function attachUploadedEditorImageData(
   let displaySrc = imageData.src;
   try {
     displaySrc = await loadMangoAttachmentObjectURL(context.apiBase, context.companyID, attachment.attachment_id, "display");
+    if (displaySrc !== imageData.src) revokeTemporaryEditorImageSource(imageData.src);
   } catch {
     displaySrc = imageData.src;
+    if (displaySrc.startsWith("blob:") && typeof window !== "undefined") {
+      window.setTimeout(() => revokeTemporaryEditorImageSource(displaySrc), 60_000);
+    }
   }
   return {
     ...imageData,
@@ -1109,12 +1113,20 @@ async function insertEditorImageFile(
   editorImageAttachmentContext: EditorImageAttachmentContext | undefined,
 ) {
   const maxDisplayWidth = Math.max(120, Math.min(720, root.clientWidth - 56));
-  const imageData = await attachUploadedEditorImageData(
-    await createEditorImageDataFromFile(file, maxDisplayWidth, getEditorImageStorageBudget(root)),
-    file,
-    editorImageAttachmentContext,
-  );
+  const localImageData = await createEditorImageDataFromFile(file, maxDisplayWidth, getEditorImageStorageBudget(root));
+  let imageData: EditorImageData;
+  try {
+    imageData = await attachUploadedEditorImageData(localImageData, file, editorImageAttachmentContext);
+  } catch (cause) {
+    revokeTemporaryEditorImageSource(localImageData.src);
+    throw cause;
+  }
   insertPreparedEditorImage(root, imageData, savedRange, undoBefore, documentUndoHistory, scheduleDocumentSave, scheduleIndentGuideUpdate);
+}
+
+function revokeTemporaryEditorImageSource(src: string): void {
+  if (!src.startsWith("blob:") || typeof URL === "undefined" || typeof URL.revokeObjectURL !== "function") return;
+  URL.revokeObjectURL(src);
 }
 
 async function insertEditorClipboardImageData(

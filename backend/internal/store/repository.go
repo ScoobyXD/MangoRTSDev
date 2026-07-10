@@ -24,6 +24,9 @@ var (
 	ErrGVICStorageUnavailable        = errors.New("GVIC storage unavailable")
 	ErrSharedInboxStorageUnavailable = errors.New("shared inbox storage unavailable")
 	ErrEmailAccountUnavailable       = errors.New("email account unavailable")
+	ErrUploadStateConflict           = errors.New("attachment upload state conflict")
+	ErrUploadIntentExpired           = errors.New("attachment upload intent expired")
+	ErrUploadPayloadConflict         = errors.New("attachment upload idempotency payload conflict")
 )
 
 type Repository interface {
@@ -159,6 +162,19 @@ type AttachmentRepository interface {
 	ListResourceAttachments(companyID, resourceType, resourceID string) ([]domain.ResourceAttachment, error)
 	LinkResourceAttachment(input ResourceAttachmentInput) (domain.ResourceAttachment, error)
 	SoftDeleteResourceAttachment(input ResourceAttachmentDeleteInput) error
+	GetAttachmentUploadIntentByClientRequest(companyID, actorUserID, clientRequestID string) (domain.AttachmentUploadIntent, error)
+	CreateAttachmentUploadIntent(input AttachmentUploadIntentCreateInput) (domain.AttachmentUploadIntent, bool, error)
+	GetAttachmentUploadIntent(companyID, actorUserID, uploadIntentID string) (domain.AttachmentUploadIntent, error)
+	UpsertAttachmentUploadParts(input AttachmentUploadPartsInput) ([]domain.AttachmentUploadPart, error)
+	ReplaceAttachmentUploadObservedParts(input AttachmentUploadObservedPartsInput) ([]domain.AttachmentUploadPart, error)
+	ListAttachmentUploadParts(companyID, actorUserID, uploadIntentID string) ([]domain.AttachmentUploadPart, error)
+	BeginAttachmentUploadCompletion(input AttachmentUploadTransitionInput) (domain.AttachmentUploadIntent, bool, error)
+	ReopenAttachmentUploadIntent(input AttachmentUploadTransitionInput, failureCode string) (domain.AttachmentUploadIntent, error)
+	FailAttachmentUploadIntent(input AttachmentUploadTransitionInput, failureCode string) (domain.AttachmentUploadIntent, error)
+	FinalizeAttachmentUpload(input AttachmentUploadFinalizeInput) (domain.Attachment, domain.ResourceAttachment, error)
+	AbortAttachmentUploadIntent(input AttachmentUploadTransitionInput) (domain.AttachmentUploadIntent, error)
+	ListExpiredAttachmentUploadIntents(now time.Time, limit int) ([]domain.AttachmentUploadIntent, error)
+	ExpireAttachmentUploadIntent(uploadIntentID string, now time.Time) (domain.AttachmentUploadIntent, error)
 }
 
 type AttachmentCreateInput struct {
@@ -169,6 +185,10 @@ type AttachmentCreateInput struct {
 	MimeType         string
 	ByteSize         int64
 	SHA256           string
+	SHA256VerificationMethod string
+	StorageChecksumAlgorithm string
+	StorageChecksumValue string
+	StorageChecksumType string
 	StorageBucket    string
 	StorageKey       string
 	OriginalWidth    *int
@@ -177,6 +197,70 @@ type AttachmentCreateInput struct {
 	SourceProvider   string
 	ResourceLink     ResourceAttachmentInput
 	CreatedTimestamp time.Time
+}
+
+type AttachmentUploadIntentCreateInput struct {
+	UploadIntentID    string
+	CompanyID         string
+	ActorUserID       string
+	ClientRequestID   string
+	AttachmentID      string
+	OriginalFilename  string
+	MimeType          string
+	SizeBytes         int64
+	SHA256            string
+	ResourceType      string
+	ResourceID        string
+	InformationID     string
+	MessageID         string
+	EditorSurface     string
+	RelationshipKind  string
+	SourceKind        string
+	SourceProvider    string
+	OriginalWidth     *int
+	OriginalHeight    *int
+	StorageBucket     string
+	StorageKey        string
+	MultipartUploadID string
+	Strategy          string
+	PartSizeBytes     int64
+	PartCount         int
+	ExpiresTimestamp  time.Time
+	CreatedTimestamp  time.Time
+}
+
+type AttachmentUploadPartsInput struct {
+	CompanyID      string
+	ActorUserID    string
+	UploadIntentID string
+	Parts          []domain.AttachmentUploadPart
+	Now            time.Time
+}
+
+type AttachmentUploadObservedPartsInput struct {
+	CompanyID      string
+	ActorUserID    string
+	UploadIntentID string
+	Parts          []domain.AttachmentUploadPart
+	Now            time.Time
+}
+
+type AttachmentUploadTransitionInput struct {
+	CompanyID      string
+	ActorUserID    string
+	UploadIntentID string
+	Now            time.Time
+}
+
+type AttachmentUploadFinalizeInput struct {
+	CompanyID                 string
+	ActorUserID               string
+	UploadIntentID            string
+	SHA256VerificationMethod  string
+	StorageChecksumAlgorithm  string
+	StorageChecksumValue      string
+	StorageChecksumType       string
+	Now                       time.Time
 }
 
 type AttachmentVariantInput struct {

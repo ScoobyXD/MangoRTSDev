@@ -1,8 +1,6 @@
 package httpapi
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,17 +12,6 @@ import (
 	"strconv"
 	"strings"
 )
-
-const (
-	attachmentMultipartMaxMemory = 1 << 20
-	attachmentContentSniffBytes   = 512
-)
-
-type attachmentUploadInspection struct {
-	ByteSize            int64
-	SHA256              string
-	DetectedContentType string
-}
 
 type attachmentUploadResponse struct {
 	Attachment         domain.Attachment         `json:"attachment"`
@@ -45,15 +32,16 @@ func (s *Server) handleAttachments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	s.handleAttachmentUpload(w, r)
+	// Browser bytes no longer pass through Mango API. Server-side integrations
+	// retain AttachmentObjectStorage.PutObject and use it directly.
+	writeError(w, http.StatusGone, "attachment_browser_upload_moved")
 }
 
 func (s *Server) handleAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/attachments/"), "/")
+	if s.handleAttachmentDirectUploadRoute(w, r, trimmed) {
+		return
+	}
 	parts := strings.Split(trimmed, "/")
 	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
 		writeError(w, http.StatusNotFound, "not_found")
@@ -69,147 +57,6 @@ func (s *Server) handleAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeError(w, http.StatusNotFound, "not_found")
-}
-
-func (s *Server) handleAttachmentUpload(w http.ResponseWriter, r *http.Request) {
-	if s.attachmentStorage == nil {
-		writeError(w, http.StatusServiceUnavailable, "attachment_storage_unavailable")
-		return
-	}
-	if err := r.ParseMultipartForm(attachmentMultipartMaxMemory); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_multipart_upload")
-		return
-	}
-	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll()
-	}
-	companyID := strings.TrimSpace(r.FormValue("company_id"))
-	resourceType := store.NormalizeAttachmentResourceType(r.FormValue("resource_type"))
-	resourceID := strings.TrimSpace(r.FormValue("resource_id"))
-	if companyID == "" || resourceType == "" || resourceID == "" {
-		writeError(w, http.StatusBadRequest, "attachment_resource_context_required")
-		return
-	}
-	if !s.requireAttachmentResourceEdit(w, r, companyID, resourceType, resourceID) {
-		return
-	}
-	width, ok := optionalPositiveIntFormValue(w, r, "original_width")
-	if !ok {
-		return
-	}
-	height, ok := optionalPositiveIntFormValue(w, r, "original_height")
-	if !ok {
-		return
-	}
-	sourceKind := store.NormalizeAttachmentSourceKind(r.FormValue("source_kind"))
-	relationshipKind := store.NormalizeAttachmentRelationshipKind(r.FormValue("relationship_kind"))
-	if sourceKind == "" || relationshipKind == "" {
-		writeError(w, http.StatusBadRequest, "invalid_attachment")
-		return
-	}
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "file_required")
-		return
-	}
-	defer file.Close()
-	inspection, err := inspectAttachmentUpload(file)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "failed_to_read_upload")
-		return
-	}
-	attachmentID := store.NewUUIDv7String()
-	storageKey := attachmentOriginalObjectKey(companyID, attachmentID)
-	mimeType := strings.TrimSpace(header.Header.Get("Content-Type"))
-	if mimeType == "" {
-		mimeType = inspection.DetectedContentType
-	}
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-	if err := s.attachmentStorage.PutObject(r.Context(), AttachmentPutObjectInput{
-		Key:           storageKey,
-		ContentType:   mimeType,
-		ContentLength: inspection.ByteSize,
-		SHA256:        inspection.SHA256,
-		Body:          file,
-	}); err != nil {
-		writeAttachmentStorageError(w, err)
-		return
-	}
-	actorUserID := ""
-	if actor, ok := authenticatedActor(r); ok {
-		actorUserID = strings.TrimSpace(actor.User.UserID)
-	}
-	attachment, link, err := s.repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
-		CompanyID:        companyID,
-		AttachmentID:     attachmentID,
-		UploadedByUserID: actorUserID,
-		OriginalFilename: attachmentFilename(header.Filename),
-		MimeType:         mimeType,
-		ByteSize:         inspection.ByteSize,
-		SHA256:           inspection.SHA256,
-		StorageBucket:    s.attachmentStorage.Bucket(),
-		StorageKey:       storageKey,
-		OriginalWidth:    width,
-		OriginalHeight:   height,
-		SourceKind:       sourceKind,
-		SourceProvider:   r.FormValue("source_provider"),
-		ResourceLink: store.ResourceAttachmentInput{
-			CompanyID:        companyID,
-			ResourceType:     resourceType,
-			ResourceID:       resourceID,
-			InformationID:    r.FormValue("information_id"),
-			MessageID:        r.FormValue("message_id"),
-			EditorSurface:    r.FormValue("editor_surface"),
-			RelationshipKind: relationshipKind,
-			CreatedByUserID:  actorUserID,
-		},
-	})
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_attachment")
-		return
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "resource_not_found")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_create_attachment")
-		return
-	}
-	writeJSON(w, http.StatusCreated, attachmentUploadResponse{Attachment: attachment, ResourceAttachment: link})
-}
-
-func inspectAttachmentUpload(file io.ReadSeeker) (attachmentUploadInspection, error) {
-	if file == nil {
-		return attachmentUploadInspection{}, errors.New("attachment upload file is required")
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return attachmentUploadInspection{}, err
-	}
-
-	prefix := make([]byte, attachmentContentSniffBytes)
-	prefixSize, readErr := io.ReadFull(file, prefix)
-	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
-		return attachmentUploadInspection{}, readErr
-	}
-
-	hasher := sha256.New()
-	_, _ = hasher.Write(prefix[:prefixSize])
-	remainderSize, err := io.Copy(hasher, file)
-	if err != nil {
-		return attachmentUploadInspection{}, err
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return attachmentUploadInspection{}, err
-	}
-
-	return attachmentUploadInspection{
-		ByteSize:            int64(prefixSize) + remainderSize,
-		SHA256:              hex.EncodeToString(hasher.Sum(nil)),
-		DetectedContentType: http.DetectContentType(prefix[:prefixSize]),
-	}, nil
 }
 
 func (s *Server) handleAttachmentMetadata(w http.ResponseWriter, r *http.Request, attachmentID string) {
@@ -360,6 +207,11 @@ func (s *Server) handleResourceAttachmentLink(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if !s.requireAttachmentResourceEdit(w, r, req.CompanyID, resourceType, resourceID) {
+		return
+	}
+	// Linking must not be usable to exfiltrate an attachment from a resource
+	// the actor cannot read, even when the actor can edit the destination.
+	if !s.canReadAttachmentThroughResourceLink(w, r, req.CompanyID, strings.TrimSpace(req.AttachmentID)) {
 		return
 	}
 	actorUserID := ""
@@ -728,27 +580,6 @@ func attachmentPermissionEntityType(resourceType string) (string, bool) {
 
 func attachmentOriginalObjectKey(companyID, attachmentID string) string {
 	return "companies/" + strings.TrimSpace(companyID) + "/attachments/" + strings.TrimSpace(attachmentID) + "/original"
-}
-
-func attachmentFilename(filename string) string {
-	filename = strings.TrimSpace(filename)
-	if filename == "" {
-		return "attachment"
-	}
-	return filename
-}
-
-func optionalPositiveIntFormValue(w http.ResponseWriter, r *http.Request, key string) (*int, bool) {
-	raw := strings.TrimSpace(r.FormValue(key))
-	if raw == "" {
-		return nil, true
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || value <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid_attachment_dimensions")
-		return nil, false
-	}
-	return &value, true
 }
 
 func writeAttachmentStorageError(w http.ResponseWriter, err error) {

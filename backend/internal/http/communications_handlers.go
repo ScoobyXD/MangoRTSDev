@@ -2173,7 +2173,10 @@ func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		filename := attachmentFilename(item.Filename)
+		filename := strings.TrimSpace(item.Filename)
+		if filename == "" {
+			filename = "attachment"
+		}
 		if filename == "attachment" && strings.TrimSpace(attachment.OriginalFilename) != "" {
 			filename = attachment.OriginalFilename
 		}

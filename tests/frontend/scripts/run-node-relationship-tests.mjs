@@ -10,6 +10,8 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/auth/authRoutes.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/api/requestJSON.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/attachments/attachmentApi.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/attachments/attachmentDirectUpload.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/attachments/attachmentHash.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/attachments/attachmentPresentation.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/communicationsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/notifications/notificationsApi.test.js"),
