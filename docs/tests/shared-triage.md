@@ -1,10 +1,12 @@
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 # Shared Triage Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (backend coverage exists for destructive delete vs remove-only and OAuth linkage; frontend helper coverage exists for mailbox-capable Shared Triage rows; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting and full rich-control exposure for Shared Triage compose/reply; `tests/frontend/pages/home/homeCommands.test.ts` covers shared compose attachment reference payload shape; `backend/internal/http/communications_handlers_test.go` covers shared-inbox send-time Mango attachment resolution and edit-access enforcement; Mango email body marking/display preservation is covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; local sent-body cache priming is covered by `tests/frontend/modules/communications/communicationsApi.test.ts`; rule IDs are not fully mapped to automated tests yet)
+
+- Automatic shared-inbox signature insertion, cross-mailbox scope isolation, rich-body deduplication, and compose-scope wiring are covered by `tests/frontend/pages/home/homeCommands.test.ts`, `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`, and `tests/frontend/modules/communications/communicationsApi.test.ts`.
 
 ## Business Logic
 
@@ -112,7 +114,7 @@ ST101 - Shared Triage reply drafts are unique per company, user, shared inbox sc
 ST102 - A saved Shared Triage reply draft stores or reloads the original shared message context, and reopening the draft shows the original email being answered above the compose editor.
 ST103 - Shared Triage compose supports To, Cc, Bcc, Reply, Reply All, and Forward; Reply All excludes the active shared mailbox address from generated recipients.
 ST104 - Shared Triage scheduled sends are saved as scheduled drafts with the selected `shared_inbox_id`, use the company-owned shared grant when due while the app is open, and delete the scheduled draft only after send succeeds.
-ST105 - Shared Triage compose and reply use the unified editor semantics shared with node, Logic Gate, project, and attached-email reply editor surfaces, including automatic numbering, indent guides, bullet list, checklist, font size, bold, underline, paste cleanup, Delete/Backspace, and copy/cut/paste behavior; the visible compose/reply controls must include only the shared segmented font-size control, bold/underline controls, and the outline-style dropdown instead of standalone list, indent/outdent, link, table, or shared-compose-only toolbar buttons. Each font-size/bold/underline segment must have its own divider and hover state wherever the shared toolbar appears.
+ST105 - Shared Triage compose and reply use the unified editor semantics shared with node, Logic Gate, project, and attached-email reply editor surfaces, including automatic numbering, indent guides, bullet list, checklist, font size, bold, underline, links, paste cleanup, Delete/Backspace, and copy/cut/paste behavior; the visible compose/reply controls use the shared segmented font-size and bold/underline controls plus the shared outline-style dropdown instead of a shared-compose-only implementation. Each font-size/bold/underline segment must have its own divider and hover state wherever the shared toolbar appears.
 ST106 - Shared Triage compose stores rich editor content as sanitized rich HTML, while legacy plain text drafts continue to load and send as escaped/linkified HTML.
 ST107 - Shared Triage received email detail must display Cc recipients when the provider returns them; Bcc is displayed only when it is present on messages the viewer is allowed to see.
 ST108 - Links in Shared Triage email bodies, forwarded/replied original-message previews, sent reply bodies, and shared email signatures must open in a new browser tab when clicked.
@@ -123,15 +125,23 @@ ST112 - View-only Shared Triage users may read Spam when they can view the mailb
 ST113 - Shared Triage email drag/drop supports same-account Chrome window/tab drops onto Company Explorer Logic Gates, Logic Gate Kanban columns, project relationship panels, and Logic Gate groups inside a project; project drops create email-origin project node relationships, and Kanban or project drops open the created node popup after conversion succeeds.
 ST114 - Shared Triage mailbox rows group messages by provider/Nylas `thread_id` when present so replies in the same shared conversation appear as one visible inbox item instead of duplicate rows; messages without a thread ID remain single-message rows.
 ST115 - A grouped Shared Triage row uses the newest loaded message as the visible row representative while unread, starred, attachment, and thread-count indicators roll up from the loaded messages in that thread.
-ST116 - Selecting a Shared Triage thread row opens a scrollable, full-height conversation detail pane that hydrates the thread through Nylas thread `message_ids` plus individual message-detail reads for HTML bodies, all scoped to the selected `shared_inbox_id` and company-owned shared grant.
+ST116 - Selecting a Shared Triage thread row opens a full-height conversation detail pane that hydrates the thread through Nylas thread `message_ids` plus individual message-detail reads for HTML bodies, all scoped to the selected `shared_inbox_id` and company-owned shared grant.
 ST117 - Shared Triage rich compose send must preserve sanitized block indentation, explicit line breaks, blank lines, and spacing, including indent/outdent and blockquote-style indents, so sent shared email HTML does not flatten intended paragraph indentation or collapse the body into one long line.
 ST118 - Expired or revoked company-owned Shared Triage mailbox provider credentials return a Shared Triage reconnect/repair state, not a Mango auth logout; permitted users remain signed in and managers/admins with edit access can repair the shared connection. Shared mailbox folder, message-list, message-detail, send, archive, star, and draft endpoints must not represent provider reauthorization as a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response; they must return a recoverable provider-specific response, such as `409 nylas_reauth_required`.
 ST119 - Any future change to unified editor semantics or shared editor format/outline controls must apply to Shared Triage compose and reply through the shared editor behavior and shared toolbar controls, not through a separate shared-compose-only implementation.
 ST120 - Shared Triage compose/reply file attachments must follow `docs/tests/attachments.md`: files upload to Mango attachments before durable draft/send state is saved, attachment references remain scoped to the selected `shared_inbox_id`, and normal durable payloads do not store raw base64 `content`.
-ST121 - Shared Triage compose/reply inline body images use the unified rich-editor image attachment path, while normal file attachments use the shared-mail attachment path.
+ST121 - Shared Triage compose/reply inline body images use the unified rich-editor image attachment path and remain durable Mango attachment references until the backend send boundary, while normal file attachments use the shared-mail attachment path.
 ST122 - Incoming shared provider attachments can stay provider-referenced as mailbox metadata, but when converted into work, attached to a node, or otherwise made durable Mango work context, bytes must be cached/persisted into Mango S3 and stored as Mango attachment references under the company/shared mailbox scope.
-ST123 - Mango-generated shared outgoing email HTML is marked as a Mango email body, and local Shared Triage Sent/reply caches must keep the exact submitted HTML body when the provider send response does not return a body.
+ST123 - Mango-generated shared outgoing email HTML is marked as a Mango email body. When send-time preparation rewrites internal inline-image references, local Shared Triage Sent/reply caches must keep the provider-ready CID HTML plus metadata-only Mango attachment references when the provider response omits body or attachment metadata; they must not restore pre-send `mango-attachment:` HTML or cache raw attachment bytes.
 ST124 - Shared Triage Inbox, All, Sent, and thread/detail views must preserve Mango-authored line breaks, spaces, and indentation when displaying sent or received copies of Mango-generated email bodies; this is a Mango display/cache contract and must not weaken the outbound shared email formatting that recipients receive. Once a detail or thread body is hydrated, later list, summary, realtime, star/read, or other preview-shaped payloads must not overwrite that hydrated body with a flattened snippet, and the detail pane must prefer a loading state over showing a snippet as if it were the full body.
+ST125 - Shared Triage conversation detail orders messages newest first by provider timestamp with a deterministic message-ID tie-breaker; a locally sent reply is merged at the top immediately, including when the provider omits its initial timestamp or thread ID.
+ST126 - Every message card in a Shared Triage conversation exposes Reply, Reply All, and Forward actions for that exact provider message. Recipients, original context, `reply_to_message_id`, stable draft identity, and shared-inbox scope come from the chosen card rather than implicitly from the latest message.
+ST127 - The Shared Triage conversation detail pane is the only vertical scroll container for a thread. Every expanded email body auto-sizes to its complete rendered content and must not have its own scrollbar.
+ST128 - The newest shared conversation card is expanded by default and older cards are collapsed to headers. When a new inbound or outbound message joins the selected thread it becomes expanded and the previously expanded cards collapse; manual expansion must not introduce nested scrolling.
+ST129 - The shared reply editor has a useful minimum/default height, can be resized vertically, and automatically saves and restores the user's clamped height preference for that shared mailbox scope; layout changes must not squeeze it below the minimum.
+ST130 - Clicking a Shared Triage email row while compose/reply is open quietly preserves the current shared draft, exits compose, selects the clicked row, and displays its detail on the first click without reloading or blanking the list.
+ST131 - Shared compose/reply font-size, Bold, and Underline controls preserve the editor selection when toolbar focus changes. Font size applies to selected text or pending caret, and Bold/Underline are true toggles whose second activation removes the format and updates active state.
+ST132 - At shared send time, each authorized `mango-attachment:` image reference is deduplicated, resolved from Mango S3 under the selected `shared_inbox_id`, assigned a unique alphanumeric content ID, added as an inline provider attachment, and rewritten to `cid:` in outbound HTML through the company-owned shared grant. Missing or unauthorized references fail the send.
 
 ## Nylas Configuration Contract
 
@@ -145,7 +155,9 @@ Shared mailbox read receipts depend on both outbound send tracking and webhook d
 
 ## Email Threading Contract
 
-Shared Triage uses Nylas `thread_id` and thread `message_ids` to group related messages into one inbox row and to load the selected conversation history. Message bodies still come from single-message detail reads because list/thread responses can omit full HTML bodies. Every thread, message, and body read must remain scoped to the selected `shared_inbox_id` and company-owned shared mailbox grant.
+Shared Triage uses Nylas `thread_id` and thread `message_ids` to group related messages into one inbox row and to load the selected conversation history. Message bodies still come from single-message detail reads because list/thread responses can omit full HTML bodies. Detail cards are newest first; the newest expands while older cards collapse, and expanded cards auto-size inside the thread's single scroll surface. Every thread, message, body, and send remains scoped to the selected `shared_inbox_id` and company-owned shared mailbox grant.
+
+ST133 - Shared Triage automatically inserts the default signature scoped to the exact selected `shared_inbox_id` exactly once into each new compose, reply, and reply-all editor. A late database load may backfill only the matching still-open new draft while preserving typed text; personal or other shared-inbox signatures must never leak into it, and reopening a saved draft must not add or replace a signature.
 
 ## Scenarios
 
@@ -556,6 +568,10 @@ Business logic covered:
 - ST117
 - ST123
 - ST124
+- ST125
+- ST126
+- ST127
+- ST128
 
 Given:
 - A mailbox-capable Shared Triage inbox has multiple provider messages with the same Nylas `thread_id`.
@@ -567,13 +583,31 @@ Expected:
 - The Shared Triage list shows one row for the thread, not one row per reply.
 - The sent body keeps the user's line breaks, spacing, and indentation in the outgoing HTML.
 - The row preview comes from the newest loaded message while unread/starred/thread-count indicators roll up from the loaded messages in that thread.
-- The right-side detail pane fills the available detail area and shows a chronological conversation history for the thread.
+- The right-side detail pane fills the available detail area and shows the conversation newest first with a deterministic tie-breaker.
+- The newest card is expanded and older cards are collapsed; a newly received or locally sent reply moves to the top, expands immediately, and collapses previously expanded cards.
+- Each card's Reply, Reply All, and Forward actions target that card's message ID while retaining the selected shared-inbox scope.
+- The thread detail pane owns the only vertical scrollbar; every expanded body auto-sizes to its full rendered height without an iframe/card scrollbar.
 - Thread IDs and message bodies are loaded only through the selected `shared_inbox_id` and company-owned shared grant; the UI must not fall back to the actor's personal mailbox.
 - Sent shared rich HTML preserves block indentation instead of flattening indented paragraphs.
-- Local shared Sent/reply caches keep the exact Mango-submitted HTML body when the send response omits body content.
+- Local shared Sent/reply caches keep provider-ready Mango HTML when the send response omits body content, including CID-rewritten inline-image HTML rather than stale internal attachment URLs.
 - Mango's own shared Inbox, All, Sent, thread, and detail displays preserve Mango-authored line breaks, spaces, and indentation instead of flattening the same email body into one sentence.
 - Once the selected shared message or thread has a hydrated body, list refreshes, realtime updates, read/star changes, and preview-only cache writes preserve that hydrated structure instead of replacing it with the row snippet.
 - While a full detail body is being fetched, the detail pane may show a loading placeholder but must not present the shared inbox preview snippet as the full structured body.
+
+### Scenario ST-S13B: Shared Signature Is Applied Automatically
+
+Business logic covered:
+- ST133
+
+Given:
+- A user with edit access opens a new compose, reply, or reply-all editor in a Shared Triage mailbox with a saved default signature.
+- The shared signature may finish loading after the new editor opens.
+
+Expected:
+- The signature for that exact `shared_inbox_id` appears once without requiring the user to press Insert Signature.
+- Personal signatures and signatures from other shared inboxes never appear in the draft.
+- If the signature arrives late, it is appended once to the matching still-open new draft without removing text already typed.
+- Reopened saved drafts are not mutated, and rich-editor serialization cannot cause a duplicate signature.
 
 ### Scenario ST-S14: Shared Mail Attachments Use Mango Attachments
 
@@ -587,6 +621,8 @@ Business logic covered:
 - ST120
 - ST121
 - ST122
+- ST123
+- ST132
 
 Given:
 - A user attaches files to a Shared Triage compose, reply, reply-all, forward, or scheduled draft.
@@ -597,6 +633,28 @@ Expected:
 - File attachments upload to Mango attachments before durable draft/send state is saved.
 - Shared draft/send payloads store Mango attachment references, not raw base64 attachment content.
 - Attachment references preserve the selected `shared_inbox_id` and company-owned shared mailbox scope.
-- Inline body images use the unified rich-editor image attachment path.
-- The backend reads S3 bytes at send time and sends them through the company-owned provider grant.
+- Inline body images use the unified rich-editor image attachment path and durable shared drafts keep Mango attachment references.
+- At send time the backend deduplicates inline references, authorizes and reads the S3 bytes under the selected `shared_inbox_id`, creates matching inline provider/CID attachments, rewrites image sources to `cid:`, and sends through the company-owned shared grant.
+- The send response/cache fallback contains provider-ready CID HTML and metadata-only attachment references, never raw bytes; missing or unauthorized references reject the send visibly.
 - Current attached-email/conversion projections do not persist provider attachment bytes; before a shared provider attachment becomes a durable Mango-owned resource, it must be cached into Mango S3 and represented by Mango attachment references under the company/shared mailbox scope.
+
+### Scenario ST-S15: Shared Reply Target, Editor Controls, And Compose Transition
+
+Business logic covered:
+- ST101
+- ST102
+- ST105
+- ST126
+- ST129
+- ST130
+- ST131
+
+Given:
+- A user with edit access has a multi-message Shared Triage thread open.
+- The user resizes the reply editor, formats selected text, or has an unsent shared compose/reply draft open.
+
+Expected:
+- Choosing Reply, Reply All, or Forward on an older card builds the action from that exact message and resumes only that message's stable shared draft.
+- The reply editor never collapses below its minimum, saves its resized height automatically, and restores the preference for that shared mailbox scope.
+- Font size applies to the preserved selection; Bold and Underline can each be turned on and off, and their active indicators follow the current caret/selection.
+- Clicking a different shared email row quietly saves the active shared draft, closes compose, and shows the clicked message on the first click without replacing the visible list.

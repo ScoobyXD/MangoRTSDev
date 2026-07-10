@@ -155,6 +155,15 @@ export function emailThreadKey(message: Pick<EmailMessage, "id" | "thread_id">):
   return `message:${message.id.trim()}`;
 }
 
+export function sortEmailConversationMessagesNewestFirst(messages: EmailMessage[]): EmailMessage[] {
+  return [...messages].sort((a, b) => {
+    const aDate = Number.isFinite(a.date ?? 0) ? (a.date ?? 0) : 0;
+    const bDate = Number.isFinite(b.date ?? 0) ? (b.date ?? 0) : 0;
+    const dateDelta = bDate - aDate;
+    return dateDelta || b.id.localeCompare(a.id);
+  });
+}
+
 export function condenseEmailThreadMessages(messages: EmailMessage[]): EmailMessage[] {
   const groups = new Map<string, EmailMessage[]>();
   const order: string[] = [];

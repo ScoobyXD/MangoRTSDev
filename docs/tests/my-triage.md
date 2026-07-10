@@ -1,10 +1,12 @@
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 # My Triage Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (store-level conversion and transfer coverage exists; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting and full rich-control exposure for My Triage compose/reply; `tests/frontend/pages/home/homeCommands.test.ts` covers personal compose attachment references without durable `content`; `backend/internal/http/communications_handlers_test.go` covers personal send-time Mango attachment resolution and raw-content rejection; Mango email body marking/display preservation is covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; local sent-body cache priming is covered by `tests/frontend/modules/communications/communicationsApi.test.ts`; rule IDs are not fully mapped to automated tests yet)
+
+- Automatic personal signature insertion, rich-body deduplication, and compose-scope wiring are covered by `tests/frontend/pages/home/homeCommands.test.ts` and `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`.
 
 ## Business Logic
 
@@ -97,15 +99,23 @@ MT86 - Spam mailbox reads are scoped to the same personal connection and filters
 MT87 - My Triage email drag/drop supports same-account Chrome window/tab drops onto Company Explorer Logic Gates, Logic Gate Kanban columns, project relationship panels, and Logic Gate groups inside a project; project drops create email-origin project node relationships, and Kanban or project drops open the created node popup after conversion succeeds.
 MT88 - My Triage mailbox rows group messages by provider/Nylas `thread_id` when present so replies in the same conversation appear as one visible inbox item instead of duplicate rows; messages without a thread ID remain single-message rows.
 MT89 - A grouped My Triage row uses the newest loaded message as the visible row representative while unread, starred, attachment, and thread-count indicators roll up from the loaded messages in that thread.
-MT90 - Selecting a My Triage thread row opens a scrollable, full-height conversation detail pane that hydrates the thread through Nylas thread `message_ids` plus individual message-detail reads for HTML bodies; the thread endpoint alone must not be treated as containing full message bodies.
+MT90 - Selecting a My Triage thread row opens a full-height conversation detail pane that hydrates the thread through Nylas thread `message_ids` plus individual message-detail reads for HTML bodies; the thread endpoint alone must not be treated as containing full message bodies.
 MT91 - Personal rich compose send must preserve sanitized block indentation, explicit line breaks, blank lines, and spacing, including indent/outdent and blockquote-style indents, so sent email HTML does not flatten intended paragraph indentation or collapse the body into one long line.
 MT92 - Expired or revoked personal My Triage mailbox provider credentials return a My Triage reconnect/repair state, not a Mango auth logout. Personal mailbox folder, message-list, message-detail, send, archive, star, and draft endpoints must not represent provider reauthorization as a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response; they must return a recoverable provider-specific response, such as `409 nylas_reauth_required`, while the user remains signed in to Mango.
 MT93 - Any future change to unified editor semantics or shared editor format/outline controls must apply to My Triage compose and reply through the shared editor behavior and shared toolbar controls, not through a separate personal-compose-only implementation.
 MT94 - Personal email compose/reply file attachments must follow `docs/tests/attachments.md`: files upload to Mango attachments before durable draft/send state is saved, and normal durable payloads store attachment references instead of raw base64 `content`.
-MT95 - Personal compose/reply inline body images use the unified rich-editor image attachment path, while normal file attachments use the mail attachment path.
+MT95 - Personal compose/reply inline body images use the unified rich-editor image attachment path and remain durable Mango attachment references until the backend send boundary, while normal file attachments use the mail attachment path.
 MT96 - Incoming personal provider attachments can stay provider-referenced as mailbox metadata, but when converted into work, attached to a node, or otherwise made durable Mango work context, bytes must be cached/persisted into Mango S3 and stored as Mango attachment references.
-MT97 - Mango-generated personal outgoing email HTML is marked as a Mango email body, and local Sent/reply caches must keep the exact submitted HTML body when the provider send response does not return a body.
+MT97 - Mango-generated personal outgoing email HTML is marked as a Mango email body. When send-time preparation rewrites internal inline-image references, local Sent/reply caches must keep the provider-ready CID HTML plus metadata-only Mango attachment references when the provider send response omits body or attachment metadata; they must not restore the pre-send `mango-attachment:` HTML or cache raw attachment bytes.
 MT98 - My Triage Inbox, All, Sent, and thread/detail views must preserve Mango-authored line breaks, spaces, and indentation when displaying sent or received copies of Mango-generated email bodies; this is a Mango display/cache contract and must not weaken the outbound email formatting that recipients receive. Once a detail or thread body is hydrated, later list, summary, realtime, star/read, or other preview-shaped payloads must not overwrite that hydrated body with a flattened snippet, and the detail pane must prefer a loading state over showing a snippet as if it were the full body.
+MT99 - My Triage conversation detail orders messages newest first by provider timestamp with a deterministic message-ID tie-breaker; a locally sent reply is merged at the top immediately, including when the provider omits its initial timestamp or thread ID.
+MT100 - Every message card in a My Triage conversation exposes Reply, Reply All, and Forward actions for that exact provider message. Recipients, original-message context, `reply_to_message_id`, and stable draft identity come from the chosen card rather than implicitly from the latest message.
+MT101 - The conversation detail pane is the only vertical scroll container for a thread. Every expanded email body auto-sizes to its complete rendered content and must not have its own scrollbar.
+MT102 - The newest conversation card is expanded by default and older cards are collapsed to headers. When a new inbound or outbound message joins the selected thread it becomes the expanded card and the previously expanded cards collapse; users can manually expand or collapse a card without introducing nested scrolling.
+MT103 - The personal reply editor has a useful minimum/default height, can be resized vertically, and automatically saves and restores the user's clamped height preference for that mailbox scope; layout changes must not squeeze it below the minimum.
+MT104 - Clicking a My Triage list row while compose/reply is open quietly preserves the current draft, exits compose, selects the clicked row, and displays its detail on the first click without reloading or blanking the list.
+MT105 - Personal compose/reply font-size, Bold, and Underline controls preserve the editor selection when toolbar focus changes. Font size applies to the selected text or pending caret, and Bold/Underline are true toggles whose second activation removes the format and updates the active state.
+MT106 - At personal send time, each authorized `mango-attachment:` image reference is deduplicated, resolved from Mango S3, assigned a unique alphanumeric content ID, added as an inline provider attachment, and rewritten to `cid:` in outbound HTML. Missing or unauthorized references fail the send instead of producing a broken image placeholder.
 
 ## Nylas Configuration Contract
 
@@ -119,7 +129,9 @@ Personal read receipts depend on both outbound send tracking and webhook deliver
 
 ## Email Threading Contract
 
-My Triage uses Nylas `thread_id` and thread `message_ids` to group related messages into one inbox row and to load the selected conversation history. Message bodies still come from single-message detail reads because list/thread responses can omit full HTML bodies.
+My Triage uses Nylas `thread_id` and thread `message_ids` to group related messages into one inbox row and to load the selected conversation history. Message bodies still come from single-message detail reads because list/thread responses can omit full HTML bodies. Detail cards are ordered newest first; the newest card expands while older cards collapse, and expanded cards auto-size inside the thread's single scroll surface.
+
+MT107 - My Triage automatically inserts the default signature for the exact active personal account exactly once into each new compose, reply, and reply-all editor. A late database load may backfill only the matching still-open new draft while preserving typed text; reopening a saved draft must not add or replace a signature.
 
 ## Scenarios
 
@@ -402,6 +414,10 @@ Business logic covered:
 - MT91
 - MT97
 - MT98
+- MT99
+- MT100
+- MT101
+- MT102
 
 Given:
 - A personal mailbox has multiple provider messages with the same Nylas `thread_id`.
@@ -412,13 +428,30 @@ Given:
 Expected:
 - The My Triage list shows one row for the thread, not one row per reply.
 - The row preview comes from the newest loaded message while unread/starred/thread-count indicators roll up from the loaded messages in that thread.
-- The right-side detail pane fills the available detail area and shows a chronological conversation history for the thread.
+- The right-side detail pane fills the available detail area and shows the conversation newest first with a deterministic tie-breaker.
+- The newest card is expanded and older cards are collapsed; a newly received or locally sent reply moves to the top, expands immediately, and collapses the previously expanded cards.
+- Each card's Reply, Reply All, and Forward actions target that card's message ID and original context.
+- The thread detail pane owns the only vertical scrollbar; every expanded body auto-sizes to its full rendered height without an iframe/card scrollbar.
 - Thread history bodies are loaded through individual message-detail reads scoped to the personal mailbox, using Nylas thread `message_ids` only as the grouping/index source.
 - Sent rich HTML preserves explicit line breaks, blank lines, spacing, and block indentation instead of flattening the reply body or indented paragraphs.
-- Local Sent/reply caches keep the exact Mango-submitted HTML body when the send response omits body content.
+- Local Sent/reply caches keep provider-ready Mango HTML when the send response omits body content, including CID-rewritten inline-image HTML rather than stale internal attachment URLs.
 - Mango's own Inbox, All, Sent, thread, and detail displays preserve Mango-authored line breaks, spaces, and indentation instead of flattening the same email body into one sentence.
 - Once the selected message or thread has a hydrated body, list refreshes, realtime updates, read/star changes, and preview-only cache writes preserve that hydrated structure instead of replacing it with the row snippet.
 - While a full detail body is being fetched, the detail pane may show a loading placeholder but must not present the inbox preview snippet as the full structured body.
+
+### Scenario MT-S8B: Personal Signature Is Applied Automatically
+
+Business logic covered:
+- MT107
+
+Given:
+- A personal mailbox has a saved default signature and the user opens a new compose, reply, or reply-all editor.
+- The signature may finish loading after the new editor opens.
+
+Expected:
+- The signature for that exact personal account appears once without requiring the user to press Insert Signature.
+- If the signature arrives late, it is appended once to the matching still-open new draft without removing text already typed.
+- Reopened saved drafts are not mutated, and rich-editor serialization cannot cause a duplicate signature.
 
 ### Scenario MT-S9: Personal Mail Attachments Use Mango Attachments
 
@@ -431,6 +464,8 @@ Business logic covered:
 - MT94
 - MT95
 - MT96
+- MT97
+- MT106
 
 Given:
 - A user attaches files to a personal compose, reply, reply-all, forward, or scheduled draft.
@@ -440,6 +475,28 @@ Given:
 Expected:
 - File attachments upload to Mango attachments before durable draft/send state is saved.
 - Personal draft/send payloads store Mango attachment references, not raw base64 attachment content.
-- Inline body images use the unified rich-editor image attachment path.
-- The backend reads S3 bytes at send time and sends them through the provider.
+- Inline body images use the unified rich-editor image attachment path and durable drafts keep Mango attachment references.
+- At send time the backend deduplicates inline references, authorizes and reads the S3 bytes, creates matching inline provider/CID attachments, and rewrites image sources to `cid:`; ordinary attached files remain ordinary attachments.
+- The send response/cache fallback contains provider-ready CID HTML and metadata-only attachment references, never raw bytes; missing or unauthorized inline references reject the send visibly.
 - Current attached-email/conversion projections do not persist provider attachment bytes; before a personal provider attachment becomes a durable Mango-owned resource, it must be cached into Mango S3 and represented by Mango attachment references.
+
+### Scenario MT-S10: Reply Target, Editor Controls, And Compose Transition
+
+Business logic covered:
+- MT76
+- MT77
+- MT80
+- MT100
+- MT103
+- MT104
+- MT105
+
+Given:
+- A user has a multi-message personal thread open.
+- The user resizes the reply editor, formats selected text, or has an unsent compose/reply draft open.
+
+Expected:
+- Choosing Reply, Reply All, or Forward on an older card builds the action from that exact message and resumes only that message's stable draft.
+- The reply editor never collapses below its minimum, saves its resized height automatically, and restores the preference when another personal reply opens.
+- Font size applies to the preserved selection; Bold and Underline can each be turned on and off, and their active indicators follow the current caret/selection.
+- Clicking a different email row quietly saves the active draft, closes compose, and shows the clicked message on the first click without replacing the visible list.

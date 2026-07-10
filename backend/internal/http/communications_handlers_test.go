@@ -1017,6 +1017,62 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != attachmentID || nylas.sent.Attachments[0].Filename != "note.txt" || nylas.sent.Attachments[0].ContentType != "text/plain" || nylas.sent.Attachments[0].Content != "aGVsbG8=" {
 		t.Fatalf("attachments = %+v, want attachment resolved from Mango storage", nylas.sent.Attachments)
 	}
+	inlineAttachmentID := uploadEmailAttachmentForCommunicationsTest(t, handler, token, companyID, personalEmailDraftResourceID(user.UserID, "draft-inline"), "screenshot.png", "image/png", []byte("png-bytes"))
+	inlineBody := `<div>Screenshot</div><img src="mango-attachment:` + url.PathEscape(inlineAttachmentID) + `" alt="screenshot"><img src='mango-attachment:` + url.PathEscape(inlineAttachmentID) + `' alt="duplicate reference">`
+	inlinePayload, err := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"to":         []map[string]string{{"email": "friend@example.com"}},
+		"subject":    "Inline screenshot",
+		"body":       inlineBody,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inlineSendReq := httptest.NewRequest(http.MethodPost, "/v1/communications/messages/send", strings.NewReader(string(inlinePayload)))
+	inlineSendReq.Header.Set("Authorization", token)
+	inlineSendReq.Header.Set("Content-Type", "application/json")
+	inlineSendRec := httptest.NewRecorder()
+	handler.ServeHTTP(inlineSendRec, inlineSendReq)
+	if inlineSendRec.Code != http.StatusCreated {
+		t.Fatalf("inline send status = %d body=%s", inlineSendRec.Code, inlineSendRec.Body.String())
+	}
+	inlineContentID := communicationsInlineImageContentID(inlineAttachmentID)
+	if strings.Contains(nylas.sent.Body, "mango-attachment:") || strings.Count(nylas.sent.Body, "cid:"+inlineContentID) != 2 {
+		t.Fatalf("sent body = %q, want internal attachment source rewritten to cid", nylas.sent.Body)
+	}
+	if len(nylas.sent.Attachments) != 1 {
+		t.Fatalf("inline attachments = %+v, want one resolved attachment", nylas.sent.Attachments)
+	}
+	inlineAttachment := nylas.sent.Attachments[0]
+	if inlineAttachment.AttachmentID != inlineAttachmentID || inlineAttachment.ContentID != inlineContentID || !inlineAttachment.IsInline || inlineAttachment.ContentDisposition != "inline" || inlineAttachment.Content != "cG5nLWJ5dGVz" {
+		t.Fatalf("inline attachment = %+v, want CID-linked Mango screenshot bytes", inlineAttachment)
+	}
+	var inlineSendResponse struct {
+		Message NylasMessage `json:"message"`
+	}
+	if err := json.Unmarshal(inlineSendRec.Body.Bytes(), &inlineSendResponse); err != nil {
+		t.Fatal(err)
+	}
+	if inlineSendResponse.Message.Body != nylas.sent.Body || len(inlineSendResponse.Message.Attachments) != 1 {
+		t.Fatalf("inline send response = %+v, want provider-ready body and attachment metadata", inlineSendResponse.Message)
+	}
+	responseAttachment := inlineSendResponse.Message.Attachments[0]
+	if responseAttachment.Content != "" || responseAttachment.AttachmentID != inlineAttachmentID || responseAttachment.ContentID != inlineContentID || !responseAttachment.IsInline {
+		t.Fatalf("response attachment = %+v, want metadata-only Mango inline attachment", responseAttachment)
+	}
+	missingInlinePayload, err := json.Marshal(map[string]any{
+		"company_id": companyID,
+		"to":         []map[string]string{{"email": "friend@example.com"}},
+		"subject":    "Broken inline reference",
+		"body":       `<img src="mango-attachment:missing-attachment">`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/send", string(missingInlinePayload), token, http.StatusNotFound)
+	if nylas.sent.Subject != "Inline screenshot" {
+		t.Fatalf("send reached provider for missing inline attachment: %+v", nylas.sent)
+	}
 	assertJSONStatus(t, handler, http.MethodDelete, "/v1/communications/messages/message-1", "", token, http.StatusOK)
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/disconnect", "", token, http.StatusOK)
 	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, store.ErrNotFound) {
@@ -1672,6 +1728,23 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	}
 	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != attachmentID || nylas.sent.Attachments[0].Filename != "shared-large.txt" || nylas.sent.Attachments[0].Content != base64.StdEncoding.EncodeToString(sharedContent) {
 		t.Fatalf("attachments = %+v, want shared inbox attachment resolved from Mango storage", nylas.sent.Attachments)
+	}
+	inlineAttachmentID := uploadEmailAttachmentForCommunicationsTest(t, handler, token, companyID, sharedEmailDraftResourceID(folder.FolderID, "draft-shared-inline"), "shared-screenshot.png", "image/png", []byte("shared-png"))
+	inlinePayload, err := json.Marshal(map[string]any{
+		"to":      []map[string]string{{"email": "customer@example.com"}},
+		"subject": "Shared inline screenshot",
+		"body":    `<img src="mango-attachment:` + url.PathEscape(inlineAttachmentID) + `">`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSONStatus(t, handler, http.MethodPost, path, string(inlinePayload), token, http.StatusCreated)
+	inlineContentID := communicationsInlineImageContentID(inlineAttachmentID)
+	if nylas.lastSendGrantID != "grant-support" || !strings.Contains(nylas.sent.Body, `src="cid:`+inlineContentID+`"`) {
+		t.Fatalf("shared inline send grant=%q body=%q", nylas.lastSendGrantID, nylas.sent.Body)
+	}
+	if len(nylas.sent.Attachments) != 1 || nylas.sent.Attachments[0].AttachmentID != inlineAttachmentID || nylas.sent.Attachments[0].ContentID != inlineContentID || !nylas.sent.Attachments[0].IsInline || nylas.sent.Attachments[0].Content != "c2hhcmVkLXBuZw==" {
+		t.Fatalf("shared inline attachments = %+v, want one CID-linked screenshot", nylas.sent.Attachments)
 	}
 }
 

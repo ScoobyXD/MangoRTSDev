@@ -1,6 +1,6 @@
 import type { CommunicationsEmailDraft, EmailMessage } from "../../modules/communications/communicationsApi.js";
 import { deleteEmailDraft, getEmailSignature, listEmailDrafts, parseEmailAddressList, saveEmailDraft, saveEmailSignature } from "../../modules/communications/communicationsApi.js";
-import { EDITOR_RICH_TEXT_PREFIX } from "../../modules/editor/richTextEditing.js";
+import { EDITOR_RICH_TEXT_PREFIX, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing.js";
 import { emptyCompose, type ComposeAttachment, type ComposeState } from "./homeTypes.js";
 
 const HOME_MAIL_DRAFTS_STORAGE_PREFIX = "mangorts.home.mailDrafts.v1";
@@ -37,8 +37,85 @@ function draftsStorageKey(companyID: string, userID: string): string {
   return `${HOME_MAIL_DRAFTS_STORAGE_PREFIX}:${storagePart(companyID, "global")}:${storagePart(userID, "anonymous")}`;
 }
 
-function signatureStorageKey(companyID: string, userID: string): string {
+function legacySignatureStorageKey(companyID: string, userID: string): string {
   return `${HOME_MAIL_SIGNATURE_STORAGE_PREFIX}:${storagePart(companyID, "global")}:${storagePart(userID, "anonymous")}`;
+}
+
+export function homeMailSignatureScopeKey(
+  companyID: string,
+  userID: string,
+  sharedInboxID = "",
+  accountEmail = "",
+): string {
+  const cleanSharedInboxID = sharedInboxID.trim();
+  const scope = cleanSharedInboxID
+    ? `shared:${encodeURIComponent(cleanSharedInboxID)}`
+    : `personal:${encodeURIComponent(accountEmail.trim().toLowerCase() || "account")}`;
+  return `${legacySignatureStorageKey(companyID, userID)}:${scope}`;
+}
+
+function plainTextToEditorHTML(value: string): string {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line ? linkifyEditorPlainTextToHTML(line) : "<br>")
+    .join("<br>");
+}
+
+function storedSignatureEditorHTML(signature: string): string {
+  const cleanSignature = signature.trim();
+  if (!cleanSignature) return "";
+  if (cleanSignature.startsWith(EDITOR_RICH_TEXT_PREFIX)) {
+    return sanitizeEditorDocumentHTML(cleanSignature.slice(EDITOR_RICH_TEXT_PREFIX.length));
+  }
+  return sanitizeEditorDocumentHTML(`<div>${plainTextToEditorHTML(cleanSignature)}</div>`);
+}
+
+function normalizedEditorText(value: string): string {
+  return composeBodyDraftText(value).replace(/\s+/g, " ").trim();
+}
+
+export function homeMailBodyHasSignature(body: string, signature: string): boolean {
+  const cleanBody = body.trimEnd();
+  const cleanSignature = signature.trim();
+  if (!cleanBody || !cleanSignature) return false;
+  if (!cleanBody.startsWith(EDITOR_RICH_TEXT_PREFIX)) return cleanBody.endsWith(cleanSignature);
+
+  const bodyHTML = sanitizeEditorDocumentHTML(cleanBody.slice(EDITOR_RICH_TEXT_PREFIX.length)).trimEnd();
+  const signatureHTML = storedSignatureEditorHTML(cleanSignature).trim();
+  if (signatureHTML && bodyHTML.endsWith(signatureHTML)) return true;
+
+  const bodyText = normalizedEditorText(cleanBody);
+  const signatureText = normalizedEditorText(cleanSignature);
+  return !!signatureText && (bodyText === signatureText || bodyText.endsWith(` ${signatureText}`));
+}
+
+export function applyHomeMailSignature(body: string, signature: string): string {
+  const cleanSignature = signature.trim();
+  if (!cleanSignature || homeMailBodyHasSignature(body, cleanSignature)) return body;
+
+  const currentHTML = body.startsWith(EDITOR_RICH_TEXT_PREFIX)
+    ? sanitizeEditorDocumentHTML(body.slice(EDITOR_RICH_TEXT_PREFIX.length))
+    : body.trim()
+      ? sanitizeEditorDocumentHTML(`<div>${plainTextToEditorHTML(body.trimEnd())}</div>`)
+      : "";
+  const signatureHTML = storedSignatureEditorHTML(cleanSignature);
+  const spacerHTML = "<div><br></div><div><br></div>";
+  return `${EDITOR_RICH_TEXT_PREFIX}${sanitizeEditorDocumentHTML(`${currentHTML}${spacerHTML}${signatureHTML}`)}`;
+}
+
+export function appendHomeMailPlainText(body: string, content: string): string {
+  const cleanContent = content.trim();
+  if (!cleanContent) return body;
+  const currentHTML = body.startsWith(EDITOR_RICH_TEXT_PREFIX)
+    ? sanitizeEditorDocumentHTML(body.slice(EDITOR_RICH_TEXT_PREFIX.length))
+    : body.trim()
+      ? sanitizeEditorDocumentHTML(`<div>${plainTextToEditorHTML(body.trimEnd())}</div>`)
+      : "";
+  const contentHTML = sanitizeEditorDocumentHTML(`<div>${plainTextToEditorHTML(cleanContent)}</div>`);
+  const spacerHTML = currentHTML.trim() ? "<div><br></div><div><br></div>" : "";
+  return `${EDITOR_RICH_TEXT_PREFIX}${sanitizeEditorDocumentHTML(`${currentHTML}${spacerHTML}${contentHTML}`)}`;
 }
 
 export function createHomeMailDraftID(): string {
@@ -290,7 +367,7 @@ export function deleteHomeMailDrafts(companyID: string, userID: string, draftIDs
 }
 
 export function composeHasDraftContent(compose: ComposeState, signature: string): boolean {
-  const signatureBody = signature.trim();
+  const signatureBody = normalizedEditorText(signature);
   const body = composeBodyDraftText(compose.body);
   return !!(
     compose.to.trim()
@@ -299,7 +376,7 @@ export function composeHasDraftContent(compose: ComposeState, signature: string)
     || compose.subject.trim()
     || compose.attachments.length > 0
     || compose.scheduledAt.trim()
-    || (body && body !== signatureBody)
+    || (body && body.replace(/\s+/g, " ").trim() !== signatureBody)
   );
 }
 
@@ -314,6 +391,9 @@ function composeBodyDraftText(value: string): string {
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/(?:&#39;|&apos;)/g, "'")
+    .replace(/&#96;/g, "`")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -415,31 +495,60 @@ function cloneMessage(message: EmailMessage): EmailMessage {
   };
 }
 
-export function readHomeMailSignature(companyID: string, userID: string): string {
+export function readHomeMailSignature(
+  companyID: string,
+  userID: string,
+  sharedInboxID = "",
+  accountEmail = "",
+): string {
   if (!storageAvailable()) return "";
-  return localStorage.getItem(signatureStorageKey(companyID, userID)) ?? "";
+  const scopedSignature = localStorage.getItem(homeMailSignatureScopeKey(companyID, userID, sharedInboxID, accountEmail));
+  if (scopedSignature !== null) return scopedSignature;
+  if (sharedInboxID.trim()) return "";
+  const legacyKey = legacySignatureStorageKey(companyID, userID);
+  const legacySignature = localStorage.getItem(legacyKey) ?? "";
+  if (!legacySignature) return "";
+  if (!accountEmail.trim()) return legacySignature;
+  try {
+    localStorage.setItem(homeMailSignatureScopeKey(companyID, userID, "", accountEmail), legacySignature);
+    localStorage.removeItem(legacyKey);
+  } catch {
+    // Keep returning the legacy value when browser storage cannot complete the one-time migration.
+  }
+  return legacySignature;
 }
 
-export function saveHomeMailSignature(companyID: string, userID: string, signature: string): void {
+export function saveHomeMailSignature(
+  companyID: string,
+  userID: string,
+  signature: string,
+  sharedInboxID = "",
+  accountEmail = "",
+): void {
   if (!storageAvailable()) return;
   try {
-    localStorage.setItem(signatureStorageKey(companyID, userID), signature);
+    localStorage.setItem(homeMailSignatureScopeKey(companyID, userID, sharedInboxID, accountEmail), signature);
   } catch {
     // Ignore storage failures; the compose state still keeps the signature text for this session.
   }
 }
 
-export async function loadHomeMailSignature(companyID: string, userID: string): Promise<string> {
-  const localSignature = readHomeMailSignature(companyID, userID);
+export async function loadHomeMailSignature(
+  companyID: string,
+  userID: string,
+  sharedInboxID = "",
+  accountEmail = "",
+): Promise<string> {
+  const localSignature = readHomeMailSignature(companyID, userID, sharedInboxID, accountEmail);
   try {
-    const remoteSignature = await getEmailSignature(companyID);
+    const remoteSignature = await getEmailSignature(companyID, sharedInboxID, accountEmail);
     const body = remoteSignature?.body_editor_html ?? "";
     if (body.trim()) {
-      saveHomeMailSignature(companyID, userID, body);
+      saveHomeMailSignature(companyID, userID, body, sharedInboxID, accountEmail);
       return body;
     }
     if (localSignature.trim()) {
-      await saveEmailSignature({ companyID, bodyEditorHTML: localSignature });
+      await saveEmailSignature({ companyID, sharedInboxID, accountEmail, bodyEditorHTML: localSignature });
     }
     return localSignature;
   } catch {
@@ -447,10 +556,16 @@ export async function loadHomeMailSignature(companyID: string, userID: string): 
   }
 }
 
-export async function saveHomeMailSignatureRemote(companyID: string, userID: string, signature: string): Promise<void> {
-  saveHomeMailSignature(companyID, userID, signature);
+export async function saveHomeMailSignatureRemote(
+  companyID: string,
+  userID: string,
+  signature: string,
+  sharedInboxID = "",
+  accountEmail = "",
+): Promise<void> {
+  saveHomeMailSignature(companyID, userID, signature, sharedInboxID, accountEmail);
   try {
-    await saveEmailSignature({ companyID, bodyEditorHTML: signature });
+    await saveEmailSignature({ companyID, sharedInboxID, accountEmail, bodyEditorHTML: signature });
   } catch {
     // The local fallback keeps the editor state durable for this browser until the backend is reachable.
   }

@@ -8,6 +8,44 @@ import type { NodeRecord } from "../../../../frontend/src/modules/node-map/share
 import { EDITOR_RICH_TEXT_PREFIX } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "../../../../frontend/src/pages/home/homeConstants.js";
 import { addMyLogicGateShortcutsCommand, addSharedInboxGVICPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeGVICMatrixNodeCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, removeSharedInboxGVICPrincipalCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateGVICMatrixNode, type HomeDeleteEmailMessage, type HomeDropAssignNodeToLogicGateStatus, type HomeMoveMyWorkNodeToCell, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInboxGVICAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { appendHomeMailPlainText, applyHomeMailSignature, composeHasDraftContent, homeMailBodyHasSignature, homeMailSignatureScopeKey } from "../../../../frontend/src/pages/home/homeMailDrafts.js";
+import { emptyCompose } from "../../../../frontend/src/pages/home/homeTypes.js";
+
+test("new compose and reply bodies receive one idempotent rich-editor signature", () => {
+  const signature = "Best,\nMango Team";
+  const initialBody = applyHomeMailSignature("", signature);
+
+  assert.equal(initialBody.startsWith(EDITOR_RICH_TEXT_PREFIX), true);
+  assert.match(initialBody, /Best,<br>Mango Team/);
+  assert.equal(homeMailBodyHasSignature(initialBody, signature), true);
+  assert.equal(applyHomeMailSignature(initialBody, signature), initialBody);
+  assert.equal(composeHasDraftContent({ ...emptyCompose, open: true, body: initialBody }, signature), false);
+
+  const forwardedBody = appendHomeMailPlainText(initialBody, "---------- Forwarded message ---------\nOriginal body");
+  assert.equal(forwardedBody.split(EDITOR_RICH_TEXT_PREFIX).length - 1, 1);
+  assert.match(forwardedBody, /Best,<br>Mango Team[\s\S]*Forwarded message[\s\S]*Original body/);
+
+  const repliedBody = applyHomeMailSignature(`${EDITOR_RICH_TEXT_PREFIX}<div>Thanks for the update.</div>`, signature);
+  assert.match(repliedBody, /Thanks for the update[\s\S]*Best,<br>Mango Team/);
+  assert.equal(applyHomeMailSignature(repliedBody, signature), repliedBody);
+  assert.equal(composeHasDraftContent({ ...emptyCompose, open: true, body: repliedBody }, signature), true);
+});
+
+test("rich signatures retain formatting and signature storage keys stay mailbox scoped", () => {
+  const richSignature = `${EDITOR_RICH_TEXT_PREFIX}<div><strong>Mango Team</strong></div>`;
+  const body = applyHomeMailSignature("", richSignature);
+
+  assert.match(body, /<strong>Mango Team<\/strong>/);
+  assert.equal(homeMailBodyHasSignature(body, richSignature), true);
+  assert.notEqual(
+    homeMailSignatureScopeKey("company-1", "user-1", "", "one@example.test"),
+    homeMailSignatureScopeKey("company-1", "user-1", "", "two@example.test"),
+  );
+  assert.notEqual(
+    homeMailSignatureScopeKey("company-1", "user-1", "shared-1", "shared@example.test"),
+    homeMailSignatureScopeKey("company-1", "user-1", "shared-2", "shared@example.test"),
+  );
+});
 
 const timestamp = "2026-01-01T00:00:00Z";
 
@@ -818,6 +856,32 @@ test("Home compose command sends rich editor HTML without plain-text escaping", 
   assert.match(sentInputs[0]?.body ?? "", /<br>  <a href="https:\/\/example\.test\/?"/);
   assert.match(sentInputs[0]?.body ?? "", /href="https:\/\/example\.test\/?"/);
   assert.doesNotMatch(sentInputs[0]?.body ?? "", /&lt;b&gt;/);
+});
+
+test("Home compose command sends an image-only rich body as a durable Mango reference", async () => {
+  const sentInputs: SendEmailInput[] = [];
+  const sendEmail: HomeSendEmail = async (input) => {
+    sentInputs.push(input);
+    return emailMessage("sent-screenshot", { to: input.to, subject: input.subject, body: input.body });
+  };
+
+  await sendHomeMailComposeCommand({
+    companyID: "company-1",
+    compose: {
+      to: "reader@example.test",
+      cc: "",
+      bcc: "",
+      subject: "Screenshot",
+      body: `${EDITOR_RICH_TEXT_PREFIX}<span data-mango-editor-image="true" data-mango-editor-attachment-id="attachment-1"><img src="mango-attachment:attachment-1" alt=""></span>`,
+      attachments: [],
+      replyToMessageID: "",
+    },
+    sendEmail,
+  });
+
+  assert.match(sentInputs[0]?.body ?? "", /src="mango-attachment:attachment-1"/);
+  assert.doesNotMatch(sentInputs[0]?.body ?? "", /data:image\//);
+  assert.deepEqual(sentInputs[0]?.attachments, []);
 });
 
 test("Home compose command sends Mango attachment references without durable content", async () => {
