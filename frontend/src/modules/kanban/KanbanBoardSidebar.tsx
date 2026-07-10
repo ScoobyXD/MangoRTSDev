@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type React from "react";
-import { MinimizeToLineIcon, OpenInNewTabIcon } from "../../app/nodeEditorPopupControls";
+import { MinimizeToLineIcon, OpenInNewTabIcon, PinToSidebarIcon } from "../../app/nodeEditorPopupControls";
 import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
 import {
   KANBAN_MODULE_TOP_CLEARANCE_PX,
@@ -57,6 +57,7 @@ type KanbanBoardSidebarProps = {
   onSelectBoard: (boardID: string) => void;
   onCollapseToTab?: () => void;
   onOpenInNewTab?: () => void;
+  onPinToSidebar?: () => void;
   timelineDragEntity?: { kind: "logic_gate"; id: string; label: string };
 };
 
@@ -93,6 +94,7 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
   onSelectBoard,
   onCollapseToTab,
   onOpenInNewTab,
+  onPinToSidebar,
   timelineDragEntity,
 }) => {
   const headerRef = useRef<HTMLDivElement>(null);
@@ -119,14 +121,14 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
     };
   }, [boardPickerOpen, onCloseAllBoards]);
 
-  const headerActionCount = (onOpenInNewTab ? 1 : 0) + (onCollapseToTab ? 1 : 0);
+  const headerActionCount = (onOpenInNewTab ? 1 : 0) + (onPinToSidebar ? 1 : 0) + (onCollapseToTab ? 1 : 0);
   const headerGridTemplateColumns = headerActionCount > 0
     ? `minmax(150px, 270px) minmax(140px, 1fr) auto repeat(${headerActionCount}, 25px)`
     : "minmax(150px, 270px) minmax(140px, 1fr) auto";
   const headerButtonStyle = compactHeaderButtonStyle(isDark, line, text);
 
   if (compactArenaHeader) {
-    return onCollapseToTab || onOpenInNewTab ? (
+    return onCollapseToTab || onOpenInNewTab || onPinToSidebar ? (
       <div ref={headerRef} data-frame-interactive="true" style={{ position: "absolute", top: 4, right: 10, zIndex: 32, display: "flex", alignItems: "center", gap: 6, pointerEvents: "auto" }}>
         {onOpenInNewTab && (
           <button
@@ -140,6 +142,20 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
             style={headerButtonStyle}
           >
             <OpenInNewTabIcon />
+          </button>
+        )}
+        {onPinToSidebar && (
+          <button
+            className="mango-elevated-action"
+            type="button"
+            title="Pin Logic Gate to Pinned"
+            aria-label="Pin Logic Gate to Pinned"
+            data-frame-interactive="true"
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={onPinToSidebar}
+            style={headerButtonStyle}
+          >
+            <PinToSidebarIcon />
           </button>
         )}
         {onCollapseToTab && (
@@ -243,6 +259,20 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
           style={headerButtonStyle}
         >
           <OpenInNewTabIcon />
+        </button>
+      )}
+      {onPinToSidebar && (
+        <button
+          className="mango-elevated-action"
+          type="button"
+          title="Pin Logic Gate to Pinned"
+          aria-label="Pin Logic Gate to Pinned"
+          data-frame-interactive="true"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={onPinToSidebar}
+          style={headerButtonStyle}
+        >
+          <PinToSidebarIcon />
         </button>
       )}
       {onCollapseToTab && (

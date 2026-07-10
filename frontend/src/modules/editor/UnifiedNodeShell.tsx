@@ -1,6 +1,6 @@
 import React from "react";
 import { HeaderRecycleBinIcon } from "../../app/HeaderIcons";
-import { MinimizeToLineIcon, OpenInNewTabIcon } from "../../app/nodeEditorPopupControls";
+import { MinimizeToLineIcon, OpenInNewTabIcon, PinToSidebarIcon } from "../../app/nodeEditorPopupControls";
 import {
   UNIFIED_NODE_SHELL_BEHAVIOR_SOURCE,
   UNIFIED_NODE_SHELL_TOP_RIGHT_ACTION_ORDER,
@@ -80,6 +80,7 @@ function defaultActionIcon(action: UnifiedNodeShellAction): React.ReactNode {
   if (action.id === "fullscreen") return <UnifiedNodeShellFullscreenIcon active={action.pressed} />;
   if (action.id === "minimize") return <MinimizeToLineIcon />;
   if (action.id === "open-in-new-tab") return <OpenInNewTabIcon />;
+  if (action.id === "pin") return <PinToSidebarIcon />;
   return "X";
 }
 
@@ -89,6 +90,7 @@ function defaultActionTitle(action: UnifiedNodeShellAction): string {
   if (action.id === "fullscreen") return action.pressed ? "Restore node editor" : "Fullscreen node editor";
   if (action.id === "minimize") return "Collapse node editor to app tab";
   if (action.id === "open-in-new-tab") return "Open node in new browser tab";
+  if (action.id === "pin") return "Pin node to Pinned";
   return "Close node editor";
 }
 

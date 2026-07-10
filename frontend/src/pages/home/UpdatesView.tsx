@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildNodeRoute } from "../../app/deepLinkRoutes";
 import { openAppPathInNewTab } from "../../app/resourceLinks";
+import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
 import { UnifiedNodeShell } from "../../modules/editor/UnifiedNodeShell";
 import {
@@ -1181,6 +1182,12 @@ function UpdatesNodePanel({
           {
             id: "open-in-new-tab",
             onClick: () => openAppPathInNewTab(buildNodeRoute(panel.nodeID)),
+          },
+          {
+            id: "pin",
+            title: "Pin node to Pinned",
+            ariaLabel: "Pin node to Pinned",
+            onClick: () => requestAppSidebarPin({ kind: "node", id: panel.nodeID, name: nodeTitle }),
           },
           {
             id: "close",

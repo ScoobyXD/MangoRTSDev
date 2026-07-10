@@ -13,6 +13,7 @@ export type UnifiedNodeShellActionID =
   | "fullscreen"
   | "minimize"
   | "open-in-new-tab"
+  | "pin"
   | "delete";
 
 export type UnifiedNodeShellBodyID = "node-workspace";
@@ -32,6 +33,7 @@ export const UNIFIED_NODE_SHELL_TOP_RIGHT_ACTION_ORDER: readonly UnifiedNodeShel
   "fullscreen",
   "minimize",
   "open-in-new-tab",
+  "pin",
   "delete",
 ] as const;
 
@@ -42,7 +44,7 @@ export const UNIFIED_NODE_SHELL_SURFACE_CONTRACTS: readonly UnifiedNodeShellSurf
     persistenceBoundary: "node-information-projection",
     openerState: "opener-owned",
     chatPane: "separate",
-    actions: ["close", "fullscreen", "minimize", "delete"],
+    actions: ["close", "fullscreen", "minimize", "pin", "delete"],
   },
   {
     id: "app-sidebar-node-popup",
@@ -50,7 +52,7 @@ export const UNIFIED_NODE_SHELL_SURFACE_CONTRACTS: readonly UnifiedNodeShellSurf
     persistenceBoundary: "node-information-projection",
     openerState: "opener-owned",
     chatPane: "separate",
-    actions: ["close", "fullscreen", "minimize", "open-in-new-tab", "delete"],
+    actions: ["close", "fullscreen", "minimize", "open-in-new-tab", "pin", "delete"],
   },
   {
     id: "dock-restored-node-popup",
@@ -58,7 +60,7 @@ export const UNIFIED_NODE_SHELL_SURFACE_CONTRACTS: readonly UnifiedNodeShellSurf
     persistenceBoundary: "node-information-projection",
     openerState: "opener-owned",
     chatPane: "separate",
-    actions: ["close", "fullscreen", "minimize", "open-in-new-tab", "delete"],
+    actions: ["close", "fullscreen", "minimize", "open-in-new-tab", "pin", "delete"],
   },
   {
     id: "updates-node-panel",
@@ -66,7 +68,7 @@ export const UNIFIED_NODE_SHELL_SURFACE_CONTRACTS: readonly UnifiedNodeShellSurf
     persistenceBoundary: "node-information-projection",
     openerState: "opener-owned",
     chatPane: "separate",
-    actions: ["close", "open-in-new-tab"],
+    actions: ["close", "open-in-new-tab", "pin"],
   },
   {
     id: "kanban-my-work-node-overlay",
@@ -74,7 +76,7 @@ export const UNIFIED_NODE_SHELL_SURFACE_CONTRACTS: readonly UnifiedNodeShellSurf
     persistenceBoundary: "node-information-projection",
     openerState: "opener-owned",
     chatPane: "separate",
-    actions: ["close", "fullscreen", "minimize", "open-in-new-tab", "delete"],
+    actions: ["close", "fullscreen", "minimize", "open-in-new-tab", "pin", "delete"],
   },
   {
     id: "project-critical-path-inline-node",
@@ -82,6 +84,6 @@ export const UNIFIED_NODE_SHELL_SURFACE_CONTRACTS: readonly UnifiedNodeShellSurf
     persistenceBoundary: "node-information-projection",
     openerState: "opener-owned",
     chatPane: "separate",
-    actions: ["close", "open-in-new-tab"],
+    actions: ["close", "open-in-new-tab", "pin"],
   },
 ] as const;

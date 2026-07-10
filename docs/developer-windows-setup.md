@@ -81,12 +81,60 @@ On Windows, prefer `winget` for tools that support user-scope installs:
 
 ```powershell
 winget install --source winget --accept-source-agreements --accept-package-agreements --id GitHub.cli --exact
-winget install --source winget --accept-source-agreements --accept-package-agreements --id Microsoft.PowerShell --exact
+winget install --source winget --accept-source-agreements --accept-package-agreements --id Microsoft.PowerShell --exact --installer-type wix
 winget install --source winget --accept-source-agreements --accept-package-agreements --id OpenJS.NodeJS.LTS --exact
 winget install --source winget --accept-source-agreements --accept-package-agreements --id Amazon.AWSCLI --exact
 winget install --source winget --accept-source-agreements --accept-package-agreements --id Hashicorp.Terraform --exact
 winget install --source winget --accept-source-agreements --accept-package-agreements --id DBeaver.DBeaver.Community --exact
 ```
+
+### PowerShell 7 requirement for Codex CLI
+
+Codex CLI must be able to launch a real `pwsh.exe`. Do not rely on the Microsoft Store / WindowsApps app-execution alias at:
+
+```text
+C:\Users\<windows-user>\AppData\Local\Microsoft\WindowsApps\pwsh.exe
+```
+
+On Jonat's laptop this alias caused Codex shell commands to fail before execution with:
+
+```text
+CreateProcessAsUserW failed: 1312
+```
+
+That failure can make Codex incorrectly report that it cannot inspect local files or run tests, even though the repo and sandbox are otherwise usable. Prefer the MSI installer with `--installer-type wix`. If that requires administrator privileges, use the official PowerShell ZIP release and put the extracted folder before `WindowsApps` in the user PATH.
+
+User-scope ZIP fallback used on Jonat's laptop:
+
+```powershell
+$version = "7.6.3"
+$zip = "C:\tmp\PowerShell-$version-win-x64.zip"
+$dest = "$env:LOCALAPPDATA\Programs\PowerShell\$version"
+$uri = "https://github.com/PowerShell/PowerShell/releases/download/v$version/PowerShell-$version-win-x64.zip"
+
+New-Item -ItemType Directory -Path $dest -Force | Out-Null
+Invoke-WebRequest -Uri $uri -OutFile $zip
+Expand-Archive -Path $zip -DestinationPath $dest -Force
+
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$parts = @($dest) + (($userPath -split ";") | Where-Object { $_ -and ($_ -ine $dest) })
+[Environment]::SetEnvironmentVariable("Path", ($parts -join ";"), "User")
+```
+
+After installing, restart the terminal, VS Code, and any running Codex instance so they inherit the updated PATH. Then verify:
+
+```powershell
+Get-Command pwsh | Format-List Source,Version
+pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString(); $PSHOME'
+```
+
+Expected result: `Source` and `$PSHOME` point to a real install folder such as:
+
+```text
+C:\Users\<windows-user>\AppData\Local\Programs\PowerShell\7.6.3
+```
+
+They should not point only to the zero-byte WindowsApps alias.
 
 Go 1.23.x may not be the current winget version. If winget only offers a newer Go, install Go 1.23.x directly from <https://go.dev/dl/>. The setup run for Jonat used:
 
@@ -320,7 +368,7 @@ psql       psql (PostgreSQL) 18.4
 aws        aws-cli/2.35.15
 terraform Terraform v1.15.7
 DBeaver   DBeaver Community 26.1.2
-pwsh       PowerShell 7.6.3
+pwsh       PowerShell 7.6.3 from C:\Users\Jonat\AppData\Local\Programs\PowerShell\7.6.3
 code       VS Code 1.127.0
 ```
 

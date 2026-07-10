@@ -396,6 +396,7 @@ function Wait-VsCodeWindowForUserData {
 }
 
 Assert-AgentCommand -Name git
+$powerShell7 = Get-AgentPowerShell7Exe
 
 $mainRoot = Resolve-AgentPath -Path $MainPath
 Assert-AgentMainWorktree -RepoPath $mainRoot
@@ -451,8 +452,9 @@ Initialize-CodexVsCodeUserData -UserData $userData
 if (-not $NoStart) {
   $script = New-VsCodeLauncherScript -Slug $slug -Worktree $workerPath -UserData $userData -Extensions $extensions -Code $code
   $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
-  $launcher = Start-Process powershell.exe -WorkingDirectory $workerPath -ArgumentList @(
+  $launcher = Start-Process -FilePath $powerShell7 -WorkingDirectory $workerPath -ArgumentList @(
     "-NoExit",
+    "-NoLogo",
     "-NoProfile",
     "-ExecutionPolicy",
     "Bypass",
@@ -473,7 +475,8 @@ if (-not $NoStart) {
 }
 
 $mergeScript = Join-Path $mainRoot "scripts\merge_worker_branch.ps1"
-$mergeCommand = "powershell -ExecutionPolicy Bypass -File `"$mergeScript`" -MainPath `"$mainRoot`" -WorkerPath `"$workerPath`" -CommitWorkerChanges -WorkerCommitMessage `"worker: $slug changes`" -Verification Full"
+$powerShellInvocation = ConvertTo-AgentPowerShellInvocation -Path $powerShell7
+$mergeCommand = "$powerShellInvocation -File `"$mergeScript`" -MainPath `"$mainRoot`" -WorkerPath `"$workerPath`" -CommitWorkerChanges -WorkerCommitMessage `"worker: $slug changes`" -Verification Full"
 
 Write-Host "Created Codex VS Code worker:"
 Write-Host "  Branch:    $branchName"
@@ -482,8 +485,9 @@ Write-Host "  Parent:    $workerParentRoot"
 Write-Host "  User data: $userData"
 Write-Host "  Base:      local main @ $baseSha"
 Write-Host "  Code:      $code"
+Write-Host "  Shell:     $powerShell7"
 if ($launcherPid) {
-  Write-Host "  Launcher:  PowerShell PID $launcherPid"
+  Write-Host "  Launcher:  PowerShell 7 PID $launcherPid"
 }
 if ($codePid) {
   Write-Host "  Code PID:  $codePid"

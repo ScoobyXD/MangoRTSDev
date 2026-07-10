@@ -241,6 +241,12 @@ export function KanbanNodeEditorOverlay({
           id: "open-in-new-tab",
           onClick: onOpenInNewTab,
         } : null,
+        {
+          id: "pin",
+          title: "Pin node to Pinned",
+          ariaLabel: "Pin node to Pinned",
+          onClick: () => requestAppSidebarPin({ kind: "node", id: overlay.nodeID, name: overlay.nodeTitle }),
+        },
         onToggleFullscreen ? {
           id: "fullscreen",
           pressed: fullscreen,

@@ -31,3 +31,10 @@ export const OpenInNewTabIcon: React.FC = () => (
     <path d="M7.4 2.2h4.4v4.4M11.6 2.4 6.4 7.6" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+export const PinToSidebarIcon: React.FC = () => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" style={{ display: "block" }}>
+    <path d="M5 1.9h4l-.55 3.35 2.05 2.05v1.45H7.65L7 12.2 6.35 8.75H3.5V7.3l2.05-2.05Z" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M7 8.75v3.45" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+  </svg>
+);

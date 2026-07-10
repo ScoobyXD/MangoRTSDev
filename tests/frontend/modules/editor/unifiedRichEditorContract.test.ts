@@ -208,6 +208,7 @@ test("unified node shell contract lists every Phase 2 full node-window surface",
     "fullscreen",
     "minimize",
     "open-in-new-tab",
+    "pin",
     "delete",
   ]);
   assert.deepEqual(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.map((surface) => surface.id), [
@@ -227,6 +228,7 @@ test("unified node shell contract lists every Phase 2 full node-window surface",
     "fullscreen",
     "minimize",
     "open-in-new-tab",
+    "pin",
     "delete",
   ]);
 });

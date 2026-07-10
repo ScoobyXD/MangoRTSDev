@@ -898,6 +898,12 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusRe
             onClick: onCollapseToTab,
           } : null,
           {
+            id: "pin",
+            title: "Pin node to Pinned",
+            ariaLabel: "Pin node to Pinned",
+            onClick: () => requestAppSidebarPin({ kind: "node", id: nodeID, name: nodeTitle }),
+          },
+          {
             id: "fullscreen",
             pressed: popupFullscreen,
             onClick: togglePopupFullscreen,

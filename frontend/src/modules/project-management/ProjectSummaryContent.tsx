@@ -3,6 +3,7 @@ import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMe
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes.js";
 import { MinimizeToLineIcon } from "../../app/nodeEditorPopupControls.js";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks.js";
+import { requestAppSidebarPin } from "../../app/sidebarPins.js";
 import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { useCompanyAccounts } from "../accounts/AccountFilterControl.js";
@@ -2218,6 +2219,12 @@ function ProjectCriticalPathNodeWindow({
             if (onNodeOpen) onNodeOpen(selection.nodeID);
             else openAppPathInNewTab(buildContextualNodeRoute(selection.nodeID));
           },
+        },
+        {
+          id: "pin",
+          title: "Pin node to Pinned",
+          ariaLabel: "Pin node to Pinned",
+          onClick: () => requestAppSidebarPin({ kind: "node", id: selection.nodeID, name: selection.title }),
         },
         {
           id: "close",

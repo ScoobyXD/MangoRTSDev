@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks";
+import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl";
 import { clearResourceMissing, isTerminalResourceNotFoundError } from "../api/missingResources";
 import { entityMatchesAccountFilter, setNodeAccountAssignments } from "../accounts/accountsApi";
@@ -3024,6 +3025,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         onCreateNewBoardView={() => void createNewBoardView()}
         onCollapseToTab={arenaMode ? onCollapseArenaToTab : undefined}
         onOpenInNewTab={openableLogicGateID ? () => openAppPathInNewTab(buildLogicGateRoute(openableLogicGateID)) : undefined}
+        onPinToSidebar={openableLogicGateID ? () => requestAppSidebarPin({ kind: "logic_gate", id: openableLogicGateID, name: activeBoardTitle }) : undefined}
         timelineDragEntity={activeLogicGateID ? { kind: "logic_gate", id: activeLogicGateID, label: activeBoardTitle } : undefined}
         onSelectBoard={(nextBoardID) => {
           setSelectedCardIDs(new Set());

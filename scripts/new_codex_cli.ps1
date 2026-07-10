@@ -89,6 +89,7 @@ function Get-NewestVsCodeCodexExe {
 }
 
 Assert-AgentCommand -Name git
+$powerShell7 = Get-AgentPowerShell7Exe
 
 $mainRoot = Resolve-AgentPath -Path $MainPath
 Assert-AgentMainWorktree -RepoPath $mainRoot
@@ -143,8 +144,10 @@ if (-not $NoStart) {
     "`$codexArgs = @('--sandbox', '$CodexSandbox', '--ask-for-approval', '$CodexApproval', '-c', '$escapedWindowsSandboxConfig')"
     "& '$escapedCodexExe' @codexArgs"
   ) -join "; "
-  $process = Start-Process -FilePath powershell.exe -WorkingDirectory $workerPath -ArgumentList @(
+  $process = Start-Process -FilePath $powerShell7 -WorkingDirectory $workerPath -ArgumentList @(
     "-NoExit",
+    "-NoLogo",
+    "-NoProfile",
     "-ExecutionPolicy",
     "Bypass",
     "-Command",
@@ -154,7 +157,8 @@ if (-not $NoStart) {
 }
 
 $mergeScript = Join-Path $mainRoot "scripts\merge_worker_branch.ps1"
-$mergeCommand = "powershell -ExecutionPolicy Bypass -File `"$mergeScript`" -MainPath `"$mainRoot`" -WorkerPath `"$workerPath`" -CommitWorkerChanges -WorkerCommitMessage `"worker: $slug changes`" -Verification Full"
+$powerShellInvocation = ConvertTo-AgentPowerShellInvocation -Path $powerShell7
+$mergeCommand = "$powerShellInvocation -File `"$mergeScript`" -MainPath `"$mainRoot`" -WorkerPath `"$workerPath`" -CommitWorkerChanges -WorkerCommitMessage `"worker: $slug changes`" -Verification Full"
 
 Write-Host "Created Codex worker:"
 Write-Host "  Branch: $branchName"
@@ -163,6 +167,7 @@ Write-Host "  Parent: $workerParentRoot"
 Write-Host "  Base:   local main @ $baseSha"
 if ($codexExe) {
   Write-Host "  Codex:  $codexExe"
+  Write-Host "  Shell:  $powerShell7"
   Write-Host "  Mode:   sandbox=$CodexSandbox approval=$CodexApproval windowsSandbox=$WindowsSandbox"
 }
 if ($pidValue) {

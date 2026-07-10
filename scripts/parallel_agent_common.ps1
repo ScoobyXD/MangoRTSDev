@@ -30,6 +30,92 @@ function Assert-AgentCommand {
   }
 }
 
+function Test-AgentPowerShell7Candidate {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    return $false
+  }
+
+  try {
+    $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
+  } catch {
+    return $false
+  }
+
+  if ($resolved -match "\\Microsoft\\WindowsApps\\pwsh\.exe$") {
+    return $false
+  }
+
+  try {
+    $item = Get-Item -LiteralPath $resolved -ErrorAction Stop
+    if (($item.PSObject.Properties.Name -contains "Length") -and ($item.Length -eq 0)) {
+      return $false
+    }
+  } catch {
+    return $false
+  }
+
+  return $true
+}
+
+function Get-AgentPowerShell7Exe {
+  $candidates = New-Object "System.Collections.Generic.List[string]"
+
+  if (-not [string]::IsNullOrWhiteSpace($env:MANGORTS_PWSH_EXE)) {
+    [void]$candidates.Add($env:MANGORTS_PWSH_EXE)
+  }
+
+  $pathCommand = Get-Command pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($pathCommand -and -not [string]::IsNullOrWhiteSpace($pathCommand.Source)) {
+    [void]$candidates.Add($pathCommand.Source)
+  }
+
+  $localPowerShellRoot = Join-Path $env:LOCALAPPDATA "Programs\PowerShell"
+  if (Test-Path -LiteralPath $localPowerShellRoot) {
+    $localPowerShellDirs = Get-ChildItem -LiteralPath $localPowerShellRoot -Directory -ErrorAction SilentlyContinue |
+      Sort-Object `
+        @{ Expression = {
+            try { [version]$_.Name } catch { [version]"0.0" }
+          }; Descending = $true },
+        @{ Expression = { $_.LastWriteTime }; Descending = $true }
+
+    foreach ($dir in $localPowerShellDirs) {
+      [void]$candidates.Add((Join-Path $dir.FullName "pwsh.exe"))
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+    [void]$candidates.Add((Join-Path $env:ProgramFiles "PowerShell\7\pwsh.exe"))
+  }
+
+  $programFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+  if (-not [string]::IsNullOrWhiteSpace($programFilesX86)) {
+    [void]$candidates.Add((Join-Path $programFilesX86 "PowerShell\7\pwsh.exe"))
+  }
+
+  foreach ($candidate in @($candidates | Select-Object -Unique)) {
+    if (Test-AgentPowerShell7Candidate -Path $candidate) {
+      return (Resolve-Path -LiteralPath $candidate).Path
+    }
+  }
+
+  throw "A real PowerShell 7 pwsh.exe was not found. Install PowerShell 7 and make sure it is not only the WindowsApps app-execution alias. See docs/developer-windows-setup.md."
+}
+
+function ConvertTo-AgentPowerShellInvocation {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $escapedPath = $Path.Replace('"', '`"')
+  return '& "' + $escapedPath + '" -NoLogo -NoProfile -ExecutionPolicy Bypass'
+}
+
 function Invoke-AgentGit {
   param(
     [Parameter(Mandatory = $true)]

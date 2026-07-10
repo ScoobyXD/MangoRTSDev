@@ -12,7 +12,7 @@ import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../modules/company-expl
 import { CompanyExplorerSearchBox } from "../modules/company-explorer/CompanyExplorerSearchBox";
 import type { CompanyExplorerTriageMessageDropHandler } from "../modules/company-explorer/CompanyExplorerContentModel";
 import { resolveExplorerClickSelection } from "../modules/company-explorer/treePresentation";
-import type { SidebarPin } from "./sidebarPins";
+import { requestAppSidebarPin, type SidebarPin } from "./sidebarPins";
 import { NODE_EDITOR_POPUP_RESIZE_HANDLES, type NodeEditorPopupResizeHandle } from "./nodeEditorPopupControls";
 import {
   NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
@@ -2194,6 +2194,12 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar
             id: "open-in-new-tab",
             onClick: onOpenInNewTab,
           } : null,
+          {
+            id: "pin",
+            title: "Pin node to Pinned",
+            ariaLabel: "Pin node to Pinned",
+            onClick: () => requestAppSidebarPin({ kind: "node", id: nodeID, name: nodeTitle }),
+          },
           onCollapseToTab ? {
             id: "minimize",
             onClick: onCollapseToTab,
