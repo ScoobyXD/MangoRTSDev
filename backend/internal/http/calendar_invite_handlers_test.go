@@ -167,7 +167,7 @@ func TestCalendarInviteResponseRejectsSharedViewOnlyAccess(t *testing.T) {
 	client := &fakeCalendarNylasClient{fakeNylasClient: &fakeNylasClient{}}
 	handler := NewServerWithOptions(repo, ServerOptions{NylasConfig: testNylasConfig(), NylasClient: client}).Routes()
 	req := httptest.NewRequest(http.MethodPost, "/v1/communications/calendar-invites/respond?company_id="+companyID+"&shared_inbox_id="+folder.FolderID, strings.NewReader(`{"message_id":"message-1","status":"yes"}`))
-	req = requestWithActorForTest(req, user, companyID)
+	req = sharedInboxRequestWithActor(req, user, companyID, domain.RoleCompanyUser)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
