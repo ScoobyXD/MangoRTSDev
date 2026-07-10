@@ -58,6 +58,13 @@ export type MangoAttachmentUploadResponse = {
   resource_attachment: MangoResourceAttachment;
 };
 
+export type MangoResourceAttachmentListResponse = {
+  company_id: string;
+  resource_type: MangoAttachmentResourceType;
+  resource_id: string;
+  attachments: MangoResourceAttachment[];
+};
+
 export type AttachmentRequestJSON = <T>(path: string, init?: RequestJSONInit) => Promise<T>;
 
 export type UploadMangoAttachmentInput = {
@@ -74,6 +81,53 @@ export type UploadMangoAttachmentInput = {
   originalWidth?: number;
   originalHeight?: number;
 };
+
+export type ListMangoResourceAttachmentsInput = {
+  companyID: string;
+  resourceType: MangoAttachmentResourceType;
+  resourceID: string;
+};
+
+export type MangoResourceAttachmentFilter = {
+  relationshipKind?: MangoAttachmentRelationshipKind;
+  editorSurface?: string;
+};
+
+export async function listMangoResourceAttachments(
+  request: AttachmentRequestJSON,
+  input: ListMangoResourceAttachmentsInput,
+): Promise<MangoResourceAttachmentListResponse> {
+  const query = new URLSearchParams({ company_id: input.companyID.trim() });
+  return request<MangoResourceAttachmentListResponse>(
+    `/v1/resources/${encodeURIComponent(input.resourceType)}/${encodeURIComponent(input.resourceID.trim())}/attachments?${query.toString()}`,
+  );
+}
+
+export function filterMangoResourceAttachments(
+  items: readonly MangoResourceAttachment[],
+  filter: MangoResourceAttachmentFilter,
+): MangoResourceAttachment[] {
+  const editorSurface = filter.editorSurface?.trim();
+  return items.filter((item) => (
+    (!filter.relationshipKind || item.relationship_kind === filter.relationshipKind)
+    && (!editorSurface || item.editor_surface?.trim() === editorSurface)
+    && !item.deleted_timestamp
+    && !item.attachment?.deleted_timestamp
+  ));
+}
+
+export function groupMangoResourceAttachmentsByInformationID(
+  items: readonly MangoResourceAttachment[],
+): Map<string, MangoResourceAttachment[]> {
+  const grouped = new Map<string, MangoResourceAttachment[]>();
+  for (const item of items) {
+    const informationID = item.information_id?.trim() ?? "";
+    const group = grouped.get(informationID) ?? [];
+    group.push(item);
+    grouped.set(informationID, group);
+  }
+  return grouped;
+}
 
 export async function uploadMangoAttachment(
   request: AttachmentRequestJSON,

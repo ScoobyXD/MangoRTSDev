@@ -18,7 +18,13 @@ import {
   type ProjectRecord,
   type ProjectRelationshipProjection,
 } from "../project-management/projectManagementApi";
-import { fileFromDataURL } from "../attachments/attachmentApi";
+import {
+  fileFromDataURL,
+  filterMangoResourceAttachments,
+  groupMangoResourceAttachmentsByInformationID,
+  listMangoResourceAttachments,
+  type MangoResourceAttachment,
+} from "../attachments/attachmentApi";
 import {
   buildEditorAttachedEmailPayload,
   buildEditorTextBlockContentPayload,
@@ -48,6 +54,7 @@ import { serializeEditorDocumentHTML } from "./richTextEditing";
 
 import {
   AttachedEmailOrganizerPane,
+  AttachmentCountDropdown,
   ChatPane,
   DeleteTextBlockConfirmationModal,
   EmailCountDropdown,
@@ -354,6 +361,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [blocks, setBlocks] = useState<TextBlockState[]>([]);
   const [chatMessages, setChatMessages] = useState<EditorTextBlockChatMessage[]>([]);
   const [attachedEmails, setAttachedEmails] = useState<EditorAttachedEmail[]>([]);
+  const [nodeResourceAttachments, setNodeResourceAttachments] = useState<MangoResourceAttachment[]>([]);
+  const [nodeAttachmentsLoading, setNodeAttachmentsLoading] = useState(false);
+  const [nodeAttachmentsLoadError, setNodeAttachmentsLoadError] = useState("");
+  const [nodeAttachmentsRefreshKey, setNodeAttachmentsRefreshKey] = useState(0);
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
   const [chatDraftAttachments, setChatDraftAttachments] = useState<Record<string, EditorChatAttachment[]>>({});
   const [chatReplyTargets, setChatReplyTargets] = useState<Record<string, string>>({});
@@ -422,6 +433,20 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return Array.from(byMessageID.values());
   }, [attachedEmails]);
+  const nodeFileAttachments = useMemo(() => filterMangoResourceAttachments(nodeResourceAttachments, {
+    relationshipKind: "file_attachment",
+  }), [nodeResourceAttachments]);
+  const nodeTextBlockAttachmentsByInformationID = useMemo(() => groupMangoResourceAttachmentsByInformationID(
+    filterMangoResourceAttachments(nodeFileAttachments, { editorSurface: "node_text_block" }),
+  ), [nodeFileAttachments]);
+  const textBlockTitleByID = useMemo(() => new Map(blocks.map((block) => [block.id, block.title.trim() || "Text box"])), [blocks]);
+  const nodeAttachmentDropdownItems = useMemo(() => nodeFileAttachments.map((resourceAttachment) => {
+    const informationID = resourceAttachment.information_id?.trim() ?? "";
+    return {
+      resourceAttachment,
+      contextLabel: informationID ? textBlockTitleByID.get(informationID) ?? "Text box" : "Node",
+    };
+  }), [nodeFileAttachments, textBlockTitleByID]);
   const compact = width > 0 && width < 720;
   const textCommunicationContentWidth = Math.max(
     TEXT_BLOCK_RESIZE_MIN_WIDTH_PX + TEXT_SIDE_PANE_MIN_WIDTH_PX,
@@ -523,6 +548,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     return items;
   }, [nodeID, unseenChanges]);
 
+  const refreshNodeAttachments = useCallback(() => {
+    setNodeAttachmentsRefreshKey((key) => key + 1);
+  }, []);
+
   const goToAssignedLogicGate = useCallback(() => {
     const logicGateID = primaryAssignedLogicGateID.trim();
     if (!logicGateID) return;
@@ -582,6 +611,37 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setAssigningProjectID("");
     setAssigningProjectLogicGateID("");
   }, [nodeID]);
+
+  useEffect(() => {
+    if (!companyID.trim() || !nodeID.trim()) {
+      setNodeResourceAttachments([]);
+      setNodeAttachmentsLoading(false);
+      setNodeAttachmentsLoadError("");
+      return undefined;
+    }
+    let cancelled = false;
+    setNodeAttachmentsLoading(true);
+    setNodeAttachmentsLoadError("");
+    void listMangoResourceAttachments(requestJSON, {
+      companyID,
+      resourceType: "node",
+      resourceID: nodeID,
+    })
+      .then((payload) => {
+        if (!cancelled) setNodeResourceAttachments(payload.attachments ?? []);
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        const message = cause instanceof Error ? cause.message : "failed_to_load_attachments";
+        setNodeResourceAttachments([]);
+        setNodeAttachmentsLoadError(message);
+        onError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setNodeAttachmentsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [companyID, nodeAttachmentsRefreshKey, nodeID, onError, requestJSON]);
 
   useEffect(() => {
     if (canEdit) return;
@@ -1061,8 +1121,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       updateTextBlockContent(blockID, { attachments: [...existingAttachments, ...attachments] });
     } catch (cause) {
       onError(cause instanceof Error ? cause.message : "failed_to_upload_attachment");
+    } finally {
+      refreshNodeAttachments();
     }
-  }, [canEdit, companyID, nodeID, onError, requestJSON, updateTextBlockContent]);
+  }, [canEdit, companyID, nodeID, onError, refreshNodeAttachments, requestJSON, updateTextBlockContent]);
 
   const deleteTextBlock = useCallback(async (blockID: string) => {
     if (!canEdit) return;
@@ -2232,6 +2294,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             align="left"
             onOpenEmail={openAttachedEmailFromHeader}
           />
+          <AttachmentCountDropdown
+            items={nodeAttachmentDropdownItems}
+            apiBase={apiBase}
+            companyID={companyID}
+            accent={accent}
+            surfaceText={surfaceText}
+            align="left"
+            loading={nodeAttachmentsLoading}
+            loadError={nodeAttachmentsLoadError}
+            onRetry={refreshNodeAttachments}
+            onError={onError}
+          />
           {canEdit && (
             <div ref={logicGateAssignerRef} style={{ position: "relative", display: "inline-flex", flex: "1 1 132px", minWidth: 0, maxWidth: compact ? "100%" : 360, overflow: "visible" }}>
               <button
@@ -2438,9 +2512,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               endOffset: activeChatMessage.selectionEnd ?? 0,
             }
             : null;
+          const blockAttachmentDropdownItems = (nodeTextBlockAttachmentsByInformationID.get(block.id) ?? []).map((resourceAttachment) => ({
+            resourceAttachment,
+          }));
           const blockHeaderGridTemplateColumns = canEdit
-            ? "minmax(0, 1fr) 26px 26px 26px 26px 26px"
-            : "minmax(0, 1fr) 26px 26px 26px";
+            ? "minmax(0, 1fr) 26px 38px 26px 26px 26px 26px"
+            : "minmax(0, 1fr) 38px 26px 26px 26px";
           const blockEmailPane = (
             <AttachedEmailOrganizerPane
               emails={blockEmails}
@@ -2604,6 +2681,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                         />
                       </label>
                     )}
+                    <AttachmentCountDropdown
+                      items={blockAttachmentDropdownItems}
+                      apiBase={apiBase}
+                      companyID={companyID}
+                      accent={accent}
+                      surfaceText={surfaceText}
+                      compact
+                      loading={nodeAttachmentsLoading}
+                      loadError={nodeAttachmentsLoadError}
+                      onRetry={refreshNodeAttachments}
+                      onError={onError}
+                    />
                     {canEdit && (
                       <button
                         type="button"
