@@ -670,3 +670,46 @@ Inspect every hit. The 410 test/route and separate email-provider aggregate limi
 ## Bottom line for the next agent
 
 Continue from the existing implementation. Do not rebuild it as a parallel model and do not restore the legacy browser upload. The immediate blockers are mechanical but material: restore process execution, generate `go.sum`, format Go, regenerate the npm lock entry, install dependencies, compile, test, format/validate Terraform, run the full repository suite, review the entire diff, and fix failures. Only after those steps pass is the branch ready to be described as verified or merge-ready.
+
+
+## extra notes from me
+
+The main implementation is substantially done—roughly 85–90% of the engineering work.
+
+  What is already done:
+
+  - Backend upload-intent system and S3 signing.
+  - Single and multipart browser uploads.
+  - Frontend hashing, progress, retry, cancel, and resume.
+  - Database migration and repository code.
+  - Node-level attachment ownership.
+  - Cleanup and recovery logic.
+  - Terraform configuration.
+  - Automated tests written.
+  - Documentation updated.
+
+  What remains is mostly verification and cleanup:
+
+  1. Fix the Windows runner problem that prevented commands from starting.
+  2. Generate the missing Go dependency checksums with go mod tidy.
+  3. Let npm properly regenerate the hash-wasm lockfile entry.
+  4. Format the Go and Terraform files.
+  5. Compile everything and run backend/frontend/full tests.
+  6. Fix whatever those tests uncover.
+  7. Confirm two small behavior questions:
+      - Whether empty files should be accepted.
+      - Whether expired cleanup records should end as expired or aborted.
+
+  8. Review the final diff carefully.
+
+  Nothing has been deployed. The database migration has not been applied, and Terraform has not changed AWS. Deployment
+  will later require:
+
+  - Reviewing existing S3 CORS and lifecycle settings.
+  - Importing/reconciling existing Terraform resources if necessary.
+  - Running the database migration through the approved human-only path.
+  - Explicit approval before applying infrastructure.
+
+  So, simply put: the feature is coded, but not yet proven to compile and work. Once the runner works, the next stage is
+  “format, install dependencies, run everything, and fix the failures.” If that goes smoothly, it is close to ready;
+  right now it should not be merged or deployed.
