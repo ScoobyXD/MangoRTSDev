@@ -37,6 +37,7 @@ LG24 - The Logic Gate editor exposes applying the current GVIC template to alrea
 LG25 - Pressing the Logic Gate editor's apply-to-assigned-nodes action asks for confirmation; canceling makes no write, and confirming applies the current Logic Gate GVIC template to nodes currently assigned to that Logic Gate. Ordinary GVIC role edits remain template-only for existing assigned nodes.
 LG26 - Logic Gate editor surfaces participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, and table semantics must apply to Logic Gate editor text wherever it is opened.
 LG27 - Logic Gate editor inline images/files must follow `docs/tests/attachments.md`: rich-editor paste/drop uses the shared editor image path, and durable Logic Gate information/projection rows store attachment references instead of data URLs or base64 file bytes.
+LG28 - The Logic Gate editor toolbar must use the shared rich-editor toolbar source and shared font-size helper/controller. Font-size minus/value/plus, bold, underline, and the outline-style dropdown must match node text boxes, project text boxes, and mail editor surfaces in look and selected-text/sticky-caret behavior.
 
 ## Scenarios
 
@@ -103,6 +104,7 @@ Business logic covered:
 - LG15
 - LG16
 - LG26
+- LG28
 
 Given:
 - A user edits a Logic Gate text body.
@@ -117,6 +119,7 @@ Expected:
 - Changing font size with only a caret sets the font size for the next typed characters.
 - Bold and underline buttons reflect the caret or selected text state and can be active at the same time.
 - Toggling bold or underline affects the selection or the next typed characters when the selection is collapsed.
+- The toolbar uses the shared font-size, bold, underline, and outline-style controls rather than a Logic Gate-only implementation.
 - Table insertion uses the current caret/selection position.
 - The same rich editing semantics come from the unified editor behavior used by node, project, and email compose/reply editor surfaces.
 

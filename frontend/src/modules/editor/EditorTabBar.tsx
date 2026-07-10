@@ -287,7 +287,11 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   });
 
   return (
-    <div style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", gap: 6, paddingLeft: reserveHeaderOffset ? 106 : 0, overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto" }}>
+    <div
+      data-mango-unified-editor-toolbar="true"
+      data-mango-unified-editor-toolbar-tabs={visibleTabs.map((tab) => tab.id).join(" ")}
+      style={{ position: "relative", zIndex: 4, display: "flex", alignItems: "center", gap: 6, paddingLeft: reserveHeaderOffset ? 106 : 0, overflow: "visible", scrollbarWidth: "none", pointerEvents: "auto" }}
+    >
       {visibleTabs.map((tab) => {
         const selected = activeTab === tab.id;
         const hovered = hoveredTabID === tab.id;

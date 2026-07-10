@@ -79,6 +79,7 @@ import {
   useEditorPreferences,
 } from "./useEditorPreferences";
 import {
+  applyEditorSelectionFontSizeToRoot,
   applyEditorInlineFormatToRoot,
   readEditorSelectionFormatState,
   useEditorDocumentSurfaceHandlers,
@@ -87,7 +88,7 @@ import {
   type EditorSelectionInlineFormatState,
 } from "./useEditorDocumentSurfaceHandlers";
 import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
-import { createEditorDocumentUndoHistory, recordEditorDocumentUndoChange, resetEditorDocumentUndoHistory, snapshotEditorDocumentHTML } from "./editorUndoHistory";
+import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
 import { subscribeWorkspaceRealtime } from "../workspace/workspaceRealtime";
@@ -121,65 +122,6 @@ function responsiveEditorDocumentFontSize(widthPx: number): number {
   if (widthPx < 460) return 13;
   if (widthPx < 620) return 14;
   return EDITOR_DOCUMENT_FONT_SIZE_PX;
-}
-
-function getSelectionRangeInsideElement(element: HTMLElement): Range | null {
-  const selection = element.ownerDocument.getSelection();
-  if (!selection || selection.rangeCount === 0) return null;
-  const range = selection.getRangeAt(0);
-  const container = range.commonAncestorContainer;
-  return container === element || element.contains(container) ? range : null;
-}
-
-function getSelectionOffsetsInsideElement(element: HTMLElement): { start: number; end: number } | null {
-  const range = getSelectionRangeInsideElement(element);
-  if (!range) return null;
-  const startRange = range.cloneRange();
-  startRange.selectNodeContents(element);
-  startRange.setEnd(range.startContainer, range.startOffset);
-  const endRange = range.cloneRange();
-  endRange.selectNodeContents(element);
-  endRange.setEnd(range.endContainer, range.endOffset);
-  return {
-    start: startRange.toString().length,
-    end: endRange.toString().length,
-  };
-}
-
-function snapshotEditorElementForUndo(element: HTMLElement) {
-  const offsets = getSelectionOffsetsInsideElement(element);
-  const fallbackOffset = readEditorDocumentText(element).length;
-  return snapshotEditorDocumentHTML(serializeEditorDocumentHTML(element), offsets?.start ?? fallbackOffset, offsets?.end ?? fallbackOffset);
-}
-
-function readRangeFontSize(range: Range, fallbackFontSize: number): number {
-  const elementForNode = (node: Node | null): Element | null => {
-    if (!node) return null;
-    if (node.nodeType === Node.TEXT_NODE) return node.parentElement;
-    return node instanceof Element ? node : null;
-  };
-  const container = range.startContainer.nodeType === Node.ELEMENT_NODE
-    ? (() => {
-      const element = range.startContainer as Element;
-      const nextChild = element.childNodes.item(range.startOffset);
-      const previousChild = range.startOffset > 0 ? element.childNodes.item(range.startOffset - 1) : null;
-      return elementForNode(nextChild ?? previousChild ?? element);
-    })()
-    : elementForNode(range.startContainer);
-  if (!container) return fallbackFontSize;
-  const view = container.ownerDocument.defaultView;
-  if (!view) return fallbackFontSize;
-  const parsed = Number.parseFloat(view.getComputedStyle(container).fontSize);
-  return Number.isFinite(parsed) ? parsed : fallbackFontSize;
-}
-
-function selectElementContents(element: HTMLElement) {
-  const selection = element.ownerDocument.getSelection();
-  if (!selection) return;
-  const range = element.ownerDocument.createRange();
-  range.selectNodeContents(element);
-  selection.removeAllRanges();
-  selection.addRange(range);
 }
 
 type EditorContentProps = {
@@ -1083,46 +1025,26 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     applyRemoteCollaborationUpdate(payload);
   }, [applyRemoteCollaborationUpdate, flashCollaborationStatus, pendingSaveRef, saveInFlightRef]);
 
+  const updateSelectionFontSize = useCallback((nextFontSize: number) => {
+    setSelectionFontSize(clampEditorSelectionFontSize(nextFontSize));
+  }, []);
+
   const applyEditorSelectionFontSizeValue = useCallback((nextFontSizeInput: number) => {
     if (!linkedEntityCanEdit) return;
-    const nextFontSize = clampEditorSelectionFontSize(nextFontSizeInput);
     if (linkedEntityKind === "node") {
-      const applied = nodeFormattingControllerRef.current?.applyFontSizeValue(nextFontSize) ?? false;
-      if (applied) setSelectionFontSize(nextFontSize);
+      nodeFormattingControllerRef.current?.applyFontSizeValue(nextFontSizeInput);
       return;
     }
     const element = editorDocumentRef.current;
     if (!element) return;
-    const range = getSelectionRangeInsideElement(element);
-    setSelectionFontSize(nextFontSize);
-
-    element.focus({ preventScroll: true });
-    if (!range || range.collapsed) {
-      pendingEditorFontSizeRef.current = nextFontSize;
-      return;
-    }
-
-    const undoBefore = snapshotEditorElementForUndo(element);
-    const fragment = range.extractContents();
-    const stripFontSizes = (node: Node) => {
-      if (node instanceof HTMLElement && node.tagName.toLowerCase() === "span") node.style.fontSize = "";
-      node.childNodes.forEach(stripFontSizes);
-    };
-    fragment.childNodes.forEach(stripFontSizes);
-    const span = element.ownerDocument.createElement("span");
-    span.style.fontSize = `${nextFontSize}px`;
-    span.appendChild(fragment);
-    range.insertNode(span);
-    selectElementContents(span);
-    pendingEditorFontSizeRef.current = null;
-    recordEditorDocumentUndoChange(documentUndoHistoryRef.current, undoBefore, snapshotEditorElementForUndo(element), "format");
-    scheduleCollaborativeDocumentSave(serializeEditorDocumentHTML(element));
-    scheduleIndentGuideUpdate(readEditorDocumentText(element));
-  }, [linkedEntityCanEdit, linkedEntityKind, scheduleCollaborativeDocumentSave, scheduleIndentGuideUpdate]);
-
-  const updateSelectionFontSize = useCallback((nextFontSize: number) => {
-    setSelectionFontSize(clampEditorSelectionFontSize(nextFontSize));
-  }, []);
+    applyEditorSelectionFontSizeToRoot(element, nextFontSizeInput, {
+      documentUndoHistory: documentUndoHistoryRef.current,
+      pendingEditorFontSizeRef,
+      scheduleDocumentSave: scheduleCollaborativeDocumentSave,
+      scheduleIndentGuideUpdate,
+      onSelectionFontSizeChange: updateSelectionFontSize,
+    });
+  }, [linkedEntityCanEdit, linkedEntityKind, scheduleCollaborativeDocumentSave, scheduleIndentGuideUpdate, updateSelectionFontSize]);
 
   const updateSelectionInlineFormat = useCallback((nextFormat: EditorSelectionInlineFormatState) => {
     setSelectionInlineFormat(nextFormat);
@@ -1160,10 +1082,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       return;
     }
     const element = editorDocumentRef.current;
-    const range = element ? getSelectionRangeInsideElement(element) : null;
-    const currentFontSize = range?.collapsed && pendingEditorFontSizeRef.current !== null
-      ? pendingEditorFontSizeRef.current
-      : (range ? readRangeFontSize(range, selectionFontSize) : selectionFontSize);
+    if (!element) return;
+    const currentState = readEditorSelectionFormatState(element, selectionFontSize);
+    const currentFontSize = pendingEditorFontSizeRef.current ?? currentState?.fontSize ?? selectionFontSize;
     applyEditorSelectionFontSizeValue(currentFontSize + delta);
   }, [applyEditorSelectionFontSizeValue, linkedEntityKind, selectionFontSize]);
 

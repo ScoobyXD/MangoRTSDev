@@ -24,7 +24,7 @@ import {
 } from "../../modules/attachments/attachmentApi";
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
 import { EditorTabBar } from "../../modules/editor/EditorTabBar";
-import type { EditorTabID } from "../../modules/editor/editorTabs";
+import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "../../modules/editor/editorTabs";
 import { EDITOR_RICH_TEXT_PREFIX, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
@@ -60,7 +60,6 @@ const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = 64;
 const NODE_EDITOR_POPUP_SIZE_STORAGE_KEY_PREFIX = "home-node-editor-popup-size-v1";
 const HOME_INBOX_GROUP_COLLAPSED_STORAGE_KEY_PREFIX = "mangorts.communications.inboxLogicGateGroupCollapsed.v1";
 const HOME_COMPACT_CONTEXT_MENU_WIDTH = 210;
-const MAIL_RICH_EDITOR_TAB_IDS: readonly EditorTabID[] = ["format", "outline-styles"];
 const HOME_LOGIC_GATE_PRIORITY_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
   { value: 1, label: "1  URGENT(<1hr)" },
   { value: 2, label: "2  By end of day" },
@@ -5245,7 +5244,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
               setBodyToolbarTab("outline-styles");
             }}
             reserveHeaderOffset={false}
-            visibleTabIDs={MAIL_RICH_EDITOR_TAB_IDS}
+            visibleTabIDs={UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS}
           />
         </div>
         <UnifiedRichEditorSurface

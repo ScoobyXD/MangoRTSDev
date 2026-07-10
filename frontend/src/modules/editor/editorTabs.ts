@@ -1,6 +1,8 @@
 export type EditorTabID = "editor" | "format" | "outline-styles" | "metadata" | "history" | "save-settings" | "relationships" | "permissions";
 export type EditorRelatedNodeCreationKind = "parent" | "peer" | "child";
 
+export const UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS: readonly EditorTabID[] = ["format", "outline-styles"];
+
 export const EDITOR_TAB_ITEMS: ReadonlyArray<{ id: EditorTabID; label: string }> = [
   { id: "editor", label: "Editor" },
   { id: "permissions", label: "Permissions" },

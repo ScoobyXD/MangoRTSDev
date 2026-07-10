@@ -3,9 +3,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS,
+} from "../../../../frontend/src/modules/editor/editorTabs.js";
+import {
   UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE,
   UNIFIED_RICH_EDITOR_MAIL_CONTROL_IDS,
   UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS,
+  UNIFIED_RICH_EDITOR_TOOLBAR_SOURCE,
 } from "../../../../frontend/src/modules/editor/unifiedRichEditorContract.js";
 import {
   UNIFIED_NODE_SHELL_BEHAVIOR_SOURCE,
@@ -21,7 +25,7 @@ const SHARED_EDITOR_TAB_BAR_CONTROL_LABELS = [
   "Outline styles",
 ] as const;
 
-function assertMailToolbarControls(adapterSource: string, editorTabBarSource: string, preferencesSource: string) {
+function assertSharedToolbarControls(adapterSource: string, editorTabBarSource: string, preferencesSource: string) {
   for (const label of SHARED_EDITOR_TAB_BAR_CONTROL_LABELS) {
     assert.match(editorTabBarSource, new RegExp(`aria-label="${label}"`));
   }
@@ -36,6 +40,8 @@ function assertMailToolbarControls(adapterSource: string, editorTabBarSource: st
   assert.match(adapterSource, /visibleTabIDs=/);
   assert.match(adapterSource, /onSelectionFontSizeChange=/);
   assert.match(adapterSource, /onSelectionInlineFormatChange=/);
+  assert.match(editorTabBarSource, /data-mango-unified-editor-toolbar="true"/);
+  assert.match(editorTabBarSource, /data-mango-unified-editor-toolbar-tabs=/);
   assert.match(editorTabBarSource, /hoveredFormatControl/);
   assert.match(editorTabBarSource, /formatControlDivider/);
   for (const controlID of ["decrease-font", "font-size", "increase-font", "bold", "underline"]) {
@@ -49,8 +55,13 @@ function assertRemovedMailOnlyFontSelect(source: string) {
   }
 }
 
+function assertUsesUnifiedFormatToolbarTabs(source: string) {
+  assert.match(source, /visibleTabIDs=\{UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS\}/);
+}
+
 test("unified rich editor contract lists every Phase 1 target surface", () => {
   assert.equal(UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE, "useEditorDocumentSurfaceHandlers");
+  assert.equal(UNIFIED_RICH_EDITOR_TOOLBAR_SOURCE, "EditorTabBar");
   assert.deepEqual(UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS.map((surface) => surface.id), [
     "logic-gate-editor",
     "node-text-block",
@@ -66,9 +77,10 @@ test("unified rich editor contract lists every Phase 1 target surface", () => {
     "underline",
     "outline-style",
   ]);
+  assert.deepEqual(UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, ["format", "outline-styles"]);
 });
 
-test("mail compose and attached-email reply mount unified rich editor adapters", () => {
+test("mail compose and attached-email reply mount unified rich editor adapters and toolbar", () => {
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
@@ -80,8 +92,9 @@ test("mail compose and attached-email reply mount unified rich editor adapters",
   assert.match(homeParts, /"my-triage-compose"/);
   assert.match(homeParts, /"shared-triage-compose"/);
   assert.doesNotMatch(homeParts, /document\.execCommand/);
-  assertMailToolbarControls(homeParts, editorTabBar, editorPreferences);
-  assert.match(homeParts, /MAIL_RICH_EDITOR_TAB_IDS/);
+  assertSharedToolbarControls(homeParts, editorTabBar, editorPreferences);
+  assertUsesUnifiedFormatToolbarTabs(homeParts);
+  assert.doesNotMatch(homeParts, /MAIL_RICH_EDITOR_TAB_IDS/);
   assert.match(homeParts, /bodyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
   assert.doesNotMatch(homeParts, /bodyEditorControllerRef\.current\?\.(toggleNumberedList|outdent|indent|insertList|insertLink|insertTable)\(/);
   assert.doesNotMatch(homeParts, /selectNumberedMode/);
@@ -89,8 +102,9 @@ test("mail compose and attached-email reply mount unified rich editor adapters",
   assert.match(nodeWorkspaceParts, /UnifiedRichEditorSurface/);
   assert.match(nodeWorkspaceParts, /surfaceID="attached-email-reply"/);
   assert.match(nodeWorkspaceParts, /serializeEditorBodyForEmailHTML/);
-  assertMailToolbarControls(nodeWorkspaceParts, editorTabBar, editorPreferences);
-  assert.match(nodeWorkspaceParts, /ATTACHED_EMAIL_REPLY_EDITOR_TAB_IDS/);
+  assertSharedToolbarControls(nodeWorkspaceParts, editorTabBar, editorPreferences);
+  assertUsesUnifiedFormatToolbarTabs(nodeWorkspaceParts);
+  assert.doesNotMatch(nodeWorkspaceParts, /ATTACHED_EMAIL_REPLY_EDITOR_TAB_IDS/);
   assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
   assert.match(nodeWorkspaceParts, /padding: "7px 8px 24px"/);
   assert.match(nodeWorkspaceParts, /scrollPaddingBottom: 24/);
@@ -104,6 +118,31 @@ test("mail compose and attached-email reply mount unified rich editor adapters",
   assert.match(unifiedRichEditorSurface, /outdent:/);
   assertRemovedMailOnlyFontSelect(homeParts);
   assertRemovedMailOnlyFontSelect(nodeWorkspaceParts);
+});
+
+test("editor toolbar font and outline controls share one source across rich editor surfaces", () => {
+  const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
+  const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
+  const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
+  const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+  const editorTabBar = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorTabBar.tsx"), "utf8");
+  const editorTabs = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorTabs.ts"), "utf8");
+
+  assert.match(editorTabs, /UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS: readonly EditorTabID\[\] = \["format", "outline-styles"\]/);
+  assert.match(editorTabBar, /data-mango-unified-editor-toolbar="true"/);
+  assertUsesUnifiedFormatToolbarTabs(homeParts);
+  assertUsesUnifiedFormatToolbarTabs(nodeWorkspaceParts);
+  assertUsesUnifiedFormatToolbarTabs(projectSummary);
+  assert.doesNotMatch(projectSummary, /PROJECT_TEXT_EDITOR_TOOLBAR_TAB_IDS/);
+
+  assert.match(editorContent, /applyEditorSelectionFontSizeToRoot\(element, nextFontSizeInput,/);
+  assert.doesNotMatch(editorContent, /span\.style\.fontSize = `\$\{nextFontSize\}px`/);
+  assert.match(nodeWorkspaceParts, /applyEditorSelectionFontSizeToRoot\(editor, fontSize,/);
+  assert.match(unifiedRichEditorSurface, /applyEditorSelectionFontSizeToRoot\(editor, fontSize,/);
+  assert.match(projectSummary, /controller\.applyFontSizeValue\(fontSize\)/);
+  assert.match(homeParts, /bodyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
+  assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
 });
 
 test("EmailPickerModal remains attach-only and cannot compose or send mail", () => {

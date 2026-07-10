@@ -6,7 +6,7 @@ import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type Edi
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
 import { EditorTabBar } from "./EditorTabBar";
-import type { EditorTabID } from "./editorTabs";
+import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "./editorTabs";
 import { EDITOR_TAB_TEXT, type EditorOutlineStyleID } from "./plainTextEditing";
 import { buildEditorIndentGuideSegments, editorIndentGuideLeftForDepth, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import {
@@ -3892,7 +3892,6 @@ const EMAIL_SELECTION_ACTION_OFFSET = 8;
 const EMAIL_PICKER_MESSAGE_BATCH_SIZE = 12;
 const EMAIL_PICKER_PREFETCH_REMAINING_ROWS = 5;
 const EMAIL_PICKER_APPROX_ROW_HEIGHT = 80;
-const ATTACHED_EMAIL_REPLY_EDITOR_TAB_IDS: readonly EditorTabID[] = ["format", "outline-styles"];
 
 type EmailPickerPrefetchedPage = {
   filterKey: string;
@@ -4865,7 +4864,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   onOutlineStyleFocus={() => setReplyToolbarTab("outline-styles")}
                   onOutlineStyleChange={changeReplyOutlineStyle}
                   reserveHeaderOffset={false}
-                  visibleTabIDs={ATTACHED_EMAIL_REPLY_EDITOR_TAB_IDS}
+                  visibleTabIDs={UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS}
                   disabled={!editable}
                 />
               </div>

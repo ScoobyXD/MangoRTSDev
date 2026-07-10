@@ -37,6 +37,7 @@ P26 - Project relationship node rows created from email expose `created_from_ema
 P27 - Successful project email drops dispatch the same Home triage conversion reconciliation event as Kanban and Company Explorer drops, including `shared_inbox_id` and `unstarred_message_ids` when present.
 P28 - Successful project email drops open the created node in the normal node popup.
 P29 - Project text-box creation and formatting controls must match the shared node text-box editor pattern: users add a new text box from a compact plus control in the left timeline gutter, and the toolbar exposes shared font-size, bold, underline, automatic numbering, bullet, checklist, and outline-style controls instead of project-only `Indent`, `A1`, or text-labeled `New Text Box` controls.
+P30 - Project text-box toolbar controls must use the shared compact editor toolbar tab inventory and shared formatting controller path. Font-size minus/value/plus, bold, underline, and the outline-style dropdown must match node text boxes, Logic Gate editor text, and mail editor surfaces in look and selected-text/sticky-caret behavior.
 
 ## Scenarios
 
@@ -125,6 +126,7 @@ Business logic covered:
 - P16
 - P18
 - P29
+- P30
 
 Given:
 - A user edits a project text box.
@@ -133,6 +135,7 @@ Given:
 Expected:
 - The project text box uses the same unified editor semantics as node, Logic Gate, and email compose/reply rich editor surfaces.
 - The project text-box toolbar exposes the shared node-style font-size, bold, underline, automatic numbering, bullet, checklist, and outline-style controls.
+- Those toolbar controls come from the shared compact editor toolbar inventory and route through the shared formatting controller for selected text and sticky collapsed-caret formatting.
 - Creating a project text box uses the compact plus control in the left timeline gutter; project-only `Indent`, `A1`, and text-labeled `New Text Box` controls are not part of the target UI.
 - Project text-box edits save to project information/projection state.
 - Project text-box edits do not write node information/projection state.
