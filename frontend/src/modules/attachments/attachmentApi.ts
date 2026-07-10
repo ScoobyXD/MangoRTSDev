@@ -13,6 +13,7 @@ export type MangoAttachmentResourceType =
   | "project_chat_message"
   | "email_message"
   | "email_draft"
+  | "email_signature"
   | "attached_email"
   | "shared_inbox"
   | "company_explorer_folder"
@@ -104,6 +105,12 @@ export function mangoEmailDraftResourceID(input: { draftID: string; userID?: str
   const sharedInboxID = input.sharedInboxID?.trim() ?? "";
   if (sharedInboxID) return `shared:${encodeURIComponent(sharedInboxID)}:${encodeURIComponent(draftID)}`;
   return `personal:${encodeURIComponent(input.userID?.trim() ?? "")}:${encodeURIComponent(draftID)}`;
+}
+
+export function mangoEmailSignatureResourceID(input: { userID?: string; accountEmail?: string; sharedInboxID?: string }): string {
+  const sharedInboxID = input.sharedInboxID?.trim() ?? "";
+  if (sharedInboxID) return `shared:${encodeURIComponent(sharedInboxID)}`;
+  return `personal:${encodeURIComponent(input.userID?.trim() ?? "")}:${encodeURIComponent(input.accountEmail?.trim().toLowerCase() ?? "")}`;
 }
 
 export function mangoEmailMessageResourceID(input: { messageID: string; userID?: string; sharedInboxID?: string }): string {

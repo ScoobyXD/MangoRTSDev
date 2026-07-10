@@ -1,5 +1,5 @@
-import type { EmailMessage } from "../../modules/communications/communicationsApi.js";
-import { parseEmailAddressList } from "../../modules/communications/communicationsApi.js";
+import type { CommunicationsEmailDraft, EmailMessage } from "../../modules/communications/communicationsApi.js";
+import { deleteEmailDraft, getEmailSignature, listEmailDrafts, parseEmailAddressList, saveEmailDraft, saveEmailSignature } from "../../modules/communications/communicationsApi.js";
 import { EDITOR_RICH_TEXT_PREFIX } from "../../modules/editor/richTextEditing.js";
 import { emptyCompose, type ComposeAttachment, type ComposeState } from "./homeTypes.js";
 
@@ -45,17 +45,26 @@ export function createHomeMailDraftID(): string {
   return `draft:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function createHomeMailReplyDraftID(sharedInboxID: string, replyToMessageID: string): string {
+function emailDraftScopeSegment(sharedInboxID: string, accountEmail = "", userID = ""): string {
+  const cleanSharedInboxID = sharedInboxID.trim();
+  if (cleanSharedInboxID) return cleanSharedInboxID;
+  const cleanUserID = userID.trim();
+  const cleanAccountEmail = accountEmail.trim().toLowerCase();
+  if (cleanUserID || cleanAccountEmail) return `personal:${cleanUserID || "user"}:${cleanAccountEmail || "account"}`;
+  return "personal";
+}
+
+export function createHomeMailReplyDraftID(sharedInboxID: string, replyToMessageID: string, accountEmail = "", userID = ""): string {
   const cleanReplyToMessageID = replyToMessageID.trim();
   if (!cleanReplyToMessageID) return createHomeMailDraftID();
-  const scope = sharedInboxID.trim() || "personal";
+  const scope = emailDraftScopeSegment(sharedInboxID, accountEmail, userID);
   return `draft:reply:${encodeURIComponent(scope)}:${encodeURIComponent(cleanReplyToMessageID)}`;
 }
 
-export function createHomeMailForwardDraftID(sharedInboxID: string, messageID: string): string {
+export function createHomeMailForwardDraftID(sharedInboxID: string, messageID: string, accountEmail = "", userID = ""): string {
   const cleanMessageID = messageID.trim();
   if (!cleanMessageID) return createHomeMailDraftID();
-  const scope = sharedInboxID.trim() || "personal";
+  const scope = emailDraftScopeSegment(sharedInboxID, accountEmail, userID);
   return `draft:forward:${encodeURIComponent(scope)}:${encodeURIComponent(cleanMessageID)}`;
 }
 
@@ -128,6 +137,142 @@ function writeHomeMailDrafts(companyID: string, userID: string, drafts: HomeMail
     return readHomeMailDrafts(companyID, userID);
   }
   return sorted;
+}
+
+export async function loadHomeMailDrafts(companyID: string, userID: string): Promise<HomeMailDraft[]> {
+  const localDrafts = readHomeMailDrafts(companyID, userID);
+  try {
+    const remoteDrafts = (await listEmailDrafts(companyID))
+      .map((draft) => homeMailDraftFromRemote(draft, companyID, userID))
+      .filter((draft): draft is HomeMailDraft => Boolean(draft));
+    const remoteIDs = new Set(remoteDrafts.map((draft) => draft.id));
+    const localOnlyDrafts = localDrafts.filter((draft) => !remoteIDs.has(draft.id) && composeHasDraftContent(homeMailDraftToCompose(draft), ""));
+    await Promise.all(localOnlyDrafts.map((draft) => saveHomeMailDraftToDatabase(draft).catch(() => null)));
+    return writeHomeMailDrafts(companyID, userID, mergeHomeMailDrafts(remoteDrafts, localOnlyDrafts));
+  } catch {
+    return localDrafts;
+  }
+}
+
+export async function syncHomeMailDraftFromCompose(
+  companyID: string,
+  userID: string,
+  compose: ComposeState,
+  signature: string,
+): Promise<HomeMailDraft[]> {
+  const localDrafts = saveHomeMailDraftFromCompose(companyID, userID, compose, signature);
+  try {
+    const draftID = compose.draftID.trim();
+    const draft = draftID ? localDrafts.find((item) => item.id === draftID) : null;
+    if (draft) {
+      await saveHomeMailDraftToDatabase(draft);
+    } else if (draftID) {
+      await deleteEmailDraft(companyID, draftID);
+    }
+    return loadHomeMailDrafts(companyID, userID);
+  } catch {
+    return localDrafts;
+  }
+}
+
+export async function deleteHomeMailDraftRemote(companyID: string, userID: string, draftID: string): Promise<HomeMailDraft[]> {
+  const localDrafts = deleteHomeMailDraft(companyID, userID, draftID);
+  try {
+    await deleteEmailDraft(companyID, draftID);
+    return loadHomeMailDrafts(companyID, userID);
+  } catch {
+    return localDrafts;
+  }
+}
+
+export async function deleteHomeMailDraftsRemote(companyID: string, userID: string, draftIDs: string[]): Promise<HomeMailDraft[]> {
+  const localDrafts = deleteHomeMailDrafts(companyID, userID, draftIDs);
+  try {
+    await Promise.all(draftIDs.map((draftID) => deleteEmailDraft(companyID, draftID)));
+    return loadHomeMailDrafts(companyID, userID);
+  } catch {
+    return localDrafts;
+  }
+}
+
+async function saveHomeMailDraftToDatabase(draft: HomeMailDraft): Promise<HomeMailDraft | null> {
+  const saved = await saveEmailDraft({
+    companyID: draft.companyID,
+    draftID: draft.id,
+    sharedInboxID: draft.sharedInboxID || undefined,
+    accountEmail: draft.accountEmail || undefined,
+    kind: homeMailDraftKind(draft),
+    sourceMessageID: draft.replyToMessageID || undefined,
+    replyToMessageID: draft.replyToMessageID || undefined,
+    to: draft.to,
+    cc: draft.cc,
+    bcc: draft.bcc,
+    subject: draft.subject,
+    bodyEditorHTML: draft.body,
+    replyToMessage: draft.replyToMessage ?? null,
+    scheduledSendTimestamp: draft.scheduledAt,
+  });
+  return homeMailDraftFromRemote(saved, draft.companyID, draft.userID);
+}
+
+function homeMailDraftFromRemote(draft: CommunicationsEmailDraft, companyID: string, userID: string): HomeMailDraft | null {
+  const id = draft.draft_id?.trim();
+  if (!id) return null;
+  return normalizeDraft({
+    id,
+    userID,
+    companyID,
+    sharedInboxID: draft.shared_inbox_id ?? "",
+    accountEmail: draft.account_email ?? draft.personal_account_email ?? "",
+    replyToMessageID: draft.source_message_id ?? "",
+    replyToMessage: draft.reply_to_message ?? null,
+    to: draft.to_recipients ?? "",
+    cc: draft.cc_recipients ?? "",
+    bcc: draft.bcc_recipients ?? "",
+    subject: draft.subject ?? "",
+    body: draft.body_editor_html ?? "",
+    attachments: remoteDraftAttachments(draft),
+    scheduledAt: scheduledTimestampForCompose(draft.scheduled_send_timestamp ?? ""),
+    createdAt: draft.created_timestamp,
+    updatedAt: draft.updated_timestamp,
+  }, companyID, userID);
+}
+
+function remoteDraftAttachments(draft: CommunicationsEmailDraft): ComposeAttachment[] {
+  return (draft.attachments ?? [])
+    .map((link) => ({
+      id: link.attachment_id?.trim() || link.resource_attachment_id?.trim() || "",
+      attachmentID: link.attachment_id?.trim() || "",
+      filename: link.attachment?.original_filename?.trim() || "attachment",
+      contentType: link.attachment?.mime_type?.trim() || "application/octet-stream",
+      size: Number.isFinite(link.attachment?.byte_size) ? Math.max(0, Math.round(link.attachment?.byte_size ?? 0)) : 0,
+    }))
+    .filter((attachment) => attachment.attachmentID);
+}
+
+function mergeHomeMailDrafts(primary: HomeMailDraft[], secondary: HomeMailDraft[]): HomeMailDraft[] {
+  const byID = new Map<string, HomeMailDraft>();
+  for (const draft of [...secondary, ...primary]) {
+    const existing = byID.get(draft.id);
+    if (!existing || Date.parse(draft.updatedAt) >= Date.parse(existing.updatedAt)) {
+      byID.set(draft.id, draft);
+    }
+  }
+  return [...byID.values()].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+}
+
+function homeMailDraftKind(draft: HomeMailDraft): "compose" | "reply" | "forward" {
+  if (draft.id.startsWith("draft:reply:")) return "reply";
+  if (draft.id.startsWith("draft:forward:")) return "forward";
+  return "compose";
+}
+
+function scheduledTimestampForCompose(value: string): string {
+  const timestamp = Date.parse(value.trim());
+  if (!Number.isFinite(timestamp)) return value.trim();
+  const date = new Date(timestamp);
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 export function deleteHomeMailDraft(companyID: string, userID: string, draftID: string): HomeMailDraft[] {
@@ -281,5 +426,32 @@ export function saveHomeMailSignature(companyID: string, userID: string, signatu
     localStorage.setItem(signatureStorageKey(companyID, userID), signature);
   } catch {
     // Ignore storage failures; the compose state still keeps the signature text for this session.
+  }
+}
+
+export async function loadHomeMailSignature(companyID: string, userID: string): Promise<string> {
+  const localSignature = readHomeMailSignature(companyID, userID);
+  try {
+    const remoteSignature = await getEmailSignature(companyID);
+    const body = remoteSignature?.body_editor_html ?? "";
+    if (body.trim()) {
+      saveHomeMailSignature(companyID, userID, body);
+      return body;
+    }
+    if (localSignature.trim()) {
+      await saveEmailSignature({ companyID, bodyEditorHTML: localSignature });
+    }
+    return localSignature;
+  } catch {
+    return localSignature;
+  }
+}
+
+export async function saveHomeMailSignatureRemote(companyID: string, userID: string, signature: string): Promise<void> {
+  saveHomeMailSignature(companyID, userID, signature);
+  try {
+    await saveEmailSignature({ companyID, bodyEditorHTML: signature });
+  } catch {
+    // The local fallback keeps the editor state durable for this browser until the backend is reachable.
   }
 }

@@ -17,7 +17,7 @@ ATT6 - Inline editor images must render as high-quality images on first open, no
 ATT7 - Node attachment-button uploads use the same Mango attachment API, S3 storage, metadata records, and `resource_attachments` links as pasted inline images.
 ATT8 - Chat attachments remain chat UI, not unified rich-editor content, but they still upload through the global Mango attachment API and persist attachment references instead of durable `dataURL` values.
 ATT9 - Project text-block attachments and project chat attachments use the same global attachment system while preserving project-owned persistence for project text boxes.
-ATT10 - Outgoing personal and shared email compose/reply attachments upload to Mango attachments before durable draft/send state is saved; the backend reads S3 bytes when sending through the provider.
+ATT10 - Outgoing personal and shared email compose/reply attachments upload to Mango attachments before durable draft/send state is saved; the backend reads S3 bytes when sending through the provider. Email signature images/logos, when supported, use the same Mango attachment system through `email_signature` resource links.
 ATT11 - Incoming provider email attachments may stay provider-referenced while they are only mailbox-list metadata, but must be cached or persisted into Mango S3 when attached to a node, converted into work, repeatedly opened as a durable Mango resource, or otherwise selected for Mango ownership.
 ATT12 - Attached-email projections and communications email JSON may store provider IDs, message/thread metadata, inline/content IDs, and Mango attachment references, but must not store attachment bytes.
 ATT13 - Attachment content access must be authorized through Mango resource permissions; knowing an S3 key or attachment ID is not enough to read bytes.
@@ -99,7 +99,7 @@ Expected:
 - Durable chat JSON/projection data does not store `dataURL` or base64 file bytes.
 - Chat remains outside unified rich-editor indentation/list/paste semantics.
 
-### Scenario ATT-S5: Outgoing Email Attachments
+### Scenario ATT-S5: Outgoing Email And Signature Attachments
 
 Business logic covered:
 - ATT3
@@ -109,10 +109,12 @@ Business logic covered:
 
 Given:
 - A user attaches a file while composing, replying, replying all, forwarding, or scheduling personal/shared email.
+- A user adds a future image/logo attachment to an email signature.
 
 Expected:
 - The browser uploads the file to Mango attachments before durable draft/send state is saved.
 - Draft/send payloads store attachment IDs or reference objects.
+- Signature image/logo payloads store Mango attachment references through `email_signature` resource links.
 - The backend reads S3 bytes at send time and passes them to the provider.
 - Normal durable email payloads do not carry raw base64 `content`.
 

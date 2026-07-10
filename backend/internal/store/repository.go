@@ -119,6 +119,12 @@ type CommunicationsRepository interface {
 	RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error)
 	TransferCommunicationsEmailNode(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferResult, error)
 	ListCommunicationsEmailPlacements(userID, companyID string, messageIDs []string) ([]domain.CommunicationsEmailPlacement, error)
+	ListCommunicationsEmailDrafts(input CommunicationsEmailDraftListInput) ([]domain.CommunicationsEmailDraft, error)
+	GetCommunicationsEmailDraft(companyID, draftID string) (domain.CommunicationsEmailDraft, error)
+	UpsertCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error)
+	SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error
+	GetCommunicationsEmailSignature(input CommunicationsEmailSignatureScopeInput) (domain.CommunicationsEmailSignature, error)
+	UpsertCommunicationsEmailSignature(input CommunicationsEmailSignatureInput) (domain.CommunicationsEmailSignature, error)
 	ListUserLogicGateShortcuts(userID, companyID string) ([]domain.UserLogicGateShortcut, error)
 	UpsertUserLogicGateShortcuts(userID, companyID string, logicGateIDs []string) ([]domain.UserLogicGateShortcut, error)
 	DeleteUserLogicGateShortcut(userID, companyID, logicGateID string) error
@@ -277,6 +283,8 @@ func NormalizeAttachmentResourceType(resourceType string) string {
 		return "email_message"
 	case "email_draft", "email-draft":
 		return "email_draft"
+	case "email_signature", "email-signature":
+		return "email_signature"
 	case "attached_email", "attached-email":
 		return "attached_email"
 	case "shared_inbox", "shared-inbox":
@@ -2165,6 +2173,57 @@ type CompanyEmailConnectionInput struct {
 	GrantID                  string
 	Status                   string
 	ConnectedByUserID        string
+}
+
+type CommunicationsEmailDraftListInput struct {
+	CompanyID   string
+	ActorUserID string
+}
+
+type CommunicationsEmailDraftInput struct {
+	CompanyID              string
+	DraftID                string
+	PersonalUserID         string
+	PersonalAccountEmail   string
+	SharedInboxID          string
+	CreatedByUserID        string
+	UpdatedByUserID        string
+	Kind                   string
+	SourceMessageID        string
+	AccountEmail           string
+	ToRecipients           string
+	CcRecipients           string
+	BccRecipients          string
+	Subject                string
+	BodyEditorHTML         string
+	ReplyToMessageJSON     string
+	ScheduledSendTimestamp *time.Time
+}
+
+type CommunicationsEmailDraftDeleteInput struct {
+	CompanyID       string
+	DraftID         string
+	UpdatedByUserID string
+}
+
+type CommunicationsEmailSignatureScopeInput struct {
+	CompanyID            string
+	PersonalUserID       string
+	PersonalAccountEmail string
+	SharedInboxID        string
+}
+
+type CommunicationsEmailSignatureInput struct {
+	CompanyID            string
+	SignatureID          string
+	PersonalUserID       string
+	PersonalAccountEmail string
+	SharedInboxID        string
+	Name                 string
+	BodyEditorHTML       string
+	IsDefault            bool
+	CreatedByUserID      string
+	UpdatedByUserID      string
 }
 
 func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {
