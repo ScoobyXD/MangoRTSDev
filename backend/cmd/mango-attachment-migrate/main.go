@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -309,10 +310,13 @@ insert into attachment_migration_runs (
 				rep.SkippedApplyRows++
 				continue
 			}
+			body := file.DecodedByteData()
 			if err := storage.PutObject(ctx, httpapi.AttachmentPutObjectInput{
-				Key:         file.StorageKey,
-				ContentType: file.MimeType,
-				Body:        file.DecodedByteData(),
+				Key:           file.StorageKey,
+				ContentType:   file.MimeType,
+				ContentLength: int64(len(body)),
+				SHA256:        file.SHA256,
+				Body:          bytes.NewReader(body),
 			}); err != nil {
 				return fmt.Errorf("put attachment object %s: %w", file.AttachmentID, err)
 			}

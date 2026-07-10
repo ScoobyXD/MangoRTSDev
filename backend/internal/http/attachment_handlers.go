@@ -15,7 +15,16 @@ import (
 	"strings"
 )
 
-const attachmentMultipartMaxMemory = 32 << 20
+const (
+	attachmentMultipartMaxMemory = 1 << 20
+	attachmentContentSniffBytes   = 512
+)
+
+type attachmentUploadInspection struct {
+	ByteSize            int64
+	SHA256              string
+	DetectedContentType string
+}
 
 type attachmentUploadResponse struct {
 	Attachment         domain.Attachment         `json:"attachment"`
@@ -84,38 +93,6 @@ func (s *Server) handleAttachmentUpload(w http.ResponseWriter, r *http.Request) 
 	if !s.requireAttachmentResourceEdit(w, r, companyID, resourceType, resourceID) {
 		return
 	}
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "file_required")
-		return
-	}
-	defer file.Close()
-	body, err := io.ReadAll(file)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "failed_to_read_upload")
-		return
-	}
-	attachmentID := store.NewUUIDv7String()
-	storageKey := attachmentOriginalObjectKey(companyID, attachmentID)
-	mimeType := strings.TrimSpace(header.Header.Get("Content-Type"))
-	if mimeType == "" {
-		mimeType = http.DetectContentType(body)
-	}
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-	if err := s.attachmentStorage.PutObject(r.Context(), AttachmentPutObjectInput{
-		Key:         storageKey,
-		ContentType: mimeType,
-		Body:        body,
-	}); err != nil {
-		writeAttachmentStorageError(w, err)
-		return
-	}
-	actorUserID := ""
-	if actor, ok := authenticatedActor(r); ok {
-		actorUserID = strings.TrimSpace(actor.User.UserID)
-	}
 	width, ok := optionalPositiveIntFormValue(w, r, "original_width")
 	if !ok {
 		return
@@ -124,20 +101,59 @@ func (s *Server) handleAttachmentUpload(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	sum := sha256.Sum256(body)
+	sourceKind := store.NormalizeAttachmentSourceKind(r.FormValue("source_kind"))
+	relationshipKind := store.NormalizeAttachmentRelationshipKind(r.FormValue("relationship_kind"))
+	if sourceKind == "" || relationshipKind == "" {
+		writeError(w, http.StatusBadRequest, "invalid_attachment")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "file_required")
+		return
+	}
+	defer file.Close()
+	inspection, err := inspectAttachmentUpload(file)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed_to_read_upload")
+		return
+	}
+	attachmentID := store.NewUUIDv7String()
+	storageKey := attachmentOriginalObjectKey(companyID, attachmentID)
+	mimeType := strings.TrimSpace(header.Header.Get("Content-Type"))
+	if mimeType == "" {
+		mimeType = inspection.DetectedContentType
+	}
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	if err := s.attachmentStorage.PutObject(r.Context(), AttachmentPutObjectInput{
+		Key:           storageKey,
+		ContentType:   mimeType,
+		ContentLength: inspection.ByteSize,
+		SHA256:        inspection.SHA256,
+		Body:          file,
+	}); err != nil {
+		writeAttachmentStorageError(w, err)
+		return
+	}
+	actorUserID := ""
+	if actor, ok := authenticatedActor(r); ok {
+		actorUserID = strings.TrimSpace(actor.User.UserID)
+	}
 	attachment, link, err := s.repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
 		CompanyID:        companyID,
 		AttachmentID:     attachmentID,
 		UploadedByUserID: actorUserID,
 		OriginalFilename: attachmentFilename(header.Filename),
 		MimeType:         mimeType,
-		ByteSize:         int64(len(body)),
-		SHA256:           hex.EncodeToString(sum[:]),
+		ByteSize:         inspection.ByteSize,
+		SHA256:           inspection.SHA256,
 		StorageBucket:    s.attachmentStorage.Bucket(),
 		StorageKey:       storageKey,
 		OriginalWidth:    width,
 		OriginalHeight:   height,
-		SourceKind:       r.FormValue("source_kind"),
+		SourceKind:       sourceKind,
 		SourceProvider:   r.FormValue("source_provider"),
 		ResourceLink: store.ResourceAttachmentInput{
 			CompanyID:        companyID,
@@ -146,7 +162,7 @@ func (s *Server) handleAttachmentUpload(w http.ResponseWriter, r *http.Request) 
 			InformationID:    r.FormValue("information_id"),
 			MessageID:        r.FormValue("message_id"),
 			EditorSurface:    r.FormValue("editor_surface"),
-			RelationshipKind: r.FormValue("relationship_kind"),
+			RelationshipKind: relationshipKind,
 			CreatedByUserID:  actorUserID,
 		},
 	})
@@ -163,6 +179,37 @@ func (s *Server) handleAttachmentUpload(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusCreated, attachmentUploadResponse{Attachment: attachment, ResourceAttachment: link})
+}
+
+func inspectAttachmentUpload(file io.ReadSeeker) (attachmentUploadInspection, error) {
+	if file == nil {
+		return attachmentUploadInspection{}, errors.New("attachment upload file is required")
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return attachmentUploadInspection{}, err
+	}
+
+	prefix := make([]byte, attachmentContentSniffBytes)
+	prefixSize, readErr := io.ReadFull(file, prefix)
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		return attachmentUploadInspection{}, readErr
+	}
+
+	hasher := sha256.New()
+	_, _ = hasher.Write(prefix[:prefixSize])
+	remainderSize, err := io.Copy(hasher, file)
+	if err != nil {
+		return attachmentUploadInspection{}, err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return attachmentUploadInspection{}, err
+	}
+
+	return attachmentUploadInspection{
+		ByteSize:            int64(prefixSize) + remainderSize,
+		SHA256:              hex.EncodeToString(hasher.Sum(nil)),
+		DetectedContentType: http.DetectContentType(prefix[:prefixSize]),
+	}, nil
 }
 
 func (s *Server) handleAttachmentMetadata(w http.ResponseWriter, r *http.Request, attachmentID string) {

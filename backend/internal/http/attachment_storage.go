@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -32,9 +31,11 @@ type AttachmentObjectStorage interface {
 }
 
 type AttachmentPutObjectInput struct {
-	Key         string
-	ContentType string
-	Body        []byte
+	Key           string
+	ContentType   string
+	ContentLength int64
+	SHA256        string
+	Body          io.ReadSeeker
 }
 
 type AttachmentGetObjectInput struct {
@@ -88,8 +89,13 @@ func (s *S3AttachmentStorage) Bucket() string {
 }
 
 func (s *S3AttachmentStorage) PutObject(ctx context.Context, input AttachmentPutObjectInput) error {
-	if s == nil || s.Region == "" || s.BucketName == "" || strings.TrimSpace(input.Key) == "" {
+	payloadHash := strings.ToLower(strings.TrimSpace(input.SHA256))
+	if s == nil || s.Region == "" || s.BucketName == "" || strings.TrimSpace(input.Key) == "" ||
+		input.Body == nil || input.ContentLength < 0 || !validAttachmentSHA256Hex(payloadHash) {
 		return ErrAttachmentStorageUnavailable
+	}
+	if _, err := input.Body.Seek(0, io.SeekStart); err != nil {
+		return err
 	}
 	creds, err := s.credentials(ctx)
 	if err != nil {
@@ -99,19 +105,22 @@ func (s *S3AttachmentStorage) PutObject(ctx context.Context, input AttachmentPut
 	if err != nil {
 		return err
 	}
-	body := bytes.Clone(input.Body)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, objectURL, bytes.NewReader(body))
+	var requestBody io.Reader = input.Body
+	if input.ContentLength == 0 {
+		requestBody = nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, objectURL, requestBody)
 	if err != nil {
 		return err
 	}
+	req.ContentLength = input.ContentLength
 	if contentType := strings.TrimSpace(input.ContentType); contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	req.Header.Set("X-Amz-Content-Sha256", attachmentSHA256Hex(body))
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv("MANGORTS_ATTACHMENT_S3_SERVER_SIDE_ENCRYPTION")), "none") {
 		req.Header.Set("X-Amz-Server-Side-Encryption", getenvDefaultHTTP("MANGORTS_ATTACHMENT_S3_SERVER_SIDE_ENCRYPTION", "AES256"))
 	}
-	signAttachmentV4(req, body, creds, s.Region, "s3", time.Now().UTC())
+	signAttachmentV4WithPayloadHash(req, payloadHash, creds, s.Region, "s3", time.Now().UTC())
 	res, err := s.httpClient().Do(req)
 	if err != nil {
 		return err
@@ -311,9 +320,12 @@ func (s *S3AttachmentStorage) credentialsFromContainer(ctx context.Context) (att
 }
 
 func signAttachmentV4(req *http.Request, body []byte, creds attachmentAWSCredentials, region, service string, now time.Time) {
+	signAttachmentV4WithPayloadHash(req, attachmentSHA256Hex(body), creds, region, service, now)
+}
+
+func signAttachmentV4WithPayloadHash(req *http.Request, payloadHash string, creds attachmentAWSCredentials, region, service string, now time.Time) {
 	amzDate := now.Format("20060102T150405Z")
 	dateStamp := now.Format("20060102")
-	payloadHash := attachmentSHA256Hex(body)
 	req.Header.Set("X-Amz-Date", amzDate)
 	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
 	if creds.SessionToken != "" {
@@ -373,6 +385,14 @@ func signAttachmentV4(req *http.Request, body []byte, creds attachmentAWSCredent
 	}, "\n")
 	signature := hex.EncodeToString(attachmentHMACSHA256(attachmentSigningKey(creds.SecretAccessKey, dateStamp, region, service), []byte(stringToSign)))
 	req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential="+creds.AccessKeyID+"/"+scope+", SignedHeaders="+signedHeaders+", Signature="+signature)
+}
+
+func validAttachmentSHA256Hex(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size
 }
 
 func attachmentCanonicalQueryString(values url.Values) string {

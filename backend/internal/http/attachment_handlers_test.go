@@ -3,7 +3,9 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -37,7 +39,24 @@ func (s *fakeAttachmentObjectStorage) Bucket() string {
 }
 
 func (s *fakeAttachmentObjectStorage) PutObject(ctx context.Context, input AttachmentPutObjectInput) error {
-	s.objects[input.Key] = fakeAttachmentObject{contentType: input.ContentType, body: bytes.Clone(input.Body)}
+	if input.Body == nil {
+		return fmt.Errorf("missing attachment body")
+	}
+	if _, err := input.Body.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	body, err := io.ReadAll(input.Body)
+	if err != nil {
+		return err
+	}
+	if int64(len(body)) != input.ContentLength {
+		return fmt.Errorf("attachment length = %d, want %d", len(body), input.ContentLength)
+	}
+	sum := sha256.Sum256(body)
+	if fmt.Sprintf("%x", sum[:]) != input.SHA256 {
+		return fmt.Errorf("attachment hash mismatch")
+	}
+	s.objects[input.Key] = fakeAttachmentObject{contentType: input.ContentType, body: body}
 	return nil
 }
 
@@ -132,6 +151,33 @@ func TestAttachmentUploadCreatesMetadataS3KeyAndResourceLinks(t *testing.T) {
 	handler.ServeHTTP(linkRec, linkReq)
 	if linkRec.Code != http.StatusCreated {
 		t.Fatalf("POST resource attachment link status = %d body=%s", linkRec.Code, linkRec.Body.String())
+	}
+}
+
+func TestInspectAttachmentUploadHashesSizesSniffsAndRewinds(t *testing.T) {
+	content := bytes.Repeat([]byte("streamed attachment\n"), 100_000)
+	reader := bytes.NewReader(content)
+
+	inspection, err := inspectAttachmentUpload(reader)
+	if err != nil {
+		t.Fatalf("inspectAttachmentUpload: %v", err)
+	}
+	wantHash := sha256.Sum256(content)
+	if inspection.ByteSize != int64(len(content)) {
+		t.Fatalf("byte size = %d, want %d", inspection.ByteSize, len(content))
+	}
+	if inspection.SHA256 != fmt.Sprintf("%x", wantHash[:]) {
+		t.Fatalf("sha256 = %q, want %x", inspection.SHA256, wantHash)
+	}
+	if !strings.HasPrefix(inspection.DetectedContentType, "text/plain") {
+		t.Fatalf("detected content type = %q", inspection.DetectedContentType)
+	}
+	replayed, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read rewound upload: %v", err)
+	}
+	if !bytes.Equal(replayed, content) {
+		t.Fatalf("rewound upload did not reproduce original bytes")
 	}
 }
 
