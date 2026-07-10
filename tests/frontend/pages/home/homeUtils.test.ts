@@ -36,6 +36,7 @@ import {
   resizeHomeInboxMatrixColumnsWithoutSidebar,
   setNodeDragData,
   sharedInboxCanLoadMail,
+  sortEmailConversationMessagesNewestFirst,
   triageMessageIDsFromStreamMessageID,
   visibleEmailAttachmentsForBody,
   workspaceEventTouchesHomePanel,
@@ -221,6 +222,26 @@ test("triage email list condenses messages from the same Nylas thread into one v
   assert.equal(condensed[0].unread, true);
   assert.equal(condensed[0].starred, true);
   assert.equal(condensed[1].thread_message_count, 1);
+
+  const afterReply = condenseEmailThreadMessages([
+    emailMessage("new-reply", "thread-1", 400, { unread: false }),
+    ...messages,
+  ]);
+  assert.deepEqual(afterReply.map((message) => message.id), ["new-reply", "solo-message"]);
+  assert.equal(afterReply[0].thread_message_count, 3);
+  assert.equal(afterReply[0].unread, true);
+  assert.equal(afterReply[0].starred, true);
+});
+
+test("conversation messages are newest first with a deterministic id tie-breaker", () => {
+  const ordered = sortEmailConversationMessagesNewestFirst([
+    emailMessage("older", "thread-1", 100),
+    emailMessage("same-date-a", "thread-1", 300),
+    emailMessage("same-date-b", "thread-1", 300),
+    emailMessage("newest", "thread-1", 400),
+  ]);
+
+  assert.deepEqual(ordered.map((message) => message.id), ["newest", "same-date-b", "same-date-a", "older"]);
 });
 
 test("message documents preserve Mango-authored email body structure", () => {

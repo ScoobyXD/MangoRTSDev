@@ -11,6 +11,7 @@ import {
   deleteCommunicationsSharedInbox,
   emailMessageMatchesListFilters,
   getEmailMessage,
+  getEmailSignature,
   invalidateCommunicationsCache,
   listCompanyUsers,
   listLogicGates,
@@ -25,6 +26,7 @@ import {
   patchEmailMessagesLogicGatePlacement,
   removeCommunicationsSharedInbox,
   removeLogicGateGVICAssignments,
+  saveEmailSignature,
   sendEmail,
   unarchiveEmailMessage,
   updateEmailMessage,
@@ -50,6 +52,61 @@ test("communications message query omits empty values and encodes filters", () =
 test("communications folder query scopes shared inbox folder reads", () => {
   assert.equal(createFolderQuery({}), "");
   assert.equal(createFolderQuery({ companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?company_id=company-1&shared_inbox_id=shared-1");
+});
+
+test("email signature helpers preserve exact personal and shared mailbox scope", async () => {
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      path: input.toString(),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return jsonResponse({
+      signature: {
+        company_id: "company-1",
+        signature_id: "signature-1",
+        scope_type: "personal",
+        name: "Default",
+        body_editor_html: "Regards",
+        is_default: true,
+        created_timestamp: "2026-07-10T00:00:00Z",
+        updated_timestamp: "2026-07-10T00:00:00Z",
+      },
+    });
+  };
+  try {
+    await getEmailSignature(" company-1 ", "", " person@example.test ");
+    await getEmailSignature("company-1", " shared-1 ", "ignored@example.test");
+    await saveEmailSignature({ companyID: "company-1", accountEmail: " person@example.test ", bodyEditorHTML: "Regards" });
+    await saveEmailSignature({ companyID: "company-1", sharedInboxID: " shared-1 ", accountEmail: "ignored@example.test", bodyEditorHTML: "Shared regards" });
+
+    assert.deepEqual(calls, [
+      {
+        path: "/v1/communications/signature?company_id=company-1&account_email=person%40example.test",
+        method: "GET",
+        body: undefined,
+      },
+      {
+        path: "/v1/communications/signature?company_id=company-1&shared_inbox_id=shared-1",
+        method: "GET",
+        body: undefined,
+      },
+      {
+        path: "/v1/communications/signature",
+        method: "PUT",
+        body: { company_id: "company-1", account_email: "person@example.test", body_editor_html: "Regards", is_default: true },
+      },
+      {
+        path: "/v1/communications/signature",
+        method: "PUT",
+        body: { company_id: "company-1", shared_inbox_id: "shared-1", body_editor_html: "Shared regards", is_default: true },
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("triage conversion payload can target a specific Kanban column", async () => {

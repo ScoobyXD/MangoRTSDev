@@ -25,7 +25,6 @@ import {
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
 import { EditorTabBar } from "../../modules/editor/EditorTabBar";
 import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "../../modules/editor/editorTabs";
-import { EDITOR_RICH_TEXT_PREFIX, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
 import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
@@ -47,8 +46,8 @@ import type { ExplorerDragPayload, ExplorerTreeNode } from "../../modules/compan
 import { EXPLORER_DRAG_MIME, getExplorerDragPayloadForSelection, readExplorerDragPayload } from "../../modules/company-explorer/companyExplorerDragDrop";
 import { HOME_INBOX_GROUP_HEIGHTS_STORAGE_KEY, HOME_INBOX_GROUP_MAX_HEIGHT_PX, HOME_INBOX_GROUP_MIN_HEIGHT_PX, HOME_LOGIC_GATE_RAIL_HEIGHT_STORAGE_KEY, HOME_NODE_RAIL_HEIGHT_STORAGE_KEY, HOME_ROW_RESIZER_HEIGHT, INBOX_NO_LOGIC_GATE_ID, INBOX_PRIORITIES, GVIC_INBOX_SECTIONS, GVIC_STATUS_COLUMNS } from "./homeConstants";
 import type { ComposeAttachment, ComposeState, HomeEntityDeleteTarget, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyNodeGroup, GVICInboxRole, GVICInboxStatus } from "./homeTypes";
-import { createHomeMailDraftID } from "./homeMailDrafts";
-import { buildGVICRoleInboxGroupsByCell, cleanIDList, clampNumber, emailAttachmentContentIDKeys, emailAttachmentIsReferencedInline, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, rewriteEmailDocumentCIDSources, visibleEmailAttachmentsForBody, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData } from "./homeUtils";
+import { applyHomeMailSignature, createHomeMailDraftID } from "./homeMailDrafts";
+import { buildGVICRoleInboxGroupsByCell, cleanIDList, clampNumber, emailAttachmentContentIDKeys, emailAttachmentIsReferencedInline, formatAddressList, formatMessageDate, hasExplorerDrag, hasTriageMessageDrag, logicGateIDsFromExplorerPayload, logicGateTitle, logicGateTreeID, messageDocument, messageIsSent, messageReadStatusLabel, messageReadStatusTitle, nodeIDFromTreeID, nodeIDsFromExplorerPayload, nodeTitle, nodeTreeID, rewriteEmailDocumentCIDSources, sortEmailConversationMessagesNewestFirst, visibleEmailAttachmentsForBody, GVICRoleCellKey, readTriageMessageIDs, gvicStatusColor, setLogicGateDragData, setNodeDragData } from "./homeUtils";
 import { HOME_CYAN, allLogicGateRowsStyle, columnResizeGripStyle, columnResizeHandleStyle, composeStyle, dangerButtonStyle, detailStyle, detailSubjectStyle, emptySmallStyle, homeColorWithAlpha, iframeStyle, inboxMatrixGridStyle, inputStyle, logicGateDisclosureStyle, logicGateInboxGroupDisclosureStyle, logicGateInboxGroupHeaderStyle, logicGateInboxGroupIconStyle, logicGateInboxGroupNotificationStyle, logicGateInboxGroupResizeGripStyle, logicGateInboxGroupResizeHandleStyle, logicGateInboxGroupStyle, logicGateInboxGroupTitleStyle, logicGateInboxNodeGuideStyle, logicGateInboxNodeIconStyle, logicGateInboxNodeListStyle, logicGateInboxNodeNotificationStyle, logicGateInboxNodeRemoveStyle, logicGateInboxNodeRowStyle, logicGateInboxNodeTitleStyle, logicGateGVICCellStyle, logicGateGVICColumnHeaderStyle, logicGateGVICColumnLabelStyle, logicGateGVICColumnLetterStyle, logicGateGVICCornerStyle, logicGateGVICHeaderStyle, logicGateGVICMatrixSurfaceStyle, logicGateGVICMetaStyle, logicGateGVICPanelStyle, logicGateGVICPriorityHeaderStyle, logicGateGVICScrollStyle, logicGateRailHeaderStyle, logicGateRailSectionStyle, logicGateRailStyle, logicGateTreeRowStyle, logicGateTreeRowTextStyle, mailAttachmentFileIconStyle, mailAttachmentGridStyle, mailAttachmentHeaderStyle, mailAttachmentMetaStyle, mailAttachmentNameStyle, mailAttachmentSectionStyle, mailAttachmentThumbnailStyle, mailAttachmentTileStyle, mailComposeAttachmentRemoveStyle, mailComposeAttachmentRowStyle, mailComposeOriginalFrameStyle, mailComposeOriginalStyle, mailComposeSendButtonStyle, mailComposeSignatureBoxStyle, mailComposeSignatureTextareaStyle, mailPanelInputStyle, mailPanelSmallButtonStyle, mailPanelTextareaStyle, messagePlacementIconStyle, messageReadStatusStyle, messageSelectDotStyle, messageTimestampStatusRowStyle, mutedSmallStyle, myLogicGateFolderLabelStyle, myLogicGateGridStyle, myLogicGateGroupStyle, myLogicGateTileIconStyle, myLogicGateTileStyle, myLogicGateTileTextStyle, myLogicGatesListStyle, nodeEditorPopupBackdropStyle, nodeEditorPopupCloseButtonStyle, nodeEditorPopupCollapseButtonStyle, nodeEditorPopupStyle, nodeInboxEmptyStyle, nodeInboxFolderLabelStyle, nodeInboxGridStyle, nodeInboxGroupCountStyle, nodeInboxGroupStyle, nodeInboxListStyle, nodeInboxMutedSmallStyle, nodeInboxOtherEmptyStyle, nodeInboxOtherListStyle, nodeInboxOtherMutedSmallStyle, nodeInboxOtherPanelTitleStyle, nodeInboxOtherSectionStyle, nodeInboxPanelTitleStyle, nodeInboxPrimarySectionStyle, nodeInboxRailHeaderStyle, nodeInboxRailStyle, nodeInboxTileIconStyle, nodeInboxTileStyle, nodeInboxTileTextStyle, panelHeaderStyle, panelTitleStyle, railRowResizeGripStyle, railRowResizeHandleStyle, sharedInboxContextMenuButtonStyle, shortcutRemoveStyle, smallButtonStyle, toolbarStyle } from "./homeStyles";
 
 const HOME_INBOX_NODE_DRAG_MIME = "application/x-mangorts-home-inbox-node";
@@ -4796,36 +4795,57 @@ const composeReplyResizeGripStyle: React.CSSProperties = {
   background: "rgba(100, 116, 139, 0.38)",
 };
 
+const MAIL_REPLY_EDITOR_HEIGHT_STORAGE_KEY_PREFIX = "mango-mail-reply-editor-height-v1";
+const MAIL_REPLY_EDITOR_DEFAULT_HEIGHT_PX = 320;
+const MAIL_REPLY_EDITOR_MIN_HEIGHT_PX = 240;
+
+function mailReplyEditorMaxHeight(): number {
+  const viewportHeight = typeof window === "undefined" ? 900 : window.innerHeight;
+  return Math.max(MAIL_REPLY_EDITOR_MIN_HEIGHT_PX, Math.floor(viewportHeight * 0.62));
+}
+
+function mailReplyEditorHeightStorageKey(companyID: string, currentUserID: string, sharedInboxID: string, accountEmail: string): string {
+  const scope = sharedInboxID.trim()
+    ? `shared:${sharedInboxID.trim()}`
+    : `personal:${accountEmail.trim().toLowerCase() || "default"}`;
+  return [MAIL_REPLY_EDITOR_HEIGHT_STORAGE_KEY_PREFIX, companyID.trim(), currentUserID.trim(), scope]
+    .map(encodeURIComponent)
+    .join(":");
+}
+
+export function readMailReplyEditorHeight(companyID: string, currentUserID: string, sharedInboxID: string, accountEmail = ""): number {
+  const fallback = clampNumber(MAIL_REPLY_EDITOR_DEFAULT_HEIGHT_PX, MAIL_REPLY_EDITOR_MIN_HEIGHT_PX, mailReplyEditorMaxHeight());
+  if (typeof localStorage === "undefined") return fallback;
+  try {
+    const stored = Number.parseInt(localStorage.getItem(mailReplyEditorHeightStorageKey(companyID, currentUserID, sharedInboxID, accountEmail)) ?? "", 10);
+    return Number.isFinite(stored)
+      ? clampNumber(stored, MAIL_REPLY_EDITOR_MIN_HEIGHT_PX, mailReplyEditorMaxHeight())
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function saveMailReplyEditorHeight(companyID: string, currentUserID: string, sharedInboxID: string, height: number, accountEmail = ""): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(
+      mailReplyEditorHeightStorageKey(companyID, currentUserID, sharedInboxID, accountEmail),
+      String(Math.round(clampNumber(height, MAIL_REPLY_EDITOR_MIN_HEIGHT_PX, mailReplyEditorMaxHeight()))),
+    );
+  } catch {
+    // Browser privacy/storage settings can disable preferences; keep the in-memory height.
+  }
+}
+
 function composeReplyRichEditorStyle(height: number): React.CSSProperties {
   return {
     ...composeRichEditorStyle,
     height,
-    minHeight: 150,
+    minHeight: MAIL_REPLY_EDITOR_MIN_HEIGHT_PX,
     maxHeight: "none",
     resize: "none",
   };
-}
-
-function plainTextSignatureToEditorHTML(value: string): string {
-  return value
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .split("\n")
-    .map((line) => line ? linkifyEditorPlainTextToHTML(line) : "<br>")
-    .join("<br>");
-}
-
-function appendSignatureToComposeBody(body: string, signature: string): string {
-  const cleanSignature = signature.trim();
-  if (!cleanSignature) return body;
-  if (body.startsWith(EDITOR_RICH_TEXT_PREFIX)) {
-    const currentHTML = sanitizeEditorDocumentHTML(body.slice(EDITOR_RICH_TEXT_PREFIX.length));
-    const signatureHTML = `<div>${plainTextSignatureToEditorHTML(cleanSignature)}</div>`;
-    const spacerHTML = currentHTML.trim() ? "<div><br></div><div><br></div>" : "<div><br></div><div><br></div>";
-    return `${EDITOR_RICH_TEXT_PREFIX}${sanitizeEditorDocumentHTML(`${currentHTML}${spacerHTML}${signatureHTML}`)}`;
-  }
-  const currentBody = body.trimEnd();
-  return currentBody ? `${currentBody}\n\n\n${cleanSignature}` : `\n\n\n${cleanSignature}`;
 }
 
 function recipientQuery(value: string): string {
@@ -4907,7 +4927,9 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   const [signatureEditorOpen, setSignatureEditorOpen] = React.useState(false);
   const [activeRecipientField, setActiveRecipientField] = React.useState<ComposeRecipientField | "">("");
   const [recipientDrafts, setRecipientDrafts] = React.useState<Record<ComposeRecipientField, string>>({ to: "", cc: "", bcc: "" });
-  const [replyEditorHeight, setReplyEditorHeight] = React.useState(220);
+  const [replyEditorHeight, setReplyEditorHeight] = React.useState(() => (
+    readMailReplyEditorHeight(companyID, currentUserID, compose.sharedInboxID, compose.accountEmail)
+  ));
   const [bodyOutlineStyle, setBodyOutlineStyle] = React.useState<EditorOutlineStyleID>("automatic-outline-numbering");
   const [bodyToolbarTab, setBodyToolbarTab] = React.useState<EditorTabID>("format");
   const [bodySelectionFontSize, setBodySelectionFontSize] = React.useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
@@ -4916,6 +4938,16 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   const attachmentRequestJSON = React.useMemo(() => defaultAttachmentRequestJSON(apiBase), [apiBase]);
   const update = (patch: Partial<ComposeState>) => onChange({ ...compose, ...patch });
   const totalAttachmentBytes = compose.attachments.reduce((sum, attachment) => sum + Math.max(0, attachment.size || 0), 0);
+  React.useEffect(() => {
+    setReplyEditorHeight(readMailReplyEditorHeight(companyID, currentUserID, compose.sharedInboxID, compose.accountEmail));
+  }, [companyID, compose.accountEmail, compose.sharedInboxID, currentUserID]);
+  React.useEffect(() => {
+    const clampToViewport = () => {
+      setReplyEditorHeight((current) => clampNumber(current, MAIL_REPLY_EDITOR_MIN_HEIGHT_PX, mailReplyEditorMaxHeight()));
+    };
+    window.addEventListener("resize", clampToViewport);
+    return () => window.removeEventListener("resize", clampToViewport);
+  }, []);
   const focusRecipientInput = (field: ComposeRecipientField) => {
     window.requestAnimationFrame(() => {
       const input = recipientInputRefs.current[field];
@@ -5103,8 +5135,9 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   const insertSignature = () => {
     const signature = emailSignature.trim();
     if (!signature) return;
-    if (compose.body.endsWith(signature)) return;
-    update({ body: appendSignatureToComposeBody(compose.body, signature) });
+    const body = applyHomeMailSignature(compose.body, signature);
+    if (body === compose.body) return;
+    update({ body });
   };
   const syncBodyToolbarFormatState = () => {
     const state = bodyEditorControllerRef.current?.readFormatState();
@@ -5129,16 +5162,21 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     event.preventDefault();
     const startY = event.clientY;
     const startHeight = replyEditorHeight;
-    const maxHeight = Math.max(260, Math.floor((typeof window === "undefined" ? 900 : window.innerHeight) * 0.48));
+    const maxHeight = mailReplyEditorMaxHeight();
+    let finalHeight = startHeight;
     const onPointerMove = (moveEvent: PointerEvent) => {
-      setReplyEditorHeight(clampNumber(startHeight + startY - moveEvent.clientY, 150, maxHeight));
+      finalHeight = clampNumber(startHeight + startY - moveEvent.clientY, MAIL_REPLY_EDITOR_MIN_HEIGHT_PX, maxHeight);
+      setReplyEditorHeight(finalHeight);
     };
     const onPointerUp = () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+      saveMailReplyEditorHeight(companyID, currentUserID, compose.sharedInboxID, finalHeight, compose.accountEmail);
     };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp, { once: true });
+    window.addEventListener("pointercancel", onPointerUp, { once: true });
   };
   const renderSubjectInput = (replyMode: boolean) => replyMode ? (
     <div style={composeReplySubjectFieldStyle}>
@@ -5216,6 +5254,11 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
             onPointerDown={startReplyEditorResize}
             role="separator"
             aria-orientation="horizontal"
+            aria-label="Resize reply editor"
+            aria-valuemin={MAIL_REPLY_EDITOR_MIN_HEIGHT_PX}
+            aria-valuemax={mailReplyEditorMaxHeight()}
+            aria-valuenow={Math.round(replyEditorHeight)}
+            title="Drag to resize. Mango saves this reply editor height automatically."
           >
             <div style={composeReplyResizeGripStyle} />
           </div>
@@ -5318,12 +5361,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   );
 }
 
-function emailDetailSortTimestamp(message: EmailMessage): number {
-  const date = message.date ?? 0;
-  return Number.isFinite(date) ? date : 0;
-}
-
-function conversationMessagesForDetail(message: EmailMessage, threadMessages: EmailMessage[]): EmailMessage[] {
+export function conversationMessagesForDetail(message: EmailMessage, threadMessages: EmailMessage[]): EmailMessage[] {
   const byID = new Map<string, EmailMessage>();
   const upsert = (candidate: EmailMessage) => {
     const id = candidate.id.trim();
@@ -5344,10 +5382,7 @@ function conversationMessagesForDetail(message: EmailMessage, threadMessages: Em
     }
   }
 
-  return Array.from(byID.values()).sort((a, b) => {
-    const dateDelta = emailDetailSortTimestamp(a) - emailDetailSortTimestamp(b);
-    return dateDelta || a.id.localeCompare(b.id);
-  });
+  return sortEmailConversationMessagesNewestFirst(Array.from(byID.values()));
 }
 
 const emailBodyLoadingStyle: React.CSSProperties = {
@@ -5361,6 +5396,63 @@ const emailBodyLoadingStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 800,
 };
+
+function AutoHeightEmailBodyFrame({ srcDoc, minHeight, style }: {
+  srcDoc: string;
+  minHeight: number;
+  style?: React.CSSProperties;
+}) {
+  const frameRef = React.useRef<HTMLIFrameElement | null>(null);
+  const cleanupRef = React.useRef<() => void>(() => undefined);
+
+  React.useEffect(() => () => cleanupRef.current(), []);
+
+  const handleLoad = () => {
+    cleanupRef.current();
+    cleanupRef.current = () => undefined;
+    const frame = frameRef.current;
+    const frameDocument = frame?.contentDocument;
+    if (!frame || !frameDocument?.documentElement || !frameDocument.body) return;
+    frameDocument.documentElement.style.overflow = "hidden";
+    frameDocument.body.style.overflow = "hidden";
+    const resize = () => {
+      const documentHeight = Math.max(
+        frameDocument.body.scrollHeight,
+        frameDocument.body.getBoundingClientRect().height,
+      );
+      frame.style.height = `${Math.max(minHeight, Math.ceil(documentHeight) + 2)}px`;
+    };
+    const images = Array.from(frameDocument.images);
+    images.forEach((image) => {
+      image.addEventListener("load", resize);
+      image.addEventListener("error", resize);
+    });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
+    if (observer) {
+      observer.observe(frameDocument.body);
+    }
+    resize();
+    cleanupRef.current = () => {
+      observer?.disconnect();
+      images.forEach((image) => {
+        image.removeEventListener("load", resize);
+        image.removeEventListener("error", resize);
+      });
+    };
+  };
+
+  return (
+    <iframe
+      ref={frameRef}
+      title="Email body"
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      srcDoc={srcDoc}
+      scrolling="no"
+      onLoad={handleLoad}
+      style={{ ...iframeStyle, ...style, minHeight, height: minHeight, overflow: "hidden" }}
+    />
+  );
+}
 
 function emailAttachmentDownloadID(attachment: EmailAttachment): string {
   return attachment.id?.trim() || attachment.attachment_id?.trim() || "";
@@ -5452,12 +5544,18 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
   return { srcDoc, loading };
 }
 
-function EmailConversationMessage({ message, companyID, sharedInboxID, fill, loadingBody = false }: {
+function EmailConversationMessage({ message, companyID, sharedInboxID, fill, expanded, busy, loadingBody = false, onToggleExpanded, onReply, onReplyAll, onForward }: {
   message: EmailMessage;
   companyID: string;
   sharedInboxID?: string;
   fill: boolean;
+  expanded: boolean;
+  busy: boolean;
   loadingBody?: boolean;
+  onToggleExpanded: () => void;
+  onReply: (message: EmailMessage) => void;
+  onReplyAll: (message: EmailMessage) => void;
+  onForward: (message: EmailMessage) => void;
 }) {
   const allAttachments = React.useMemo(
     () => (message.attachments ?? []).filter((attachment) => emailAttachmentFileName(attachment) || attachment.id?.trim()),
@@ -5469,14 +5567,13 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, loa
   const hasAttachments = attachments.length > 0;
   const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID);
   const showMessageMeta = !fill;
-  const frameStyle: React.CSSProperties = fill
-    ? { ...iframeStyle, minHeight: hasAttachments ? 300 : 360, height: hasAttachments ? 360 : "100%" }
-    : { ...iframeStyle, minHeight: 260, height: 320, boxShadow: "none" };
+  const frameMinHeight = fill ? (hasAttachments ? 300 : 360) : 120;
+  const frameStyle: React.CSSProperties | undefined = fill ? undefined : { boxShadow: "none" };
   const itemStyle: React.CSSProperties = {
     minHeight: fill ? 0 : undefined,
     minWidth: 0,
     display: "grid",
-    gridTemplateRows: showMessageMeta ? "auto auto" : "auto",
+    gridTemplateRows: "auto",
     gap: 8,
     paddingTop: fill ? 0 : 10,
     borderTop: fill ? "none" : "1px solid rgba(148, 163, 184, 0.28)",
@@ -5485,26 +5582,42 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, loa
   return (
     <article style={itemStyle}>
       {showMessageMeta && (
-        <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
-          <div style={mutedSmallStyle}>
-            From {formatAddressList(message.from) || "Unknown sender"} to {formatAddressList(message.to) || "me"}
-            {messageDate && <span> - {messageDate}</span>}
+        <div style={{ display: "flex", alignItems: "start", justifyContent: "space-between", gap: 10, minWidth: 0 }}>
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={onToggleExpanded}
+            style={{ border: "none", background: "transparent", padding: 0, minWidth: 0, display: "grid", gridTemplateColumns: "14px minmax(0, 1fr)", gap: 5, alignItems: "start", textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit", flex: "1 1 auto" }}
+          >
+            <span aria-hidden="true" style={{ color: "rgba(71, 85, 105, 0.78)", lineHeight: 1.4 }}>{expanded ? "v" : ">"}</span>
+            <span style={{ display: "grid", gap: 3, minWidth: 0 }}>
+              <span style={mutedSmallStyle}>
+                From {formatAddressList(message.from) || "Unknown sender"} to {formatAddressList(message.to) || "me"}
+                {messageDate && <span> - {messageDate}</span>}
+              </span>
+              {!expanded && message.snippet && <span style={{ ...mutedSmallStyle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{message.snippet}</span>}
+              {formatAddressList(message.cc) && <span style={mutedSmallStyle}>Cc {formatAddressList(message.cc)}</span>}
+              {formatAddressList(message.bcc) && <span style={mutedSmallStyle}>Bcc {formatAddressList(message.bcc)}</span>}
+              {messageIsSent(message) && (
+                <span style={{ ...messageTimestampStatusRowStyle, justifyContent: "flex-start" }}>
+                  <MessageReadStatusText message={message} />
+                </span>
+              )}
+            </span>
+          </button>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", flex: "0 0 auto" }}>
+            <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
+            <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
+            <button type="button" style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onForward(message)}>Forward</button>
           </div>
-          {formatAddressList(message.cc) && <div style={mutedSmallStyle}>Cc {formatAddressList(message.cc)}</div>}
-          {formatAddressList(message.bcc) && <div style={mutedSmallStyle}>Bcc {formatAddressList(message.bcc)}</div>}
-          {messageIsSent(message) && (
-            <div style={{ ...messageTimestampStatusRowStyle, justifyContent: "flex-start" }}>
-              <MessageReadStatusText message={message} />
-            </div>
-          )}
         </div>
       )}
-      {(loadingBody && !body) || bodyDocument.loading ? (
+      {expanded && ((loadingBody && !body) || bodyDocument.loading ? (
         <div style={emailBodyLoadingStyle}>Loading message</div>
       ) : (
-        <iframe title="Email body" sandbox="allow-popups allow-popups-to-escape-sandbox" srcDoc={bodyDocument.srcDoc} style={frameStyle} />
-      )}
-      {hasAttachments && (
+        <AutoHeightEmailBodyFrame srcDoc={bodyDocument.srcDoc} minHeight={frameMinHeight} style={frameStyle} />
+      ))}
+      {expanded && hasAttachments && (
         <div style={mailAttachmentSectionStyle}>
           <div style={mailAttachmentHeaderStyle}>
             <span>{attachments.length === 1 ? "1 attachment" : `${attachments.length} attachments`}</span>
@@ -5536,9 +5649,9 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   archiveLabel: string;
   busy: boolean;
   deleteAvailable: boolean;
-  onReply: () => void;
-  onReplyAll: () => void;
-  onForward: () => void;
+  onReply: (message: EmailMessage) => void;
+  onReplyAll: (message: EmailMessage) => void;
+  onForward: (message: EmailMessage) => void;
   onArchive: () => void;
   onDelete: () => void;
   onToggleRead: () => void;
@@ -5547,9 +5660,23 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   const messageDate = formatMessageDate(message.date);
   const conversationMessages = conversationMessagesForDetail(message, threadMessages);
   const singleMessage = conversationMessages.length <= 1;
+  const newestMessageID = conversationMessages[0]?.id ?? message.id;
+  const [expandedMessageIDs, setExpandedMessageIDs] = React.useState<Set<string>>(() => new Set([newestMessageID]));
+  React.useLayoutEffect(() => {
+    setExpandedMessageIDs(newestMessageID ? new Set([newestMessageID]) : new Set());
+  }, [newestMessageID]);
+  const toggleConversationMessage = (messageID: string) => {
+    setExpandedMessageIDs((current) => {
+      const next = new Set(current);
+      if (next.has(messageID)) next.delete(messageID);
+      else next.add(messageID);
+      return next;
+    });
+  };
   const bodyContainerStyle: React.CSSProperties = {
     minHeight: 0,
-    overflow: "auto",
+    overflowX: "hidden",
+    overflowY: "auto",
     display: "grid",
     gridTemplateRows: singleMessage ? "minmax(0, 1fr)" : undefined,
     gap: 12,
@@ -5572,9 +5699,9 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
         {loading && <span style={mutedSmallStyle}>Loading</span>}
       </div>
       <div style={toolbarStyle}>
-        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onReply}>Reply</button>
-        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onReplyAll}>Reply all</button>
-        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onForward}>Forward</button>
+        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
+        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
+        <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onForward(message)}>Forward</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleRead}>{message.unread ? "Mark read" : "Mark unread"}</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={onToggleStar}>{message.starred ? "Unstar" : "Star"}</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy || !archiveAvailable} onClick={onArchive}>{archiveLabel}</button>
@@ -5588,7 +5715,13 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
             companyID={companyID}
             sharedInboxID={sharedInboxID}
             fill={singleMessage}
+            expanded={singleMessage || expandedMessageIDs.has(conversationMessage.id)}
+            busy={busy}
             loadingBody={loading && conversationMessage.id === message.id && !conversationMessage.body?.trim()}
+            onToggleExpanded={() => toggleConversationMessage(conversationMessage.id)}
+            onReply={onReply}
+            onReplyAll={onReplyAll}
+            onForward={onForward}
           />
         ))}
       </div>

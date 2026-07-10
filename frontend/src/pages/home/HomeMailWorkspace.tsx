@@ -309,12 +309,12 @@ export function HomeMailWorkspace({
   onOpenNewCompose: () => void;
   onOpenDraftsMailbox: () => void;
   onOpenPendingMailbox: () => void;
-  onOpenReply: () => void;
-  onOpenReplyAll: () => void;
+  onOpenReply: (message?: EmailMessage) => void;
+  onOpenReplyAll: (message?: EmailMessage) => void;
   onOpenSentMailbox: () => void;
   onOpenSpamMailbox: () => void;
   onOpenStarredMailbox: () => void;
-  onOpenForward: () => void;
+  onOpenForward: (message?: EmailMessage) => void;
   onEmailSignatureChange: (value: string) => void;
   onSaveEmailSignature: () => void;
   onSaveComposeDraft: () => void;

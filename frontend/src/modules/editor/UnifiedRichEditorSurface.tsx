@@ -212,17 +212,25 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     editorImageAttachmentContext,
     onEditorImageAttachmentError,
   });
-  const { mentionMenu, insertTable, ...documentSurfaceHandlers } = handlers;
+  const { mentionMenu, insertTable, restoreSelection, ...documentSurfaceHandlers } = handlers;
+
+  const restoreFormattingSelection = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return null;
+    restoreSelection(editor);
+    editor.focus({ preventScroll: true });
+    return editor;
+  }, [restoreSelection]);
 
   const formattingController = useMemo<UnifiedRichEditorFormattingController>(() => ({
     focus: () => {
-      editorRef.current?.focus({ preventScroll: true });
+      restoreFormattingSelection();
     },
     flush: () => {
       flushDocumentSave();
     },
     applyFontSizeValue: (fontSize: number) => {
-      const editor = editorRef.current;
+      const editor = restoreFormattingSelection();
       if (!editable || !editor) return false;
       return applyEditorSelectionFontSizeToRoot(editor, fontSize, {
         documentUndoHistory: documentUndoHistoryRef.current,
@@ -233,7 +241,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
       });
     },
     adjustFontSize: (delta: number) => {
-      const editor = editorRef.current;
+      const editor = restoreFormattingSelection();
       if (!editable || !editor) return false;
       const currentState = readEditorSelectionFormatState(editor, selectionFontSizeRef.current);
       const currentFontSize = pendingFontSizeRef.current ?? currentState?.fontSize ?? selectionFontSizeRef.current;
@@ -246,7 +254,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
       });
     },
     toggleInlineFormat: (command) => {
-      const editor = editorRef.current;
+      const editor = restoreFormattingSelection();
       if (!editable || !editor) return false;
       return applyEditorInlineFormatToRoot(editor, command, {
         documentUndoHistory: documentUndoHistoryRef.current,
@@ -260,7 +268,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
       return insertTable(editorRef.current);
     },
     insertLink: (href: string) => {
-      const editor = editorRef.current;
+      const editor = restoreFormattingSelection();
       if (!editable || !editor) return false;
       return applyEditorLinkToRoot(editor, href, {
         documentUndoHistory: documentUndoHistoryRef.current,
@@ -269,7 +277,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
       });
     },
     toggleNumberedList: () => {
-      const editor = editorRef.current;
+      const editor = restoreFormattingSelection();
       if (!editable || !editor) return false;
       return applyEditorNumberedListToRoot(editor, {
         documentUndoHistory: documentUndoHistoryRef.current,
@@ -278,7 +286,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
       });
     },
     indent: () => {
-      const editor = editorRef.current;
+      const editor = restoreFormattingSelection();
       if (!editable || !editor) return false;
       return applyEditorIndentCommandToRoot(editor, "indent", outlineStyle, {
         documentUndoHistory: documentUndoHistoryRef.current,
@@ -287,7 +295,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
       });
     },
     outdent: () => {
-      const editor = editorRef.current;
+      const editor = restoreFormattingSelection();
       if (!editable || !editor) return false;
       return applyEditorIndentCommandToRoot(editor, "outdent", outlineStyle, {
         documentUndoHistory: documentUndoHistoryRef.current,
@@ -296,7 +304,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
       });
     },
     insertList: (kind: EditorListKind) => {
-      const editor = editorRef.current;
+      const editor = restoreFormattingSelection();
       if (!editable || !editor) return false;
       return insertEditorListKindToRoot(editor, kind, {
         documentUndoHistory: documentUndoHistoryRef.current,
@@ -305,7 +313,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
       });
     },
     readFormatState: () => {
-      const editor = editorRef.current;
+      const editor = restoreFormattingSelection();
       return editor ? readEditorSelectionFormatState(editor, selectionFontSizeRef.current) : null;
     },
   }), [
@@ -315,6 +323,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     insertTable,
     onSelectionInlineFormatChange,
     outlineStyle,
+    restoreFormattingSelection,
     scheduleDocumentSave,
     scheduleIndentGuideUpdate,
   ]);

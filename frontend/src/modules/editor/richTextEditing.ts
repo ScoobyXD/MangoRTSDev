@@ -851,15 +851,16 @@ export function editorEmailDisplayDocument(body: string, options: { compact?: bo
     : `<pre ${EDITOR_EMAIL_BODY_ATTRIBUTE}="plain">${linkifyEditorPlainTextToHTML(value)}</pre>`;
   const padding = options.compact ? "6px 0 2px" : "14px";
   const base = options.baseTarget ? `<base target="_blank">` : "";
-  return `<!doctype html><html><head><meta charset="utf-8">${base}<style>html{margin:0;padding:0}body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:${padding};overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;margin:0}[${EDITOR_EMAIL_BODY_ATTRIBUTE}]{white-space:pre-wrap!important;overflow-wrap:anywhere!important}p{margin-top:0}a{color:${EDITOR_LINK_COLOR};text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:2px;font-weight:650;cursor:pointer}a:hover{color:#0c4a6e}</style></head><body>${content}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8">${base}<style>html{margin:0;padding:0}body{font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;color:#111;margin:0;padding:${padding};overflow-wrap:anywhere}pre{white-space:pre-wrap;font:14px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif;margin:0}[${EDITOR_EMAIL_BODY_ATTRIBUTE}]{white-space:pre-wrap!important;overflow-wrap:anywhere!important}[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"]{max-width:100%!important;height:auto!important;aspect-ratio:auto!important}[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"] img{max-width:100%!important;height:auto!important}img{max-width:100%;height:auto}p{margin-top:0}a{color:${EDITOR_LINK_COLOR};text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:2px;font-weight:650;cursor:pointer}a:hover{color:#0c4a6e}</style></head><body>${content}</body></html>`;
 }
 
 export function editorBodyHasEmailContent(value: string): boolean {
   const body = value.trim();
   if (!body) return false;
   if (!body.startsWith(EDITOR_RICH_TEXT_PREFIX)) return true;
-  return body
-    .slice(EDITOR_RICH_TEXT_PREFIX.length)
+  const richHTML = body.slice(EDITOR_RICH_TEXT_PREFIX.length);
+  if (/<img\b[^>]*\bsrc\s*=\s*["']mango-attachment:/i.test(richHTML)) return true;
+  return richHTML
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
     .trim()

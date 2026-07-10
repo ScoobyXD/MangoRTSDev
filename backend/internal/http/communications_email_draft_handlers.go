@@ -31,6 +31,7 @@ type communicationsEmailDraftRequest struct {
 type communicationsEmailSignatureRequest struct {
 	CompanyID      string `json:"company_id"`
 	SharedInboxID  string `json:"shared_inbox_id"`
+	AccountEmail   string `json:"account_email"`
 	Name           string `json:"name"`
 	BodyEditorHTML string `json:"body_editor_html"`
 	IsDefault      *bool  `json:"is_default"`
@@ -269,7 +270,7 @@ func (s *Server) handleCommunicationsEmailSignatureGet(w http.ResponseWriter, r 
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	scope, ok := s.resolveCommunicationsEmailScope(w, actor, companyID, r.URL.Query().Get("shared_inbox_id"), "", store.EntityPermissionView)
+	scope, ok := s.resolveCommunicationsEmailScope(w, actor, companyID, r.URL.Query().Get("shared_inbox_id"), r.URL.Query().Get("account_email"), store.EntityPermissionView)
 	if !ok {
 		return
 	}
@@ -305,7 +306,7 @@ func (s *Server) handleCommunicationsEmailSignatureUpsert(w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	scope, ok := s.resolveCommunicationsEmailScope(w, actor, companyID, req.SharedInboxID, "", store.EntityPermissionEdit)
+	scope, ok := s.resolveCommunicationsEmailScope(w, actor, companyID, req.SharedInboxID, req.AccountEmail, store.EntityPermissionEdit)
 	if !ok {
 		return
 	}

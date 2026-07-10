@@ -1,10 +1,12 @@
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 # Email Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/pages/home/homeCommands.test.ts` covers send payload construction and Mango attachment references; `tests/frontend/modules/editor/richTextEditing.test.ts` covers rich email HTML serialization, spacing, indentation, lists, links, and safe sanitization; backend communications and attachment handler tests cover provider send boundaries, S3 attachment resolution, and email draft attachment authorization. Draft/signature persistence endpoint coverage should be expanded with focused backend HTTP tests.)
+
+- Automatic signature insertion, rich-body deduplication, signature-only draft detection, mailbox scope keys, and personal/shared signature request scope are covered by `tests/frontend/pages/home/homeCommands.test.ts`, `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`, and `tests/frontend/modules/communications/communicationsApi.test.ts`.
 
 ## Business Logic
 
@@ -21,13 +23,22 @@ EMAIL10 - Draft rows store addressing text, subject, sanitized editor body conte
 EMAIL11 - Email signatures store sanitized editor body content and default metadata; signature attachments use `email_signature` resource attachments when images/logos are supported.
 EMAIL12 - Normal file attachments for drafts use `email_draft` resource attachments and are sent by resolving Mango attachment IDs to S3 bytes at send time.
 EMAIL13 - Durable email draft/signature/send payloads must not store raw base64 attachment content or data URLs.
-EMAIL14 - Sending a Mango-authored email must serialize the editor body into professional HTML that preserves line breaks, blank lines, spacing, bullets, numbered lists, links, and indentation. Fonts are intentionally ignored until multiple fonts exist.
+EMAIL14 - Sending a Mango-authored email must serialize the editor body into professional HTML that preserves line breaks, blank lines, spacing, bullets, numbered lists, links, indentation, font size, bold, and underline. Font-family selection is intentionally ignored until multiple font families exist; this does not disable font-size formatting.
 EMAIL15 - Legacy plain text drafts/signatures must still send safely as escaped/linkified HTML.
 EMAIL16 - Scheduled sends are saved as durable drafts with a due timestamp, but V1 scheduled execution remains browser-driven while the app is open.
 EMAIL17 - Successful sends delete the corresponding durable draft only after the provider send succeeds.
 EMAIL18 - Nylas is the mailbox read/send provider boundary; Mango owns draft/signature persistence and attachment references.
 EMAIL19 - SES remains for auth/invitation/system email and must not be confused with user mailbox draft/send behavior.
 EMAIL20 - Provider reauthorization problems must be recoverable mailbox errors, not Mango logout/session failures.
+EMAIL21 - A thread action targets the exact message card on which Reply, Reply All, or Forward was chosen; its provider message ID, recipients, original context, and stable draft identity must not be substituted with the latest thread message.
+EMAIL22 - Conversation details are newest first with a deterministic message-ID tie-breaker. New inbound or locally sent messages appear expanded at the top and collapse previously expanded cards while preserving the single grouped mailbox row.
+EMAIL23 - A thread detail pane owns the only vertical scrollbar. Expanded message documents auto-size to their complete rendered content and never expose per-message body scrollbars; collapsed cards remain header summaries until expanded.
+EMAIL24 - Reply body editors have a nontrivial minimum/default height, support vertical resizing, and automatically persist a clamped per-user mailbox-scope height preference.
+EMAIL25 - Selecting a mailbox row while compose/reply is open quietly saves eligible draft content, exits compose, and shows the selected message on the first click without reloading the list.
+EMAIL26 - Shared font-size/Bold/Underline controls preserve the editor range when toolbar focus changes. Font size applies to a range or pending caret, Bold and Underline toggle both on and off, and serialized outbound HTML preserves the result.
+EMAIL27 - Durable pasted-image bodies store Mango attachment references. At the backend send boundary, authorized references are deduplicated, resolved from S3, converted to inline attachments with unique alphanumeric content IDs, and rewritten to matching `cid:` image sources; normal files remain non-inline and broken/unauthorized inline references reject the send.
+
+EMAIL28 - The default signature for the exact active personal mailbox or Shared Triage inbox is automatically inserted exactly once into every newly created compose, reply, and reply-all body. If database hydration completes after the editor opens, Mango backfills only that still-open new draft, preserves text already typed, never rewrites a reopened saved draft, and never duplicates a signature already present in rich or legacy body content.
 
 ## Scenarios
 
@@ -41,6 +52,7 @@ Business logic covered:
 - EMAIL6
 - EMAIL7
 - EMAIL10
+- EMAIL25
 
 Given:
 - A signed-in user opens My Triage compose or reply with a connected personal mailbox.
@@ -51,6 +63,7 @@ Expected:
 - The browser may keep a local mirror, but reload uses the database row when available.
 - Reopening Drafts shows the same draft on another browser session after backend sync.
 - A different non-manager user cannot see or edit the personal draft.
+- Clicking an email in the left list while compose is open quietly saves eligible draft content, closes compose, and renders the clicked email immediately.
 
 ### Scenario EMAIL-S2: Shared Draft Durability
 
@@ -77,6 +90,7 @@ Business logic covered:
 - EMAIL8
 - EMAIL9
 - EMAIL17
+- EMAIL21
 
 Given:
 - A user replies to or forwards a provider message, closes compose, and later clicks Reply or Forward on the same source message in the same mailbox scope.
@@ -84,6 +98,7 @@ Given:
 Expected:
 - Mango resumes the existing stable draft ID instead of creating a duplicate.
 - Reply context is restored so the original message being answered is visible.
+- Choosing the action on an older thread card uses that exact message ID and context rather than the newest card.
 - After a successful send, Mango deletes the saved draft.
 
 ### Scenario EMAIL-S4: Signature Persistence
@@ -95,6 +110,7 @@ Business logic covered:
 - EMAIL5
 - EMAIL6
 - EMAIL11
+- EMAIL28
 
 Given:
 - A user saves an email signature for their personal mailbox or for a shared inbox they can edit.
@@ -102,6 +118,8 @@ Given:
 Expected:
 - Mango saves the signature in `communications_email_signatures` for exactly one scope.
 - Loading compose uses the database signature when available and localStorage only as fallback/migration.
+- New compose, reply, and reply-all editors receive the exact mailbox-scoped default signature automatically, including a safe one-time backfill when remote loading finishes after the editor opens.
+- Reopened saved drafts are left unchanged, and automatic or manual insertion cannot add a duplicate signature.
 - Future logo/image attachments for signatures use `email_signature` resource attachments.
 
 ### Scenario EMAIL-S5: Professional Email Rendering
@@ -109,14 +127,16 @@ Expected:
 Business logic covered:
 - EMAIL14
 - EMAIL15
+- EMAIL26
 
 Given:
 - A draft or signature body contains rich editor content with paragraphs, blank lines, indentation, bullets, numbered lists, and links.
 
 Expected:
 - Sending uses the shared email HTML serializer, not raw draft text.
-- The resulting HTML preserves spacing, line breaks, list structure, links, and indentation.
-- Fonts are not part of this contract until Mango supports more than one email font.
+- The resulting HTML preserves spacing, line breaks, list structure, links, indentation, selected font sizes, bold, and underline.
+- Font-size controls retain the selected range even if the numeric picker receives focus, and Bold/Underline can be toggled off as well as on.
+- Font-family choice is not part of this contract until Mango supports more than one font family.
 
 ### Scenario EMAIL-S6: Attachments And Provider Boundary
 
@@ -126,12 +146,32 @@ Business logic covered:
 - EMAIL18
 - EMAIL19
 - EMAIL20
+- EMAIL27
 
 Given:
-- A draft has normal file attachments and is sent through personal or shared mailbox scope.
+- A draft has normal file attachments or pasted inline screenshots and is sent through personal or shared mailbox scope.
 
 Expected:
 - The browser stores attachment IDs/references, not file bytes, in durable draft/send state.
 - The backend reads S3 bytes from Mango attachments only at provider send time.
+- Each pasted screenshot is sent once as an authorized inline/CID attachment, the outbound HTML references the matching `cid:`, and the local send response contains provider-ready HTML plus metadata rather than raw bytes.
+- Missing or unauthorized pasted-image references reject the send instead of delivering a broken placeholder.
 - Nylas handles user mailbox send/read operations; SES remains only for Mango system email.
 - Provider reauth errors surface as mailbox repair states while the Mango session remains valid.
+
+### Scenario EMAIL-S7: Thread Ordering, Collapse, And One Scroll Surface
+
+Business logic covered:
+- EMAIL21
+- EMAIL22
+- EMAIL23
+- EMAIL24
+
+Given:
+- A hydrated email thread contains several messages and the user sends or receives another message.
+
+Expected:
+- Cards render newest first, with the newest message expanded and older messages collapsed to headers.
+- The new message appears at the top immediately and becomes the sole automatically expanded card.
+- Users can expand older cards and see their complete bodies without an internal message scrollbar; the thread pane remains the only vertical scroll surface.
+- A resized reply body restores its saved mailbox-scope height and cannot be squeezed below the minimum.

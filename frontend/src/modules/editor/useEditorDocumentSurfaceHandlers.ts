@@ -133,6 +133,7 @@ export type EditorDocumentSurfaceHandlers = Pick<
 export type EditorDocumentSurfaceHandlerResult = EditorDocumentSurfaceHandlers & {
   mentionMenu: React.ReactNode;
   insertTable: (root?: HTMLElement | null) => boolean;
+  restoreSelection: (root: HTMLElement) => boolean;
 };
 
 type UseEditorDocumentSurfaceHandlersOptions = {
@@ -2342,11 +2343,12 @@ function readElementInlineFormat(root: HTMLElement, element: Element, command: E
   return computedStyleIndicatesInlineFormat(root, command);
 }
 
-function readDocumentCommandState(root: HTMLElement, command: EditorInlineStyleCommand): boolean {
+function readDocumentCommandState(root: HTMLElement, command: EditorInlineStyleCommand): boolean | null {
+  if (typeof root.ownerDocument.queryCommandState !== "function") return null;
   try {
     return root.ownerDocument.queryCommandState(command);
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -2357,10 +2359,12 @@ export function readEditorSelectionFormatState(root: HTMLElement, fallbackFontSi
   if (!view) return null;
   const element = getRangeFontSizeElement(root, range);
   const parsed = Number.parseFloat(view.getComputedStyle(element).fontSize);
+  const boldCommandState = readDocumentCommandState(root, "bold");
+  const underlineCommandState = readDocumentCommandState(root, "underline");
   return {
     fontSize: Number.isFinite(parsed) ? clampEditorFontSize(parsed) : clampEditorFontSize(fallbackFontSize),
-    bold: readDocumentCommandState(root, "bold") || readElementInlineFormat(root, element, "bold"),
-    underline: readDocumentCommandState(root, "underline") || readElementInlineFormat(root, element, "underline"),
+    bold: boldCommandState ?? readElementInlineFormat(root, element, "bold"),
+    underline: underlineCommandState ?? readElementInlineFormat(root, element, "underline"),
   };
 }
 
@@ -3886,6 +3890,7 @@ export function useEditorDocumentSurfaceHandlers({
       refreshMentionDraft(event.currentTarget);
     },
     onBlur(event) {
+      rememberEditorSelectionRange(event.currentTarget);
       setActiveMentionDraft(null);
       setActiveTableContextMenu(null);
       activeMentionRootRef.current = null;
@@ -4271,5 +4276,5 @@ export function useEditorDocumentSurfaceHandlers({
   }, [documentUndoHistoryRef, pendingEditorFontSizeRef, rememberEditorSelectionRange, restoreEditorSelectionRange, scheduleDocumentSave, scheduleIndentGuideUpdate]);
 
   const overlay = React.createElement(React.Fragment, null, mentionMenu, tableContextMenu, imagePreviewModal);
-  return { ...handlers, mentionMenu: overlay, insertTable };
+  return { ...handlers, mentionMenu: overlay, insertTable, restoreSelection: restoreEditorSelectionRange };
 }

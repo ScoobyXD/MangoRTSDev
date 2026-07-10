@@ -242,3 +242,54 @@ func TestNylasRESTClientSendMessageWithAttachmentsUsesMultipart(t *testing.T) {
 		t.Fatalf("attachment = %q type=%q, want hello text/plain", gotAttachment, gotAttachmentContentType)
 	}
 }
+
+func TestNylasRESTClientUsesInlineContentIDAsMultipartFieldName(t *testing.T) {
+	t.Parallel()
+
+	const contentID = "mango0123456789abcdef"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(4 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		values := r.MultipartForm.Value["message"]
+		if len(values) != 1 || !strings.Contains(values[0], `cid:`+contentID) {
+			t.Fatalf("message form values = %+v, want matching cid body", values)
+		}
+		files := r.MultipartForm.File[contentID]
+		if len(files) != 1 {
+			t.Fatalf("inline attachment files = %d, want one under CID field", len(files))
+		}
+		file, err := files[0].Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		raw, err := io.ReadAll(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(raw) != "png-bytes" || files[0].Header.Get("Content-Type") != "image/png" {
+			t.Fatalf("inline attachment = %q type=%q", raw, files[0].Header.Get("Content-Type"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"id":"sent-inline"}}`))
+	}))
+	defer server.Close()
+
+	client := NewNylasRESTClient(server.URL, "api-key", "client-id")
+	_, err := client.SendMessage(context.Background(), "grant-1", NylasSendMessageRequest{
+		To:      []NylasEmailAddress{{Email: "friend@example.com"}},
+		Subject: "Inline screenshot",
+		Body:    `<p>Screenshot</p><img src="cid:` + contentID + `">`,
+		Attachments: []NylasAttachment{{
+			Filename:    "screenshot.png",
+			ContentType: "image/png",
+			Content:     "cG5nLWJ5dGVz",
+			ContentID:   contentID,
+			IsInline:    true,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

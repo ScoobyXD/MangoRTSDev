@@ -721,11 +721,12 @@ export async function deleteEmailDraft(companyID: string, draftID: string): Prom
   });
 }
 
-export async function getEmailSignature(companyID: string, sharedInboxID?: string): Promise<CommunicationsEmailSignature | null> {
+export async function getEmailSignature(companyID: string, sharedInboxID?: string, accountEmail?: string): Promise<CommunicationsEmailSignature | null> {
   const cleanCompanyID = companyID.trim();
   if (!cleanCompanyID) return null;
   const query = new URLSearchParams({ company_id: cleanCompanyID });
   if (sharedInboxID?.trim()) query.set("shared_inbox_id", sharedInboxID.trim());
+  else if (accountEmail?.trim()) query.set("account_email", accountEmail.trim());
   const payload = await apiFetchJSON<{ signature?: CommunicationsEmailSignature | null }>(`/v1/communications/signature?${query.toString()}`);
   return payload.signature ? cloneCommunicationsEmailSignature(payload.signature) : null;
 }
@@ -733,6 +734,7 @@ export async function getEmailSignature(companyID: string, sharedInboxID?: strin
 export async function saveEmailSignature(input: {
   companyID: string;
   sharedInboxID?: string;
+  accountEmail?: string;
   bodyEditorHTML: string;
   name?: string;
   isDefault?: boolean;
@@ -744,6 +746,7 @@ export async function saveEmailSignature(input: {
     body: JSON.stringify({
       company_id: cleanCompanyID,
       shared_inbox_id: input.sharedInboxID?.trim() || undefined,
+      account_email: input.sharedInboxID?.trim() ? undefined : input.accountEmail?.trim() || undefined,
       name: input.name?.trim() || undefined,
       body_editor_html: input.bodyEditorHTML,
       is_default: input.isDefault ?? true,
@@ -1671,6 +1674,7 @@ function archivedEmailMessageForLocalLists(message: EmailMessage): EmailMessage 
 function sentEmailMessageForLocalLists(message: EmailMessage): EmailMessage {
   const sent = cloneMessage(message);
   sent.unread = false;
+  if (!Number.isFinite(sent.date ?? 0) || (sent.date ?? 0) <= 0) sent.date = Math.floor(Date.now() / 1000);
   if (messageFolderTokens(sent).length === 0) sent.folders = ["sent"];
   return sent;
 }

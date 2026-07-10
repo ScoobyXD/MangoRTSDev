@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +14,7 @@ import (
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +24,7 @@ import (
 var (
 	errInvalidCommunicationsMailbox     = errors.New("invalid communications mailbox")
 	errCommunicationsArchiveUnavailable = errors.New("communications archive folder unavailable")
+	mangoEditorAttachmentImageSourceRE  = regexp.MustCompile(`(?i)(\bsrc\s*=\s*)(?:(["'])mango-attachment:([^"']+)["']|mango-attachment:([^\s>/]+))`)
 )
 
 func (s *Server) handleCommunicationsStatus(w http.ResponseWriter, r *http.Request) {
@@ -946,6 +950,7 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	if rejectDurableInlineFileBytes(w, "communications_send_body", sendReq.Body) {
 		return
 	}
+	sendReq.Body, sendReq.Attachments = prepareCommunicationsInlineImageAttachments(sendReq.Body, sendReq.Attachments)
 	attachments, attachmentsOK := s.resolveCommunicationsSendAttachments(w, r, cleanCompanyID, sendReq.Attachments)
 	if !attachmentsOK {
 		return
@@ -970,6 +975,7 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		s.writeNylasError(w, r, connection, err)
 		return
 	}
+	message = communicationsSendResponseWithLocalContent(message, sendReq)
 	if message.TrackingOptions == nil || !message.TrackingOptions.Opens {
 		log.Printf("nylas send response missing open tracking user_id=%s grant_id=%s message_id=%s subject=%q", connection.UserID, connection.GrantID, message.ID, sendReq.Subject)
 	}
@@ -979,6 +985,47 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	s.commCache.invalidateMessage(connection.UserID, cacheScope, message.ID)
 	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.created", message.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{"message": message})
+}
+
+func communicationsSendResponseWithLocalContent(message NylasMessage, sendReq NylasSendMessageRequest) NylasMessage {
+	if strings.TrimSpace(message.Body) == "" {
+		message.Body = sendReq.Body
+	}
+	attachments := append([]NylasAttachment(nil), message.Attachments...)
+	for index := range attachments {
+		attachments[index].Content = ""
+	}
+	for _, sentAttachment := range sendReq.Attachments {
+		matchIndex := -1
+		for index, responseAttachment := range attachments {
+			contentIDMatches := strings.TrimSpace(sentAttachment.ContentID) != "" && strings.EqualFold(strings.TrimSpace(responseAttachment.ContentID), strings.TrimSpace(sentAttachment.ContentID))
+			filenameMatches := strings.TrimSpace(sentAttachment.Filename) != "" && strings.EqualFold(strings.TrimSpace(responseAttachment.Filename), strings.TrimSpace(sentAttachment.Filename))
+			if contentIDMatches || filenameMatches {
+				matchIndex = index
+				break
+			}
+		}
+		if matchIndex < 0 {
+			sentAttachment.Content = ""
+			attachments = append(attachments, sentAttachment)
+			continue
+		}
+		if strings.TrimSpace(attachments[matchIndex].AttachmentID) == "" {
+			attachments[matchIndex].AttachmentID = sentAttachment.AttachmentID
+		}
+		if strings.TrimSpace(attachments[matchIndex].ContentID) == "" {
+			attachments[matchIndex].ContentID = sentAttachment.ContentID
+		}
+		if strings.TrimSpace(attachments[matchIndex].ContentDisposition) == "" {
+			attachments[matchIndex].ContentDisposition = sentAttachment.ContentDisposition
+		}
+		attachments[matchIndex].IsInline = attachments[matchIndex].IsInline || sentAttachment.IsInline
+		attachments[matchIndex].Content = ""
+	}
+	if len(attachments) > 0 {
+		message.Attachments = attachments
+	}
+	return message
 }
 
 func defaultCommunicationsTrackingOptions() *NylasTrackingOptions {
@@ -1966,6 +2013,79 @@ func cleanEmailAddresses(items []NylasEmailAddress) []NylasEmailAddress {
 		})
 	}
 	return cleaned
+}
+
+type communicationsInlineImageReference struct {
+	AttachmentID string
+	ContentID    string
+}
+
+func prepareCommunicationsInlineImageAttachments(body string, items []NylasAttachment) (string, []NylasAttachment) {
+	references := make([]communicationsInlineImageReference, 0)
+	seenAttachmentIDs := make(map[string]struct{})
+	rewrittenBody := mangoEditorAttachmentImageSourceRE.ReplaceAllStringFunc(body, func(match string) string {
+		parts := mangoEditorAttachmentImageSourceRE.FindStringSubmatch(match)
+		if len(parts) != 5 {
+			return match
+		}
+		encodedAttachmentID := parts[3]
+		if encodedAttachmentID == "" {
+			encodedAttachmentID = parts[4]
+		}
+		attachmentID, err := url.PathUnescape(strings.TrimSpace(encodedAttachmentID))
+		if err != nil {
+			attachmentID = strings.TrimSpace(encodedAttachmentID)
+		}
+		attachmentID = strings.TrimSpace(attachmentID)
+		if attachmentID == "" {
+			return match
+		}
+		contentID := communicationsInlineImageContentID(attachmentID)
+		if _, exists := seenAttachmentIDs[attachmentID]; !exists {
+			seenAttachmentIDs[attachmentID] = struct{}{}
+			references = append(references, communicationsInlineImageReference{AttachmentID: attachmentID, ContentID: contentID})
+		}
+		if parts[2] != "" {
+			return parts[1] + parts[2] + "cid:" + contentID + parts[2]
+		}
+		return parts[1] + `"cid:` + contentID + `"`
+	})
+	if len(references) == 0 {
+		return body, items
+	}
+
+	prepared := append([]NylasAttachment(nil), items...)
+	itemIndexByAttachmentID := make(map[string]int, len(prepared))
+	for index, item := range prepared {
+		attachmentID := strings.TrimSpace(item.AttachmentID)
+		if attachmentID == "" {
+			attachmentID = strings.TrimSpace(item.ID)
+		}
+		if attachmentID != "" {
+			itemIndexByAttachmentID[attachmentID] = index
+		}
+	}
+	for _, reference := range references {
+		if index, exists := itemIndexByAttachmentID[reference.AttachmentID]; exists {
+			prepared[index].ContentID = reference.ContentID
+			prepared[index].ContentDisposition = "inline"
+			prepared[index].IsInline = true
+			continue
+		}
+		itemIndexByAttachmentID[reference.AttachmentID] = len(prepared)
+		prepared = append(prepared, NylasAttachment{
+			AttachmentID:       reference.AttachmentID,
+			ContentID:          reference.ContentID,
+			ContentDisposition: "inline",
+			IsInline:           true,
+		})
+	}
+	return rewrittenBody, prepared
+}
+
+func communicationsInlineImageContentID(attachmentID string) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(attachmentID)))
+	return "mango" + hex.EncodeToString(digest[:12])
 }
 
 func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *http.Request, companyID string, items []NylasAttachment) ([]NylasAttachment, bool) {

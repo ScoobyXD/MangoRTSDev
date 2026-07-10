@@ -1,4 +1,4 @@
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 # Attachments Tests
 
@@ -17,13 +17,14 @@ ATT6 - Inline editor images must render as high-quality images on first open, no
 ATT7 - Node attachment-button uploads use the same Mango attachment API, S3 storage, metadata records, and `resource_attachments` links as pasted inline images.
 ATT8 - Chat attachments remain chat UI, not unified rich-editor content, but they still upload through the global Mango attachment API and persist attachment references instead of durable `dataURL` values.
 ATT9 - Project text-block attachments and project chat attachments use the same global attachment system while preserving project-owned persistence for project text boxes.
-ATT10 - Outgoing personal and shared email compose/reply attachments upload to Mango attachments before durable draft/send state is saved; the backend reads S3 bytes when sending through the provider. Email signature images/logos, when supported, use the same Mango attachment system through `email_signature` resource links.
+ATT10 - Outgoing personal and shared email compose/reply attachments upload to Mango attachments before durable draft/send state is saved; the backend reads S3 bytes only when sending through the provider. Pasted inline images remain Mango references in durable content and become CID-linked inline provider attachments at that send boundary. Email signature images/logos, when supported, use the same Mango attachment system through `email_signature` resource links.
 ATT11 - Incoming provider email attachments may stay provider-referenced while they are only mailbox-list metadata, but must be cached or persisted into Mango S3 when attached to a node, converted into work, repeatedly opened as a durable Mango resource, or otherwise selected for Mango ownership.
 ATT12 - Attached-email projections and communications email JSON may store provider IDs, message/thread metadata, inline/content IDs, and Mango attachment references, but must not store attachment bytes.
 ATT13 - Attachment content access must be authorized through Mango resource permissions; knowing an S3 key or attachment ID is not enough to read bytes.
 ATT14 - Developer inspection uses DBeaver for `attachments`, `attachment_variants`, and `resource_attachments` metadata, then AWS S3 console/CLI for the referenced object key when byte inspection is explicitly needed.
 ATT15 - Backend validation must reject new durable inline file-byte payloads in normal editor, chat, projection, saved-version, and email send/draft paths.
 ATT16 - Migration must be dry-run first, idempotent, resumable, auditable, and must record old-to-new attachment mappings before rewriting existing inline/base64 payloads.
+ATT17 - Email send preparation must find each `mango-attachment:` image source, deduplicate repeated IDs, authorize the existing resource link, resolve original S3 bytes within the total attachment limit, assign an alphanumeric content ID, add one inline provider attachment, and rewrite the image source to the matching `cid:` URI. It must reject missing/unauthorized references and return only metadata—not base64 bytes—in local sent-message fallback data.
 
 ## Scenarios
 
@@ -53,6 +54,7 @@ Business logic covered:
 - ATT5
 - ATT6
 - ATT15
+- ATT17
 
 Given:
 - A user pastes or drops an image into a node text box, Logic Gate editor body, project text box, My Triage compose/reply body, Shared Triage compose/reply body, or attached-email reply body.
@@ -115,7 +117,10 @@ Expected:
 - The browser uploads the file to Mango attachments before durable draft/send state is saved.
 - Draft/send payloads store attachment IDs or reference objects.
 - Signature image/logo payloads store Mango attachment references through `email_signature` resource links.
-- The backend reads S3 bytes at send time and passes them to the provider.
+- The backend reads S3 bytes at send time and passes normal files to the provider as ordinary attachments.
+- Each pasted image reference is deduplicated, permission-checked, converted to one inline attachment with a matching alphanumeric CID, and rewritten from the private Mango source to `cid:` in outbound HTML.
+- Personal and Shared Triage use the same conversion while preserving their personal/shared permission and grant scopes.
+- Missing or unauthorized inline references fail the send, and local sent-message fallback data contains provider-ready CID HTML plus metadata-only references rather than raw bytes.
 - Normal durable email payloads do not carry raw base64 `content`.
 
 ### Scenario ATT-S6: Incoming And Attached Email Attachments

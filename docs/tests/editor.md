@@ -1,4 +1,4 @@
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 # Unified Editor Tests
 
@@ -33,12 +33,14 @@ ED22 - Chat panes inside node or project text boxes are explicitly not unified e
 ED23 - Node and project email pickers are explicitly not compose editor surfaces; they may search, filter, scroll, drag, and attach existing email, but they must not contain compose, send, scheduled send, draft-save, or rich body editing behavior.
 ED24 - Map and legacy map-specific editor surfaces are explicitly outside the V1 unified editor contract unless they import a helper that is actively shared by a live non-map unified editor surface.
 ED25 - Backend persistence unification is explicitly outside the unified editor contract; shared editing behavior must not force node, Logic Gate, project, personal mailbox, shared mailbox, or attached-email reply content into one storage owner.
-ED26 - Rich-editor pasted or dropped inline images in unified editor surfaces must follow the global attachment contract in `docs/tests/attachments.md`: temporary previews are allowed, but durable editor/email content stores attachment references instead of data URLs or base64 bytes.
+ED26 - Rich-editor pasted or dropped inline images in unified editor surfaces must follow the global attachment contract in `docs/tests/attachments.md`: temporary previews are allowed, durable editor/email content stores attachment references instead of data URLs or base64 bytes, and email adapters convert those references to CID attachments only at the backend send boundary.
 ED27 - Chat attachments remain outside the unified rich-editor contract; they must use the global attachment contract as chat attachments rather than inheriting rich-editor body semantics.
 ED28 - Project text boxes must expose the same shared format and outline toolbar controls as node text boxes, including font-size controls, bold, underline, automatic numbering, bullets, checklist, and outline-style selection; project-specific toolbar toggles must call the shared editor controller instead of defining separate semantics.
 ED29 - The unified rich-editor toolbar source is `EditorTabBar`. Any rich editor surface that exposes formatting controls must use the same font-size minus/value/plus controls, bold/underline controls, and outline-style dropdown UI instead of reimplementing a look-alike toolbar.
 ED30 - The shared outline-style dropdown inventory is Automatic Numbering, Indent Guides, Bullet Points, and Checklist. The compact toolbar inventory used by project text boxes, mail compose/reply, and attached-email reply must come from one shared toolbar tab list so adding, removing, renaming, or restyling those controls changes every compact editor surface together.
 ED31 - Font-size toolbar actions must route through the shared editor formatting controller/helper for every unified rich editor surface, including Logic Gate editor text, node text boxes, project text boxes, My Triage/Shared Triage compose and reply bodies, and attached-email reply bodies. A surface must not keep a local font-size span mutation path behind the shared toolbar.
+ED32 - The shared formatting controller must restore the last valid editor range before toolbar actions that can move browser focus. Font size applies to the restored range or pending caret, and Bold/Underline state must reflect the browser command state so activating the same control again removes the format.
+ED33 - An image-only rich email body containing a durable Mango attachment image counts as sendable content. The frontend must preserve the reference without raw bytes, and the backend email adapter must authorize/resolve it and produce provider-ready CID HTML plus an inline attachment.
 
 ## Scenarios
 
@@ -64,6 +66,7 @@ Business logic covered:
 - ED29
 - ED30
 - ED31
+- ED32
 
 Given:
 - A user can edit a Logic Gate body, a node text box, a project text box, a My Triage compose body, a Shared Triage compose body, and an attached-email reply body.
@@ -83,6 +86,7 @@ Expected:
 - The same visible toolbar styling is used for the format controls wherever the shared toolbar appears.
 - The outline-style dropdown lists Automatic Numbering, Indent Guides, Bullet Points, and Checklist from the shared inventory.
 - Font-size minus/value/plus actions route through the shared formatting helper/controller for selected text and sticky collapsed-caret formatting.
+- Toolbar focus changes do not discard the editor range; Bold and Underline toggle off on their second activation and active state follows the caret/selection.
 - Project text-box adapters expose the shared node-style format and outline controls and route those actions through the shared editor controller.
 
 ### Scenario ED-S2: Domain Persistence Stays Separate
@@ -113,6 +117,8 @@ Business logic covered:
 - ED19
 - ED20
 - ED21
+- ED32
+- ED33
 
 Given:
 - A user writes a personal compose, personal reply, shared compose, shared reply, or attached-email reply body.
@@ -125,6 +131,8 @@ Expected:
 - Indented blocks remain indented in sent HTML instead of flattening.
 - Numbered-list toolbar actions create or toggle a shared automatic numbered/alphanumerical list item rather than only changing an outline-style setting.
 - The visible mail toolbar includes the shared font-size control, bold/underline controls, and outline-style dropdown used by the main editor.
+- The numeric font-size picker restores the prior editor selection before applying, and Bold/Underline are reversible toggles whose serialized HTML preserves the final state.
+- A body containing only a pasted attachment-backed image is sendable without adding placeholder text.
 
 ### Scenario ED-S4: Chat Is Excluded
 
@@ -169,6 +177,7 @@ Business logic covered:
 - ED13
 - ED26
 - ED27
+- ED33
 
 Given:
 - A user pastes or drops an image into a node text box, Logic Gate editor body, project text box, My Triage compose/reply body, Shared Triage compose/reply body, or attached-email reply body.
@@ -177,6 +186,7 @@ Given:
 Expected:
 - The rich-editor image insertion path comes from the shared editor handler contract.
 - Durable saved rich-editor content stores attachment references, not `data:image/...;base64` or durable `dataURL` values.
+- For email surfaces, the backend send adapter deduplicates and resolves those references, rewrites outbound image sources to matching `cid:` values, and returns metadata-only attachment fallback data for immediate rendering.
 - Each rich-editor surface still saves or sends through its own node, Logic Gate, project, personal mailbox, or shared mailbox adapter.
 - Chat attachment behavior follows `docs/tests/attachments.md` as chat attachment behavior and does not become unified rich-editor content.
 

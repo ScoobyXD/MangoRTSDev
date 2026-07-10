@@ -84,6 +84,7 @@ test("mail compose and attached-email reply mount unified rich editor adapters a
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
+  const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
   const editorTabBar = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorTabBar.tsx"), "utf8");
   const editorPreferences = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorPreferences.ts"), "utf8");
 
@@ -116,8 +117,31 @@ test("mail compose and attached-email reply mount unified rich editor adapters a
   assert.match(unifiedRichEditorSurface, /toggleNumberedList:/);
   assert.match(unifiedRichEditorSurface, /indent:/);
   assert.match(unifiedRichEditorSurface, /outdent:/);
+  assert.match(unifiedRichEditorSurface, /restoreFormattingSelection/);
+  assert.match(editorSurfaceHandlers, /restoreSelection: restoreEditorSelectionRange/);
+  assert.match(editorSurfaceHandlers, /boldCommandState \?\? readElementInlineFormat/);
+  assert.match(editorSurfaceHandlers, /underlineCommandState \?\? readElementInlineFormat/);
   assertRemovedMailOnlyFontSelect(homeParts);
   assertRemovedMailOnlyFontSelect(nodeWorkspaceParts);
+});
+
+test("mail thread detail supports exact-message replies, saved editor sizing, and one scroll surface", () => {
+  const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
+  const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
+
+  assert.match(homeParts, /sortEmailConversationMessagesNewestFirst/);
+  assert.match(homeParts, /onReply\(message\)/);
+  assert.match(homeParts, /onReplyAll\(message\)/);
+  assert.match(homeParts, /AutoHeightEmailBodyFrame/);
+  assert.match(homeParts, /scrolling="no"/);
+  assert.match(homeParts, /new ResizeObserver\(resize\)/);
+  assert.match(homeParts, /setExpandedMessageIDs\(newestMessageID \? new Set\(\[newestMessageID\]\)/);
+  assert.match(homeParts, /saveMailReplyEditorHeight/);
+  assert.match(homeParts, /MAIL_REPLY_EDITOR_MIN_HEIGHT_PX/);
+  assert.match(homePage, /saveCurrentComposeDraft\(\{ quiet: true \}\);\s*setCompose\(emptyCompose\);/);
+  assert.match(homePage, /openReply\("reply", message \?\? selectedMessage\)/);
+  assert.match(homePage, /incomingThreadID && incomingThreadID === selectedThreadID/);
+  assert.match(homePage, /setSelectedThreadMessages\(\(previous\) => mergeEmailThreadDetailMessages\(previous, \[message\]\)\)/);
 });
 
 test("editor toolbar font and outline controls share one source across rich editor surfaces", () => {
@@ -143,6 +167,24 @@ test("editor toolbar font and outline controls share one source across rich edit
   assert.match(projectSummary, /controller\.applyFontSizeValue\(fontSize\)/);
   assert.match(homeParts, /bodyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
   assert.match(nodeWorkspaceParts, /replyEditorControllerRef\.current\?\.applyFontSizeValue\(fontSize\)/);
+});
+
+test("mail signatures are mailbox scoped and late hydration only backfills the pending new draft", () => {
+  const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
+  const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
+  const homeMailDrafts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/homeMailDrafts.ts"), "utf8");
+
+  assert.match(homePage, /pendingAutoSignatureRef/);
+  assert.match(homePage, /activeSignatureScopeKey/);
+  assert.match(homePage, /loadHomeMailSignature\(companyID, currentUserID, activeSharedInboxFolderID, activeMailAccountEmail\)/);
+  assert.match(homePage, /current\.draftID !== pending\.draftID/);
+  assert.match(homePage, /applyHomeMailSignature\(current\.body, emailSignature\)/);
+  assert.match(homePage, /emailSignature=\{composeScopeEmailSignature\}/);
+  assert.match(homePage, /compose: submittedCompose/);
+  assert.match(homeMailDrafts, /export function homeMailSignatureScopeKey/);
+  assert.match(homeMailDrafts, /export function homeMailBodyHasSignature/);
+  assert.match(homeParts, /applyHomeMailSignature\(compose\.body, signature\)/);
+  assert.doesNotMatch(homeParts, /compose\.body\.endsWith\(signature\)/);
 });
 
 test("EmailPickerModal remains attach-only and cannot compose or send mail", () => {
