@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { fetchCurrentUser, readAuthConfig, type CurrentUserResponse } from "../../auth/cognitoAuth.js";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
-import { emitNotificationsUpdated, emptyNotificationSummary, EVENT_NOTIFICATIONS_UPDATED, fetchNotificationSummary, type NotificationSummary } from "./notificationsApi.js";
+import { emptyNotificationSummary, EVENT_NOTIFICATIONS_UPDATED, fetchNotificationSummary, type NotificationSummary } from "./notificationsApi.js";
 
 const NOTIFICATION_SUMMARY_CLOSE_GRACE_MS = 1500;
-const NOTIFICATION_REALTIME_UPDATE_SOURCE = "notification-realtime";
 
 type NotificationSummaryListener = (summary: NotificationSummary) => void;
 type TimerID = ReturnType<typeof setTimeout>;
@@ -83,17 +82,18 @@ function ensureNotificationRealtime(entry: NotificationSummaryEntry): void {
   const apiBase = readAuthConfig().apiBase;
   void fetchCurrentUser()
     .then((current) => {
-      const userID = current.user.user_id.trim();
-      if (!userID || !currentUserCanUseCompany(current, entry.companyID) || notificationSummaryEntries.get(entry.companyID) !== entry) return;
-      entry.unsubscribeRealtime = subscribeRealtimeScope(apiBase, entry.companyID, `notifications:user:${userID}`, {
+        const userID = current.user.user_id.trim();
+        if (!userID || !currentUserCanUseCompany(current, entry.companyID) || notificationSummaryEntries.get(entry.companyID) !== entry) return;
+        // The app freshness bridge owns global notification events and preserves local mutation sources.
+        entry.unsubscribeRealtime = subscribeRealtimeScope(apiBase, entry.companyID, `notifications:user:${userID}`, {
         onNotificationCreated(message) {
-          emitNotificationsUpdated(message.company_id || entry.companyID, NOTIFICATION_REALTIME_UPDATE_SOURCE);
+            requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
         },
         onNotificationDeleted(message) {
-          emitNotificationsUpdated(message.company_id || entry.companyID, NOTIFICATION_REALTIME_UPDATE_SOURCE);
+          requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
         },
         onNotificationsCleared(message) {
-          emitNotificationsUpdated(message.company_id || entry.companyID, NOTIFICATION_REALTIME_UPDATE_SOURCE);
+          requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
         },
         onError(error) {
           console.error("Notification realtime failed", error);

@@ -29,7 +29,7 @@ import { formatNotificationTimestamp } from "../../modules/notifications/notific
 import { createSavedViewID, fetchSavedViews, type SavedView, type SavedViewPrincipal } from "./savedViewsApi";
 import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNestedGroup } from "../../modules/grouping/universalGrouping";
 import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
-import { orderedUpdateSelection, resolveUpdateClickSelection } from "./updatesSelection";
+import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenSuccessor, updatesNotificationEventRequiresReload } from "./updatesSelection";
 
 type UpdatesEditorContentComponent = React.FC<{
   accent: string;
@@ -345,9 +345,12 @@ export function UpdatesView({
     if (typeof window === "undefined") return undefined;
     const handleNotificationsUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ companyID?: string; source?: string }>).detail;
-      const eventCompanyID = detail?.companyID?.trim() ?? "";
-      if (eventCompanyID && eventCompanyID !== companyID) return;
-      if (detail?.source === NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN) return;
+      if (!updatesNotificationEventRequiresReload({
+        activeCompanyID: companyID,
+        eventCompanyID: detail?.companyID,
+        source: detail?.source,
+        localSeenSource: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN,
+      })) return;
       setReloadToken((value) => value + 1);
     };
     window.addEventListener(EVENT_NOTIFICATIONS_UPDATED, handleNotificationsUpdated);
@@ -357,7 +360,10 @@ export function UpdatesView({
   const sourceGroups = useMemo(() => rootGroups.map((root) => branchByRootID[root.id] ?? root), [branchByRootID, rootGroups]);
   const updateRows = useMemo(() => flattenUpdateRows(sourceGroups, hiddenNotificationIDs), [hiddenNotificationIDs, sourceGroups]);
   const displayGroups = useMemo(() => buildUpdateDisplayGroups(updateRows, selectedSetting.groupings), [selectedSetting.groupings, updateRows]);
-  const visibleUpdateRows = useMemo(() => flattenDisplayRows(displayGroups), [displayGroups]);
+  const visibleUpdateRows = useMemo(
+    () => flattenDisplayRows(displayGroups, expandedGroupIDs),
+    [displayGroups, expandedGroupIDs],
+  );
   const visibleNotifications = useMemo(() => visibleUpdateRows.map((row) => row.item), [visibleUpdateRows]);
   const groupingSignature = useMemo(() => JSON.stringify({
     setting: selectedSetting.setting_id,
@@ -425,11 +431,11 @@ export function UpdatesView({
     return visibleNotifications.filter((item) => selectedNotificationKeys.has(updateNotificationSelectionKey(item)));
   }, [selectedNotificationKeys, visibleNotifications]);
 
-  const focusUpdateRow = useCallback((notificationKey: string) => {
-    if (!notificationKey) return;
+  const focusUpdateRow = useCallback((rowKey: string) => {
+    if (!rowKey) return;
     const focusSelectedRow = () => {
-      const rows = Array.from(updatesListRef.current?.querySelectorAll<HTMLElement>("[data-update-key]") ?? []);
-      rows.find((row) => row.dataset.updateKey === notificationKey)?.focus();
+      const rows = Array.from(updatesListRef.current?.querySelectorAll<HTMLElement>("[data-update-row-key]") ?? []);
+      rows.find((row) => row.dataset.updateRowKey === rowKey)?.focus();
     };
     window.requestAnimationFrame(focusSelectedRow);
     window.setTimeout(focusSelectedRow, 80);
@@ -451,7 +457,7 @@ export function UpdatesView({
       notificationKey,
       row,
     });
-    focusUpdateRow(notificationKey);
+    focusUpdateRow(row.rowKey);
     onOpenNode(nodeID, informationID);
   }, [focusUpdateRow, onOpenNode, resolveNodeDetails]);
 
@@ -488,34 +494,36 @@ export function UpdatesView({
     setSelectedNotificationKeys(new Set(orderedSelectedIDs.length > 0 ? orderedSelectedIDs : [itemKey]));
     setSelectionAnchorNotificationKey(selected.anchorID);
     setSelectedNotificationKey(primaryKey);
-    if (options.focus) focusUpdateRow(itemKey);
+    if (options.focus) focusUpdateRow(row.rowKey);
     if (!shouldOpen) return;
     openUpdateNodePanel(row);
   }, [focusUpdateRow, openUpdateNodePanel, selectedNotificationKeys, selectionAnchorNotificationKey, visibleUpdateRows]);
 
   const selectAdjacentUpdate = useCallback((row: UpdateFeedRow, direction: 1 | -1) => {
     if (visibleUpdateRows.length === 0) return;
-    const itemKey = updateNotificationSelectionKey(row.item);
-    const activeKey = selectedNotificationKey || itemKey;
-    const currentIndex = Math.max(0, visibleUpdateRows.findIndex((candidate) => updateNotificationSelectionKey(candidate.item) === activeKey));
+    const currentIndex = Math.max(0, visibleUpdateRows.findIndex((candidate) => candidate.rowKey === row.rowKey));
     const nextIndex = Math.min(Math.max(currentIndex + direction, 0), visibleUpdateRows.length - 1);
     selectUpdateRow(visibleUpdateRows[nextIndex], undefined, { open: true, focus: true });
-  }, [selectUpdateRow, selectedNotificationKey, visibleUpdateRows]);
+  }, [selectUpdateRow, visibleUpdateRows]);
 
-  const removeSeenUpdates = useCallback((items: NotificationItem[], confirmMessage = "", options: { advanceToNext?: boolean } = {}) => {
+  const removeSeenUpdates = useCallback((items: NotificationItem[], confirmMessage = "", options: { advanceFromRowKey?: string } = {}) => {
     const uniqueItems = Array.from(new Map(items.map((item) => [updateNotificationSelectionKey(item), item])).values());
     const notificationIDs = uniqueItems.map((item) => item.notification_id?.trim() ?? "").filter(Boolean);
     if (notificationIDs.length === 0) return;
     if (confirmMessage && typeof window !== "undefined" && !window.confirm(confirmMessage)) return;
     const hiddenKeys = uniqueItems.map(updateNotificationSelectionKey);
     const hiddenKeySet = new Set(hiddenKeys);
-    const primaryHiddenKey = hiddenKeys.includes(selectedNotificationKey) ? selectedNotificationKey : (hiddenKeys[0] ?? "");
-    const hiddenRowIndex = visibleUpdateRows.findIndex((row) => updateNotificationSelectionKey(row.item) === primaryHiddenKey);
-    const nextRow = options.advanceToNext && hiddenRowIndex >= 0
-      ? visibleUpdateRows.slice(hiddenRowIndex + 1).find((row) => !hiddenKeySet.has(updateNotificationSelectionKey(row.item)))
-        ?? visibleUpdateRows.slice(0, hiddenRowIndex).reverse().find((row) => !hiddenKeySet.has(updateNotificationSelectionKey(row.item)))
-        ?? null
-      : null;
+    const nextRowKey = options.advanceFromRowKey
+      ? resolveUpdateSeenSuccessor(
+        visibleUpdateRows.map((row) => ({
+          rowKey: row.rowKey,
+          notificationKey: updateNotificationSelectionKey(row.item),
+        })),
+        options.advanceFromRowKey,
+        hiddenKeySet,
+      )
+      : "";
+    const nextRow = nextRowKey ? visibleUpdateRows.find((row) => row.rowKey === nextRowKey) ?? null : null;
     setHiddenNotificationIDs((current) => {
       const next = new Set(current);
       for (const key of hiddenKeys) next.add(key);
@@ -531,9 +539,15 @@ export function UpdatesView({
       setSelectedNotificationKey(nextKey);
       setSelectedNotificationKeys(new Set([nextKey]));
       setSelectionAnchorNotificationKey(nextKey);
-      openUpdateNodePanel(nextRow);
-    } else if (hiddenKeys.includes(selectedNotificationKey)) {
+      if (updateRowNodeID(nextRow)) openUpdateNodePanel(nextRow);
+      else {
+        setActiveNodePanel(null);
+        focusUpdateRow(nextRow.rowKey);
+      }
+    } else if (options.advanceFromRowKey || hiddenKeys.includes(selectedNotificationKey)) {
       setSelectedNotificationKey("");
+      setSelectedNotificationKeys(new Set());
+      setSelectionAnchorNotificationKey("");
       setActiveNodePanel(null);
     }
     setContextMenu(null);
@@ -545,10 +559,10 @@ export function UpdatesView({
       });
       setError(nextError instanceof Error ? nextError.message : "Failed to mark update as seen");
     });
-  }, [companyID, openUpdateNodePanel, selectedNotificationKey, visibleUpdateRows]);
+  }, [companyID, focusUpdateRow, openUpdateNodePanel, selectedNotificationKey, visibleUpdateRows]);
 
-  const markUpdateSeen = useCallback((item: NotificationItem) => {
-    removeSeenUpdates([item], "", { advanceToNext: true });
+  const markUpdateSeen = useCallback((row: UpdateFeedRow) => {
+    removeSeenUpdates([row.item], "", { advanceFromRowKey: row.rowKey });
   }, [removeSeenUpdates]);
 
   const markSelectedUpdatesSeen = useCallback(() => {
@@ -698,7 +712,7 @@ function UpdateGroupList({
   onToggleGroup: (groupID: string) => void;
   onSelectRow: (row: UpdateFeedRow, event?: React.MouseEvent | React.KeyboardEvent) => void;
   onSelectAdjacent: (row: UpdateFeedRow, direction: 1 | -1) => void;
-  onMarkSeen: (item: NotificationItem) => void;
+  onMarkSeen: (row: UpdateFeedRow) => void;
   selectedNotificationKey: string;
   selectedNotificationKeys: Set<string>;
   hoveredNotificationKey: string;
@@ -826,7 +840,7 @@ function UpdateRows({
   depth: number;
   onSelectRow: (row: UpdateFeedRow, event?: React.MouseEvent | React.KeyboardEvent) => void;
   onSelectAdjacent: (row: UpdateFeedRow, direction: 1 | -1) => void;
-  onMarkSeen: (item: NotificationItem) => void;
+  onMarkSeen: (row: UpdateFeedRow) => void;
   selectedNotificationKey: string;
   selectedNotificationKeys: Set<string>;
   hoveredNotificationKey: string;
@@ -848,6 +862,7 @@ function UpdateRows({
             role="button"
             tabIndex={0}
             data-update-key={notificationKey}
+            data-update-row-key={row.rowKey}
             style={updateRowStyle(depth, !item.read_timestamp, rowTone, selectedNotificationKeys.has(notificationKey) || selectedNotificationKey === notificationKey, hoveredNotificationKey === notificationKey)}
             onMouseDown={(event) => {
               if (event.button !== 0) return;
@@ -891,7 +906,7 @@ function UpdateRows({
               disabled={!item.notification_id?.trim()}
               onClick={(event) => {
                 event.stopPropagation();
-                onMarkSeen(item);
+                onMarkSeen(row);
               }}
             >
               Seen
@@ -1344,11 +1359,12 @@ function flattenUpdateRows(groups: UpdateGroup[], hiddenNotificationIDs: Set<str
   return sortUpdateRows(rows);
 }
 
-function flattenDisplayRows(groups: UpdateDisplayGroup[]): UpdateFeedRow[] {
+function flattenDisplayRows(groups: UpdateDisplayGroup[], expandedGroupIDs: ReadonlySet<string>): UpdateFeedRow[] {
   const rows: UpdateFeedRow[] = [];
   const visit = (group: UpdateDisplayGroup) => {
-    for (const row of group.rows ?? []) rows.push(row);
+    if (!expandedGroupIDs.has(group.id)) return;
     for (const child of group.groups) visit(child);
+    for (const row of group.rows ?? []) rows.push(row);
   };
   for (const group of groups) visit(group);
   return rows;

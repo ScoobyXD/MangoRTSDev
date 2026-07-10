@@ -1,10 +1,10 @@
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 # Updates Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project and Logic Gate grouping fields. Other rule IDs are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project and Logic Gate grouping fields. Frontend selection tests cover row selection and individual Seen successor/reload decisions. Other rule IDs are not mapped to automated tests yet.
 
 ## Business Logic
 
@@ -78,6 +78,7 @@ U67 - Updates saved grouping view rows render under the Updates entry in the Key
 U68 - Activating an Updates row that opens the node preview panel keeps keyboard focus on the Updates row list; Up and Down arrow keys continue moving through visible rows across grouping boundaries instead of moving the caret inside the node editor.
 U69 - The Home sidebar Updates tab shows separate live unread badges for urgent ! mentions, normal @ mentions, and non-mention update notifications using notification summary counts: urgent comes from `mention.urgent_created`, @ comes from `mention.created`, and regular updates come from total unread minus those mention counts. These badges are display state only, not a second notification source of truth, and must increment or decrement after notification-created, Seen, and Seen all reconciliation.
 U70 - Attachment-related update rows may reference attachment IDs, email IDs, node IDs, and preview metadata, but Updates payloads must not carry file bytes, data URLs, base64 blobs, or S3 object contents.
+U71 - Seeing an individual update activates the next remaining visible row below it and opens that row's node preview when it references a node, so the user can continue down the list with repeated Seen actions. If no row remains below, Updates clears the active row and node preview instead of jumping upward.
 
 ## Update Row Copy And Visual Language
 
@@ -338,6 +339,7 @@ Business logic covered:
 - U66
 - U68
 - U69
+- U71
 
 Given:
 - A user inserts an @ mention or ! mention into a node text editor or Logic Gate text editor.
@@ -354,6 +356,8 @@ Expected:
 - Saving a text editor that still contains an older already-recorded mention occurrence does not recreate that old mention update, even if the old notification was previously Seen.
 - Clicking Seen on one row removes that notification permanently from the Updates feed for that user.
 - Clicking Seen on one row hides the row without a full Updates feed reload or visible blink.
+- After Seen hides one row, the next remaining visible row below it becomes active and its node preview opens when the row references a node, allowing repeated Seen actions to continue down the list.
+- If no row remains below the Seen row, the active row and node preview clear instead of jumping upward.
 - Clicking Seen all asks for confirmation, then removes all current-user Updates notifications for the company.
 - Ctrl-click or Command-click toggles row selection, and Shift-click additively selects the visible range from the selection anchor.
 - Activating a row scrolls the node preview to the referenced information without placing the caret inside the node editor.

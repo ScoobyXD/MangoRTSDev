@@ -34,3 +34,32 @@ export function resolveUpdateClickSelection(input: {
 export function orderedUpdateSelection(orderedIDs: string[], selectedIDs: Set<string>): string[] {
   return orderedIDs.filter((id) => selectedIDs.has(id));
 }
+
+export type UpdateSeenRow = {
+  rowKey: string;
+  notificationKey: string;
+};
+
+export function resolveUpdateSeenSuccessor(
+  orderedRows: readonly UpdateSeenRow[],
+  seenRowKey: string,
+  hiddenNotificationKeys: ReadonlySet<string>,
+): string {
+  const seenIndex = orderedRows.findIndex((row) => row.rowKey === seenRowKey);
+  if (seenIndex < 0) return "";
+  return orderedRows
+    .slice(seenIndex + 1)
+    .find((row) => !hiddenNotificationKeys.has(row.notificationKey))
+    ?.rowKey ?? "";
+}
+
+export function updatesNotificationEventRequiresReload(input: {
+  activeCompanyID: string;
+  eventCompanyID?: string;
+  source?: string;
+  localSeenSource: string;
+}): boolean {
+  const eventCompanyID = input.eventCompanyID?.trim() ?? "";
+  if (eventCompanyID && eventCompanyID !== input.activeCompanyID.trim()) return false;
+  return (input.source?.trim() ?? "") !== input.localSeenSource.trim();
+}
