@@ -1,10 +1,11 @@
-Last updated: 2026-07-08
+Last updated: 2026-07-10
 
 # Logic Gates Tests
 
 Detailed Logic Gate Kanban board behavior, including subgrouping, request card footers, and card placement provenance, is covered in `docs/tests/kanbanboard.md`.
 
 Coverage Status:
+- Shared `@`/`!` people-picker palette key, fallback, and contrast behavior is covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract; shared editor attachment tests cover durable rich-editor image attachment references; Logic Gate-specific projection/persistence rule IDs are not fully mapped to automated tests yet)
 
@@ -35,7 +36,7 @@ LG22 - Logic Gate editor projection saves must use one-save-at-a-time latest-con
 LG23 - Logic Gate editor save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. The editor is marked `has not changed` only when the completed request's version matches the latest local version.
 LG24 - The Logic Gate editor exposes applying the current GVIC template to already assigned nodes as a one-shot action next to the GVIC role fields, not as a persistent checkbox or vertical control between the title and GVIC fields.
 LG25 - Pressing the Logic Gate editor's apply-to-assigned-nodes action asks for confirmation; canceling makes no write, and confirming applies the current Logic Gate GVIC template to nodes currently assigned to that Logic Gate. Ordinary GVIC role edits remain template-only for existing assigned nodes.
-LG26 - Logic Gate editor surfaces participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, and table semantics must apply to Logic Gate editor text wherever it is opened.
+LG26 - Logic Gate editor surfaces participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, table, and people-suggestion semantics must apply to Logic Gate editor text wherever it is opened. The `@`/`!` people picker uses stable, visible per-user profile colors rather than gray-only rows.
 LG27 - Logic Gate editor inline images/files must follow `docs/tests/attachments.md`: rich-editor paste/drop uses the shared editor image path, and durable Logic Gate information/projection rows store attachment references instead of data URLs or base64 file bytes.
 LG28 - The Logic Gate editor toolbar must use the shared rich-editor toolbar source and shared font-size helper/controller. Font-size minus/value/plus, bold, underline, and the outline-style dropdown must match node text boxes, project text boxes, and mail editor surfaces in look and selected-text/sticky-caret behavior.
 
@@ -122,6 +123,7 @@ Expected:
 - The toolbar uses the shared font-size, bold, underline, and outline-style controls rather than a Logic Gate-only implementation.
 - Table insertion uses the current caret/selection position.
 - The same rich editing semantics come from the unified editor behavior used by node, project, and email compose/reply editor surfaces.
+- Typing `@` or `!` opens the shared people picker with a stable color keyed by normalized user ID, then email, then display name. Keyboard-active treatment adds a translucent same-color tint and the existing active rail while preserving the opaque profile avatar and tested readable contrast.
 
 ### Scenario LG-S5: Logic Gate Editor Projection Saves And Saved Versions
 

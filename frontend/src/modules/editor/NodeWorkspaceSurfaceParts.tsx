@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { getEmailMessage, getEmailThread, listEmailMessages, sendEmail, type EmailAddress, type EmailMailbox, type EmailMessage, type MessagePage } from "../communications/communicationsApi";
-import { downloadMangoAttachment, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachmentResourceType, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
+import { downloadMangoAttachment, fetchMangoAttachmentBlob, loadMangoAttachmentObjectURL, mangoAttachedEmailResourceID, type AttachmentRequestJSON, type MangoAttachment, type MangoAttachmentResourceType, type MangoAttachmentVariantType, type MangoResourceAttachment } from "../attachments/attachmentApi";
+import { classifyAttachmentPresentation, classifyAttachmentPreview, splitAttachmentFilename, type AttachmentPresentationKind, type AttachmentPreviewKind } from "../attachments/attachmentPresentation";
 import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type EditorChatAttachment, type EditorTextBlockChatMessage } from "./editorProjection";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
@@ -46,6 +48,7 @@ import {
   EDITOR_MENTION_COLOR,
   mentionUserDisplayName,
   mentionUserOptionLabel,
+  mentionUserProfileColor,
   readActiveMentionDraft,
   splitTextByMentions,
   type ActiveMentionDraft,
@@ -1940,6 +1943,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   const label = mentionUserOptionLabel(user);
                   const name = mentionUserDisplayName(user);
                   const email = (user.email ?? "").trim();
+                  const profileColor = mentionUserProfileColor(user);
                   return (
                     <button
                       key={user.user_id}
@@ -1969,7 +1973,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         boxShadow: selected ? "0 8px 20px rgba(15,23,42,0.10), 0 0 12px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : undefined,
                       }}
                     >
-                      <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", background: avatarBackgroundForName(name), color: "#ffffff", fontSize: 10, fontWeight: 900 }}>
+                      <span aria-hidden="true" style={{ width: 24, height: 24, boxSizing: "border-box", border: `1px solid ${profileColor.border}`, borderRadius: 999, display: "grid", placeItems: "center", background: profileColor.background, color: profileColor.foreground, fontSize: 10, fontWeight: 900 }}>
                         {initialsForName(name)}
                       </span>
                       <span style={{ minWidth: 0, display: "grid", gap: 1 }}>
@@ -2746,6 +2750,317 @@ type AttachmentCountDropdownProps = {
   onError: (message: string) => void;
 };
 
+const ATTACHMENT_KIND_VISUALS: Record<AttachmentPresentationKind, { label: string; background: string; border: string; color: string }> = {
+  image: { label: "IMG", background: "#ecfeff", border: "rgba(8,145,178,0.28)", color: "#0e7490" },
+  spreadsheet: { label: "XLS", background: "#ecfdf5", border: "rgba(5,150,105,0.28)", color: "#047857" },
+  document: { label: "DOC", background: "#eff6ff", border: "rgba(37,99,235,0.28)", color: "#1d4ed8" },
+  presentation: { label: "PPT", background: "#fff7ed", border: "rgba(234,88,12,0.28)", color: "#c2410c" },
+  pdf: { label: "PDF", background: "#fff1f2", border: "rgba(225,29,72,0.28)", color: "#be123c" },
+  archive: { label: "ZIP", background: "#fffbeb", border: "rgba(217,119,6,0.28)", color: "#b45309" },
+  text: { label: "TXT", background: "#f0fdfa", border: "rgba(13,148,136,0.28)", color: "#0f766e" },
+  audio: { label: "AUD", background: "#faf5ff", border: "rgba(147,51,234,0.25)", color: "#7e22ce" },
+  video: { label: "VID", background: "#fdf2f8", border: "rgba(219,39,119,0.25)", color: "#be185d" },
+  generic: { label: "FILE", background: "#f8fafc", border: "rgba(100,116,139,0.28)", color: "#475569" },
+};
+
+const AttachmentTypeVisual: React.FC<{ kind: AttachmentPresentationKind; muted?: boolean }> = ({ kind, muted = false }) => {
+  const visual = ATTACHMENT_KIND_VISUALS[kind];
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        width: 34,
+        height: 34,
+        display: "grid",
+        placeItems: "center",
+        border: `1px solid ${visual.border}`,
+        borderRadius: 7,
+        background: visual.background,
+        color: visual.color,
+        fontSize: visual.label.length > 3 ? 7.5 : 8.5,
+        fontWeight: 950,
+        letterSpacing: 0,
+        lineHeight: 1,
+        opacity: muted ? 0.52 : 1,
+        boxSizing: "border-box",
+      }}
+    >
+      {visual.label}
+    </span>
+  );
+};
+
+const AuthenticatedAttachmentThumbnail: React.FC<{
+  apiBase: string;
+  companyID: string;
+  attachmentID: string;
+}> = ({ apiBase, companyID, attachmentID }) => {
+  const [previewURL, setPreviewURL] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+  const [shouldLoad, setShouldLoad] = useState(false);
+  const previewAnchorRef = useRef<HTMLSpanElement | null>(null);
+  const previewURLRef = useRef("");
+  const revokePreviewURL = useCallback(() => {
+    if (!previewURLRef.current) return;
+    URL.revokeObjectURL(previewURLRef.current);
+    previewURLRef.current = "";
+  }, []);
+
+  useEffect(() => {
+    if (shouldLoad) return undefined;
+    const anchor = previewAnchorRef.current;
+    if (!anchor || typeof IntersectionObserver === "undefined") {
+      setShouldLoad(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setShouldLoad(true);
+      observer.disconnect();
+    }, { root: anchor.closest('[role="menu"]'), rootMargin: "48px 0px" });
+    observer.observe(anchor);
+    return () => observer.disconnect();
+  }, [shouldLoad]);
+
+  useEffect(() => {
+    if (!shouldLoad) return undefined;
+    const controller = new AbortController();
+    let disposed = false;
+    revokePreviewURL();
+    setPreviewURL("");
+    setStatus("loading");
+    void (async () => {
+      let loadedURL = "";
+      for (const variant of ["thumbnail", "display"] as const) {
+        try {
+          loadedURL = await loadMangoAttachmentObjectURL(apiBase, companyID, attachmentID, variant, { signal: controller.signal });
+          break;
+        } catch {
+          if (controller.signal.aborted) return;
+        }
+      }
+      if (!loadedURL) {
+        if (!disposed) setStatus("failed");
+        return;
+      }
+      if (disposed) {
+        URL.revokeObjectURL(loadedURL);
+        return;
+      }
+      previewURLRef.current = loadedURL;
+      setPreviewURL(loadedURL);
+      setStatus("ready");
+    })();
+    return () => {
+      disposed = true;
+      controller.abort();
+      revokePreviewURL();
+    };
+  }, [apiBase, attachmentID, companyID, revokePreviewURL, shouldLoad]);
+
+  if (status !== "ready" || !previewURL) {
+    return (
+      <span ref={previewAnchorRef} title={status === "failed" ? "Image preview unavailable" : status === "idle" ? "Image preview pending" : "Loading image preview"} aria-busy={status === "loading"} style={{ display: "block", width: 34, height: 34 }}>
+        <AttachmentTypeVisual kind="image" muted={status === "loading"} />
+      </span>
+    );
+  }
+  return (
+    <img
+      src={previewURL}
+      alt=""
+      onError={() => {
+        revokePreviewURL();
+        setPreviewURL("");
+        setStatus("failed");
+      }}
+      style={{ width: 34, height: 34, display: "block", border: "1px solid rgba(100,116,139,0.20)", borderRadius: 7, background: "#f8fafc", objectFit: "cover", boxSizing: "border-box" }}
+    />
+  );
+};
+
+const TEXT_PREVIEW_MAX_BYTES = 256 * 1024;
+const TEXT_PREVIEW_MAX_CHARACTERS = 200_000;
+
+const AttachmentPreviewModal: React.FC<{
+  attachment: MangoAttachment;
+  previewKind: AttachmentPreviewKind;
+  apiBase: string;
+  companyID: string;
+  accent: string;
+  surfaceText: string;
+  onClose: () => void;
+  onError: (message: string) => void;
+}> = ({ attachment, previewKind, apiBase, companyID, accent, surfaceText, onClose, onError }) => {
+  const [status, setStatus] = useState<"loading" | "ready" | "failed">(previewKind === "unavailable" ? "ready" : "loading");
+  const [objectURL, setObjectURL] = useState("");
+  const [textContent, setTextContent] = useState("");
+  const [textTruncated, setTextTruncated] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const objectURLRef = useRef("");
+  const filename = splitAttachmentFilename(attachment.original_filename).filename;
+  const presentationKind = classifyAttachmentPresentation({ filename, mimeType: attachment.mime_type });
+  const revokeObjectURL = useCallback(() => {
+    if (!objectURLRef.current) return;
+    URL.revokeObjectURL(objectURLRef.current);
+    objectURLRef.current = "";
+  }, []);
+
+  useEffect(() => {
+    const focusFrame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = dialogRef.current ? Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), audio[controls], video[controls], iframe, [tabindex]:not([tabindex="-1"])')).filter((element) => element.getClientRects().length > 0) : [];
+      if (focusable.length === 0) return;
+      const activeIndex = focusable.indexOf(document.activeElement as HTMLElement);
+      const nextIndex = event.shiftKey
+        ? activeIndex <= 0 ? focusable.length - 1 : activeIndex - 1
+        : activeIndex < 0 || activeIndex === focusable.length - 1 ? 0 : activeIndex + 1;
+      event.preventDefault();
+      focusable[nextIndex]?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  useEffect(() => {
+    revokeObjectURL();
+    setObjectURL("");
+    setTextContent("");
+    setTextTruncated(false);
+    if (previewKind === "unavailable") {
+      setStatus("ready");
+      return undefined;
+    }
+    const controller = new AbortController();
+    let disposed = false;
+    setStatus("loading");
+    void (async () => {
+      try {
+        if (previewKind === "text") {
+          let blob: Blob | null = null;
+          for (const variant of ["display", "original"] as const) {
+            try {
+              blob = await fetchMangoAttachmentBlob(apiBase, companyID, attachment.attachment_id, variant, { signal: controller.signal });
+              break;
+            } catch {
+              if (controller.signal.aborted) return;
+            }
+          }
+          if (!blob) throw new Error("attachment_preview_unavailable");
+          const decoded = await blob.slice(0, TEXT_PREVIEW_MAX_BYTES).text();
+          if (disposed) return;
+          setTextContent(decoded.slice(0, TEXT_PREVIEW_MAX_CHARACTERS));
+          setTextTruncated(blob.size > TEXT_PREVIEW_MAX_BYTES || decoded.length > TEXT_PREVIEW_MAX_CHARACTERS);
+          setStatus("ready");
+          return;
+        }
+        let loadedURL = "";
+        for (const variant of ["display", "original"] as const) {
+          try {
+            loadedURL = await loadMangoAttachmentObjectURL(apiBase, companyID, attachment.attachment_id, variant, { signal: controller.signal });
+            break;
+          } catch {
+            if (controller.signal.aborted) return;
+          }
+        }
+        if (!loadedURL) throw new Error("attachment_preview_unavailable");
+        if (disposed) {
+          URL.revokeObjectURL(loadedURL);
+          return;
+        }
+        objectURLRef.current = loadedURL;
+        setObjectURL(loadedURL);
+        setStatus("ready");
+      } catch (cause) {
+        if (disposed || controller.signal.aborted) return;
+        setStatus("failed");
+        onError(cause instanceof Error ? cause.message : "attachment_preview_unavailable");
+      }
+    })();
+    return () => {
+      disposed = true;
+      controller.abort();
+      revokeObjectURL();
+    };
+  }, [apiBase, attachment.attachment_id, companyID, onError, previewKind, revokeObjectURL]);
+
+  const download = async () => {
+    setDownloading(true);
+    try {
+      await downloadMangoAttachment({ apiBase, companyID, attachmentID: attachment.attachment_id, filename, variant: "original" });
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_download_attachment");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      role="presentation"
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      style={{ position: "fixed", zIndex: 240, inset: 0, display: "grid", placeItems: "center", background: "rgba(15,23,42,0.52)", padding: 18 }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`attachment-preview-title-${attachment.attachment_id}`}
+        style={{ width: "min(980px, 94vw)", height: "min(760px, 88vh)", minHeight: 0, display: "grid", gridTemplateRows: "48px minmax(0, 1fr) 50px", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: EDITOR_NEU_PANEL_BACKGROUND, color: surfaceText, overflow: "hidden", boxShadow: "0 28px 72px rgba(15,23,42,0.32)" }}
+      >
+        <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "34px minmax(0, 1fr) 32px", alignItems: "center", gap: 9, borderBottom: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, padding: "7px 8px 7px 11px", background: EDITOR_NEU_SURFACE }}>
+          <AttachmentTypeVisual kind={presentationKind} />
+          <div id={`attachment-preview-title-${attachment.attachment_id}`} title={filename} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 900 }}>{filename}</div>
+          <button ref={closeButtonRef} type="button" title="Close preview" aria-label="Close preview" onClick={onClose} style={{ width: 30, height: 30, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: surfaceText, cursor: "pointer", fontSize: 14, fontWeight: 900, lineHeight: 1, padding: 0 }}>X</button>
+        </div>
+        <div style={{ minWidth: 0, minHeight: 0, display: "grid", placeItems: status === "ready" ? undefined : "center", overflow: "auto", background: "#ffffff", padding: previewKind === "text" || previewKind === "unavailable" ? 18 : 0 }}>
+          {status === "loading" && <div role="status" style={{ fontSize: 12, fontWeight: 850, color: "rgba(71,85,105,0.82)" }}>Loading preview...</div>}
+          {status === "failed" && <div role="alert" style={{ fontSize: 12, fontWeight: 850, color: "#be123c" }}>Preview unavailable</div>}
+          {status === "ready" && previewKind === "image" && objectURL && <img src={objectURL} alt={filename} onError={() => { revokeObjectURL(); setObjectURL(""); setStatus("failed"); }} style={{ display: "block", maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />}
+          {status === "ready" && previewKind === "pdf" && objectURL && <iframe src={objectURL} title={`PDF preview: ${filename}`} onError={() => { revokeObjectURL(); setObjectURL(""); setStatus("failed"); }} style={{ width: "100%", height: "100%", border: 0, background: "#ffffff" }} />}
+          {status === "ready" && previewKind === "audio" && objectURL && <audio src={objectURL} controls preload="metadata" aria-label={`Audio preview: ${filename}`} onError={() => { revokeObjectURL(); setObjectURL(""); setStatus("failed"); }} style={{ width: "min(680px, 90%)" }} />}
+          {status === "ready" && previewKind === "video" && objectURL && <video src={objectURL} controls preload="metadata" aria-label={`Video preview: ${filename}`} onError={() => { revokeObjectURL(); setObjectURL(""); setStatus("failed"); }} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain", background: "#000000" }} />}
+          {status === "ready" && previewKind === "text" && (
+            <div style={{ width: "100%", minHeight: "100%", display: "grid", alignContent: "start", gap: 10 }}>
+              {textTruncated && <div role="status" style={{ color: "#92400e", fontSize: 11, fontWeight: 850 }}>Preview limited to 256 KiB / 200,000 characters.</div>}
+              <pre style={{ width: "100%", margin: 0, color: "#1f2937", fontFamily: "Consolas, 'Courier New', monospace", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", tabSize: 2 }}>{textContent}</pre>
+            </div>
+          )}
+          {status === "ready" && previewKind === "unavailable" && (
+            <div style={{ width: "min(520px, 100%)", display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", alignItems: "center", gap: 12, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: "#f8fafc", padding: 14 }}>
+              <AttachmentTypeVisual kind={presentationKind} />
+              <div style={{ minWidth: 0, display: "grid", gap: 5 }}>
+                <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{filename}</div>
+                <div style={{ color: "rgba(71,85,105,0.82)", fontSize: 10.5, fontWeight: 750 }}>{attachment.mime_type || "Unknown file type"} - {formatFileSize(attachment.byte_size)}</div>
+                <div style={{ color: "rgba(71,85,105,0.74)", fontSize: 11, fontWeight: 750 }}>Preview unavailable for this file type.</div>
+              </div>
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, borderTop: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, padding: "8px 10px", background: EDITOR_NEU_SURFACE }}>
+          <button type="button" disabled={downloading} onClick={() => { void download(); }} style={{ minHeight: 32, display: "inline-flex", alignItems: "center", gap: 7, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, cursor: downloading ? "wait" : "pointer", padding: "4px 10px", font: "inherit", fontSize: 11.5, fontWeight: 900, letterSpacing: 0 }}>
+            <DownloadIcon color={accent} />
+            {downloading ? "Downloading..." : "Download"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
 const DownloadIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="14" height="14" viewBox="0 0 18 18" style={{ display: "block" }}>
     <path d="M9 2.7v8.1m-3-3 3 3 3-3M3.2 13v2.2h11.6V13" fill="none" stroke={color} strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" />
@@ -2766,10 +3081,24 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
   onError,
 }) => {
   const [open, setOpen] = useState(false);
+  const [previewItem, setPreviewItem] = useState<AttachmentCountDropdownItem | null>(null);
   const [downloadingResourceAttachmentID, setDownloadingResourceAttachmentID] = useState("");
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const close = useCallback(() => setOpen(false), []);
   useCloseFloatingMenu(open, rootRef, close);
+  const closePreview = useCallback(() => {
+    setPreviewItem(null);
+    window.requestAnimationFrame(() => triggerRef.current?.focus());
+  }, []);
+  const openAttachmentPreview = useCallback((item: AttachmentCountDropdownItem) => {
+    if (!item.resourceAttachment.attachment) {
+      onError("attachment_metadata_unavailable");
+      return;
+    }
+    setOpen(false);
+    setPreviewItem(item);
+  }, [onError]);
   const downloadAttachment = useCallback(async (item: AttachmentCountDropdownItem) => {
     const { resourceAttachment } = item;
     const attachment = resourceAttachment.attachment;
@@ -2793,8 +3122,10 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
     }
   }, [apiBase, companyID, onError]);
   return (
+    <>
     <div ref={rootRef} style={{ position: "relative", flex: "0 0 auto", minWidth: 0 }}>
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -2875,10 +3206,22 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
             const { resourceAttachment, contextLabel } = item;
             const attachment = resourceAttachment.attachment;
             const filename = attachment?.original_filename?.trim() || "Attachment";
+            const filenamePresentation = splitAttachmentFilename(filename);
+            const presentationKind = classifyAttachmentPresentation({ filename, mimeType: attachment?.mime_type });
             const downloading = downloadingResourceAttachmentID === resourceAttachment.resource_attachment_id;
             return (
               <div
               key={resourceAttachment.resource_attachment_id}
+              role="button"
+              tabIndex={0}
+              title={`Preview ${filename}`}
+              aria-label={`Preview ${filename}`}
+              onClick={() => openAttachmentPreview(item)}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
+                event.preventDefault();
+                openAttachmentPreview(item);
+              }}
               style={{
                 minWidth: 0,
                 display: "grid",
@@ -2889,14 +3232,30 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
                 borderRadius: 10,
                 background: "#ffffff",
                 color: surfaceText,
+                cursor: attachment ? "pointer" : "default",
                 padding: "7px 8px",
                 boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86), 2px 2px 8px rgba(174,174,192,0.14), -2px -2px 8px rgba(255,255,255,0.76)",
               }}
             >
-              <span style={{ minWidth: 0, display: "grid", gap: 3, color: surfaceText }}>
-                <span title={filename} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 900 }}>{filename}</span>
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontWeight: 750, color: "rgba(100,116,139,0.86)" }}>
-                  {[contextLabel?.trim(), attachment ? formatFileSize(attachment.byte_size) : "File unavailable"].filter(Boolean).join(" - ")}
+              <span style={{ minWidth: 0, display: "grid", gridTemplateColumns: "34px minmax(0, 1fr)", alignItems: "center", gap: 8, color: surfaceText }}>
+                {attachment && presentationKind === "image" ? (
+                  <AuthenticatedAttachmentThumbnail apiBase={apiBase} companyID={companyID} attachmentID={attachment.attachment_id} />
+                ) : (
+                  <AttachmentTypeVisual kind={attachment ? presentationKind : "generic"} />
+                )}
+                <span style={{ minWidth: 0, display: "grid", gap: 4 }}>
+                  <span title={filenamePresentation.filename} style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 6 }}>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 900 }}>{filenamePresentation.baseName}</span>
+                    <span
+                      title={filenamePresentation.extensionLabel}
+                      style={{ maxWidth: 96, justifySelf: "end", border: "1px solid rgba(100,116,139,0.18)", borderRadius: 5, background: "#f8fafc", color: "rgba(71,85,105,0.92)", padding: "2px 4px", fontSize: 8.5, fontWeight: 950, lineHeight: 1.05, letterSpacing: 0, textAlign: "right", whiteSpace: "normal", overflowWrap: "anywhere" }}
+                    >
+                      {filenamePresentation.extensionLabel}
+                    </span>
+                  </span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10, fontWeight: 750, color: "rgba(100,116,139,0.86)" }}>
+                    {[contextLabel?.trim(), attachment ? formatFileSize(attachment.byte_size) : "File unavailable"].filter(Boolean).join(" - ")}
+                  </span>
                 </span>
               </span>
               <button
@@ -2905,7 +3264,11 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
                 title={`Download ${filename}`}
                 aria-label={`Download ${filename}`}
                 disabled={!attachment || downloading}
-                onClick={() => void downloadAttachment(item)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void downloadAttachment(item);
+                }}
+                onKeyDown={(event) => event.stopPropagation()}
                 style={{ width: 28, height: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: !attachment || downloading ? "not-allowed" : "pointer", opacity: !attachment || downloading ? 0.5 : 1, padding: 0, boxShadow: "2px 2px 6px rgba(174,174,192,0.16), -2px -2px 6px rgba(255,255,255,0.78)" }}
               >
                 <DownloadIcon color={accent} />
@@ -2916,6 +3279,22 @@ export const AttachmentCountDropdown: React.FC<AttachmentCountDropdownProps> = (
         </div>
       )}
     </div>
+    {previewItem?.resourceAttachment.attachment && (
+      <AttachmentPreviewModal
+        attachment={previewItem.resourceAttachment.attachment}
+        previewKind={classifyAttachmentPreview({
+          filename: previewItem.resourceAttachment.attachment.original_filename,
+          mimeType: previewItem.resourceAttachment.attachment.mime_type,
+        })}
+        apiBase={apiBase}
+        companyID={companyID}
+        accent={accent}
+        surfaceText={surfaceText}
+        onClose={closePreview}
+        onError={onError}
+      />
+    )}
+    </>
   );
 };
 

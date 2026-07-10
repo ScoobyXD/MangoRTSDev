@@ -64,11 +64,34 @@ The Nodes modules provide a visual “canvas-inside-canvas” experience plus li
 
 ### V1 Mango Attachment System Note (2026-07-09)
 
+#### Retained Associations And In-App Preview (2026-07-10)
+
+- A text-box `information_id` on a node file records where the upload originated; it does not make the text box the file's lifetime owner. Deleting that box leaves the attachment metadata, S3 object, and node resource link intact.
+- The node-header attachment counter/list is independent of text-box existence. It shows all retained node files, and a file whose origin no longer resolves to a live box uses a clear deleted-text-box fallback label.
+- Activating a file row opens an authenticated node-level preview overlay and does not download automatically. The right-side download icon remains the only row command that downloads the original file.
+- The preview overlay renders browser-supported images, PDF, text/code/CSV/JSON/XML, audio, and video. For text-like files it decodes only `blob.slice(0, 256 KiB)` and renders at most 200,000 decoded characters. Larger text remains previewable in truncated form and shows `Preview limited to 256 KiB / 200,000 characters.` Office documents, archives, and unknown binary files show a preview-unavailable message with metadata and download still available.
+- Preview content comes from Mango's authorized attachment-content path. The current endpoint may transfer the full authenticated blob before the client applies its text decode/render caps. Temporary object URLs and obsolete requests are cleaned up when the user closes the overlay or switches files; the 256 KiB decode and 200,000-character render caps prevent unbounded text preview work.
+- Deleting a text box also leaves attached-email projections intact. The global node-header email counter/list opens a node-level modal containing `AttachedEmailOrganizerPane`, including its folders/list and selected conversation, independent of any text box. Retained mail therefore remains viewable with zero boxes and under read-only access, while per-text-box email panes keep their existing behavior for surviving boxes.
+- No automatic replacement text box is created, and retained files or emails are not silently reassigned to a surviving box. Removal requires a separate explicit unlink/remove action.
+- Upload size policy is not changed by this work. The UI continues to enforce 10 MiB per file and 12 MiB total attachment bytes per text box while a future higher-limit policy is evaluated.
+
 - Node text-box inline images, node attachment-button uploads, node text-block chat attachments, and attached-email reply attachments use the global Mango attachment system for new writes.
 - Durable node projection/information payloads store attachment references only. The known slow node with multi-megabyte pasted screenshots is the evidence case for removing inline data URLs/base64 from node content.
 - The shared node shell keeps attachment button behavior in the shared node workspace/body path, not separately for Home, sidebar, Updates, Kanban/My Work, dock restore, and Project inline node openers.
 - Node chats remain separate chat UI; they store attachment references without inheriting rich-editor toolbar/list/indent semantics.
 - Incoming provider attachments on attached emails remain provider-referenced until a product path explicitly selects them for Mango ownership/cache.
+- `NodeWorkspaceSurface` performs one node-scoped attachment metadata load, filters `file_attachment` relationships for the `node_text_block` editor surface, and derives both per-information-ID lists and the node-wide union from that result. Text-box dropdowns must not each issue their own list request.
+- Node attachment upload completion merges successful results into the latest text-block state, deduplicated by durable attachment ID. Overlapping picker batches reserve bytes per company/node/text block before validating the 12 MiB total, and partial multi-file failures preserve every successful S3-backed attachment instead of replacing a batch with stale captured state. Canonical resource metadata and projection-only references are deduplicated for the size calculation.
+- Upload callbacks carry the company/node/text-block generation and edit scope that started them. Navigation, attachment-scope changes, edit-permission loss, and text-block deletion invalidate pending callbacks, so late completion cannot mutate the newly opened node or recreate a deleted projection.
+- Attachment rows use shared presentation helpers to split the filename from its final extension and to classify common image, spreadsheet, document, presentation, PDF, archive, text/code, audio, and video formats. A recognized final extension takes priority over an unhelpful MIME value. The filename base may ellipsize, but its extension is rendered in a non-shrinking badge as uppercase `.EXT`; extensionless, hidden-dot, and trailing-dot names use `NO EXT` and retain their full base name. The download icon remains a separate far-right action.
+- Image rows use `IntersectionObserver` with a small vertical prefetch margin, so closed menus and off-screen aggregate rows do not fetch file bytes. A visible/near-visible row requests authenticated `thumbnail` content first, then `display` on failure; the backend may resolve a missing variant to the original.
+- Thumbnail requests are abortable and short-lived object URLs are revoked on image failure, dependency change, menu close, and unmount. Non-image and failed-thumbnail rows render the classified file icon, with a generic icon as the final fallback.
+- Every listed attachment keeps a right-side download action that requests the authenticated `original` variant and preserves the stored filename. View-only node users may list/download; only editors may upload.
+
+### Shared People Picker Color Note (2026-07-10)
+
+- The shared people suggestion rows opened by `@` or `!` in node rich text, Logic Gate rich text, and chat composers derive one of twelve deterministic dark, saturated profile palettes from normalized user ID, falling back to normalized email and then display name.
+- Each profile palette uses an opaque background, white foreground, and dark border with tested contrast. Keyboard-active rich-editor rows add a low-alpha tint of that same profile color plus the existing active rail while keeping the avatar opaque; chat keeps its existing active-row treatment while also keeping the avatar opaque and full-color.
 
 ### Node Attachment Lists And Downloads (2026-07-10)
 

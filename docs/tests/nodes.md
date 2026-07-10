@@ -3,10 +3,25 @@ Last updated: 2026-07-10
 # Nodes Tests
 
 Coverage Status:
+- Node attachment presentation and visibility-gated thumbnail behavior are covered by `tests/frontend/modules/attachments/attachmentPresentation.test.ts`; upload concurrency, partial-success, byte-limit, scope/permission invalidation, and delete-while-uploading behavior are covered by `tests/frontend/modules/editor/nodeTextBlockAttachments.test.ts`; shared people-palette behavior is covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial. Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; Company Explorer search resource-type filtering has backend coverage; node editor projection-save helpers have frontend coverage; Tab-at-caret editor behavior is covered by `tests/frontend/modules/editor/plainTextEditing.test.ts`; Mango email body marking/display preservation is covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; the unified editor contract, attached-email reply bottom buffer, EmailPickerModal attach-only boundary, red unified close chrome, and unified node-shell contract/adapter mounting are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; shared attachment tests cover node resource links/content authorization and `attached_email` resource authorization; GVIC picker rule IDs, the Assign to Logic Gate picker no-preload UI behavior, and node header project-assignment layout rules are not mapped to automated tests yet.
 
 ## Business Logic
+
+### 2026-07-10 Text-Box Deletion Retention And Node-Level Viewers
+
+- Deleting a node text box removes that text-box projection and its local UI, but it must not treat node files or attached emails referenced from that box as child records to delete. File `resource_attachments` links and attached-email projections remain associated with the node until a separate explicit unlink/remove operation is implemented and invoked.
+- The node header attachment counter/list remains available independently of text boxes and includes files uploaded from deleted text boxes. A missing `information_id` target is displayed with an explicit deleted-text-box origin label instead of hiding the file or assigning it to another box.
+- The node header attached-email counter/list also remains available independently of text boxes. Opening it uses a standalone node-level attached-email organizer modal with its folders/list and selected conversation, not an automatically created or arbitrarily selected text box.
+- A retained attached email must be viewable from the global node header when the node has no text boxes and when the user has view-only access. Existing per-text-box email conversation panes remain available for live text boxes and are not the required host for the global viewer.
+- Clicking a file row opens an authenticated in-app preview without starting a download. Images, PDF, text/code/CSV/JSON/XML, audio, and video are previewable when browser-supported; text preview decodes only the first 256 KiB and renders at most 200,000 decoded characters. Larger text is shown as a bounded/truncated preview with `Preview limited to 256 KiB / 200,000 characters.`, while Office/archive/unknown binary files show preview-unavailable state and retain their explicit download control.
+- Node attachment upload limits remain at the current 10 MiB per file and 12 MiB total per text box while the higher-limit policy is still under discussion.
+
+Required regression scenario:
+- Attach files and emails from multiple text boxes, select an attached email, delete one originating text box, and then delete all remaining text boxes.
+- Confirm the node-level file and email counters do not decrease because of text-box deletion, deleted-origin files remain labeled and usable, and the global email list opens the retained conversation in the standalone node-level organizer with zero live text boxes.
+- Confirm a view-only user can list, preview, and download retained files and can open retained attached emails, while upload and other edit operations remain unavailable.
 
 N1 - Nodes support generated, verified, consulted, and informed GVIC assignments.
 N2 - Node generated and verified GVIC assignments are single-user slots.
@@ -43,7 +58,7 @@ N32 - Node text boxes participate in the unified editor contract: changes to ind
 N33 - Full node editor windows participate in the unified node shell contract: header, title behavior, top-right actions, close/minimize/open/fullscreen/delete controls, sizing, and body layout must come from one shared user-facing shell behavior wherever practical.
 N34 - Adding, removing, reordering, or restyling a top-right node-window action must happen through the unified node shell so Home, sidebar/app shell, Updates, Kanban/My Work, dock-restored, Project critical-path inline node windows, and Project Logic Gates / Nodes node popups stay aligned when the capability is available.
 N35 - Unified node shell does not require one opener, route, page state, or backend path; a node may be opened from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, a Project critical-path row, or the Project Logic Gates / Nodes tab while still sharing the same user-facing shell.
-N36 - The node workspace body remains text boxes, attached emails, and text-block chats; chats are conversation UI and must not inherit unified rich-editor toolbar, indentation, paste, delete, list, or font-size semantics.
+N36 - The node workspace body remains text boxes, attached emails, and text-block chats; chats are conversation UI and must not inherit unified rich-editor toolbar, indentation, paste, delete, list, or font-size semantics. The shared `@`/`!` people picker may still be used by node rich text and chat composers, and its user colors must remain visible rather than being neutralized by a disabled/gray presentation.
 N37 - The node email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
 N38 - Project critical-path inline node windows must use the unified node shell and unified node text-box editor semantics while preserving node information/projection persistence for node edits.
 N39 - The V1 unified node shell source is `UnifiedNodeShell`; full node-window adapters may keep their own opener state, geometry, route handling, and permissions, but top-right node-window action ordering and shell/body data attributes must come from that shared source.
@@ -58,7 +73,7 @@ N47 - The Project critical-path inline node window is a unified node shell surfa
 N48 - The Project Logic Gates / Nodes double-click node popup is a unified node shell surface, even when it routes through the standard app/sidebar node popup adapter.
 N49 - Any future project or page surface that opens a full node editor/window must use the unified node shell unless a new documented exception is added with an explicit business rule and test.
 N50 - Small node card previews, list rows, tree rows, timeline bars, picker rows, and other non-editor node summaries are not unified node shell surfaces unless they open into a full node editor/window.
-N51 - Node text-box inline images and node attachment-button uploads must follow `docs/tests/attachments.md`: durable node information/projection rows store attachment references, not data URLs, base64 file bytes, or embedded file payloads.
+N51 - Node text-box inline images, node attachment-button uploads, and node attachment lists must follow `docs/tests/attachments.md`: durable node information/projection rows store attachment references, not data URLs, base64 file bytes, or embedded file payloads; per-text-box and node-wide lists load metadata once at node scope and fetch attachment bytes only for authenticated thumbnails or explicit downloads.
 N52 - Node text-block chat attachments remain chat-specific UI, but submitted chat payloads must store Mango attachment references instead of durable `dataURL` values.
 N53 - Attached emails on nodes may store message/thread/provider metadata and Mango attachment references, but must not store attachment bytes in node projection rows or communications email attachment JSON.
 N54 - The node header Assign to Project button must size to its icon and current label instead of flex-growing into all remaining toolbar space. In the unassigned state it should remain compact for the `Assign to Project` label; after assignment it may grow for `Project: <project name>` up to the node header's project-control maximum and must ellipsize overflow text instead of pushing adjacent header actions away.
@@ -293,6 +308,7 @@ Expected:
 - The Kanban/My Work full node overlay exposes the shared fullscreen control between minimize and close and restores its prior board-relative overlay size when fullscreen is turned off or the overlay closes.
 - Activating that Kanban/My Work fullscreen control pins the node overlay to the browser viewport, not merely to the visible Kanban board bounds.
 - Node text boxes use the unified editor semantics on every node-window surface.
+- Typing `@` or `!` in a node text box or its chat opens the people picker with each user represented by a stable profile color keyed by normalized user ID, then email, then display name. Rich-editor keyboard selection adds a translucent same-color row tint and active rail; chat retains its active-row treatment. Both keep the profile avatar opaque/full-color with tested white-text contrast instead of washing every user gray.
 - The shared format toolbar controls the focused node text box through the shared formatting controller, so font size and outline-style behavior cannot diverge by node opener.
 - Node text-box edits continue to save through node information/projection persistence.
 - Text-block chats remain chat composers and do not receive rich editor toolbar or rich editor keyboard semantics.
@@ -327,6 +343,10 @@ Given:
 Expected:
 - Node text-box projection saves preserve the latest text content but store attachment references for inline files.
 - Node attachment-button uploads create Mango attachment links instead of embedding bytes in node information/projection payloads.
+- Concurrent attachment picker batches reserve bytes before validating the text-box total and append successful uploads, deduplicated by durable attachment ID, to the latest text-box state; a failed file does not erase successful files from the same or another batch.
+- An upload callback belongs to the company/node/text-block generation and edit permission where it started. Navigation, attachment-scope changes, edit-permission loss, or deleting the text block invalidate that callback, so a late upload cannot mutate the current node or recreate a deleted projection.
+- Each text box can list its own attachments, and one node-wide counter/list can show the union across all text boxes from the same node-level metadata read.
+- Attachment rows show an immediate type cue, visibility-gated image thumbnails through authenticated content reads, an always-visible extension badge (or `NO EXT`), and a right-side original-file download action. Only visible/near-visible image rows prefetch; closing the list aborts pending reads and releases object URLs.
 - Chat messages store attachment references and remain outside rich-editor semantics.
 - Attached-email projections store email metadata and attachment references only.
 - The attached-email reply composer is visible without manual scrolling and stays docked to the bottom of the selected email detail.

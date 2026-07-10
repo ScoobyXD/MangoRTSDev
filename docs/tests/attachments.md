@@ -3,10 +3,28 @@ Last updated: 2026-07-10
 # Attachments Tests
 
 Coverage Status:
+- Node attachment filename/type and visibility-gated thumbnail presentation are covered by `tests/frontend/modules/attachments/attachmentPresentation.test.ts`; concurrent byte reservations, deduplicated totals, partial success, latest-state append, stale navigation/scope/permission invalidation, and delete-while-uploading protection are covered by `tests/frontend/modules/editor/nodeTextBlockAttachments.test.ts`.
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/api/requestJSON.test.ts` covers multipart upload request headers; `tests/frontend/modules/editor/editorProjection.test.ts` covers attachment-reference serialization for editor text-block/chat payloads and legacy data-url parsing without emitting new durable data URLs; `tests/frontend/modules/editor/richTextEditing.test.ts` covers the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers email compose payloads sending Mango attachment references without durable `content`; `backend/internal/http/attachment_handlers_test.go` covers attachment metadata/resource links, content permission checks, and `email_draft`/`attached_email` resource authorization; `backend/internal/http/communications_handlers_test.go` covers email send-time S3 resolution into provider payloads, rejection of raw attachment content, and rejection of inline data URL send bodies; `backend/internal/http/durable_inline_guard_test.go` covers backend durable-inline-byte guard shapes; `backend/internal/attachments/migration/scanner_test.go` covers scanner rewrite/idempotency/signals; `backend/cmd/mango-attachment-migrate/main_test.go` covers dry-run report mapping and apply confirmation)
 
 ## Business Logic
+
+### 2026-07-10 Node Attachment Retention And Preview Contract
+
+- A node text box is the upload origin for a file, not the lifetime owner of that file. Deleting the originating text box must delete only that text-box projection; it must not unlink the file's node `resource_attachments` relationship, delete attachment metadata, or delete S3 bytes.
+- The node-level attachment counter and list are the recovery and discovery surface for every retained node file, including files whose originating text box no longer exists. A retained file with no live origin must remain countable, listable, previewable, and downloadable, and its origin must use an explicit deleted-text-box fallback label rather than a misleading live text-box number.
+- Clicking the non-action area of a node attachment row opens an in-app preview. Row activation must not silently download the file. The explicit download control remains available at the right side of the row and must not also open the preview.
+- Preview bytes must be fetched through the authenticated Mango attachment-content API and normal resource authorization. The UI must not expose or depend on a public S3 object URL.
+- In-app preview supports images, PDF, bounded plain-text and source-like content (including text, code, CSV, JSON, and XML), audio, and video when the browser can render the returned content type. Text preview may receive the full authenticated blob from the current content endpoint, but it decodes only `blob.slice(0, 256 KiB)` and renders at most 200,000 decoded characters so a large file cannot create unbounded decode or DOM work.
+- Office documents, spreadsheets, presentations, archives, and unknown/binary formats are not converted in the browser. Their in-app state must say that preview is unavailable while keeping metadata and the explicit original-file download action usable.
+- Preview requests and temporary object URLs are transient UI resources. Closing or replacing a preview must abort obsolete work where possible and revoke any object URL created for the previous file.
+- The existing upload policy remains unchanged while a higher limit is discussed: at most 10 MiB per selected file and 12 MiB total attachment bytes per node text box. This change must not be described or tested as a limit increase.
+
+Required regression scenario:
+- Upload previewable and non-previewable files from two node text boxes, delete one originating text box, and reopen the node.
+- Confirm every retained file is still present in the node-level count/list, the deleted origin has the fallback label, supported rows preview in app without downloading, unsupported rows show preview-unavailable state, and the separate download control still returns the original file.
+- Confirm text preview truncates rather than rejects larger content, decodes no more than the first 256 KiB, renders no more than 200,000 decoded characters, and shows `Preview limited to 256 KiB / 200,000 characters.` when content exceeds either display bound.
+- Confirm closing/switching previews cleans up transient browser resources and upload validation still enforces the existing 10 MiB per-file and 12 MiB per-text-box policy.
 
 ATT1 - All durable user file bytes must be stored in private Amazon S3 through the Mango attachment system in local, dev, and prod environments; normal local development must not use a separate filesystem attachment backend.
 ATT2 - Postgres stores attachment metadata, S3 object keys, variants, ownership/resource links, and audit fields; editor, chat, email, projection, and saved-version payloads store attachment references, not file bytes.
@@ -14,7 +32,7 @@ ATT3 - Durable Mango payloads must not store `data:image/...;base64`, `data:appl
 ATT4 - Temporary browser previews may use object URLs or data URLs only before upload completes; those values must be replaced by attachment references before durable save, send, snapshot, history, or projection writes.
 ATT5 - Rich-editor pasted or dropped inline images must be handled through the shared unified rich-editor image path behind `useEditorDocumentSurfaceHandlers` and `editorImages`, then saved as attachment references across node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply body surfaces.
 ATT6 - Inline editor images must render as high-quality images on first open, not low-quality thumbnails, and double-click/fullscreen preview must load the original or highest-quality available variant.
-ATT7 - Node attachment-button uploads use the same Mango attachment API, S3 storage, metadata records, and `resource_attachments` links as pasted inline images.
+ATT7 - Node attachment-button uploads and attachment lists use the same Mango attachment API, private S3 storage, metadata records, and `resource_attachments` links as pasted inline images. The node loads attachment metadata separately from file bytes; image bytes are requested only when a row is visible or near-visible, and original bytes are requested only by an explicit download.
 ATT8 - Chat attachments remain chat UI, not unified rich-editor content, but they still upload through the global Mango attachment API and persist attachment references instead of durable `dataURL` values.
 ATT9 - Project text-block attachments and project chat attachments use the same global attachment system while preserving project-owned persistence for project text boxes.
 ATT10 - Outgoing personal and shared email compose/reply attachments upload to Mango attachments before durable draft/send state is saved; the backend reads S3 bytes only when sending through the provider. Pasted inline images remain Mango references in durable content and become CID-linked inline provider attachments at that send boundary. Email signature images/logos, when supported, use the same Mango attachment system through `email_signature` resource links.
@@ -85,6 +103,17 @@ Given:
 
 Expected:
 - Node-level uploads create attachment metadata and node resource links.
+- A successful node upload is appended to the latest text-block attachment state after the request finishes, so two overlapping picker batches cannot overwrite one another. Concurrent batches reserve their selected byte totals per company/node/text block before upload validation, preventing each batch from independently passing the 12 MiB text-box limit.
+- The 12 MiB text-box total is calculated from deduplicated canonical node attachment metadata plus projection-only references that do not yet have a canonical relationship; the same durable attachment ID must not be counted twice.
+- When a multi-file upload only partly succeeds, every successfully uploaded attachment remains linked, visible, and downloadable; the failed files are reported without discarding the successful results.
+- Upload completion is scoped to the company/node/text-block generation and edit permission that started it. A late completion after navigation, attachment-scope change, edit-permission loss, or text-block deletion must not mutate, save, refresh, or recreate the current projection.
+- Each node text box exposes a list/count containing only file attachments linked to that text block, while one node-wide list/count contains the union across all text boxes without issuing one attachment-list request per text box.
+- Node-wide and per-text-box rows show a recognizable image, spreadsheet, document, presentation, PDF, archive, text/code, audio, video, or generic-file icon. A recognized final extension takes precedence over an unhelpful MIME value; unknown types use the generic fallback rather than appearing broken.
+- Image rows use visibility observation with a small vertical prefetch margin, so only visible or near-visible rows request bytes; closed menus and off-screen aggregate rows do not fetch thumbnails.
+- A visible image row requests the authenticated `thumbnail` variant first and retries the authenticated `display` variant when that read fails; the backend may resolve a missing variant to the original. Each request is abortable, and the browser revokes temporary object URLs on image failure, dependency change, menu close, or unmount. A failed preview returns to the classified image/file icon instead of breaking the row.
+- A long or opaque filename base may ellipsize, but a separate non-shrinking extension badge at the title's right edge always remains visible. The badge is uppercase and includes the leading dot (for example `.PNG` or `.XLSX`); names without a usable extension show `NO EXT`.
+- Every row exposes a separate far-right download action that fetches the authorized original attachment bytes and preserves the original filename.
+- Listing and downloading require view access to the node; uploading still requires edit access.
 - Project text-block attachments create project-owned attachment references and links.
 - Project inline node windows inherit node attachment behavior while preserving node-owned persistence.
 - Permission checks follow the owning resource.
