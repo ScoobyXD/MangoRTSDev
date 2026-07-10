@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { NotificationPopover } from "../../app/NotificationPopover";
@@ -22,7 +23,7 @@ import {
   mangoEmailDraftResourceID,
   uploadMangoAttachment,
 } from "../../modules/attachments/attachmentApi";
-import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
+import { downloadEmailAttachment, parseEmailAddressList, respondToCalendarInvite, type CalendarInviteRSVPStatus, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
 import { EditorTabBar } from "../../modules/editor/EditorTabBar";
 import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "../../modules/editor/editorTabs";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
@@ -4126,6 +4127,43 @@ function emailAttachmentIsImage(attachment: EmailAttachment): boolean {
   return attachmentIsImageContentType(emailAttachmentContentType(attachment));
 }
 
+function emailAttachmentIsCalendarInvite(attachment: EmailAttachment): boolean {
+  return (emailAttachmentContentType(attachment).toLowerCase().split(";", 1)[0] ?? "").trim() === "text/calendar"
+    || emailAttachmentFileName(attachment).toLowerCase().endsWith(".ics");
+}
+
+function CalendarInviteActions({ messageID, companyID, sharedInboxID, busy }: {
+  messageID: string;
+  companyID: string;
+  sharedInboxID?: string;
+  busy: boolean;
+}) {
+  const [response, setResponse] = React.useState<CalendarInviteRSVPStatus | "">("");
+  const [responding, setResponding] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const respond = (status: CalendarInviteRSVPStatus) => {
+    if (responding || busy) return;
+    setResponding(true);
+    setError("");
+    void respondToCalendarInvite({ messageID, status, companyID, sharedInboxID })
+      .then(() => setResponse(status))
+      .catch((cause) => setError(cause instanceof Error ? cause.message : "Failed to respond to calendar invitation."))
+      .finally(() => setResponding(false));
+  };
+  return (
+    <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", border: "1px solid rgba(20,184,166,0.24)", borderRadius: 8, background: "rgba(240,253,250,0.72)", padding: "8px 9px" }}>
+      <strong style={{ color: "#0f172a", fontSize: 11 }}>Calendar invitation</strong>
+      {([{"status":"yes","label":"Accept"},{"status":"maybe","label":"Tentative"},{"status":"no","label":"Decline"}] as const).map((option) => (
+        <button key={option.status} type="button" style={{ ...mailPanelSmallButtonStyle, color: option.status === "no" ? "#b91c1c" : mailPanelSmallButtonStyle.color, boxShadow: response === option.status ? "0 0 0 2px rgba(14,165,233,0.24)" : mailPanelSmallButtonStyle.boxShadow }} disabled={busy || responding} onClick={() => respond(option.status)}>
+          {option.label}
+        </button>
+      ))}
+      {response && <span role="status" style={mutedSmallStyle}>Response saved: {response === "yes" ? "Accepted" : response === "maybe" ? "Tentative" : "Declined"}</span>}
+      {error && <span role="alert" style={{ ...mutedSmallStyle, color: "#b91c1c" }}>{error}</span>}
+    </div>
+  );
+}
+
 function emailAttachmentDataURL(attachment: EmailAttachment): string {
   const content = attachment.content?.trim() ?? "";
   if (!content) return "";
@@ -4954,6 +4992,11 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     window.addEventListener("resize", clampToViewport);
     return () => window.removeEventListener("resize", clampToViewport);
   }, []);
+  React.useEffect(() => {
+    if (!compose.replyToMessageID.trim()) return undefined;
+    const frame = window.requestAnimationFrame(() => bodyEditorControllerRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [compose.draftID, compose.focusRequestID, compose.replyToMessageID]);
   const focusRecipientInput = (field: ComposeRecipientField) => {
     window.requestAnimationFrame(() => {
       const input = recipientInputRefs.current[field];
@@ -5166,23 +5209,50 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   const isReplyMode = !!replyMessage;
   const startReplyEditorResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    const pointerID = event.pointerId;
     const startY = event.clientY;
     const startHeight = replyEditorHeight;
     const maxHeight = mailReplyEditorMaxHeight();
     let finalHeight = startHeight;
+    let finished = false;
+    try {
+      handle.setPointerCapture(pointerID);
+    } catch {
+      // Window-level listeners still provide a safe fallback.
+    }
     const onPointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerID || finished) return;
       finalHeight = clampNumber(startHeight + startY - moveEvent.clientY, MAIL_REPLY_EDITOR_MIN_HEIGHT_PX, maxHeight);
       setReplyEditorHeight(finalHeight);
     };
-    const onPointerUp = () => {
+    const finishResize = () => {
+      if (finished) return;
+      finished = true;
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerCancel);
+      window.removeEventListener("blur", finishResize);
+      handle.removeEventListener("lostpointercapture", finishResize);
+      try {
+        if (handle.hasPointerCapture(pointerID)) handle.releasePointerCapture(pointerID);
+      } catch {
+        // The pointer may already have been released outside the window.
+      }
       saveMailReplyEditorHeight(companyID, currentUserID, compose.sharedInboxID, finalHeight, compose.accountEmail);
     };
+    const onPointerUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId === pointerID) finishResize();
+    };
+    const onPointerCancel = (cancelEvent: PointerEvent) => {
+      if (cancelEvent.pointerId === pointerID) finishResize();
+    };
     window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp, { once: true });
-    window.addEventListener("pointercancel", onPointerUp, { once: true });
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerCancel);
+    window.addEventListener("blur", finishResize, { once: true });
+    handle.addEventListener("lostpointercapture", finishResize, { once: true });
   };
   const renderSubjectInput = (replyMode: boolean) => replyMode ? (
     <div style={composeReplySubjectFieldStyle}>
@@ -5410,8 +5480,14 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, style }: {
 }) {
   const frameRef = React.useRef<HTMLIFrameElement | null>(null);
   const cleanupRef = React.useRef<() => void>(() => undefined);
+  const [selectedImage, setSelectedImage] = React.useState<{ src: string; filename: string } | null>(null);
+  const [previewImage, setPreviewImage] = React.useState<{ src: string; filename: string } | null>(null);
 
   React.useEffect(() => () => cleanupRef.current(), []);
+  React.useEffect(() => {
+    setSelectedImage(null);
+    setPreviewImage(null);
+  }, [srcDoc]);
 
   const handleLoad = () => {
     cleanupRef.current();
@@ -5429,9 +5505,29 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, style }: {
       frame.style.height = `${Math.max(minHeight, Math.ceil(documentHeight) + 2)}px`;
     };
     const images = Array.from(frameDocument.images);
-    images.forEach((image) => {
+    const imageCleanups: Array<() => void> = [];
+    images.forEach((image, index) => {
+      image.style.cursor = "zoom-in";
+      const selectImage = (event: MouseEvent) => {
+        event.preventDefault();
+        event.stopPropagation();
+        images.forEach((candidate) => { candidate.style.outline = ""; });
+        image.style.outline = `2px solid ${HOME_CYAN}`;
+        image.style.outlineOffset = "2px";
+        setSelectedImage({ src: image.currentSrc || image.src, filename: image.alt?.trim() || `email-image-${index + 1}` });
+      };
+      const previewSelectedImage = (event: MouseEvent) => {
+        selectImage(event);
+        setPreviewImage({ src: image.currentSrc || image.src, filename: image.alt?.trim() || `email-image-${index + 1}` });
+      };
+      image.addEventListener("click", selectImage);
+      image.addEventListener("dblclick", previewSelectedImage);
       image.addEventListener("load", resize);
       image.addEventListener("error", resize);
+      imageCleanups.push(() => {
+        image.removeEventListener("click", selectImage);
+        image.removeEventListener("dblclick", previewSelectedImage);
+      });
     });
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
     if (observer) {
@@ -5444,19 +5540,43 @@ function AutoHeightEmailBodyFrame({ srcDoc, minHeight, style }: {
         image.removeEventListener("load", resize);
         image.removeEventListener("error", resize);
       });
+      imageCleanups.forEach((cleanup) => cleanup());
     };
   };
 
   return (
-    <iframe
-      ref={frameRef}
-      title="Email body"
-      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-      srcDoc={srcDoc}
-      scrolling="no"
-      onLoad={handleLoad}
-      style={{ ...iframeStyle, ...style, minHeight, height: minHeight, overflow: "hidden" }}
-    />
+    <>
+      <div style={{ position: "relative", minWidth: 0 }}>
+        {selectedImage && (
+          <button
+            type="button"
+            style={{ ...mailPanelSmallButtonStyle, position: "absolute", zIndex: 3, top: 8, right: 8, boxShadow: "0 8px 18px rgba(15,23,42,0.16)" }}
+            onClick={() => downloadURL(selectedImage.src, selectedImage.filename)}
+          >
+            Download image
+          </button>
+        )}
+        <iframe
+          ref={frameRef}
+          title="Email body"
+          sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+          srcDoc={srcDoc}
+          scrolling="no"
+          onLoad={handleLoad}
+          style={{ ...iframeStyle, ...style, minHeight, height: minHeight, overflow: "hidden" }}
+        />
+      </div>
+      {previewImage && typeof document !== "undefined" && createPortal(
+        <div role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewImage(null); }} style={{ position: "fixed", zIndex: 260, inset: 0, display: "grid", gridTemplateRows: "minmax(0, 1fr) auto", placeItems: "center", background: "rgba(15,23,42,0.82)", padding: 18 }}>
+          <img src={previewImage.src} alt={previewImage.filename} style={{ display: "block", maxWidth: "100%", maxHeight: "calc(100vh - 90px)", objectFit: "contain" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 10 }}>
+            <button type="button" style={mailPanelSmallButtonStyle} onClick={() => downloadURL(previewImage.src, previewImage.filename)}>Download</button>
+            <button type="button" style={mailPanelSmallButtonStyle} onClick={() => setPreviewImage(null)}>Close</button>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
@@ -5550,13 +5670,14 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
   return { srcDoc, loading };
 }
 
-function EmailConversationMessage({ message, companyID, sharedInboxID, fill, expanded, busy, loadingBody = false, onToggleExpanded, onReply, onReplyAll, onForward }: {
+function EmailConversationMessage({ message, companyID, sharedInboxID, fill, expanded, busy, calendarResponseAvailable, loadingBody = false, onToggleExpanded, onReply, onReplyAll, onForward }: {
   message: EmailMessage;
   companyID: string;
   sharedInboxID?: string;
   fill: boolean;
   expanded: boolean;
   busy: boolean;
+  calendarResponseAvailable: boolean;
   loadingBody?: boolean;
   onToggleExpanded: () => void;
   onReply: (message: EmailMessage) => void;
@@ -5571,6 +5692,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, exp
   const body = message.body?.trim() ? message.body : loadingBody ? "" : (message.snippet || "");
   const attachments = visibleEmailAttachmentsForBody(body, allAttachments);
   const hasAttachments = attachments.length > 0;
+  const hasCalendarInvite = allAttachments.some(emailAttachmentIsCalendarInvite);
   const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID);
   const showMessageMeta = !fill;
   const frameMinHeight = fill ? (hasAttachments ? 300 : 360) : 120;
@@ -5641,6 +5763,14 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, exp
           </div>
         </div>
       )}
+      {expanded && hasCalendarInvite && (
+        <CalendarInviteActions
+          messageID={message.id}
+          companyID={companyID}
+          sharedInboxID={sharedInboxID}
+          busy={busy || !calendarResponseAvailable}
+        />
+      )}
     </article>
   );
 }
@@ -5679,6 +5809,7 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
       return next;
     });
   };
+  const allConversationMessagesExpanded = conversationMessages.every((conversationMessage) => expandedMessageIDs.has(conversationMessage.id));
   const bodyContainerStyle: React.CSSProperties = {
     minHeight: 0,
     overflowX: "hidden",
@@ -5705,6 +5836,15 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
         {loading && <span style={mutedSmallStyle}>Loading</span>}
       </div>
       <div style={toolbarStyle}>
+        {!singleMessage && (
+          <button
+            style={mailPanelSmallButtonStyle}
+            disabled={allConversationMessagesExpanded}
+            onClick={() => setExpandedMessageIDs(new Set(conversationMessages.map((conversationMessage) => conversationMessage.id)))}
+          >
+            Expand all threads
+          </button>
+        )}
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReply(message)}>Reply</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onReplyAll(message)}>Reply all</button>
         <button style={mailPanelSmallButtonStyle} disabled={busy} onClick={() => onForward(message)}>Forward</button>
@@ -5723,6 +5863,7 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
             fill={singleMessage}
             expanded={singleMessage || expandedMessageIDs.has(conversationMessage.id)}
             busy={busy}
+            calendarResponseAvailable={!sharedInboxID || archiveAvailable}
             loadingBody={loading && conversationMessage.id === message.id && !conversationMessage.body?.trim()}
             onToggleExpanded={() => toggleConversationMessage(conversationMessage.id)}
             onReply={onReply}

@@ -1,4 +1,4 @@
-Last updated: 2026-06-30
+Last updated: 2026-07-10
 
 # Pin Tests
 
@@ -35,6 +35,7 @@ PIN24 - Pinned email conversion from Shared Triage preserves the drag payload `s
 PIN25 - Successful pinned email conversion suppresses the matching immediate workspace event burst for the locally-created email node/card so the Home workspace panel does not repeatedly reload after the POST response already updated local state.
 PIN26 - Successful pinned or Explorer email conversion must keep converted source email rows visible and must not trigger row removal, post-removal fill, message-length prefetch, or stale prefetched-page top-up for those rows.
 PIN27 - Successful pinned email conversion must set source emails to unstarred through the source mailbox scope, return `unstarred_message_ids`, and reconcile Home locally without blanking, refilling, or repeatedly reloading My Triage or Shared Triage.
+PIN28 - Pinned-node and pinned-Logic-Gate email conversions persist mailbox provenance in the resulting attached-email projection: personal mail stores `account_email`, and Shared Triage mail stores both `shared_inbox_id` and `account_email` for later scoped reads and mutations.
 
 ## Scenarios
 
@@ -158,6 +159,7 @@ Business logic covered:
 - PIN25
 - PIN26
 - PIN27
+- PIN28
 
 Given:
 - A user has pinned a node, a logic gate, and a project.
@@ -171,6 +173,7 @@ Expected:
 - Dropping email on the pinned logic gate opens the normal priority selection, then creates node(s) in that logic gate through the communications conversion path.
 - Dropping email on the pinned node opens the normal priority selection, then attaches the email to that existing node without creating a duplicate node.
 - If the email was dragged from Shared Triage, the conversion request includes the source shared inbox ID and uses the shared mailbox conversion path.
+- The resulting attached-email projection records the source account email and, for Shared Triage, the shared inbox ID so later thread, attachment, reply, draft, and calendar actions use the originating grant.
 - The conversion response includes successfully unstarred IDs in `unstarred_message_ids`, the backend sets those emails to unstarred through the personal or shared mailbox grant, and Home applies the unstar locally while keeping the converted row visible.
 - Dropping a node on the pinned logic gate assigns the existing node to the logic gate through the normal assignment endpoint without creating a duplicate node.
 - Successful drops show a short green confirmation banner in the pin section.

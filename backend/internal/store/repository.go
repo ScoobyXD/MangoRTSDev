@@ -1669,6 +1669,8 @@ type CommunicationsEmailConversionProvenance struct {
 type CommunicationsTriageConversionInput struct {
 	UserID             string
 	CompanyID          string
+	SharedInboxID      string
+	AccountEmail       string
 	ActorUserID        string
 	PermissionUserID   string
 	IdempotencyKey     string

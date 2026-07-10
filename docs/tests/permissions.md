@@ -1,9 +1,10 @@
-Last updated: 2026-07-02
+Last updated: 2026-07-10
 
 # Permissions Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
+- Explicit Save visibility is covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; close-with-save and duplicate-write prevention still require focused interaction coverage.
 - Business Logic Covered By Automated Tests: partial backend coverage for default/source-row semantics, group permission pointers, apply-to-descendants behavior, manager-preservation rules, Logic Gate-to-node permission snapshots, folder-to-child permission snapshots, same-parent preservation, cross-parent overwrite behavior, and direct node view denial. Rule ID mapping is partial. Pointer-scaled descendant apply rules are documented as target behavior and are not yet proven by implementation tests.
 
 ## Business Logic
@@ -51,7 +52,7 @@ P40 - Group permission rows are pointers to the group or subgroup; adding a user
 P41 - Direct user permission rows override group permission rows for that user; group rows override default access, and the nearest matching group row wins before same-depth access-rank tie breaking.
 P42 - On company Explorer folders, apply-to-descendants applies the changed permission rule keys to all descendant folders, contained projects, contained Logic Gates, and nodes assigned to those Logic Gates.
 P43 - On Logic Gates, apply-to-descendants applies the changed permission rule keys to nodes currently assigned to that Logic Gate.
-P44 - The permissions dialog saves pending changes when it is closed with the X control; the dialog does not require a separate Save button.
+P44 - Every permissions dialog and embedded permissions view, including Company Explorer folders, nodes, Logic Gates, projects, shared inboxes, and Shared Triage entry points, exposes an explicit `Save` button in a stable action area. Save commits the current default, user/group, and descendant selections without closing. Editable dialogs retain close-with-save for pending changes, but closing after a successful explicit Save must not issue a duplicate write.
 P45 - Runtime authorization resolves group permission rows from group source tables and group membership source rows; permission checks must not require a derived group closure/projection table to be populated.
 P46 - Editing a parent without apply-to-descendants changes only that parent and the template future direct children will receive; existing descendants keep their current permission policies.
 P47 - Permission policy inheritance should be implementable as reusable policy/rule pointers or immutable rule versions, not as duplicated full permission rows per descendant.
@@ -215,18 +216,21 @@ Expected:
 - Group permission rules remain group pointers and are not expanded into one source row per user.
 - Permission explanations identify whether access came from a direct rule, create/transfer inheritance, descendant apply, or group membership, and do not treat GVIC assignment as resource-permission access.
 
-### Scenario P-S5: Permission Dialog Autosave
+### Scenario P-S5: Explicit Permission Save And Close Autosave
 
 Business logic covered:
 - P44
 
 Given:
-- A manager/admin opens the permissions dialog for an editable Explorer resource.
-- The manager/admin changes a user or group permission and closes the dialog with X.
+- A manager/admin opens a dialog or embedded permission view from Company Explorer, a folder, node, Logic Gate, project, shared inbox, Shared Triage, or another entity entry point.
+- The manager/admin changes a user or group permission.
 
 Expected:
+- An explicit Save button is always visible in both dialog and embedded variants and persists the current selection without closing the view.
+- Save is disabled while the view is loading, saving, or read-only.
 - Closing with X persists the pending permission change.
-- The dialog does not require a separate Save button before close.
+- A successful explicit save leaves the view open and displays saved state.
+- Closing after a successful explicit Save does not issue the same permission write again.
 
 ### Scenario P-S6: Denied Permission Dialog Can Close
 

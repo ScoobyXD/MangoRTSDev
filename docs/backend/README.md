@@ -206,6 +206,10 @@ This keeps append-only information history, deletes duplicate hot `Text box` pro
 
 ## API endpoints (MVP canonical set)
 
+Communications invitation response:
+
+- `POST /v1/communications/calendar-invites/respond?company_id={uuid}&shared_inbox_id={uuid}` accepts an authorized source `message_id` and `yes`, `maybe`, or `no`; `shared_inbox_id` is omitted for personal mail. The backend resolves raw iCalendar data and the message UID to exactly one provider event; callers do not supply grant, calendar, or provider event IDs.
+
 - `GET /healthz`
 - `POST /v1/nodes`
 - `GET /v1/nodes/{node_id}?company_id={uuid}`

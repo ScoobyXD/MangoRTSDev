@@ -293,3 +293,67 @@ func TestNylasRESTClientUsesInlineContentIDAsMultipartFieldName(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNylasRESTClientListsEventsByICalUID(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v3/grants/grant-1/events" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.URL.Query().Get("calendar_id"); got != "primary" {
+			t.Fatalf("calendar_id = %q", got)
+		}
+		if got := r.URL.Query().Get("ical_uid"); got != "invite+special@example.com" {
+			t.Fatalf("ical_uid = %q", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer api-key" {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"event-1","calendar_id":"primary","ical_uid":"invite+special@example.com"}]}`))
+	}))
+	defer server.Close()
+
+	client := NewNylasRESTClient(server.URL, "api-key", "client-id")
+	events, err := client.ListEventsByICalUID(context.Background(), "grant-1", "invite+special@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].ID != "event-1" {
+		t.Fatalf("events = %+v", events)
+	}
+}
+
+func TestNylasRESTClientSendsEventRSVP(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.EscapedPath() != "/v3/grants/grant-1/events/event%231/send-rsvp" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.EscapedPath())
+		}
+		if got := r.URL.Query().Get("calendar_id"); got != "calendar-1" {
+			t.Fatalf("calendar_id = %q", got)
+		}
+		if got := r.URL.Query().Get("skip_nylas_email"); got != "true" {
+			t.Fatalf("skip_nylas_email = %q", got)
+		}
+		var body struct {
+			Status string `json:"status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Status != "maybe" {
+			t.Fatalf("status = %q", body.Status)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{}}`))
+	}))
+	defer server.Close()
+
+	client := NewNylasRESTClient(server.URL, "api-key", "client-id")
+	if err := client.SendEventRSVP(context.Background(), "grant-1", "event#1", "calendar-1", "maybe"); err != nil {
+		t.Fatal(err)
+	}
+}

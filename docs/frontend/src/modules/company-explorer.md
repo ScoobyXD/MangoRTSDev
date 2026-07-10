@@ -54,6 +54,7 @@ Golden rule:
 - Hierarchy is shown through indentation, faint vertical guide lines, and fixed entity icons.
 - Multi-select behavior mirrors existing platform expectations (`Shift`/`Ctrl`).
 - Context menu available per item and per empty area.
+- Folder, project, and Logic Gate permission actions use the shared permissions dialog. Every editable permissions view opened from Company Explorer displays an explicit `Save` button that commits the current selection; denied or read-only views remain dismissible without writing. Node search results remain open-only and do not gain Explorer permission actions.
 - Keyboard navigation (up/down/left/right/enter) should be supported.
 
 ---

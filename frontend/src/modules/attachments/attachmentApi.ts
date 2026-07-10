@@ -88,6 +88,10 @@ export type ListMangoResourceAttachmentsInput = {
   resourceID: string;
 };
 
+export type UnlinkMangoResourceAttachmentInput = ListMangoResourceAttachmentsInput & {
+  attachmentID: string;
+};
+
 export type MangoResourceAttachmentFilter = {
   relationshipKind?: MangoAttachmentRelationshipKind;
   editorSurface?: string;
@@ -100,6 +104,21 @@ export async function listMangoResourceAttachments(
   const query = new URLSearchParams({ company_id: input.companyID.trim() });
   return request<MangoResourceAttachmentListResponse>(
     `/v1/resources/${encodeURIComponent(input.resourceType)}/${encodeURIComponent(input.resourceID.trim())}/attachments?${query.toString()}`,
+  );
+}
+
+export async function unlinkMangoResourceAttachment(
+  request: AttachmentRequestJSON,
+  input: UnlinkMangoResourceAttachmentInput,
+): Promise<void> {
+  const companyID = input.companyID.trim();
+  const resourceID = input.resourceID.trim();
+  const attachmentID = input.attachmentID.trim();
+  if (!companyID || !resourceID || !attachmentID) throw new Error("attachment_resource_context_required");
+  const query = new URLSearchParams({ company_id: companyID });
+  await request<{ status: string }>(
+    `/v1/resources/${encodeURIComponent(input.resourceType)}/${encodeURIComponent(resourceID)}/attachments/${encodeURIComponent(attachmentID)}?${query.toString()}`,
+    { method: "DELETE" },
   );
 }
 

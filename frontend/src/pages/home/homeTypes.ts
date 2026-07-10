@@ -21,6 +21,7 @@ export type ComposeState = {
   accountEmail: string;
   replyToMessageID: string;
   replyToMessage?: EmailMessage | null;
+  focusRequestID: number;
   to: string;
   cc: string;
   bcc: string;
@@ -45,6 +46,7 @@ export const emptyCompose: ComposeState = {
   accountEmail: "",
   replyToMessageID: "",
   replyToMessage: null,
+  focusRequestID: 0,
   to: "",
   cc: "",
   bcc: "",

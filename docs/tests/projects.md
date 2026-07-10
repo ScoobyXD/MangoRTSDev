@@ -1,4 +1,4 @@
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 # Projects Tests
 
@@ -38,6 +38,8 @@ P27 - Successful project email drops dispatch the same Home triage conversion re
 P28 - Successful project email drops open the created node in the normal node popup.
 P29 - Project text-box creation and formatting controls must match the shared node text-box editor pattern: users add a new text box from a compact plus control in the left timeline gutter, and the toolbar exposes shared font-size, bold, underline, automatic numbering, bullet, checklist, and outline-style controls instead of project-only `Indent`, `A1`, or text-labeled `New Text Box` controls.
 P30 - Project text-box toolbar controls must use the shared compact editor toolbar tab inventory and shared formatting controller path. Font-size minus/value/plus, bold, underline, and the outline-style dropdown must match node text boxes, Logic Gate editor text, and mail editor surfaces in look and selected-text/sticky-caret behavior.
+P31 - A project permissions view opened from Project Management, Company Explorer, or another project entry point always displays an explicit `Save` button when permission settings are editable. Save commits the current permission selection without closing the view; denied and read-only states remain dismissible without attempting a write.
+P32 - Project attached-email projections preserve mailbox provenance. Personal picker attachments and personal email-drop conversions store the active `account_email`, while shared-inbox conversions retain both `shared_inbox_id` and `account_email`; the project reader uses that scope for threads, recipients, attachments, drafts, replies, and calendar invitations.
 
 ## Scenarios
 
@@ -188,6 +190,7 @@ Business logic covered:
 - P26
 - P27
 - P28
+- P32
 
 Given:
 - A user has an email row from My Triage or a mailbox-capable Shared Triage inbox.
@@ -198,5 +201,38 @@ Expected:
 - Dropping the email on the project relationship panel creates a node relationship in the project without requiring a Logic Gate.
 - Dropping the email on a Logic Gate group inside the project creates the node/card in that Logic Gate and relates the created node to the project.
 - Created project relationship rows for email-derived nodes expose `created_from_email = true` and show the email-origin icon.
+- A personal email drop stores `account_email` in the created attached-email projection; a Shared Triage drop stores both `shared_inbox_id` and `account_email`.
 - The source Home mail row is reconciled through the local conversion event, including shared inbox scope and unstarred IDs when present.
 - The created node opens in the standard node popup after the drop succeeds.
+
+### Scenario P-S9: Project Permissions Save
+
+Business logic covered:
+- P31
+
+Given:
+- A manager or administrator opens permissions for the same project from Project Management and from Company Explorer.
+- A second viewer can open the project but cannot edit its permission settings.
+
+Expected:
+- Every editable project permissions view displays an explicit `Save` button.
+- Choosing users, groups, default access, or descendant behavior does not remove or hide the Save action.
+- Clicking Save commits the current selection, reports completion through the shared permissions dialog behavior, and leaves the view open.
+- The view-only or denied state remains dismissible and does not issue a permission update.
+
+### Scenario P-S10: Project Attached-Email Scope And Viewer
+
+Business logic covered:
+- P18
+- P23
+- P27
+- P32
+
+Given:
+- A personal mailbox message is attached through the project picker.
+- A shared-inbox message is converted into project work and later reopened from its attached-email row.
+
+Expected:
+- The personal attachment records the active account email and the shared conversion records both shared-inbox ID and account email.
+- Reopening either message uses the same thread viewer contract as My Triage, Shared Triage, and nodes, including recipients, attachments, Reply/Reply All, drafts, and invitation responses.
+- Shared attachment reads and actions retain shared-inbox authorization and do not silently fall back to a personal grant.

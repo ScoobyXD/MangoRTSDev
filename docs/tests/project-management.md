@@ -1,4 +1,4 @@
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 # Project Management Tests
 
@@ -49,6 +49,8 @@ PM38 - Opening a node from Project Management preserves node-level access, node 
 PM39 - The node workspace project assignment control is a content-sized action, not a spacer. The unassigned `Assign to Project` button must remain compact, and the assigned `Project: <project name>` button may grow only until the node header project-control maximum before ellipsizing.
 PM40 - The node workspace project assignment menu must use the compact project-picker width contract: nominal minimum 280px, desktop maximum 390px, compact-layout maximum 320px, and no wider than the browser viewport allows.
 PM41 - The node workspace project assignment menu must avoid right-edge clipping by shifting left when there is not enough visible space to the right of the button; project rows and optional Logic Gate rows must remain readable without horizontal viewport overflow.
+PM42 - Project permission controls use the canonical permissions contract in `docs/tests/permissions.md`: every editable dialog or embedded view exposes **Save**, saving persists the current selection without closing, and read-only/denied states never issue a write.
+PM43 - Project Management attached-email views follow `docs/tests/projects.md` P32: personal picker attachments and personal email-drop conversions retain `account_email`, shared conversions retain both `shared_inbox_id` and `account_email`, and subsequent thread, attachment, reply, draft, and calendar operations use that stored mailbox scope.
 
 ## Scenarios
 
@@ -207,3 +209,30 @@ Expected:
 - The opened node window applies node access and saves node edits through node information/projection persistence.
 - The project relationship remains opener context only; it does not own node text-box edits, attached-email edits, or node chat messages.
 - Node text boxes use the unified editor semantics, and node chats remain separate chat panes.
+
+### Scenario PM-S7: Project Permission Controls
+
+Business logic covered:
+- PM42
+
+Given:
+- A user opens project permissions from Project Management or another project entry point.
+
+Expected:
+- The view follows the shared permission component and authorization rules documented in `docs/tests/permissions.md`.
+- An editable view always shows **Save**, persists the selected permissions on save, and remains open after success.
+- A read-only or denied view stays dismissible and does not submit a permission mutation.
+
+### Scenario PM-S8: Project Attached-Email Provenance
+
+Business logic covered:
+- PM6
+- PM43
+
+Given:
+- Project Management opens one personal attached email and one email derived from a Shared Triage conversion.
+
+Expected:
+- The personal projection retains the active account email and the shared projection retains both shared-inbox ID and account email.
+- Reopening the message uses the stored mailbox scope for thread hydration, recipients, attachments, Reply/Reply All, draft resume, and calendar invitation response.
+- A shared message never silently falls back to a personal grant.

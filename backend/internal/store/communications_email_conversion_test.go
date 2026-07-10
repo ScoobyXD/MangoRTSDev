@@ -30,6 +30,8 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	result, err := repo.ConvertCommunicationsTriageItems(CommunicationsTriageConversionInput{
 		UserID:         user.UserID,
 		CompanyID:      companyID,
+		SharedInboxID:  "shared-inbox-1",
+		AccountEmail:   "support@example.com",
 		LogicGateID:    logicGate.LogicGateID,
 		Status:         "in_progress",
 		MessageIDs:     []string{message.ID},
@@ -87,8 +89,8 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	if err := json.Unmarshal([]byte(projections[0].Information), &projectionPayload); err != nil {
 		t.Fatalf("projection payload json: %v", err)
 	}
-	if projectionPayload["message_id"] != message.ID || projectionPayload["thread_id"] != message.ThreadID {
-		t.Fatalf("projection payload = %+v, want message/thread provenance", projectionPayload)
+	if projectionPayload["message_id"] != message.ID || projectionPayload["thread_id"] != message.ThreadID || projectionPayload["shared_inbox_id"] != "shared-inbox-1" || projectionPayload["account_email"] != "support@example.com" {
+		t.Fatalf("projection payload = %+v, want message/thread/mailbox provenance", projectionPayload)
 	}
 	triageItems, err := repo.ListCommunicationsTriageItems(user.UserID)
 	if err != nil || len(triageItems) != 0 {

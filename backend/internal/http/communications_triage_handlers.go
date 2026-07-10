@@ -141,6 +141,8 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	conversionInput, err := store.NormalizeCommunicationsTriageConversionInput(store.CommunicationsTriageConversionInput{
 		UserID:             connection.UserID,
 		CompanyID:          req.CompanyID,
+		SharedInboxID:      sharedInboxID,
+		AccountEmail:       connection.AccountEmail,
 		ActorUserID:        actorUserID,
 		PermissionUserID:   permissionUserID,
 		IdempotencyKey:     idempotencyKey,

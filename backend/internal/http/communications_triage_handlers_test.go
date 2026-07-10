@@ -203,4 +203,15 @@ func TestCommunicationsTriageConvertUsesSharedInboxConnection(t *testing.T) {
 	if len(placements) != 1 || placements[0].LogicGateID != logicGate.LogicGateID {
 		t.Fatalf("shared conversion placements = %+v, want shared email attached to gate %s", placements, logicGate.LogicGateID)
 	}
+	projections, err := repo.ListNodeProjections(companyID, placements[0].NodeID)
+	if err != nil || len(projections) != 1 {
+		t.Fatalf("shared conversion projections = %+v err=%v", projections, err)
+	}
+	var projectionPayload map[string]any
+	if err := json.Unmarshal([]byte(projections[0].Information), &projectionPayload); err != nil {
+		t.Fatalf("decode shared projection: %v", err)
+	}
+	if projectionPayload["shared_inbox_id"] != folder.FolderID || projectionPayload["account_email"] != "support@example.com" {
+		t.Fatalf("shared projection mailbox provenance = %+v", projectionPayload)
+	}
 }

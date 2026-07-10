@@ -225,7 +225,7 @@ export function readHomeMailDrafts(companyID: string, userID: string): HomeMailD
 }
 
 function writeHomeMailDrafts(companyID: string, userID: string, drafts: HomeMailDraft[]): HomeMailDraft[] {
-  const sorted = [...drafts].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+  const sorted = mergeHomeMailDrafts(drafts, []);
   try {
     if (storageAvailable()) localStorage.setItem(draftsStorageKey(companyID, userID), JSON.stringify(sorted));
   } catch {
@@ -240,10 +240,15 @@ export async function loadHomeMailDrafts(companyID: string, userID: string): Pro
     const remoteDrafts = (await listEmailDrafts(companyID))
       .map((draft) => homeMailDraftFromRemote(draft, companyID, userID))
       .filter((draft): draft is HomeMailDraft => Boolean(draft));
+    const supersededRemoteDraftIDs = supersededHomeMailDraftIDs(remoteDrafts);
+    if (supersededRemoteDraftIDs.length > 0) {
+      await Promise.all(supersededRemoteDraftIDs.map((draftID) => deleteEmailDraft(companyID, draftID).catch(() => undefined)));
+    }
+    const activeRemoteDrafts = mergeHomeMailDrafts(remoteDrafts, []);
     const remoteIDs = new Set(remoteDrafts.map((draft) => draft.id));
     const localOnlyDrafts = localDrafts.filter((draft) => !remoteIDs.has(draft.id) && composeHasDraftContent(homeMailDraftToCompose(draft), ""));
     await Promise.all(localOnlyDrafts.map((draft) => saveHomeMailDraftToDatabase(draft).catch(() => null)));
-    return writeHomeMailDrafts(companyID, userID, mergeHomeMailDrafts(remoteDrafts, localOnlyDrafts));
+    return writeHomeMailDrafts(companyID, userID, mergeHomeMailDrafts(activeRemoteDrafts, localOnlyDrafts));
   } catch {
     return localDrafts;
   }
@@ -345,15 +350,29 @@ function remoteDraftAttachments(draft: CommunicationsEmailDraft): ComposeAttachm
     .filter((attachment) => attachment.attachmentID);
 }
 
-function mergeHomeMailDrafts(primary: HomeMailDraft[], secondary: HomeMailDraft[]): HomeMailDraft[] {
-  const byID = new Map<string, HomeMailDraft>();
+export function mergeHomeMailDrafts(primary: HomeMailDraft[], secondary: HomeMailDraft[]): HomeMailDraft[] {
+  const byDraftKey = new Map<string, HomeMailDraft>();
   for (const draft of [...secondary, ...primary]) {
-    const existing = byID.get(draft.id);
+    const key = homeMailDraftSemanticKey(draft);
+    const existing = byDraftKey.get(key);
     if (!existing || Date.parse(draft.updatedAt) >= Date.parse(existing.updatedAt)) {
-      byID.set(draft.id, draft);
+      byDraftKey.set(key, draft);
     }
   }
-  return [...byID.values()].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+  return [...byDraftKey.values()].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+}
+
+export function supersededHomeMailDraftIDs(drafts: HomeMailDraft[]): string[] {
+  const activeIDs = new Set(mergeHomeMailDrafts(drafts, []).map((draft) => draft.id));
+  return Array.from(new Set(drafts.map((draft) => draft.id).filter((draftID) => !activeIDs.has(draftID))));
+}
+
+function homeMailDraftSemanticKey(draft: HomeMailDraft): string {
+  const replyMessageID = draft.replyToMessageID.trim();
+  const scope = draft.sharedInboxID.trim()
+    ? `shared:${draft.sharedInboxID.trim()}`
+    : `personal:${draft.userID.trim()}`;
+  return replyMessageID ? `reply:${scope}:${replyMessageID}` : `draft:${draft.id}`;
 }
 
 function homeMailDraftKind(draft: HomeMailDraft): "compose" | "reply" | "forward" {

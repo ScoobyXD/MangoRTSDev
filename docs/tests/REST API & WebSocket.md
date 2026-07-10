@@ -1,10 +1,10 @@
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 # REST API & WebSocket Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: 0% (rule IDs are not mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`backend/internal/http/calendar_invite_handlers_test.go` covers invitation parsing and RSVP handler behavior; `backend/internal/http/nylas_client_test.go` covers provider event lookup/response shapes; broader REST/WebSocket rule IDs are not fully mapped yet)
 
 ## Business Logic
 
@@ -32,6 +32,7 @@ RW21 - A `404` for a node, Logic Gate, or other resource is terminal for that re
 RW22 - Failure handling for `401`, `404`, and WebSocket disconnects must reduce frontend/backend work rather than creating retry, reconnect, or fallback-refetch storms.
 RW23 - Realtime WebSocket tickets must be short-lived, HTTP-only, and valid across backend worker instances in the same environment so a ticket issued by one ECS task can be accepted by another task during WebSocket upgrade.
 RW24 - Attachment upload, metadata, linking, and content reads are HTTP API operations; WebSocket messages may notify that attachment metadata changed, but WebSocket payloads must not carry file bytes, base64 blobs, or S3 object contents.
+RW25 - Calendar invitation responses use authenticated `POST /v1/communications/calendar-invites/respond` HTTP requests. The request supplies the company/mailbox scope plus `message_id` and `status` (`yes`, `maybe`, or `no`); the backend resolves the iCalendar UID and exactly one provider event under the authorized personal/shared mailbox scope instead of accepting client-supplied grant, calendar, or event identifiers. Shared inbox responses require edit access, WebSocket messages never send the RSVP, and expired/revoked grants or missing calendar scope return a recoverable mailbox/provider error rather than Mango logout or false success.
 
 ## Scenarios
 
@@ -243,3 +244,22 @@ Expected:
 - Realtime events may invalidate or update scoped attachment metadata.
 - Realtime payloads do not include raw file bytes, base64 strings, or S3 object content.
 - Clients fetch attachment content through the attachment HTTP content route only when they need to render or download it.
+
+### Scenario RW-S11: Calendar Invitation RSVP Uses A Scoped HTTP Command
+
+Business logic covered:
+- RW25
+
+Given:
+- A personal or shared mailbox message contains one valid `METHOD:REQUEST` iCalendar event.
+- The user chooses Accept, Tentative, or Decline in an email viewer.
+
+Expected:
+- The frontend posts the source `message_id`, normalized RSVP status, company scope, and shared inbox scope when applicable to `/v1/communications/calendar-invites/respond`.
+- The endpoint requires the authenticated communications connection and shared-inbox edit access when a shared scope is supplied.
+- The backend reads the source MIME, extracts the invitation UID, resolves exactly one non-cancelled event in the provider calendar, and sends the provider RSVP.
+- Missing invitations or events return a validation/not-found response, and ambiguous event matches return a conflict instead of choosing an arbitrary event.
+- The request does not accept or trust a client grant ID, provider event ID, calendar ID, provider token, or attachment bytes.
+- Each provider request is rate-gated and the action is not sent through WebSocket.
+- Expired or revoked grants, insufficient calendar scope, and provider failures return a recoverable reconnect/provider response and never report a successful RSVP or force Mango logout.
+- Environment OAuth scopes must include Google/Microsoft calendar write access before integrated provider verification. Scope changes are not retroactive: existing grants must be reauthorized/reconsented after the configured scopes change. This route is invitation RSVP, not a full calendar workspace.

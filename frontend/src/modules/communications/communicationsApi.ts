@@ -283,6 +283,15 @@ export type SendEmailInput = {
   shared_inbox_id?: string;
 };
 
+export type CalendarInviteRSVPStatus = "yes" | "maybe" | "no";
+
+export type CalendarInviteRSVPResponse = {
+  status: "responded" | string;
+  rsvp_status: CalendarInviteRSVPStatus;
+  event_id: string;
+  calendar_id?: string;
+};
+
 export type CommunicationsEmailDraftAttachment = {
   resource_attachment_id: string;
   attachment_id: string;
@@ -676,6 +685,19 @@ export async function sendEmail(input: SendEmailInput): Promise<EmailMessage> {
   applyEmailMessageToCachedPages(message, { prependIfMissing: true });
   if (input.reply_to_message_id?.trim()) addLocalEmailReply(input.reply_to_message_id, message);
   return message;
+}
+
+export async function respondToCalendarInvite(input: {
+  messageID: string;
+  status: CalendarInviteRSVPStatus;
+  companyID?: string;
+  sharedInboxID?: string;
+}): Promise<CalendarInviteRSVPResponse> {
+  const query = createSharedInboxMessageMutationQuery(input.sharedInboxID, input.companyID);
+  return apiFetchJSON<CalendarInviteRSVPResponse>(`/v1/communications/calendar-invites/respond${query}`, {
+    method: "POST",
+    body: JSON.stringify({ message_id: input.messageID.trim(), status: input.status }),
+  });
 }
 
 export async function listEmailDrafts(companyID: string): Promise<CommunicationsEmailDraft[]> {

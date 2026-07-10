@@ -12,6 +12,7 @@ import (
 	"net/textproto"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -19,7 +20,7 @@ import (
 )
 
 func (s *Server) attachRawMIMEAttachmentsIfMissing(ctx context.Context, connection domain.UserEmailConnection, message NylasMessage) NylasMessage {
-	if !messageNeedsRawMIMEAttachmentRecovery(message) || s.nylasClient == nil || strings.TrimSpace(connection.GrantID) == "" || strings.TrimSpace(message.ID) == "" {
+	if message.RawMIMEAttachmentsRecovered || !messageNeedsRawMIMEAttachmentRecovery(message) || s.nylasClient == nil || strings.TrimSpace(connection.GrantID) == "" || strings.TrimSpace(message.ID) == "" {
 		return message
 	}
 	rawMIME, err := s.nylasClient.GetMessageRawMIME(ctx, connection.GrantID, message.ID)
@@ -27,6 +28,7 @@ func (s *Server) attachRawMIMEAttachmentsIfMissing(ctx context.Context, connecti
 		log.Printf("communications_attachment_raw_mime outcome=fetch_failed user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s err=%v", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), err)
 		return message
 	}
+	message.RawMIMEAttachmentsRecovered = true
 	attachments := nylasAttachmentsFromRawMIME(rawMIME)
 	if len(attachments) == 0 {
 		log.Printf("communications_attachment_raw_mime outcome=no_attachments user_id=%s provider=%s account_email=%s scope=%s message_id=%s grant=%s raw_mime_bytes=%d", connection.UserID, connection.Provider, connection.AccountEmail, connection.Scope, message.ID, grantIDLogValue(connection.GrantID), len(rawMIME))
@@ -50,7 +52,13 @@ func (s *Server) attachRawMIMEAttachmentsIfMissing(ctx context.Context, connecti
 var rawMIMEBodyCIDPattern = regexp.MustCompile(`(?i)\bcid:([^"'\s>)]+)`)
 
 func messageNeedsRawMIMEAttachmentRecovery(message NylasMessage) bool {
+	if message.RawMIMEAttachmentsRecovered {
+		return false
+	}
 	if len(message.Attachments) == 0 {
+		return true
+	}
+	if !slices.ContainsFunc(message.Attachments, rawMIMEAttachmentIsCalendar) {
 		return true
 	}
 	refs := rawMIMEBodyCIDReferences(message.Body)
@@ -113,8 +121,17 @@ func mergeRawMIMEAttachments(existing, recovered []NylasAttachment, referencedCo
 			changed = true
 			continue
 		}
+		if rawMIMEAttachmentIsCalendar(raw) && !slices.ContainsFunc(merged, rawMIMEAttachmentIsCalendar) {
+			merged = append(merged, raw)
+			changed = true
+		}
 	}
 	return merged, changed
+}
+
+func rawMIMEAttachmentIsCalendar(attachment NylasAttachment) bool {
+	contentType := strings.ToLower(strings.TrimSpace(strings.Split(attachment.ContentType, ";")[0]))
+	return contentType == "text/calendar" || strings.HasSuffix(strings.ToLower(strings.TrimSpace(attachment.Filename)), ".ics")
 }
 
 func rawMIMEAttachmentIndexByContentID(attachments []NylasAttachment, contentID string) int {
@@ -209,8 +226,9 @@ func collectRawMIMEAttachments(header textproto.MIMEHeader, body io.Reader, atta
 	}
 	contentID := cleanRawMIMEContentID(header.Get("Content-ID"))
 	isImage := strings.HasPrefix(mediaType, "image/")
+	isCalendar := mediaType == "text/calendar" || strings.HasSuffix(strings.ToLower(filename), ".ics")
 	isInline := disposition == "inline" || (contentID != "" && isImage)
-	isAttachment := disposition == "attachment" || filename != "" || isInline
+	isAttachment := disposition == "attachment" || filename != "" || isInline || isCalendar
 	if !isAttachment {
 		return
 	}

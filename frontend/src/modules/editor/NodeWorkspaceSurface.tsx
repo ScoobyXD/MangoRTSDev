@@ -23,6 +23,7 @@ import {
   filterMangoResourceAttachments,
   groupMangoResourceAttachmentsByInformationID,
   listMangoResourceAttachments,
+  unlinkMangoResourceAttachment,
   type MangoResourceAttachment,
 } from "../attachments/attachmentApi";
 import {
@@ -563,6 +564,27 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const refreshNodeAttachments = useCallback(() => {
     setNodeAttachmentsRefreshKey((key) => key + 1);
   }, []);
+
+  const removeNodeAttachment = useCallback(async (resourceAttachment: MangoResourceAttachment) => {
+    if (!canEdit) return;
+    const attachmentID = resourceAttachment.attachment_id?.trim();
+    if (!attachmentID) {
+      onError("attachment_metadata_unavailable");
+      return;
+    }
+    try {
+      await unlinkMangoResourceAttachment(requestJSON, {
+        companyID,
+        resourceType: "node",
+        resourceID: nodeID,
+        attachmentID,
+      });
+      setNodeResourceAttachments((current) => current.filter((item) => item.attachment_id !== attachmentID));
+      refreshNodeAttachments();
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "failed_to_remove_attachment");
+    }
+  }, [canEdit, companyID, nodeID, onError, refreshNodeAttachments, requestJSON]);
 
   const goToAssignedLogicGate = useCallback(() => {
     const logicGateID = primaryAssignedLogicGateID.trim();
@@ -1647,6 +1669,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       blockID: cleanBlockID || undefined,
       messageID: email.messageID,
       threadID: email.threadID,
+      sharedInboxID: email.sharedInboxID,
+      accountEmail: email.accountEmail,
       subject: email.subject,
       snippet: email.snippet,
       from: email.from,
@@ -2370,6 +2394,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             surfaceText={surfaceText}
             align="left"
             onOpenEmail={openAttachedEmailFromHeader}
+            onRemoveEmail={canEdit ? (emailID) => { void removeAttachedEmail(emailID); } : undefined}
           />
           <AttachmentCountDropdown
             items={nodeAttachmentDropdownItems}
@@ -2381,6 +2406,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             loading={nodeAttachmentsLoading}
             loadError={nodeAttachmentsLoadError}
             onRetry={refreshNodeAttachments}
+            onRemove={canEdit ? (item) => { void removeNodeAttachment(item.resourceAttachment); } : undefined}
             onError={onError}
           />
           {canEdit && (
@@ -2768,6 +2794,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       loading={nodeAttachmentsLoading}
                       loadError={nodeAttachmentsLoadError}
                       onRetry={refreshNodeAttachments}
+                      onRemove={canEdit ? (item) => { void removeNodeAttachment(item.resourceAttachment); } : undefined}
                       onError={onError}
                     />
                     {canEdit && (
@@ -2920,13 +2947,13 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setNodeEmailModalMessageID("");
           }}
-          style={{ position: "fixed", zIndex: 180, inset: 0, display: "grid", placeItems: "center", background: "rgba(15,23,42,0.44)", padding: 18 }}
+          style={{ position: "fixed", zIndex: 180, inset: 0, display: "grid", placeItems: "stretch", background: "rgba(15,23,42,0.44)", padding: 12 }}
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="node-attached-email-dialog-title"
-            style={{ width: "min(1080px, 94vw)", height: "min(780px, 88vh)", minHeight: 0, display: "grid", gridTemplateRows: "44px minmax(0, 1fr)", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: panelBackground, color: surfaceText, overflow: "hidden", boxShadow: "0 24px 64px rgba(15,23,42,0.28)" }}
+            style={{ width: "100%", height: "100%", minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "44px minmax(0, 1fr)", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground, color: surfaceText, overflow: "hidden", boxShadow: "0 24px 64px rgba(15,23,42,0.28)" }}
           >
             <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 32px", alignItems: "center", gap: 10, borderBottom: `1px solid ${ruleColor}`, padding: "6px 8px 6px 12px", background: EDITOR_NEU_SURFACE }}>
               <div id="node-attached-email-dialog-title" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 900 }}>
@@ -2973,7 +3000,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           panelBackground={panelBackground}
           strokeColor={strokeColor}
           onClose={() => setEmailPickerTargetBlockID(null)}
-          onAttach={(message) => { void attachEmail(messageAttachmentPayload(message), emailPickerTargetBlockID ?? ""); }}
+          onAttach={(message, scope) => { void attachEmail(messageAttachmentPayload(message, scope.sharedInboxID, scope.accountEmail), emailPickerTargetBlockID ?? ""); }}
         />
       )}
       {canEdit && deleteTextBlockConfirmation && (

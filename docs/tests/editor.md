@@ -1004,3 +1004,19 @@ The highest-value remediation order identified by Codex is:
 7. Add real browser interaction tests across all six declared rich-editor surfaces before changing more edge cases.
 
 This audit section intentionally records findings only. It was appended by Codex at the user's request and does not claim that any of the defects above were fixed as part of the audit.
+
+### Scenario E-S-IMAGE-CARET: Shared Image Selection Places A Caret Before The Frame
+
+Business logic covered:
+- `docs/tests/attachments.md` ATT5
+- `docs/tests/attachments.md` ATT6
+- `docs/tests/attachments.md` ATT25
+
+Given:
+- Any unified rich-editor surface contains a resizable image frame.
+
+Expected:
+- A single click selects the image and places a collapsed caret immediately before its frame.
+- Typing or pressing Space inserts content before the image.
+- Dragging the image body still moves it, dragging an edge/corner still resizes it, Delete/Backspace still removes a selected image, and double-click still opens preview.
+- The behavior is identical in node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply editors.

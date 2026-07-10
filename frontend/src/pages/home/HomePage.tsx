@@ -58,6 +58,7 @@ import {
   type EmailProvider,
   type UserLogicGateShortcut,
 } from "../../modules/communications/communicationsApi";
+import { buildReplyAllRecipients } from "../../modules/communications/emailRecipients";
 import { subscribeCommunicationsStream } from "../../modules/communications/communicationsStream";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
@@ -256,18 +257,22 @@ function addressListExcludingMailbox(message: EmailMessage, field: "from" | "rep
 }
 
 function replyAllRecipients(message: EmailMessage, mailboxEmail: string): { to: string; cc: string } {
-  const replyTo = addressListExcludingMailbox(message, "reply_to", mailboxEmail);
-  const to = replyTo || addressListExcludingMailbox(message, "from", mailboxEmail);
-  const toEmails = new Set((message.reply_to?.length ? message.reply_to : message.from ?? []).map((address) => address.email.trim().toLowerCase()).filter(Boolean));
-  const cleanMailboxEmail = mailboxEmail.trim().toLowerCase();
-  const seen = new Set<string>([...toEmails, cleanMailboxEmail].filter(Boolean));
-  const ccAddresses = [...(message.to ?? []), ...(message.cc ?? [])].filter((address) => {
-    const email = address.email.trim().toLowerCase();
-    if (!email || seen.has(email)) return false;
-    seen.add(email);
+  const recipients = buildReplyAllRecipients(message, [mailboxEmail]);
+  return { to: formatAddressList(recipients.to), cc: formatAddressList(recipients.cc) };
+}
+
+function mergeEmailAddressDrafts(values: string[], excludedValues: string[] = []): string {
+  const excluded = new Set(
+    excludedValues.flatMap((value) => parseEmailAddressList(value)).map((address) => address.email.trim().toLowerCase()).filter(Boolean),
+  );
+  const seen = new Set<string>();
+  const addresses = values.flatMap((value) => parseEmailAddressList(value)).filter((address) => {
+    const key = address.email.trim().toLowerCase();
+    if (!key || excluded.has(key) || seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
-  return { to, cc: formatAddressList(ccAddresses) };
+  return formatAddressList(addresses);
 }
 
 function replySubject(subject: string): string {
@@ -3000,15 +3005,26 @@ export function HomePage({
     saveCurrentComposeDraft({ quiet: true });
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     const accountEmail = (activeMailAccountEmail ?? "").trim();
+    const focusRequestID = composeRef.current.focusRequestID + 1;
     const existingDraftID = createHomeMailReplyDraftID(sharedInboxID, sourceMessage.id, accountEmail, currentUserID);
     const legacyDraftID = createHomeMailReplyDraftID(sharedInboxID, sourceMessage.id);
     const existingDraft = mailDrafts.find((draft) => draft.id === existingDraftID)
       ?? (legacyDraftID !== existingDraftID ? mailDrafts.find((draft) => draft.id === legacyDraftID) : undefined);
     if (existingDraft) {
       pendingAutoSignatureRef.current = null;
+      const requiredReplyAllRecipients = mode === "reply-all" ? replyAllRecipients(sourceMessage, accountEmail) : null;
+      const to = requiredReplyAllRecipients
+        ? mergeEmailAddressDrafts([existingDraft.to, requiredReplyAllRecipients.to])
+        : existingDraft.to;
+      const cc = requiredReplyAllRecipients
+        ? mergeEmailAddressDrafts([existingDraft.cc, requiredReplyAllRecipients.cc], [to])
+        : existingDraft.cc;
       setCompose({
         ...homeMailDraftToCompose(existingDraft),
         replyToMessage: existingDraft.replyToMessage ?? sourceMessage,
+        focusRequestID,
+        to,
+        cc,
       });
       return;
     }
@@ -3026,6 +3042,7 @@ export function HomePage({
       accountEmail,
       replyToMessageID: sourceMessage.id,
       replyToMessage: sourceMessage,
+      focusRequestID,
       to: recipients.to,
       cc: recipients.cc,
       subject: replySubject(sourceMessage.subject || ""),

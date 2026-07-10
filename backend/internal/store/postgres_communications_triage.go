@@ -445,7 +445,7 @@ returning company_id::text, user_id::text, message_id, node_id::text, board_id, 
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, message, time.Now().UTC(), true); err != nil {
+		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, input.SharedInboxID, input.AccountEmail, message, time.Now().UTC(), true); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -563,7 +563,7 @@ for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrN
 			return CommunicationsTriageConversionResult{}, err
 		}
 		message = normalizeEmailMessageSnapshot(message)
-		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.NodeID, message, time.Now().UTC(), false); err != nil {
+		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, time.Now().UTC(), false); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -633,7 +633,7 @@ insert into node_map_positions (company_id, node_id, x, y, updated_timestamp)
 values ($1, $2, $3, $4, now())`, input.CompanyID, nodeID, 120+float64(index*28), 120+float64(index*28)); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, message, time.Now().UTC(), true); err != nil {
+		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, nodeID, input.SharedInboxID, input.AccountEmail, message, time.Now().UTC(), true); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -787,7 +787,7 @@ returning company_id::text, user_id::text, message_id, node_id::text, board_id, 
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.NodeID, message, time.Now().UTC(), false); err != nil {
+		if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.NodeID, input.SharedInboxID, input.AccountEmail, message, time.Now().UTC(), false); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -872,9 +872,34 @@ order by created_timestamp desc, message_id asc, logic_gate_id asc`, args...)
 	return placements, rows.Err()
 }
 
-func addEmailProjectionSQL(ctx context.Context, tx *sql.Tx, companyID, nodeID string, message domain.EmailMessageSnapshot, attachedAt time.Time, createdFromEmail bool) error {
+func emailProjectionMailboxScopeSQL(ctx context.Context, tx *sql.Tx, companyID, nodeID, messageID string) (string, string, error) {
+	var information string
+	err := tx.QueryRowContext(ctx, `
+select information
+from node_projection_table
+where company_id=$1 and node_id=$2 and type='Attached email'::information_type
+  and information::jsonb->>'message_id'=$3
+order by created_timestamp desc
+limit 1`, companyID, nodeID, messageID).Scan(&information)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	var payload struct {
+		SharedInboxID string `json:"shared_inbox_id"`
+		AccountEmail  string `json:"account_email"`
+	}
+	if err := json.Unmarshal([]byte(information), &payload); err != nil {
+		return "", "", nil
+	}
+	return strings.TrimSpace(payload.SharedInboxID), strings.TrimSpace(payload.AccountEmail), nil
+}
+
+func addEmailProjectionSQL(ctx context.Context, tx *sql.Tx, companyID, nodeID, sharedInboxID, accountEmail string, message domain.EmailMessageSnapshot, attachedAt time.Time, createdFromEmail bool) error {
 	informationID := newUUIDv7String()
-	information := attachedEmailProjectionInformation(message, attachedAt, createdFromEmail)
+	information := attachedEmailProjectionInformation(message, sharedInboxID, accountEmail, attachedAt, createdFromEmail)
 	if _, err := tx.ExecContext(ctx, `
 insert into node_information (
   company_id, information_id, node_id, type, information, created_timestamp, updated_timestamp
@@ -1007,6 +1032,10 @@ for update`, input.CompanyID, input.TargetBoardID, input.TargetCardID))
 	if targetLogicGateID == "" || targetCard.NodeID == link.NodeID {
 		return CommunicationsEmailNodeTransferResult{}, ErrInvalid
 	}
+	sharedInboxID, accountEmail, err := emailProjectionMailboxScopeSQL(ctx, tx, input.CompanyID, link.NodeID, link.MessageID)
+	if err != nil {
+		return CommunicationsEmailNodeTransferResult{}, err
+	}
 
 	placement, err := scanCommunicationsEmailPlacement(tx.QueryRowContext(ctx, `
 insert into communications_email_node_attachments (
@@ -1025,7 +1054,7 @@ returning company_id::text, user_id::text, message_id, node_id::text, board_id, 
 	if err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
-	if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, targetCard.NodeID, link.Message, time.Now().UTC(), false); err != nil {
+	if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, targetCard.NodeID, sharedInboxID, accountEmail, link.Message, time.Now().UTC(), false); err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
 	if err := deletePostgresCommunicationsEmailSourceNodeTx(ctx, tx, input.CompanyID, link); err != nil {

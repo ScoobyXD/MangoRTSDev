@@ -39,6 +39,8 @@ LG25 - Pressing the Logic Gate editor's apply-to-assigned-nodes action asks for 
 LG26 - Logic Gate editor surfaces participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, table, and people-suggestion semantics must apply to Logic Gate editor text wherever it is opened. The `@`/`!` people picker uses stable, visible per-user profile colors rather than gray-only rows.
 LG27 - Logic Gate editor inline images/files must follow `docs/tests/attachments.md`: rich-editor paste/drop uses the shared editor image path, and durable Logic Gate information/projection rows store attachment references instead of data URLs or base64 file bytes.
 LG28 - The Logic Gate editor toolbar must use the shared rich-editor toolbar source and shared font-size helper/controller. Font-size minus/value/plus, bold, underline, and the outline-style dropdown must match node text boxes, project text boxes, and mail editor surfaces in look and selected-text/sticky-caret behavior.
+LG29 - A Logic Gate permissions view opened from the editor, map, Company Explorer, or another Logic Gate entry point always displays **Save** when editable. Saving persists the current selection without closing; read-only and denied views remain dismissible and do not attempt a write. This permission action is distinct from editor saved-version Save.
+LG30 - When a personal or Shared Triage email is converted into a node/card assigned to a Logic Gate, the created attached-email projection retains the source account email and, for shared mail, the shared-inbox ID. Later node email reads and mutations use that stored mailbox scope.
 
 ## Scenarios
 
@@ -189,3 +191,30 @@ Expected:
 - The saved Logic Gate projection stores attachment references.
 - Logic Gate information/projection rows do not store durable data URLs or base64 file bytes.
 - Fullscreen image preview still opens the original or highest-quality available file.
+
+### Scenario LG-S8: Logic Gate Permissions Save
+
+Business logic covered:
+- LG29
+
+Given:
+- A manager or administrator opens permissions for the same Logic Gate from the editor, map, and Company Explorer.
+- A second viewer can open the Logic Gate but cannot edit permission settings.
+
+Expected:
+- Every editable Logic Gate permissions view displays the shared explicit `Save` button.
+- Clicking Save commits the current permission selection, reports loading or failure state, leaves the view open on success, and is not confused with the Logic Gate editor saved-version command.
+- The view-only or denied state remains dismissible without issuing a permission update.
+
+### Scenario LG-S9: Email Conversion Retains Mailbox Scope
+
+Business logic covered:
+- LG30
+
+Given:
+- A user converts a personal email and a Shared Triage email into nodes/cards assigned to a Logic Gate.
+
+Expected:
+- The personal attached-email projection retains `account_email`.
+- The shared attached-email projection retains both `shared_inbox_id` and `account_email`.
+- Reopening either message from the created node uses the stored scope for thread hydration, attachments, Reply/Reply All, drafts, and calendar invitation responses instead of falling back to another mailbox grant.

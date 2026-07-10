@@ -26,6 +26,7 @@ import {
   patchEmailMessagesLogicGatePlacement,
   removeCommunicationsSharedInbox,
   removeLogicGateGVICAssignments,
+  respondToCalendarInvite,
   saveEmailSignature,
   sendEmail,
   unarchiveEmailMessage,
@@ -52,6 +53,35 @@ test("communications message query omits empty values and encodes filters", () =
 test("communications folder query scopes shared inbox folder reads", () => {
   assert.equal(createFolderQuery({}), "");
   assert.equal(createFolderQuery({ companyID: " company-1 ", sharedInboxID: " shared-1 " }), "?company_id=company-1&shared_inbox_id=shared-1");
+});
+
+test("calendar RSVP uses message identity and shared mailbox scope", async () => {
+  const calls: Array<{ path: string; method: string; body: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      path: input.toString(),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return jsonResponse({ status: "responded", rsvp_status: "maybe", event_id: "event-1", calendar_id: "primary" });
+  };
+  try {
+    const response = await respondToCalendarInvite({
+      messageID: " message-1 ",
+      status: "maybe",
+      companyID: " company-1 ",
+      sharedInboxID: " shared-1 ",
+    });
+    assert.equal(response.rsvp_status, "maybe");
+    assert.deepEqual(calls, [{
+      path: "/v1/communications/calendar-invites/respond?company_id=company-1&shared_inbox_id=shared-1",
+      method: "POST",
+      body: { message_id: "message-1", status: "maybe" },
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("email signature helpers preserve exact personal and shared mailbox scope", async () => {
