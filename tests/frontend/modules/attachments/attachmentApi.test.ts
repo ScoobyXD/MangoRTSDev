@@ -1,15 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  fetchMangoAttachmentBlob,
   filterMangoResourceAttachments,
   groupMangoResourceAttachmentsByInformationID,
+  invalidateMangoResourceAttachmentsCache,
   linkMangoResourceAttachment,
   listMangoResourceAttachments,
   mangoEmailSignatureResourceID,
+  unlinkMangoResourceAttachment,
   type AttachmentRequestJSON,
   type MangoResourceAttachment,
   type MangoResourceAttachmentListResponse,
 } from "../../../../frontend/src/modules/attachments/attachmentApi.js";
+import { logout } from "../../../../frontend/src/auth/cognitoAuth.js";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (cause: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
 
 function resourceAttachment(
   attachmentID: string,
@@ -70,7 +84,7 @@ test("lists resource attachments through the encoded resource endpoint", async (
     "/v1/resources/node/node%2Fwith%20spaces/attachments?company_id=company%2Fid",
   );
   assert.equal(requestedMethod, "GET");
-  assert.equal(result, expected);
+  assert.deepEqual(result, expected);
   assert.equal(result.attachments[0]?.attachment?.original_filename, "attachment-1.txt");
 });
 
@@ -175,4 +189,166 @@ test("groups attachments by normalized information ID and preserves item order",
     "unassigned-missing",
   ]);
   assert.deepEqual(grouped.get("block-b")?.map((item) => item.attachment_id), ["block-b"]);
+});
+
+test("resource attachment metadata coalesces StrictMode-style reads and invalidates after unlink", async () => {
+  const firstLoad = deferred<MangoResourceAttachmentListResponse>();
+  let listCalls = 0;
+  let unlinkCalls = 0;
+  const underlyingRequest: AttachmentRequestJSON = async <T>(_path: string, init?: Parameters<AttachmentRequestJSON>[1]): Promise<T> => {
+    if (init?.method === "DELETE") {
+      unlinkCalls += 1;
+      return { status: "ok" } as T;
+    }
+    listCalls += 1;
+    if (listCalls === 1) return firstLoad.promise as Promise<T>;
+    return {
+      company_id: "company-1",
+      resource_type: "node",
+      resource_id: "node-1",
+      attachments: [resourceAttachment(`attachment-${listCalls}`)],
+    } as T;
+  };
+  const firstOwner: AttachmentRequestJSON = (path, init) => underlyingRequest(path, init);
+  const strictModeReplayOwner: AttachmentRequestJSON = (path, init) => underlyingRequest(path, init);
+  const input = { apiBase: "https://api.example.test", companyID: "company-1", resourceType: "node" as const, resourceID: "node-1" };
+
+  const first = listMangoResourceAttachments(firstOwner, input);
+  const replay = listMangoResourceAttachments(strictModeReplayOwner, input);
+  assert.equal(listCalls, 1);
+  firstLoad.resolve({
+    company_id: "company-1",
+    resource_type: "node",
+    resource_id: "node-1",
+    attachments: [resourceAttachment("attachment-1")],
+  });
+  assert.deepEqual((await first).attachments.map((item) => item.attachment_id), ["attachment-1"]);
+  assert.deepEqual((await replay).attachments.map((item) => item.attachment_id), ["attachment-1"]);
+  assert.equal((await listMangoResourceAttachments(strictModeReplayOwner, input)).attachments[0]?.attachment_id, "attachment-1");
+  assert.equal(listCalls, 1);
+
+  await unlinkMangoResourceAttachment(firstOwner, { ...input, attachmentID: "attachment-1" });
+  assert.equal(unlinkCalls, 1);
+  assert.equal((await listMangoResourceAttachments(strictModeReplayOwner, input)).attachments[0]?.attachment_id, "attachment-2");
+  assert.equal(listCalls, 2);
+  invalidateMangoResourceAttachmentsCache(firstOwner);
+});
+
+test("resource attachment metadata failures evict the shared request", async () => {
+  let calls = 0;
+  const request: AttachmentRequestJSON = async <T>(): Promise<T> => {
+    calls += 1;
+    if (calls === 1) throw new Error("temporary_failure");
+    return { company_id: "company-1", resource_type: "node", resource_id: "node-2", attachments: [] } as T;
+  };
+  const input = { companyID: "company-1", resourceType: "node" as const, resourceID: "node-2" };
+  await assert.rejects(listMangoResourceAttachments(request, input), /temporary_failure/);
+  await listMangoResourceAttachments(request, input);
+  assert.equal(calls, 2);
+});
+
+test("attachment Blob requests share bytes, detach aborted consumers, and isolate auth generations", async () => {
+  const originalFetch = globalThis.fetch;
+  const firstResponse = deferred<Response>();
+  let fetchCalls = 0;
+  globalThis.fetch = (async () => {
+    fetchCalls += 1;
+    if (fetchCalls === 1) return firstResponse.promise;
+    return new Response(new Blob([`bytes-${fetchCalls}`], { type: "image/png" }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const controller = new AbortController();
+    const abortedConsumer = fetchMangoAttachmentBlob("https://api.example.test", "company-1", "attachment-shared", "display", { signal: controller.signal });
+    const survivingConsumer = fetchMangoAttachmentBlob("https://api.example.test", "company-1", "attachment-shared", "display");
+    assert.equal(fetchCalls, 1);
+    controller.abort();
+    await assert.rejects(abortedConsumer, (cause: unknown) => cause instanceof DOMException && cause.name === "AbortError");
+    firstResponse.resolve(new Response(new Blob(["shared-bytes"], { type: "image/png" }), { status: 200 }));
+    assert.equal(await (await survivingConsumer).text(), "shared-bytes");
+    assert.equal(await (await fetchMangoAttachmentBlob("https://api.example.test", "company-1", "attachment-shared", "display")).text(), "shared-bytes");
+    assert.equal(fetchCalls, 1);
+
+    await fetchMangoAttachmentBlob("https://api.example.test", "company-1", "attachment-original", "original");
+    await fetchMangoAttachmentBlob("https://api.example.test", "company-1", "attachment-original", "original");
+    assert.equal(fetchCalls, 3, "original bytes are singleflight-only and are not retained");
+
+    logout();
+    await fetchMangoAttachmentBlob("https://api.example.test", "company-1", "attachment-shared", "display");
+    assert.equal(fetchCalls, 4, "a new auth generation cannot reuse prior-user bytes");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("StrictMode detach and immediate reattach preserve one shared Blob transfer", async () => {
+  const originalFetch = globalThis.fetch;
+  const response = deferred<Response>();
+  let fetchCalls = 0;
+  globalThis.fetch = (async () => {
+    fetchCalls += 1;
+    return response.promise;
+  }) as typeof fetch;
+  try {
+    const controller = new AbortController();
+    const detached = fetchMangoAttachmentBlob("https://api.example.test", "company-1", "attachment-strict", "display", { signal: controller.signal });
+    controller.abort();
+    const reattached = fetchMangoAttachmentBlob("https://api.example.test", "company-1", "attachment-strict", "display");
+    assert.equal(fetchCalls, 1);
+    response.resolve(new Response(new Blob(["strict-bytes"], { type: "image/png" }), { status: 200 }));
+    await assert.rejects(detached, (cause: unknown) => cause instanceof DOMException && cause.name === "AbortError");
+    assert.equal(await (await reattached).text(), "strict-bytes");
+    assert.equal(fetchCalls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("metadata and Blob callers reject an old auth generation after an in-flight response", async () => {
+  const metadataResponse = deferred<MangoResourceAttachmentListResponse>();
+  const request: AttachmentRequestJSON = async <T>() => metadataResponse.promise as Promise<T>;
+  const metadataRead = listMangoResourceAttachments(request, {
+    apiBase: "https://api.example.test/stale-auth",
+    companyID: "company-1",
+    resourceType: "node",
+    resourceID: "node-stale-auth",
+  });
+  logout();
+  metadataResponse.resolve({ company_id: "company-1", resource_type: "node", resource_id: "node-stale-auth", attachments: [] });
+  await assert.rejects(metadataRead, (cause: unknown) => cause instanceof DOMException && cause.name === "AbortError");
+  invalidateMangoResourceAttachmentsCache(request);
+
+  const originalFetch = globalThis.fetch;
+  const blobResponse = deferred<Response>();
+  globalThis.fetch = (async () => blobResponse.promise) as typeof fetch;
+  try {
+    const blobRead = fetchMangoAttachmentBlob("https://api.example.test", "company-1", "attachment-stale-auth", "display");
+    logout();
+    blobResponse.resolve(new Response(new Blob(["old-user-bytes"], { type: "image/png" }), { status: 200 }));
+    await assert.rejects(blobRead, (cause: unknown) => cause instanceof DOMException && cause.name === "AbortError");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("resource attachment metadata invalidation aborts an obsolete in-flight caller", async () => {
+  const firstResponse = deferred<MangoResourceAttachmentListResponse>();
+  let calls = 0;
+  const request: AttachmentRequestJSON = async <T>(): Promise<T> => {
+    calls += 1;
+    if (calls === 1) return firstResponse.promise as Promise<T>;
+    return { company_id: "company-1", resource_type: "node", resource_id: "node-invalidation", attachments: [] } as T;
+  };
+  const input = {
+    apiBase: "https://api.example.test/invalidation",
+    companyID: "company-1",
+    resourceType: "node" as const,
+    resourceID: "node-invalidation",
+  };
+  const staleRead = listMangoResourceAttachments(request, input);
+  invalidateMangoResourceAttachmentsCache(request, input);
+  firstResponse.resolve({ company_id: "company-1", resource_type: "node", resource_id: "node-invalidation", attachments: [] });
+  await assert.rejects(staleRead, (cause: unknown) => cause instanceof DOMException && cause.name === "AbortError");
+  await listMangoResourceAttachments(request, input);
+  assert.equal(calls, 2);
+  invalidateMangoResourceAttachmentsCache(request, input);
 });

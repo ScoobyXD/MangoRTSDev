@@ -188,6 +188,9 @@ func (r *MemoryRepo) applyResourceGVICAssignmentCommand(input ResourceGVICAssign
 		return ResourceGVICAssignmentMutationResult{}, err
 	}
 	effective := r.gvicEffectiveAssignmentsForResourceLocked(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
+	if keyValue.resourceType == EntityTypeNode && changed {
+		r.bumpNodeViewVersionLocked(keyValue.companyID, keyValue.resourceID)
+	}
 	return ResourceGVICAssignmentMutationResult{
 		CompanyID:            keyValue.companyID,
 		ResourceType:         keyValue.resourceType,

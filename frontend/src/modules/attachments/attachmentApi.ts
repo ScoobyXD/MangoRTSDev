@@ -1,4 +1,4 @@
-import { getApiAccessToken, isAuthEnabled, isTerminalAuthFailureActive, markTerminalAuthFailure } from "../../auth/cognitoAuth.js";
+import { getApiAccessToken, getAuthSessionCacheGeneration, isAuthEnabled, isTerminalAuthFailureActive, markTerminalAuthFailure } from "../../auth/cognitoAuth.js";
 import { requestJSON, type RequestJSONInit } from "../api/requestJSON.js";
 import {
   uploadBrowserAttachment,
@@ -37,8 +37,8 @@ export type MangoAttachment = {
   storage_checksum_algorithm?: string;
   storage_checksum_value?: string;
   storage_checksum_type?: string;
-  storage_bucket: string;
-  storage_key: string;
+  storage_bucket?: string;
+  storage_key?: string;
   original_width?: number;
   original_height?: number;
   source_kind: MangoAttachmentSourceKind;
@@ -95,6 +95,8 @@ export type UploadMangoAttachmentInput = {
 };
 
 export type ListMangoResourceAttachmentsInput = {
+  apiBase?: string;
+  cacheScope?: string;
   companyID: string;
   resourceType: MangoAttachmentResourceType;
   resourceID: string;
@@ -111,6 +113,98 @@ export type LinkMangoResourceAttachmentInput = UnlinkMangoResourceAttachmentInpu
   editorSurface?: string;
 };
 
+type ResourceAttachmentCacheEntry = {
+  authGeneration: number;
+  expiresAt: number;
+  value?: MangoResourceAttachmentListResponse;
+  inflight?: Promise<MangoResourceAttachmentListResponse>;
+};
+
+const RESOURCE_ATTACHMENT_CACHE_TTL_MS = 30_000;
+const resourceAttachmentCache = new Map<string, ResourceAttachmentCacheEntry>();
+const resourceAttachmentGeneration = new Map<string, number>();
+const ATTACHMENT_BLOB_CACHE_TTL_MS = 2 * 60_000;
+const ATTACHMENT_BLOB_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+type AttachmentBlobCacheEntry = {
+  abortTimer?: ReturnType<typeof setTimeout>;
+  authGeneration: number;
+  byteSize: number;
+  consumers: number;
+  controller: AbortController;
+  expiresAt: number;
+  lastUsedAt: number;
+  promise: Promise<Blob>;
+  settled: boolean;
+  variant: MangoAttachmentVariantType;
+};
+const attachmentBlobCache = new Map<string, AttachmentBlobCacheEntry>();
+
+function pruneAttachmentBlobCache(authGeneration: number): void {
+  const now = Date.now();
+  for (const [key, entry] of attachmentBlobCache) {
+    if (entry.authGeneration !== authGeneration || (entry.expiresAt > 0 && entry.expiresAt <= now)) {
+      if (entry.abortTimer) clearTimeout(entry.abortTimer);
+      if (!entry.settled) entry.controller.abort();
+      attachmentBlobCache.delete(key);
+    }
+  }
+  let retainedBytes = Array.from(attachmentBlobCache.values()).reduce((total, entry) => total + entry.byteSize, 0);
+  if (retainedBytes <= ATTACHMENT_BLOB_CACHE_MAX_BYTES) return;
+  const oldestFirst = Array.from(attachmentBlobCache.entries()).sort((left, right) => left[1].lastUsedAt - right[1].lastUsedAt);
+  for (const [key, entry] of oldestFirst) {
+    if (retainedBytes <= ATTACHMENT_BLOB_CACHE_MAX_BYTES) break;
+    if (entry.expiresAt === 0) continue;
+    attachmentBlobCache.delete(key);
+    retainedBytes -= entry.byteSize;
+  }
+}
+
+function cloneResourceAttachmentList(value: MangoResourceAttachmentListResponse): MangoResourceAttachmentListResponse {
+  return {
+    ...value,
+    attachments: (value.attachments ?? []).map((item) => ({
+      ...item,
+      attachment: item.attachment ? { ...item.attachment } : undefined,
+    })),
+  };
+}
+
+function resourceAttachmentCacheKey(input: ListMangoResourceAttachmentsInput): string {
+  const requestScope = input.apiBase?.trim() || input.cacheScope?.trim() || "default";
+  return `${requestScope}\u0000${input.companyID.trim()}\u0000${input.resourceType}\u0000${input.resourceID.trim()}`;
+}
+
+function readResourceAttachmentGeneration(cacheKey: string): number {
+  return resourceAttachmentGeneration.get(cacheKey) ?? 0;
+}
+
+function bumpResourceAttachmentGeneration(cacheKey: string): void {
+  resourceAttachmentGeneration.set(cacheKey, readResourceAttachmentGeneration(cacheKey) + 1);
+}
+
+export function invalidateMangoResourceAttachmentsCache(
+  request: AttachmentRequestJSON,
+  input?: Partial<ListMangoResourceAttachmentsInput>,
+): void {
+  void request;
+  const apiBase = input?.apiBase?.trim() ?? "";
+  const cacheScope = input?.cacheScope?.trim() ?? "";
+  const companyID = input?.companyID?.trim() ?? "";
+  const resourceType = input?.resourceType;
+  const resourceID = input?.resourceID?.trim() ?? "";
+  const keys = new Set([...resourceAttachmentCache.keys(), ...resourceAttachmentGeneration.keys()]);
+  for (const key of keys) {
+    const [cachedScope, cachedCompanyID, cachedResourceType, cachedResourceID] = key.split("\u0000");
+    if (apiBase && cachedScope !== apiBase) continue;
+    if (cacheScope && cachedScope !== cacheScope) continue;
+    if (companyID && cachedCompanyID !== companyID) continue;
+    if (resourceType && cachedResourceType !== resourceType) continue;
+    if (resourceID && cachedResourceID !== resourceID) continue;
+    bumpResourceAttachmentGeneration(key);
+    resourceAttachmentCache.delete(key);
+  }
+}
+
 export type MangoResourceAttachmentFilter = {
   relationshipKind?: MangoAttachmentRelationshipKind;
   editorSurface?: string;
@@ -120,10 +214,43 @@ export async function listMangoResourceAttachments(
   request: AttachmentRequestJSON,
   input: ListMangoResourceAttachmentsInput,
 ): Promise<MangoResourceAttachmentListResponse> {
+  const cacheKey = resourceAttachmentCacheKey(input);
+  const authGeneration = getAuthSessionCacheGeneration();
+  const invalidationGeneration = readResourceAttachmentGeneration(cacheKey);
+  const cached = resourceAttachmentCache.get(cacheKey);
+  if (cached?.authGeneration === authGeneration && cached.value && cached.expiresAt > Date.now()) return cloneResourceAttachmentList(cached.value);
+  if (cached?.authGeneration === authGeneration && cached.inflight) {
+    const value = await cached.inflight;
+    if (getAuthSessionCacheGeneration() !== authGeneration || readResourceAttachmentGeneration(cacheKey) !== invalidationGeneration) {
+      throw new DOMException("The attachment metadata read became stale.", "AbortError");
+    }
+    return cloneResourceAttachmentList(value);
+  }
+  if (cached) resourceAttachmentCache.delete(cacheKey);
   const query = new URLSearchParams({ company_id: input.companyID.trim() });
-  return request<MangoResourceAttachmentListResponse>(
+  const inflight = request<MangoResourceAttachmentListResponse>(
     `/v1/resources/${encodeURIComponent(input.resourceType)}/${encodeURIComponent(input.resourceID.trim())}/attachments?${query.toString()}`,
-  );
+  ).then((value) => {
+    if (getAuthSessionCacheGeneration() === authGeneration
+      && readResourceAttachmentGeneration(cacheKey) === invalidationGeneration
+      && resourceAttachmentCache.get(cacheKey)?.inflight === inflight) {
+      resourceAttachmentCache.set(cacheKey, {
+        authGeneration,
+        expiresAt: Date.now() + RESOURCE_ATTACHMENT_CACHE_TTL_MS,
+        value: cloneResourceAttachmentList(value),
+      });
+    }
+    return value;
+  }).catch((cause) => {
+    if (resourceAttachmentCache.get(cacheKey)?.inflight === inflight) resourceAttachmentCache.delete(cacheKey);
+    throw cause;
+  });
+  resourceAttachmentCache.set(cacheKey, { authGeneration, expiresAt: 0, inflight });
+  const value = await inflight;
+  if (getAuthSessionCacheGeneration() !== authGeneration || readResourceAttachmentGeneration(cacheKey) !== invalidationGeneration) {
+    throw new DOMException("The attachment metadata read became stale.", "AbortError");
+  }
+  return cloneResourceAttachmentList(value);
 }
 
 export async function unlinkMangoResourceAttachment(
@@ -139,6 +266,7 @@ export async function unlinkMangoResourceAttachment(
     `/v1/resources/${encodeURIComponent(input.resourceType)}/${encodeURIComponent(resourceID)}/attachments/${encodeURIComponent(attachmentID)}?${query.toString()}`,
     { method: "DELETE" },
   );
+  invalidateMangoResourceAttachmentsCache(request, input);
 }
 
 export async function linkMangoResourceAttachment(
@@ -164,6 +292,7 @@ export async function linkMangoResourceAttachment(
       },
     },
   );
+  invalidateMangoResourceAttachmentsCache(request, input);
   return response.resource_attachment;
 }
 
@@ -198,7 +327,9 @@ export async function uploadMangoAttachment(
   request: AttachmentRequestJSON,
   input: UploadMangoAttachmentInput,
 ): Promise<MangoAttachmentUploadResponse> {
-  return uploadBrowserAttachment(request, input);
+  const response = await uploadBrowserAttachment(request, input);
+  invalidateMangoResourceAttachmentsCache(request, input);
+  return response;
 }
 
 export function mangoAttachmentContentPath(companyID: string, attachmentID: string, variant: MangoAttachmentVariantType = "display"): string {
@@ -240,6 +371,61 @@ export async function fetchMangoAttachmentBlob(
   variant: MangoAttachmentVariantType = "original",
   options: { signal?: AbortSignal } = {},
 ): Promise<Blob> {
+  const authGeneration = getAuthSessionCacheGeneration();
+  pruneAttachmentBlobCache(authGeneration);
+  const cacheKey = [apiBase.trim(), companyID.trim(), String(authGeneration), attachmentID.trim(), variant].join("\u0000");
+  let entry = attachmentBlobCache.get(cacheKey);
+  if (!entry) {
+    const controller = new AbortController();
+    const promise = fetchMangoAttachmentBlobUncached(apiBase, companyID, attachmentID, variant, controller.signal);
+    entry = { authGeneration, byteSize: 0, consumers: 0, controller, expiresAt: 0, lastUsedAt: Date.now(), promise, settled: false, variant };
+    attachmentBlobCache.set(cacheKey, entry);
+    void promise.then((blob) => {
+      entry!.settled = true;
+      if (getAuthSessionCacheGeneration() !== authGeneration) {
+        if (attachmentBlobCache.get(cacheKey)?.promise === promise) attachmentBlobCache.delete(cacheKey);
+        return;
+      }
+      if (attachmentBlobCache.get(cacheKey)?.promise !== promise) return;
+      if (variant === "original" || blob.size > ATTACHMENT_BLOB_CACHE_MAX_BYTES) {
+        attachmentBlobCache.delete(cacheKey);
+        return;
+      }
+      entry!.byteSize = blob.size;
+      entry!.expiresAt = Date.now() + ATTACHMENT_BLOB_CACHE_TTL_MS;
+      entry!.lastUsedAt = Date.now();
+      pruneAttachmentBlobCache(authGeneration);
+    }).catch(() => {
+      entry!.settled = true;
+      if (attachmentBlobCache.get(cacheKey)?.promise === promise) attachmentBlobCache.delete(cacheKey);
+    });
+  }
+  if (entry.abortTimer) {
+    clearTimeout(entry.abortTimer);
+    entry.abortTimer = undefined;
+  }
+  entry.lastUsedAt = Date.now();
+  entry.consumers += 1;
+  return waitForAttachmentBlob(entry.promise, authGeneration, options.signal).finally(() => {
+    entry!.consumers = Math.max(0, entry!.consumers - 1);
+    if (entry!.consumers === 0 && !entry!.settled) {
+      entry!.abortTimer = setTimeout(() => {
+        entry!.abortTimer = undefined;
+        if (entry!.consumers !== 0 || entry!.settled) return;
+        entry!.controller.abort();
+        if (attachmentBlobCache.get(cacheKey) === entry) attachmentBlobCache.delete(cacheKey);
+      }, 0);
+    }
+  });
+}
+
+async function fetchMangoAttachmentBlobUncached(
+  apiBase: string,
+  companyID: string,
+  attachmentID: string,
+  variant: MangoAttachmentVariantType,
+  signal: AbortSignal,
+): Promise<Blob> {
   const headers = new Headers();
   if (isAuthEnabled()) {
     if (isTerminalAuthFailureActive()) throw new Error("terminal_auth_failure_active");
@@ -253,7 +439,7 @@ export async function fetchMangoAttachmentBlob(
   const response = await fetch(`${apiBase}${mangoAttachmentContentPath(companyID, attachmentID, variant)}`, {
     method: "GET",
     headers,
-    signal: options.signal,
+    signal,
   });
   if (response.status === 401 && isAuthEnabled()) {
     markTerminalAuthFailure("http_401");
@@ -261,6 +447,20 @@ export async function fetchMangoAttachmentBlob(
   }
   if (!response.ok) throw new Error(`attachment_content_${response.status}`);
   return response.blob();
+}
+
+function waitForAttachmentBlob(inflight: Promise<Blob>, authGeneration: number, signal?: AbortSignal): Promise<Blob> {
+  const checked = inflight.then((blob) => {
+    if (getAuthSessionCacheGeneration() !== authGeneration) throw new DOMException("The auth session changed.", "AbortError");
+    return blob;
+  });
+  if (!signal) return checked;
+  if (signal.aborted) return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+  return new Promise<Blob>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException("The operation was aborted.", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    void checked.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 export async function loadMangoAttachmentObjectURL(

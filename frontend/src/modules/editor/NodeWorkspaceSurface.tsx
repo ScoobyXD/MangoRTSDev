@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
+import { isAbortError } from "../api/requestJSON";
 import { humanLabelOrFallback } from "../entityLabels.js";
 import { getLogicGateRecordSingleFlight } from "../logic-gate-map/LogicGateRecordStore.js";
 import type { LogicGateRecord } from "../logic-gate-map/shared";
@@ -22,6 +23,7 @@ import {
   fileFromDataURL,
   filterMangoResourceAttachments,
   groupMangoResourceAttachmentsByInformationID,
+  invalidateMangoResourceAttachmentsCache,
   listMangoResourceAttachments,
   unlinkMangoResourceAttachment,
   type MangoAttachmentUploadProgress,
@@ -574,8 +576,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [nodeID, unseenChanges]);
 
   const refreshNodeAttachments = useCallback(() => {
+    invalidateMangoResourceAttachmentsCache(requestJSON, {
+      apiBase,
+      companyID,
+      resourceType: "node",
+      resourceID: nodeID,
+    });
     setNodeAttachmentsRefreshKey((key) => key + 1);
-  }, []);
+  }, [apiBase, companyID, nodeID, requestJSON]);
 
   const removeNodeAttachment = useCallback(async (resourceAttachment: MangoResourceAttachment) => {
     if (!canEdit) return;
@@ -682,6 +690,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     setNodeAttachmentsLoading(true);
     setNodeAttachmentsLoadError("");
     void listMangoResourceAttachments(requestJSON, {
+      apiBase,
       companyID,
       resourceType: "node",
       resourceID: nodeID,
@@ -691,6 +700,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       })
       .catch((cause) => {
         if (cancelled) return;
+        if (isAbortError(cause)) return;
         const message = cause instanceof Error ? cause.message : "failed_to_load_attachments";
         setNodeResourceAttachments([]);
         setNodeAttachmentsLoadError(message);
@@ -700,7 +710,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         if (!cancelled) setNodeAttachmentsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [companyID, nodeAttachmentsRefreshKey, nodeID, onError, requestJSON]);
+  }, [apiBase, companyID, nodeAttachmentsRefreshKey, nodeID, onError, requestJSON]);
 
   useEffect(() => {
     if (canEdit) return;
@@ -816,8 +826,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       .then((payload) => {
         if (!cancelled) setNodeProjectRelationships(payload.relationships ?? []);
       })
-      .catch(() => {
-        if (!cancelled) setNodeProjectRelationships([]);
+      .catch((cause) => {
+        if (!cancelled && !isAbortError(cause)) setNodeProjectRelationships([]);
       });
     return () => { cancelled = true; };
   }, [companyID, nodeID, projectRelationshipRefreshKey]);

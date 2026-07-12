@@ -140,6 +140,11 @@ export function isTerminalAuthFailureError(cause: unknown): cause is TerminalAut
     || (cause instanceof Error && cause.name === "TerminalAuthFailureError");
 }
 
+export function isAbortError(cause: unknown): boolean {
+  return cause instanceof DOMException && cause.name === "AbortError"
+    || cause instanceof Error && cause.name === "AbortError";
+}
+
 export function isHTTPNotFoundError(cause: unknown): boolean {
   if (cause instanceof APIHTTPError) return cause.status === 404;
   if (!(cause instanceof Error)) return false;

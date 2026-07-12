@@ -3,14 +3,15 @@ package store
 import (
 	"miraeopus/backend/internal/domain"
 	"strings"
+	"sync"
 )
 
 type nodeViewLoader interface {
 	GetNodeDetailsSummary(companyID, nodeID string) (domain.NodeDetails, error)
 	ListNodeProjections(companyID, nodeID string) ([]domain.NodeProjection, error)
 	ListNodeLogicGateAssignments(companyID, nodeID string) ([]domain.NodeLogicGateAssignment, error)
+	ListResourceGVICAssignments(companyID, resourceType, resourceID string) ([]domain.ResourceGVICAssignment, error)
 	ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error)
-	MarkNodeContentChangeSeen(input NodeContentChangeSeenInput) (int, error)
 }
 
 type logicGateViewLoader interface {
@@ -34,45 +35,55 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		return domain.NodeView{}, ErrInvalid
 	}
 
-	details, err := loader.GetNodeDetailsSummary(companyID, nodeID)
-	if err != nil {
-		return domain.NodeView{}, err
+	var (
+		details         domain.NodeDetails
+		projections     []domain.NodeProjection
+		assignments     []domain.NodeLogicGateAssignment
+		gvicAssignments []domain.ResourceGVICAssignment
+		contentChanges  = []domain.NodeContentChange{}
+		detailsErr      error
+		projectionsErr  error
+		assignmentsErr  error
+		gvicErr         error
+		changesErr      error
+		waitGroup       sync.WaitGroup
+	)
+	userID := strings.TrimSpace(input.UserID)
+	callCount := 4
+	if userID != "" {
+		callCount++
 	}
-	projections, err := loader.ListNodeProjections(companyID, nodeID)
-	if err != nil {
-		return domain.NodeView{}, err
-	}
-	assignments, err := loader.ListNodeLogicGateAssignments(companyID, nodeID)
-	if err != nil {
-		return domain.NodeView{}, err
-	}
-
-	contentChanges := []domain.NodeContentChange{}
-	if userID := strings.TrimSpace(input.UserID); userID != "" {
-		contentChanges, err = loader.ListUnseenNodeContentChanges(NodeContentChangeListInput{
-			CompanyID: companyID,
-			NodeID:    nodeID,
-			UserID:    userID,
-		})
-		if err != nil {
-			return domain.NodeView{}, err
-		}
-		changedProjectionIDs := map[string]bool{}
-		for _, change := range contentChanges {
-			changedProjectionIDs[change.InformationID] = true
-		}
-		for _, projection := range projections {
-			if projection.Type != "Text box" || changedProjectionIDs[projection.InformationID] {
-				continue
-			}
-			if _, err := loader.MarkNodeContentChangeSeen(NodeContentChangeSeenInput{
+	waitGroup.Add(callCount)
+	go func() {
+		defer waitGroup.Done()
+		details, detailsErr = loader.GetNodeDetailsSummary(companyID, nodeID)
+	}()
+	go func() {
+		defer waitGroup.Done()
+		projections, projectionsErr = loader.ListNodeProjections(companyID, nodeID)
+	}()
+	go func() {
+		defer waitGroup.Done()
+		assignments, assignmentsErr = loader.ListNodeLogicGateAssignments(companyID, nodeID)
+	}()
+	go func() {
+		defer waitGroup.Done()
+		gvicAssignments, gvicErr = loader.ListResourceGVICAssignments(companyID, EntityTypeNode, nodeID)
+	}()
+	if userID != "" {
+		go func() {
+			defer waitGroup.Done()
+			contentChanges, changesErr = loader.ListUnseenNodeContentChanges(NodeContentChangeListInput{
 				CompanyID: companyID,
 				NodeID:    nodeID,
-				ChangeID:  nodeProjectionContentChangeID(projection.InformationID, NodeContentChangeAddition),
 				UserID:    userID,
-			}); err != nil {
-				return domain.NodeView{}, err
-			}
+			})
+		}()
+	}
+	waitGroup.Wait()
+	for _, err := range []error{detailsErr, projectionsErr, assignmentsErr, gvicErr, changesErr} {
+		if err != nil {
+			return domain.NodeView{}, err
 		}
 	}
 	if details.Information == nil {
@@ -87,6 +98,9 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 	if assignments == nil {
 		assignments = []domain.NodeLogicGateAssignment{}
 	}
+	if gvicAssignments == nil {
+		gvicAssignments = []domain.ResourceGVICAssignment{}
+	}
 
 	return domain.NodeView{
 		CompanyID:            companyID,
@@ -96,6 +110,7 @@ func loadNodeView(loader nodeViewLoader, input NodeViewInput) (domain.NodeView, 
 		Projections:          projections,
 		Relationships:        details.Relationships,
 		LogicGateAssignments: assignments,
+		GVICAssignments:      gvicAssignments,
 		ContentChanges:       contentChanges,
 		InformationCount:     details.InformationCount,
 		ProjectionCount:      len(projections),

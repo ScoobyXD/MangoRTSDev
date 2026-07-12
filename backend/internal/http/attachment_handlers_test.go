@@ -19,11 +19,13 @@ import (
 type fakeAttachmentObjectStorage struct {
 	bucket  string
 	objects map[string]fakeAttachmentObject
+	getKeys []string
 }
 
 type fakeAttachmentObject struct {
-	contentType string
-	body        []byte
+	contentType    string
+	body           []byte
+	reportedLength *int64
 }
 
 func newFakeAttachmentObjectStorage() *fakeAttachmentObjectStorage {
@@ -62,15 +64,39 @@ func (s *fakeAttachmentObjectStorage) PutObject(ctx context.Context, input Attac
 }
 
 func (s *fakeAttachmentObjectStorage) GetObject(ctx context.Context, input AttachmentGetObjectInput) (AttachmentGetObjectOutput, error) {
+	s.getKeys = append(s.getKeys, input.Key)
 	object, ok := s.objects[input.Key]
 	if !ok {
 		return AttachmentGetObjectOutput{}, ErrAttachmentObjectNotFound
 	}
+	length := int64(len(object.body))
+	if object.reportedLength != nil {
+		length = *object.reportedLength
+	}
 	return AttachmentGetObjectOutput{
 		ContentType:   object.contentType,
-		ContentLength: int64(len(object.body)),
+		ContentLength: length,
 		Body:          io.NopCloser(bytes.NewReader(object.body)),
 	}, nil
+}
+
+func TestAttachmentContentRejectsStorageLengthMismatchBeforeStreaming(t *testing.T) {
+	repo, server, storage, companyID, allowed, _, node := newAttachmentRouteTestFixture(t)
+	attachmentID := seedAttachmentForTest(t, repo, storage, companyID, node.NodeID, allowed)
+	attachment, err := repo.GetAttachment(companyID, attachmentID)
+	if err != nil {
+		t.Fatalf("GetAttachment: %v", err)
+	}
+	object := storage.objects[attachment.StorageKey]
+	wrong := int64(len(object.body) + 1)
+	object.reportedLength = &wrong
+	storage.objects[attachment.StorageKey] = object
+	req := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet, "/v1/attachments/"+attachmentID+"/content?company_id="+companyID, nil), allowed, companyID, domain.RoleCompanyUser)
+	recorder := httptest.NewRecorder()
+	server.Routes().ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusBadGateway || !strings.Contains(recorder.Body.String(), "attachment_content_length_mismatch") {
+		t.Fatalf("length mismatch status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
 }
 
 func TestLegacyAttachmentUploadRouteRejectsBrowserBytes(t *testing.T) {
@@ -109,6 +135,83 @@ func TestAttachmentContentRequiresLinkedResourceAccess(t *testing.T) {
 	handler.ServeHTTP(deniedRec, deniedReq)
 	if deniedRec.Code != http.StatusNotFound {
 		t.Fatalf("denied content status = %d body=%s", deniedRec.Code, deniedRec.Body.String())
+	}
+}
+
+func TestAttachmentContentConditionalRequestAuthorizesBefore304AndSkipsStorage(t *testing.T) {
+	repo, server, storage, companyID, allowed, denied, node := newAttachmentRouteTestFixture(t)
+	attachmentID := seedAttachmentForTest(t, repo, storage, companyID, node.NodeID, allowed)
+	path := "/v1/attachments/" + attachmentID + "/content?company_id=" + companyID + "&variant=display"
+
+	firstReq := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet, path, nil), allowed, companyID, domain.RoleCompanyUser)
+	first := httptest.NewRecorder()
+	server.Routes().ServeHTTP(first, firstReq)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first content status = %d body=%s", first.Code, first.Body.String())
+	}
+	etag := first.Header().Get("ETag")
+	if etag == "" || first.Header().Get("Last-Modified") == "" ||
+		first.Header().Get("Cache-Control") != "private, max-age=0, no-cache, must-revalidate" ||
+		first.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("content cache/security headers = %#v", first.Header())
+	}
+	storageReads := len(storage.getKeys)
+
+	notModifiedReq := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet, path, nil), allowed, companyID, domain.RoleCompanyUser)
+	notModifiedReq.Header.Set("If-None-Match", etag)
+	notModified := httptest.NewRecorder()
+	server.Routes().ServeHTTP(notModified, notModifiedReq)
+	if notModified.Code != http.StatusNotModified || len(storage.getKeys) != storageReads || notModified.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("conditional response status=%d reads=%d headers=%#v", notModified.Code, len(storage.getKeys), notModified.Header())
+	}
+
+	deniedReq := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet, path, nil), denied, companyID, domain.RoleCompanyUser)
+	deniedReq.Header.Set("If-None-Match", etag)
+	deniedResponse := httptest.NewRecorder()
+	server.Routes().ServeHTTP(deniedResponse, deniedReq)
+	if deniedResponse.Code != http.StatusNotFound || len(storage.getKeys) != storageReads {
+		t.Fatalf("unauthorized conditional status=%d reads=%d", deniedResponse.Code, len(storage.getKeys))
+	}
+}
+
+func TestAttachmentContentMissingDerivativeObjectFallsBackToOriginal(t *testing.T) {
+	repo, server, storage, companyID, allowed, _, node := newAttachmentRouteTestFixture(t)
+	attachmentID := seedAttachmentForTest(t, repo, storage, companyID, node.NodeID, allowed)
+	variantSHA := strings.Repeat("a", 64)
+	generation, width, height := 1, 100, 80
+	if _, err := repo.UpsertAttachmentVariants(context.Background(), companyID, []store.AttachmentVariantInput{{
+		AttachmentID: attachmentID, VariantType: store.AttachmentVariantDisplay, MimeType: "image/jpeg", ByteSize: 123,
+		SHA256: &variantSHA, GenerationVersion: &generation, Width: &width, Height: &height,
+		StorageBucket: storage.bucket, StorageKey: "missing-display-object",
+	}}); err != nil {
+		t.Fatalf("UpsertAttachmentVariants: %v", err)
+	}
+	req := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet,
+		"/v1/attachments/"+attachmentID+"/content?company_id="+companyID+"&variant=display", nil),
+		allowed, companyID, domain.RoleCompanyUser)
+	recorder := httptest.NewRecorder()
+	server.Routes().ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "hello attachment" {
+		t.Fatalf("fallback status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
+	if len(storage.getKeys) != 2 || storage.getKeys[0] != "missing-display-object" || storage.getKeys[1] == "missing-display-object" {
+		t.Fatalf("fallback storage reads = %#v", storage.getKeys)
+	}
+}
+
+func TestAttachmentMetadataDoesNotExposeStorageCoordinates(t *testing.T) {
+	repo, server, storage, companyID, allowed, _, node := newAttachmentRouteTestFixture(t)
+	attachmentID := seedAttachmentForTest(t, repo, storage, companyID, node.NodeID, allowed)
+	req := attachmentRequestWithActor(httptest.NewRequest(http.MethodGet,
+		"/v1/attachments/"+attachmentID+"?company_id="+companyID, nil), allowed, companyID, domain.RoleCompanyUser)
+	recorder := httptest.NewRecorder()
+	server.Routes().ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("metadata status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "storage_bucket") || strings.Contains(recorder.Body.String(), "storage_key") ||
+		strings.Contains(recorder.Body.String(), storage.bucket) {
+		t.Fatalf("metadata exposed storage coordinates: %s", recorder.Body.String())
 	}
 }
 

@@ -16,7 +16,7 @@ import {
 import { LOGIC_GATE_MAP_EXPLORER_CONTEXT_KEY_PREFIX, getNodeTitle as getLogicGateTitle, toLogicGateCanvasRecord, type LogicGateGVICAssignment, type LogicGateGVICRole, type LogicGateGVICPrincipalType, type LogicGateRecord } from "../logic-gate-map/shared";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_FRAME_LINK_GRAPH_UPDATED, EVENT_LOGIC_GATE_MAP_SELECTION_UPDATED, EVENT_NODE_MAP_SELECTION_UPDATED } from "../node-map/eventbus";
 import { FRAME_LINKS_KEY, FRAME_REGISTRY_KEY, readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveLinkedFrameByKindFromGraph } from "../linkingGraph";
-import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeContentChangesSingleFlight, getNodeEditorSequenceSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../node-map/NodeRecordStore";
+import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeContentChangesSingleFlight, getNodeGVICAssignmentsSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem } from "../node-map/NodeRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeMapPositionsInNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../node-map/NodeRelationshipGraph";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
 import { buildLinkedNodePayloadFromSourceSide } from "../node-map/relationshipProjection";
@@ -24,7 +24,7 @@ import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingle
 import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gate-map/LogicGateRelationshipGraph";
 import { patchLogicGateGVICAssignmentsInCommunicationsWorkspaceCache } from "../communications/communicationsApi";
 import { loadMangoAttachmentObjectURL } from "../attachments/attachmentApi";
-import { createRequestJSON } from "../api/requestJSON";
+import { createRequestJSON, isAbortError } from "../api/requestJSON";
 import { clearResourceMissing, isTerminalResourceNotFoundError } from "../api/missingResources";
 import { hasSequenceGap, isNewerSequence, readIncomingSequence, type ContextMutationEnvelope } from "../contextSyncContract";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange, type SelectionIntent } from "../selectionCoordinator";
@@ -378,8 +378,8 @@ const ProjectRelationshipsSurface: React.FC<{
       .then((payload) => {
         if (!cancelled) setRelationships(payload.relationships ?? []);
       })
-      .catch(() => {
-        if (!cancelled) setRelationships([]);
+      .catch((cause) => {
+        if (!cancelled && !isAbortError(cause)) setRelationships([]);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -647,6 +647,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const editingTitleRef = useRef<HTMLSpanElement | null>(null);
   const editingTitleDraftRef = useRef("");
   const editorDocumentRef = useRef<HTMLDivElement | null>(null);
+  const attachmentHydrationCleanupRef = useRef<(() => void) | null>(null);
   const editorHeaderRef = useRef<HTMLDivElement | null>(null);
   const activeTabRef = useRef<EditorTabID>("editor");
   const restoringScrollRef = useRef(false);
@@ -674,6 +675,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const nodeWorkspaceSaveControllerRef = useRef<NodeWorkspaceSaveController | null>(null);
   const autoSaveVersionTimerRef = useRef<number | null>(null);
   const saveVersionStatusTimerRef = useRef<number | null>(null);
+  const saveVersionsRequestRef = useRef(0);
   const autoSaveVersionBusyRef = useRef(false);
   const lastAutoSaveVersionSignatureRef = useRef("");
   const collaborationClientIDRef = useRef(createEditorCollaborationClientID());
@@ -865,9 +867,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setSelectedSaveVersionID("");
       return;
     }
+    const requestID = saveVersionsRequestRef.current + 1;
+    saveVersionsRequestRef.current = requestID;
     setSaveVersionsLoading(true);
     try {
       const payload = await requestJSON<EditorSaveVersionsPayload>(`${editorSaveVersionsPath(resourceType, resourceID)}?company_id=${encodeURIComponent(companyID)}`);
+      if (saveVersionsRequestRef.current !== requestID) return;
       const versions = payload.versions ?? [];
       setSaveVersions(versions);
       setSelectedSaveVersionID((current) => {
@@ -875,28 +880,35 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         return versions[0]?.save_id ?? "";
       });
     } catch (cause) {
+      if (saveVersionsRequestRef.current !== requestID) return;
       setSaveVersions([]);
       setSelectedSaveVersionID("");
       setError(cause instanceof Error ? cause.message : "failed_to_load_save_versions");
     } finally {
-      setSaveVersionsLoading(false);
+      if (saveVersionsRequestRef.current === requestID) setSaveVersionsLoading(false);
     }
   }, [companyID, linkedEntityKind, linkedNodeID, requestJSON]);
 
   useEffect(() => {
     const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
     const resourceID = linkedNodeID.trim();
+    saveVersionsRequestRef.current += 1;
+    setSaveVersions([]);
+    setSelectedSaveVersionID("");
+    setSaveVersionsLoading(false);
+    setSaveVersionStatus("");
     if (!companyID || !resourceType || !resourceID || linkedEntityAccessDenied) {
-      setSaveVersions([]);
-      setSelectedSaveVersionID("");
-      setSaveVersionStatus("");
       setSaveVersionIntervalMinutes(EDITOR_SAVE_VERSION_DEFAULT_INTERVAL_MINUTES);
       return;
     }
     setSaveVersionIntervalMinutes(readEditorSaveIntervalMinutes(companyID, resourceType, resourceID));
     lastAutoSaveVersionSignatureRef.current = "";
+  }, [companyID, linkedEntityAccessDenied, linkedEntityKind, linkedNodeID]);
+
+  useEffect(() => {
+    if (activeTab !== "save-settings" || linkedEntityAccessDenied) return;
     void loadEditorSaveVersions();
-  }, [companyID, linkedEntityAccessDenied, linkedEntityKind, linkedNodeID, loadEditorSaveVersions]);
+  }, [activeTab, linkedEntityAccessDenied, loadEditorSaveVersions]);
 
   const updateSaveVersionInterval = useCallback((minutes: number) => {
     const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
@@ -1105,9 +1117,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     const restoredScrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
     if (element) {
       const nextHTML = deserializeEditorDocumentHTML(text);
+      attachmentHydrationCleanupRef.current?.();
+      attachmentHydrationCleanupRef.current = null;
       if (element.innerHTML !== nextHTML) element.innerHTML = nextHTML;
       if (selectionOffsets) setEditorSelectionByOffsets(element, selectionOffsets.start, selectionOffsets.end);
-      hydrateEditorAttachmentImageFrames(element, (attachmentID, variant, options) => (
+      attachmentHydrationCleanupRef.current = hydrateEditorAttachmentImageFrames(element, (attachmentID, variant, options) => (
         loadMangoAttachmentObjectURL(apiBase, companyID, attachmentID, variant, options)
       ));
       element.scrollTop = restoredScrollTop;
@@ -1246,6 +1260,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setSelectionHighlightColor(null);
     restoringScrollRef.current = false;
     if (editorDocumentRef.current) {
+      attachmentHydrationCleanupRef.current?.();
+      attachmentHydrationCleanupRef.current = null;
       editorDocumentRef.current.innerHTML = "";
       editorDocumentRef.current.scrollTop = 0;
     }
@@ -2012,17 +2028,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setError("");
       if (resourceType === "node") {
         invalidateNodeRecordStoreCaches(apiBase, companyID, resourceID);
-        const [projections, contentChanges, editorSequence] = await Promise.all([
+        const [projections, contentChanges] = await Promise.all([
           getNodeInformationProjectionSingleFlight(apiBase, companyID, resourceID),
           getNodeContentChangesSingleFlight(apiBase, companyID, resourceID),
-          getNodeEditorSequenceSingleFlight(apiBase, companyID, resourceID),
         ]);
-        if (!isCurrentTarget() || !isFreshEditorSnapshot(realtimeScope, editorSequence, minimumSequence)) return;
+        if (!isCurrentTarget()) return;
         setNodeWorkspaceProjections(projections);
         setNodeWorkspaceLoadedNodeID(resourceID);
         setNodeContentChanges(contentChanges);
         setNodeContentChangesLoadedNodeID(resourceID);
-        rememberEditorProjectionSequence(realtimeScope, editorSequence);
         setEditorSnapshotLoadedScope(realtimeScope);
         return;
       }
@@ -2101,7 +2115,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setSelectedSaveVersionID(version.save_id);
       lastAutoSaveVersionSignatureRef.current = editorSaveVersionSignature(version) || currentEditorVersionSignature();
       showSaveVersionStatus(`${editorSaveVersionKindLabel(saveKind)} saved at ${formatEditorSaveVersionTimestamp(version.created_timestamp)}`);
-      void loadEditorSaveVersions();
+      if (activeTabRef.current === "save-settings") void loadEditorSaveVersions();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "failed_to_save_version";
       if (saveKind === "manual") setError(message);
@@ -2294,6 +2308,11 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (remoteCollaborationTimerRef.current !== null) window.clearTimeout(remoteCollaborationTimerRef.current);
     if (saveVersionStatusTimerRef.current !== null) window.clearTimeout(saveVersionStatusTimerRef.current);
     if (autoSaveVersionTimerRef.current !== null) window.clearInterval(autoSaveVersionTimerRef.current);
+  }, []);
+
+  useEffect(() => () => {
+    attachmentHydrationCleanupRef.current?.();
+    attachmentHydrationCleanupRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -2519,6 +2538,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setSelectionInlineFormat({ bold: false, underline: false });
       setSelectionHighlightColor(null);
       if (editorDocumentRef.current) {
+        attachmentHydrationCleanupRef.current?.();
+        attachmentHydrationCleanupRef.current = null;
         editorDocumentRef.current.innerHTML = "";
         editorDocumentRef.current.scrollTop = 0;
       }
@@ -2587,15 +2608,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           return;
         }
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
-        const [details, projections, contentChanges, editorSequence, gvicPayload] = await Promise.all([
+        const [details, projections, contentChanges, gvicAssignments] = await Promise.all([
           getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeContentChangesSingleFlight(apiBase, companyID, linkedNodeID),
-          getNodeEditorSequenceSingleFlight(apiBase, companyID, linkedNodeID),
-          requestJSON<ResourceGVICPayload>(`/v1/resources/node/${encodeURIComponent(linkedNodeID)}/gvic?company_id=${encodeURIComponent(companyID)}`),
+          getNodeGVICAssignmentsSingleFlight(apiBase, companyID, linkedNodeID),
         ]);
         const realtimeScope = editorRealtimeScope("node", linkedNodeID);
-        if (!isCurrentLinkedLoad() || !isFreshEditorSnapshot(realtimeScope, editorSequence)) return;
+        if (!isCurrentLinkedLoad()) return;
         setLinkedEntityCanEdit(canEditResourceAccess(details));
         setLinkedEntityCanAdmin(canAdminResourceAccess(details));
         setLinkedNodeTitle((current) => preserveNodeTitle(getNodeTitle(details.node), current, linkedNodeID));
@@ -2604,13 +2624,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
         setNodeLogicGateIDs(details.node.logic_gate_ids ?? []);
         setNodeAccounts(details.node.accounts ?? []);
-        setNodeGVICAssignments(gvicPayload.gvic_assignments ?? []);
+        setNodeGVICAssignments(gvicAssignments);
         applyLogicGateGVICAssignments([], "");
         setNodeWorkspaceProjections(projections);
         setNodeWorkspaceLoadedNodeID(linkedNodeID);
         setNodeContentChanges(contentChanges);
         setNodeContentChangesLoadedNodeID(linkedNodeID);
-        rememberEditorProjectionSequence(realtimeScope, editorSequence);
         setEditorSnapshotLoadedScope(realtimeScope);
         const currentInformation = details.information.length > 0
           ? details.information
@@ -2640,6 +2659,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setLinkedNodeHistoryRows(historyRows);
       } catch (cause) {
         if (!cancelled) {
+          if (isAbortError(cause)) return;
           const message = linkedEntityLoadErrorMessage(cause, linkedEntityKind);
           if (message === LINKED_NODE_ACCESS_DENIED_MESSAGE || message === LINKED_ENTITY_NOT_FOUND_MESSAGE) {
             clearVisibleDocumentForSelection();

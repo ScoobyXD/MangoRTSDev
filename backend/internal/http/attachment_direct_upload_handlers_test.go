@@ -45,6 +45,16 @@ type fakeAttachmentDirectUploadStorage struct {
 	operations   []string
 }
 
+type fakeAttachmentImageVariantEnsurer struct {
+	calls int
+	err   error
+}
+
+func (f *fakeAttachmentImageVariantEnsurer) EnsureImageVariants(_ context.Context, _ domain.Attachment) ([]domain.AttachmentVariant, error) {
+	f.calls++
+	return nil, f.err
+}
+
 func newFakeAttachmentDirectUploadStorage() *fakeAttachmentDirectUploadStorage {
 	return &fakeAttachmentDirectUploadStorage{
 		bucket: "direct-upload-test-bucket",
@@ -417,6 +427,8 @@ func TestAttachmentDirectUploadPolicyAndIntentBoundaries(t *testing.T) {
 
 func TestAttachmentDirectUploadSingleCompletionIsVerifiedAndIdempotent(t *testing.T) {
 	fixture := newAttachmentDirectUploadTestFixture(t)
+	variantEnsurer := &fakeAttachmentImageVariantEnsurer{err: errors.New("bounded derivative failure")}
+	fixture.server.attachmentVariantEnsurer = variantEnsurer
 	shaHex := directUploadTestSHA256Hex("single-completion")
 	payload := attachmentDirectUploadIntentPayload(fixture.node.NodeID, "single-completion", 19, shaHex)
 	created := createAttachmentDirectUploadIntent(t, fixture, payload)
@@ -482,6 +494,9 @@ func TestAttachmentDirectUploadSingleCompletionIsVerifiedAndIdempotent(t *testin
 	}
 	if replayed.Attachment["attachment_id"] != completed.Attachment["attachment_id"] {
 		t.Fatalf("replayed completion created another attachment: first=%#v second=%#v", completed.Attachment, replayed.Attachment)
+	}
+	if variantEnsurer.calls != 2 {
+		t.Fatalf("best-effort variant attempts = %d, want first completion plus completed replay", variantEnsurer.calls)
 	}
 }
 

@@ -1138,6 +1138,7 @@ func (r *MemoryRepo) setResourceDefaultAccessLocked(companyID, entityType, entit
 		}
 		node.DefaultAccess = defaultAccess
 		r.nodes[key(companyID, entityID)] = node
+		r.bumpNodeViewVersionLocked(companyID, entityID)
 	case EntityTypeLogicGate:
 		gate, ok := r.logicGates[key(companyID, entityID)]
 		if !ok {

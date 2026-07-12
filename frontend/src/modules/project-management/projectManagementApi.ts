@@ -1,4 +1,4 @@
-import { apiFetchJSON } from "../../auth/cognitoAuth.js";
+import { apiFetchJSON, getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 import type { Account } from "../accounts/accountsApi.js";
 
 export type ProjectManagementEntityType = "node" | "logic_gate";
@@ -158,6 +158,48 @@ export type ProjectRelationshipMutationResponse = {
   relationship?: ProjectRelationshipProjection;
   deleted_id?: string;
 };
+
+type ProjectRelationshipReadCacheEntry = {
+  authGeneration: number;
+  expiresAt: number;
+  value?: ProjectRelationshipProjection[];
+  inflight?: Promise<ProjectRelationshipProjection[]>;
+};
+
+const PROJECT_RELATIONSHIP_CACHE_TTL_MS = 30_000;
+const projectRelationshipReadCache = new Map<string, ProjectRelationshipReadCacheEntry>();
+const projectRelationshipReadGeneration = new Map<string, number>();
+
+function readProjectRelationshipGeneration(cacheKey: string): number {
+  return projectRelationshipReadGeneration.get(cacheKey) ?? 0;
+}
+
+function projectRelationshipReadKey(input: { companyID: string; resourceType: "logic_gate" | "node"; resourceID: string }): string {
+  return `${input.companyID.trim()}\u0000${input.resourceType}\u0000${input.resourceID.trim()}`;
+}
+
+function cloneProjectRelationships(value: readonly ProjectRelationshipProjection[]): ProjectRelationshipProjection[] {
+  return value.map((relationship) => ({ ...relationship }));
+}
+
+export function invalidateProjectRelationshipsForResource(input?: {
+  companyID?: string;
+  resourceType?: "logic_gate" | "node";
+  resourceID?: string;
+}): void {
+  const companyID = input?.companyID?.trim() ?? "";
+  const resourceType = input?.resourceType;
+  const resourceID = input?.resourceID?.trim() ?? "";
+  const keys = new Set([...projectRelationshipReadCache.keys(), ...projectRelationshipReadGeneration.keys()]);
+  for (const key of keys) {
+    const [cachedCompanyID, cachedResourceType, cachedResourceID] = key.split("\u0000");
+    if (companyID && cachedCompanyID !== companyID) continue;
+    if (resourceType && cachedResourceType !== resourceType) continue;
+    if (resourceID && cachedResourceID !== resourceID) continue;
+    projectRelationshipReadGeneration.set(key, readProjectRelationshipGeneration(key) + 1);
+    projectRelationshipReadCache.delete(key);
+  }
+}
 
 export async function fetchProjectManagementTimeline(companyID: string, userID: string, limit = 1000): Promise<ProjectManagementTimelineResponse> {
   const params = new URLSearchParams();
@@ -362,7 +404,7 @@ export async function upsertProjectRelationship(input: {
   relationshipID?: string;
   position?: number;
 }): Promise<ProjectRelationshipMutationResponse> {
-  return apiFetchJSON<ProjectRelationshipMutationResponse>(`/v1/projects/${encodeURIComponent(input.projectID)}/relationships`, {
+  const response = await apiFetchJSON<ProjectRelationshipMutationResponse>(`/v1/projects/${encodeURIComponent(input.projectID)}/relationships`, {
     method: "POST",
     body: JSON.stringify({
       company_id: input.companyID,
@@ -372,6 +414,8 @@ export async function upsertProjectRelationship(input: {
       position: input.position ?? 0,
     }),
   });
+  invalidateProjectRelationshipsForResource(input);
+  return response;
 }
 
 export async function createProjectNode(input: {
@@ -416,9 +460,11 @@ export async function deleteProjectRelationship(input: {
 }): Promise<ProjectRelationshipMutationResponse> {
   const params = new URLSearchParams();
   params.set("company_id", input.companyID);
-  return apiFetchJSON<ProjectRelationshipMutationResponse>(`/v1/projects/${encodeURIComponent(input.projectID)}/relationships/${encodeURIComponent(input.relationshipID)}?${params.toString()}`, {
+  const response = await apiFetchJSON<ProjectRelationshipMutationResponse>(`/v1/projects/${encodeURIComponent(input.projectID)}/relationships/${encodeURIComponent(input.relationshipID)}?${params.toString()}`, {
     method: "DELETE",
   });
+  invalidateProjectRelationshipsForResource({ companyID: input.companyID });
+  return response;
 }
 
 export async function listProjectRelationshipsForResource(input: {
@@ -426,11 +472,48 @@ export async function listProjectRelationshipsForResource(input: {
   resourceType: "logic_gate" | "node";
   resourceID: string;
 }): Promise<{ relationships: ProjectRelationshipProjection[] }> {
+  const cacheKey = projectRelationshipReadKey(input);
+  const authGeneration = getAuthSessionCacheGeneration();
+  const invalidationGeneration = readProjectRelationshipGeneration(cacheKey);
+  const cached = projectRelationshipReadCache.get(cacheKey);
+  if (cached?.authGeneration === authGeneration && cached.value && cached.expiresAt > Date.now()) {
+    return { relationships: cloneProjectRelationships(cached.value) };
+  }
+  if (cached?.authGeneration === authGeneration && cached.inflight) {
+    const relationships = await cached.inflight;
+    if (getAuthSessionCacheGeneration() !== authGeneration || readProjectRelationshipGeneration(cacheKey) !== invalidationGeneration) {
+      throw new DOMException("The project relationship read became stale.", "AbortError");
+    }
+    return { relationships: cloneProjectRelationships(relationships) };
+  }
   const params = new URLSearchParams();
   params.set("company_id", input.companyID);
   params.set("resource_type", input.resourceType);
   params.set("resource_id", input.resourceID);
-  return apiFetchJSON<{ relationships: ProjectRelationshipProjection[] }>(`/v1/projects/relationships?${params.toString()}`);
+  const inflight = apiFetchJSON<{ relationships: ProjectRelationshipProjection[] }>(`/v1/projects/relationships?${params.toString()}`)
+    .then((payload) => payload.relationships ?? [])
+    .then((relationships) => {
+      if (getAuthSessionCacheGeneration() === authGeneration
+        && readProjectRelationshipGeneration(cacheKey) === invalidationGeneration
+        && projectRelationshipReadCache.get(cacheKey)?.inflight === inflight) {
+        projectRelationshipReadCache.set(cacheKey, {
+          authGeneration,
+          expiresAt: Date.now() + PROJECT_RELATIONSHIP_CACHE_TTL_MS,
+          value: cloneProjectRelationships(relationships),
+        });
+      }
+      return relationships;
+    })
+    .catch((cause) => {
+      if (projectRelationshipReadCache.get(cacheKey)?.inflight === inflight) projectRelationshipReadCache.delete(cacheKey);
+      throw cause;
+    });
+  projectRelationshipReadCache.set(cacheKey, { authGeneration, expiresAt: 0, inflight });
+  const relationships = await inflight;
+  if (getAuthSessionCacheGeneration() !== authGeneration || readProjectRelationshipGeneration(cacheKey) !== invalidationGeneration) {
+    throw new DOMException("The project relationship read became stale.", "AbortError");
+  }
+  return { relationships: cloneProjectRelationships(relationships) };
 }
 
 export async function deleteProjectManagementNode(companyID: string, nodeID: string, confirmationDisplayName: string): Promise<{ status: string }> {

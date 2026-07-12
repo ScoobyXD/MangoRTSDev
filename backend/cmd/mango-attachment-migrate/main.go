@@ -15,6 +15,7 @@ import (
 	"log"
 	"miraeopus/backend/internal/attachments/migration"
 	httpapi "miraeopus/backend/internal/http"
+	"miraeopus/backend/internal/store"
 	"net"
 	"net/url"
 	"os"
@@ -282,6 +283,7 @@ func buildReport(cfg commandConfig, rows []candidateRow) report {
 }
 
 func applyReport(ctx context.Context, db *sql.DB, storage httpapi.AttachmentObjectStorage, cfg commandConfig, rep *report) error {
+	repo := store.NewPostgresRepo(db)
 	runID := newUUIDv4String()
 	if _, err := db.ExecContext(ctx, `
 insert into attachment_migration_runs (
@@ -345,6 +347,23 @@ insert into attachment_migration_runs (
 		}
 		if err := tx.Commit(); err != nil {
 			return err
+		}
+		for _, file := range result.EmbeddedFiles {
+			if file.DecodeError != "" || file.AttachmentID == "" {
+				continue
+			}
+			attachment, loadErr := repo.GetAttachment(cfg.CompanyID, file.AttachmentID)
+			if loadErr != nil {
+				log.Printf("attachment_migration_variants status=skipped attachment_id=%s reason=metadata_load_failed", file.AttachmentID)
+				continue
+			}
+			if _, variantErr := httpapi.EnsureAttachmentImageVariants(ctx, repo, storage, attachment); variantErr != nil {
+				reason := strings.ReplaceAll(strings.TrimSpace(variantErr.Error()), "\n", " ")
+				if len(reason) > 120 {
+					reason = reason[:120]
+				}
+				log.Printf("attachment_migration_variants status=skipped attachment_id=%s reason=%q", file.AttachmentID, reason)
+			}
 		}
 		rep.MigratedRows++
 	}

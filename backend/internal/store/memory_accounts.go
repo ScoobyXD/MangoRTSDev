@@ -115,6 +115,9 @@ func (r *MemoryRepo) UpdateAccount(input AccountInput) (AccountMutationResult, e
 	existing.UpdatedTimestamp = time.Now().UTC()
 	r.accounts[accountKey(input.CompanyID, input.AccountID)] = existing
 	r.syncProjectionsForAccountNodeIDsLocked(input.CompanyID, nodeIDs)
+	for _, nodeID := range nodeIDs {
+		r.bumpNodeViewVersionLocked(input.CompanyID, nodeID)
+	}
 	afterKanban, afterGVICMatrix, afterProject := r.projectionRowsForAccountNodeIDsLocked(input.CompanyID, nodeIDs)
 	deltas := projectionDeltasForAccountNodeChange(beforeKanban, beforeGVICMatrix, beforeProject, afterKanban, afterGVICMatrix, afterProject)
 	return AccountMutationResult{Account: &existing, ProjectionDeltas: deltas}, nil
@@ -140,6 +143,9 @@ func (r *MemoryRepo) DeleteAccount(companyID, accountID, actorUserID string) (Ac
 		}
 	}
 	r.syncProjectionsForAccountNodeIDsLocked(companyID, nodeIDs)
+	for _, nodeID := range nodeIDs {
+		r.bumpNodeViewVersionLocked(companyID, nodeID)
+	}
 	afterKanban, afterGVICMatrix, afterProject := r.projectionRowsForAccountNodeIDsLocked(companyID, nodeIDs)
 	deltas := projectionDeltasForAccountNodeChange(beforeKanban, beforeGVICMatrix, beforeProject, afterKanban, afterGVICMatrix, afterProject)
 	_ = actorUserID
@@ -331,6 +337,7 @@ func (r *MemoryRepo) SetNodeAccountAssignments(input NodeAccountAssignmentUpdate
 	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)); err != nil {
 		return NodeAccountAssignmentUpdateResult{}, err
 	}
+	r.bumpNodeViewVersionLocked(input.CompanyID, input.NodeID)
 	return NodeAccountAssignmentUpdateResult{
 		Node:             node,
 		Assignments:      r.nodeAccountAssignmentsForNodeLocked(input.CompanyID, input.NodeID),

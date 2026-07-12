@@ -55,6 +55,7 @@ func (r *MemoryRepo) createNodeWithIDLocked(companyID, nodeID, title string) (do
 		CreatedTimestamp: time.Now().UTC(),
 	}
 	r.nodes[key(companyID, n.NodeID)] = n
+	r.bumpNodeViewVersionLocked(companyID, n.NodeID)
 	r.syncGVICMatrixProjectionForNodeLocked(companyID, n.NodeID)
 	return r.withNodeReadModelLocked(n), nil
 }
@@ -190,6 +191,7 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 		node.Priority = input.Priority
 	}
 	r.nodes[k] = node
+	r.bumpNodeViewVersionLocked(input.CompanyID, input.NodeID)
 	r.syncGVICMatrixProjectionForNodeLocked(input.CompanyID, input.NodeID)
 	r.syncProjectManagementTimelineProjectionForNodeLocked(input.CompanyID, input.NodeID)
 	return r.withNodeReadModelLocked(node), nil
@@ -595,6 +597,7 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 			return domain.NodeInformation{}, err
 		}
 	}
+	r.bumpNodeViewVersionLocked(companyID, nodeID)
 	return item, nil
 }
 
@@ -662,6 +665,7 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 	}
 	if _, ok := r.nodeText[k][informationID]; ok {
 		delete(r.nodeText[k], informationID)
+		r.bumpNodeViewVersionLocked(companyID, nodeID)
 		if eventInput, ok := EditorProjectionDeleteEventInput(companyID, input.ActorUserID, "", EntityTypeNode, nodeID, informationID); ok {
 			if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
 				rollback()
@@ -787,10 +791,18 @@ func (r *MemoryRepo) MarkNodeContentChangeSeen(input NodeContentChangeSeenInput)
 		return 0, ErrNotFound
 	}
 	if informationID := nodeProjectionInformationIDFromContentChangeID(changeID); informationID != "" {
-		return r.markNodeProjectionSeenLocked(companyID, nodeID, informationID, userID)
+		count, err := r.markNodeProjectionSeenLocked(companyID, nodeID, informationID, userID)
+		if err == nil && count > 0 {
+			r.bumpNodeViewUserVersionLocked(companyID, nodeID, userID)
+		}
+		return count, err
 	}
 	if changeID == "" {
-		return r.markNodeProjectionSeenLocked(companyID, nodeID, "", userID)
+		count, err := r.markNodeProjectionSeenLocked(companyID, nodeID, "", userID)
+		if err == nil && count > 0 {
+			r.bumpNodeViewUserVersionLocked(companyID, nodeID, userID)
+		}
+		return count, err
 	}
 	now := time.Now().UTC()
 	count := 0
@@ -802,6 +814,7 @@ func (r *MemoryRepo) MarkNodeContentChangeSeen(input NodeContentChangeSeenInput)
 	if _, seen := r.nodeContentChangeSeen[seenKey]; !seen {
 		r.nodeContentChangeSeen[seenKey] = now
 		count = 1
+		r.bumpNodeViewUserVersionLocked(companyID, nodeID, userID)
 	}
 	return count, nil
 }
@@ -885,6 +898,8 @@ func (r *MemoryRepo) createNodeRelationshipLocked(companyID, nodeIDA, nodeIDB, a
 		CreatedTimestamp:   time.Now().UTC(),
 	}
 	r.nodeRels[companyID] = append(r.nodeRels[companyID], item)
+	r.bumpNodeViewVersionLocked(companyID, nodeIDA)
+	r.bumpNodeViewVersionLocked(companyID, nodeIDB)
 	return item, nil
 }
 
@@ -917,6 +932,8 @@ func (r *MemoryRepo) deleteNodeRelationshipLocked(companyID, relationshipID stri
 	for _, item := range items {
 		if item.NodeRelationshipID == relationshipID {
 			deleted = true
+			r.bumpNodeViewVersionLocked(companyID, item.NodeIDA)
+			r.bumpNodeViewVersionLocked(companyID, item.NodeIDB)
 			continue
 		}
 		filtered = append(filtered, item)

@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"miraeopus/backend/internal/domain"
 )
@@ -193,4 +194,69 @@ func readPhase5SourceForTest(t *testing.T, path string) string {
 		t.Fatalf("ReadFile %s: %v", path, err)
 	}
 	return string(content)
+}
+
+type blockingNodeViewLoader struct {
+	entered chan string
+	release chan struct{}
+}
+
+func (loader *blockingNodeViewLoader) enter(name string) {
+	loader.entered <- name
+	<-loader.release
+}
+
+func (loader *blockingNodeViewLoader) GetNodeDetailsSummary(companyID, nodeID string) (domain.NodeDetails, error) {
+	loader.enter("details")
+	return domain.NodeDetails{Node: domain.Node{CompanyID: companyID, NodeID: nodeID}}, nil
+}
+
+func (loader *blockingNodeViewLoader) ListNodeProjections(_, _ string) ([]domain.NodeProjection, error) {
+	loader.enter("projections")
+	return []domain.NodeProjection{}, nil
+}
+
+func (loader *blockingNodeViewLoader) ListNodeLogicGateAssignments(_, _ string) ([]domain.NodeLogicGateAssignment, error) {
+	loader.enter("assignments")
+	return []domain.NodeLogicGateAssignment{}, nil
+}
+func (loader *blockingNodeViewLoader) ListResourceGVICAssignments(_, _, _ string) ([]domain.ResourceGVICAssignment, error) {
+	loader.enter("gvic")
+	return []domain.ResourceGVICAssignment{}, nil
+}
+
+func (loader *blockingNodeViewLoader) ListUnseenNodeContentChanges(NodeContentChangeListInput) ([]domain.NodeContentChange, error) {
+	loader.enter("changes")
+	return []domain.NodeContentChange{}, nil
+}
+
+func TestLoadNodeViewRunsIndependentReadsConcurrently(t *testing.T) {
+	loader := &blockingNodeViewLoader{
+		entered: make(chan string, 5),
+		release: make(chan struct{}),
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := loadNodeView(loader, NodeViewInput{
+			CompanyID: "55555555-5555-4555-8555-555555555591",
+			NodeID:    "55555555-5555-4555-8555-555555555592",
+			UserID:    "55555555-5555-4555-8555-555555555593",
+		})
+		done <- err
+	}()
+
+	entered := map[string]bool{}
+	for len(entered) < 5 {
+		select {
+		case name := <-loader.entered:
+			entered[name] = true
+		case <-time.After(time.Second):
+			close(loader.release)
+			t.Fatalf("node view reads did not overlap; entered=%v", entered)
+		}
+	}
+	close(loader.release)
+	if err := <-done; err != nil {
+		t.Fatalf("loadNodeView: %v", err)
+	}
 }

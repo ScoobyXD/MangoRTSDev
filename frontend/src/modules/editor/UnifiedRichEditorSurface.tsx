@@ -80,6 +80,8 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   onSelectionHighlightColorChange,
 }) => {
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const attachmentHydrationCleanupRef = useRef<(() => void) | null>(null);
+  const attachmentHydrationContextKeyRef = useRef("");
   const restoringScrollRef = useRef(false);
   const scrollMemoryRef = useRef(createEditorScrollMemory());
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
@@ -130,12 +132,17 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   useLayoutEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    if (lastAppliedValueRef.current === value) return;
+    const hydrationContextKey = editorImageAttachmentContext
+      ? [editorImageAttachmentContext.apiBase.trim(), editorImageAttachmentContext.companyID.trim(), editorImageAttachmentContext.resourceType, editorImageAttachmentContext.resourceID.trim()].join("\u0000")
+      : "";
+    if (lastAppliedValueRef.current === value && attachmentHydrationContextKeyRef.current === hydrationContextKey) return;
     restoreSelectionForHydrationRef.current?.(editor);
     const selectionOffsets = getEditorSelectionOffsets(editor);
+    attachmentHydrationCleanupRef.current?.();
+    attachmentHydrationCleanupRef.current = null;
     editor.innerHTML = deserializeEditorDocumentHTML(value);
     if (editorImageAttachmentContext) {
-      hydrateEditorAttachmentImageFrames(editor, (attachmentID, variant, options) => (
+      attachmentHydrationCleanupRef.current = hydrateEditorAttachmentImageFrames(editor, (attachmentID, variant, options) => (
         loadMangoAttachmentObjectURL(
           editorImageAttachmentContext.apiBase,
           editorImageAttachmentContext.companyID,
@@ -145,6 +152,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
         )
       ));
     }
+    attachmentHydrationContextKeyRef.current = hydrationContextKey;
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
     lastAppliedValueRef.current = value;
     userEditedRef.current = false;
@@ -152,19 +160,10 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     if (selectionOffsets) setEditorSelectionByOffsets(editor, selectionOffsets.start, selectionOffsets.end);
   }, [editorImageAttachmentContext, scheduleIndentGuideUpdate, value]);
 
-  useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor || !editorImageAttachmentContext) return;
-    hydrateEditorAttachmentImageFrames(editor, (attachmentID, variant, options) => (
-      loadMangoAttachmentObjectURL(
-        editorImageAttachmentContext.apiBase,
-        editorImageAttachmentContext.companyID,
-        attachmentID,
-        variant,
-        options,
-      )
-    ));
-  }, [editorImageAttachmentContext, value]);
+  useEffect(() => () => {
+    attachmentHydrationCleanupRef.current?.();
+    attachmentHydrationCleanupRef.current = null;
+  }, []);
 
   useEffect(() => {
     const editor = editorRef.current;

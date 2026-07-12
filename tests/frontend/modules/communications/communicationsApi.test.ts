@@ -14,6 +14,7 @@ import {
   getEmailSignature,
   invalidateCommunicationsCache,
   listCompanyUsers,
+  listCompanyUserGroups,
   listLogicGates,
   listLogicGateFolderItems,
   listCommunicationsSharedInboxes,
@@ -400,6 +401,37 @@ test("listCompanyUsers shares concurrent requests and caches per auth session co
     assert.deepEqual(firstUsers.map((user) => user.user_id), ["user-1"]);
     assert.deepEqual(secondUsers.map((user) => user.user_id), ["user-1"]);
     assert.deepEqual(cachedUsers.map((user) => user.user_id), ["user-1"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("listCompanyUserGroups shares node-open reference reads and honors scoped invalidation", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return jsonResponse({
+      groups: [{ company_id: "company-1", group_id: `group-${calls}`, name: "Team", position: 1 }],
+      members: [],
+    });
+  }) as typeof fetch;
+  try {
+    const [first, strictModeReplay] = await Promise.all([
+      listCompanyUserGroups("company-1"),
+      listCompanyUserGroups("company-1"),
+    ]);
+    assert.equal(calls, 1);
+    assert.equal(first.groups[0]?.group_id, "group-1");
+    assert.equal(strictModeReplay.groups[0]?.group_id, "group-1");
+    assert.equal((await listCompanyUserGroups("company-1")).groups[0]?.group_id, "group-1");
+    assert.equal(calls, 1);
+
+    markCommunicationsWorkspacePanelStale("company-1", { userGroups: true });
+    assert.equal((await listCompanyUserGroups("company-1")).groups[0]?.group_id, "group-2");
+    assert.equal(calls, 2);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();

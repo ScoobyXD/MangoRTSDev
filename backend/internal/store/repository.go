@@ -141,10 +141,11 @@ const (
 	AttachmentSourceEmailOutgoing        = "email_outgoing"
 	AttachmentSourceMigrationInlineImage = "migration_inline_image"
 
-	AttachmentVariantOriginal  = "original"
-	AttachmentVariantDisplay   = "display"
-	AttachmentVariantThumbnail = "thumbnail"
-	AttachmentVariantEmailSend = "email_send"
+	AttachmentVariantOriginal          = "original"
+	AttachmentVariantDisplay           = "display"
+	AttachmentVariantThumbnail         = "thumbnail"
+	AttachmentVariantEmailSend         = "email_send"
+	AttachmentVariantGenerationVersion = 1
 
 	AttachmentRelationshipInlineImage       = "inline_image"
 	AttachmentRelationshipFileAttachment    = "file_attachment"
@@ -157,7 +158,9 @@ const (
 type AttachmentRepository interface {
 	CreateAttachmentWithResourceLink(input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error)
 	GetAttachment(companyID, attachmentID string) (domain.Attachment, error)
-	GetAttachmentVariant(companyID, attachmentID, variantType string) (domain.AttachmentVariant, error)
+	GetAttachmentVariant(ctx context.Context, companyID, attachmentID, variantType string) (domain.AttachmentVariant, error)
+	ReadAttachmentContent(ctx context.Context, companyID, attachmentID, variantType string) (AttachmentContentRead, error)
+	UpsertAttachmentVariants(ctx context.Context, companyID string, inputs []AttachmentVariantInput) ([]domain.AttachmentVariant, error)
 	ListAttachmentResourceLinks(companyID, attachmentID string) ([]domain.ResourceAttachment, error)
 	ListResourceAttachments(companyID, resourceType, resourceID string) ([]domain.ResourceAttachment, error)
 	LinkResourceAttachment(input ResourceAttachmentInput) (domain.ResourceAttachment, error)
@@ -264,15 +267,48 @@ type AttachmentUploadFinalizeInput struct {
 }
 
 type AttachmentVariantInput struct {
-	AttachmentID     string
-	VariantType      string
-	MimeType         string
-	ByteSize         int64
-	Width            *int
-	Height           *int
-	StorageBucket    string
-	StorageKey       string
-	CreatedTimestamp time.Time
+	AttachmentID      string
+	VariantType       string
+	MimeType          string
+	ByteSize          int64
+	SHA256            *string
+	GenerationVersion *int
+	Width             *int
+	Height            *int
+	StorageBucket     string
+	StorageKey        string
+	CreatedTimestamp  time.Time
+}
+
+// AttachmentContentRead is the minimal repository result needed to authorize
+// and serve one attachment object. Storage coordinates remain server-only.
+// The repository resolves a missing display/thumbnail request to the original
+// in the same read, so the content handler never reloads full attachment
+// metadata, variants, and links separately.
+type AttachmentContentRead struct {
+	CompanyID                string
+	AttachmentID             string
+	OriginalFilename         string
+	OriginalMimeType         string
+	OriginalSHA256           string
+	OriginalByteSize         int64
+	OriginalStorageBucket    string
+	OriginalStorageKey       string
+	OriginalCreatedTimestamp time.Time
+	OriginalUpdatedTimestamp time.Time
+	RequestedVariant         string
+	ServedVariant            string
+	MimeType                 string
+	ByteSize                 int64
+	SHA256                   string
+	GenerationVersion        int
+	Width                    *int
+	Height                   *int
+	StorageBucket            string
+	StorageKey               string
+	CreatedTimestamp         time.Time
+	UpdatedTimestamp         time.Time
+	ResourceLinks            []domain.ResourceAttachment
 }
 
 type ResourceAttachmentInput struct {
@@ -413,6 +449,8 @@ type WorkGraphRepository interface {
 	RestoreNodeEditorSaveVersion(input EditorSaveVersionRestoreInput) (domain.EditorSaveVersion, error)
 	ListUnseenNodeContentChanges(input NodeContentChangeListInput) ([]domain.NodeContentChange, error)
 	MarkNodeContentChangeSeen(input NodeContentChangeSeenInput) (int, error)
+	AnchorCleanNodeProjections(input NodeProjectionAnchorInput) (int, error)
+	CurrentNodeViewVersion(companyID, nodeID, userID string) (NodeViewVersion, error)
 	CreateNodeRelationship(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, error)
 	CreateNodeRelationshipAndWorkspaceEvent(companyID, nodeIDA, nodeIDB, aPosition, bPosition string) (domain.NodeRelationship, domain.DomainEvent, error)
 }
@@ -2164,6 +2202,17 @@ type NodeContentChangeSeenInput struct {
 	NodeID    string
 	ChangeID  string
 	UserID    string
+}
+
+type NodeProjectionAnchorInput struct {
+	CompanyID string
+	NodeID    string
+	UserID    string
+}
+
+type NodeViewVersion struct {
+	Shared int64
+	User   int64
 }
 
 type NodeViewInput struct {

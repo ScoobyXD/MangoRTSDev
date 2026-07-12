@@ -427,7 +427,7 @@ func (s *Server) handleAttachmentUploadIntentComplete(w http.ResponseWriter, r *
 		return
 	}
 	if intent.Status == domain.AttachmentUploadStatusCompleted {
-		s.writeCompletedAttachmentIntent(w, intent, actor.User.UserID, AttachmentHeadObjectOutput{})
+		s.writeCompletedAttachmentIntent(r.Context(), w, intent, actor.User.UserID, AttachmentHeadObjectOutput{})
 		return
 	}
 	if !claimed {
@@ -489,7 +489,7 @@ func (s *Server) handleAttachmentUploadIntentComplete(w http.ResponseWriter, r *
 		writeAttachmentCompletionError(w, err)
 		return
 	}
-	s.writeCompletedAttachmentIntent(w, intent, actor.User.UserID, head)
+	s.writeCompletedAttachmentIntent(r.Context(), w, intent, actor.User.UserID, head)
 }
 
 func (s *Server) recoverCompletingAttachmentUpload(w http.ResponseWriter, r *http.Request, storage AttachmentDirectUploadStorage, actorUserID string, intent domain.AttachmentUploadIntent) bool {
@@ -508,7 +508,7 @@ func (s *Server) recoverCompletingAttachmentUpload(w http.ResponseWriter, r *htt
 	}
 	head, err := storage.HeadObject(r.Context(), AttachmentHeadObjectInput{Key: intent.StorageKey})
 	if err == nil && verifyAttachmentHead(intent, head, expectedMultipart) == nil {
-		s.writeCompletedAttachmentIntent(w, intent, actorUserID, head)
+		s.writeCompletedAttachmentIntent(r.Context(), w, intent, actorUserID, head)
 		return true
 	}
 	if r.Context().Err() != nil {
@@ -538,7 +538,7 @@ func (s *Server) recoverCompletingAttachmentUpload(w http.ResponseWriter, r *htt
 	return false
 }
 
-func (s *Server) writeCompletedAttachmentIntent(w http.ResponseWriter, intent domain.AttachmentUploadIntent, actorUserID string, head AttachmentHeadObjectOutput) {
+func (s *Server) writeCompletedAttachmentIntent(ctx context.Context, w http.ResponseWriter, intent domain.AttachmentUploadIntent, actorUserID string, head AttachmentHeadObjectOutput) {
 	method := "client_reported"
 	storageType := strings.TrimSpace(head.ChecksumType)
 	if intent.Strategy == domain.AttachmentUploadStrategySingle && storageType == "" {
@@ -562,6 +562,18 @@ func (s *Server) writeCompletedAttachmentIntent(w http.ResponseWriter, intent do
 	if err != nil {
 		writeAttachmentUploadStoreError(w, err)
 		return
+	}
+	if s.attachmentVariantEnsurer != nil {
+		variants, variantErr := s.attachmentVariantEnsurer.EnsureImageVariants(ctx, attachment)
+		if variantErr != nil {
+			reason := strings.ReplaceAll(strings.TrimSpace(variantErr.Error()), "\n", " ")
+			if len(reason) > 120 {
+				reason = reason[:120]
+			}
+			log.Printf("attachment_image_variants status=skipped attachment_id=%s reason=%q", attachment.AttachmentID, reason)
+		} else {
+			attachment.Variants = variants
+		}
 	}
 	log.Printf("attachment_direct_upload_intent status=completed upload_intent_id=%s strategy=%s size_bytes=%d latency_ms=%d", intent.UploadIntentID, intent.Strategy, intent.SizeBytes, time.Since(intent.CreatedTimestamp).Milliseconds())
 	writeJSON(w, http.StatusCreated, attachmentUploadResponse{Attachment: attachment, ResourceAttachment: link})

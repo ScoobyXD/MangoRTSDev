@@ -26,6 +26,7 @@ ACC15 - Replacing node account assignments cleans blank IDs, dedupes repeated ac
 ACC16 - Updating node account assignments recomputes node projection dependencies.
 ACC17 - Updating node account assignments appends account-change event rows.
 ACC18 - Updating node account assignments emits a workspace node-updated event marked as accounts changed.
+ACC19 - Company account reference reads use one company-scoped shared singleflight/cache across editor and project consumers. Every account or folder create/update/delete invalidates that cache before emitting `mangorts:accounts-updated`, so an older in-flight result cannot repopulate stale account labels after a mutation.
 
 ## Scenarios
 
@@ -95,3 +96,19 @@ Expected:
 - Successful replacement recomputes node projection dependencies.
 - Successful replacement appends account-change event rows.
 - Successful replacement emits a workspace node-updated event with accounts-changed metadata.
+
+### Scenario ACC-S4: Shared Account Reference Cache
+
+Business logic covered:
+- ACC1
+- ACC4
+- ACC19
+
+Given:
+- Multiple mounted editor/project surfaces request the same company's accounts under React StrictMode.
+- An account or account folder is then created, updated, or deleted.
+
+Expected:
+- Compatible reads share one in-flight request and reuse the company-scoped result.
+- The mutation invalidates cached and older in-flight account data before the account-updated event asks consumers to reload.
+- The next read returns the post-mutation sorted account list, and another auth/company scope cannot reuse it.
