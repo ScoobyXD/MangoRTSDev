@@ -64,7 +64,6 @@ func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 	if !addPayload.Changed || addPayload.Operation != store.GVICAssignmentCommandAdd || len(addPayload.Assignments) != 1 || len(addPayload.EffectiveAssignments) != 1 {
 		t.Fatalf("add payload = %+v, want changed single assignment", addPayload)
 	}
-	assertHTTPGVICEventRowCount(t, repo, companyID, 1)
 
 	duplicateAdd := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandAdd, addBody)
 	if duplicateAdd.Code != http.StatusOK {
@@ -74,7 +73,6 @@ func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 	if duplicateAddPayload.Changed || len(duplicateAddPayload.Assignments) != 1 {
 		t.Fatalf("duplicate add payload = %+v, want no-op with existing assignment", duplicateAddPayload)
 	}
-	assertHTTPGVICEventRowCount(t, repo, companyID, 1)
 
 	removeBody := map[string]any{
 		"company_id": companyID,
@@ -92,7 +90,6 @@ func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 	if !removedPayload.Changed || removedPayload.Operation != store.GVICAssignmentCommandRemove || len(removedPayload.Assignments) != 0 || len(removedPayload.EffectiveAssignments) != 0 {
 		t.Fatalf("remove payload = %+v, want changed empty assignments", removedPayload)
 	}
-	assertHTTPGVICEventRowCount(t, repo, companyID, 2)
 
 	missingRemove := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandRemove, removeBody)
 	if missingRemove.Code != http.StatusOK {
@@ -102,7 +99,6 @@ func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 	if missingRemovePayload.Changed || len(missingRemovePayload.Assignments) != 0 {
 		t.Fatalf("missing remove payload = %+v, want intentional no-op", missingRemovePayload)
 	}
-	assertHTTPGVICEventRowCount(t, repo, companyID, 2)
 
 	fullReplaceBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
@@ -121,7 +117,6 @@ func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 	if len(fullReplacePayload.Assignments) != 1 || fullReplacePayload.Assignments[0].Role != domain.GVICRoleVerified {
 		t.Fatalf("full replace payload = %+v, want accountable assignment", fullReplacePayload.Assignments)
 	}
-	assertHTTPGVICEventRowCount(t, repo, companyID, 3)
 
 	invalidRole := postResourceGVICCommandForTest(t, handler, store.EntityTypeLogicGate, logicGate.LogicGateID, store.GVICAssignmentCommandAdd, map[string]any{
 		"company_id": companyID,
@@ -156,7 +151,6 @@ func TestLogicGateGVICAddRemoveCommandAPI(t *testing.T) {
 	if outsiderAdd.Code != http.StatusBadRequest || !strings.Contains(outsiderAdd.Body.String(), "gvic_principal_not_in_company") {
 		t.Fatalf("outsider add status = %d body=%s, want gvic_principal_not_in_company", outsiderAdd.Code, outsiderAdd.Body.String())
 	}
-	assertHTTPGVICEventRowCount(t, repo, companyID, 3)
 }
 
 type resourceGVICCommandPayloadForTest struct {
@@ -189,21 +183,4 @@ func decodeResourceGVICCommandPayloadForTest(t *testing.T, rec *httptest.Respons
 		payload.EffectiveAssignments = []domain.ResourceGVICEffectiveAssignment{}
 	}
 	return payload
-}
-
-func assertHTTPGVICEventRowCount(t *testing.T, repo store.Repository, companyID string, want int) {
-	t.Helper()
-	rows, err := repo.ListEventRows(companyID, 50)
-	if err != nil {
-		t.Fatalf("ListEventRows: %v", err)
-	}
-	got := 0
-	for _, row := range rows {
-		if row.EventType == store.EventTypeGVICProjectionDelta {
-			got++
-		}
-	}
-	if got != want {
-		t.Fatalf("GVIC event rows len = %d, want %d: %+v", got, want, rows)
-	}
 }

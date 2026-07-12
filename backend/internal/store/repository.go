@@ -53,7 +53,6 @@ type Repository interface {
 	ProjectManagementRepository
 	NotificationRepository
 	DomainEventRepository
-	EventRepository
 }
 
 type AccountRepository interface {
@@ -488,7 +487,6 @@ type EffectiveAccessRepository interface {
 	UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error)
 	ListEffectiveResourceIDsForUser(companyID, userID, resourceType, accessLevel string, resourceIDs []string) (map[string]bool, error)
 	ListEffectiveUsersForResource(companyID, resourceType, resourceID, accessLevel string) ([]string, error)
-	ListEffectiveUsersForWorkspaceEvent(event domain.DomainEvent) ([]string, error)
 }
 
 type ConsolidatedViewRepository interface {
@@ -592,8 +590,6 @@ type WorkItemReadRepository interface {
 	ListKanbanBoardProjectionRows(companyID, logicGateID string, query KanbanCardQuery) ([]KanbanBoardProjectionRow, error)
 	ListKanbanBoardProjectionRowsForNode(companyID, nodeID string) ([]KanbanBoardProjectionRow, error)
 	ListKanbanBoardProjectionRowsForLogicGate(companyID, logicGateID string) ([]KanbanBoardProjectionRow, error)
-	CurrentProjectionSequence(companyID, projectionName, projectionScope string) (int64, error)
-	NextProjectionSequence(companyID, projectionName, projectionScope string) (int64, error)
 }
 
 type ProjectManagementRepository interface {
@@ -874,8 +870,6 @@ type KanbanRepository interface {
 }
 
 type NotificationRepository interface {
-	GetNotificationDomainEventCheckpoint(companyID string) (NotificationDomainEventCheckpoint, bool, error)
-	SaveNotificationDomainEventCheckpoint(checkpoint NotificationDomainEventCheckpoint) error
 	CreateNotifications(input CreateNotificationsInput) ([]domain.Notification, error)
 	ListNotifications(input NotificationListInput) ([]domain.Notification, error)
 	ListUpdateRootGroups(input UpdatesQuery) ([]UpdatesNestedGroup, error)
@@ -892,24 +886,12 @@ type NotificationRepository interface {
 type DomainEventRepository interface {
 	AppendDomainEvent(input DomainEventInput) (domain.DomainEvent, error)
 	AppendDomainEvents(inputs []DomainEventInput) ([]domain.DomainEvent, error)
-	ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error)
 	ListDomainEventsAfter(query DomainEventReplayQuery) ([]domain.DomainEvent, error)
 	ListDomainEventsForNotificationProjection(query DomainEventNotificationProjectionQuery) ([]domain.DomainEvent, error)
 	LatestDomainEventForNotificationProjection(companyID string) (NotificationDomainEventCheckpoint, bool, error)
 	CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error)
 	DomainEventExistsByIdempotencyKey(companyID, idempotencyKey string) (bool, error)
 	CurrentWorkspaceReadVersion(query WorkspaceReadVersionQuery) (int64, bool, error)
-	MarkDomainEventPublished(companyID, eventID string) error
-}
-
-type EventRepository interface {
-	AppendEventRow(input EventRowInput) (EventRow, error)
-	AppendEventRows(inputs []EventRowInput) ([]EventRow, error)
-	ListEventRows(companyID string, limit int) ([]EventRow, error)
-	CurrentEventRowSequence(companyID, sequenceScope string) (int64, error)
-	ClaimAvailableEventRows(limit int, processingLeaseTimeout time.Duration) ([]EventRow, error)
-	MarkEventRowProcessed(companyID, eventID string) error
-	MarkEventRowFailed(companyID, eventID, lastError string, availableAt time.Time) error
 }
 
 type DeleteCompanyUserResult struct {
@@ -1036,46 +1018,6 @@ type ProjectManagementTimelineProjectionRow = ProjectionRow
 
 type ProjectRelationshipProjectionRow = ProjectionRow
 
-const (
-	ProjectionNameGVICEffectiveAssignments  = "gvic_effective_assignments"
-	ProjectionNameGVICMatrix                = "gvic_matrix"
-	ProjectionNameKanbanBoard               = "kanban_board"
-	ProjectionNameProjectManagementTimeline = "project_management_timeline"
-	ProjectionNameProjectRelationship       = "project_relationship"
-
-	ProjectionDeltaOperationUpsert = "upsert"
-	ProjectionDeltaOperationDelete = "delete"
-	ProjectionDeltaOperationPatch  = "patch"
-)
-
-type ProjectionRowKey struct {
-	ProjectionRowID     string `json:"projection_row_id,omitempty"`
-	ItemID              string `json:"item_id,omitempty"`
-	UserID              string `json:"user_id,omitempty"`
-	ProjectID           string `json:"project_id,omitempty"`
-	RelationshipID      string `json:"relationship_id,omitempty"`
-	ResourceType        string `json:"resource_type,omitempty"`
-	ResourceID          string `json:"resource_id,omitempty"`
-	GVICAssignment      string `json:"gvic_assignment,omitempty"`
-	ParentResourceType  string `json:"parent_resource_type,omitempty"`
-	ParentResourceID    string `json:"parent_resource_id,omitempty"`
-	NodeLeafID          string `json:"node_leaf_id,omitempty"`
-	Depth               int    `json:"depth,omitempty"`
-	SortOrder           int    `json:"sort_order,omitempty"`
-	IsContainerRow      bool   `json:"is_container_row,omitempty"`
-	Role                string `json:"role,omitempty"`
-	SourceResourceType  string `json:"source_resource_type,omitempty"`
-	SourceResourceID    string `json:"source_resource_id,omitempty"`
-	SourcePrincipalType string `json:"source_principal_type,omitempty"`
-	SourcePrincipalID   string `json:"source_principal_id,omitempty"`
-	InheritanceType     string `json:"inheritance_type,omitempty"`
-	BoardID             string `json:"board_id,omitempty"`
-	LogicGateID         string `json:"logic_gate_id,omitempty"`
-	NodeID              string `json:"node_id,omitempty"`
-	AssignmentID        string `json:"assignment_id,omitempty"`
-	CardID              string `json:"card_id,omitempty"`
-}
-
 const ProjectManagementTimelineDefaultLimit = 500
 const ProjectManagementTimelineMaxLimit = 1000
 const ProjectManagementTimelineMaxDurationDays = 90
@@ -1118,10 +1060,9 @@ type ProjectManagementTimelineItemDeleteInput struct {
 }
 
 type ProjectManagementTimelineMutationResult struct {
-	Item             *ProjectManagementTimelineProjectionRow `json:"item,omitempty"`
-	DeletedItemID    string                                  `json:"deleted_item_id,omitempty"`
-	UserID           string                                  `json:"user_id,omitempty"`
-	ProjectionDeltas []ProjectionDelta                       `json:"-"`
+	Item          *ProjectManagementTimelineProjectionRow `json:"item,omitempty"`
+	DeletedItemID string                                  `json:"deleted_item_id,omitempty"`
+	UserID        string                                  `json:"user_id,omitempty"`
 }
 
 type ProjectInput struct {
@@ -1172,15 +1113,13 @@ type ResourceGVICAssignmentMutationResult struct {
 	Changed              bool                                     `json:"changed"`
 	GVICAssignments      []domain.ResourceGVICAssignment          `json:"gvic_assignments"`
 	EffectiveAssignments []domain.ResourceGVICEffectiveAssignment `json:"effective_assignments,omitempty"`
-	ProjectionDeltas     []ProjectionDelta                        `json:"-"`
 	Events               []domain.DomainEvent                     `json:"-"`
 }
 
 type ProjectMutationResult struct {
-	Project          *domain.Project                   `json:"project,omitempty"`
-	DeletedID        string                            `json:"deleted_project_id,omitempty"`
-	FolderItem       *domain.CompanyExplorerFolderItem `json:"folder_item,omitempty"`
-	ProjectionDeltas []ProjectionDelta                 `json:"-"`
+	Project    *domain.Project                   `json:"project,omitempty"`
+	DeletedID  string                            `json:"deleted_project_id,omitempty"`
+	FolderItem *domain.CompanyExplorerFolderItem `json:"folder_item,omitempty"`
 }
 
 type ProjectInformationInput struct {
@@ -1271,13 +1210,12 @@ type ProjectScopedNodeLogicGateAssignmentInput struct {
 }
 
 type ProjectScopedNodeCreateResult struct {
-	Node             domain.Node                           `json:"node"`
-	Relationship     *domain.ProjectRelationshipProjection `json:"relationship,omitempty"`
-	Information      *domain.NodeInformation               `json:"information,omitempty"`
-	Assignment       *domain.NodeLogicGateAssignment       `json:"assignment,omitempty"`
-	Card             *domain.KanbanCard                    `json:"card,omitempty"`
-	Events           []domain.DomainEvent                  `json:"-"`
-	ProjectionDeltas []ProjectionDelta                     `json:"-"`
+	Node         domain.Node                           `json:"node"`
+	Relationship *domain.ProjectRelationshipProjection `json:"relationship,omitempty"`
+	Information  *domain.NodeInformation               `json:"information,omitempty"`
+	Assignment   *domain.NodeLogicGateAssignment       `json:"assignment,omitempty"`
+	Card         *domain.KanbanCard                    `json:"card,omitempty"`
+	Events       []domain.DomainEvent                  `json:"-"`
 }
 
 type ProjectScopedLogicGateCreateInput struct {
@@ -1292,11 +1230,10 @@ type ProjectScopedLogicGateCreateInput struct {
 }
 
 type ProjectScopedLogicGateCreateResult struct {
-	LogicGate        domain.LogicGate                      `json:"logic_gate"`
-	Relationship     *domain.ProjectRelationshipProjection `json:"relationship,omitempty"`
-	Information      *domain.LogicGateInformation          `json:"information,omitempty"`
-	Events           []domain.DomainEvent                  `json:"-"`
-	ProjectionDeltas []ProjectionDelta                     `json:"-"`
+	LogicGate    domain.LogicGate                      `json:"logic_gate"`
+	Relationship *domain.ProjectRelationshipProjection `json:"relationship,omitempty"`
+	Information  *domain.LogicGateInformation          `json:"information,omitempty"`
+	Events       []domain.DomainEvent                  `json:"-"`
 }
 
 type AccountInput struct {
@@ -1311,9 +1248,8 @@ type AccountInput struct {
 }
 
 type AccountMutationResult struct {
-	Account          *domain.Account   `json:"account,omitempty"`
-	DeletedAccountID string            `json:"deleted_account_id,omitempty"`
-	ProjectionDeltas []ProjectionDelta `json:"-"`
+	Account          *domain.Account `json:"account,omitempty"`
+	DeletedAccountID string          `json:"deleted_account_id,omitempty"`
 }
 
 type AccountFolderInput struct {
@@ -1334,21 +1270,9 @@ type NodeAccountAssignmentUpdateInput struct {
 }
 
 type NodeAccountAssignmentUpdateResult struct {
-	Node             domain.Node                    `json:"node"`
-	Assignments      []domain.NodeAccountAssignment `json:"assignments"`
-	ProjectionDeltas []ProjectionDelta              `json:"-"`
-	Events           []domain.DomainEvent           `json:"-"`
-}
-
-type ProjectionDelta struct {
-	CompanyID          string           `json:"company_id"`
-	Projection         string           `json:"projection"`
-	ProjectionSequence int64            `json:"projection_sequence,omitempty"`
-	Operation          string           `json:"operation"`
-	RowKey             ProjectionRowKey `json:"row_key"`
-	Row                *ProjectionRow   `json:"row,omitempty"`
-	Patch              map[string]any   `json:"patch,omitempty"`
-	ProjectedTimestamp time.Time        `json:"projected_timestamp"`
+	Node        domain.Node                    `json:"node"`
+	Assignments []domain.NodeAccountAssignment `json:"assignments"`
+	Events      []domain.DomainEvent           `json:"-"`
 }
 
 const CommunicationsTriageBatchMaxItems = 50
@@ -1546,7 +1470,6 @@ type GVICMatrixNodeCreateResult struct {
 	Card                     *domain.KanbanCard                 `json:"card,omitempty"`
 	FolderItems              []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
 	GVICMatrixProjectionRows []GVICMatrixProjectionRow          `json:"gvic_projection_rows,omitempty"`
-	ProjectionDeltas         []ProjectionDelta                  `json:"-"`
 	Events                   []domain.DomainEvent               `json:"-"`
 }
 type NodeMapWindowBounds struct {
@@ -1787,7 +1710,6 @@ type CommunicationsTriageConversionResult struct {
 	DeletedMessageIDs    []string                                  `json:"deleted_message_ids"`
 	UnstarredMessageIDs  []string                                  `json:"unstarred_message_ids,omitempty"`
 	Events               []domain.DomainEvent                      `json:"-"`
-	ProjectionDeltas     []ProjectionDelta                         `json:"-"`
 }
 
 type CommunicationsTriageRevertInput struct {
@@ -1944,7 +1866,6 @@ type LogicGateNodeAssignmentResult struct {
 	Node                     domain.Node                    `json:"node"`
 	Assignment               domain.NodeLogicGateAssignment `json:"-"`
 	GVICMatrixProjectionRows []GVICMatrixProjectionRow      `json:"gvic_projection_rows,omitempty"`
-	ProjectionDeltas         []ProjectionDelta              `json:"-"`
 	Events                   []domain.DomainEvent           `json:"-"`
 }
 
@@ -1953,7 +1874,6 @@ type LogicGateNodeAssignmentRemoveResult struct {
 	Node                     domain.Node                    `json:"node"`
 	Assignment               domain.NodeLogicGateAssignment `json:"-"`
 	GVICMatrixProjectionRows []GVICMatrixProjectionRow      `json:"gvic_projection_rows,omitempty"`
-	ProjectionDeltas         []ProjectionDelta              `json:"-"`
 	Events                   []domain.DomainEvent           `json:"-"`
 }
 
@@ -2205,7 +2125,6 @@ type LogicGateGVICAssignmentCommandResult struct {
 	Changed           bool                             `json:"changed"`
 	GVICAssignments   []domain.LogicGateGVICAssignment `json:"gvic_assignments"`
 	BeforeAssignments []domain.LogicGateGVICAssignment `json:"-"`
-	ProjectionDeltas  []ProjectionDelta                `json:"-"`
 	Events            []domain.DomainEvent             `json:"-"`
 }
 

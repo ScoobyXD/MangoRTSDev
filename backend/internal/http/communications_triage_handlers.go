@@ -70,7 +70,6 @@ func (s *Server) handleCommunicationsTriage(w http.ResponseWriter, r *http.Reque
 			}
 			items = append(items, item)
 		}
-		s.publishCommunicationsEvent(connection.UserID, "triage_changed", "triage.upserted", strings.Join(messageIDs, ","))
 		writeJSON(w, http.StatusCreated, map[string]any{"items": items})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -101,7 +100,6 @@ func (s *Server) handleCommunicationsTriageByID(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_triage_item")
 		return
 	}
-	s.publishCommunicationsEvent(connection.UserID, "triage_changed", "triage.deleted", messageID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
@@ -217,7 +215,6 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	}
 	result.UnstarredMessageIDs = s.unstarConvertedCommunicationsMessages(r.Context(), connection, sourceMessagesByID, conversionInput.MessageIDs)
 	s.publishCommittedWorkspaceEvents(result.Events)
-	s.publishCommunicationsEventWithMeta(connection.UserID, "triage_changed", "triage.converted", strings.Join(result.DeletedMessageIDs, ","), communicationsEventMetadata{SharedInboxID: sharedInboxID})
 	writeJSON(w, http.StatusCreated, result)
 }
 
@@ -308,7 +305,6 @@ func (s *Server) handleCommunicationsTriageRevert(w http.ResponseWriter, r *http
 		"card_id":  result.DeletedCardID,
 	})
 	s.publishWorkspaceEvent(req.CompanyID, "node_deleted", map[string]any{"node_id": result.DeletedNodeID})
-	s.publishCommunicationsEvent(connection.UserID, "triage_changed", "triage.reverted", result.TriageItem.MessageID)
 	writeJSON(w, http.StatusOK, result)
 }
 

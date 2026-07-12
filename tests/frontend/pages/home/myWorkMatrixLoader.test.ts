@@ -5,7 +5,6 @@ import {
   loadMyWorkMatrixCacheEntry,
   markMyWorkMatrixCachesStaleForTargetUsers,
   myWorkMatrixCacheKey,
-  myWorkProjectionDeltaAffectsTargetUsers,
   readMyWorkMatrixCache,
   uniqueMyWorkTargetUserIDs,
 } from "../../../../frontend/src/pages/home/myWorkMatrixLoader.js";
@@ -160,38 +159,4 @@ test("My Work matrix cache can invalidate an empty target-user result", async ()
   });
 
   assert.equal(calls, 2);
-});
-
-test("My Work projection deltas only affect matching target users", () => {
-  assert.equal(myWorkProjectionDeltaAffectsTargetUsers({
-    scope: "gvic_matrix:user:user-1",
-    projection: "gvic_matrix",
-    projection_scope: "user:user-1",
-    affected_scopes: ["my_work:user:user-1"],
-    deltas: [],
-  }, ["user-1", "user-2"]), true);
-
-  assert.equal(myWorkProjectionDeltaAffectsTargetUsers({
-    scope: "gvic_matrix:user:user-3",
-    projection: "gvic_matrix",
-    projection_scope: "user:user-3",
-    affected_scopes: ["my_work:user:user-3"],
-    deltas: [],
-  }, ["user-1", "user-2"]), false);
-
-  assert.equal(myWorkProjectionDeltaAffectsTargetUsers({
-    scope: "gvic_matrix:user:user-4",
-    projection: "gvic_matrix",
-    projection_scope: "user:user-4",
-    affected_scopes: [],
-    deltas: [{ operation: "upsert", row: { user_id: "user-2" } }],
-  }, ["user-1", "user-2"]), true);
-
-  assert.equal(myWorkProjectionDeltaAffectsTargetUsers({
-    scope: "kanban:board-1",
-    projection: "kanban_board",
-    projection_scope: "board:board-1",
-    affected_scopes: [],
-    deltas: [{ operation: "upsert", row: { user_id: "user-1" } }],
-  }, ["user-1"]), false);
 });

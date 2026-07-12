@@ -10,14 +10,12 @@ export type RealtimeMessageType =
   | "ready"
   | "subscription.accepted"
   | "subscription.rejected"
-  | "projection.delta"
-  | "workspace.event"
   | "notification.created"
   | "notification.deleted"
   | "notifications.cleared"
-  | "communications.event"
-  | "snapshot.refetch"
-  | "permission.revoked"
+  | "chat.message.created"
+  | "chat.message.deleted"
+  | "kanban.changed"
   | "ping"
   | "pong"
   | "error";
@@ -37,54 +35,19 @@ export type RealtimeReadyMessage = RealtimeBaseMessage & {
 export type RealtimeSubscriptionAcceptedMessage = RealtimeBaseMessage & {
   type: "subscription.accepted";
   scope: string;
-  current_sequence?: number;
 };
 
 export type RealtimeSubscriptionRejectedMessage = RealtimeBaseMessage & {
   type: "subscription.rejected";
-  scope?: string;
+  scope: string;
   error?: string;
   message?: string;
-};
-
-export type RealtimeProjectionDeltaMessage = RealtimeBaseMessage & {
-  type: "projection.delta";
-  scope: string;
-  affected_scopes?: string[];
-  sequence?: number;
-  projection?: string;
-  projection_scope?: string;
-  projection_sequence?: number;
-  resource_type?: string;
-  resource_id?: string;
-  projected_timestamp?: string;
-  deltas: unknown[];
-};
-
-export type RealtimeWorkspaceEventEnvelope = {
-  company_id?: string;
-  event_id?: string;
-  sequence?: number;
-  stream_type?: string;
-  stream_id?: string;
-  type?: string;
-  ts?: string;
-  data?: Record<string, unknown>;
-};
-
-export type RealtimeWorkspaceEventMessage = RealtimeBaseMessage & {
-  type: "workspace.event";
-  company_id: string;
-  scope: string;
-  sequence?: number;
-  event: RealtimeWorkspaceEventEnvelope;
 };
 
 export type RealtimeNotificationCreatedMessage = RealtimeBaseMessage & {
   type: "notification.created";
   company_id: string;
   scope: string;
-  affected_scopes?: string[];
   notification: NotificationItem;
   ts?: string;
 };
@@ -93,7 +56,6 @@ export type RealtimeNotificationDeletedMessage = RealtimeBaseMessage & {
   type: "notification.deleted";
   company_id: string;
   scope: string;
-  affected_scopes?: string[];
   notification_id: string;
   ts?: string;
 };
@@ -102,39 +64,37 @@ export type RealtimeNotificationsClearedMessage = RealtimeBaseMessage & {
   type: "notifications.cleared";
   company_id: string;
   scope: string;
-  affected_scopes?: string[];
   deleted_count: number;
   ts?: string;
 };
 
-export type RealtimeCommunicationsEventEnvelope = {
-  user_id?: string;
-  type?: string;
-  trigger?: string;
-  message_id?: string;
+export type RealtimeChatMessageCreatedMessage = RealtimeBaseMessage & {
+  type: "chat.message.created";
+  company_id: string;
+  scope: string;
+  node_id: string;
+  block_id: string;
+  message_id: string;
   ts?: string;
 };
 
-export type RealtimeCommunicationsEventMessage = RealtimeBaseMessage & {
-  type: "communications.event";
+export type RealtimeChatMessageDeletedMessage = RealtimeBaseMessage & {
+  type: "chat.message.deleted";
   company_id: string;
   scope: string;
-  event: RealtimeCommunicationsEventEnvelope;
+  node_id: string;
+  block_id?: string;
+  message_id: string;
+  ts?: string;
 };
 
-export type RealtimeSnapshotRefetchMessage = RealtimeBaseMessage & {
-  type: "snapshot.refetch";
+export type RealtimeKanbanChangedMessage = RealtimeBaseMessage & {
+  type: "kanban.changed";
+  company_id: string;
   scope: string;
-  sequence?: number;
-  reason?: string;
-};
-
-export type RealtimePermissionRevokedMessage = RealtimeBaseMessage & {
-  type: "permission.revoked";
-  scope: string;
-  resource_type?: string;
-  resource_id?: string;
-  reason?: string;
+  board_id: string;
+  change_type?: string;
+  ts?: string;
 };
 
 export type RealtimeErrorMessage = RealtimeBaseMessage & {
@@ -147,31 +107,25 @@ export type RealtimeInboundMessage =
   | RealtimeReadyMessage
   | RealtimeSubscriptionAcceptedMessage
   | RealtimeSubscriptionRejectedMessage
-  | RealtimeProjectionDeltaMessage
-  | RealtimeWorkspaceEventMessage
   | RealtimeNotificationCreatedMessage
   | RealtimeNotificationDeletedMessage
   | RealtimeNotificationsClearedMessage
-  | RealtimeCommunicationsEventMessage
-  | RealtimeSnapshotRefetchMessage
-  | RealtimePermissionRevokedMessage
+  | RealtimeChatMessageCreatedMessage
+  | RealtimeChatMessageDeletedMessage
+  | RealtimeKanbanChangedMessage
   | RealtimeErrorMessage
   | (RealtimeBaseMessage & { type: "ping" | "pong" });
 
 export type RealtimeSubscriptionHandlers = {
-  afterSequence?: number;
-  getAfterSequence?: () => number | undefined;
   onReady?: (message: RealtimeReadyMessage) => void;
   onAccepted?: (message: RealtimeSubscriptionAcceptedMessage) => void;
   onRejected?: (message: RealtimeSubscriptionRejectedMessage) => void;
-  onDelta?: (message: RealtimeProjectionDeltaMessage) => void;
-  onWorkspaceEvent?: (message: RealtimeWorkspaceEventMessage) => void;
   onNotificationCreated?: (message: RealtimeNotificationCreatedMessage) => void;
   onNotificationDeleted?: (message: RealtimeNotificationDeletedMessage) => void;
   onNotificationsCleared?: (message: RealtimeNotificationsClearedMessage) => void;
-  onCommunicationsEvent?: (message: RealtimeCommunicationsEventMessage) => void;
-  onRefetch?: (message: RealtimeSnapshotRefetchMessage) => void;
-  onPermissionRevoked?: (message: RealtimePermissionRevokedMessage) => void;
+  onChatMessageCreated?: (message: RealtimeChatMessageCreatedMessage) => void;
+  onChatMessageDeleted?: (message: RealtimeChatMessageDeletedMessage) => void;
+  onKanbanChanged?: (message: RealtimeKanbanChangedMessage) => void;
   onError?: (message: RealtimeErrorMessage) => void;
 };
 
@@ -215,24 +169,9 @@ function optionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
-function stringListValue(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const item of value) {
-    const clean = stringValue(item);
-    if (!clean || seen.has(clean)) continue;
-    seen.add(clean);
-    out.push(clean);
-  }
-  return out;
-}
-
 function objectValue(raw: string): Record<string, unknown> {
   const parsed = JSON.parse(raw) as unknown;
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("realtime_message_must_be_object");
-  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("realtime_message_must_be_object");
   return parsed as Record<string, unknown>;
 }
 
@@ -240,11 +179,19 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
+function scopedMessageBase(payload: Record<string, unknown>, type: RealtimeMessageType): { type: RealtimeMessageType; company_id: string; scope: string } {
+  const companyID = stringValue(payload.company_id);
+  const scope = stringValue(payload.scope);
+  if (!companyID) throw new Error("realtime_company_id_required");
+  if (!scope) throw new Error("realtime_scope_required");
+  return { type, company_id: companyID, scope };
+}
+
 export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
   const payload = objectValue(raw);
   const type = stringValue(payload.type) as RealtimeMessageType;
   if (!type) throw new Error("realtime_type_required");
-  const base = {
+  const base: RealtimeBaseMessage = {
     type,
     company_id: stringValue(payload.company_id) || undefined,
     scope: stringValue(payload.scope) || undefined,
@@ -252,176 +199,66 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
 
   switch (type) {
     case "ready":
-      return {
-        ...base,
-        type,
-        user_id: stringValue(payload.user_id) || undefined,
-        connection_id: stringValue(payload.connection_id) || undefined,
-      };
+      return { ...base, type, user_id: stringValue(payload.user_id) || undefined, connection_id: stringValue(payload.connection_id) || undefined };
     case "subscription.accepted": {
       const scope = stringValue(payload.scope);
       if (!scope) throw new Error("realtime_scope_required");
-      return { ...base, type, scope, current_sequence: optionalNumber(payload.current_sequence) };
+      return { ...base, type, scope };
     }
-    case "subscription.rejected":
-      return {
-        ...base,
-        type,
-        error: stringValue(payload.error) || undefined,
-        message: stringValue(payload.message) || undefined,
-      };
-    case "projection.delta": {
+    case "subscription.rejected": {
       const scope = stringValue(payload.scope);
       if (!scope) throw new Error("realtime_scope_required");
-      const sequence = optionalNumber(payload.sequence);
-      return {
-        ...base,
-        type,
-        scope,
-        affected_scopes: stringListValue(payload.affected_scopes),
-        sequence,
-        projection: stringValue(payload.projection) || undefined,
-        projection_scope: stringValue(payload.projection_scope) || undefined,
-        projection_sequence: optionalNumber(payload.projection_sequence) ?? sequence,
-        resource_type: stringValue(payload.resource_type) || undefined,
-        resource_id: stringValue(payload.resource_id) || undefined,
-        projected_timestamp: stringValue(payload.projected_timestamp) || undefined,
-        deltas: Array.isArray(payload.deltas) ? payload.deltas : [],
-      };
-    }
-    case "workspace.event": {
-      const scope = stringValue(payload.scope);
-      if (!scope) throw new Error("realtime_scope_required");
-      const companyID = stringValue(payload.company_id);
-      if (!companyID) throw new Error("realtime_company_id_required");
-      const event = recordValue(payload.event);
-      if (!event || !stringValue(event.type)) throw new Error("realtime_workspace_event_required");
-      const envelope: RealtimeWorkspaceEventEnvelope = {
-        company_id: stringValue(event.company_id) || undefined,
-        event_id: stringValue(event.event_id) || undefined,
-        sequence: optionalNumber(event.sequence),
-        stream_type: stringValue(event.stream_type) || undefined,
-        stream_id: stringValue(event.stream_id) || undefined,
-        type: stringValue(event.type) || undefined,
-        ts: stringValue(event.ts) || undefined,
-        data: recordValue(event.data) ?? undefined,
-      };
-      const sequence = optionalNumber(payload.sequence) ?? envelope.sequence;
-      return {
-        ...base,
-        type,
-        company_id: companyID,
-        scope,
-        sequence,
-        event: envelope,
-      };
+      return { ...base, type, scope, error: stringValue(payload.error) || undefined, message: stringValue(payload.message) || undefined };
     }
     case "notification.created": {
-      const scope = stringValue(payload.scope);
-      if (!scope) throw new Error("realtime_scope_required");
-      const companyID = stringValue(payload.company_id);
-      if (!companyID) throw new Error("realtime_company_id_required");
+      const scoped = scopedMessageBase(payload, type);
       const notification = recordValue(payload.notification);
       if (!notification || !stringValue(notification.notification_id)) throw new Error("realtime_notification_required");
-      return {
-        ...base,
-        type,
-        company_id: companyID,
-        scope,
-        affected_scopes: stringListValue(payload.affected_scopes),
-        notification: notification as unknown as NotificationItem,
-        ts: stringValue(payload.ts) || undefined,
-      };
+      return { ...scoped, type, notification: notification as unknown as NotificationItem, ts: stringValue(payload.ts) || undefined };
     }
     case "notification.deleted": {
-      const scope = stringValue(payload.scope);
-      if (!scope) throw new Error("realtime_scope_required");
-      const companyID = stringValue(payload.company_id);
-      if (!companyID) throw new Error("realtime_company_id_required");
+      const scoped = scopedMessageBase(payload, type);
       const notificationID = stringValue(payload.notification_id);
       if (!notificationID) throw new Error("realtime_notification_id_required");
-      return {
-        ...base,
-        type,
-        company_id: companyID,
-        scope,
-        affected_scopes: stringListValue(payload.affected_scopes),
-        notification_id: notificationID,
-        ts: stringValue(payload.ts) || undefined,
-      };
+      return { ...scoped, type, notification_id: notificationID, ts: stringValue(payload.ts) || undefined };
     }
     case "notifications.cleared": {
-      const scope = stringValue(payload.scope);
-      if (!scope) throw new Error("realtime_scope_required");
-      const companyID = stringValue(payload.company_id);
-      if (!companyID) throw new Error("realtime_company_id_required");
-      return {
-        ...base,
-        type,
-        company_id: companyID,
-        scope,
-        affected_scopes: stringListValue(payload.affected_scopes),
-        deleted_count: optionalNumber(payload.deleted_count) ?? 0,
-        ts: stringValue(payload.ts) || undefined,
-      };
+      const scoped = scopedMessageBase(payload, type);
+      return { ...scoped, type, deleted_count: optionalNumber(payload.deleted_count) ?? 0, ts: stringValue(payload.ts) || undefined };
     }
-    case "communications.event": {
-      const scope = stringValue(payload.scope);
-      if (!scope) throw new Error("realtime_scope_required");
-      const companyID = stringValue(payload.company_id);
-      if (!companyID) throw new Error("realtime_company_id_required");
-      const event = recordValue(payload.event);
-      if (!event || !stringValue(event.type)) throw new Error("realtime_communications_event_required");
-      return {
-        ...base,
-        type,
-        company_id: companyID,
-        scope,
-        event: {
-          user_id: stringValue(event.user_id) || undefined,
-          type: stringValue(event.type) || undefined,
-          trigger: stringValue(event.trigger) || undefined,
-          message_id: stringValue(event.message_id) || undefined,
-          ts: stringValue(event.ts) || undefined,
-        },
-      };
+    case "chat.message.created": {
+      const scoped = scopedMessageBase(payload, type);
+      const nodeID = stringValue(payload.node_id);
+      const blockID = stringValue(payload.block_id);
+      const messageID = stringValue(payload.message_id);
+      if (!nodeID || !blockID || !messageID) throw new Error("realtime_chat_message_required");
+      return { ...scoped, type, node_id: nodeID, block_id: blockID, message_id: messageID, ts: stringValue(payload.ts) || undefined };
     }
-    case "snapshot.refetch": {
-      const scope = stringValue(payload.scope);
-      if (!scope) throw new Error("realtime_scope_required");
-      return {
-        ...base,
-        type,
-        scope,
-        sequence: optionalNumber(payload.sequence),
-        reason: stringValue(payload.reason) || undefined,
-      };
+    case "chat.message.deleted": {
+      const scoped = scopedMessageBase(payload, type);
+      const nodeID = stringValue(payload.node_id);
+      const messageID = stringValue(payload.message_id);
+      if (!nodeID || !messageID) throw new Error("realtime_chat_message_required");
+      return { ...scoped, type, node_id: nodeID, block_id: stringValue(payload.block_id) || undefined, message_id: messageID, ts: stringValue(payload.ts) || undefined };
     }
-    case "permission.revoked": {
-      const scope = stringValue(payload.scope);
-      if (!scope) throw new Error("realtime_scope_required");
-      return {
-        ...base,
-        type,
-        scope,
-        resource_type: stringValue(payload.resource_type) || undefined,
-        resource_id: stringValue(payload.resource_id) || undefined,
-        reason: stringValue(payload.reason) || undefined,
-      };
+    case "kanban.changed": {
+      const scoped = scopedMessageBase(payload, type);
+      const boardID = stringValue(payload.board_id);
+      if (!boardID) throw new Error("realtime_board_id_required");
+      return { ...scoped, type, board_id: boardID, change_type: stringValue(payload.change_type) || undefined, ts: stringValue(payload.ts) || undefined };
     }
     case "error":
-      return {
-        ...base,
-        type,
-        error: stringValue(payload.error) || undefined,
-        message: stringValue(payload.message) || undefined,
-      };
+      return { ...base, type, error: stringValue(payload.error) || undefined, message: stringValue(payload.message) || undefined };
     case "ping":
     case "pong":
       return { ...base, type };
     default:
       throw new Error("unknown_realtime_message_type");
   }
+}
+
+export function isSupportedRealtimeScope(scope: string): boolean {
+  return /^(?:notifications:user:[^:]+|chat:node:[^:]+|board:.+)$/.test(scope.trim());
 }
 
 export function realtimeWebSocketURL(apiBase: string, companyID: string): string {
@@ -451,7 +288,6 @@ export class MangoRealtimeClient {
   private socket: WebSocket | null = null;
   private opening = false;
   private manualClose = false;
-  private keepAliveRefs = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private subscriptionsSentForSocket = false;
   private openAttemptID = 0;
@@ -467,18 +303,9 @@ export class MangoRealtimeClient {
     this.reconnectDelayMs = options.reconnectDelayMs ?? 1_000;
   }
 
-  retain(): () => void {
-    this.keepAliveRefs += 1;
-    this.ensureOpen();
-    return () => {
-      this.keepAliveRefs = Math.max(0, this.keepAliveRefs - 1);
-      this.closeIfIdle();
-    };
-  }
-
   subscribe(scope: string, handlers: RealtimeSubscriptionHandlers = {}): () => void {
     const cleanScope = scope.trim();
-    if (!cleanScope) return () => undefined;
+    if (!isSupportedRealtimeScope(cleanScope)) throw new Error("unsupported_realtime_scope");
     const subscription: RealtimeSubscription = { ...handlers, scope: cleanScope };
     const bucket = this.subscriptions.get(cleanScope) ?? new Set<RealtimeSubscription>();
     const firstForScope = bucket.size === 0;
@@ -491,9 +318,7 @@ export class MangoRealtimeClient {
       current?.delete(subscription);
       if (current && current.size > 0) return;
       this.subscriptions.delete(cleanScope);
-      if (this.socket?.readyState === WebSocket.OPEN) {
-        this.socket.send(JSON.stringify({ type: "unsubscribe", scope: cleanScope }));
-      }
+      if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: "unsubscribe", scope: cleanScope }));
       this.closeIfIdle();
     };
   }
@@ -521,19 +346,17 @@ export class MangoRealtimeClient {
           this.sendSubscriptionsForCurrentSocket();
         };
         socket.onmessage = (event) => {
-          if (this.socket !== socket) return;
-          this.handleMessage(typeof event.data === "string" ? event.data : "");
+          if (this.socket === socket) this.handleMessage(typeof event.data === "string" ? event.data : "");
         };
         socket.onerror = () => {
-          if (this.socket !== socket) return;
-          this.dispatchError({ type: "error", error: "websocket_error" });
+          if (this.socket === socket) this.dispatchError({ type: "error", error: "websocket_error" });
         };
         socket.onclose = () => {
           if (this.socket !== socket) return;
           this.socket = null;
           this.opening = false;
           this.subscriptionsSentForSocket = false;
-          if (!this.manualClose && (this.keepAliveRefs > 0 || this.subscriptions.size > 0)) this.scheduleReconnect();
+          if (!this.manualClose && this.subscriptions.size > 0) this.scheduleReconnect();
         };
       })
       .catch((cause) => {
@@ -560,12 +383,12 @@ export class MangoRealtimeClient {
   }
 
   private closeIfIdle(): void {
-    if (this.keepAliveRefs > 0 || this.subscriptions.size > 0) return;
+    if (this.subscriptions.size > 0) return;
     this.close();
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectTimer !== undefined || this.manualClose || isTerminalAuthFailureActive()) return;
+    if (this.reconnectTimer !== undefined || this.manualClose || this.subscriptions.size === 0 || isTerminalAuthFailureActive()) return;
     const delayMs = computeRealtimeReconnectDelayMs(this.reconnectAttempts, { baseDelayMs: this.reconnectDelayMs });
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
@@ -586,34 +409,14 @@ export class MangoRealtimeClient {
     this.reconnectAttempts = 0;
   }
 
-  private sendSubscriptions(): void {
-    for (const scope of this.subscriptions.keys()) this.sendSubscribe(scope);
-  }
-
   private sendSubscriptionsForCurrentSocket(): void {
     if (this.subscriptionsSentForSocket) return;
     this.subscriptionsSentForSocket = true;
-    this.sendSubscriptions();
+    for (const scope of this.subscriptions.keys()) this.sendSubscribe(scope);
   }
 
   private sendSubscribe(scope: string): void {
-    const afterSequence = this.latestAfterSequence(scope);
-    const message: { type: "subscribe"; scope: string; after_sequence?: number } = { type: "subscribe", scope };
-    if (afterSequence !== undefined) message.after_sequence = afterSequence;
-    this.socket?.send(JSON.stringify(message));
-  }
-
-  private latestAfterSequence(scope: string): number | undefined {
-    const bucket = this.subscriptions.get(scope);
-    if (!bucket) return undefined;
-    let sequence: number | undefined;
-    for (const sub of bucket) {
-      const candidate = sub.getAfterSequence?.() ?? sub.afterSequence;
-      if (candidate !== undefined && Number.isSafeInteger(candidate) && candidate >= 0) {
-        sequence = Math.max(sequence ?? 0, candidate);
-      }
-    }
-    return sequence;
+    this.socket?.send(JSON.stringify({ type: "subscribe", scope }));
   }
 
   private handleMessage(raw: string): void {
@@ -638,8 +441,7 @@ export class MangoRealtimeClient {
       this.dispatchError(message);
       return;
     }
-    const scope = message.scope ?? "";
-    const bucket = scope ? this.subscriptions.get(scope) : undefined;
+    const bucket = message.scope ? this.subscriptions.get(message.scope) : undefined;
     if (!bucket || bucket.size === 0) return;
     for (const sub of bucket) {
       switch (message.type) {
@@ -648,12 +450,6 @@ export class MangoRealtimeClient {
           break;
         case "subscription.rejected":
           sub.onRejected?.(message);
-          break;
-        case "projection.delta":
-          sub.onDelta?.(message);
-          break;
-        case "workspace.event":
-          sub.onWorkspaceEvent?.(message);
           break;
         case "notification.created":
           sub.onNotificationCreated?.(message);
@@ -664,14 +460,14 @@ export class MangoRealtimeClient {
         case "notifications.cleared":
           sub.onNotificationsCleared?.(message);
           break;
-        case "communications.event":
-          sub.onCommunicationsEvent?.(message);
+        case "chat.message.created":
+          sub.onChatMessageCreated?.(message);
           break;
-        case "snapshot.refetch":
-          sub.onRefetch?.(message);
+        case "chat.message.deleted":
+          sub.onChatMessageDeleted?.(message);
           break;
-        case "permission.revoked":
-          sub.onPermissionRevoked?.(message);
+        case "kanban.changed":
+          sub.onKanbanChanged?.(message);
           break;
       }
     }
@@ -700,11 +496,6 @@ export function getMangoRealtimeClient(apiBase: string, companyID: string, optio
   const client = new MangoRealtimeClient(apiBase, companyID, options);
   realtimeClients.set(key, client);
   return client;
-}
-
-export function ensureMangoRealtimeConnection(apiBase: string, companyID: string): () => void {
-  if (!companyID.trim()) return () => undefined;
-  return getMangoRealtimeClient(apiBase, companyID).retain();
 }
 
 export function subscribeRealtimeScope(apiBase: string, companyID: string, scope: string, handlers: RealtimeSubscriptionHandlers): () => void {

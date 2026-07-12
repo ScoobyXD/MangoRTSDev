@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net"
 	"net/http"
@@ -22,13 +21,12 @@ import (
 )
 
 const (
-	webSocketGUID                     = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-	maxRealtimeMessageBytes           = 1 << 20
-	realtimeWorkspaceReplayLimit      = 100
-	webSocketOpcodeText          byte = 0x1
-	webSocketOpcodeClose         byte = 0x8
-	webSocketOpcodePing          byte = 0x9
-	webSocketOpcodePong          byte = 0xA
+	webSocketGUID                = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+	maxRealtimeMessageBytes      = 1 << 20
+	webSocketOpcodeText     byte = 0x1
+	webSocketOpcodeClose    byte = 0x8
+	webSocketOpcodePing     byte = 0x9
+	webSocketOpcodePong     byte = 0xA
 )
 
 const (
@@ -37,14 +35,12 @@ const (
 	realtimeMessageUnsubscribe          = "unsubscribe"
 	realtimeMessageSubscriptionAccepted = "subscription.accepted"
 	realtimeMessageSubscriptionRejected = "subscription.rejected"
-	realtimeMessageProjectionDelta      = "projection.delta"
-	realtimeMessageWorkspaceEvent       = "workspace.event"
 	realtimeMessageNotificationCreated  = "notification.created"
 	realtimeMessageNotificationDeleted  = "notification.deleted"
 	realtimeMessageNotificationsCleared = "notifications.cleared"
-	realtimeMessageCommunicationsEvent  = "communications.event"
-	realtimeMessageSnapshotRefetch      = "snapshot.refetch"
-	realtimeMessagePermissionRevoked    = "permission.revoked"
+	realtimeMessageChatCreated          = "chat.message.created"
+	realtimeMessageChatDeleted          = "chat.message.deleted"
+	realtimeMessageKanbanChanged        = "kanban.changed"
 	realtimeMessagePing                 = "ping"
 	realtimeMessagePong                 = "pong"
 	realtimeMessageError                = "error"
@@ -61,63 +57,34 @@ type realtimeConnection struct {
 }
 
 type realtimeClientMessage struct {
-	Type          string `json:"type"`
-	Scope         string `json:"scope,omitempty"`
-	AfterSequence *int64 `json:"after_sequence,omitempty"`
+	Type  string `json:"type"`
+	Scope string `json:"scope,omitempty"`
 }
 
 type realtimeServerMessage struct {
-	Type            string `json:"type"`
-	CompanyID       string `json:"company_id,omitempty"`
-	UserID          string `json:"user_id,omitempty"`
-	ConnectionID    string `json:"connection_id,omitempty"`
-	Scope           string `json:"scope,omitempty"`
-	CurrentSequence int64  `json:"current_sequence,omitempty"`
-	Sequence        int64  `json:"sequence,omitempty"`
-	ResourceType    string `json:"resource_type,omitempty"`
-	ResourceID      string `json:"resource_id,omitempty"`
-	Error           string `json:"error,omitempty"`
-	Message         string `json:"message,omitempty"`
-	Reason          string `json:"reason,omitempty"`
+	Type         string `json:"type"`
+	CompanyID    string `json:"company_id,omitempty"`
+	UserID       string `json:"user_id,omitempty"`
+	ConnectionID string `json:"connection_id,omitempty"`
+	Scope        string `json:"scope,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
-type realtimeProjectionDeltaMessage struct {
-	Type               string                  `json:"type"`
-	CompanyID          string                  `json:"company_id"`
-	Scope              string                  `json:"scope"`
-	Sequence           int64                   `json:"sequence"`
-	Projection         string                  `json:"projection"`
-	ProjectionScope    string                  `json:"projection_scope,omitempty"`
-	ProjectionSequence int64                   `json:"projection_sequence"`
-	Deltas             []store.ProjectionDelta `json:"deltas"`
-	ProjectedTimestamp time.Time               `json:"projected_timestamp"`
+type realtimeChatMessage struct {
+	Type      string `json:"type"`
+	CompanyID string `json:"company_id"`
+	Scope     string `json:"scope"`
+	NodeID    string `json:"node_id"`
+	BlockID   string `json:"block_id,omitempty"`
+	MessageID string `json:"message_id"`
 }
 
-type realtimeEditorProjectionDeltaMessage struct {
-	Type               string                        `json:"type"`
-	CompanyID          string                        `json:"company_id"`
-	Scope              string                        `json:"scope"`
-	Sequence           int64                         `json:"sequence"`
-	Projection         string                        `json:"projection"`
-	ResourceType       string                        `json:"resource_type"`
-	ResourceID         string                        `json:"resource_id"`
-	Deltas             []store.EditorProjectionDelta `json:"deltas"`
-	ProjectedTimestamp time.Time                     `json:"projected_timestamp"`
-}
-
-type realtimeWorkspaceEventMessage struct {
-	Type      string                 `json:"type"`
-	CompanyID string                 `json:"company_id"`
-	Scope     string                 `json:"scope"`
-	Sequence  int64                  `json:"sequence"`
-	Event     workspaceEventEnvelope `json:"event"`
-}
-
-type realtimeCommunicationsEventMessage struct {
-	Type      string                      `json:"type"`
-	CompanyID string                      `json:"company_id"`
-	Scope     string                      `json:"scope"`
-	Event     communicationsEventEnvelope `json:"event"`
+type realtimeKanbanChangedMessage struct {
+	Type       string `json:"type"`
+	CompanyID  string `json:"company_id"`
+	Scope      string `json:"scope"`
+	BoardID    string `json:"board_id"`
+	ChangeType string `json:"change_type,omitempty"`
 }
 
 func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -315,80 +282,13 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 	}
 	s.realtimeRegistry.subscribe(conn, scope)
 	s.recordRealtimeActiveSubscriptions()
-	currentSequence := s.currentRealtimeScopeSequence(conn.companyID, scope)
-	log.Printf("realtime_subscription_accepted company_id=%s user_id=%s connection_id=%s scope_type=%s scope=%s current_sequence=%d", conn.companyID, conn.userID, conn.id, realtimeScopeType(scope), scope, currentSequence)
-	_ = conn.sendJSON(realtimeServerMessage{
-		Type:            realtimeMessageSubscriptionAccepted,
-		CompanyID:       conn.companyID,
-		Scope:           scope,
-		CurrentSequence: currentSequence,
-	})
-	if message.AfterSequence != nil && currentSequence > *message.AfterSequence {
-		if realtimeWorkspaceDomainEventScopeType(scope) != "" && s.replayWorkspaceEventsForSubscription(conn, scope, *message.AfterSequence, currentSequence) {
-			return
-		}
-		s.sendRealtimeSnapshotRefetch(conn, scope, currentSequence, "sequence_unavailable")
-	}
+	log.Printf("realtime_subscription_accepted company_id=%s user_id=%s connection_id=%s scope_type=%s scope=%s", conn.companyID, conn.userID, conn.id, realtimeScopeType(scope), scope)
+	_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionAccepted, CompanyID: conn.companyID, Scope: scope})
 }
 
 func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, scope string) (bool, string, error) {
 	if actorRoleForCompany(actor, companyID) == "" {
 		return false, "company_access_denied", nil
-	}
-	if boardID := realtimeBoardIDFromScope(scope); boardID != "" {
-		logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
-		if logicGateID == "" {
-			return false, "unsupported_scope", nil
-		}
-		if actorCanManageCompany(actor, companyID) {
-			return true, "", nil
-		}
-		userID := strings.TrimSpace(actor.User.UserID)
-		if userID == "" {
-			return false, "unauthorized", nil
-		}
-		allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
-		if err != nil {
-			return false, "", err
-		}
-		if !allowed {
-			return false, "access_denied", nil
-		}
-		return true, "", nil
-	}
-	if resourceType, resourceID := realtimeEditorResourceFromScope(scope); resourceID != "" {
-		if actorCanManageCompany(actor, companyID) {
-			return true, "", nil
-		}
-		userID := strings.TrimSpace(actor.User.UserID)
-		if userID == "" {
-			return false, "unauthorized", nil
-		}
-		allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, store.EntityPermissionEdit)
-		if err != nil {
-			return false, "", err
-		}
-		if !allowed {
-			return false, "access_denied", nil
-		}
-		return true, "", nil
-	}
-	if projectID := realtimeProjectRelationshipProjectIDFromScope(scope); projectID != "" {
-		if actorCanManageCompany(actor, companyID) {
-			return true, "", nil
-		}
-		userID := strings.TrimSpace(actor.User.UserID)
-		if userID == "" {
-			return false, "unauthorized", nil
-		}
-		allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, store.EntityTypeProject, projectID, store.EntityPermissionView)
-		if err != nil {
-			return false, "", err
-		}
-		if !allowed {
-			return false, "access_denied", nil
-		}
-		return true, "", nil
 	}
 	if userID := realtimeNotificationUserIDFromScope(scope); userID != "" {
 		if userID != strings.TrimSpace(actor.User.UserID) {
@@ -396,238 +296,88 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return true, "", nil
 	}
-	if userID := realtimeCommunicationsUserIDFromScope(scope); userID != "" {
-		if userID != strings.TrimSpace(actor.User.UserID) {
-			return false, "access_denied", nil
-		}
-		return true, "", nil
+	if nodeID := realtimeChatNodeIDFromScope(scope); nodeID != "" {
+		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeNode, nodeID, store.EntityPermissionEdit)
 	}
-	if userID := realtimeWorkspaceUserIDFromScope(scope); userID != "" {
-		if userID != strings.TrimSpace(actor.User.UserID) && !actorCanManageCompany(actor, companyID) {
-			return false, "access_denied", nil
+	if boardID := realtimeBoardIDFromScope(scope); boardID != "" {
+		logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
+		if logicGateID == "" {
+			return false, "unsupported_scope", nil
 		}
-		return true, "", nil
-	}
-	if userID := realtimeGVICMatrixUserIDFromScope(scope); userID != "" {
-		if userID != strings.TrimSpace(actor.User.UserID) && !actorCanManageCompany(actor, companyID) {
-			return false, "access_denied", nil
-		}
-		return true, "", nil
-	}
-	if userID := realtimeProjectManagementUserIDFromScope(scope); userID != "" {
-		if userID != strings.TrimSpace(actor.User.UserID) && !actorCanManageCompany(actor, companyID) {
-			return false, "access_denied", nil
-		}
-		return true, "", nil
+		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionView)
 	}
 	return false, "unsupported_scope", nil
 }
 
-func realtimeBoardScope(boardID string) string {
-	boardID = strings.TrimSpace(boardID)
-	if boardID == "" {
-		return ""
+func (s *Server) authorizeRealtimeEntityScope(actor ActorContext, companyID, resourceType, resourceID, permission string) (bool, string, error) {
+	if actorCanManageCompany(actor, companyID) {
+		return true, "", nil
 	}
-	return "board:" + boardID
+	userID := strings.TrimSpace(actor.User.UserID)
+	if userID == "" {
+		return false, "unauthorized", nil
+	}
+	allowed, err := s.repo.UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, permission)
+	if err != nil {
+		return false, "", err
+	}
+	if !allowed {
+		return false, "access_denied", nil
+	}
+	return true, "", nil
+}
+
+func realtimeBoardScope(boardID string) string {
+	return realtimeResourceScope("board:", boardID)
 }
 
 func realtimeBoardIDFromScope(scope string) string {
-	scope = strings.TrimSpace(scope)
-	if !strings.HasPrefix(scope, "board:") {
-		return ""
-	}
-	return strings.TrimSpace(strings.TrimPrefix(scope, "board:"))
+	return realtimeResourceIDFromScope(scope, "board:")
 }
 
-func realtimeProjectRelationshipScope(projectID string) string {
-	return store.ProjectRelationshipProjectionProjectScope(projectID)
+func realtimeChatScope(nodeID string) string {
+	return realtimeResourceScope("chat:node:", nodeID)
 }
 
-func realtimeProjectRelationshipProjectIDFromScope(scope string) string {
-	scope = strings.TrimSpace(scope)
-	if !strings.HasPrefix(scope, "project:") {
-		return ""
-	}
-	return strings.TrimSpace(strings.TrimPrefix(scope, "project:"))
-}
-
-func realtimeEditorScope(resourceType, resourceID string) string {
-	return store.EditorRealtimeScope(resourceType, resourceID)
-}
-
-func realtimeEditorResourceFromScope(scope string) (string, string) {
-	scope = strings.TrimSpace(scope)
-	for _, candidate := range []struct {
-		prefix       string
-		resourceType string
-	}{
-		{prefix: "editor:node:", resourceType: store.EntityTypeNode},
-		{prefix: "editor:logic_gate:", resourceType: store.EntityTypeLogicGate},
-	} {
-		if strings.HasPrefix(scope, candidate.prefix) {
-			return candidate.resourceType, strings.TrimSpace(strings.TrimPrefix(scope, candidate.prefix))
-		}
-	}
-	return "", ""
+func realtimeChatNodeIDFromScope(scope string) string {
+	return realtimeResourceIDFromScope(scope, "chat:node:")
 }
 
 func realtimeNotificationScope(userID string) string {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return ""
-	}
-	return "notifications:user:" + userID
+	return realtimeResourceScope("notifications:user:", userID)
 }
 
 func realtimeNotificationUserIDFromScope(scope string) string {
+	return realtimeResourceIDFromScope(scope, "notifications:user:")
+}
+
+func realtimeResourceScope(prefix, resourceID string) string {
+	resourceID = strings.TrimSpace(resourceID)
+	if resourceID == "" {
+		return ""
+	}
+	return prefix + resourceID
+}
+
+func realtimeResourceIDFromScope(scope, prefix string) string {
 	scope = strings.TrimSpace(scope)
-	if !strings.HasPrefix(scope, "notifications:user:") {
+	if !strings.HasPrefix(scope, prefix) {
 		return ""
 	}
-	return strings.TrimSpace(strings.TrimPrefix(scope, "notifications:user:"))
-}
-
-func realtimeCommunicationsScope(userID string) string {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return ""
-	}
-	return "communications:user:" + userID
-}
-
-func realtimeCommunicationsUserIDFromScope(scope string) string {
-	scope = strings.TrimSpace(scope)
-	if !strings.HasPrefix(scope, "communications:user:") {
-		return ""
-	}
-	return strings.TrimSpace(strings.TrimPrefix(scope, "communications:user:"))
-}
-
-func realtimeGVICMatrixScope(userID string) string {
-	return store.GVICMatrixRealtimeUserScope(userID)
-}
-
-func realtimeGVICScope(userID string) string {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return ""
-	}
-	return "gvic:user:" + userID
-}
-
-func realtimeGVICUserIDFromScope(scope string) string {
-	scope = strings.TrimSpace(scope)
-	if !strings.HasPrefix(scope, "gvic:user:") {
-		return ""
-	}
-	return strings.TrimSpace(strings.TrimPrefix(scope, "gvic:user:"))
-}
-
-func realtimeGVICMatrixUserIDFromScope(scope string) string {
-	scope = strings.TrimSpace(scope)
-	if !strings.HasPrefix(scope, "gvic_matrix:user:") {
-		return ""
-	}
-	return strings.TrimSpace(strings.TrimPrefix(scope, "gvic_matrix:user:"))
-}
-
-func realtimeProjectManagementScope(userID string) string {
-	return store.ProjectManagementRealtimeUserScope(userID)
-}
-
-func realtimeProjectManagementUserIDFromScope(scope string) string {
-	scope = strings.TrimSpace(scope)
-	if !strings.HasPrefix(scope, "project_management:user:") {
-		return ""
-	}
-	return strings.TrimSpace(strings.TrimPrefix(scope, "project_management:user:"))
-}
-
-func realtimeWorkspaceScope(userID string) string {
-	return realtimeUserScopedWorkspaceScope("workspace", userID)
-}
-
-func realtimeCompanyExplorerScope(userID string) string {
-	return realtimeUserScopedWorkspaceScope("company_explorer", userID)
-}
-
-func realtimeNodeGraphScope(userID string) string {
-	return realtimeUserScopedWorkspaceScope("node_graph", userID)
-}
-
-func realtimeLogicGateGraphScope(userID string) string {
-	return realtimeUserScopedWorkspaceScope("logic_gate_graph", userID)
-}
-
-func realtimeUserScopedWorkspaceScope(prefix, userID string) string {
-	prefix = strings.TrimSpace(prefix)
-	userID = strings.TrimSpace(userID)
-	if prefix == "" || userID == "" {
-		return ""
-	}
-	return prefix + ":user:" + userID
-}
-
-func realtimeWorkspaceUserIDFromScope(scope string) string {
-	scope = strings.TrimSpace(scope)
-	for _, prefix := range []string{
-		"workspace:user:",
-		"company_explorer:user:",
-		"node_graph:user:",
-		"logic_gate_graph:user:",
-	} {
-		if strings.HasPrefix(scope, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(scope, prefix))
-		}
-	}
-	return ""
-}
-
-func realtimeWorkspaceDomainEventScopeType(scope string) string {
-	scope = strings.TrimSpace(scope)
-	for _, prefix := range []string{
-		"workspace",
-		"company_explorer",
-		"node_graph",
-		"logic_gate_graph",
-	} {
-		if strings.HasPrefix(scope, prefix+":user:") {
-			return prefix
-		}
-	}
-	return ""
+	return strings.TrimSpace(strings.TrimPrefix(scope, prefix))
 }
 
 func realtimeScopeType(scope string) string {
-	scope = strings.TrimSpace(scope)
 	switch {
-	case realtimeBoardIDFromScope(scope) != "":
-		return "board"
-	case realtimeProjectRelationshipProjectIDFromScope(scope) != "":
-		return "project"
-	case realtimeEditorResourceIDFromScope(scope) != "":
-		return "editor"
 	case realtimeNotificationUserIDFromScope(scope) != "":
 		return "notifications"
-	case realtimeCommunicationsUserIDFromScope(scope) != "":
-		return "communications"
-	case realtimeWorkspaceDomainEventScopeType(scope) != "":
-		return realtimeWorkspaceDomainEventScopeType(scope)
-	case realtimeGVICMatrixUserIDFromScope(scope) != "":
-		return "gvic_matrix"
-	case realtimeProjectManagementUserIDFromScope(scope) != "":
-		return "project_management"
+	case realtimeChatNodeIDFromScope(scope) != "":
+		return "chat"
+	case realtimeBoardIDFromScope(scope) != "":
+		return "board"
 	default:
-		if index := strings.Index(scope, ":"); index > 0 {
-			return strings.TrimSpace(scope[:index])
-		}
-		return scope
+		return ""
 	}
-}
-
-func realtimeEditorResourceIDFromScope(scope string) string {
-	_, resourceID := realtimeEditorResourceFromScope(scope)
-	return resourceID
 }
 
 func (s *Server) recordRealtimeActiveConnections() {
@@ -642,147 +392,10 @@ func (s *Server) recordRealtimeActiveSubscriptions() {
 		return
 	}
 	counts := s.realtimeRegistry.scopeTypeCounts()
-	for _, scopeType := range []string{"board", "communications", "notifications", "gvic_matrix", "project_management", "workspace", "company_explorer", "node_graph", "logic_gate_graph"} {
+	for _, scopeType := range []string{"notifications", "chat", "board"} {
 		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(counts[scopeType]), 0)
 	}
-	for scopeType, count := range counts {
-		if scopeType == "board" || scopeType == "communications" || scopeType == "notifications" || scopeType == "gvic_matrix" || scopeType == "project_management" ||
-			scopeType == "workspace" || scopeType == "company_explorer" || scopeType == "node_graph" || scopeType == "logic_gate_graph" {
-			continue
-		}
-		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(count), 0)
-	}
 }
-
-func (s *Server) sendRealtimeSnapshotRefetch(conn *realtimeConnection, scope string, sequence int64, reason string) {
-	if conn == nil {
-		return
-	}
-	_ = conn.sendJSON(realtimeServerMessage{
-		Type:      realtimeMessageSnapshotRefetch,
-		CompanyID: conn.companyID,
-		Scope:     scope,
-		Sequence:  sequence,
-		Reason:    reason,
-	})
-	s.recordOperationalMetric("realtime.snapshot_refetch_count", realtimeScopeType(scope), 1, 0)
-	if realtimeWorkspaceDomainEventScopeType(scope) != "" {
-		s.recordOperationalMetric("realtime.workspace_replay_refetch_count", realtimeScopeType(scope), 1, 0)
-	}
-}
-
-func (s *Server) replayWorkspaceEventsForSubscription(conn *realtimeConnection, scope string, afterSequence, currentSequence int64) bool {
-	if s == nil || s.repo == nil || conn == nil || realtimeWorkspaceDomainEventScopeType(scope) == "" {
-		return false
-	}
-	if afterSequence < 0 || currentSequence-afterSequence > realtimeWorkspaceReplayLimit {
-		return false
-	}
-	events, err := s.repo.ListDomainEventsAfter(store.DomainEventReplayQuery{
-		CompanyID:     conn.companyID,
-		StreamType:    workspaceDomainStreamType,
-		StreamID:      conn.companyID,
-		AfterSequence: afterSequence,
-		Limit:         realtimeWorkspaceReplayLimit + 1,
-	})
-	if err != nil {
-		log.Printf("failed to replay realtime workspace events company_id=%s user_id=%s scope=%s after_sequence=%d: %v", conn.companyID, conn.userID, scope, afterSequence, err)
-		return false
-	}
-	if len(events) > realtimeWorkspaceReplayLimit {
-		return false
-	}
-	for _, event := range events {
-		if event.Sequence <= afterSequence || event.Sequence > currentSequence {
-			continue
-		}
-		visible, err := s.workspaceEventVisibleForRealtimeScope(event, scope)
-		if err != nil {
-			log.Printf("failed to filter realtime workspace replay company_id=%s scope=%s sequence=%d event_id=%s: %v", conn.companyID, scope, event.Sequence, event.EventID, err)
-			return false
-		}
-		if !visible {
-			continue
-		}
-		payload, err := json.Marshal(realtimeWorkspaceEventMessage{
-			Type:      realtimeMessageWorkspaceEvent,
-			CompanyID: conn.companyID,
-			Scope:     scope,
-			Sequence:  event.Sequence,
-			Event:     workspaceEventEnvelopeFromDomainEvent(event),
-		})
-		if err != nil {
-			log.Printf("failed to marshal realtime workspace replay company_id=%s scope=%s sequence=%d event_id=%s: %v", conn.companyID, scope, event.Sequence, event.EventID, err)
-			return false
-		}
-		if err := conn.sendText(payload); err != nil {
-			return true
-		}
-		s.recordOperationalMetric("realtime.workspace_events_replayed", realtimeScopeType(scope), 1, 0)
-	}
-	return true
-}
-
-func (s *Server) workspaceEventVisibleForRealtimeScope(event domain.DomainEvent, scope string) (bool, error) {
-	userID := realtimeWorkspaceUserIDFromScope(scope)
-	if userID == "" {
-		return true, nil
-	}
-	userIDs, err := s.repo.ListEffectiveUsersForWorkspaceEvent(event)
-	if err != nil {
-		return false, err
-	}
-	for _, candidate := range userIDs {
-		if strings.TrimSpace(candidate) == userID {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func (s *Server) currentRealtimeScopeSequence(companyID, scope string) int64 {
-	projectionName := ""
-	projectionScope := ""
-	if boardID := realtimeBoardIDFromScope(scope); boardID != "" {
-		projectionName = store.ProjectionNameKanbanBoard
-		projectionScope = scope
-	} else if userID := realtimeGVICUserIDFromScope(scope); userID != "" {
-		projectionName = store.ProjectionNameGVICEffectiveAssignments
-		projectionScope = projectionUserScope(userID)
-	} else if userID := realtimeGVICMatrixUserIDFromScope(scope); userID != "" {
-		projectionName = store.ProjectionNameGVICMatrix
-		projectionScope = store.GVICMatrixProjectionUserScope(userID)
-	} else if userID := realtimeProjectManagementUserIDFromScope(scope); userID != "" {
-		projectionName = store.ProjectionNameProjectManagementTimeline
-		projectionScope = store.ProjectManagementProjectionUserScope(userID)
-	} else if projectID := realtimeProjectRelationshipProjectIDFromScope(scope); projectID != "" {
-		projectionName = store.ProjectionNameProjectRelationship
-		projectionScope = store.ProjectRelationshipProjectionProjectScope(projectID)
-	} else if realtimeEditorResourceIDFromScope(scope) != "" {
-		sequence, err := s.repo.CurrentEventRowSequence(companyID, scope)
-		if err != nil {
-			log.Printf("failed to read realtime editor scope sequence company_id=%s scope=%s: %v", companyID, scope, err)
-			return 0
-		}
-		return sequence
-	} else if realtimeWorkspaceDomainEventScopeType(scope) != "" {
-		sequence, err := s.repo.CurrentDomainEventSequence(store.DomainEventStreamQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID})
-		if err != nil {
-			log.Printf("failed to read realtime workspace scope sequence company_id=%s scope=%s: %v", companyID, scope, err)
-			return 0
-		}
-		return sequence
-	} else {
-		return 0
-	}
-	sequence, err := s.repo.CurrentProjectionSequence(companyID, projectionName, projectionScope)
-	if err != nil {
-		log.Printf("failed to read realtime scope sequence company_id=%s scope=%s: %v", companyID, scope, err)
-		return 0
-	}
-	return sequence
-}
-
 func (c *realtimeConnection) sendJSON(value any) error {
 	payload, err := json.Marshal(value)
 	if err != nil {

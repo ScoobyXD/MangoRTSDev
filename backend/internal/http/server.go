@@ -34,31 +34,18 @@ type BootstrapDevAdminConfig struct {
 
 type Server struct {
 	repo                                    store.Repository
-	workspaceEvents                         *localWorkspaceEventBus
-	projectionHub                           *projectionDeltaHub
 	realtimeRegistry                        *realtimeSubscriptionRegistry
 	realtimeTickets                         *realtimeTicketStore
 	notifications                           *notifications.Service
 	kanban                                  *kanban.Service
-	workspaceFanout                         store.WorkspaceEventFanout
-	workspaceFanoutCancel                   context.CancelFunc
-	workspacePublishDedupe                  *workspaceEventPublishDedupe
 	workspaceDerivedCatchupCancel           context.CancelFunc
 	workspaceDerivedCatchupInterval         time.Duration
 	workspaceDerivedCatchupLimit            int
-	notificationCatchupCancel               context.CancelFunc
-	notificationCatchupInterval             time.Duration
-	notificationCatchupLimit                int
 	notificationCleanupCancel               context.CancelFunc
 	notificationCleanupInterval             time.Duration
 	notificationRetentionDuration           time.Duration
 	notificationCleanupLimit                int
 	notificationCleanupDisabled             bool
-	eventWorkerCancel                       context.CancelFunc
-	eventWorkerInterval                     time.Duration
-	eventWorkerBatchLimit                   int
-	eventWorkerLeaseTimeout                 time.Duration
-	eventWorkerDisabled                     bool
 	communicationsArchiveWorkerCancel       context.CancelFunc
 	communicationsArchiveWorkerWake         chan struct{}
 	communicationsArchiveWorkerInterval     time.Duration
@@ -101,19 +88,12 @@ type ServerOptions struct {
 	RealtimeTicketSecret                    string
 	MaxRequestBodyBytes                     int64
 	LegacyMapRoutesEnabled                  bool
-	WorkspaceEventFanout                    store.WorkspaceEventFanout
 	WorkspaceDerivedCatchupInterval         time.Duration
 	WorkspaceDerivedCatchupLimit            int
-	NotificationCatchupInterval             time.Duration
-	NotificationCatchupLimit                int
 	NotificationCleanupInterval             time.Duration
 	NotificationRetentionDuration           time.Duration
 	NotificationCleanupLimit                int
 	DisableNotificationCleanup              bool
-	EventWorkerInterval                     time.Duration
-	EventWorkerBatchLimit                   int
-	EventWorkerLeaseTimeout                 time.Duration
-	DisableEventWorker                      bool
 	CommunicationsArchiveWorkerInterval     time.Duration
 	CommunicationsArchiveWorkerBatchLimit   int
 	CommunicationsArchiveWorkerLeaseTimeout time.Duration
@@ -147,29 +127,12 @@ func normalizeBootstrapDevAdminConfig(config BootstrapDevAdminConfig) BootstrapD
 }
 
 func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server {
-	notificationCatchupInterval := options.NotificationCatchupInterval
-	if notificationCatchupInterval <= 0 {
-		notificationCatchupInterval = notificationDomainEventCatchupInterval
-	}
-	notificationCatchupLimit := options.NotificationCatchupLimit
-	if notificationCatchupLimit <= 0 {
-		notificationCatchupLimit = notificationDomainEventCatchupLimit
-	}
 	notificationCleanupInterval := options.NotificationCleanupInterval
 	if notificationCleanupInterval <= 0 {
 		notificationCleanupInterval = defaultNotificationCleanupInterval
 	}
 	notificationRetentionDuration := store.NormalizeNotificationRetentionDuration(options.NotificationRetentionDuration)
 	notificationCleanupLimit := store.NormalizeNotificationCleanupLimit(options.NotificationCleanupLimit)
-	eventWorkerInterval := options.EventWorkerInterval
-	if eventWorkerInterval <= 0 {
-		eventWorkerInterval = defaultEventWorkerInterval
-	}
-	eventWorkerBatchLimit := options.EventWorkerBatchLimit
-	if eventWorkerBatchLimit <= 0 {
-		eventWorkerBatchLimit = defaultEventWorkerBatchLimit
-	}
-	eventWorkerLeaseTimeout := store.NormalizeEventRowProcessingLeaseTimeout(options.EventWorkerLeaseTimeout)
 	communicationsArchiveWorkerInterval := options.CommunicationsArchiveWorkerInterval
 	if communicationsArchiveWorkerInterval <= 0 {
 		communicationsArchiveWorkerInterval = defaultCommunicationsArchiveWorkerInterval
@@ -197,26 +160,16 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	}
 	server := &Server{
 		repo:                                    repo,
-		workspaceEvents:                         newLocalWorkspaceEventBus(),
-		projectionHub:                           newProjectionDeltaHub(),
 		realtimeRegistry:                        newRealtimeSubscriptionRegistry(),
 		realtimeTickets:                         newRealtimeTicketStore(realtimeTicketSecret),
 		notifications:                           notifications.NewService(repo),
 		kanban:                                  kanban.NewService(repo),
-		workspaceFanout:                         options.WorkspaceEventFanout,
-		workspacePublishDedupe:                  newWorkspaceEventPublishDedupe(),
 		workspaceDerivedCatchupInterval:         workspaceDerivedCatchupInterval,
 		workspaceDerivedCatchupLimit:            workspaceDerivedCatchupLimit,
-		notificationCatchupInterval:             notificationCatchupInterval,
-		notificationCatchupLimit:                notificationCatchupLimit,
 		notificationCleanupInterval:             notificationCleanupInterval,
 		notificationRetentionDuration:           notificationRetentionDuration,
 		notificationCleanupLimit:                notificationCleanupLimit,
 		notificationCleanupDisabled:             options.DisableNotificationCleanup,
-		eventWorkerInterval:                     eventWorkerInterval,
-		eventWorkerBatchLimit:                   eventWorkerBatchLimit,
-		eventWorkerLeaseTimeout:                 eventWorkerLeaseTimeout,
-		eventWorkerDisabled:                     options.DisableEventWorker,
 		communicationsArchiveWorkerWake:         make(chan struct{}, 1),
 		communicationsArchiveWorkerInterval:     communicationsArchiveWorkerInterval,
 		communicationsArchiveWorkerBatchLimit:   communicationsArchiveWorkerBatchLimit,
@@ -241,14 +194,10 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		maxBodyBytes:                            options.MaxRequestBodyBytes,
 		legacyMapRoutesEnabled:                  options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
 	}
-	server.initializeNotificationDomainEventCheckpoints(context.Background())
 	server.initializeWorkspaceDerivedDomainEventCheckpoints(context.Background())
-	server.startWorkspaceEventFanout()
 	server.startAttachmentUploadCleanup()
 	server.startWorkspaceDerivedDomainEventCatchup()
-	server.startNotificationDomainEventCatchup()
 	server.startNotificationCleanup()
-	server.startEventWorker()
 	server.startCommunicationsArchiveWorker()
 	return server
 }
@@ -257,20 +206,11 @@ func (s *Server) Close() {
 	if s.attachmentUploadCleanupCancel != nil {
 		s.attachmentUploadCleanupCancel()
 	}
-	if s.workspaceFanoutCancel != nil {
-		s.workspaceFanoutCancel()
-	}
 	if s.workspaceDerivedCatchupCancel != nil {
 		s.workspaceDerivedCatchupCancel()
 	}
-	if s.notificationCatchupCancel != nil {
-		s.notificationCatchupCancel()
-	}
 	if s.notificationCleanupCancel != nil {
 		s.notificationCleanupCancel()
-	}
-	if s.eventWorkerCancel != nil {
-		s.eventWorkerCancel()
 	}
 	if s.communicationsArchiveWorkerCancel != nil {
 		s.communicationsArchiveWorkerCancel()
@@ -340,7 +280,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/workspace/snapshot", s.handleWorkspaceSnapshot)
 	mux.HandleFunc("/v1/realtime/ticket", s.handleRealtimeTicket)
 	mux.HandleFunc("/v1/realtime/ws", s.handleRealtimeWebSocket)
-	mux.HandleFunc("/v1/editor/collaboration/events", s.handleEditorCollaborationEvents)
 	mux.HandleFunc("/v1/company-explorer/roots", s.handleCompanyExplorerRoots)
 	mux.HandleFunc("/v1/company-explorer/children", s.handleCompanyExplorerChildren)
 	mux.HandleFunc("/v1/company-explorer/search", s.handleCompanyExplorerSearch)

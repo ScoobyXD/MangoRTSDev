@@ -38,9 +38,7 @@ func (r *MemoryRepo) GetLogicGateWork(companyID, logicGateID string) (domain.Log
 			Node:       r.logicGateWorkNodeSummaryLocked(node, assignment),
 		})
 	}
-	boardID := LogicGateKanbanBoardID(logicGateID)
-	sequence := r.projectionSequences[companyID+":"+ProjectionNameKanbanBoard+":"+"board:"+boardID]
-	work := buildLogicGateWorkView(logicGate, assignments, sequence)
+	work := buildLogicGateWorkView(logicGate, assignments)
 	emailOriginKeys := make(map[string]bool)
 	for linkKey, link := range r.emailNodeLinks {
 		if linkKey != emailNodeLinkKey(link.CompanyID, link.BoardID, link.CardID) {

@@ -457,21 +457,6 @@ where entry.company_id=$1::uuid
 	return upsertPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID)
 }
 
-func syncPostgresGVICMatrixProjectionForNodeDeltasTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectionDelta, error) {
-	before, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-		return nil, err
-	}
-	after, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
-	if err != nil {
-		return nil, err
-	}
-	return diffGVICMatrixProjectionRows(before, after), nil
-}
-
 func syncPostgresGVICMatrixProjectionForNewNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
 	defer observeTiming(ctx, "repo.syncPostgresGVICMatrixProjectionForNodeTx.total")()
 	companyID = cleanUUIDText(companyID)
@@ -480,21 +465,6 @@ func syncPostgresGVICMatrixProjectionForNewNodeTx(ctx context.Context, tx *sql.T
 		return ErrInvalid
 	}
 	return upsertPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID)
-}
-
-func syncPostgresGVICMatrixProjectionForNewNodeDeltasTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectionDelta, error) {
-	before, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err := syncPostgresGVICMatrixProjectionForNewNodeTx(ctx, tx, companyID, nodeID); err != nil {
-		return nil, err
-	}
-	after, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
-	if err != nil {
-		return nil, err
-	}
-	return diffGVICMatrixProjectionRows(before, after), nil
 }
 
 func upsertPostgresGVICMatrixProjectionForNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
@@ -576,33 +546,6 @@ func syncPostgresGVICMatrixProjectionForLogicGateTx(ctx context.Context, tx *sql
 
 func syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateGVICAssignment) error {
 	return syncPostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID)
-}
-
-func syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, before, after []domain.LogicGateGVICAssignment) ([]ProjectionDelta, error) {
-	users, err := postgresGVICMatrixProjectionUsersForLogicGateTx(ctx, tx, companyID, logicGateID)
-	if err != nil {
-		return nil, err
-	}
-	current, err := postgresGVICMatrixAssignmentUserIDsTx(ctx, tx, companyID, logicGateID)
-	if err != nil {
-		return nil, err
-	}
-	for userID := range current {
-		users[userID] = true
-	}
-	userIDs := mapKeys(users)
-	beforeRows, err := postgresGVICMatrixProjectionRowsForLogicGateUsersTx(ctx, tx, companyID, logicGateID, userIDs)
-	if err != nil {
-		return nil, err
-	}
-	if err := syncPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx, tx, companyID, logicGateID, userIDs); err != nil {
-		return nil, err
-	}
-	afterRows, err := postgresGVICMatrixProjectionRowsForLogicGateUsersTx(ctx, tx, companyID, logicGateID, userIDs)
-	if err != nil {
-		return nil, err
-	}
-	return diffGVICMatrixProjectionRows(beforeRows, afterRows), nil
 }
 
 func syncPostgresGVICMatrixProjectionForLogicGateUsersTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, userIDs []string) error {
@@ -1072,43 +1015,6 @@ func scanGVICMatrixProjectionRow(row interface{ Scan(dest ...any) error }) (GVIC
 	item.Accounts = scanAccountSnapshotsJSON(accountsJSON)
 	return item, err
 }
-func (r *PostgresRepo) CurrentProjectionSequence(companyID, projectionName, projectionScope string) (int64, error) {
-	companyID = cleanUUIDText(companyID)
-	projectionName = strings.TrimSpace(projectionName)
-	projectionScope = strings.TrimSpace(projectionScope)
-	if companyID == "" || projectionName == "" {
-		return 0, ErrInvalid
-	}
-	var sequence int64
-	err := r.db.QueryRowContext(context.Background(), `
-select coalesce((
-  select sequence
-  from company_projection_sequences
-  where company_id=$1::uuid
-    and projection_name=$2::text
-    and projection_scope=$3::text
-), 0)`, companyID, projectionName, projectionScope).Scan(&sequence)
-	return sequence, err
-}
-
-func (r *PostgresRepo) NextProjectionSequence(companyID, projectionName, projectionScope string) (int64, error) {
-	companyID = cleanUUIDText(companyID)
-	projectionName = strings.TrimSpace(projectionName)
-	projectionScope = strings.TrimSpace(projectionScope)
-	if companyID == "" || projectionName == "" {
-		return 0, ErrInvalid
-	}
-	var sequence int64
-	err := r.db.QueryRowContext(context.Background(), `
-insert into company_projection_sequences (company_id, projection_name, projection_scope, sequence, updated_timestamp)
-values ($1::uuid, $2::text, $3::text, 1, now())
-on conflict (company_id, projection_name, projection_scope)
-do update set sequence=company_projection_sequences.sequence + 1,
-              updated_timestamp=now()
-returning sequence`, companyID, projectionName, projectionScope).Scan(&sequence)
-	return sequence, err
-}
-
 func postgresGVICMatrixProjectionUsersForLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) (map[string]bool, error) {
 	rows, err := tx.QueryContext(ctx, `
 select distinct user_id::text

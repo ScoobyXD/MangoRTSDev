@@ -9,8 +9,6 @@ import {
   buildMyNodeGroups,
   buildGVICRoleInboxGroupsByCell,
   buildSharedInboxRows,
-  communicationStreamEventIsArchiveConfirmation,
-  communicationStreamEventIsStarConfirmation,
   condenseEmailThreadMessages,
   emailAttachmentIsReferencedInline,
   emailAttachmentIsInlineContent,
@@ -20,7 +18,6 @@ import {
   getHomeViewLabel,
   inboxLogicGateLabel,
   isWorkspacePanelHomeViewID,
-  localMailboxMutationEchoKeys,
   logicGateTitle,
   messageDocument,
   missingLogicGateRecordIDs,
@@ -37,9 +34,7 @@ import {
   setNodeDragData,
   sharedInboxCanLoadMail,
   sortEmailConversationMessagesNewestFirst,
-  triageMessageIDsFromStreamMessageID,
   visibleEmailAttachmentsForBody,
-  workspaceEventTouchesHomePanel,
 } from "../../../../frontend/src/pages/home/homeUtils.js";
 import { messageSelectDotStyle, triageMessageRowStyle } from "../../../../frontend/src/pages/home/homeStyles.js";
 import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
@@ -139,10 +134,6 @@ test("Home view helpers map labels and mailboxes without changing backend mailbo
   assert.equal(isWorkspacePanelHomeViewID("o-inbox"), true);
 });
 
-test("communications triage stream message ids are cleaned and deduped", () => {
-  assert.deepEqual(triageMessageIDsFromStreamMessageID(" message-1,message-2, message-1 ,,message-3 "), ["message-1", "message-2", "message-3"]);
-  assert.deepEqual(triageMessageIDsFromStreamMessageID(" , "), []);
-});
 
 test("email body inline cid attachments are treated as body images", () => {
   const body = '<p>Here is a screenshot:</p><img src="cid:image-1@local" alt="image.png"><p>done</p>';
@@ -180,17 +171,6 @@ test("email cid image sources are rewritten to resolved sources", () => {
   assert.equal(unquoted, `<img src="blob:http://localhost/image-1">`);
 });
 
-test("shared inbox local mailbox mutation echoes include scoped and unscoped keys", () => {
-  assert.deepEqual(localMailboxMutationEchoKeys(" company-1 ", undefined, " message-1 "), [
-    "company-1\x1f\x1fmessage-1",
-  ]);
-  assert.deepEqual(localMailboxMutationEchoKeys("company-1", " shared-1 ", "message-2"), [
-    "company-1\x1fshared-1\x1fmessage-2",
-    "company-1\x1f\x1fmessage-2",
-  ]);
-  assert.deepEqual(localMailboxMutationEchoKeys("", "shared-1", "message-2"), []);
-  assert.deepEqual(localMailboxMutationEchoKeys("company-1", "shared-1", " "), []);
-});
 
 test("message select dot only appears for the selected email while unread rows keep their outline", () => {
   const unreadInactiveDot = messageSelectDotStyle(false, true);
@@ -252,21 +232,7 @@ test("message documents preserve Mango-authored email body structure", () => {
   assert.match(documentHTML, /hello<br>  structure/);
 });
 
-test("communications archive stream events are identified without treating generic updates as archive confirmations", () => {
-  assert.equal(communicationStreamEventIsArchiveConfirmation({ trigger: "message.archived" }), true);
-  assert.equal(communicationStreamEventIsArchiveConfirmation({ trigger: "message.updated", action: " archive " }), true);
-  assert.equal(communicationStreamEventIsArchiveConfirmation({ trigger: "message.updated" }), false);
-  assert.equal(communicationStreamEventIsArchiveConfirmation({ trigger: "message.created", action: "reply" }), false);
-});
 
-test("communications star stream events are identified without treating generic updates as star confirmations", () => {
-  assert.equal(communicationStreamEventIsStarConfirmation({ trigger: "message.starred" }), true);
-  assert.equal(communicationStreamEventIsStarConfirmation({ trigger: "message.unstarred" }), true);
-  assert.equal(communicationStreamEventIsStarConfirmation({ trigger: "message.updated", action: " star " }), true);
-  assert.equal(communicationStreamEventIsStarConfirmation({ trigger: "message.updated", action: "unstar" }), true);
-  assert.equal(communicationStreamEventIsStarConfirmation({ trigger: "message.updated" }), false);
-  assert.equal(communicationStreamEventIsStarConfirmation({ trigger: "message.archived", action: "archive" }), false);
-});
 
 test("mailbox count helper keeps visible Inbox and Starred counts", () => {
   const counts = mailboxCountsFromFolders([
@@ -279,15 +245,6 @@ test("mailbox count helper keeps visible Inbox and Starred counts", () => {
   assert.deepEqual(counts, { primary: 30, starred: 4 });
 });
 
-test("Home workspace panel ignores internal derived projection request events", () => {
-  assert.equal(workspaceEventTouchesHomePanel("workspace_derived_projection_requested"), false);
-  assert.equal(workspaceEventTouchesHomePanel("company_explorer_folder_item_assign_requested"), false);
-  assert.equal(workspaceEventTouchesHomePanel("node_map_position_upsert_requested"), false);
-  assert.equal(workspaceEventTouchesHomePanel("logic_gate_map_position_upsert_requested"), false);
-  assert.equal(workspaceEventTouchesHomePanel("node_created"), true);
-  assert.equal(workspaceEventTouchesHomePanel("relationship_created"), true);
-  assert.equal(workspaceEventTouchesHomePanel("relationship_deleted"), true);
-});
 
 test("shared inbox rows are stable, sorted, and nested by parent", () => {
   const rows = buildSharedInboxRows([

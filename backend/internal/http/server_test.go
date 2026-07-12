@@ -10,26 +10,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
-
-func readWorkspaceEventForTest(t *testing.T, ch chan []byte) workspaceEventEnvelope {
-	t.Helper()
-	select {
-	case payload := <-ch:
-		var event workspaceEventEnvelope
-		if err := json.Unmarshal(payload, &event); err != nil {
-			t.Fatalf("decode workspace event: %v", err)
-		}
-		return event
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for workspace event")
-		return workspaceEventEnvelope{}
-	}
-}
 
 func requestWithActorForTest(req *http.Request, user domain.User, companyID string) *http.Request {
 	actor := ActorContext{
@@ -990,9 +974,6 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 		t.Fatalf("created logic-gate card = %+v", createdCard)
 	}
 
-	stream := server.workspaceEvents.subscribe(companyID)
-	defer server.workspaceEvents.unsubscribe(companyID, stream)
-
 	issueBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
 		"board_id":   boardID,
@@ -1015,26 +996,6 @@ func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *test
 	if !issueCard.IsIssue || issueCard.ColumnID != store.LogicGateWorkStatusInProgress {
 		t.Fatalf("issue card = %+v, want issue without move", issueCard)
 	}
-	var cardEvent workspaceEventEnvelope
-	var nodeEvent workspaceEventEnvelope
-	for i := 0; i < 6 && (cardEvent.Type == "" || nodeEvent.Type == ""); i++ {
-		event := readWorkspaceEventForTest(t, stream)
-		if event.Type == "kanban_card_moved" {
-			cardEvent = event
-		}
-		if event.Type == "node_updated" && event.Data["node_id"] == node.NodeID {
-			if nodePayload, ok := event.Data["node"].(map[string]any); ok && nodePayload["status"] == "Issue" {
-				nodeEvent = event
-			}
-		}
-	}
-	if cardEvent.Type == "" {
-		t.Fatal("workspace events missing kanban_card_moved")
-	}
-	if nodeEvent.Type == "" {
-		t.Fatalf("workspace events missing Issue node_updated for %q", node.NodeID)
-	}
-
 	updateNodeBody, _ := json.Marshal(map[string]any{
 		"company_id": companyID,
 		"due_date":   "05/06/2026",

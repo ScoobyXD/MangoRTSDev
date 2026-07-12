@@ -40,20 +40,12 @@ func (s *Server) handleProjectManagementTimelineProjection(w http.ResponseWriter
 		writeError(w, http.StatusInternalServerError, "failed_to_list_project_management_timeline")
 		return
 	}
-	sequence, err := s.repo.CurrentProjectionSequence(query.CompanyID, store.ProjectionNameProjectManagementTimeline, store.ProjectManagementProjectionUserScope(query.UserID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_read_project_management_projection_sequence")
-		return
-	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-		"company_id":          query.CompanyID,
-		"user_id":             query.UserID,
-		"limit":               query.Limit,
-		"projection":          store.ProjectionNameProjectManagementTimeline,
-		"projection_scope":    store.ProjectManagementProjectionUserScope(query.UserID),
-		"realtime_scope":      store.ProjectManagementRealtimeUserScope(query.UserID),
-		"projection_sequence": sequence,
-		"rows":                rows,
+		"company_id": query.CompanyID,
+		"user_id":    query.UserID,
+		"limit":      query.Limit,
+		"projection": "project_management_timeline",
+		"rows":       rows,
 	})
 }
 

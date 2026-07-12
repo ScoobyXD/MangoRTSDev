@@ -25,20 +25,17 @@ func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GV
 
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	result := GVICMatrixNodeCreateResult{}
-	ownedProjectionDeltas := []ProjectionDelta{}
 	logicGateID := input.LogicGateID
 	deferCompanyExplorerFolderItems := input.MutationOrigin == MutationOriginMatrix || input.MutationOrigin == MutationOriginKanban
 	if input.CreateLogicGateHeader != "" {
 		stop := observeTiming(ctx, "repo.CreateGVICMatrixNode.logic_gate_writes")
-		logicGate, _, deltas, err := createGVICMatrixLogicGateTx(ctx, tx, input, !deferCompanyExplorerFolderItems)
+		logicGate, _, err := createGVICMatrixLogicGateTx(ctx, tx, input, !deferCompanyExplorerFolderItems)
 		stop()
 		if err != nil {
 			return GVICMatrixNodeCreateResult{}, err
 		}
 		logicGateID = logicGate.LogicGateID
 		result.LogicGate = &logicGate
-		result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
-		ownedProjectionDeltas = append(ownedProjectionDeltas, deltas...)
 		eventInputs := []DomainEventInput{logicGateCreatedWorkspaceEventInput(logicGate, meta)}
 		stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.domain_event_append")
 		events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)
@@ -79,10 +76,6 @@ func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GV
 		result.Assignment = &assignment
 		result.Card = &card
 		result.Events = append(result.Events, assignmentResult.Events...)
-		result.ProjectionDeltas = append(result.ProjectionDeltas, assignmentResult.ProjectionDeltas...)
-		if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, ownedProjectionDeltas)); err != nil {
-			return GVICMatrixNodeCreateResult{}, err
-		}
 		stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.commit")
 		if err := tx.Commit(); err != nil {
 			stop()
@@ -103,12 +96,6 @@ func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GV
 	if err != nil {
 		return GVICMatrixNodeCreateResult{}, err
 	}
-	stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.gvic_matrix_projection_delta")
-	rows, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, []string{node.NodeID}, nil)
-	stop()
-	if err != nil {
-		return GVICMatrixNodeCreateResult{}, err
-	}
 	eventInputs := []DomainEventInput{nodeCreatedWorkspaceEventInputWithMetadata(node, meta)}
 	stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.domain_event_append")
 	events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)
@@ -117,11 +104,7 @@ func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GV
 		return GVICMatrixNodeCreateResult{}, err
 	}
 	result.Node = node
-	result.ProjectionDeltas = append(result.ProjectionDeltas, diffGVICMatrixProjectionRows(nil, rows)...)
 	result.Events = append(result.Events, events...)
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
-		return GVICMatrixNodeCreateResult{}, err
-	}
 	stop = observeTiming(ctx, "repo.CreateGVICMatrixNode.commit")
 	if err := tx.Commit(); err != nil {
 		stop()
@@ -131,7 +114,7 @@ func (r *PostgresRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GV
 	return result, nil
 }
 
-func createGVICMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input GVICMatrixNodeCreateInput, syncFolderItem bool) (domain.LogicGate, domain.CompanyExplorerFolderItem, []ProjectionDelta, error) {
+func createGVICMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input GVICMatrixNodeCreateInput, syncFolderItem bool) (domain.LogicGate, domain.CompanyExplorerFolderItem, error) {
 	created := domain.LogicGate{
 		CompanyID:     input.CompanyID,
 		LogicGateID:   newUUIDv7String(),
@@ -146,10 +129,9 @@ func createGVICMatrixLogicGateTx(ctx context.Context, tx *sql.Tx, input GVICMatr
 		created.CompanyID, created.LogicGateID, created.Header,
 	).Scan(&created.CompanyID, &created.LogicGateID, &created.Header, &created.CreatedTimestamp); err != nil {
 		stop()
-		return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
+		return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 	}
 	stop()
-	projectionDeltas := []ProjectionDelta{}
 	if input.ActorUserID != "" && input.CreatorLogicGateGVICRole != "" {
 		var creatorInCompany bool
 		if err := tx.QueryRowContext(ctx, `
@@ -158,10 +140,10 @@ select exists(
   from company_memberships
   where company_id=$1::uuid and user_id::text=$2
 )`, input.CompanyID, input.ActorUserID).Scan(&creatorInCompany); err != nil {
-			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
+			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 		}
 		if !creatorInCompany {
-			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, ErrPrincipalNotInCompany
+			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, ErrPrincipalNotInCompany
 		}
 		stop := observeTiming(ctx, "repo.createGVICMatrixLogicGateTx.gvic_assignment_writes")
 		if _, err := tx.ExecContext(ctx, `
@@ -180,26 +162,24 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 			input.CompanyID, created.LogicGateID, input.CreatorLogicGateGVICRole, input.ActorUserID,
 		); err != nil {
 			stop()
-			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
+			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 		}
 		stop()
 		stop = observeTiming(ctx, "repo.createGVICMatrixLogicGateTx.gvic_projection_sync")
-		gvicDeltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}})
+		err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}})
 		if err != nil {
 			stop()
-			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
+			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 		}
-		deltas, err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, input.CompanyID, created.LogicGateID, nil, nil)
+		err = syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx(ctx, tx, input.CompanyID, created.LogicGateID, nil, nil)
 		if err != nil {
 			stop()
-			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
+			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 		}
 		stop()
-		projectionDeltas = append(projectionDeltas, gvicDeltas...)
-		projectionDeltas = append(projectionDeltas, deltas...)
 		assignments, err := postgresResourceGVICAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID})
 		if err != nil {
-			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, nil, err
+			return domain.LogicGate{}, domain.CompanyExplorerFolderItem{}, err
 		}
 		created.GVICAssignments = logicGateGVICAssignmentsFromResources(assignments)
 		created.EffectiveAccess = EntityPermissionEdit
@@ -209,7 +189,7 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 		stop = observeTiming(ctx, "repo.createGVICMatrixLogicGateTx.folder_item_writes")
 		stop()
 	}
-	return created, folderItem, projectionDeltas, nil
+	return created, folderItem, nil
 }
 
 func postgresCompanyExplorerFolderItemForEntityTx(ctx context.Context, tx *sql.Tx, companyID, itemType, itemID string) (domain.CompanyExplorerFolderItem, error) {

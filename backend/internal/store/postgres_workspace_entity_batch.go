@@ -109,11 +109,8 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 			if err := syncPostgresGVICMatrixProjectionForNewNodeTx(ctx, tx, input.CompanyID, created.NodeID); err != nil {
 				return WorkspaceEntityBatchResult{}, err
 			}
-			deltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: created.NodeID}})
+			err = syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeNode, resourceID: created.NodeID}})
 			if err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
-			if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.CreatorUserID, "", deltas)); err != nil {
 				return WorkspaceEntityBatchResult{}, err
 			}
 			if input.CreatorUserID != "" {
@@ -186,15 +183,12 @@ do update set updated_timestamp=resource_gvic_assignments.updated_timestamp`,
 			}
 			stop()
 			stop = observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.gvic_projection_sync")
-			deltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}})
+			err = syncResourceGVICEffectiveAssignmentsTx(ctx, tx, input.CompanyID, []resourceGVICKey{{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID}})
 			if err != nil {
 				stop()
 				return WorkspaceEntityBatchResult{}, err
 			}
 			stop()
-			if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.CreatorUserID, "", deltas)); err != nil {
-				return WorkspaceEntityBatchResult{}, err
-			}
 			assignments, err := postgresResourceGVICAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: created.LogicGateID})
 			if err != nil {
 				return WorkspaceEntityBatchResult{}, err

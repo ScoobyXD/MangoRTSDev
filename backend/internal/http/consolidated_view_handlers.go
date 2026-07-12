@@ -29,7 +29,6 @@ func (s *Server) handleNodeViewV2(w http.ResponseWriter, r *http.Request, nodeID
 	if !ok {
 		return
 	}
-	editorSequence := s.currentRealtimeScopeSequence(companyID, realtimeEditorScope(store.EntityTypeNode, nodeID))
 	view, err := s.repo.GetNodeView(store.NodeViewInput{
 		CompanyID: companyID,
 		NodeID:    nodeID,
@@ -49,7 +48,6 @@ func (s *Server) handleNodeViewV2(w http.ResponseWriter, r *http.Request, nodeID
 		return
 	}
 	view.EffectiveAccessFlags = flags
-	view.EditorSequence = editorSequence
 	writeJSONMaybeNotModified(w, r, http.StatusOK, view)
 }
 
@@ -63,7 +61,6 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 	if !ok {
 		return
 	}
-	editorSequence := s.currentRealtimeScopeSequence(companyID, realtimeEditorScope(store.EntityTypeLogicGate, logicGateID))
 	etag, err := s.consolidatedViewETag(r, companyID, "logic-gate-view:"+logicGateID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_read_logic_gate_view_version")
@@ -91,7 +88,6 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 		view.EffectiveAccessFlags = flags
 		view.Work.Permissions = flags
 		response := logicGateViewResponseWithWork(view)
-		response.EditorSequence = editorSequence
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, response, etag)
 		return
 	}
@@ -116,7 +112,6 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 		return
 	}
 	response := logicGateCoreViewResponse(companyID, logicGateID, details, projections, flags)
-	response.EditorSequence = editorSequence
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, response, etag)
 }
 
@@ -142,7 +137,6 @@ type logicGateViewHTTPResponse struct {
 	RelationshipsCount  int                              `json:"relationships_count"`
 	AssignmentCount     int                              `json:"assignment_count,omitempty"`
 	NodeCount           int                              `json:"node_count,omitempty"`
-	EditorSequence      int64                            `json:"editor_sequence,omitempty"`
 	domain.EffectiveAccessFlags
 }
 

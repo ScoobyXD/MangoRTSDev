@@ -20,7 +20,7 @@ import (
 )
 
 func main() {
-	repo, workspaceFanout, cleanup := buildRepository()
+	repo, cleanup := buildRepository()
 	defer cleanup()
 	nylasConfig := buildNylasConfig()
 	server := httpapi.NewServerWithOptions(repo, httpapi.ServerOptions{
@@ -36,7 +36,6 @@ func main() {
 		NylasConfig:          nylasConfig,
 		AttachmentStorage:    httpapi.NewS3AttachmentStorageFromEnv(),
 		RealtimeTicketSecret: secretEnvValue("MANGORTS_REALTIME_TICKET_SECRET", "realtime_ticket_secret", "ticket_secret", "MANGORTS_REALTIME_TICKET_SECRET"),
-		WorkspaceEventFanout: workspaceFanout,
 	})
 	defer server.Close()
 
@@ -63,7 +62,7 @@ func main() {
 	}
 }
 
-func buildRepository() (store.Repository, store.WorkspaceEventFanout, func()) {
+func buildRepository() (store.Repository, func()) {
 	host := os.Getenv("DB_HOST")
 	allowFallback := strings.EqualFold(os.Getenv("ALLOW_INMEMORY_FALLBACK"), "true")
 	appEnv := getenvDefault("APP_ENV", "dev")
@@ -71,7 +70,7 @@ func buildRepository() (store.Repository, store.WorkspaceEventFanout, func()) {
 	if host == "" {
 		if appEnv == "dev" || allowFallback {
 			log.Println("using in-memory repository (DB_HOST not set, dev/fallback mode)")
-			return store.NewMemoryRepo(), nil, func() {}
+			return store.NewMemoryRepo(), func() {}
 		}
 		log.Fatal("DB_HOST is required when APP_ENV is not dev")
 	}
@@ -88,7 +87,7 @@ func buildRepository() (store.Repository, store.WorkspaceEventFanout, func()) {
 	if err != nil {
 		if appEnv == "dev" || allowFallback {
 			log.Printf("failed to open postgres (%v), falling back to in-memory repository", err)
-			return store.NewMemoryRepo(), nil, func() {}
+			return store.NewMemoryRepo(), func() {}
 		}
 		log.Fatalf("failed to open postgres in %s: %v", appEnv, err)
 	}
@@ -96,14 +95,14 @@ func buildRepository() (store.Repository, store.WorkspaceEventFanout, func()) {
 		_ = db.Close()
 		if appEnv == "dev" || allowFallback {
 			log.Printf("failed to connect postgres (%v), falling back to in-memory repository", err)
-			return store.NewMemoryRepo(), nil, func() {}
+			return store.NewMemoryRepo(), func() {}
 		}
 		log.Fatalf("failed to connect postgres in %s: %v", appEnv, err)
 	}
 	configureDatabasePool(db)
 
 	log.Printf("using postgres repository host=%s db=%s sslmode=%s", host, dbName, sslMode)
-	return store.NewPostgresRepo(db), store.NewPostgresWorkspaceEventFanout(db, dsn), func() { _ = db.Close() }
+	return store.NewPostgresRepo(db), func() { _ = db.Close() }
 }
 
 func getenvDefault(key, fallback string) string {

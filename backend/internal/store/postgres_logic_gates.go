@@ -222,14 +222,11 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 	if err != nil {
 		return domain.LogicGate{}, err
 	}
-	projectionDeltas, err := applyLogicGateProjectionDeltaDependenciesTx(ctx, tx, LogicGateProjectionDeltaDependencyInput{
+	err = syncLogicGateProjectionDependenciesTx(ctx, tx, LogicGateProjectionDependencyInput{
 		CompanyID:   item.CompanyID,
 		LogicGateID: item.LogicGateID,
 	})
 	if err != nil {
-		return domain.LogicGate{}, err
-	}
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(item.CompanyID, "", "", projectionDeltas)); err != nil {
 		return domain.LogicGate{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -263,14 +260,11 @@ RETURNING company_id, logic_gate_id, header, created_timestamp
 		}
 		return domain.LogicGate{}, err
 	}
-	projectionDeltas, err := applyLogicGateProjectionDeltaDependenciesTx(ctx, tx, LogicGateProjectionDeltaDependencyInput{
+	err = syncLogicGateProjectionDependenciesTx(ctx, tx, LogicGateProjectionDependencyInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGateID,
 	})
 	if err != nil {
-		return domain.LogicGate{}, err
-	}
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
 		return domain.LogicGate{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -749,16 +743,12 @@ on conflict (company_id, resource_type, resource_id, role, principal_type, princ
 	}
 	assignments := cloneLogicGateGVICAssignments(assignmentsByGate[logicGateID])
 	keyValue := resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}
-	projectionDeltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{keyValue})
+	err = syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{keyValue})
 	if err != nil {
 		return nil, err
 	}
-	logicGateDeltas, err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, companyID, logicGateID, nil, assignments)
+	err = syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx(ctx, tx, companyID, logicGateID, nil, assignments)
 	if err != nil {
-		return nil, err
-	}
-	projectionDeltas = append(projectionDeltas, logicGateDeltas...)
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -783,11 +773,8 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	}
 	defer tx.Rollback()
 
-	projectionDeltas, err := postgresDeleteLogicGateWithProjectionDeltasTx(ctx, tx, companyID, logicGateID)
+	err = postgresDeleteLogicGateWithDependentProjectionsTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
-		return err
-	}
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1333,11 +1320,6 @@ func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType,
 			return domain.LogicGateInformation{}, err
 		}
 	}
-	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, "", "", EditorProjectionRowFromLogicGate(projection)); ok {
-		if _, err := r.appendEventRowsTx(ctx, tx, []EventRowInput{eventInput}); err != nil {
-			return domain.LogicGateInformation{}, err
-		}
-	}
 
 	if err := tx.Commit(); err != nil {
 		return domain.LogicGateInformation{}, err
@@ -1430,11 +1412,6 @@ func (r *PostgresRepo) DeleteLogicGateProjection(companyID, logicGateID, informa
 	if affected, err := deleted.RowsAffected(); err != nil {
 		return err
 	} else if affected > 0 {
-		if eventInput, ok := EditorProjectionDeleteEventInput(companyID, "", "", EntityTypeLogicGate, logicGateID, informationID); ok {
-			if _, err := r.appendEventRowsTx(ctx, tx, []EventRowInput{eventInput}); err != nil {
-				return err
-			}
-		}
 	}
 	return tx.Commit()
 }

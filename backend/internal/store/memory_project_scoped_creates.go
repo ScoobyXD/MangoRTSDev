@@ -28,7 +28,6 @@ type memoryProjectScopedCreateSnapshot struct {
 	GVICMatrixProjectionRows      map[string]memoryGVICMatrixProjectionRow
 	effectiveAccess               map[string]domain.EffectiveResourceAccess
 	domainEvents                  map[string]domain.DomainEvent
-	eventRows                     map[string]EventRow
 	workspaceReadVersions         map[string]int64
 }
 
@@ -54,7 +53,6 @@ func (r *MemoryRepo) snapshotProjectScopedCreateLocked() memoryProjectScopedCrea
 		GVICMatrixProjectionRows:      cloneMemoryMap(r.GVICMatrixProjectionRows),
 		effectiveAccess:               cloneMemoryMap(r.effectiveAccess),
 		domainEvents:                  cloneMemoryMap(r.domainEvents),
-		eventRows:                     cloneMemoryMap(r.eventRows),
 		workspaceReadVersions:         cloneMemoryMap(r.workspaceReadVersions),
 	}
 }
@@ -80,7 +78,6 @@ func (r *MemoryRepo) restoreProjectScopedCreateLocked(snapshot memoryProjectScop
 	r.GVICMatrixProjectionRows = snapshot.GVICMatrixProjectionRows
 	r.effectiveAccess = snapshot.effectiveAccess
 	r.domainEvents = snapshot.domainEvents
-	r.eventRows = snapshot.eventRows
 	r.workspaceReadVersions = snapshot.workspaceReadVersions
 }
 
@@ -129,7 +126,6 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 	}
 	var assignment *domain.NodeLogicGateAssignment
 	var card *domain.KanbanCard
-	assignmentDeltas := make([]ProjectionDelta, 0)
 	assignmentEvents := make([]domain.DomainEvent, 0)
 	if input.InitialAssignment != nil {
 		assignmentResult, err := r.assignInitialProjectScopedNodeToLogicGateLocked(input, node)
@@ -141,7 +137,6 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 		assignment = &assignmentResult.Assignment
 		cardValue := assignmentResult.Card
 		card = &cardValue
-		assignmentDeltas = append(assignmentDeltas, assignmentResult.ProjectionDeltas...)
 		assignmentEvents = append(assignmentEvents, assignmentResult.Events...)
 	}
 	relationshipID := newUUIDv7String()
@@ -156,17 +151,12 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 		UpdatedTimestamp: time.Now().UTC(),
 	}
 	r.projectRelationships[projectRelationshipKey(input.CompanyID, relationshipID)] = relationship
-	beforeRelationship := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, relationshipID)
 	if err := r.syncProjectRelationshipProjectionLocked(input.CompanyID, relationshipID); err != nil {
 		rollback()
 		return ProjectScopedNodeCreateResult{}, err
 	}
-	afterRelationship := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, relationshipID)
-	eventDeltas := make([]ProjectionDelta, 0)
 	if input.InitialAssignment == nil {
-		eventDeltas = append(eventDeltas, diffGVICMatrixProjectionRows(nil, r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, []string{node.NodeID}, nil))...)
 	}
-	eventDeltas = append(eventDeltas, diffProjectRelationshipProjectionRows(beforeRelationship, afterRelationship)...)
 	projection := r.projectRelationshipProjection[projectRelationshipKey(input.CompanyID, relationshipID)]
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	events, err := r.appendDomainEventsLocked([]DomainEventInput{
@@ -178,20 +168,13 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 		return ProjectScopedNodeCreateResult{}, err
 	}
 	events = append(assignmentEvents, events...)
-	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, eventDeltas)); err != nil {
-		rollback()
-		return ProjectScopedNodeCreateResult{}, err
-	}
-	projectionDeltas := append([]ProjectionDelta{}, assignmentDeltas...)
-	projectionDeltas = append(projectionDeltas, eventDeltas...)
 	return ProjectScopedNodeCreateResult{
-		Node:             r.withNodeReadModelLocked(node),
-		Relationship:     &projection,
-		Information:      information,
-		Assignment:       assignment,
-		Card:             card,
-		Events:           events,
-		ProjectionDeltas: projectionDeltas,
+		Node:         r.withNodeReadModelLocked(node),
+		Relationship: &projection,
+		Information:  information,
+		Assignment:   assignment,
+		Card:         card,
+		Events:       events,
 	}, nil
 }
 
@@ -243,15 +226,11 @@ func (r *MemoryRepo) CreateLogicGateAssociatedWithProject(input ProjectScopedLog
 		UpdatedTimestamp: time.Now().UTC(),
 	}
 	r.projectRelationships[projectRelationshipKey(input.CompanyID, relationshipID)] = relationship
-	beforeRelationship := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, relationshipID)
 	if err := r.syncProjectRelationshipProjectionLocked(input.CompanyID, relationshipID); err != nil {
 		rollback()
 		return ProjectScopedLogicGateCreateResult{}, err
 	}
-	afterRelationship := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, relationshipID)
 	r.syncGVICMatrixProjectionForLogicGateLocked(input.CompanyID, logicGate.LogicGateID)
-	projectionDeltas := diffGVICMatrixProjectionRows(nil, r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, nil, []string{logicGate.LogicGateID}))
-	projectionDeltas = append(projectionDeltas, diffProjectRelationshipProjectionRows(beforeRelationship, afterRelationship)...)
 	projection := r.projectRelationshipProjection[projectRelationshipKey(input.CompanyID, relationshipID)]
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	events, err := r.appendDomainEventsLocked([]DomainEventInput{
@@ -262,16 +241,11 @@ func (r *MemoryRepo) CreateLogicGateAssociatedWithProject(input ProjectScopedLog
 		rollback()
 		return ProjectScopedLogicGateCreateResult{}, err
 	}
-	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
-		rollback()
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
 	return ProjectScopedLogicGateCreateResult{
-		LogicGate:        r.withLogicGateGVICLocked(logicGate),
-		Relationship:     &projection,
-		Information:      information,
-		Events:           events,
-		ProjectionDeltas: projectionDeltas,
+		LogicGate:    r.withLogicGateGVICLocked(logicGate),
+		Relationship: &projection,
+		Information:  information,
+		Events:       events,
 	}, nil
 }
 
@@ -308,7 +282,6 @@ func (r *MemoryRepo) assignInitialProjectScopedNodeToLogicGateLocked(input Proje
 	if _, ok := logicGateAssignmentInputPriority(assignmentInput); !ok && !logicGateAssignmentNodeHasPriority(r.nodes[key(assignmentInput.CompanyID, assignmentInput.NodeID)].Priority) {
 		return LogicGateNodeAssignmentResult{}, ErrPriorityRequired
 	}
-	kanbanBefore := r.kanbanProjectionRowsForNodeLocked(assignmentInput.CompanyID, assignmentInput.NodeID)
 	if assignmentInput.PrioritySet {
 		priority, ok := logicGateAssignmentInputPriority(assignmentInput)
 		if !ok {
@@ -332,27 +305,21 @@ func (r *MemoryRepo) assignInitialProjectScopedNodeToLogicGateLocked(input Proje
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	kanbanAfter := r.kanbanProjectionRowsForNodeLocked(assignmentInput.CompanyID, assignmentInput.NodeID)
-	projectionDeltas := diffKanbanProjectionRows(kanbanBefore, kanbanAfter)
-	projectionDeltas = append(projectionDeltas, r.syncGVICResourceKeysLocked(assignmentInput.CompanyID, []resourceGVICKey{{companyID: assignmentInput.CompanyID, resourceType: EntityTypeNode, resourceID: assignmentInput.NodeID}})...)
+	r.syncGVICResourceKeysLocked(assignmentInput.CompanyID, []resourceGVICKey{{companyID: assignmentInput.CompanyID, resourceType: EntityTypeNode, resourceID: assignmentInput.NodeID}})
 	assignment, ok := r.nodeLogicGateAssignmentLocked(assignmentInput.CompanyID, assignmentInput.NodeID, assignmentInput.LogicGateID)
 	if !ok {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
 	result := LogicGateNodeAssignmentResult{
-		Card:             r.withKanbanCardProjectionFieldsLocked(card),
-		Node:             r.withNodeReadModelLocked(r.nodes[key(assignmentInput.CompanyID, assignmentInput.NodeID)]),
-		Assignment:       assignment,
-		ProjectionDeltas: projectionDeltas,
+		Card:       r.withKanbanCardProjectionFieldsLocked(card),
+		Node:       r.withNodeReadModelLocked(r.nodes[key(assignmentInput.CompanyID, assignmentInput.NodeID)]),
+		Assignment: assignment,
 	}
 	events, err := r.appendDomainEventsLocked(logicGateAssignmentSavedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
-	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
-		return LogicGateNodeAssignmentResult{}, err
-	}
 	return result, nil
 }
 
@@ -407,11 +374,6 @@ func (r *MemoryRepo) addInitialNodeInformationLocked(input NodeInformationInput)
 			now,
 		))
 	}
-	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, input.ActorUserID, "", EditorProjectionRowFromNode(projection)); ok {
-		if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
-			return domain.NodeInformation{}, err
-		}
-	}
 	return item, nil
 }
 
@@ -453,10 +415,5 @@ func (r *MemoryRepo) addInitialLogicGateInformationLocked(companyID, logicGateID
 		UpdatedTimestamp: now,
 	}
 	r.logicGateText[k][keyValue] = projection
-	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, actorUserID, "", EditorProjectionRowFromLogicGate(projection)); ok {
-		if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
-			return domain.LogicGateInformation{}, err
-		}
-	}
 	return item, nil
 }

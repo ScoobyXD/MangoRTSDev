@@ -14,7 +14,6 @@ type memoryLogicGateGVICCommandSnapshot struct {
 	effectiveAccess          map[string]domain.EffectiveResourceAccess
 	GVICMatrixProjectionRows map[string]memoryGVICMatrixProjectionRow
 	domainEvents             map[string]domain.DomainEvent
-	eventRows                map[string]EventRow
 	workspaceReadVersions    map[string]int64
 }
 
@@ -27,7 +26,6 @@ func (r *MemoryRepo) snapshotLogicGateGVICCommandStateLocked() memoryLogicGateGV
 		effectiveAccess:          cloneMemoryMap(r.effectiveAccess),
 		GVICMatrixProjectionRows: cloneMemoryMap(r.GVICMatrixProjectionRows),
 		domainEvents:             cloneMemoryMap(r.domainEvents),
-		eventRows:                cloneMemoryMap(r.eventRows),
 		workspaceReadVersions:    cloneMemoryMap(r.workspaceReadVersions),
 	}
 }
@@ -40,7 +38,6 @@ func (r *MemoryRepo) restoreLogicGateGVICCommandStateLocked(snapshot memoryLogic
 	r.effectiveAccess = snapshot.effectiveAccess
 	r.GVICMatrixProjectionRows = snapshot.GVICMatrixProjectionRows
 	r.domainEvents = snapshot.domainEvents
-	r.eventRows = snapshot.eventRows
 	r.workspaceReadVersions = snapshot.workspaceReadVersions
 }
 
@@ -174,16 +171,12 @@ func (r *MemoryRepo) applyLogicGateGVICAssignmentCommand(input LogicGateGVICAssi
 		r.gvicAssignments[gvicSourceAssignmentKey(item.CompanyID, item.ResourceType, item.ResourceID, item.Role, item.PrincipalType, item.PrincipalID)] = item
 	}
 	r.logicGateGVIC[GVICKey] = assignments
-	result.ProjectionDeltas = r.syncGVICMatrixProjectionForLogicGateAssignmentsDeltasLocked(companyID, logicGateID, before, assignments)
+	r.syncGVICMatrixProjectionForLogicGateAssignmentsLocked(companyID, logicGateID, before, assignments)
 	event, err := r.appendDomainEventLocked(logicGateGVICUpdatedWorkspaceEventInput(result, commandAssignments, input))
 	if err != nil {
 		r.restoreLogicGateGVICCommandStateLocked(snapshot)
 		return LogicGateGVICAssignmentCommandResult{}, err
 	}
 	result.Events = []domain.DomainEvent{event}
-	if _, err := r.appendEventRowsLocked(GVICMatrixProjectionDeltaEventInputs(companyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
-		r.restoreLogicGateGVICCommandStateLocked(snapshot)
-		return LogicGateGVICAssignmentCommandResult{}, err
-	}
 	return result, nil
 }

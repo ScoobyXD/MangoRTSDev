@@ -126,35 +126,21 @@ func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.
 	defer r.mu.Unlock()
 	snapshot := r.snapshotNodeGraphEventStateLocked()
 	before, hasBefore := r.nodes[key(input.CompanyID, input.NodeID)]
-	kanbanProjectionBefore := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
-	GVICMatrixProjectionBefore := r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil)
 	gvicEffectiveBefore := r.gvicEffectiveAssignmentsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
 	beforeGeneratedUserIDs := gvicEffectiveUserIDsForRole(gvicEffectiveBefore, domain.GVICRoleGenerated)
-	projectManagementProjectionBefore := r.projectManagementTimelineProjectionRowsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
 	item, err := r.updateNodeLocked(input)
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
-	kanbanProjectionAfter := r.kanbanProjectionRowsForNodeLocked(input.CompanyID, input.NodeID)
-	GVICMatrixProjectionAfter := r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, []string{input.NodeID}, nil)
 	gvicEffectiveAfter := r.gvicEffectiveAssignmentsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
 	afterGeneratedUserIDs := gvicEffectiveUserIDsForRole(gvicEffectiveAfter, domain.GVICRoleGenerated)
-	projectManagementProjectionAfter := r.projectManagementTimelineProjectionRowsForResourceLocked(input.CompanyID, EntityTypeNode, input.NodeID)
-	projectionDeltas := diffKanbanProjectionRows(kanbanProjectionBefore, kanbanProjectionAfter)
-	projectionDeltas = append(projectionDeltas, diffGVICMatrixProjectionRows(GVICMatrixProjectionBefore, GVICMatrixProjectionAfter)...)
-	projectionDeltas = append(projectionDeltas, diffGVICEffectiveProjectionRows(gvicEffectiveProjectionRowsFromDomain(gvicEffectiveBefore), gvicEffectiveProjectionRowsFromDomain(gvicEffectiveAfter))...)
-	projectionDeltas = append(projectionDeltas, diffProjectManagementProjectionRows(projectManagementProjectionBefore, projectManagementProjectionAfter)...)
 	eventInput := nodeUpdatedWorkspaceEventInput(item)
 	if hasBefore {
 		eventInput = nodeUpdatedWorkspaceEventInputForUpdate(input, before, item, beforeGeneratedUserIDs, afterGeneratedUserIDs)
 	}
 	event, err := r.appendDomainEventLocked(eventInput)
 	if err != nil {
-		r.restoreNodeGraphEventStateLocked(snapshot)
-		return domain.Node{}, domain.DomainEvent{}, err
-	}
-	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
@@ -529,16 +515,6 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 	}
 	now := time.Now().UTC()
 	k := key(companyID, nodeID)
-	beforeInfo := append([]domain.NodeInformation{}, r.nodeInfo[k]...)
-	beforeText := cloneMemoryNodeProjectionMap(r.nodeText[k])
-	beforeChanges := cloneMemoryNodeContentChanges(r.nodeContentChanges)
-	beforeChangeSeen := cloneMemoryTimeMap(r.nodeContentChangeSeen)
-	rollback := func() {
-		r.nodeInfo[k] = beforeInfo
-		r.nodeText[k] = beforeText
-		r.nodeContentChanges = beforeChanges
-		r.nodeContentChangeSeen = beforeChangeSeen
-	}
 	item := domain.NodeInformation{
 		CompanyID:        companyID,
 		InformationID:    newUUIDv7String(),
@@ -589,12 +565,6 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 			now,
 		))
 	}
-	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, input.ActorUserID, "", EditorProjectionRowFromNode(projection)); ok {
-		if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
-			rollback()
-			return domain.NodeInformation{}, err
-		}
-	}
 	return item, nil
 }
 
@@ -639,14 +609,6 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 		return ErrNotFound
 	}
 	k := key(companyID, nodeID)
-	beforeText := cloneMemoryNodeProjectionMap(r.nodeText[k])
-	beforeChanges := cloneMemoryNodeContentChanges(r.nodeContentChanges)
-	beforeChangeSeen := cloneMemoryTimeMap(r.nodeContentChangeSeen)
-	rollback := func() {
-		r.nodeText[k] = beforeText
-		r.nodeContentChanges = beforeChanges
-		r.nodeContentChangeSeen = beforeChangeSeen
-	}
 	if existing, ok := r.nodeText[k][informationID]; ok && (strings.TrimSpace(input.ActorUserID) != "" || strings.TrimSpace(input.ActorDisplayName) != "") {
 		existingCopy := existing
 		r.recordNodeContentChangesLocked(buildNodeContentChanges(
@@ -662,12 +624,6 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 	}
 	if _, ok := r.nodeText[k][informationID]; ok {
 		delete(r.nodeText[k], informationID)
-		if eventInput, ok := EditorProjectionDeleteEventInput(companyID, input.ActorUserID, "", EntityTypeNode, nodeID, informationID); ok {
-			if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
-				rollback()
-				return err
-			}
-		}
 	}
 	return nil
 }

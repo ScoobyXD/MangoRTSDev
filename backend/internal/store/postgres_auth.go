@@ -686,7 +686,7 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 		return DeleteCompanyUserResult{}, err
 	}
 	if len(gvicKeys) > 0 {
-		if _, err = syncResourceGVICEffectiveAssignmentsTx(context.Background(), tx, companyID, gvicKeys); err != nil {
+		if err = syncResourceGVICEffectiveAssignmentsTx(context.Background(), tx, companyID, gvicKeys); err != nil {
 			return DeleteCompanyUserResult{}, fmt.Errorf("sync company gvic assignments for user: %w", err)
 		}
 	}

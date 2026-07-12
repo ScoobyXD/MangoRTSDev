@@ -1,6 +1,4 @@
 import { useEffect, useState } from "react";
-import { fetchCurrentUser, readAuthConfig, type CurrentUserResponse } from "../../auth/cognitoAuth.js";
-import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
 import { emptyNotificationSummary, EVENT_NOTIFICATIONS_UPDATED, fetchNotificationSummary, type NotificationSummary } from "./notificationsApi.js";
 
 const NOTIFICATION_SUMMARY_CLOSE_GRACE_MS = 1500;
@@ -15,8 +13,6 @@ type NotificationSummaryEntry = {
   closeTimer?: TimerID;
   loading: boolean;
   reloadQueued: boolean;
-  realtimePending: boolean;
-  unsubscribeRealtime?: () => void;
 };
 
 const notificationSummaryEntries = new Map<string, NotificationSummaryEntry>();
@@ -45,7 +41,6 @@ function subscribeNotificationSummary(companyID: string, listener: NotificationS
   entry.listeners.add(listener);
   listener(entry.summary);
   ensureNotificationUpdateListener();
-  ensureNotificationRealtime(entry);
   requestNotificationSummaryLoad(entry, { queueWhileLoading: false });
 
   return () => {
@@ -53,7 +48,6 @@ function subscribeNotificationSummary(companyID: string, listener: NotificationS
     if (entry.listeners.size === 0 && entry.closeTimer === undefined) {
       entry.closeTimer = setTimeout(() => {
         if (entry.listeners.size > 0 || notificationSummaryEntries.get(companyID) !== entry) return;
-        entry.unsubscribeRealtime?.();
         notificationSummaryEntries.delete(companyID);
       }, NOTIFICATION_SUMMARY_CLOSE_GRACE_MS);
     }
@@ -70,47 +64,9 @@ function getNotificationSummaryEntry(companyID: string): NotificationSummaryEntr
     listeners: new Set(),
     loading: false,
     reloadQueued: false,
-    realtimePending: false,
   };
   notificationSummaryEntries.set(companyID, created);
   return created;
-}
-
-function ensureNotificationRealtime(entry: NotificationSummaryEntry): void {
-  if (entry.unsubscribeRealtime || entry.realtimePending || !entry.companyID.trim()) return;
-  entry.realtimePending = true;
-  const apiBase = readAuthConfig().apiBase;
-  void fetchCurrentUser()
-    .then((current) => {
-        const userID = current.user.user_id.trim();
-        if (!userID || !currentUserCanUseCompany(current, entry.companyID) || notificationSummaryEntries.get(entry.companyID) !== entry) return;
-        // The app freshness bridge owns global notification events and preserves local mutation sources.
-        entry.unsubscribeRealtime = subscribeRealtimeScope(apiBase, entry.companyID, `notifications:user:${userID}`, {
-        onNotificationCreated(message) {
-            requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
-        },
-        onNotificationDeleted(message) {
-          requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
-        },
-        onNotificationsCleared(message) {
-          requestNotificationSummaryLoadsForCompany(message.company_id || entry.companyID);
-        },
-        onError(error) {
-          console.error("Notification realtime failed", error);
-        },
-      });
-    })
-    .catch((error: unknown) => {
-      console.error("Notification realtime failed", error);
-    })
-    .finally(() => {
-      entry.realtimePending = false;
-    });
-}
-
-function currentUserCanUseCompany(current: CurrentUserResponse, companyID: string): boolean {
-  const cleanCompanyID = companyID.trim();
-  return !!cleanCompanyID && (current.is_dev_admin || current.memberships.some((membership) => membership.company_id === cleanCompanyID));
 }
 
 function ensureNotificationUpdateListener(): void {
@@ -183,4 +139,3 @@ function requestNotificationSummaryLoad(entry: NotificationSummaryEntry, options
 function notifyNotificationSummaryListeners(entry: NotificationSummaryEntry): void {
   for (const listener of Array.from(entry.listeners)) listener(entry.summary);
 }
-

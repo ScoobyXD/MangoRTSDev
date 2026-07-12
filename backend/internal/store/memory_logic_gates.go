@@ -892,12 +892,6 @@ func (r *MemoryRepo) AddLogicGateInformation(companyID, logicGateID, infoType, i
 	}
 	now := time.Now().UTC()
 	k := key(companyID, logicGateID)
-	beforeInfo := append([]domain.LogicGateInformation{}, r.logicGateInfo[k]...)
-	beforeText := cloneMemoryLogicGateProjectionMap(r.logicGateText[k])
-	rollback := func() {
-		r.logicGateInfo[k] = beforeInfo
-		r.logicGateText[k] = beforeText
-	}
 	item := domain.LogicGateInformation{
 		CompanyID:        companyID,
 		InformationID:    newUUIDv7String(),
@@ -947,12 +941,6 @@ func (r *MemoryRepo) AddLogicGateInformation(companyID, logicGateID, infoType, i
 		UpdatedTimestamp: item.UpdatedTimestamp,
 	}
 	r.logicGateText[k][projectionID] = projection
-	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, "", "", EditorProjectionRowFromLogicGate(projection)); ok {
-		if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
-			rollback()
-			return domain.LogicGateInformation{}, err
-		}
-	}
 	return item, nil
 }
 
@@ -983,15 +971,8 @@ func (r *MemoryRepo) DeleteLogicGateProjection(companyID, logicGateID, informati
 		return ErrNotFound
 	}
 	k := key(companyID, logicGateID)
-	beforeText := cloneMemoryLogicGateProjectionMap(r.logicGateText[k])
 	if _, ok := r.logicGateText[k][informationID]; ok {
 		delete(r.logicGateText[k], informationID)
-		if eventInput, ok := EditorProjectionDeleteEventInput(companyID, "", "", EntityTypeLogicGate, logicGateID, informationID); ok {
-			if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
-				r.logicGateText[k] = beforeText
-				return err
-			}
-		}
 	}
 	return nil
 }

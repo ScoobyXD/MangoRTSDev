@@ -409,10 +409,6 @@ func (s *Server) applyCommunicationsArchiveBatchResult(connection domain.UserEma
 	}
 	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, result.ArchivedIDs, true)
 	s.rememberRecentCommunicationsArchiveMutation(cacheScope, result.ArchivedIDs, now)
-	eventMeta := communicationsEventMetadata{Action: "archive", SharedInboxID: sharedInboxID}
-	for _, messageID := range result.ArchivedIDs {
-		s.publishCommunicationsEventWithMeta(connection.UserID, "mailbox_changed", "message.archived", messageID, eventMeta)
-	}
 }
 
 func (s *Server) handleCommunicationsThreadByID(w http.ResponseWriter, r *http.Request) {
@@ -575,8 +571,6 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 		cacheScope := communicationsConnectionCacheScope(connection)
 		s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
 		s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, req.Folders != nil)
-		eventTrigger, eventMeta := communicationsMessageUpdateEvent(req.Starred, sharedInboxID)
-		s.publishCommunicationsEventWithMeta(connection.UserID, "mailbox_changed", eventTrigger, message.ID, eventMeta)
 		writeJSON(w, http.StatusOK, map[string]any{"message": message})
 	case http.MethodDelete:
 		if err := s.withCommunicationsNylasGate(r.Context(), connection, func(ctx context.Context) error {
@@ -589,7 +583,6 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 		cacheScope := communicationsConnectionCacheScope(connection)
 		s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, []string{messageID}, "", now)
 		s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, true)
-		s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.deleted", messageID)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -650,19 +643,6 @@ func (s *Server) downloadCommunicationsAttachment(w http.ResponseWriter, r *http
 	_, _ = w.Write(content)
 }
 
-func communicationsMessageUpdateEvent(starred *bool, sharedInboxID string) (string, communicationsEventMetadata) {
-	meta := communicationsEventMetadata{SharedInboxID: strings.TrimSpace(sharedInboxID)}
-	if starred == nil {
-		return "message.updated", meta
-	}
-	if *starred {
-		meta.Action = "star"
-		return "message.starred", meta
-	}
-	meta.Action = "unstar"
-	return "message.unstarred", meta
-}
-
 func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection, messageID, sharedInboxID string) {
 	archiveFolderID := ""
 	if connection.Provider != "google" {
@@ -689,10 +669,6 @@ func (s *Server) archiveCommunicationsMessage(w http.ResponseWriter, r *http.Req
 	s.commCache.patchMessagePages(connection.UserID, cacheScope, archived, now)
 	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, true)
 	s.rememberRecentCommunicationsArchiveMutation(cacheScope, []string{messageID}, now)
-	s.publishCommunicationsEventWithMeta(connection.UserID, "mailbox_changed", "message.archived", archived.ID, communicationsEventMetadata{
-		Action:        "archive",
-		SharedInboxID: sharedInboxID,
-	})
 	writeJSON(w, http.StatusOK, map[string]any{"message": archived})
 }
 
@@ -721,7 +697,6 @@ func (s *Server) unarchiveCommunicationsMessage(w http.ResponseWriter, r *http.R
 	s.commCache.removeMessagesFromPages(connection.UserID, cacheScope, []string{messageID}, "archive", now)
 	s.commCache.patchMessagePages(connection.UserID, cacheScope, restored, now)
 	s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, true)
-	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.updated", restored.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"message": restored})
 }
 
@@ -983,7 +958,6 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	cacheScope := communicationsConnectionCacheScope(connection)
 	s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
 	s.commCache.invalidateMessage(connection.UserID, cacheScope, message.ID)
-	s.publishCommunicationsEvent(connection.UserID, "mailbox_changed", "message.created", message.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{"message": message})
 }
 

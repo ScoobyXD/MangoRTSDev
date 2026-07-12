@@ -1,5 +1,8 @@
-# Syncing Layer V1
+# Syncing Layer V1 (Superseded)
 
+Status: historical only. The broad projection-delta/event-row/workspace-stream direction below was removed by the 2026-07-12 realtime simplification. The current contract is `docs/v4-architecture-doc.md`: only `notifications:user:{user_id}`, `chat:node:{node_id}`, and mounted `board:{board_id}` are product realtime scopes. My Work/GVIC, Company Explorer, maps, Project Management, mail, permissions, and generic editor documents are non-live; `event_rows` and projection replication are deleted. Future Huddle CRDT/OT work is separate.
+
+The remainder is retained only as implementation history and is not an active requirement.
 ## Purpose
 
 MangoRTS needs a projection-first live-update architecture to stop GET storms, broad workspace snapshot refetches, and repetitive backend work after POST/PUT requests.

@@ -78,7 +78,6 @@ func (s *Server) handleLogicGateGVICCommand(w http.ResponseWriter, r *http.Reque
 	}
 
 	s.publishCommittedWorkspaceEvents(result.Events)
-	s.publishProjectionDeltas(result.ProjectionDeltas)
 	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }

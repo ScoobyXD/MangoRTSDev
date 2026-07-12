@@ -14,7 +14,6 @@ type memoryNodeGraphEventSnapshot struct {
 	kanbanCards       map[string][]domain.KanbanCard
 	emailNodeLinks    map[string]communicationsEmailNodeLink
 	domainEvents      map[string]domain.DomainEvent
-	eventRows         map[string]EventRow
 	effectiveAccess   map[string]domain.EffectiveResourceAccess
 }
 
@@ -55,7 +54,6 @@ func (r *MemoryRepo) snapshotNodeGraphEventStateLocked() memoryNodeGraphEventSna
 		kanbanCards:       cloneMemorySliceMap(r.kanbanCards),
 		emailNodeLinks:    cloneMemoryMap(r.emailNodeLinks),
 		domainEvents:      cloneMemoryMap(r.domainEvents),
-		eventRows:         cloneMemoryMap(r.eventRows),
 		effectiveAccess:   cloneMemoryMap(r.effectiveAccess),
 	}
 }
@@ -72,6 +70,5 @@ func (r *MemoryRepo) restoreNodeGraphEventStateLocked(snapshot memoryNodeGraphEv
 	r.kanbanCards = snapshot.kanbanCards
 	r.emailNodeLinks = snapshot.emailNodeLinks
 	r.domainEvents = snapshot.domainEvents
-	r.eventRows = snapshot.eventRows
 	r.effectiveAccess = snapshot.effectiveAccess
 }

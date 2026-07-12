@@ -4,7 +4,7 @@ Last updated: 2026-07-12
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: core read path, projection sync, permission filtering, and realtime delta behavior have backend coverage. `tests/frontend/pages/home/myWorkGrouping.test.ts` and `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` cover the My Work grouping model and exact shared status order. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: core read path, projection sync, and permission filtering have backend coverage. `tests/frontend/pages/home/myWorkGrouping.test.ts` and `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` cover the My Work grouping model and exact shared status order. Rule ID mapping is partial.
 
 ## Definitions
 
@@ -16,7 +16,7 @@ Path context: `project_id/project_name` and `logic_gate_id/logic_gate_name` are 
 
 Active work: A standalone node is active when its node status is not `Done`. A node in a relationship with an active project, directly or through a logic gate, remains active while the project is active even if the node status is `Done`. A project is active when its project status is not `Done`. Logic gates do not add their own active status.
 
-Projection identity: `projection_row_id` is the row identity used by reads, deltas, realtime payloads, and frontend reconciliation.
+Projection identity: `projection_row_id` is the row identity used by canonical reads and frontend reconciliation.
 
 ## Business Logic
 
@@ -30,7 +30,7 @@ MW7 - Each target user loads independently so one failed target does not blank s
 MW8 - If all target loads fail, My Work shows a full failure state.
 MW9 - If some target loads fail, My Work preserves successful results and shows a scoped partial-failure warning.
 MW10 - My Work cache keys include company, surface scope, and target user IDs.
-MW11 - Realtime My Work subscriptions are scoped per target user and reconcile rows by `projection_row_id`.
+MW11 - My Work has no realtime subscription; it loads canonical rows for the selected target users when the surface opens or explicitly refreshes.
 MW12 - My Work matrix cells group work by `gvic_assignment` and `priority`.
 MW13 - Role buckets sort generated, verified, consulted, then informed.
 MW14 - Priority buckets sort 1, 2, 3, 4, 5, then no priority.
@@ -53,8 +53,8 @@ MW30 - Expanding/collapsing grouping rows is separate from opening the work item
 MW31 - Drag/drop or empty-cell creation from My Work carries the selected priority and creator GVIC role into the created node.
 MW32 - Semantic backend mutations write canonical/source rows and update affected hot projection rows in the same transaction.
 MW33 - Normal mutations prefer exact projection row upsert/delete over broad rebuilds.
-MW34 - Large fanout changes may emit bounded refetch signals instead of many row deltas.
-MW35 - Realtime sends exact row deltas when safe; permission-sensitive delivery must re-check access before sending rows.
+MW34 - Large fanout changes update the projection transactionally; the next canonical My Work load returns the current rows.
+MW35 - My Work does not receive cross-user projection deltas. Read-time permission filtering is authoritative, and temporary cross-user staleness until navigation or refresh is accepted.
 MW36 - My Work pulls only active work. Standalone nodes are active when they are not in `Done` status. Projects are active when they are not in `Done` status. A node marked `Done` remains active when it is in a relationship with an active project, either directly or through a logic gate, because the parent project is still going. Logic gates do not add their own active status.
     a. standalone Done nodes are excluded from My Work
     b. Done nodes under an active project are included
@@ -76,7 +76,7 @@ MW49 - Right-clicking a My Work saved-view row exposes Edit, Rename, and Delete 
 MW50 - Dragging a node between My Work cells updates both target priority and target GVIC role. A logic-gate-backed node must keep the same logic-gate relationship while moving, for example from priority 1 Generated to priority 3 Consulted.
 MW51 - My Work Status grouping consumes the shared universal status contract also used by Updates and Project Logic Gates / Nodes. Ascending recognized order is In Progress, Review, Pending, Requested, Backlog, Done. Verify/Verification/Verified normalize to Review, Request/Requests normalize to Requested, Backlogs/Back Logs/Backlogged normalize to Backlog, and Complete/Completed/Closed/Archived normalize to Done. Descending reverses recognized nonterminal groups while Done remains final; unknown nonblank statuses and the distinct No status group remain before Done.
 
-## Projection Sync Events
+## Projection Maintenance
 
 The hot projection is updated transactionally for these source mutations:
 - node rename, status, due date, priority, accounts, deletion, or inactive status changes
@@ -93,7 +93,7 @@ Logic gate GVIC assignment changed: rebuild rows for all current nodes in that l
 Node GVIC assignment changed: rebuild rows for that node, but only matters when the node is not deferring to a logic gate.
 Project relationship changed: rebuild affected node rows under that project/gate relationship.
 Project/logic gate/node deleted or archived/done: delete or rebuild affected rows.
-Realtime: emit deltas keyed by projection_row_id; for big fanout changes, emit a scoped refetch for affected users instead of thousands of row patches.
+No My Work WebSocket message is emitted. The initiating command patches or reloads its concrete local surface; other sessions see the projection on their next open or refresh.
 
 
 ## Scenarios
@@ -106,7 +106,7 @@ Business logic covered:
 Given:
 - A company has users, nested user groups, and active node GVIC work.
 - One target user's My Work request succeeds and another target user's request fails.
-- Realtime GVIC matrix events arrive for one target user.
+- The surface loads canonical My Work rows for the selected target users.
 
 Expected:
 - My Work includes generated, verified, consulted, and informed assignments and does not show notification-feed-only Updates.
@@ -115,7 +115,7 @@ Expected:
 - Successful target results remain visible when another target fails.
 - A full failure state appears only when every target fails.
 - Cache keys separate company, selected scope, and target users.
-- Realtime reconciles only rows for the target user affected by the event.
+- No WebSocket subscription is created; canonical rows are reconciled for the selected target users.
 
 ### Scenario MW-S2: Flat Rows, Roles, Priority, And Visibility
 
@@ -186,7 +186,7 @@ Expected:
 - Deleting a My Work node hides it optimistically, restores it on failure, and refreshes My Work on success.
 - Updates grouping supports Project, Logic Gate, and Status as ordinary grouping choices while staying separate from My Work active-work grouping.
 
-### Scenario MW-S4: Transactional Projection And Realtime
+### Scenario MW-S4: Transactional Projection Without Realtime
 
 Business logic covered:
 - MW32 through MW35
@@ -194,11 +194,11 @@ Business logic covered:
 Given:
 - A semantic backend mutation changes canonical/source My Work data.
 - The mutation affects one or more node leaf projection rows.
-- Subscribed users may or may not still have permission to see those rows.
+- A later reader may or may not have permission to see those rows.
 
 Expected:
 - Canonical/source rows and exact affected projection rows are updated in the same transaction.
-- Projection deltas use `projection_row_id`.
-- Realtime sends authorized exact row upserts/deletes when bounded.
-- Large fanout or ambiguous permission changes can request a bounded refetch.
-- Unauthorized viewers do not receive row payloads for hidden nodes or hidden path contexts.
+- Canonical projection rows preserve stable `projection_row_id` identities.
+- No GVIC/My Work realtime event or `event_rows` record is emitted.
+- The next open, navigation, or explicit refresh reads the current projection.
+- Unauthorized readers do not receive hidden nodes or hidden path contexts from the canonical API.

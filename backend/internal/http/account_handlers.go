@@ -119,7 +119,6 @@ func (s *Server) handleAccountByID(w http.ResponseWriter, r *http.Request) {
 			writeAccountError(w, err, "failed_to_update_account")
 			return
 		}
-		s.publishProjectionDeltas(result.ProjectionDeltas)
 		writeJSON(w, http.StatusOK, result.Account)
 	case http.MethodDelete:
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
@@ -132,7 +131,6 @@ func (s *Server) handleAccountByID(w http.ResponseWriter, r *http.Request) {
 			writeAccountError(w, err, "failed_to_delete_account")
 			return
 		}
-		s.publishProjectionDeltas(result.ProjectionDeltas)
 		writeJSON(w, http.StatusOK, map[string]any{"deleted_account_id": result.DeletedAccountID})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -289,7 +287,6 @@ func (s *Server) handleNodeAccounts(w http.ResponseWriter, r *http.Request, node
 			return
 		}
 		s.publishCommittedWorkspaceEvents(result.Events)
-		s.publishProjectionDeltas(result.ProjectionDeltas)
 		writeJSON(w, http.StatusOK, map[string]any{"node": result.Node, "assignments": result.Assignments})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

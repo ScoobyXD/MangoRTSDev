@@ -21,7 +21,6 @@ export type KanbanBoardContents = {
   board?: KanbanBoard;
   columns: KanbanColumn[];
   cards: KanbanCard[];
-  projectionSequence?: number;
 };
 
 export type KanbanBoardContentsCacheSnapshot = {
@@ -57,7 +56,6 @@ function cloneContents(contents: KanbanBoardContents): KanbanBoardContents {
       ...card,
       accounts: card.accounts?.map((account) => ({ ...account })),
     })),
-    projectionSequence: contents.projectionSequence,
   };
 }
 
@@ -149,7 +147,7 @@ export async function getKanbanBoardContentsSingleFlight(
   const promise = (logicGateID
     ? requestLogicGateWorkView(apiBase, companyID, logicGateID, controller.signal)
       .then((view) => normalizeLogicGateWorkView(view, companyID, boardID, logicGateID))
-    : Promise.resolve({ columns: [], cards: [], projectionSequence: undefined })
+    : Promise.resolve({ columns: [], cards: [] })
   ).then((contents) => {
     clearResourceMissing({ apiBase, companyID, resourceType: "kanban_board", resourceID: boardID });
     if (logicGateID) clearResourceMissing({ apiBase, companyID, resourceType: "logic_gate", resourceID: logicGateID });
@@ -225,18 +223,12 @@ function normalizeLogicGateWorkView(
       updated_timestamp: projectionUpdated || created,
     };
   });
-  const projectionSequence = view.projection_sequence;
   return {
     logicGate: { ...view.logic_gate, logic_gate_id: view.logic_gate.logic_gate_id || logicGateID },
     permissions: { ...view.permissions },
     board,
     columns: (view.columns ?? []).map((column) => ({ ...column })),
     cards,
-    projectionSequence: typeof projectionSequence === "number"
-      && Number.isSafeInteger(projectionSequence)
-      && projectionSequence > 0
-      ? projectionSequence
-      : undefined,
   };
 }
 

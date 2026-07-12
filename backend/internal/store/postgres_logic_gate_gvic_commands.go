@@ -379,18 +379,16 @@ where company_id=$1::uuid
 		return LogicGateGVICAssignmentCommandResult{}, err
 	}
 	assignments := cloneLogicGateGVICAssignments(assignmentsByGate[logicGateID])
-	projectionDeltas := []ProjectionDelta{}
 	if changed {
 		keyValue := resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}
-		deltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{keyValue})
+		err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{keyValue})
 		if err != nil {
 			return LogicGateGVICAssignmentCommandResult{}, err
 		}
-		logicGateDeltas, err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, companyID, logicGateID, before, assignments)
+		err = syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx(ctx, tx, companyID, logicGateID, before, assignments)
 		if err != nil {
 			return LogicGateGVICAssignmentCommandResult{}, err
 		}
-		projectionDeltas = append(deltas, logicGateDeltas...)
 	}
 	result := LogicGateGVICAssignmentCommandResult{
 		CompanyID:         companyID,
@@ -399,7 +397,6 @@ where company_id=$1::uuid
 		Changed:           changed,
 		GVICAssignments:   assignments,
 		BeforeAssignments: before,
-		ProjectionDeltas:  projectionDeltas,
 		Events:            []domain.DomainEvent{},
 	}
 	if changed {
@@ -408,9 +405,6 @@ where company_id=$1::uuid
 			return LogicGateGVICAssignmentCommandResult{}, err
 		}
 		result.Events = []domain.DomainEvent{event}
-		if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
-			return LogicGateGVICAssignmentCommandResult{}, err
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return LogicGateGVICAssignmentCommandResult{}, err

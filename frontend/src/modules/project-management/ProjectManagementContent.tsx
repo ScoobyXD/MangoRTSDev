@@ -4,7 +4,7 @@ import { buildProjectRoute } from "../../app/deepLinkRoutes.js";
 import type { ProjectLogicGateReturnContext } from "../../app/projectRouteHistory.js";
 import { openAppPathInNewTab } from "../../app/resourceLinks.js";
 import { requestAppSidebarPin } from "../../app/sidebarPins.js";
-import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
+import { fetchCurrentUser } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl.js";
 import { entityMatchesAccountFilter } from "../accounts/accountsApi.js";
@@ -16,14 +16,6 @@ import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folder
 import type { LogicGateRecord } from "../logic-gate-map/shared.js";
 import { toLogicGateCanvasRecord } from "../logic-gate-map/shared.js";
 import { getNodeTitle, type NodeRecord } from "../node-map/shared.js";
-import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../realtime/realtimeWebSocket.js";
-import {
-  companyExplorerRealtimeScope,
-  subscribeWorkspaceUserRealtime,
-  type WorkspaceReconciliationScope,
-  type WorkspaceStreamEventContext,
-  type WorkspaceStreamGapSignal,
-} from "../workspace/workspaceRealtime.js";
 import {
   fetchCommunicationsWorkspacePanel,
   invalidateCommunicationsWorkspacePanelCache,
@@ -179,11 +171,6 @@ const TIMELINE_MIN_DAY_W = 96;
 const TIMELINE_HEADER_H = 38;
 const TIMELINE_ROW_H = 45;
 
-type WorkspaceEventEnvelope = {
-  company_id?: string;
-  type?: string;
-};
-
 function workspacePanelStateFromResponse(panel: CommunicationsWorkspacePanel): WorkspacePanelState {
   return {
     nodeFolders: panel.nodeFolders,
@@ -193,62 +180,6 @@ function workspacePanelStateFromResponse(panel: CommunicationsWorkspacePanel): W
     logicGateFolderItems: panel.logicGateFolderItems,
     logicGates: panel.logicGates,
   };
-}
-
-function projectManagementWorkspaceScopeTouchesPanel(scope: WorkspaceReconciliationScope): boolean {
-  switch (scope.kind) {
-    case "node_graph":
-    case "logic_gate_graph":
-    case "work_item_assignment":
-    case "workspace":
-      return true;
-    case "company_explorer":
-      return !scope.folderKind || scope.folderKind === "node" || scope.folderKind === "logic_gate" ||
-        !scope.itemType || scope.itemType === "node" || scope.itemType === "logic_gate";
-    default:
-      return false;
-  }
-}
-
-function projectManagementWorkspaceScopesTouchPanel(scopes: WorkspaceReconciliationScope[]): boolean {
-  return scopes.some(projectManagementWorkspaceScopeTouchesPanel);
-}
-
-function projectManagementWorkspaceEventTouchesPanel(type: string): boolean {
-  const cleanType = type.trim();
-  if (!cleanType) return false;
-  if (
-    cleanType === "workspace_derived_projection_requested" ||
-    cleanType === "company_explorer_folder_item_assign_requested" ||
-    cleanType === "node_map_position_upsert_requested" ||
-    cleanType === "logic_gate_map_position_upsert_requested"
-  ) {
-    return false;
-  }
-  return cleanType === "node_created" ||
-    cleanType === "node_updated" ||
-    cleanType === "node_deleted" ||
-    cleanType === "node_permissions_updated" ||
-    cleanType === "relationship_created" ||
-    cleanType === "relationship_deleted" ||
-    cleanType === "logic_gate_created" ||
-    cleanType === "logic_gate_updated" ||
-    cleanType === "logic_gate_deleted" ||
-    cleanType === "logic_gate_gvic_updated" ||
-    cleanType === "logic_gate_permissions_updated" ||
-    cleanType.startsWith("company_explorer_folder_");
-}
-
-function projectManagementWorkspaceEventTouchesProjects(type: string): boolean {
-  const cleanType = type.trim();
-  return cleanType === "project_created" ||
-    cleanType === "project_updated" ||
-    cleanType === "project_deleted" ||
-    cleanType === "project_information_created" ||
-    cleanType === "project_information_deleted" ||
-    cleanType === "project_relationship_upserted" ||
-    cleanType === "project_relationship_deleted" ||
-    cleanType === "project_permissions_updated";
 }
 
 function defaultUserPerspective(currentUserID: string): CompanyPerspective {
@@ -709,7 +640,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 }) => {
   const companyID = getActiveCompanyID();
   const pageRef = useRef<HTMLDivElement | null>(null);
-  const sequenceByUserRef = useRef(new Map<string, number>());
   const workspacePanelReloadTimerRef = useRef<number | null>(null);
   const projectListReloadTimerRef = useRef<number | null>(null);
   const timelineRowsRef = useRef<ProjectManagementTimelineRow[]>([]);
@@ -727,7 +657,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [subgroupBy, setSubgroupBy] = useState<ProjectGroupingField>("");
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [activeProjectID, setActiveProjectID] = useState("");
-  const [projectSummaryReloadKey, setProjectSummaryReloadKey] = useState(0);
   const [weekAnchor, setWeekAnchor] = useState(() => weekStart(new Date()));
   const [timelineRows, setTimelineRows] = useState<ProjectManagementTimelineRow[]>([]);
   const [timelinePerspective, setTimelinePerspective] = useState<CompanyPerspective>(() => defaultUserPerspective(""));
@@ -798,33 +727,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     }, 250);
   }, [companyID, loadProjectList]);
 
-  const handleWorkspaceGap = useCallback((gap: WorkspaceStreamGapSignal) => {
-    if (gap.companyID !== companyID) return;
-    if (projectManagementWorkspaceScopesTouchPanel(gap.scopes)) scheduleWorkspacePanelReload();
-    scheduleProjectListReload();
-  }, [companyID, scheduleProjectListReload, scheduleWorkspacePanelReload]);
-
-  const handleWorkspaceEvent = useCallback((event: { event: string; data: string }, context: WorkspaceStreamEventContext) => {
-    if (event.event !== "workspace" || event.data.length === 0) return;
-    let envelope: WorkspaceEventEnvelope;
-    try {
-      envelope = JSON.parse(event.data) as WorkspaceEventEnvelope;
-    } catch {
-      scheduleWorkspacePanelReload();
-      return;
-    }
-    const eventCompanyID = envelope.company_id?.trim() ?? "";
-    if (eventCompanyID && eventCompanyID !== companyID) return;
-    const eventType = envelope.type ?? "";
-    if (projectManagementWorkspaceScopesTouchPanel(context.scopes) || projectManagementWorkspaceEventTouchesPanel(eventType)) {
-      scheduleWorkspacePanelReload();
-    }
-    if (projectManagementWorkspaceEventTouchesProjects(eventType)) {
-      scheduleProjectListReload();
-      if (activeProjectID) setProjectSummaryReloadKey((current) => current + 1);
-    }
-  }, [activeProjectID, companyID, scheduleProjectListReload, scheduleWorkspacePanelReload]);
-
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -858,16 +760,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     };
   }, [companyID]);
 
-  useEffect(() => {
-    if (!companyID) return undefined;
-    return subscribeWorkspaceUserRealtime(readAuthConfig().apiBase, companyID, companyExplorerRealtimeScope, {
-      onGap: handleWorkspaceGap,
-      onEvent: handleWorkspaceEvent,
-      onError() {
-        // The timeline projection stream remains independent; panel reload errors surface through loadWorkspacePanel.
-      },
-    });
-  }, [companyID, handleWorkspaceEvent, handleWorkspaceGap]);
 
   useEffect(() => () => {
     if (workspacePanelReloadTimerRef.current !== null) {
@@ -904,7 +796,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     groupMembers,
     currentUserID,
   }), [companyUsers, currentUserID, groupMembers, timelinePerspective]);
-  const timelineTargetKey = timelineTargetUserIDs.join("|");
   const timelineWriteUserID = writeUserIDForPerspective(timelineTargetUserIDs, currentUserID);
 
   const loadTimelineRows = useCallback(async (options: TimelineLoadOptions = {}) => {
@@ -919,10 +810,8 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     const settled = await Promise.allSettled(timelineTargetUserIDs.map((userID) => fetchProjectManagementTimeline(companyID, userID)));
     const rows: ProjectManagementTimelineRow[] = [];
     let failureCount = 0;
-    settled.forEach((result, index) => {
-      const userID = timelineTargetUserIDs[index];
+    settled.forEach((result) => {
       if (result.status === "fulfilled") {
-        sequenceByUserRef.current.set(userID, Number(result.value.projection_sequence) || 0);
         rows.push(...result.value.rows.map(normalizeTimelineRow));
       } else {
         failureCount += 1;
@@ -954,32 +843,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     setViewMode("list");
   }, [targetProjectID, targetProjectRequestID]);
 
-  useEffect(() => {
-    if (!companyID || !timelineTargetKey) return undefined;
-    const apiBase = readAuthConfig().apiBase;
-    const unsubscribes = timelineTargetUserIDs.map((userID) => {
-      const scope = `project_management:user:${userID}`;
-      return subscribeRealtimeScope(apiBase, companyID, scope, {
-        getAfterSequence: () => sequenceByUserRef.current.get(userID),
-        onDelta: (message: RealtimeProjectionDeltaMessage) => {
-          if (message.projection !== "project_management_timeline") return;
-          if (typeof message.projection_sequence === "number") {
-            sequenceByUserRef.current.set(userID, Math.max(sequenceByUserRef.current.get(userID) ?? 0, message.projection_sequence));
-          }
-          void loadTimelineRows();
-        },
-        onRefetch: () => {
-          void loadTimelineRows();
-        },
-        onPermissionRevoked: () => {
-          void loadTimelineRows();
-        },
-      });
-    });
-    return () => {
-      unsubscribes.forEach((unsubscribe) => unsubscribe());
-    };
-  }, [companyID, loadTimelineRows, timelineTargetKey, timelineTargetUserIDs]);
 
   useEffect(() => {
     if (!resizeState) return undefined;
@@ -1326,7 +1189,6 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       <ProjectSummaryContent
         projectID={activeProjectID}
         accent={accent}
-        refreshToken={projectSummaryReloadKey}
         workspace={workspace}
         onBack={() => setActiveProjectID("")}
         onNodeOpen={onNodeOpen}

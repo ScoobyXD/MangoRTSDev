@@ -302,7 +302,7 @@ set status=$2,
     last_error=$3,
     updated_timestamp=now()
 where job_item_id=$1::uuid
-returning archive_job_id::text`, jobItemID, status, trimEventLastError(lastError)).Scan(&jobID)
+returning archive_job_id::text`, jobItemID, status, trimCommunicationsArchiveJobLastError(lastError)).Scan(&jobID)
 	} else {
 		err = tx.QueryRowContext(ctx, `
 update communications_email_archive_job_items
@@ -312,7 +312,7 @@ set status=$2,
     last_error=$4,
     updated_timestamp=now()
 where job_item_id=$1::uuid
-returning archive_job_id::text`, jobItemID, status, availableAt.UTC(), trimEventLastError(lastError)).Scan(&jobID)
+returning archive_job_id::text`, jobItemID, status, availableAt.UTC(), trimCommunicationsArchiveJobLastError(lastError)).Scan(&jobID)
 	}
 	if err != nil {
 		if err == sql.ErrNoRows {

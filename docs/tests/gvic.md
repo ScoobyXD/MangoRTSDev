@@ -1,10 +1,10 @@
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 # GVIC Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: partial backend coverage for role validation, Logic Gate-to-node GVIC snapshots, explicit Logic Gate GVIC apply-to-descendants, linked node editing, detach preservation, effective-delta stability, group membership deltas, and scoped projection sync. Rule ID mapping is partial. Pointer-scaled descendant apply rules are documented as target behavior and are not yet proven by implementation tests.
+- Business Logic Covered By Automated Tests: partial backend coverage for role validation, Logic Gate-to-node GVIC snapshots, explicit Logic Gate GVIC apply-to-descendants, linked node editing, detach preservation, effective-row stability, group membership changes, and projection sync. Rule ID mapping is partial. Pointer-scaled descendant apply rules are documented as target behavior and are not yet proven by implementation tests.
 
 ## Business Logic
 
@@ -19,20 +19,20 @@ GVIC8 - Group GVIC assignments expand into effective user assignments for group 
 GVIC9 - Effective GVIC assignment records preserve enough source/inheritance data to explain whether access came from a direct or group assignment.
 GVIC10 - Updating logic gate GVIC applies precise effective-assignment deltas for the logic gate; unchanged effective rows must not be deleted, rewritten, or retimestamped.
 GVIC11 - Updating logic gate GVIC updates the logic gate's GVIC template/effective rows only by default; it must not fan out to nodes that already have a node-level snapshot unless apply-to-descendants is set.
-GVIC12 - Updating project, node, or shared resource GVIC applies precise effective GVIC and projection deltas for affected users without rebuilding unaffected rows.
+GVIC12 - Updating project, node, or shared resource GVIC applies precise effective GVIC and projection-row changes for affected users without rebuilding unaffected rows.
 GVIC13 - My Work reads active work from the GVIC matrix projection table, not by guessing from UI state.
-GVIC14 - GVIC matrix projection sequences are tracked per company and scope so clients can process ordered deltas.
-GVIC15 - When a client detects a GVIC matrix sequence gap, it must fall back to a full reload.
-GVIC16 - GVIC assignment changes publish or append events needed by My Work, Updates, and workspace clients.
+GVIC14 - My Work/GVIC has no product realtime scope or projection sequence; canonical reads return the current transactionally maintained rows.
+GVIC15 - My Work loads canonical GVIC matrix rows on open/navigation/manual refresh; temporary cross-user staleness until then is accepted.
+GVIC16 - GVIC assignment changes maintain canonical projections and independently required notification/domain-event consumers; they do not publish My Work or workspace browser events.
 GVIC17 - Removing a user from a group removes the user's effective GVIC access that came only from that group.
 GVIC18 - Removing a GVIC assignment removes the effective access/projection rows that were produced only by that assignment.
 GVIC19 - A resource can have multiple GVIC roles across different principals without collapsing the role meaning.
 GVIC20 - Shared inbox GVIC assignments must remain GVIC assignments and must not be converted into ordinary resource permission grants.
 GVIC21 - A person or group can only have one GVIC assignment per each node or for each logic gate. So the same person/group can not be in, for example, Generated and Informed for the same node (same rule applies for logic gates). A node assigned to a logic gate owns its node-level GVIC snapshot after entry.
 GVIC22 - Node and logic gate generated and verified assignments are single-user slots; they must use user principals, while consulted and informed can still use users or groups.
-GVIC23 - GVIC write commands update source assignments and projection/effective read models in the same transaction using precise deltas, not broad table or subsection rebuilds.
+GVIC23 - GVIC write commands update source assignments and projection/effective read models in the same transaction using precise row changes, not broad table or subsection rebuilds.
 GVIC24 - GVIC editor caches are patched from the canonical source-shaped write response for the edited resource; broad cached payloads must not overwrite newer GVIC assignments.
-GVIC25 - Projection and realtime deltas are the cache update path for My Work and other projection-backed views; source-shaped assignment responses are the cache update path for editable GVIC chips.
+GVIC25 - Source-shaped assignment responses patch editable GVIC chips for the initiating browser. My Work and other non-live projection-backed views read canonical state when opened or refreshed.
 GVIC26 - Stale in-flight reads or browser cache entries must not repopulate older Logic Gate GVIC data after a successful POST or PUT.
 GVIC27 - Logic Gate GVIC and Node GVIC must follow the same cache freshness contract; Logic Gate GVIC must not depend on stale broad Logic Gate payloads when Node GVIC uses fresh resource GVIC data.
 GVIC28 - Logic Gate GVIC is a template for nodes only at the moment a node enters that logic gate.
@@ -60,7 +60,7 @@ GVIC49 - Group GVIC assignments remain group pointers and must not be expanded i
 GVIC50 - GVIC audit/explainability must identify whether a user's role came from a direct resource binding, create/transfer inheritance, ancestor apply-to-descendants, or group membership.
 GVIC51 - Logic Gate Kanban work derives `request_owner_user_id` from the Logic Gate Generated user and does not serialize the full GVIC assignment collection.
 GVIC52 - A direct Logic Gate GVIC assignment or Logic Gate GVIC policy revision invalidates that Logic Gate's dedicated work version so cached header/request-owner data cannot remain stale.
-GVIC53 - Realtime or committed GVIC header reconciliation must patch or revalidate the same cached Logic Gate work snapshot; a stale in-flight work response cannot overwrite a newer Generated-user change.
+GVIC53 - The committed GVIC response patches or revalidates the initiating browser's cached Logic Gate work snapshot; a stale in-flight work response cannot overwrite a newer Generated-user change.
 GVIC54 - The minimal Logic Gate work request-owner field is display/workflow metadata only and does not imply `can_view`, `can_edit`, or `can_admin`.
 
 ## Scenarios
@@ -115,7 +115,7 @@ Expected:
 - Sync code may derive the desired effective set for comparison, but it must not delete and reinsert unchanged rows.
 - Logic Gate templates and node snapshots that directly reference affected groups update through the same scoped group-resource delta path.
 
-### Scenario GVIC-S3: Projection, Sequence, And Realtime
+### Scenario GVIC-S3: Transactional Projection Without Realtime
 
 Business logic covered:
 - GVIC10
@@ -131,18 +131,18 @@ Given:
 - A logic gate has assigned nodes, node GVIC snapshots, and GVIC template assignments.
 - A regular logic gate GVIC edit is saved.
 - The user separately runs the one-shot apply-to-descendants action for that logic gate.
-- A user has My Work open while GVIC assignments change.
-- A client receives matrix deltas with and without sequence gaps.
+- A user later opens or refreshes My Work after GVIC assignments change.
+- Another browser may retain stale My Work state until navigation or refresh.
 
 Expected:
-- Logic gate GVIC updates apply precise effective-assignment deltas for the gate template.
+- Logic gate GVIC updates apply precise effective-assignment row changes for the gate template.
 - Regular logic gate GVIC edits do not mutate existing assigned node snapshots or assigned-node matrix rows.
 - The one-shot apply-to-descendants action updates currently assigned node snapshots and refreshes affected node effective/projection rows.
-- Project, node, and supported shared resource GVIC changes apply precise GVIC/projection deltas for affected users.
+- Project, node, and supported shared resource GVIC changes apply precise GVIC/projection row changes for affected users.
 - My Work reads from the GVIC matrix projection table.
-- Projection sequence values are ordered per company and scope.
-- Sequence gaps cause a full reload.
-- GVIC changes publish or append refresh events for affected clients.
+- No GVIC/My Work realtime scope, event row, or projection sequence is created.
+- My Work sees current rows on its next canonical load.
+- Independently required notification/domain-event consumers remain, but no generic browser refresh event is published.
 
 ### Scenario GVIC-S4: Shared Inbox GVIC Compatibility
 
@@ -156,7 +156,7 @@ Expected:
 - GVIC assignment reads and writes preserve GVIC records.
 - Updating shared inbox access does not convert GVIC assignments into ordinary permission grants.
 
-### Scenario GVIC-S5: Delta Writes And Logic Gate Cache Freshness
+### Scenario GVIC-S5: Precise Writes And Logic Gate Cache Freshness
 
 Business logic covered:
 - GVIC23
@@ -179,12 +179,12 @@ Expected:
 - Effective assignment maintenance deletes only disappeared rows and inserts only new rows.
 - Effective rows that still represent the same user, resource, role, source, and inheritance identity are not rewritten and keep their updated timestamps.
 - Editable GVIC chips are patched from the source-shaped write response.
-- My Work and projection-backed views update from projection or realtime deltas.
+- My Work and other non-live projection-backed views load the current rows on open or refresh.
 - Stale broad Logic Gate payloads, stale workspace list cache entries, and stale in-flight reads cannot overwrite newer Logic Gate GVIC assignments.
 - Logic Gate and Node GVIC follow the same freshness contract.
 - Linked node effective access resolves through the node's own copied snapshot rows after the node enters the logic gate.
 - Regular Logic Gate GVIC add, remove, and set edits are template edits only for existing assigned nodes.
-- When the explicit apply-to-descendants action runs, the same source-shaped write response remains authoritative for the edited Logic Gate and affected node snapshots refresh through projection/realtime deltas.
+- When the explicit apply-to-descendants action runs, the same source-shaped write response remains authoritative for the edited Logic Gate; affected node snapshots are current on subsequent canonical reads.
 
 ### Scenario GVIC-S6: Node Logic Gate GVIC Snapshots, My Work, And Updates
 

@@ -143,13 +143,6 @@ func (s *Server) recordCommunicationsArchiveJobItemFailure(item store.Communicat
 	if err := s.repo.MarkCommunicationsArchiveJobItemFailed(item.JobItemID, code, availableAt, final); err != nil {
 		return err
 	}
-	if final {
-		connection := communicationsArchiveJobItemConnection(item)
-		s.publishCommunicationsEventWithMeta(connection.UserID, "mailbox_changed", "message.archive_failed", item.MessageID, communicationsEventMetadata{
-			Action:        "archive_failed",
-			SharedInboxID: item.SharedInboxID,
-		})
-	}
 	return nil
 }
 

@@ -514,7 +514,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		stop()
 	}
 	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.projection_dependencies")
-	projectionDeltas, err := applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDeltaDependencyInput{
+	err = syncNodeLogicGateAssignmentProjectionDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDependencyInput{
 		CompanyID:    input.CompanyID,
 		AssignmentID: assignment.AssignmentID,
 		NodeID:       input.NodeID,
@@ -535,7 +535,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	stop()
-	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment, ProjectionDeltas: projectionDeltas}
+	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment}
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	eventInputs := logicGateAssignmentSavedWorkspaceEventInputs(result, meta)
 	if createdNode.CompanyID != "" {
@@ -548,12 +548,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
-	stop = observeTiming(ctx, "repo.assignNodeToLogicGateStatusTx.projection_event_append")
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
-		stop()
-		return LogicGateNodeAssignmentResult{}, err
-	}
-	stop()
 	return result, nil
 }
 
@@ -669,7 +663,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 			return LogicGateNodeAssignmentResult{}, err
 		}
 	}
-	projectionDeltas, err := applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDeltaDependencyInput{
+	err = syncNodeLogicGateAssignmentProjectionDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDependencyInput{
 		CompanyID:    input.CompanyID,
 		AssignmentID: assignment.AssignmentID,
 		NodeID:       input.NodeID,
@@ -685,15 +679,12 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *priority); 
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment, ProjectionDeltas: projectionDeltas}
+	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment}
 	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentMovedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
-		return LogicGateNodeAssignmentResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
@@ -736,7 +727,7 @@ set status=$3::text
 where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, fallbackStatus); err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
-	projectionDeltas, err := applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDeltaDependencyInput{
+	err = syncNodeLogicGateAssignmentProjectionDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDependencyInput{
 		CompanyID:    input.CompanyID,
 		AssignmentID: assignment.AssignmentID,
 		NodeID:       input.NodeID,
@@ -748,15 +739,12 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, fallbackStat
 	if err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
-	result := LogicGateNodeAssignmentRemoveResult{Card: card, Node: node, Assignment: assignment, ProjectionDeltas: projectionDeltas}
+	result := LogicGateNodeAssignmentRemoveResult{Card: card, Node: node, Assignment: assignment}
 	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentRemovedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
 	result.Events = events
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
-		return LogicGateNodeAssignmentRemoveResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return LogicGateNodeAssignmentRemoveResult{}, err
 	}
@@ -801,7 +789,7 @@ func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssign
 	if err := syncNodeStatusFromLogicGateAssignmentTx(ctx, tx, assignment); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	projectionDeltas, err := applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDeltaDependencyInput{
+	err = syncNodeLogicGateAssignmentProjectionDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDependencyInput{
 		CompanyID:    input.CompanyID,
 		AssignmentID: assignment.AssignmentID,
 		NodeID:       input.NodeID,
@@ -817,15 +805,12 @@ func (r *PostgresRepo) SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssign
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment, ProjectionDeltas: projectionDeltas}
+	result := LogicGateNodeAssignmentResult{Card: card, Node: node, Assignment: assignment}
 	events, err := r.appendDomainEventsTx(ctx, tx, logicGateAssignmentIssueWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	result.Events = events
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
-		return LogicGateNodeAssignmentResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}

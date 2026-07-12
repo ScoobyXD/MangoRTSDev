@@ -450,8 +450,6 @@ test("mail thread detail supports exact-message replies, saved editor sizing, an
   assert.match(homeParts, /MAIL_REPLY_EDITOR_MIN_HEIGHT_PX/);
   assert.match(homePage, /saveCurrentComposeDraft\(\{ quiet: true \}\);\s*setCompose\(emptyCompose\);/);
   assert.match(homePage, /openReply\("reply", message \?\? selectedMessage\)/);
-  assert.match(homePage, /incomingThreadID && incomingThreadID === selectedThreadID/);
-  assert.match(homePage, /setSelectedThreadMessages\(\(previous\) => mergeEmailThreadDetailMessages\(previous, \[message\]\)\)/);
 });
 
 test("editor toolbar font, inline, highlight, and outline controls share one controller across rich editor surfaces", () => {
