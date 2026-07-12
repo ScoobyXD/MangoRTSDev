@@ -39,21 +39,21 @@ module "platform" {
   managed_db_password_secret_arn = var.managed_db_password_secret_arn
   managed_db_security_group_id   = var.managed_db_security_group_id
 
-  backend_image_uri     = var.backend_image_uri
-  deploy_revision       = var.deploy_revision
-  container_port        = var.container_port
-  backend_cpu           = var.backend_cpu
-  backend_memory        = var.backend_memory
-  backend_desired_count = var.backend_desired_count
-  attachment_s3_bucket                         = var.attachment_s3_bucket
-  attachment_direct_upload_enabled             = var.attachment_direct_upload_enabled
-  attachment_max_browser_upload_bytes          = var.attachment_max_browser_upload_bytes
-  attachment_upload_intent_ttl_seconds          = var.attachment_upload_intent_ttl_seconds
-  attachment_single_put_url_ttl_seconds         = var.attachment_single_put_url_ttl_seconds
-  attachment_multipart_part_url_ttl_seconds     = var.attachment_multipart_part_url_ttl_seconds
-  attachment_s3_presign_endpoint                = var.attachment_s3_presign_endpoint
-  attachment_additional_browser_origins         = var.attachment_additional_browser_origins
-  attachment_multipart_abort_days               = var.attachment_multipart_abort_days
+  backend_image_uri                         = var.backend_image_uri
+  deploy_revision                           = var.deploy_revision
+  container_port                            = var.container_port
+  backend_cpu                               = var.backend_cpu
+  backend_memory                            = var.backend_memory
+  backend_desired_count                     = var.backend_desired_count
+  attachment_s3_bucket                      = var.attachment_s3_bucket
+  attachment_direct_upload_enabled          = var.attachment_direct_upload_enabled
+  attachment_max_browser_upload_bytes       = var.attachment_max_browser_upload_bytes
+  attachment_upload_intent_ttl_seconds      = var.attachment_upload_intent_ttl_seconds
+  attachment_single_put_url_ttl_seconds     = var.attachment_single_put_url_ttl_seconds
+  attachment_multipart_part_url_ttl_seconds = var.attachment_multipart_part_url_ttl_seconds
+  attachment_s3_presign_endpoint            = var.attachment_s3_presign_endpoint
+  attachment_additional_browser_origins     = var.attachment_additional_browser_origins
+  attachment_multipart_abort_days           = var.attachment_multipart_abort_days
 
   default_company_id     = local.effective_default_company_id
   email_from_address     = var.email_from_address

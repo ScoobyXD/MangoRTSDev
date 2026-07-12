@@ -222,30 +222,30 @@ type EffectiveResourceAccess struct {
 }
 
 type Attachment struct {
-	CompanyID        string               `json:"company_id"`
-	AttachmentID     string               `json:"attachment_id"`
-	UploadedByUserID string               `json:"uploaded_by_user_id,omitempty"`
-	OriginalFilename string               `json:"original_filename"`
-	MimeType         string               `json:"mime_type"`
-	ByteSize         int64                `json:"byte_size"`
-	SHA256           string               `json:"sha256"`
+	CompanyID        string `json:"company_id"`
+	AttachmentID     string `json:"attachment_id"`
+	UploadedByUserID string `json:"uploaded_by_user_id,omitempty"`
+	OriginalFilename string `json:"original_filename"`
+	MimeType         string `json:"mime_type"`
+	ByteSize         int64  `json:"byte_size"`
+	SHA256           string `json:"sha256"`
 	// ChecksumVerificationMethod records how SHA256 was verified without
 	// changing its meaning: SHA256 is always the lowercase hexadecimal digest
 	// of the raw file bytes.
-	SHA256VerificationMethod string         `json:"sha256_verification_method,omitempty"`
-	StorageChecksumAlgorithm string         `json:"storage_checksum_algorithm,omitempty"`
-	StorageChecksumValue     string         `json:"storage_checksum_value,omitempty"`
-	StorageChecksumType      string         `json:"storage_checksum_type,omitempty"`
-	StorageBucket    string               `json:"storage_bucket"`
-	StorageKey       string               `json:"storage_key"`
-	OriginalWidth    *int                 `json:"original_width,omitempty"`
-	OriginalHeight   *int                 `json:"original_height,omitempty"`
-	SourceKind       string               `json:"source_kind"`
-	SourceProvider   string               `json:"source_provider,omitempty"`
-	CreatedTimestamp time.Time            `json:"created_timestamp"`
-	DeletedTimestamp *time.Time           `json:"deleted_timestamp,omitempty"`
-	Variants         []AttachmentVariant  `json:"variants,omitempty"`
-	ResourceLinks    []ResourceAttachment `json:"resource_links,omitempty"`
+	SHA256VerificationMethod string               `json:"sha256_verification_method,omitempty"`
+	StorageChecksumAlgorithm string               `json:"storage_checksum_algorithm,omitempty"`
+	StorageChecksumValue     string               `json:"storage_checksum_value,omitempty"`
+	StorageChecksumType      string               `json:"storage_checksum_type,omitempty"`
+	StorageBucket            string               `json:"storage_bucket"`
+	StorageKey               string               `json:"storage_key"`
+	OriginalWidth            *int                 `json:"original_width,omitempty"`
+	OriginalHeight           *int                 `json:"original_height,omitempty"`
+	SourceKind               string               `json:"source_kind"`
+	SourceProvider           string               `json:"source_provider,omitempty"`
+	CreatedTimestamp         time.Time            `json:"created_timestamp"`
+	DeletedTimestamp         *time.Time           `json:"deleted_timestamp,omitempty"`
+	Variants                 []AttachmentVariant  `json:"variants,omitempty"`
+	ResourceLinks            []ResourceAttachment `json:"resource_links,omitempty"`
 }
 
 const (
@@ -265,61 +265,61 @@ const (
 // browser upload. Storage coordinates are deliberately omitted from JSON so
 // callers can never learn or choose object keys or multipart upload IDs.
 type AttachmentUploadIntent struct {
-	UploadIntentID   string    `json:"uploadIntentId"`
-	CompanyID        string    `json:"-"`
-	ActorUserID      string    `json:"-"`
-	ClientRequestID  string    `json:"-"`
-	AttachmentID     string    `json:"attachmentId"`
-	ResourceAttachmentID string `json:"-"`
-	OriginalFilename string    `json:"filename"`
-	MimeType         string    `json:"contentType"`
-	SizeBytes        int64     `json:"sizeBytes"`
-	SHA256           string    `json:"sha256"`
-	SHA256VerificationMethod string `json:"sha256VerificationMethod,omitempty"`
-	StorageChecksumAlgorithm string `json:"-"`
-	StorageChecksumValue string `json:"-"`
-	StorageChecksumType string `json:"-"`
-	ResourceType     string    `json:"-"`
-	ResourceID       string    `json:"-"`
-	InformationID    string    `json:"-"`
-	MessageID        string    `json:"-"`
-	EditorSurface    string    `json:"-"`
-	RelationshipKind string    `json:"-"`
-	SourceKind       string    `json:"-"`
-	SourceProvider   string    `json:"-"`
-	OriginalWidth    *int      `json:"-"`
-	OriginalHeight   *int      `json:"-"`
-	StorageBucket    string    `json:"-"`
-	StorageKey       string    `json:"-"`
-	MultipartUploadID string   `json:"-"`
-	Strategy         string    `json:"strategy"`
-	PartSizeBytes    int64     `json:"partSizeBytes,omitempty"`
-	PartCount        int       `json:"partCount,omitempty"`
-	Status           string    `json:"status"`
-	FailureCode      string    `json:"failureCode,omitempty"`
-	Version          int64     `json:"-"`
-	CreatedTimestamp time.Time `json:"createdAt"`
-	UpdatedTimestamp time.Time `json:"updatedAt"`
-	ExpiresTimestamp time.Time `json:"expiresAt"`
-	CompletedTimestamp *time.Time `json:"completedAt,omitempty"`
+	UploadIntentID           string     `json:"uploadIntentId"`
+	CompanyID                string     `json:"-"`
+	ActorUserID              string     `json:"-"`
+	ClientRequestID          string     `json:"-"`
+	AttachmentID             string     `json:"attachmentId"`
+	ResourceAttachmentID     string     `json:"-"`
+	OriginalFilename         string     `json:"filename"`
+	MimeType                 string     `json:"contentType"`
+	SizeBytes                int64      `json:"sizeBytes"`
+	SHA256                   string     `json:"sha256"`
+	SHA256VerificationMethod string     `json:"sha256VerificationMethod,omitempty"`
+	StorageChecksumAlgorithm string     `json:"-"`
+	StorageChecksumValue     string     `json:"-"`
+	StorageChecksumType      string     `json:"-"`
+	ResourceType             string     `json:"-"`
+	ResourceID               string     `json:"-"`
+	InformationID            string     `json:"-"`
+	MessageID                string     `json:"-"`
+	EditorSurface            string     `json:"-"`
+	RelationshipKind         string     `json:"-"`
+	SourceKind               string     `json:"-"`
+	SourceProvider           string     `json:"-"`
+	OriginalWidth            *int       `json:"-"`
+	OriginalHeight           *int       `json:"-"`
+	StorageBucket            string     `json:"-"`
+	StorageKey               string     `json:"-"`
+	MultipartUploadID        string     `json:"-"`
+	Strategy                 string     `json:"strategy"`
+	PartSizeBytes            int64      `json:"partSizeBytes,omitempty"`
+	PartCount                int        `json:"partCount,omitempty"`
+	Status                   string     `json:"status"`
+	FailureCode              string     `json:"failureCode,omitempty"`
+	Version                  int64      `json:"-"`
+	CreatedTimestamp         time.Time  `json:"createdAt"`
+	UpdatedTimestamp         time.Time  `json:"updatedAt"`
+	ExpiresTimestamp         time.Time  `json:"expiresAt"`
+	CompletedTimestamp       *time.Time `json:"completedAt,omitempty"`
 }
 
 // AttachmentUploadPart persists both the checksum the browser committed to
 // before signing and the S3-observed result used during reconciliation.
 type AttachmentUploadPart struct {
-	UploadIntentID   string     `json:"-"`
-	PartNumber       int        `json:"partNumber"`
-	ExpectedSizeBytes int64     `json:"expectedSizeBytes,omitempty"`
-	ObservedSizeBytes int64     `json:"sizeBytes,omitempty"`
-	ChecksumAlgorithm string    `json:"checksumAlgorithm,omitempty"`
-	ExpectedChecksum string     `json:"checksum,omitempty"`
-	ETag              string    `json:"eTag,omitempty"`
-	S3Checksum        string    `json:"s3Checksum,omitempty"`
-	CreatedTimestamp time.Time  `json:"-"`
-	UpdatedTimestamp time.Time  `json:"-"`
-	SigningAttemptCount int      `json:"-"`
+	UploadIntentID      string     `json:"-"`
+	PartNumber          int        `json:"partNumber"`
+	ExpectedSizeBytes   int64      `json:"expectedSizeBytes,omitempty"`
+	ObservedSizeBytes   int64      `json:"sizeBytes,omitempty"`
+	ChecksumAlgorithm   string     `json:"checksumAlgorithm,omitempty"`
+	ExpectedChecksum    string     `json:"checksum,omitempty"`
+	ETag                string     `json:"eTag,omitempty"`
+	S3Checksum          string     `json:"s3Checksum,omitempty"`
+	CreatedTimestamp    time.Time  `json:"-"`
+	UpdatedTimestamp    time.Time  `json:"-"`
+	SigningAttemptCount int        `json:"-"`
 	LastSignedTimestamp *time.Time `json:"-"`
-	UploadedTimestamp *time.Time `json:"uploadedAt,omitempty"`
+	UploadedTimestamp   *time.Time `json:"uploadedAt,omitempty"`
 }
 
 type AttachmentVariant struct {

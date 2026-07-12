@@ -178,25 +178,25 @@ type AttachmentRepository interface {
 }
 
 type AttachmentCreateInput struct {
-	CompanyID        string
-	AttachmentID     string
-	UploadedByUserID string
-	OriginalFilename string
-	MimeType         string
-	ByteSize         int64
-	SHA256           string
+	CompanyID                string
+	AttachmentID             string
+	UploadedByUserID         string
+	OriginalFilename         string
+	MimeType                 string
+	ByteSize                 int64
+	SHA256                   string
 	SHA256VerificationMethod string
 	StorageChecksumAlgorithm string
-	StorageChecksumValue string
-	StorageChecksumType string
-	StorageBucket    string
-	StorageKey       string
-	OriginalWidth    *int
-	OriginalHeight   *int
-	SourceKind       string
-	SourceProvider   string
-	ResourceLink     ResourceAttachmentInput
-	CreatedTimestamp time.Time
+	StorageChecksumValue     string
+	StorageChecksumType      string
+	StorageBucket            string
+	StorageKey               string
+	OriginalWidth            *int
+	OriginalHeight           *int
+	SourceKind               string
+	SourceProvider           string
+	ResourceLink             ResourceAttachmentInput
+	CreatedTimestamp         time.Time
 }
 
 type AttachmentUploadIntentCreateInput struct {
@@ -253,14 +253,14 @@ type AttachmentUploadTransitionInput struct {
 }
 
 type AttachmentUploadFinalizeInput struct {
-	CompanyID                 string
-	ActorUserID               string
-	UploadIntentID            string
-	SHA256VerificationMethod  string
-	StorageChecksumAlgorithm  string
-	StorageChecksumValue      string
-	StorageChecksumType       string
-	Now                       time.Time
+	CompanyID                string
+	ActorUserID              string
+	UploadIntentID           string
+	SHA256VerificationMethod string
+	StorageChecksumAlgorithm string
+	StorageChecksumValue     string
+	StorageChecksumType      string
+	Now                      time.Time
 }
 
 type AttachmentVariantInput struct {

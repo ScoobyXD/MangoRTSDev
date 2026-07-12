@@ -14,6 +14,7 @@ import { sha256HexToBase64 } from "../../../../frontend/src/modules/attachments/
 
 const RAW_SHA256 = "a".repeat(64);
 const RAW_SHA256_BASE64 = sha256HexToBase64(RAW_SHA256);
+const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 test("single upload sends JSON metadata to Mango and raw File bytes with exact signed S3 headers", async () => {
   const file = testFile(7, "report.txt", "text/plain");
@@ -81,6 +82,52 @@ test("single upload sends JSON metadata to Mango and raw File bytes with exact s
   assert.equal("x-mango-company-id" in (xhrCaptures[0]?.headers ?? {}), false);
   assert.deepEqual(progressStates, ["preparing", "preparing", "uploading", "uploading", "uploading", "completing", "complete"]);
   assert.equal(storage.values().length, 0);
+});
+
+test("zero-byte files use single PUT and complete with empty-payload metadata", async () => {
+  const file = testFile(0, "empty.txt", "text/plain");
+  const xhrCaptures: XHRCapture[] = [];
+  let intentJSON: Record<string, unknown> | undefined;
+  const progress: Array<{ state: string; fraction: number }> = [];
+  const request: AttachmentRequestJSON = async <T>(path: string, init?: Parameters<AttachmentRequestJSON>[1]): Promise<T> => {
+    if (path === "/v1/attachments/upload-intents") {
+      intentJSON = init?.json as Record<string, unknown>;
+      return {
+        uploadIntentId: "intent-1",
+        attachmentId: "attachment-1",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        upload: {
+          strategy: "single",
+          method: "PUT",
+          url: "https://s3.example.test/empty",
+          requiredHeaders: {
+            "content-type": "text/plain",
+            "x-amz-checksum-sha256": sha256HexToBase64(EMPTY_SHA256),
+          },
+        },
+      } as unknown as T;
+    }
+    if (path.endsWith("/complete")) return uploadResponse(file) as unknown as T;
+    throw new Error(`unexpected_request:${path}`);
+  };
+
+  await uploadBrowserAttachment(request, {
+    ...baseInput(file),
+    onProgress: ({ state, fraction }) => progress.push({ state, fraction }),
+  }, {
+    policy: standardPolicy(),
+    hashFile: async () => EMPTY_SHA256,
+    xhrFactory: fakeXHRFactory([{ status: 200 }], xhrCaptures),
+    storage: null,
+    sleep: async () => {},
+    randomUUID: () => "client-empty",
+  });
+
+  assert.equal(intentJSON?.sizeBytes, 0);
+  assert.equal(intentJSON?.sha256, EMPTY_SHA256);
+  assert.equal(xhrCaptures[0]?.body, file);
+  assert.equal((xhrCaptures[0]?.body as Blob).size, 0);
+  assert.deepEqual(progress[progress.length - 1], { state: "complete", fraction: 1 });
 });
 
 test("expired single PUT URL is refreshed through the idempotent intent before retry", async () => {

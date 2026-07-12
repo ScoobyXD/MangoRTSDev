@@ -59,6 +59,7 @@ import {
 } from "./nodeTextBlockAttachments";
 import {
   projectionIDsForTextBlockDeletion,
+  shouldCreateInitialTextBlock,
 } from "./nodeTextBlockDeletion";
 import { resolveEditorTextBlockChatAnchorMessageID } from "./editorTextBlockChatHighlights";
 import { createEditorImageFrame } from "./editorImages";
@@ -327,6 +328,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   unseenChanges,
   companyUsers,
   projectionsLoaded,
+  editorSequence,
   hidden = false,
   focusInformationID,
   focusRequestID,
@@ -1147,10 +1149,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   }, [canEdit, textBlockProjectionSaveController]);
 
   useEffect(() => {
-    if (!canEdit || !projectionsLoaded || !nodeID || loadedTextBlockProjections.length > 0 || blocks.length > 0 || autoCreatedTextBlockNodeIDsRef.current.has(nodeID)) return;
+    if (!shouldCreateInitialTextBlock({
+      canEdit,
+      projectionsLoaded,
+      nodeID,
+      editorSequence,
+      loadedTextBlockCount: loadedTextBlockProjections.length,
+      renderedTextBlockCount: blocks.length,
+    })) return;
+    if (autoCreatedTextBlockNodeIDsRef.current.has(nodeID)) return;
     autoCreatedTextBlockNodeIDsRef.current.add(nodeID);
     createTextBlock();
-  }, [blocks.length, canEdit, createTextBlock, loadedTextBlockProjections.length, nodeID, projectionsLoaded]);
+  }, [blocks.length, canEdit, createTextBlock, editorSequence, loadedTextBlockProjections.length, nodeID, projectionsLoaded]);
 
   const updateTextBlockContent = useCallback((blockID: string, patch: Partial<EditorTextBlockContent>) => {
     if (!canEdit) return;

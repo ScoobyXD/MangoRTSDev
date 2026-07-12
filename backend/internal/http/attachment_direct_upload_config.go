@@ -9,20 +9,20 @@ import (
 
 const (
 	defaultAttachmentMaxBrowserUploadBytes = int64(250 * 1024 * 1024)
-	attachmentSinglePutMaxBytes             = int64(64 * 1024 * 1024)
-	attachmentMultipartPartBytes            = int64(16 * 1024 * 1024)
-	attachmentMaxConcurrentParts            = 3
-	attachmentMaxPartSignBatch              = 8
-	attachmentMaxMultipartParts             = 10000
+	attachmentSinglePutMaxBytes            = int64(64 * 1024 * 1024)
+	attachmentMultipartPartBytes           = int64(16 * 1024 * 1024)
+	attachmentMaxConcurrentParts           = 3
+	attachmentMaxPartSignBatch             = 8
+	attachmentMaxMultipartParts            = 10000
 )
 
 type attachmentDirectUploadConfig struct {
-	Enabled          bool
-	MaxFileBytes     int64
-	IntentLifetime   time.Duration
+	Enabled           bool
+	MaxFileBytes      int64
+	IntentLifetime    time.Duration
 	SingleURLLifetime time.Duration
-	PartURLLifetime  time.Duration
-	CleanupInterval  time.Duration
+	PartURLLifetime   time.Duration
+	CleanupInterval   time.Duration
 }
 
 func attachmentDirectUploadConfigFromEnv() attachmentDirectUploadConfig {

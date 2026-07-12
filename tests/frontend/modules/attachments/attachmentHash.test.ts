@@ -34,6 +34,16 @@ test("raw file SHA-256 is calculated from bounded slices without whole-file arra
   assert.equal(progress[progress.length - 1], bytes.length);
 });
 
+test("an empty attachment hashes to the raw empty-payload SHA-256", async () => {
+  const progress: Array<[number, number]> = [];
+  const digest = await hashAttachmentBlobIncrementally(new Blob([]), {
+    onProgress: (processed, total) => progress.push([processed, total]),
+  });
+
+  assert.equal(digest, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+  assert.deepEqual(progress, [[0, 0]]);
+});
+
 test("multipart checksum is the base64 form of the raw part SHA-256", async () => {
   assert.equal(
     await hashAttachmentPartSHA256Base64(new Blob(["abc"])),

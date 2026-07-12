@@ -2994,6 +2994,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             unseenChanges={nodeContentChangesLoadedNodeID === linkedNodeID ? nodeContentChanges : []}
             companyUsers={companyUsers}
             projectionsLoaded={nodeWorkspaceLoadedNodeID === linkedNodeID}
+            editorSequence={editorProjectionSequenceByScopeRef.current.get(editorRealtimeScope("node", linkedNodeID)) ?? 0}
             hidden={activeTab === "save-settings"}
             focusInformationID={focusInformationID}
             focusRequestID={focusRequestID}

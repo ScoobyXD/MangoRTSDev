@@ -8,8 +8,8 @@ locals {
   api_domain       = "${local.api_subdomain}.${local.root_domain}"
   origin_host      = "${local.origin_subdomain}.${local.root_domain}"
 
-  backend_service_enabled        = trimspace(var.backend_image_uri) != ""
-  attachment_storage_enabled     = trimspace(var.attachment_s3_bucket) != ""
+  backend_service_enabled    = trimspace(var.backend_image_uri) != ""
+  attachment_storage_enabled = trimspace(var.attachment_s3_bucket) != ""
   attachment_browser_origins = sort(distinct(concat(
     ["https://${local.app_domain}"],
     [for origin in var.attachment_additional_browser_origins : trimsuffix(trimspace(origin), "/")]

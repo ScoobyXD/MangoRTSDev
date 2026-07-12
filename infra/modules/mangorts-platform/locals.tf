@@ -6,8 +6,8 @@ locals {
   origin_host = "${var.origin_subdomain}.${local.root_domain}"
   stack_name  = trimspace(var.stack_name) != "" ? var.stack_name : "aws-${var.environment}"
 
-  backend_service_enabled        = trimspace(var.backend_image_uri) != ""
-  attachment_storage_enabled     = trimspace(var.attachment_s3_bucket) != ""
+  backend_service_enabled    = trimspace(var.backend_image_uri) != ""
+  attachment_storage_enabled = trimspace(var.attachment_s3_bucket) != ""
   attachment_browser_origins = sort(distinct(concat(
     ["https://${local.app_domain}"],
     var.environment == "dev" ? ["http://localhost:5173"] : [],

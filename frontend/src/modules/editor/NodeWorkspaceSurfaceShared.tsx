@@ -34,6 +34,7 @@ export type NodeWorkspaceSurfaceProps = {
   unseenChanges: NodeContentChange[];
   companyUsers: MentionableCompanyUser[];
   projectionsLoaded: boolean;
+  editorSequence: number;
   hidden?: boolean;
   focusInformationID?: string;
   focusRequestID?: number;
