@@ -14,13 +14,13 @@ import (
 
 type fakeCalendarNylasClient struct {
 	*fakeNylasClient
-	events            []NylasEvent
-	listGrantID       string
-	listICalUID       string
-	rsvpGrantID       string
-	rsvpEventID       string
-	rsvpCalendarID    string
-	rsvpStatus        string
+	events         []NylasEvent
+	listGrantID    string
+	listICalUID    string
+	rsvpGrantID    string
+	rsvpEventID    string
+	rsvpCalendarID string
+	rsvpStatus     string
 }
 
 func (f *fakeCalendarNylasClient) ListEventsByICalUID(_ context.Context, grantID, iCalUID string) ([]NylasEvent, error) {
@@ -96,12 +96,12 @@ func TestRawMIMECalendarAttachmentMergesAlongsideProviderAttachment(t *testing.T
 		t.Fatalf("merged calendar attachments = %+v changed=%t", merged, changed)
 	}
 	message := NylasMessage{ID: "message-1", Attachments: existing}
-	if !messageNeedsRawMIMEAttachmentRecovery(message) {
-		t.Fatal("provider attachment without a calendar part should trigger one raw MIME recovery pass")
-	}
-	message.RawMIMEAttachmentsRecovered = true
 	if messageNeedsRawMIMEAttachmentRecovery(message) {
-		t.Fatal("completed raw MIME recovery should be cached")
+		t.Fatal("ordinary provider attachment should not trigger synchronous raw MIME recovery")
+	}
+	message.Body = "<img src=\"cid:missing-inline\">"
+	if !messageNeedsRawMIMEAttachmentRecovery(message) {
+		t.Fatal("unresolved inline content should still trigger raw MIME recovery")
 	}
 }
 

@@ -570,6 +570,7 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 		now := time.Now().UTC()
 		cacheScope := communicationsConnectionCacheScope(connection)
 		s.commCache.patchMessagePages(connection.UserID, cacheScope, message, now)
+		s.commCache.patchMessageMetadata(connection.UserID, cacheScope, messageID, update, message)
 		s.invalidateCommunicationsMessageMutations(connection.UserID, cacheScope, []string{messageID}, req.Folders != nil)
 		writeJSON(w, http.StatusOK, map[string]any{"message": message})
 	case http.MethodDelete:
@@ -863,9 +864,10 @@ func (s *Server) invalidateCommunicationsMessageMutations(userID, accountScope s
 	if s.commCache == nil {
 		return
 	}
-	if foldersChanged {
-		s.commCache.invalidateFolders(userID, accountScope)
+	if !foldersChanged {
+		return
 	}
+	s.commCache.invalidateFolders(userID, accountScope)
 	for _, messageID := range messageIDs {
 		s.commCache.invalidateMessage(userID, accountScope, messageID)
 	}
@@ -1498,66 +1500,100 @@ func (s *Server) communicationsMessagePage(ctx context.Context, connection domai
 			return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, page), nil
 		}
 	}
-
-	var page NylasMessagePage
-	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+	flightKey := communicationsMessagePageCacheKey(connection.UserID, cacheScope, cacheQuery) + communicationsCacheKeySeparator + strconv.FormatBool(query.Refresh)
+	resultChannel := s.communicationsMessagePageFlights.DoChan(flightKey, func() (any, error) {
+		flightNow := time.Now().UTC()
 		if !query.Refresh {
-			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL, time.Now().UTC()); ok {
-				page = cached
-				return nil
+			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL, flightNow); ok {
+				return cached, nil
 			}
 		}
-		var err error
-		page, err = s.nylasClient.ListMessages(ctx, connection.GrantID, query)
-		return err
+		var page NylasMessagePage
+		err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+			var err error
+			page, err = s.nylasClient.ListMessages(ctx, connection.GrantID, query)
+			return err
+		})
+		if err != nil {
+			if shouldServeStaleCommunicationsCache(err) {
+				if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL+communicationsMaxStaleTTL, flightNow); ok {
+					return cached, nil
+				}
+			}
+			return NylasMessagePage{}, err
+		}
+		s.commCache.setMessagePage(connection.UserID, cacheScope, cacheQuery, page, time.Now().UTC())
+		return page, nil
 	})
-	if err != nil {
-		if shouldServeStaleCommunicationsCache(err) {
-			if cached, ok := s.commCache.getMessagePage(connection.UserID, cacheScope, cacheQuery, communicationsMessagesCacheTTL+communicationsMaxStaleTTL, now); ok {
-				return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, cached), nil
-			}
+	select {
+	case <-ctx.Done():
+		return NylasMessagePage{}, ctx.Err()
+	case result := <-resultChannel:
+		if result.Err != nil {
+			return NylasMessagePage{}, result.Err
 		}
-		return NylasMessagePage{}, err
+		page, ok := result.Val.(NylasMessagePage)
+		if !ok {
+			return NylasMessagePage{}, errors.New("invalid communications message page flight result")
+		}
+		return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, page), nil
 	}
-	s.commCache.setMessagePage(connection.UserID, cacheScope, cacheQuery, page, now)
-	return s.enrichCommunicationsMessagePageForConnection(connection, query.CompanyID, page), nil
 }
+
 func (s *Server) communicationsMessage(ctx context.Context, connection domain.UserEmailConnection, messageID string) (NylasMessage, error) {
 	now := time.Now().UTC()
 	cacheScope := communicationsConnectionCacheScope(connection)
 	if message, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, now); ok {
-		if messageNeedsRawMIMEAttachmentRecovery(message) {
-			_ = s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
-				message = s.recoverCommunicationsMessageRawMIMEAttachments(ctx, connection, cacheScope, message, now)
-				return nil
-			})
+		if !messageNeedsRawMIMEAttachmentRecovery(message) {
+			return s.enrichCommunicationsMessageReadStatus(connection, message), nil
+		}
+	}
+	flightKey := communicationsMessageCacheKey(connection.UserID, cacheScope, messageID)
+	resultChannel := s.communicationsMessageFlights.DoChan(flightKey, func() (any, error) {
+		flightNow := time.Now().UTC()
+		if cached, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, flightNow); ok {
+			if messageNeedsRawMIMEAttachmentRecovery(cached) {
+				_ = s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+					cached = s.recoverCommunicationsMessageRawMIMEAttachments(ctx, connection, cacheScope, cached, time.Now().UTC())
+					return nil
+				})
+			}
+			return cached, nil
+		}
+		var message NylasMessage
+		err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
+			var err error
+			message, err = s.nylasClient.GetMessage(ctx, connection.GrantID, messageID)
+			if err != nil {
+				return err
+			}
+			message = s.attachRawMIMEAttachmentsIfMissing(ctx, connection, message)
+			return nil
+		})
+		if err != nil {
+			if shouldServeStaleCommunicationsCache(err) {
+				if cached, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL+communicationsMaxStaleTTL, flightNow); ok {
+					return cached, nil
+				}
+			}
+			return NylasMessage{}, err
+		}
+		s.commCache.setMessage(connection.UserID, cacheScope, message, time.Now().UTC())
+		return message, nil
+	})
+	select {
+	case <-ctx.Done():
+		return NylasMessage{}, ctx.Err()
+	case result := <-resultChannel:
+		if result.Err != nil {
+			return NylasMessage{}, result.Err
+		}
+		message, ok := result.Val.(NylasMessage)
+		if !ok {
+			return NylasMessage{}, errors.New("invalid communications message flight result")
 		}
 		return s.enrichCommunicationsMessageReadStatus(connection, message), nil
 	}
-	var message NylasMessage
-	err := s.withCommunicationsNylasGate(ctx, connection, func(ctx context.Context) error {
-		if cached, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL, time.Now().UTC()); ok {
-			message = s.recoverCommunicationsMessageRawMIMEAttachments(ctx, connection, cacheScope, cached, time.Now().UTC())
-			return nil
-		}
-		var err error
-		message, err = s.nylasClient.GetMessage(ctx, connection.GrantID, messageID)
-		if err != nil {
-			return err
-		}
-		message = s.attachRawMIMEAttachmentsIfMissing(ctx, connection, message)
-		return err
-	})
-	if err != nil {
-		if shouldServeStaleCommunicationsCache(err) {
-			if cached, ok := s.commCache.getMessage(connection.UserID, cacheScope, messageID, communicationsMessageCacheTTL+communicationsMaxStaleTTL, now); ok {
-				return s.enrichCommunicationsMessageReadStatus(connection, cached), nil
-			}
-		}
-		return NylasMessage{}, err
-	}
-	s.commCache.setMessage(connection.UserID, cacheScope, message, now)
-	return s.enrichCommunicationsMessageReadStatus(connection, message), nil
 }
 
 func (s *Server) recoverCommunicationsMessageRawMIMEAttachments(ctx context.Context, connection domain.UserEmailConnection, cacheScope string, message NylasMessage, now time.Time) NylasMessage {

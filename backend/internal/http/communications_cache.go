@@ -208,7 +208,7 @@ func (c *communicationsCache) invalidateFolders(userID string, accountScope ...s
 	c.deleteFoldersForUserLocked(userID)
 }
 
-func (c *communicationsCache) invalidateMessagePages(userID string) {
+func (c *communicationsCache) invalidateMessagePages(userID string, accountScope ...string) {
 	if c == nil {
 		return
 	}
@@ -218,6 +218,10 @@ func (c *communicationsCache) invalidateMessagePages(userID string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if len(accountScope) > 0 && strings.TrimSpace(accountScope[0]) != "" {
+		c.deleteMessagePagesForUserAccountLocked(userID, accountScope[0])
+		return
+	}
 	c.deleteMessagePagesForUserLocked(userID)
 }
 
@@ -241,6 +245,35 @@ func (c *communicationsCache) invalidateMessage(userID, accountScope, messageID 
 			delete(c.messages, key)
 		}
 	}
+}
+
+func (c *communicationsCache) patchMessageMetadata(userID, accountScope, messageID string, update NylasMessageUpdate, providerMessage NylasMessage) {
+	if c == nil {
+		return
+	}
+	key := communicationsMessageCacheKey(userID, accountScope, messageID)
+	if key == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.messages[key]
+	if !ok {
+		return
+	}
+	message := cloneNylasMessage(entry.message)
+	if update.Unread != nil {
+		message.Unread = *update.Unread
+	}
+	if update.Starred != nil {
+		message.Starred = *update.Starred
+	}
+	if update.Folders != nil {
+		message.Folders = cloneStringSlice(providerMessage.Folders)
+		message.FolderIDs = cloneStringSlice(providerMessage.FolderIDs)
+	}
+	entry.message = message
+	c.messages[key] = entry
 }
 
 func (c *communicationsCache) patchMessagePages(userID, accountScope string, message NylasMessage, now time.Time) {
@@ -341,6 +374,15 @@ func (c *communicationsCache) removeMessagesFromPages(userID, accountScope strin
 
 func (c *communicationsCache) deleteMessagePagesForUserLocked(userID string) {
 	prefix := userID + communicationsCacheKeySeparator
+	for key := range c.messagePages {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.messagePages, key)
+		}
+	}
+}
+
+func (c *communicationsCache) deleteMessagePagesForUserAccountLocked(userID, accountScope string) {
+	prefix := strings.TrimSpace(userID) + communicationsCacheKeySeparator + communicationsNormalizeCacheAccountScope(accountScope) + communicationsCacheKeySeparator
 	for key := range c.messagePages {
 		if strings.HasPrefix(key, prefix) {
 			delete(c.messagePages, key)

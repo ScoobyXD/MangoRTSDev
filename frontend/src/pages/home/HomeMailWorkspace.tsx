@@ -232,6 +232,7 @@ export function HomeMailWorkspace({
   onComposeChange,
   onDeleteSelected,
   onDisconnect,
+  onLoadMessageBody,
   onLoadMoreMessages,
   onPrefetchMessages,
   onOpenAllMailbox,
@@ -304,6 +305,7 @@ export function HomeMailWorkspace({
   onComposeChange: React.Dispatch<React.SetStateAction<ComposeState>>;
   onDeleteSelected: () => void;
   onDisconnect: (position?: ConfirmActionMenuPosition) => void;
+  onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
   onLoadMoreMessages: () => void;
   onPrefetchMessages: () => void;
   onOpenAllMailbox: () => void;
@@ -724,6 +726,7 @@ export function HomeMailWorkspace({
             archiveAvailable={archiveAvailable}
             archiveLabel={archiveLabel}
             busy={!!busy}
+            onLoadMessageBody={onLoadMessageBody}
             onReply={onOpenReply}
             onReplyAll={onOpenReplyAll}
             onForward={onOpenForward}

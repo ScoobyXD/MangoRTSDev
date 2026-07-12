@@ -63,6 +63,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorMentions.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/plainTextEditing.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/unifiedRichEditorContract.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/emailViewerContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/richTextEditing.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorScroll.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorIndentGuides.test.js"),

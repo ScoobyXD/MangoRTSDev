@@ -62,6 +62,9 @@ ATT29 - Upload intents and multipart part state are durable and idempotent. Crea
 ATT30 - Only completed intents create/list permanent attachments. Node-level progress preserves filename/extension/size, byte progress, cancel/retry, and the states preparing, uploading, retrying, completing, complete, canceled, and failed. Each selected file is independent and one failure cannot discard completed siblings.
 ATT31 - Server-side streaming PutObject, including non-seekable producer streams, remains available for incoming email, provider imports, migrations, and backend jobs. Removing the old browser multipart-byte path must not remove or weaken backend-originated streaming or authenticated GetObject reads.
 ATT32 - Pasting an existing attachment-backed editor image into another unified rich editor target must create the destination resource's authorized `inline_image` link before inserting the image reference. An asynchronous upload or existing-attachment link may commit only while its originating editor root, document target, attachment resource context, and saved range are still current; switching targets or unmounting must not insert it into the next document.
+ATT33 - Incoming email body text and HTML never wait for inline attachment bytes. CID images resolve independently through authenticated Mango/provider reads, and a slow, failed, or aborted image leaves the body readable.
+ATT34 - Collapsed historical email cards issue no attachment-content reads. Expanded-card reads are abortable when scope, thread, message, or attachment changes and release transient object URLs during cleanup.
+ATT35 - Initial body detail carries provider attachment metadata and only the inline content required by concrete CID recovery; ordinary body-only or ordinary file-attachment detail does not fetch or embed raw MIME bytes. Calendar RSVP may still authenticate and parse raw MIME at the action boundary.
 
 ## Scenarios
 
@@ -269,13 +272,18 @@ Business logic covered:
 - ATT24
 - ATT25
 - ATT32
+- ATT33
+- ATT34
+- ATT35
 
 Given:
 - A personal, shared, or node-attached email body contains an inline screenshot referenced by `cid:` or provider attachment metadata.
 - A user selects or copies an inline image in any unified rich editor surface, including a personal/shared email signature.
 
 Expected:
-- Mango resolves the incoming image through the authorized attachment boundary and renders it inside the email body.
+- Mango renders the sanitized incoming body before CID attachment bytes finish loading, then resolves each inline image independently through the authorized attachment boundary.
+- Collapsed historical cards make no body-detail or attachment-content reads. Expanding a card activates its lazy body read and abortable CID downloads; replacing or collapsing the card aborts work that no longer has a visible consumer.
+- Ordinary message detail does not fetch raw MIME merely because attachment metadata is empty or no calendar part is present; MIME recovery remains limited to a concrete missing inline-CID body reference, while calendar RSVP may still use authenticated raw MIME parsing.
 - A single click on the incoming image exposes an explicit authenticated download action, and a double-click opens fullscreen preview.
 - Selecting the editable image preserves its resize selection and places a document caret immediately before its frame.
 - Typing text or spaces at that caret moves the editable image forward, and resize behavior is consistent in node, Logic Gate, project, My Triage, Shared Triage, attached-email reply, and email-signature editors.

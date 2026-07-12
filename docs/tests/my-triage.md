@@ -31,7 +31,7 @@ MT18 - Successful conversion returns the canonical result needed for concrete sa
 MT19 - Reverting a converted email restores the triage item from the email-node placement and removes the workspace record that was created from that conversion.
 MT20 - My Triage and Shared Triage mail are non-live. Canonical list loads and explicit refresh reconcile provider/other-user changes; local commands patch committed results without replacing the whole visible list.
 MT21 - My Triage and Shared Triage primary inboxes must show a fixed, predictable message batch size of 12 messages per page.
-MT22 - My Triage and Shared Triage primary inboxes must immediately prefetch the next message page after the first visible page loads, without waiting for scrolling or the archive/advance action.
+MT22 - My Triage and Shared Triage primary inboxes automatically prefetch the next message page after the selected-detail foreground path settles, without waiting for scrolling or the archive/advance action.
 MT23 - Scrolling a My Triage or Shared Triage primary inbox must not archive messages and must not load the next primary-inbox page.
 MT24 - Advancing a My Triage or Shared Triage primary inbox page is an explicit user action that archives only the messages visible on the current page.
 MT25 - Advancing must display the prefetched next page before archiving the previous page whenever a prefetched page is available.
@@ -129,13 +129,18 @@ Personal read receipts depend on both outbound send tracking and webhook deliver
 
 ## Email Threading Contract
 
-My Triage uses Nylas `thread_id` and thread `message_ids` to group related messages into one inbox row and to load the selected conversation history. Message bodies still come from single-message detail reads because list/thread responses can omit full HTML bodies. Detail cards are ordered newest first; the newest card expands while older cards collapse, and expanded cards auto-size inside the thread's single scroll surface.
+My Triage uses Nylas `thread_id` to group related messages into one inbox row. After the selected detail hydrates, bounded thread-filtered message pages provide conversation header metadata; list responses are not treated as complete bodies, and older cards fetch single-message detail only when expanded. Detail cards are ordered newest first, the newest card expands while older cards collapse, and expanded cards auto-size inside the thread's single scroll surface.
 
 MT107 - My Triage automatically inserts the default signature for the exact active personal account exactly once into each new compose, reply, and reply-all editor. A late database load may backfill only the matching still-open new draft while preserving typed text; reopening a saved draft must not add or replace a signature.
 MT108 - My Triage thread inspection exposes expand-all, To/Cc/Bcc, authenticated image download/fullscreen, immediate reply focus, and bounded vertical resizing. Pointer-up, pointer-cancel, lost capture, or window blur ends resizing, and calendar RSVP controls prevent duplicate submission and show a selected response only after provider success.
 MT109 - Personal remote-draft reconciliation keeps the newest reply draft for each mailbox/source-message scope, deletes superseded remote duplicates, and restores saved Reply All To/Cc/Bcc addressing without reintroducing the active mailbox or duplicate recipients.
 MT110 - Personal Save Draft and Send flush the mounted unified editor first and persist or submit the exact sanitized HTML returned by that flush, including the user's final DOM edit.
 MT111 - The personal-account signature editor is a mailbox-scoped unified rich editor using the shared toolbar, including working font-size minus/value/plus and highlight controls. Save Signature persists the exact flushed HTML; stale loads cannot overwrite newer edits, empty remote rows remain authoritative, and failed saves retain ordered mailbox-scoped pending sync without overtaking newer saves.
+MT112 - Personal primary-inbox prefetch builds a bounded logical page of at most 12 unique thread rows, stops on a repeated page token or the configured provider-page budget, and never performs an unbounded serialized fill.
+MT113 - Advance directly consumes the exact personal mailbox/filter/page-token prefetch, awaiting a matching in-flight prefetch instead of duplicating it. The click must not make a list request before swapping an available prefetched page.
+MT114 - Initial next-page prefetch and provider mark-read yield foreground priority to the selected detail request while preserving immediate optimistic unread UI.
+MT115 - Clicking a different personal thread replaces prior thread state immediately; stale results cannot reinsert old cards.
+MT116 - Personal thread history uses bounded preview pages and lazy per-card body/attachment hydration. Collapsed cards perform no attachment-content reads, while Expand all intentionally hydrates all cards.
 
 ## Scenarios
 
@@ -314,6 +319,9 @@ Business logic covered:
 - MT86
 - MT93
 - MT110
+- MT112
+- MT113
+- MT114
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
@@ -326,7 +334,7 @@ Given:
 
 Expected:
 - The visible page contains no more than 12 messages.
-- The next page is prefetched after the visible page loads.
+- After the selected detail request gets foreground priority, the next page is prefetched as a bounded logical page of at most 12 unique thread rows; filling stops on a repeated provider token or the configured request budget.
 - Created, updated, and deleted provider state appears on the next canonical list load without requiring a communications WebSocket.
 - Clicking an email row, focusing the email body, and clicking back into the list do not reload, blank, or replace the message list.
 - Browser focus and visibility changes do not force a message-list refresh.
@@ -354,7 +362,7 @@ Expected:
 - Node editor, logic-gate editor, and inline comment/chat links render as clickable underlined links and open on single left click.
 - The All mailbox dropdown can switch between All and Spam folder, with the selected option highlighted and marked.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
-- Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.
+- Clicking the advance action freezes the currently visible message IDs, directly consumes (or awaits) the matching prefetched logical page without duplicating its provider reads, and enqueues only the frozen previous-page IDs for background archive.
 - The frozen previous-page IDs are accepted by one page-level backend archive request only after durable archive job rows are written, and provider archive mutations continue from the backend worker.
 - The advance action becomes usable again immediately after the next page is shown and the previous page is queued.
 - The hidden archive queue accepts at most 140 pending emails; if adding the current page would exceed that limit, the advance action is disabled until enough background archive work completes.
@@ -424,6 +432,8 @@ Business logic covered:
 - MT100
 - MT101
 - MT102
+- MT115
+- MT116
 
 Given:
 - A personal mailbox has multiple provider messages with the same Nylas `thread_id`.
@@ -438,7 +448,8 @@ Expected:
 - The newest card is expanded and older cards are collapsed; a newly received or locally sent reply moves to the top, expands immediately, and collapses the previously expanded cards.
 - Each card's Reply, Reply All, and Forward actions target that card's message ID and original context.
 - The thread detail pane owns the only vertical scrollbar; every expanded body auto-sizes to its full rendered height without an iframe/card scrollbar.
-- Thread history bodies are loaded through individual message-detail reads scoped to the personal mailbox, using Nylas thread `message_ids` only as the grouping/index source.
+- The selected message detail is the foreground read. Thread history starts from bounded, thread-filtered list previews; each older body is fetched through an individual personal-mailbox detail read only when that card is expanded or Expand all is chosen.
+- Selecting a row from another thread immediately replaces the prior conversation cards, while same-thread reconciliation may preserve already hydrated detail.
 - Sent rich HTML preserves explicit line breaks, blank lines, spacing, and block indentation instead of flattening the reply body or indented paragraphs.
 - Local Sent/reply caches keep provider-ready Mango HTML when the send response omits body content, including CID-rewritten inline-image HTML rather than stale internal attachment URLs.
 - Mango's own Inbox, All, Sent, thread, and detail displays preserve Mango-authored line breaks, spaces, and indentation instead of flattening the same email body into one sentence.

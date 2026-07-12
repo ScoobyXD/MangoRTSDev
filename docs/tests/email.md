@@ -59,6 +59,11 @@ EMAIL33 - Reopening a saved Reply All draft restores its saved To, Cc, and Bcc f
 EMAIL34 - My Triage compose/reply, Shared Triage compose/reply, attached-email reply, and personal/shared signature editing must use the same `EditorDocumentSurface`, shared behavior/formatting controller, and `EditorTabBar` controls as the other unified editor surfaces. The signature editor must be a unified rich editor rather than a native textarea.
 EMAIL35 - Save Draft, Send, and Save Signature must synchronously flush the mounted rich editor and persist or submit the exact sanitized HTML returned by that flush, including the user's final uncommitted DOM edit; cached React state must not substitute an older body.
 EMAIL36 - Signature persistence is scoped to the exact personal account or shared inbox. An in-flight remote load must not overwrite a newer local edit, an existing remote row remains authoritative even when its body is empty, and save success is shown only after the remote write succeeds. A failed save retains the exact mailbox-scoped pending body, retries it before accepting older remote state, serializes retries/backfills with newer saves, and clears pending state only after that same body succeeds.
+EMAIL37 - Selecting a mailbox row makes that message detail the foreground provider read. First body paint must not wait behind unread-state mutation, next-page prefetch, historical thread hydration, collapsed-card attachment reads, or background archive work.
+EMAIL38 - Selecting a row from a different thread replaces prior conversation state immediately. Requests started for the old selection may finish, but must not repopulate the new detail pane or continue nonessential attachment hydration.
+EMAIL39 - The selected message body hydrates first. Historical thread rows load preview metadata in bounded pages and fetch full bodies or attachment content only when the user expands that card; Expand all is an explicit request to hydrate every card.
+EMAIL40 - Received body text and HTML render before inline CID downloads finish. Each CID source resolves independently, a slow or failed image never hides readable body content, and collapsed cards issue no attachment-content reads.
+EMAIL41 - Normal detail reads use mailbox-scoped frontend/backend caches and same-key in-flight coalescing without `refresh=true`. Raw MIME is not part of an ordinary body-only detail critical path; calendar RSVP and concrete unresolved inline-content recovery remain authenticated raw-MIME uses.
 
 ## Scenarios
 
@@ -254,3 +259,21 @@ Expected:
 - Shared Triage RSVP requires edit access to the shared inbox.
 - Response controls are disabled while the request is pending, and a selected/saved state appears only after provider success.
 - Insufficient calendar scope, expired/revoked grants, and provider failures surface a recoverable reconnect/provider error, leave the user signed in to Mango, and never report or display a saved response.
+
+### Scenario EMAIL-S10: Foreground Detail And Lazy Thread Hydration
+
+Business logic covered:
+- EMAIL37
+- EMAIL38
+- EMAIL39
+- EMAIL40
+- EMAIL41
+
+Given:
+- A personal or shared mailbox page is prefetching, the selected row is unread, and its thread contains several older messages with inline images.
+
+Expected:
+- The selected detail request starts before delayed mark-read and speculative prefetch work.
+- The selected body becomes readable without waiting for raw MIME, historical message details, or CID downloads.
+- Thread preview metadata is bounded, collapsed messages fetch no body or attachment bytes, and expanding one older card hydrates only that card.
+- Rapidly selecting another thread removes the prior cards immediately and stale completions do not reinsert them.
