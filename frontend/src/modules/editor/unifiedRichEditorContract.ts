@@ -7,14 +7,16 @@ export type UnifiedRichEditorSurfaceID =
   | "project-text-block"
   | "my-triage-compose"
   | "shared-triage-compose"
-  | "attached-email-reply";
+  | "attached-email-reply"
+  | "email-signature";
 
 export type UnifiedRichEditorPersistenceBoundary =
   | "logic-gate-information-projection"
   | "node-information-projection"
   | "project-information-projection"
   | "personal-mailbox"
-  | "shared-mailbox";
+  | "shared-mailbox"
+  | "mailbox-signature";
 
 export type UnifiedRichEditorSurfaceContract = {
   id: UnifiedRichEditorSurfaceID;
@@ -26,6 +28,7 @@ export type UnifiedRichEditorControlID =
   | "font-size"
   | "bold"
   | "underline"
+  | "highlight"
   | "outline-style";
 
 export const UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS: readonly UnifiedRichEditorSurfaceContract[] = [
@@ -35,11 +38,13 @@ export const UNIFIED_RICH_EDITOR_SURFACE_CONTRACTS: readonly UnifiedRichEditorSu
   { id: "my-triage-compose", persistenceBoundary: "personal-mailbox", chatSurface: false },
   { id: "shared-triage-compose", persistenceBoundary: "shared-mailbox", chatSurface: false },
   { id: "attached-email-reply", persistenceBoundary: "personal-mailbox", chatSurface: false },
+  { id: "email-signature", persistenceBoundary: "mailbox-signature", chatSurface: false },
 ] as const;
 
 export const UNIFIED_RICH_EDITOR_MAIL_CONTROL_IDS: readonly UnifiedRichEditorControlID[] = [
   "font-size",
   "bold",
   "underline",
+  "highlight",
   "outline-style",
 ] as const;

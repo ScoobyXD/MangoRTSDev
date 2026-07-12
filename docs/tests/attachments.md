@@ -1,13 +1,13 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-12
 
 # Attachments Tests
 
 Coverage Status:
 - Node attachment filename/type and visibility-gated thumbnail presentation are covered by `tests/frontend/modules/attachments/attachmentPresentation.test.ts`; concurrent byte reservations, deduplicated totals, partial success, latest-state append, stale navigation/scope/permission invalidation, and delete-while-uploading protection are covered by `tests/frontend/modules/editor/nodeTextBlockAttachments.test.ts`.
-- Incoming email image selection/download/fullscreen behavior and node attachment removal controls are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; shared editor image-reference behavior is covered by `tests/frontend/modules/editor/editorProjection.test.ts` and `tests/frontend/modules/editor/richTextEditing.test.ts`.
+- Incoming email image selection/download/fullscreen behavior and node attachment removal controls are covered by `tests/frontend/modules/editor/emailViewerContract.test.ts`; shared editor image-reference behavior is covered by `tests/frontend/modules/editor/editorProjection.test.ts` and `tests/frontend/modules/editor/richTextEditing.test.ts`; existing-attachment destination linking and mailbox-complete signature resource IDs are covered by `tests/frontend/modules/attachments/attachmentApi.test.ts`.
 - Direct-upload coverage must additionally prove bounded hashing, JSON-only Mango control requests, raw credential-free S3 PUTs, exact signed headers, progress/cancel/retry/resume, completed-part reconciliation, node-scoped deletion survival, and completed-only list/count refresh.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial. Existing attachment presentation, durable-reference serialization, authenticated content access, email send-time S3 resolution, durable-inline guards, and migration behavior are covered. The direct browser path requires focused frontend hashing/transport/node-lifecycle tests, backend intent/storage/repository tests, and the static IaC contract in `infra/tests/attachment_direct_upload.test.mjs`; normal suites must not require live AWS.
+- Business Logic Covered By Automated Tests: Partial. Existing attachment presentation, durable-reference serialization, authenticated content access, email send-time S3 resolution, draft/signature durable-inline guards, destination resource linking, and migration behavior are covered. The direct browser path requires focused frontend hashing/transport/node-lifecycle tests, backend intent/storage/repository tests, and the static IaC contract in `infra/tests/attachment_direct_upload.test.mjs`; normal suites must not require live AWS.
 
 ## Business Logic
 
@@ -34,17 +34,17 @@ ATT1 - All durable user file bytes must be stored in private Amazon S3 through t
 ATT2 - Postgres stores attachment metadata, S3 object keys, variants, ownership/resource links, and audit fields; editor, chat, email, projection, and saved-version payloads store attachment references, not file bytes.
 ATT3 - Durable Mango payloads must not store `data:image/...;base64`, `data:application/...;base64`, durable `dataURL` fields, or normal app email attachment payloads carrying raw base64 content.
 ATT4 - Temporary browser previews may use object URLs or data URLs only before upload completes; those values must be replaced by attachment references before durable save, send, snapshot, history, or projection writes.
-ATT5 - Rich-editor pasted or dropped inline images must be handled through the shared unified rich-editor image path behind `useEditorDocumentSurfaceHandlers` and `editorImages`, then saved as attachment references across node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply body surfaces.
+ATT5 - Rich-editor pasted or dropped inline images must be handled through the shared unified rich-editor image path behind `useEditorDocumentSurfaceHandlers` and `editorImages`, then saved as attachment references across node, Logic Gate, project, My Triage, Shared Triage, attached-email reply body, and personal/shared email-signature surfaces.
 ATT6 - Inline editor images must render as high-quality images on first open, not low-quality thumbnails, and double-click/fullscreen preview must load the original or highest-quality available variant.
 ATT7 - Node attachment-button uploads and attachment lists use the same Mango attachment API, private S3 storage, metadata records, and `resource_attachments` links as pasted inline images. The node loads attachment metadata separately from file bytes; image bytes are requested only when a row is visible or near-visible, and original bytes are requested only by an explicit download.
 ATT8 - Chat attachments remain chat UI, not unified rich-editor content, but they still upload through the global Mango attachment API and persist attachment references instead of durable `dataURL` values.
 ATT9 - Project text-block attachments and project chat attachments use the same global attachment system while preserving project-owned persistence for project text boxes.
-ATT10 - Outgoing personal and shared email compose/reply attachments upload to Mango attachments before durable draft/send state is saved; the backend reads S3 bytes only when sending through the provider. Pasted inline images remain Mango references in durable content and become CID-linked inline provider attachments at that send boundary. Email signature images/logos, when supported, use the same Mango attachment system through `email_signature` resource links.
+ATT10 - Outgoing personal and shared email compose/reply attachments upload to Mango attachments before durable draft/send state is saved; the backend reads S3 bytes only when sending through the provider. Pasted inline images remain Mango references in durable content and become CID-linked inline provider attachments at that send boundary. Personal and shared email-signature images/logos use the same Mango attachment system through mailbox-scoped `email_signature` resource links.
 ATT11 - Incoming provider email attachments may stay provider-referenced while they are only mailbox-list metadata, but must be cached or persisted into Mango S3 when attached to a node, converted into work, repeatedly opened as a durable Mango resource, or otherwise selected for Mango ownership.
 ATT12 - Attached-email projections and communications email JSON may store provider IDs, message/thread metadata, inline/content IDs, and Mango attachment references, but must not store attachment bytes.
 ATT13 - Attachment content access must be authorized through Mango resource permissions; knowing an S3 key or attachment ID is not enough to read bytes.
 ATT14 - Developer inspection uses DBeaver for `attachments`, `attachment_variants`, and `resource_attachments` metadata, then AWS S3 console/CLI for the referenced object key when byte inspection is explicitly needed.
-ATT15 - Backend validation must reject new durable inline file-byte payloads in normal editor, chat, projection, saved-version, and email send/draft paths.
+ATT15 - Backend validation must reject new durable inline file-byte payloads in normal editor, chat, projection, saved-version, email send, communications draft, and communications signature paths.
 ATT16 - Migration must be dry-run first, idempotent, resumable, auditable, and must record old-to-new attachment mappings before rewriting existing inline/base64 payloads.
 ATT17 - Email send preparation must find each `mango-attachment:` image source, deduplicate repeated IDs, authorize the existing resource link, resolve original S3 bytes within the total attachment limit, assign an alphanumeric content ID, add one inline provider attachment, and rewrite the image source to the matching `cid:` URI. It must reject missing/unauthorized references and return only metadata—not base64 bytes—in local sent-message fallback data.
 ATT18 - Explicit files uploaded from a node text box are node resource links with `relationship_kind=file_attachment`, `information_id` set to that text-box ID, and `editor_surface=node_text_block`. This metadata determines list scope; file bytes and legacy `dataURL` values do not.
@@ -54,13 +54,14 @@ ATT21 - User downloads request the `original` attachment variant through Mango's
 ATT22 - Read access to the owning node permits listing and downloading its attachments. Creating a new node attachment remains an edit operation and must stay hidden or disabled for a view-only user.
 ATT23 - Right-clicking an attachment row in a node-wide or text-box attachment list exposes a red `Remove from node` action only when the viewer can edit that node. The action removes the active node resource link; it does not delete shared attachment metadata, private S3 bytes, or links owned by another resource.
 ATT24 - An inline image in an incoming email body can be selected with one click to expose an authenticated download action and opened in fullscreen preview with a double-click. Inline `cid:` sources must resolve through an authorized Mango or provider attachment endpoint rather than exposing a public object URL.
-ATT25 - Selecting an inline image in a unified rich editor preserves its visual selection/resize handles and establishes a collapsed document caret immediately before the image frame. Text or spaces typed at that caret appear before the image, and image resizing remains available in node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply editors.
+ATT25 - Selecting an inline image in a unified rich editor preserves its visual selection/resize handles and establishes a collapsed document caret immediately before the image frame. Text or spaces typed at that caret appear before the image, and image resizing remains available in node, Logic Gate, project, My Triage, Shared Triage, attached-email reply, and email-signature editors.
 ATT26 - Browser-selected file bytes go directly to private S3 through short-lived presigned requests. Mango API remains the authoritative control plane for authentication, authorization, upload intents, IDs, object keys, limits, signing, completion/abort, S3 verification, metadata, and durable resource linking; browser bytes never traverse Mango API.
 ATT27 - The configurable browser limit defaults to 250 MiB per file. Single PUT applies through and including 64 MiB; larger files use 16 MiB multipart parts with at most three parts in flight per file and four S3 PUTs across the page. There is no 12 MiB aggregate-per-text-box limit on this path.
 ATT28 - Browser raw file SHA-256 is computed incrementally with bounded memory before intent creation. `attachments.sha256` remains the raw content hash; S3 checksum algorithm/value/type and SHA verification method are recorded separately, and multipart ETags/composite checksums never replace the raw hash.
 ATT29 - Upload intents and multipart part state are durable and idempotent. Creation uses actor/company/client-request identity; signing the same part/checksum may refresh its URL; completion and abort replay safely; resume reconciles authoritative accepted parts; expired intents cannot sign/complete and are cleaned up by the application with S3 lifecycle as a backstop.
 ATT30 - Only completed intents create/list permanent attachments. Node-level progress preserves filename/extension/size, byte progress, cancel/retry, and the states preparing, uploading, retrying, completing, complete, canceled, and failed. Each selected file is independent and one failure cannot discard completed siblings.
 ATT31 - Server-side streaming PutObject, including non-seekable producer streams, remains available for incoming email, provider imports, migrations, and backend jobs. Removing the old browser multipart-byte path must not remove or weaken backend-originated streaming or authenticated GetObject reads.
+ATT32 - Pasting an existing attachment-backed editor image into another unified rich editor target must create the destination resource's authorized `inline_image` link before inserting the image reference. An asynchronous upload or existing-attachment link may commit only while its originating editor root, document target, attachment resource context, and saved range are still current; switching targets or unmounting must not insert it into the next document.
 
 ## Scenarios
 
@@ -91,9 +92,11 @@ Business logic covered:
 - ATT6
 - ATT15
 - ATT17
+- ATT32
 
 Given:
-- A user pastes or drops an image into a node text box, Logic Gate editor body, project text box, My Triage compose/reply body, Shared Triage compose/reply body, or attached-email reply body.
+- A user pastes or drops an image into a node text box, Logic Gate editor body, project text box, My Triage compose/reply body, Shared Triage compose/reply body, attached-email reply body, or personal/shared email signature.
+- A user copies an existing attachment-backed image into a different unified editor resource, or changes editor targets while an image upload/link is pending.
 
 Expected:
 - The shared rich-editor image path uploads the file through the Mango attachment API.
@@ -101,7 +104,8 @@ Expected:
 - The first rendered inline image is high quality.
 - Clicking an email-body image selects it and exposes an authenticated download action; double-click/fullscreen opens the original or highest-quality available variant.
 - In editable content, image selection establishes a usable caret immediately before the image, and the same drag and resize behavior works in node, Logic Gate, project, compose, and reply editors.
-- Backend guards reject attempts to persist durable inline image bytes.
+- Copying an attachment-backed image creates the destination resource link before the reference is inserted; a stale asynchronous completion does not mutate a different or unmounted editor target.
+- Backend guards reject attempts to persist durable inline image bytes, including communications draft and signature bodies.
 
 ### Scenario ATT-S3: Node, Logic Gate, And Project Attachments
 
@@ -159,17 +163,19 @@ Business logic covered:
 
 Given:
 - A user attaches a file while composing, replying, replying all, forwarding, or scheduling personal/shared email.
-- A user adds a future image/logo attachment to an email signature.
+- A user adds an image/logo attachment to a personal or shared email signature.
 
 Expected:
 - The browser uploads the file to Mango attachments before durable draft/send state is saved.
 - Draft/send payloads store attachment IDs or reference objects.
 - Signature image/logo payloads store Mango attachment references through `email_signature` resource links.
+- Personal signature resource IDs require both the user and connected account email, while shared signature resource IDs use the selected shared inbox; an incomplete personal mailbox scope must not create an attachment link.
 - The backend reads S3 bytes at send time and passes normal files to the provider as ordinary attachments.
 - Each pasted image reference is deduplicated, permission-checked, converted to one inline attachment with a matching alphanumeric CID, and rewritten from the private Mango source to `cid:` in outbound HTML.
 - Personal and Shared Triage use the same conversion while preserving their personal/shared permission and grant scopes.
 - Missing or unauthorized inline references fail the send, and local sent-message fallback data contains provider-ready CID HTML plus metadata-only references rather than raw bytes.
 - Normal durable email payloads do not carry raw base64 `content`.
+- Communications draft and signature upserts reject durable inline data URLs/base64 file bytes.
 
 ### Scenario ATT-S6: Incoming And Attached Email Attachments
 
@@ -262,16 +268,18 @@ Business logic covered:
 - ATT13
 - ATT24
 - ATT25
+- ATT32
 
 Given:
 - A personal, shared, or node-attached email body contains an inline screenshot referenced by `cid:` or provider attachment metadata.
-- A user selects an inline image in any unified rich editor surface.
+- A user selects or copies an inline image in any unified rich editor surface, including a personal/shared email signature.
 
 Expected:
 - Mango resolves the incoming image through the authorized attachment boundary and renders it inside the email body.
 - A single click on the incoming image exposes an explicit authenticated download action, and a double-click opens fullscreen preview.
 - Selecting the editable image preserves its resize selection and places a document caret immediately before its frame.
-- Typing text or spaces at that caret moves the editable image forward, and resize behavior is consistent in node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply editors.
+- Typing text or spaces at that caret moves the editable image forward, and resize behavior is consistent in node, Logic Gate, project, My Triage, Shared Triage, attached-email reply, and email-signature editors.
+- Copying an attachment-backed image to a different resource authorizes and links it to that destination before insertion, and a target switch prevents a stale asynchronous insertion.
 - Closing or replacing previews releases transient browser object URLs.
 - The DOM and download action do not expose provider credentials, private S3 keys, or a public object URL.
 

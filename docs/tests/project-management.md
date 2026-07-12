@@ -1,10 +1,10 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-12
 
 # Project Management Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: 0% (rule IDs are not mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/nodeTextBlockProjectionSaves.test.ts` covers serialized latest-content project text-block envelopes; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers project attached-reply resource context and formatting-owner invalidation; remaining project-management rule IDs are not mapped to automated tests yet)
 
 ## Business Logic
 
@@ -51,6 +51,8 @@ PM40 - The node workspace project assignment menu must use the compact project-p
 PM41 - The node workspace project assignment menu must avoid right-edge clipping by shifting left when there is not enough visible space to the right of the button; project rows and optional Logic Gate rows must remain readable without horizontal viewport overflow.
 PM42 - Project permission controls use the canonical permissions contract in `docs/tests/permissions.md`: every editable dialog or embedded view exposes **Save**, saving persists the current selection without closing, and read-only/denied states never issue a write.
 PM43 - Project Management attached-email views follow `docs/tests/projects.md` P32: personal picker attachments and personal email-drop conversions retain `account_email`, shared conversions retain both `shared_inbox_id` and `account_email`, and subsequent thread, attachment, reply, draft, and calendar operations use that stored mailbox scope.
+PM44 - Project information text-block persistence uses the project-scoped latest-content save controller. Title, document, and attachment references are saved as one coherent envelope; saves do not overlap, later edits coalesce, deletion waits for an in-progress save, stale reloads cannot replace dirty local content, and project-scope teardown drains changed blocks.
+PM45 - An attached-email reply opened from Project Management keeps project attachment ownership and the originating information ID for files and inline images, while mailbox provenance continues to determine the provider thread, reply, draft, and send scope.
 
 ## Scenarios
 
@@ -130,16 +132,20 @@ Business logic covered:
 - PM10
 - PM11
 - PM35
+- PM44
 
 Given:
 - A user adds pasted images or files to a project information/projection text block.
 - The user has project edit access.
+- The user changes the block title, document, or attachment list while a save is already in progress, or deletes/switches projects while changed content remains.
 
 Expected:
 - The project information/projection mutation stores attachment references, not inline file bytes.
 - Project detail reads return metadata/content references small enough for normal project load paths.
 - Reads and writes follow project view/edit permissions.
 - Deleting the project information/projection row does not require deleting the underlying S3 object while other resource links may still reference it.
+- Project text-block saves do not overlap. Later edits coalesce into one follow-up containing the latest title, document, and attachment references, and an older completion cannot mark newer content saved.
+- A stale project reload cannot replace dirty local text-block content; deletion waits for the in-progress save, and leaving the project drains changed blocks from that project scope.
 
 ### Scenario PM-S4: Project Management Timeline
 
@@ -228,11 +234,14 @@ Expected:
 Business logic covered:
 - PM6
 - PM43
+- PM45
 
 Given:
 - Project Management opens one personal attached email and one email derived from a Shared Triage conversion.
+- The user replies from an email attached to a project text block and adds a file or inline image.
 
 Expected:
 - The personal projection retains the active account email and the shared projection retains both shared-inbox ID and account email.
 - Reopening the message uses the stored mailbox scope for thread hydration, recipients, attachments, Reply/Reply All, draft resume, and calendar invitation response.
 - A shared message never silently falls back to a personal grant.
+- Reply files and inline images remain linked to the project and originating project information ID, while the stored personal/shared mailbox scope continues to authorize provider reads, drafts, replies, and sends.

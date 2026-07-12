@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { sanitizeAPIErrorMessage } from "../../../../frontend/src/modules/api/requestJSON.js";
-import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_EMAIL_BODY_ATTRIBUTE, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, EDITOR_LIST_ATTRIBUTE, EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, editorBodyHasEmailContent, editorEmailDisplayDocument, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML, serializeEditorBodyForEmailHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import { EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES, EDITOR_EMAIL_BODY_ATTRIBUTE, EDITOR_HIGHLIGHT_ATTRIBUTE, EDITOR_HIGHLIGHT_COLOR_ITEMS, EDITOR_IMAGE_CLEAR_BREAK_ATTRIBUTE, EDITOR_LIST_ATTRIBUTE, EDITOR_RICH_TEXT_PREFIX, deserializeEditorDocumentHTML, editorBodyHasEmailContent, editorEmailDisplayDocument, getEditorLinkHrefForText, linkifyEditorPlainTextToHTML, normalizeEditorHighlightColor, normalizeEditorTableColumnWidths, sanitizeEditorDocumentHTML, serializeEditorBodyForEmailHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { clampEditorImageVerticalOffset, createStandaloneImageClipboardHTML, editorAttachmentIDFromImageSource, editorAttachmentImageSource, getEditorImageFloatSideForVisualLeft, getEditorImageInlineOffsetForVisualLeft, getEditorImagePointerInteraction, getEditorImageStorageBudgetForDocumentBytes, isEditorAttachmentImageSource, isSafeEditorImageSource, resolveEditorImageFrameSource, shouldUseEditorImageFileTransferShortcut, writeImageClipboardData } from "../../../../frontend/src/modules/editor/editorImages.js";
 
 test("editor rich text keeps a twenty-line bottom buffer", () => {
@@ -78,6 +80,35 @@ test("editor sanitizer collapses nested font-size wrappers to the final size", (
   const html = sanitizeEditorDocumentHTML('<span style="font-size: 14px;"><span style="font-size: 15px;"><span style="font-size: 16px;">nice</span></span></span>');
 
   assert.equal(html, '<span style="font-size: 16px;">nice</span>');
+});
+
+test("editor highlight colors normalize to opaque canonical hex only", () => {
+  assert.equal(normalizeEditorHighlightColor("#Fe0"), "#ffee00");
+  assert.equal(normalizeEditorHighlightColor("rgb(254, 240, 138)"), "#fef08a");
+  assert.equal(normalizeEditorHighlightColor("rgba(254, 240, 138, 1)"), "#fef08a");
+  for (const item of EDITOR_HIGHLIGHT_COLOR_ITEMS) assert.equal(normalizeEditorHighlightColor(item.color), item.color);
+  for (const unsafe of ["transparent", "rgba(1, 2, 3, 0.5)", "var(--color)", "url(javascript:alert(1))", "linear-gradient(red, blue)"]) {
+    assert.equal(normalizeEditorHighlightColor(unsafe), null);
+  }
+});
+
+test("email serialization retains canonical highlight metadata and inline color", () => {
+  const body = `${EDITOR_RICH_TEXT_PREFIX}<span ${EDITOR_HIGHLIGHT_ATTRIBUTE}="#fef08a" style="background-color: #fef08a;"><strong>Important</strong></span>`;
+  const html = serializeEditorBodyForEmailHTML(body);
+  assert.match(html, new RegExp(`${EDITOR_HIGHLIGHT_ATTRIBUTE}="#fef08a"`));
+  assert.match(html, /background-color: #fef08a/);
+  assert.match(html, /<strong>Important<\/strong>/);
+});
+
+test("highlight clearing normalizes nested wrappers while retaining intermediate inline formats", () => {
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/richTextEditing.ts"), "utf8");
+  const handlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");
+  assert.match(source, /middle\.appendChild\(pivot\)/);
+  assert.match(source, /liftEditorHighlightSpanOutOfAncestor\(span, ancestor\)/);
+  assert.match(source, /removeEditorElementHighlight\(span\)/);
+  assert.match(source, /normalizeEditorHighlightSpans\(clean\)/);
+  assert.match(handlers, /const spans = wrapEditorSelectedTextRuns\([\s\S]*normalizeEditorHighlightSpans\(root\);[\s\S]*spans\.forEach\(\(span\) =>/);
+  assert.match(handlers, /function unwrapEditorHighlightClearSpan[\s\S]*span\.replaceWith\(\.\.\.children\)[\s\S]*selection\?\.addRange\(range\)/);
 });
 
 test("editor sanitizer preserves image clear breaks", () => {

@@ -148,6 +148,8 @@
     "../modules/editor/editorIndentGuides.test.ts",
     "../../../frontend/src/modules/editor/editorProjection.ts",
     "../modules/editor/editorProjection.test.ts",
+    "../../../frontend/src/modules/editor/editorDocumentSaveQueue.ts",
+    "../modules/editor/editorDocumentSaveQueue.test.ts",
     "../../../frontend/src/modules/editor/nodeTextBlockProjectionSaves.ts",
     "../modules/editor/nodeTextBlockProjectionSaves.test.ts",
     "../../../frontend/src/modules/editor/nodeTextBlockAttachments.ts",

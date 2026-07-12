@@ -80,6 +80,57 @@ test("text block projection saves do not overlap and follow up with latest conte
   assert.equal(snapshot?.saveNeededAfterCurrentSave, false);
 });
 
+test("serialized text block saves retain the latest full content envelope", async () => {
+  type ContentEnvelope = {
+    title: string;
+    document: string;
+    attachments: string[];
+  };
+  const controller = createTextBlockProjectionSaveController<ContentEnvelope>();
+  const requests: TextBlockProjectionSaveRequest<ContentEnvelope>[] = [];
+  const pendingSaves: Deferred[] = [];
+
+  controller.configure({
+    saveBlock: async (request) => {
+      requests.push(request);
+      const pending = createDeferred();
+      pendingSaves.push(pending);
+      await pending.promise;
+    },
+  });
+
+  let latestContent: ContentEnvelope = {
+    title: "Project summary",
+    document: "Initial document",
+    attachments: [],
+  };
+  controller.replaceBlocksAsHasNotChanged([{ blockID: "project-block", content: latestContent }]);
+
+  latestContent = { ...latestContent, document: "Newest document" };
+  controller.markHasChanged("project-block", latestContent);
+  const firstDrain = controller.saveLatestContent("project-block");
+  await waitFor(() => requests.length === 1);
+
+  latestContent = { ...latestContent, attachments: ["attachment-1"] };
+  controller.markHasChanged("project-block", latestContent);
+  latestContent = { ...latestContent, title: "Renamed project summary" };
+  controller.markHasChanged("project-block", latestContent);
+
+  pendingSaves[0]?.resolve();
+  await waitFor(() => requests.length === 2);
+
+  assert.deepEqual(requests[1]?.content, {
+    title: "Renamed project summary",
+    document: "Newest document",
+    attachments: ["attachment-1"],
+  });
+  assert.equal(requests[1]?.sentVersion, 3);
+
+  pendingSaves[1]?.resolve();
+  await firstDrain;
+  assert.equal(controller.getSnapshot("project-block")?.hasChanged, false);
+});
+
 test("forced text block projection flush skips has not changed blocks and saves sequentially", async () => {
   const controller = createTextBlockProjectionSaveController<string>();
   const requests: TextBlockProjectionSaveRequest<string>[] = [];

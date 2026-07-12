@@ -143,6 +143,9 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
+	if rejectDurableInlineFileBytes(w, "communications_email_draft", req.BodyEditorHTML) {
+		return
+	}
 	companyID := strings.TrimSpace(req.CompanyID)
 	draftID := strings.TrimSpace(firstNonBlank(pathDraftID, req.DraftID))
 	if companyID == "" {
@@ -299,6 +302,9 @@ func (s *Server) handleCommunicationsEmailSignatureUpsert(w http.ResponseWriter,
 	var req communicationsEmailSignatureRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	if rejectDurableInlineFileBytes(w, "communications_email_signature", req.BodyEditorHTML) {
 		return
 	}
 	companyID := strings.TrimSpace(req.CompanyID)

@@ -5,6 +5,8 @@ import { emptyCompose, type ComposeAttachment, type ComposeState } from "./homeT
 
 const HOME_MAIL_DRAFTS_STORAGE_PREFIX = "mangorts.home.mailDrafts.v1";
 const HOME_MAIL_SIGNATURE_STORAGE_PREFIX = "mangorts.home.mailSignature.v1";
+const homeMailSignatureRemoteSaveQueues = new Map<string, Promise<void>>();
+const homeMailSignatureLocalRevisions = new Map<string, number>();
 
 export type HomeMailDraft = {
   id: string;
@@ -52,6 +54,77 @@ export function homeMailSignatureScopeKey(
     ? `shared:${encodeURIComponent(cleanSharedInboxID)}`
     : `personal:${encodeURIComponent(accountEmail.trim().toLowerCase() || "account")}`;
   return `${legacySignatureStorageKey(companyID, userID)}:${scope}`;
+}
+
+function homeMailSignaturePendingSyncKey(
+  companyID: string,
+  userID: string,
+  sharedInboxID = "",
+  accountEmail = "",
+): string {
+  return homeMailSignatureScopeKey(companyID, userID, sharedInboxID, accountEmail) + ":pending-sync";
+}
+
+function readPendingHomeMailSignatureSync(
+  companyID: string,
+  userID: string,
+  sharedInboxID = "",
+  accountEmail = "",
+): string | null {
+  if (!storageAvailable()) return null;
+  return localStorage.getItem(homeMailSignaturePendingSyncKey(companyID, userID, sharedInboxID, accountEmail));
+}
+
+function markPendingHomeMailSignatureSync(
+  companyID: string,
+  userID: string,
+  signature: string,
+  sharedInboxID = "",
+  accountEmail = "",
+): void {
+  if (!storageAvailable()) return;
+  try {
+    localStorage.setItem(homeMailSignaturePendingSyncKey(companyID, userID, sharedInboxID, accountEmail), signature);
+  } catch {
+    // The rejected remote save remains visible in compose state even when browser storage is unavailable.
+  }
+}
+
+function clearPendingHomeMailSignatureSync(
+  companyID: string,
+  userID: string,
+  signature: string,
+  sharedInboxID = "",
+  accountEmail = "",
+): void {
+  if (!storageAvailable()) return;
+  const key = homeMailSignaturePendingSyncKey(companyID, userID, sharedInboxID, accountEmail);
+  try {
+    if (localStorage.getItem(key) === signature) localStorage.removeItem(key);
+  } catch {
+    // A stale retry marker is safe; the next load retries the idempotent signature upsert.
+  }
+}
+
+function queueHomeMailSignatureRemoteSave(scopeKey: string, save: () => Promise<unknown>): Promise<void> {
+  const previous = homeMailSignatureRemoteSaveQueues.get(scopeKey) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(async () => {
+    await save();
+  });
+  homeMailSignatureRemoteSaveQueues.set(scopeKey, current);
+  return current.finally(() => {
+    if (homeMailSignatureRemoteSaveQueues.get(scopeKey) === current) {
+      homeMailSignatureRemoteSaveQueues.delete(scopeKey);
+    }
+  });
+}
+
+function readHomeMailSignatureLocalRevision(scopeKey: string): number {
+  return homeMailSignatureLocalRevisions.get(scopeKey) ?? 0;
+}
+
+function advanceHomeMailSignatureLocalRevision(scopeKey: string): void {
+  homeMailSignatureLocalRevisions.set(scopeKey, readHomeMailSignatureLocalRevision(scopeKey) + 1);
 }
 
 function plainTextToEditorHTML(value: string): string {
@@ -562,9 +635,11 @@ export function saveHomeMailSignature(
   sharedInboxID = "",
   accountEmail = "",
 ): void {
+  const scopeKey = homeMailSignatureScopeKey(companyID, userID, sharedInboxID, accountEmail);
+  advanceHomeMailSignatureLocalRevision(scopeKey);
   if (!storageAvailable()) return;
   try {
-    localStorage.setItem(homeMailSignatureScopeKey(companyID, userID, sharedInboxID, accountEmail), signature);
+    localStorage.setItem(scopeKey, signature);
   } catch {
     // Ignore storage failures; the compose state still keeps the signature text for this session.
   }
@@ -576,20 +651,49 @@ export async function loadHomeMailSignature(
   sharedInboxID = "",
   accountEmail = "",
 ): Promise<string> {
+  const scopeKey = homeMailSignatureScopeKey(companyID, userID, sharedInboxID, accountEmail);
   const localSignature = readHomeMailSignature(companyID, userID, sharedInboxID, accountEmail);
+  const localRevisionAtLoadStart = readHomeMailSignatureLocalRevision(scopeKey);
+  const pendingSignature = readPendingHomeMailSignatureSync(companyID, userID, sharedInboxID, accountEmail);
+  if (pendingSignature !== null) {
+    saveHomeMailSignature(companyID, userID, pendingSignature, sharedInboxID, accountEmail);
+    try {
+      await queueHomeMailSignatureRemoteSave(scopeKey, () => (
+        saveEmailSignature({ companyID, sharedInboxID, accountEmail, bodyEditorHTML: pendingSignature })
+      ));
+      clearPendingHomeMailSignatureSync(companyID, userID, pendingSignature, sharedInboxID, accountEmail);
+    } catch {
+      // Keep the exact pending body authoritative locally until a later retry succeeds.
+    }
+    return readPendingHomeMailSignatureSync(companyID, userID, sharedInboxID, accountEmail)
+      ?? readHomeMailSignature(companyID, userID, sharedInboxID, accountEmail);
+  }
   try {
     const remoteSignature = await getEmailSignature(companyID, sharedInboxID, accountEmail);
-    const body = remoteSignature?.body_editor_html ?? "";
-    if (body.trim()) {
+    const pendingAfterLoad = readPendingHomeMailSignatureSync(companyID, userID, sharedInboxID, accountEmail);
+    const localAfterLoad = readHomeMailSignature(companyID, userID, sharedInboxID, accountEmail);
+    if (
+      pendingAfterLoad !== null
+      || readHomeMailSignatureLocalRevision(scopeKey) !== localRevisionAtLoadStart
+      || localAfterLoad !== localSignature
+    ) {
+      return pendingAfterLoad ?? localAfterLoad;
+    }
+    if (remoteSignature) {
+      const body = remoteSignature.body_editor_html ?? "";
       saveHomeMailSignature(companyID, userID, body, sharedInboxID, accountEmail);
       return body;
     }
     if (localSignature.trim()) {
-      await saveEmailSignature({ companyID, sharedInboxID, accountEmail, bodyEditorHTML: localSignature });
+      await queueHomeMailSignatureRemoteSave(scopeKey, () => (
+        saveEmailSignature({ companyID, sharedInboxID, accountEmail, bodyEditorHTML: localSignature })
+      ));
     }
-    return localSignature;
+    return readPendingHomeMailSignatureSync(companyID, userID, sharedInboxID, accountEmail)
+      ?? readHomeMailSignature(companyID, userID, sharedInboxID, accountEmail);
   } catch {
-    return localSignature;
+    return readPendingHomeMailSignatureSync(companyID, userID, sharedInboxID, accountEmail)
+      ?? readHomeMailSignature(companyID, userID, sharedInboxID, accountEmail);
   }
 }
 
@@ -601,9 +705,10 @@ export async function saveHomeMailSignatureRemote(
   accountEmail = "",
 ): Promise<void> {
   saveHomeMailSignature(companyID, userID, signature, sharedInboxID, accountEmail);
-  try {
-    await saveEmailSignature({ companyID, sharedInboxID, accountEmail, bodyEditorHTML: signature });
-  } catch {
-    // The local fallback keeps the editor state durable for this browser until the backend is reachable.
-  }
+  markPendingHomeMailSignatureSync(companyID, userID, signature, sharedInboxID, accountEmail);
+  const scopeKey = homeMailSignatureScopeKey(companyID, userID, sharedInboxID, accountEmail);
+  await queueHomeMailSignatureRemoteSave(scopeKey, () => (
+    saveEmailSignature({ companyID, sharedInboxID, accountEmail, bodyEditorHTML: signature })
+  ));
+  clearPendingHomeMailSignatureSync(companyID, userID, signature, sharedInboxID, accountEmail);
 }

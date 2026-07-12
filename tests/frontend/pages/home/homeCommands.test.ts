@@ -8,7 +8,7 @@ import type { NodeRecord } from "../../../../frontend/src/modules/node-map/share
 import { EDITOR_RICH_TEXT_PREFIX } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "../../../../frontend/src/pages/home/homeConstants.js";
 import { addMyLogicGateShortcutsCommand, addSharedInboxGVICPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeGVICMatrixNodeCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, removeSharedInboxGVICPrincipalCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessage, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateGVICMatrixNode, type HomeDeleteEmailMessage, type HomeDropAssignNodeToLogicGateStatus, type HomeMoveMyWorkNodeToCell, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInboxGVICAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
-import { appendHomeMailPlainText, applyHomeMailSignature, composeHasDraftContent, homeMailBodyHasSignature, homeMailDraftToMessage, homeMailSignatureScopeKey } from "../../../../frontend/src/pages/home/homeMailDrafts.js";
+import { appendHomeMailPlainText, applyHomeMailSignature, composeHasDraftContent, homeMailBodyHasSignature, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailSignature, readHomeMailSignature, saveHomeMailSignatureRemote } from "../../../../frontend/src/pages/home/homeMailDrafts.js";
 import { emptyCompose } from "../../../../frontend/src/pages/home/homeTypes.js";
 
 test("new compose and reply bodies receive one idempotent rich-editor signature", () => {
@@ -84,6 +84,183 @@ test("rich signatures retain formatting and signature storage keys stay mailbox 
     homeMailSignatureScopeKey("company-1", "user-1", "shared-1", "shared@example.test"),
     homeMailSignatureScopeKey("company-1", "user-1", "shared-2", "shared@example.test"),
   );
+});
+
+function memoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear() {
+      values.clear();
+    },
+    getItem(key: string) {
+      return values.get(key) ?? null;
+    },
+    key(index: number) {
+      return Array.from(values.keys())[index] ?? null;
+    },
+    removeItem(key: string) {
+      values.delete(key);
+    },
+    setItem(key: string, value: string) {
+      values.set(key, String(value));
+    },
+  };
+}
+
+function installMemoryStorage(t: { after: (callback: () => void) => void }): Storage {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const storage = memoryStorage();
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+  t.after(() => {
+    if (originalDescriptor) Object.defineProperty(globalThis, "localStorage", originalDescriptor);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  });
+  return storage;
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+function signatureResponse(body: string | null): Response {
+  return new Response(JSON.stringify({
+    signature: body === null ? null : {
+      company_id: "company-signature-race",
+      signature_id: "signature-race",
+      scope_type: "personal",
+      personal_user_id: "user-signature-race",
+      personal_account_email: "signature@example.test",
+      name: "Default",
+      body_editor_html: body,
+      is_default: true,
+      created_timestamp: timestamp,
+      updated_timestamp: timestamp,
+    },
+  }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function signatureBodyFromRequest(init?: RequestInit): string {
+  if (typeof init?.body !== "string") return "";
+  const body = JSON.parse(init.body) as { body_editor_html?: string };
+  return body.body_editor_html ?? "";
+}
+
+function installSignatureFetch(
+  t: { after: (callback: () => void) => void },
+  handler: (init?: RequestInit) => Promise<Response>,
+): void {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => handler(init)) as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+}
+
+test("a pending signature retry never overwrites a newer save", async (t: { after: (callback: () => void) => void }) => {
+  installMemoryStorage(t);
+  const companyID = "company-signature-pending-race";
+  const userID = "user-signature-pending-race";
+  const accountEmail = "pending-race@example.test";
+  let phase: "seed-failure" | "race" = "seed-failure";
+  const retryResponse = deferred<Response>();
+  const newerResponse = deferred<Response>();
+  const retryStarted = deferred<void>();
+  const newerStarted = deferred<void>();
+  const racePutBodies: string[] = [];
+  installSignatureFetch(t, async (init) => {
+    if (phase === "seed-failure") throw new Error("offline");
+    const body = signatureBodyFromRequest(init);
+    racePutBodies.push(body);
+    if (racePutBodies.length === 1) {
+      retryStarted.resolve();
+      return retryResponse.promise;
+    }
+    newerStarted.resolve();
+    return newerResponse.promise;
+  });
+
+  await assert.rejects(saveHomeMailSignatureRemote(companyID, userID, "pending body", "", accountEmail));
+  phase = "race";
+  const loadPromise = loadHomeMailSignature(companyID, userID, "", accountEmail);
+  await retryStarted.promise;
+  const newerSave = saveHomeMailSignatureRemote(companyID, userID, "newer body", "", accountEmail);
+  retryResponse.resolve(signatureResponse("pending body"));
+
+  assert.equal(await loadPromise, "newer body");
+  assert.equal(readHomeMailSignature(companyID, userID, "", accountEmail), "newer body");
+  await newerStarted.promise;
+  newerResponse.resolve(signatureResponse("newer body"));
+  await newerSave;
+  assert.deepEqual(racePutBodies, ["pending body", "newer body"]);
+});
+
+test("a stale signature GET cannot overwrite a completed same-body save", async (t: { after: (callback: () => void) => void }) => {
+  const storage = installMemoryStorage(t);
+  const companyID = "company-signature-get-race";
+  const userID = "user-signature-get-race";
+  const accountEmail = "get-race@example.test";
+  const body = "locally authoritative body";
+  storage.setItem(homeMailSignatureScopeKey(companyID, userID, "", accountEmail), body);
+  const getResponse = deferred<Response>();
+  installSignatureFetch(t, async (init) => {
+    if (!init?.method || init.method === "GET") return getResponse.promise;
+    return signatureResponse(signatureBodyFromRequest(init));
+  });
+
+  const loadPromise = loadHomeMailSignature(companyID, userID, "", accountEmail);
+  await saveHomeMailSignatureRemote(companyID, userID, body, "", accountEmail);
+  getResponse.resolve(signatureResponse("stale remote body"));
+
+  assert.equal(await loadPromise, body);
+  assert.equal(readHomeMailSignature(companyID, userID, "", accountEmail), body);
+});
+
+test("legacy signature backfill stays ordered ahead of a newer save", async (t: { after: (callback: () => void) => void }) => {
+  const storage = installMemoryStorage(t);
+  const companyID = "company-signature-backfill-race";
+  const userID = "user-signature-backfill-race";
+  const accountEmail = "backfill-race@example.test";
+  storage.setItem(homeMailSignatureScopeKey(companyID, userID, "", accountEmail), "legacy body");
+  const backfillResponse = deferred<Response>();
+  const newerResponse = deferred<Response>();
+  const backfillStarted = deferred<void>();
+  const newerStarted = deferred<void>();
+  const putBodies: string[] = [];
+  installSignatureFetch(t, async (init) => {
+    if (!init?.method || init.method === "GET") return signatureResponse(null);
+    const body = signatureBodyFromRequest(init);
+    putBodies.push(body);
+    if (putBodies.length === 1) {
+      backfillStarted.resolve();
+      return backfillResponse.promise;
+    }
+    newerStarted.resolve();
+    return newerResponse.promise;
+  });
+
+  const loadPromise = loadHomeMailSignature(companyID, userID, "", accountEmail);
+  await backfillStarted.promise;
+  const newerSave = saveHomeMailSignatureRemote(companyID, userID, "newer body", "", accountEmail);
+  await Promise.resolve();
+  assert.deepEqual(putBodies, ["legacy body"]);
+  backfillResponse.resolve(signatureResponse("legacy body"));
+  await newerStarted.promise;
+  assert.deepEqual(putBodies, ["legacy body", "newer body"]);
+  newerResponse.resolve(signatureResponse("newer body"));
+
+  assert.equal(await loadPromise, "newer body");
+  await newerSave;
+  assert.equal(readHomeMailSignature(companyID, userID, "", accountEmail), "newer body");
 });
 
 const timestamp = "2026-01-01T00:00:00Z";

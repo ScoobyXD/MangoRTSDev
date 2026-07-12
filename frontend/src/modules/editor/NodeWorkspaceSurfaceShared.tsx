@@ -14,6 +14,7 @@ import type { MentionableCompanyUser } from "./editorMentions";
 import type { EditorChatAttachment, EditorTextBlockChatMessage } from "./editorProjection";
 import type { NodeContentChange } from "./nodeContentChanges";
 import type { EditorOutlineStyleID } from "./plainTextEditing";
+import type { EditorHighlightColor } from "./richTextEditing";
 import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState } from "./useEditorDocumentSurfaceHandlers";
 export type { MentionableCompanyUser } from "./editorMentions";
 export type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
@@ -57,6 +58,8 @@ export type NodeWorkspaceSurfaceProps = {
   onRequireNodePriorityForLogicGateAssignment: () => void;
   onSelectionFontSizeChange?: (fontSize: number) => void;
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
+  onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
+  onFormattingControllerAvailabilityChange?: (available: boolean) => void;
   onRegisterSaveController?: (controller: NodeWorkspaceSaveController | null) => void;
   onError: (message: string) => void;
 };

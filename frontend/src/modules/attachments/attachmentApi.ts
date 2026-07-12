@@ -104,6 +104,13 @@ export type UnlinkMangoResourceAttachmentInput = ListMangoResourceAttachmentsInp
   attachmentID: string;
 };
 
+export type LinkMangoResourceAttachmentInput = UnlinkMangoResourceAttachmentInput & {
+  relationshipKind: MangoAttachmentRelationshipKind;
+  informationID?: string;
+  messageID?: string;
+  editorSurface?: string;
+};
+
 export type MangoResourceAttachmentFilter = {
   relationshipKind?: MangoAttachmentRelationshipKind;
   editorSurface?: string;
@@ -132,6 +139,32 @@ export async function unlinkMangoResourceAttachment(
     `/v1/resources/${encodeURIComponent(input.resourceType)}/${encodeURIComponent(resourceID)}/attachments/${encodeURIComponent(attachmentID)}?${query.toString()}`,
     { method: "DELETE" },
   );
+}
+
+export async function linkMangoResourceAttachment(
+  request: AttachmentRequestJSON,
+  input: LinkMangoResourceAttachmentInput,
+): Promise<MangoResourceAttachment> {
+  const companyID = input.companyID.trim();
+  const resourceID = input.resourceID.trim();
+  const attachmentID = input.attachmentID.trim();
+  if (!companyID || !resourceID || !attachmentID) throw new Error("attachment_resource_context_required");
+  const path = "/v1/resources/" + encodeURIComponent(input.resourceType) + "/" + encodeURIComponent(resourceID) + "/attachments";
+  const response = await request<{ resource_attachment: MangoResourceAttachment }>(
+    path,
+    {
+      method: "POST",
+      json: {
+        company_id: companyID,
+        attachment_id: attachmentID,
+        relationship_kind: input.relationshipKind,
+        information_id: input.informationID?.trim() || undefined,
+        message_id: input.messageID?.trim() || undefined,
+        editor_surface: input.editorSurface?.trim() || undefined,
+      },
+    },
+  );
+  return response.resource_attachment;
 }
 
 export function filterMangoResourceAttachments(
@@ -183,7 +216,10 @@ export function mangoEmailDraftResourceID(input: { draftID: string; userID?: str
 export function mangoEmailSignatureResourceID(input: { userID?: string; accountEmail?: string; sharedInboxID?: string }): string {
   const sharedInboxID = input.sharedInboxID?.trim() ?? "";
   if (sharedInboxID) return `shared:${encodeURIComponent(sharedInboxID)}`;
-  return `personal:${encodeURIComponent(input.userID?.trim() ?? "")}:${encodeURIComponent(input.accountEmail?.trim().toLowerCase() ?? "")}`;
+  const userID = input.userID?.trim() ?? "";
+  const accountEmail = input.accountEmail?.trim().toLowerCase() ?? "";
+  if (!userID || !accountEmail) return "";
+  return `personal:${encodeURIComponent(userID)}:${encodeURIComponent(accountEmail)}`;
 }
 
 export function mangoEmailMessageResourceID(input: { messageID: string; userID?: string; sharedInboxID?: string }): string {

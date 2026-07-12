@@ -196,6 +196,7 @@ export function HomeMailWorkspace({
   compose,
   draftCount,
   emailSignature,
+  emailSignatureAccountEmail,
   error,
   isArchivableListView,
   isArchiveMailbox,
@@ -267,6 +268,7 @@ export function HomeMailWorkspace({
   compose: ComposeState;
   draftCount: number;
   emailSignature: string;
+  emailSignatureAccountEmail: string;
   error: string;
   isArchivableListView: boolean;
   isArchiveMailbox: boolean;
@@ -316,12 +318,12 @@ export function HomeMailWorkspace({
   onOpenStarredMailbox: () => void;
   onOpenForward: (message?: EmailMessage) => void;
   onEmailSignatureChange: (value: string) => void;
-  onSaveEmailSignature: () => void;
-  onSaveComposeDraft: () => void;
+  onSaveEmailSignature: (signature: string) => void;
+  onSaveComposeDraft: (compose: ComposeState) => void;
   onSearchDraftChange: (value: string) => void;
   onSelectMessage: (message: EmailMessage, modifiers: MessageSelectionModifiers) => void;
   onStartMessageDrag: (message: EmailMessage, event: React.DragEvent<HTMLElement>) => void;
-  onSubmitCompose: (event: React.FormEvent) => void;
+  onSubmitCompose: (event: React.FormEvent, compose: ComposeState) => void;
   onSubmitSearch: (event: React.FormEvent) => void;
   onToggleMessageStar: (message: EmailMessage) => void;
   onToggleRead: () => void;
@@ -701,6 +703,7 @@ export function HomeMailWorkspace({
             busy={busy === "send"}
             replyMessage={compose.replyToMessage ?? (selectedMessage?.id === compose.replyToMessageID ? selectedMessage : null)}
             emailSignature={emailSignature}
+            emailSignatureAccountEmail={emailSignatureAccountEmail}
             companyID={companyID}
             currentUserID={currentUserID}
             companyUsers={companyUsers}

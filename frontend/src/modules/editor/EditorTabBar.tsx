@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { EDITOR_TAB_ITEMS, type EditorRelatedNodeCreationKind, type EditorTabID } from "./editorTabs";
 import type { EditorOutlineStyleID } from "./plainTextEditing";
+import { EDITOR_HIGHLIGHT_COLOR_ITEMS, normalizeEditorHighlightColor, type EditorHighlightColor } from "./richTextEditing";
 import { EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, EDITOR_OUTLINE_STYLE_ITEMS } from "./useEditorPreferences";
 
 const EditorDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
@@ -106,8 +107,10 @@ type EditorTabBarProps = {
   onSetSelectionFontSize: (fontSize: number) => void;
   boldActive: boolean;
   underlineActive: boolean;
+  highlightColor: EditorHighlightColor | null;
   onToggleBold: () => void;
   onToggleUnderline: () => void;
+  onSetSelectionHighlightColor: (color: EditorHighlightColor | null) => void;
   onOutlineStyleFocus: () => void;
   onOutlineStyleChange: (outlineStyle: EditorOutlineStyleID) => void;
   onCreateRelatedNode?: (kind: EditorRelatedNodeCreationKind) => void;
@@ -119,9 +122,10 @@ type EditorTabBarProps = {
   reserveHeaderOffset?: boolean;
   visibleTabIDs?: readonly EditorTabID[];
   disabled?: boolean;
+  formattingDisabled?: boolean;
 };
 
-type EditorFormatControlID = "decrease-font" | "font-size" | "increase-font" | "bold" | "underline";
+type EditorFormatControlID = "decrease-font" | "font-size" | "increase-font" | "bold" | "underline" | "highlight";
 
 export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   activeTab,
@@ -138,8 +142,10 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   onSetSelectionFontSize,
   boldActive,
   underlineActive,
+  highlightColor,
   onToggleBold,
   onToggleUnderline,
+  onSetSelectionHighlightColor,
   onOutlineStyleFocus,
   onOutlineStyleChange,
   onCreateRelatedNode,
@@ -151,14 +157,21 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   reserveHeaderOffset = true,
   visibleTabIDs,
   disabled = false,
+  formattingDisabled = false,
 }) => {
   const [outlineMenuOpen, setOutlineMenuOpen] = useState(false);
+  const [highlightMenuOpen, setHighlightMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [hoveredTabID, setHoveredTabID] = useState<EditorTabID | "create" | null>(null);
   const [hoveredFormatControl, setHoveredFormatControl] = useState<EditorFormatControlID | null>(null);
   const [hoveredOutlineStyle, setHoveredOutlineStyle] = useState<EditorOutlineStyleID | null>(null);
   const [fontSizeDraft, setFontSizeDraft] = useState(String(documentFontSize));
+  const [customHighlightColor, setCustomHighlightColor] = useState<EditorHighlightColor>(highlightColor ?? EDITOR_HIGHLIGHT_COLOR_ITEMS[0].color);
+  const cancelFontSizeCommitRef = useRef(false);
   const outlineMenuRef = useRef<HTMLDivElement | null>(null);
+  const outlineTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const highlightMenuRef = useRef<HTMLDivElement | null>(null);
+  const highlightTriggerRef = useRef<HTMLButtonElement | null>(null);
   const createMenuRef = useRef<HTMLDivElement | null>(null);
   const relationshipTabRef = useRef<HTMLButtonElement | null>(null);
   const tabFrameBackground = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
@@ -169,10 +182,19 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   const tabHoverBackground = "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.66))";
   const tabHoverShadow = "0 8px 20px rgba(15, 23, 42, 0.12), 0 0 14px rgba(183, 124, 255, 0.18), inset 1px 1px 0 rgba(255,255,255,0.86)";
   const visibleTabs = visibleTabIDs ? EDITOR_TAB_ITEMS.filter((tab) => visibleTabIDs.includes(tab.id)) : EDITOR_TAB_ITEMS;
+  const formatControlsDisabled = disabled || formattingDisabled;
 
   useEffect(() => {
     setFontSizeDraft(String(documentFontSize));
   }, [documentFontSize]);
+
+  useEffect(() => {
+    if (highlightColor) setCustomHighlightColor(highlightColor);
+  }, [highlightColor]);
+
+  useEffect(() => {
+    if (formatControlsDisabled) setHighlightMenuOpen(false);
+  }, [formatControlsDisabled]);
 
   const commitFontSizeDraft = () => {
     const parsed = Number.parseInt(fontSizeDraft, 10);
@@ -180,7 +202,9 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
       setFontSizeDraft(String(documentFontSize));
       return;
     }
-    onSetSelectionFontSize(Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, parsed)));
+    const nextFontSize = Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, parsed));
+    setFontSizeDraft(String(nextFontSize));
+    onSetSelectionFontSize(nextFontSize);
   };
 
   useEffect(() => {
@@ -189,9 +213,41 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
       if (outlineMenuRef.current?.contains(event.target as Node)) return;
       setOutlineMenuOpen(false);
     };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOutlineMenuOpen(false);
+      window.requestAnimationFrame(() => outlineTriggerRef.current?.focus({ preventScroll: true }));
+    };
     window.addEventListener("pointerdown", closeOnPointerDown);
-    return () => window.removeEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape, true);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape, true);
+    };
   }, [outlineMenuOpen]);
+
+  useEffect(() => {
+    if (!highlightMenuOpen) return;
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (highlightMenuRef.current?.contains(event.target as Node)) return;
+      setHighlightMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setHighlightMenuOpen(false);
+      window.requestAnimationFrame(() => highlightTriggerRef.current?.focus({ preventScroll: true }));
+    };
+    window.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape, true);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape, true);
+    };
+  }, [highlightMenuOpen]);
 
   useEffect(() => {
     if (!createMenuOpen) return;
@@ -258,7 +314,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
   const formatControlHoverBackground = "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(230,252,255,0.72) 46%, rgba(247,239,255,0.74))";
   const formatControlStyle = (id: EditorFormatControlID, options: { active?: boolean; withRightBorder?: boolean; width?: number; fontSize?: number } = {}): React.CSSProperties => {
     const active = options.active ?? false;
-    const hovered = hoveredFormatControl === id && !disabled;
+    const hovered = hoveredFormatControl === id && !formatControlsDisabled;
     return {
       width: options.width ?? 28,
       height: 24,
@@ -268,7 +324,8 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
       color: active ? outlineMenuAccent : surfaceText,
       display: "grid",
       placeItems: "center",
-      cursor: disabled ? "default" : "pointer",
+      cursor: formatControlsDisabled ? "default" : "pointer",
+      opacity: formatControlsDisabled ? 0.54 : 1,
       fontSize: options.fontSize ?? 12,
       fontWeight: 900,
       lineHeight: 1,
@@ -301,22 +358,23 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
           return (
             <div
               key={tab.id}
-              aria-label="Font size"
+              ref={highlightMenuRef}
+              aria-label="Format controls"
               onMouseEnter={() => setHoveredTabID(tab.id)}
               onMouseLeave={() => setHoveredTabID((current) => (current === tab.id ? null : current))}
-              style={{ ...tabStyle, display: "inline-flex", alignItems: "center", gap: 0, padding: 0, overflow: "hidden" }}
+              style={{ ...tabStyle, position: "relative", display: "inline-flex", alignItems: "center", gap: 0, padding: 0, overflow: "visible" }}
             >
               <button
                 type="button"
                 aria-label="Decrease font size"
                 title="Decrease font size"
-                disabled={disabled}
+                disabled={formatControlsDisabled}
                 data-mango-editor-format-control="decrease-font"
                 {...formatControlHoverHandlers("decrease-font")}
-                onMouseDown={(event) => event.preventDefault()}
+                onPointerDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (disabled) return;
+                  if (formatControlsDisabled) return;
                   onAdjustSelectionFontSize(-1);
                 }}
                 style={formatControlStyle("decrease-font", { width: 30, fontSize: 17 })}
@@ -326,40 +384,56 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
               <input
                 aria-label="Font size value"
                 value={fontSizeDraft}
-                disabled={disabled}
+                disabled={formatControlsDisabled}
                 data-mango-editor-format-control="font-size"
                 onMouseEnter={() => setHoveredFormatControl("font-size")}
                 onMouseLeave={() => setHoveredFormatControl((current) => (current === "font-size" ? null : current))}
-                onFocus={() => setHoveredFormatControl("font-size")}
+                onFocus={() => {
+                  cancelFontSizeCommitRef.current = false;
+                  setHoveredFormatControl("font-size");
+                }}
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
                 onDoubleClick={(event) => event.currentTarget.select()}
-                onChange={(event) => setFontSizeDraft(event.target.value.replace(/[^\d]/g, "").slice(0, 2))}
+                onChange={(event) => {
+                  cancelFontSizeCommitRef.current = false;
+                  setFontSizeDraft(event.target.value.replace(/[^\d]/g, "").slice(0, 2));
+                }}
                 onBlur={() => {
-                  commitFontSizeDraft();
+                  if (cancelFontSizeCommitRef.current) {
+                    cancelFontSizeCommitRef.current = false;
+                    setFontSizeDraft(String(documentFontSize));
+                  } else {
+                    commitFontSizeDraft();
+                  }
                   setHoveredFormatControl((current) => (current === "font-size" ? null : current));
                 }}
                 onKeyDown={(event) => {
                   event.stopPropagation();
-                  if (event.key === "Enter") event.currentTarget.blur();
-                  if (event.key === "Escape") {
-                    setFontSizeDraft(String(documentFontSize));
+                  if (event.key === "Enter") {
+                    event.preventDefault();
                     event.currentTarget.blur();
                   }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelFontSizeCommitRef.current = true;
+                    setFontSizeDraft(String(documentFontSize));
+                    event.currentTarget.select();
+                  }
                 }}
-                style={{ ...formatControlStyle("font-size", { width: 34 }), cursor: disabled ? "default" : "text", textAlign: "center", outline: "none", font: "inherit", fontSize: 10, fontWeight: 500, padding: 0 }}
+                style={{ ...formatControlStyle("font-size", { width: 34 }), cursor: formatControlsDisabled ? "default" : "text", textAlign: "center", outline: "none", font: "inherit", fontSize: 10, fontWeight: 500, padding: 0 }}
               />
               <button
                 type="button"
                 aria-label="Increase font size"
                 title="Increase font size"
-                disabled={disabled}
+                disabled={formatControlsDisabled}
                 data-mango-editor-format-control="increase-font"
                 {...formatControlHoverHandlers("increase-font")}
-                onMouseDown={(event) => event.preventDefault()}
+                onPointerDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (disabled) return;
+                  if (formatControlsDisabled) return;
                   onAdjustSelectionFontSize(1);
                 }}
                 style={formatControlStyle("increase-font", { width: 30, fontSize: 17 })}
@@ -371,13 +445,13 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 aria-label="Bold"
                 title="Bold"
                 aria-pressed={boldActive}
-                disabled={disabled}
+                disabled={formatControlsDisabled}
                 data-mango-editor-format-control="bold"
                 {...formatControlHoverHandlers("bold")}
-                onMouseDown={(event) => event.preventDefault()}
+                onPointerDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (disabled) return;
+                  if (formatControlsDisabled) return;
                   onToggleBold();
                 }}
                 style={inlineFormatButtonStyle("bold", boldActive)}
@@ -389,19 +463,130 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 aria-label="Underline"
                 title="Underline"
                 aria-pressed={underlineActive}
-                disabled={disabled}
+                disabled={formatControlsDisabled}
                 data-mango-editor-format-control="underline"
                 {...formatControlHoverHandlers("underline")}
-                onMouseDown={(event) => event.preventDefault()}
+                onPointerDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (disabled) return;
+                  if (formatControlsDisabled) return;
                   onToggleUnderline();
                 }}
-                style={inlineFormatButtonStyle("underline", underlineActive, false)}
+                style={inlineFormatButtonStyle("underline", underlineActive)}
               >
                 <span style={{ textDecoration: "underline", textUnderlineOffset: 2 }}>U</span>
               </button>
+              <button
+                ref={highlightTriggerRef}
+                type="button"
+                aria-label="Text highlight"
+                title="Text highlight"
+                aria-haspopup="menu"
+                aria-expanded={highlightMenuOpen}
+                aria-pressed={Boolean(highlightColor)}
+                disabled={formatControlsDisabled}
+                data-mango-editor-format-control="highlight"
+                {...formatControlHoverHandlers("highlight")}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (!formatControlsDisabled) setHighlightMenuOpen((open) => !open);
+                }}
+                style={{
+                  ...formatControlStyle("highlight", { active: Boolean(highlightColor), withRightBorder: false, width: 40 }),
+                  display: "inline-flex",
+                  gridAutoFlow: undefined,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 3,
+                  borderRadius: "0 8px 8px 0",
+                }}
+              >
+                <span aria-hidden="true" style={{ width: 13, height: 13, display: "grid", placeItems: "center", borderBottom: `4px solid ${highlightColor ?? "#fef08a"}`, fontSize: 10, lineHeight: 1 }}>A</span>
+                <EditorDisclosureIcon color={surfaceText} />
+              </button>
+              {highlightMenuOpen && (
+                <div
+                  role="menu"
+                  aria-label="Text highlight colors"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 5px)",
+                    right: 0,
+                    zIndex: 40,
+                    width: 214,
+                    display: "grid",
+                    gap: 8,
+                    padding: 9,
+                    border: `1px solid ${strokeColor}`,
+                    borderRadius: 10,
+                    background: outlineMenuSurface,
+                    boxShadow: `9px 9px 22px ${colorWithAlpha("#64748b", 0.26)}, -7px -7px 18px rgba(255, 255, 255, 0.92)`,
+                  }}
+                >
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 7 }}>
+                    {EDITOR_HIGHLIGHT_COLOR_ITEMS.map((item) => {
+                      const colorSelected = highlightColor === item.color;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          role="menuitemradio"
+                          aria-label={`${item.label} highlight`}
+                          aria-checked={colorSelected}
+                          title={item.label}
+                          onPointerDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            onSetSelectionHighlightColor(item.color);
+                            setCustomHighlightColor(item.color);
+                            setHighlightMenuOpen(false);
+                          }}
+                          style={{
+                            width: 40,
+                            height: 28,
+                            border: colorSelected ? `2px solid ${outlineMenuAccent}` : `1px solid ${strokeColor}`,
+                            borderRadius: 7,
+                            background: item.color,
+                            cursor: "pointer",
+                            boxShadow: colorSelected ? `0 0 0 2px ${colorWithAlpha(outlineMenuAccent, 0.16)}` : "inset 1px 1px 0 rgba(255,255,255,0.7)",
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 7, alignItems: "center" }}>
+                    <label style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 7, fontSize: 10, fontWeight: 750 }}>
+                      <input
+                        type="color"
+                        aria-label="Custom highlight color"
+                        value={customHighlightColor}
+                        onChange={(event) => {
+                          const color = normalizeEditorHighlightColor(event.currentTarget.value);
+                          if (!color) return;
+                          setCustomHighlightColor(color);
+                          onSetSelectionHighlightColor(color);
+                        }}
+                        style={{ width: 32, height: 26, border: 0, padding: 0, background: "transparent", cursor: "pointer" }}
+                      />
+                      <span>Custom</span>
+                    </label>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      aria-label="Clear highlight"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        onSetSelectionHighlightColor(null);
+                        setHighlightMenuOpen(false);
+                      }}
+                      style={{ minHeight: 27, border: `1px solid ${strokeColor}`, borderRadius: 7, background: "rgba(255,255,255,0.78)", color: surfaceText, padding: "0 8px", cursor: "pointer", fontSize: 10, fontWeight: 800 }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         }
@@ -416,6 +601,7 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
               style={{ position: "relative", flex: "0 0 auto" }}
             >
               <button
+                ref={outlineTriggerRef}
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded={outlineMenuOpen}
@@ -546,12 +732,12 @@ export const EditorTabBar: React.FC<EditorTabBarProps> = ({
           type="button"
           aria-label="Insert table"
           title="Insert table"
-          disabled={disabled}
+          disabled={formatControlsDisabled}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
-            if (!disabled) onInsertTable();
+            if (!formatControlsDisabled) onInsertTable();
           }}
-          style={{ ...tabStyleFor(false, false), width: 30, height: 26, display: "grid", placeItems: "center", padding: 0 }}
+          style={{ ...tabStyleFor(false, false), width: 30, height: 26, display: "grid", placeItems: "center", padding: 0, cursor: formatControlsDisabled ? "default" : "pointer", opacity: formatControlsDisabled ? 0.54 : 1 }}
         >
           <EditorTableIcon color={surfaceText} />
         </button>
