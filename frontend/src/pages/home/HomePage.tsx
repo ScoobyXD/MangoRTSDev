@@ -20,7 +20,6 @@ import {
   fetchCommunicationsWorkspacePanel,
   fetchCommunicationsStatus,
   getEmailMessage,
-  getEmailThread,
   invalidateCommunicationsCache,
   invalidateEmailMessageCache,
   listCompanyUsers,
@@ -45,7 +44,6 @@ import {
   type EmailFolder,
   type EmailMailbox,
   type EmailMessage,
-  type EmailThread,
   type MessagePage,
   type CommunicationsStatus,
   type EmailProvider,
@@ -132,17 +130,12 @@ function mergeEmailThreadDetailMessages(current: EmailMessage[], incoming: Email
   return sortEmailConversationMessagesNewestFirst(Array.from(byID.values()));
 }
 
-function emailThreadMessageIDs(thread: EmailThread, selectedMessageID: string): string[] {
-  return cleanIDList([
-    selectedMessageID,
-    ...(thread.message_ids ?? []),
-    thread.latest_draft_or_message?.id ?? "",
-  ]);
-}
-
 const MISSING_LOGIC_GATE_REPAIR_CONCURRENCY = 4;
 const MISSING_LOGIC_GATE_REPAIR_FAILURE_TTL_MS = 5 * 60_000;
 const ARCHIVE_BACKGROUND_CONFIRMATION_TIMEOUT_MS = 3 * 60_000;
+const PRIMARY_TRIAGE_PAGE_FILL_MAX_REQUESTS = 4;
+const EMAIL_DETAIL_FOREGROUND_GRACE_MS = 250;
+const EMAIL_THREAD_PREVIEW_MAX_PAGES = 1;
 const LOCAL_TRIAGE_CONVERSION_MAIL_NETWORK_SUPPRESSION_MS = 8_000;
 
 
@@ -528,6 +521,7 @@ export function HomePage({
   const pendingMessageRefreshRef = useRef(false);
   const messageRequestSeqRef = useRef(0);
   const loadMessagesRef = useRef<((options?: LoadMessagesOptions) => Promise<void>) | null>(null);
+  const draftMessagesRef = useRef<EmailMessage[]>([]);
   const prefetchedMessagePageRef = useRef<PrefetchedMessagePage | null>(null);
   const prefetchMessageTokenRef = useRef("");
   const prefetchMessageFilterKeyRef = useRef("");
@@ -541,6 +535,8 @@ export function HomePage({
   const pendingArchiveMessageKeysRef = useRef<Set<string>>(new Set());
   const archiveQueueFlushTimerRef = useRef<number | null>(null);
   const archivePendingReleaseTimerIDsRef = useRef<Set<number>>(new Set());
+  const delayedMailRequestTimerIDsRef = useRef<Set<number>>(new Set());
+  const delayedMarkReadTimerByMessageIDRef = useRef<Map<string, number>>(new Map());
   const pendingStarredMessageIDsRef = useRef<Set<string>>(new Set());
   const scheduledMailDraftsInFlightRef = useRef<Set<string>>(new Set());
   const pendingAutoSignatureRef = useRef<{ draftID: string; scopeKey: string } | null>(null);
@@ -631,6 +627,12 @@ export function HomePage({
         .filter((draft) => homeMailDraftMatchesSearch(draft, searchQuery))
         .map(homeMailDraftToMessage)
   ), [mailDrafts, searchQuery, unreadOnly]);
+  useEffect(() => {
+    draftMessagesRef.current = draftMessages;
+    if (mailboxRef.current !== "drafts") return;
+    setMessages(draftMessages);
+    setNextPageToken("");
+  }, [draftMessages]);
   useEffect(() => {
     setGVICMatrixTargetUserID(currentUserID);
   }, [companyID, currentUserID]);
@@ -829,6 +831,9 @@ export function HomePage({
       }
       for (const timerID of archivePendingReleaseTimerIDsRef.current) window.clearTimeout(timerID);
       archivePendingReleaseTimerIDsRef.current.clear();
+      for (const timerID of delayedMailRequestTimerIDsRef.current) window.clearTimeout(timerID);
+      delayedMailRequestTimerIDsRef.current.clear();
+      delayedMarkReadTimerByMessageIDRef.current.clear();
       queuedArchiveBatchesRef.current.clear();
       pendingArchiveMessageKeysRef.current.clear();
       pendingStarredMessageIDsRef.current.clear();
@@ -1290,11 +1295,13 @@ export function HomePage({
     let pageMessages = sortEmailMessagesByDateDescending(seedPage.messages ?? []);
     let nextToken = (seedPage.next_page_token ?? "").trim();
     const seenPageTokens = new Set<string>();
+    let additionalPageRequests = 0;
 
     while (
       nextToken
       && primaryTriageVisibleMessagesForList(pageMessages).length < MESSAGE_BATCH_SIZE
       && !seenPageTokens.has(nextToken)
+      && additionalPageRequests < PRIMARY_TRIAGE_PAGE_FILL_MAX_REQUESTS
     ) {
       if (
         messageListFilterKeyRef.current !== filterKey
@@ -1302,6 +1309,7 @@ export function HomePage({
         || localTriageConversionMailNetworkIsSuppressed(filterKey)
       ) break;
       seenPageTokens.add(nextToken);
+      additionalPageRequests += 1;
       const pageToken = nextToken;
       const page = await listEmailMessages({
         limit: MESSAGE_BATCH_SIZE,
@@ -1350,14 +1358,15 @@ export function HomePage({
     const requestKey = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly);
     messageListFilterKeyRef.current = requestKey;
     if (mailbox === "drafts") {
+      const currentDraftMessages = draftMessagesRef.current;
       messageRequestKeyRef.current = "";
       setLoadedMessageListKey(requestKey);
       clearPrefetchedMessagePage();
       setLoadingMessages(false);
       setNextPageToken("");
-      setMessages(draftMessages);
+      setMessages(currentDraftMessages);
       const currentSelectedMessageID = selectedMessageIDRef.current;
-      const currentSelectionStillVisible = !!currentSelectedMessageID && draftMessages.some((message) => message.id === currentSelectedMessageID);
+      const currentSelectionStillVisible = !!currentSelectedMessageID && currentDraftMessages.some((message) => message.id === currentSelectedMessageID);
       if (!currentSelectionStillVisible && currentSelectedMessageID) {
         setSelectedMessageID("");
         setSelectedMessage(null);
@@ -1446,7 +1455,7 @@ export function HomePage({
         }
       }
     }
-  }, [activeSharedInbox, activeSharedInboxBlocksEmail, activeSharedInboxFolderID, activeSharedInboxNeedsEmail, activeViewID, canLoadMailForView, canRepairSharedInboxConnection, clearMailListState, clearPrefetchedMessagePage, companyID, draftMessages, fillPrimaryTriageVisibleMessagePage, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed, mailbox, searchQuery, unreadOnly]);
+  }, [activeSharedInbox, activeSharedInboxBlocksEmail, activeSharedInboxFolderID, activeSharedInboxNeedsEmail, activeViewID, canLoadMailForView, canRepairSharedInboxConnection, clearMailListState, clearPrefetchedMessagePage, companyID, fillPrimaryTriageVisibleMessagePage, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed, mailbox, searchQuery, unreadOnly]);
   useEffect(() => {
     const sharedInboxID = pendingSharedInboxMessageRefreshID.trim();
     if (!sharedInboxID) return;
@@ -1458,12 +1467,6 @@ export function HomePage({
     void loadFolders();
     void loadMessages({ refresh: true });
   }, [activeViewID, loadFolders, loadMessages, mailbox, pendingSharedInboxMessageRefreshID, sharedInboxes]);
-  useEffect(() => {
-    if (!activeSharedInboxFolderID || mailbox !== "primary") return;
-    if (!activeSharedInboxIsMailbox || !activeMailViewHasEmailConnection) return;
-    void loadFolders();
-    void loadMessages({ refresh: true });
-  }, [activeMailViewHasEmailConnection, activeSharedInboxFolderID, activeSharedInboxIsMailbox, loadFolders, loadMessages, mailbox]);
   const consumePrefetchedMessagePage = useCallback((filterKey: string, pageToken: string): MessagePage | null => {
     const prefetched = prefetchedMessagePageRef.current;
     if (!prefetched || prefetched.filterKey !== filterKey || prefetched.pageToken !== pageToken) return null;
@@ -1510,11 +1513,14 @@ export function HomePage({
       q: searchQueryRef.current,
       unread: unreadOnlyRef.current ? true : undefined,
     })
-      .then((page) => {
+      .then(async (page) => {
+        const preparedPage = isPrimaryTriageMailbox(activeViewIDRef.current, mailboxRef.current)
+          ? await fillPrimaryTriageVisibleMessagePage(page, filterKey)
+          : page;
         if (prefetchMessageGenerationRef.current !== requestGeneration) return;
         if (localTriageConversionMailNetworkIsSuppressed(filterKey)) return;
         if (messageListFilterKeyRef.current !== filterKey || nextPageTokenRef.current !== pageToken) return;
-        prefetchedMessagePageRef.current = { filterKey, pageToken, page };
+        prefetchedMessagePageRef.current = { filterKey, pageToken, page: preparedPage };
       })
       .catch((messageError) => {
         if (isEmailAccessExpiredError(messageError)) {
@@ -1530,7 +1536,7 @@ export function HomePage({
       });
     prefetchMessagePromiseRef.current = request;
     await request;
-  }, [canLoadMailForView, companyID, currentMessageFilterKey, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed]);
+  }, [canLoadMailForView, companyID, currentMessageFilterKey, fillPrimaryTriageVisibleMessagePage, handleEmailAccessExpired, localTriageConversionMailNetworkIsSuppressed]);
   const loadMoreMessages = useCallback(async () => {
     if (!canLoadMailForView(activeViewIDRef.current) || mailboxRef.current === "drafts" || isInboxMatrixViewID(activeViewIDRef.current) || activeViewIDRef.current === "my-work" || activeViewIDRef.current === "updates" || loadingMessagesRef.current || loadingMoreMessagesRef.current) return;
     if (isPrimaryTriageMailbox(activeViewIDRef.current, mailboxRef.current)) return;
@@ -1742,10 +1748,25 @@ export function HomePage({
       const archivedIDSet = new Set(previousMessageIDs);
       const remainingMessages = messagesRef.current.filter((message) => !archivedIDSet.has(message.id.trim()));
       if (pageToken && primaryTriageVisibleMessagesForList(remainingMessages).length < MESSAGE_BATCH_SIZE) setLoadingMoreMessages(true);
-      const nextPage = await fillPrimaryTriageVisibleMessagePage({
+      let prefetchedPage = consumePrefetchedMessagePage(filterKey, pageToken);
+      const matchingPrefetch = !prefetchedPage
+        && prefetchMessagePromiseRef.current
+        && prefetchMessageFilterKeyRef.current === filterKey
+        && prefetchMessageTokenRef.current === pageToken
+        ? prefetchMessagePromiseRef.current
+        : null;
+      if (matchingPrefetch) {
+        await matchingPrefetch;
+        prefetchedPage = consumePrefetchedMessagePage(filterKey, pageToken);
+      }
+      const seedPage = prefetchedPage ? {
+        messages: mergeEmailMessagePages(remainingMessages, prefetchedPage.messages ?? []),
+        next_page_token: prefetchedPage.next_page_token ?? "",
+      } : {
         messages: remainingMessages,
         next_page_token: pageToken,
-      }, filterKey);
+      };
+      const nextPage = await fillPrimaryTriageVisibleMessagePage(seedPage, filterKey);
       if (messageListFilterKeyRef.current !== filterKey || !isPrimaryTriageMailbox(activeViewIDRef.current, mailboxRef.current)) return;
       replaceVisibleMessagesForAdvance(nextPage);
       displayedNextPage = true;
@@ -1767,7 +1788,7 @@ export function HomePage({
     } finally {
       setLoadingMoreMessages(false);
     }
-  }, [activeMailViewHasEmailConnection, adjustPrimaryMailboxCount, archiveQueueCanAccept, busy, canMutateCurrentMailView, companyID, currentMessageFilterKey, fillPrimaryTriageVisibleMessagePage, handleEmailAccessExpired, prefetchNextMessagePage, queueArchiveMessages, replaceVisibleMessagesForAdvance, scheduleMessageListRefresh]);
+  }, [activeMailViewHasEmailConnection, adjustPrimaryMailboxCount, archiveQueueCanAccept, busy, canMutateCurrentMailView, companyID, consumePrefetchedMessagePage, currentMessageFilterKey, fillPrimaryTriageVisibleMessagePage, handleEmailAccessExpired, prefetchNextMessagePage, queueArchiveMessages, replaceVisibleMessagesForAdvance, scheduleMessageListRefresh]);
   const fillMessageListAfterRemoval = useCallback(() => {
     window.setTimeout(() => {
       const list = messageListRef.current;
@@ -1919,7 +1940,7 @@ export function HomePage({
     window.addEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
     return () => window.removeEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
   }, [companyID, patchConvertedMessageLogicGatePlacement, reconcileConvertedMessageUnstars]);
-  useEffect(() => { void loadMessages({ refresh: true }); }, [loadMessages]);
+  useEffect(() => { void loadMessages(); }, [loadMessages]);
   useEffect(() => {
     setNodeEditorOverlay(null);
   }, [companyID]);
@@ -1929,14 +1950,22 @@ export function HomePage({
     if (!nextPageToken || loadingMessages || loadingMoreMessages) return;
     if (localTriageConversionMailNetworkIsSuppressed(loadedListKey)) return;
     if (isPrimaryTriageMailbox(activeViewID, mailbox)) {
-      void prefetchNextMessagePage(nextPageToken);
-      return;
+      if (loadingDetail) return;
+      const timerID = window.setTimeout(() => {
+        delayedMailRequestTimerIDsRef.current.delete(timerID);
+        void prefetchNextMessagePage(nextPageToken);
+      }, EMAIL_DETAIL_FOREGROUND_GRACE_MS);
+      delayedMailRequestTimerIDsRef.current.add(timerID);
+      return () => {
+        window.clearTimeout(timerID);
+        delayedMailRequestTimerIDsRef.current.delete(timerID);
+      };
     }
     const list = messageListRef.current;
     if (!list) return;
     if (messageListWithinPrefetchDistance()) void prefetchNextMessagePage();
     if (messageListContentScrollHeight(list) <= list.clientHeight + 120) void loadMoreMessages();
-  }, [activeViewID, companyID, loadMoreMessages, loadedMessageListKey, loadingMessages, loadingMoreMessages, localTriageConversionMailNetworkIsSuppressed, mailbox, messageListWithinPrefetchDistance, messages.length, nextPageToken, prefetchNextMessagePage, searchQuery, unreadOnly]);
+  }, [activeViewID, companyID, loadMoreMessages, loadedMessageListKey, loadingDetail, loadingMessages, loadingMoreMessages, localTriageConversionMailNetworkIsSuppressed, mailbox, messageListWithinPrefetchDistance, messages.length, nextPageToken, prefetchNextMessagePage, searchQuery, unreadOnly]);
   useEffect(() => {
     if (!selectedMessageID) {
       setSelectedThreadMessages([]);
@@ -1974,43 +2003,38 @@ export function HomePage({
         const threadID = (selected.thread_id ?? "").trim();
         if (!threadID) return;
 
-        let threadMessageIDs: string[] = [];
+        let threadPreviews: EmailMessage[] = [];
+        let pageToken = "";
+        const seenPageTokens = new Set<string>();
+        let loadedPages = 0;
         try {
-          const thread = await getEmailThread(threadID, companyID, sharedInboxID);
-          threadMessageIDs = emailThreadMessageIDs(thread, selected.id);
-        } catch (threadError) {
-          if (cancelled) return;
-          if (isEmailAccessExpiredError(threadError)) throw threadError;
-        }
-
-        if (threadMessageIDs.length <= 1) {
-          try {
+          do {
             const page = await listEmailMessages({
               limit: MESSAGE_BATCH_SIZE,
+              pageToken: pageToken || undefined,
               mailbox: "all",
               threadID,
               companyID,
               sharedInboxID,
             });
-            threadMessageIDs = cleanIDList([selected.id, ...page.messages.map((message) => message.id)]);
-          } catch (threadListError) {
             if (cancelled) return;
-            if (isEmailAccessExpiredError(threadListError)) throw threadListError;
-          }
+            threadPreviews = mergeEmailMessagePages(threadPreviews, page.messages ?? []);
+            loadedPages += 1;
+            const nextToken = (page.next_page_token ?? "").trim();
+            if (!nextToken || seenPageTokens.has(nextToken)) break;
+            seenPageTokens.add(nextToken);
+            pageToken = nextToken;
+          } while (loadedPages < EMAIL_THREAD_PREVIEW_MAX_PAGES);
+        } catch (threadListError) {
+          if (cancelled) return;
+          if (isEmailAccessExpiredError(threadListError)) throw threadListError;
         }
 
-        const detailIDs = cleanIDList([selected.id, ...threadMessageIDs]);
-        const threadDetails = await Promise.all(detailIDs.map(async (messageID) => {
-          if (messageID === selected.id) return selectedWithLocalReplies;
-          try {
-            return withLocalReadOverlay(await getEmailMessage(messageID, companyID, sharedInboxID));
-          } catch {
-            return null;
-          }
-        }));
         if (cancelled) return;
-        const hydratedMessages = threadDetails.filter((message): message is EmailMessage => Boolean(message));
-        setSelectedThreadMessages(mergeEmailThreadDetailMessages([], hydratedMessages));
+        setSelectedThreadMessages(mergeEmailThreadDetailMessages(
+          threadPreviews.map(withLocalReadOverlay),
+          [selectedWithLocalReplies],
+        ));
       } catch (detailError) {
         if (cancelled) return;
         if (isEmailAccessExpiredError(detailError)) {
@@ -2025,6 +2049,31 @@ export function HomePage({
     void loadDetail();
     return () => { cancelled = true; };
   }, [activeViewID, canLoadMailForView, companyID, handleEmailAccessExpired, mailbox, selectedMessageID]);
+  const loadSelectedThreadMessageBody = useCallback(async (messageID: string): Promise<EmailMessage | null> => {
+    const cleanMessageID = messageID.trim();
+    if (!cleanMessageID || !canLoadMailForView(activeViewIDRef.current)) return null;
+    const requestSharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
+    try {
+      const message = await getEmailMessage(cleanMessageID, companyID, requestSharedInboxID);
+      if (sharedInboxIDForHomeView(activeViewIDRef.current) !== requestSharedInboxID) return null;
+      const overlaid = locallyReadMessageIDsRef.current.has(cleanMessageID) ? { ...message, unread: false } : message;
+      setSelectedThreadMessages((current) => {
+        if (!current.some((candidate) => candidate.id === cleanMessageID)) return current;
+        return mergeEmailThreadDetailMessages(current, [overlaid]);
+      });
+      if (selectedMessageIDRef.current === cleanMessageID) {
+        setSelectedMessage((current) => current?.id === cleanMessageID ? mergeEmailDetailMessage(current, overlaid) : current);
+      }
+      return overlaid;
+    } catch (messageError) {
+      if (isEmailAccessExpiredError(messageError)) {
+        void handleEmailAccessExpired(messageError);
+      } else if (selectedMessageIDRef.current === cleanMessageID) {
+        setError(formatError(messageError, "Failed to load message"));
+      }
+      return null;
+    }
+  }, [canLoadMailForView, companyID, handleEmailAccessExpired]);
   const startConnection = async (provider: "google" | "microsoft") => {
     setBusy(provider);
     setError("");
@@ -2141,6 +2190,14 @@ export function HomePage({
   }, [currentMessageListParams]);
   const patchSelectedMessage = async (update: { unread?: boolean; starred?: boolean; folders?: string[] }) => {
     if (!selectedMessage) return;
+    if (update.unread !== undefined) {
+      const delayedMarkReadTimerID = delayedMarkReadTimerByMessageIDRef.current.get(selectedMessage.id);
+      if (delayedMarkReadTimerID !== undefined) {
+        window.clearTimeout(delayedMarkReadTimerID);
+        delayedMailRequestTimerIDsRef.current.delete(delayedMarkReadTimerID);
+        delayedMarkReadTimerByMessageIDRef.current.delete(selectedMessage.id);
+      }
+    }
     const starredDelta = update.starred !== undefined && update.starred !== selectedMessage.starred
       ? (update.starred ? 1 : -1)
       : 0;
@@ -2969,35 +3026,49 @@ export function HomePage({
     setMessages((previous) => mergeEmailMessageIntoMessageList(previous, optimistic, listParams()));
     setSelectedMessage((current) => (current?.id === messageID ? { ...current, unread: false } : current));
     setSelectedThreadMessages((previous) => mergeEmailThreadDetailMessages(previous, [optimistic]));
-    void updateHomeMailMessageCommand({
-      companyID,
-      sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
-      messageID,
-      update: { unread: false },
-    })
-      .then((result) => {
-        if (!result) return;
-        const readUpdated = { ...result.message, unread: false };
-        setMessages((previous) => mergeEmailMessageIntoMessageList(previous, readUpdated, listParams()));
-        setSelectedThreadMessages((previous) => mergeEmailThreadDetailMessages(previous, [readUpdated]));
-        if (selectedMessageIDRef.current === messageID) {
-          setSelectedMessage((current) => (current?.id === messageID ? {
-            ...current,
-            ...readUpdated,
-            local_replies: current.local_replies ?? readUpdated.local_replies,
-          } : readUpdated));
-        }
+    const requestSharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
+    const existingTimerID = delayedMarkReadTimerByMessageIDRef.current.get(messageID);
+    if (existingTimerID !== undefined) {
+      window.clearTimeout(existingTimerID);
+      delayedMailRequestTimerIDsRef.current.delete(existingTimerID);
+    }
+    const timerID = window.setTimeout(() => {
+      delayedMailRequestTimerIDsRef.current.delete(timerID);
+      if (delayedMarkReadTimerByMessageIDRef.current.get(messageID) === timerID) {
+        delayedMarkReadTimerByMessageIDRef.current.delete(messageID);
+      }
+      void updateHomeMailMessageCommand({
+        companyID,
+        sharedInboxID: requestSharedInboxID,
+        messageID,
+        update: { unread: false },
       })
-      .catch((markError) => {
-        locallyReadMessageIDsRef.current.delete(messageID);
-        invalidateEmailMessageCache(messageID);
-        if (isEmailAccessExpiredError(markError)) {
-          void handleEmailAccessExpired(markError);
-          return;
-        }
-        setError(formatError(markError, "Failed to mark message read"));
-        scheduleMessageListRefresh();
-      });
+        .then((result) => {
+          if (!result || sharedInboxIDForHomeView(activeViewIDRef.current) !== requestSharedInboxID) return;
+          const readUpdated = { ...result.message, unread: false };
+          setMessages((previous) => mergeEmailMessageIntoMessageList(previous, readUpdated, listParams()));
+          setSelectedThreadMessages((previous) => mergeEmailThreadDetailMessages(previous, [readUpdated]));
+          if (selectedMessageIDRef.current === messageID) {
+            setSelectedMessage((current) => (current?.id === messageID ? {
+              ...current,
+              ...readUpdated,
+              local_replies: current.local_replies ?? readUpdated.local_replies,
+            } : readUpdated));
+          }
+        })
+        .catch((markError) => {
+          locallyReadMessageIDsRef.current.delete(messageID);
+          invalidateEmailMessageCache(messageID);
+          if (isEmailAccessExpiredError(markError)) {
+            void handleEmailAccessExpired(markError);
+            return;
+          }
+          setError(formatError(markError, "Failed to mark message read"));
+          scheduleMessageListRefresh();
+        });
+    }, EMAIL_DETAIL_FOREGROUND_GRACE_MS);
+    delayedMailRequestTimerIDsRef.current.add(timerID);
+    delayedMarkReadTimerByMessageIDRef.current.set(messageID, timerID);
   }, [companyID, handleEmailAccessExpired, scheduleMessageListRefresh]);
   const selectMessageRow = useCallback((message: EmailMessage, modifiers: MessageSelectionModifiers) => {
     activeDeleteSelectionKindRef.current = "message";
@@ -3025,7 +3096,13 @@ export function HomePage({
     setSelectionAnchorMessageID(next.anchorID);
     setSelectedMessageID(primaryID);
     setSelectedMessage(visiblePrimaryMessage);
-    setSelectedThreadMessages((current) => mergeEmailThreadDetailMessages(current, [visiblePrimaryMessage]));
+    const previousPrimaryMessage = selectedMessageRef.current;
+    const preserveCurrentThread = previousPrimaryMessage
+      ? emailThreadKey(previousPrimaryMessage) === emailThreadKey(visiblePrimaryMessage)
+      : false;
+    setSelectedThreadMessages((current) => preserveCurrentThread
+      ? mergeEmailThreadDetailMessages(current, [visiblePrimaryMessage])
+      : [visiblePrimaryMessage]);
     setMessageContextMenu(null);
     if (mailboxRef.current === "drafts" || homeMessageIsDraft(visiblePrimaryMessage)) {
       const draft = mailDrafts.find((item) => item.id === primaryID);
@@ -4466,6 +4543,7 @@ export function HomePage({
             onComposeChange={handleComposeChange}
             onDeleteSelected={deleteSelected}
             onDisconnect={requestDisconnect}
+            onLoadMessageBody={loadSelectedThreadMessageBody}
             onLoadMoreMessages={() => { void loadMoreMessages(); }}
             onPrefetchMessages={() => { void prefetchNextMessagePage(); }}
             onOpenAllMailbox={openAllMailbox}

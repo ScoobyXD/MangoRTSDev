@@ -50,6 +50,23 @@ test("triage thread controls and reply resize pointer lifecycle are explicit", (
   assert.match(homePage, /mergeEmailAddressDrafts\(\[existingDraft\.cc, requiredReplyAllRecipients\.cc\], \[to\]\)/);
 });
 
+test("triage email selection, history, and archive prefetch preserve the foreground detail path", () => {
+  const homeParts = source("frontend/src/pages/home/HomeParts.tsx");
+  const homePage = source("frontend/src/pages/home/HomePage.tsx");
+
+  assert.match(homePage, /PRIMARY_TRIAGE_PAGE_FILL_MAX_REQUESTS = 4/);
+  assert.match(homePage, /additionalPageRequests < PRIMARY_TRIAGE_PAGE_FILL_MAX_REQUESTS/);
+  assert.match(homePage, /consumePrefetchedMessagePage\(filterKey, pageToken\)/);
+  assert.match(homePage, /await matchingPrefetch;[\s\S]{0,200}consumePrefetchedMessagePage\(filterKey, pageToken\)/);
+  assert.match(homePage, /EMAIL_DETAIL_FOREGROUND_GRACE_MS/);
+  assert.match(homePage, /useEffect\(\(\) => \{ void loadMessages\(\); \}, \[loadMessages\]\)/);
+  assert.match(homePage, /preserveCurrentThread[\s\S]{0,300}: \[visiblePrimaryMessage\]/);
+  assert.match(homePage, /loadSelectedThreadMessageBody/);
+  assert.doesNotMatch(homePage, /getEmailThread/);
+  assert.doesNotMatch(homePage, /Promise\.all\(detailIDs/);
+  assert.match(homeParts, /onLoadMessageBody/);
+});
+
 test("node list context menus unlink attachments and remove attached emails", () => {
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");

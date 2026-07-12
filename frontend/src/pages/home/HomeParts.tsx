@@ -5712,7 +5712,11 @@ function emailAttachmentDownloadID(attachment: EmailAttachment): string {
   return attachment.id?.trim() || attachment.attachment_id?.trim() || "";
 }
 
-function useEmailBodyDocument(messageID: string, body: string, attachments: EmailAttachment[], companyID: string, sharedInboxID?: string): { srcDoc: string; loading: boolean } {
+function emailMessageBodyIsLoaded(message: EmailMessage): boolean {
+  return message.detail_fetched === true || typeof message.body === "string";
+}
+
+function useEmailBodyDocument(messageID: string, body: string, attachments: EmailAttachment[], companyID: string, sharedInboxID: string | undefined, enabled: boolean): { srcDoc: string } {
   const apiBase = readAuthConfig().apiBase;
   const inlineAttachments = React.useMemo(
     () => attachments.filter((attachment) => emailAttachmentIsReferencedInline(body, attachment)),
@@ -5729,31 +5733,39 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
       ].join(":"))
       .join("|")
   ), [inlineAttachments]);
-  const [sourceByContentID, setSourceByContentID] = React.useState<Record<string, string>>({});
-  const [loading, setLoading] = React.useState(false);
+  const embeddedSourceByContentID = React.useMemo(() => {
+    const sources: Record<string, string> = {};
+    for (const attachment of inlineAttachments) {
+      const inlineURL = emailAttachmentDataURL(attachment);
+      if (!inlineURL) continue;
+      for (const key of emailAttachmentContentIDKeys(attachment)) sources[key] = inlineURL;
+    }
+    return sources;
+  }, [inlineAttachments]);
+  const hydrationKey = `${companyID}\x1f${sharedInboxID ?? ""}\x1f${messageID}\x1f${inlineAttachmentKey}`;
+  const [downloadedCIDState, setDownloadedSourceByContentID] = React.useState<{
+    hydrationKey: string;
+    sources: Record<string, string>;
+  }>({ hydrationKey: "", sources: {} });
 
   React.useEffect(() => {
-    setSourceByContentID({});
-    if (!body.trim() || inlineAttachments.length === 0) {
-      setLoading(false);
-      return undefined;
-    }
+    setDownloadedSourceByContentID({ hydrationKey, sources: {} });
+    if (!enabled || !body.trim() || inlineAttachments.length === 0) return undefined;
+    const attachmentsToDownload = inlineAttachments.filter((attachment) => !emailAttachmentDataURL(attachment));
+    if (attachmentsToDownload.length === 0) return undefined;
     let cancelled = false;
     const objectURLs: string[] = [];
     const controller = new AbortController();
-    setLoading(true);
     const loadInlineAttachment = async (attachment: EmailAttachment): Promise<{ keys: string[]; sourceURL: string }> => {
       const keys = emailAttachmentContentIDKeys(attachment);
       try {
-        const inlineURL = emailAttachmentDataURL(attachment);
-        if (inlineURL) return { keys, sourceURL: inlineURL };
         const mangoAttachmentID = attachment.attachment_id?.trim() ?? "";
         const providerAttachmentID = attachment.id?.trim() ?? "";
         let sourceURL = "";
         if (mangoAttachmentID) {
           sourceURL = await loadMangoAttachmentObjectURL(apiBase, companyID, mangoAttachmentID, "display", { signal: controller.signal });
         } else if (providerAttachmentID) {
-          const blob = await downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID);
+          const blob = await downloadEmailAttachment(messageID, providerAttachmentID, companyID, sharedInboxID, { signal: controller.signal });
           if (cancelled) return { keys, sourceURL: "" };
           sourceURL = URL.createObjectURL(blob);
         }
@@ -5767,38 +5779,33 @@ function useEmailBodyDocument(messageID: string, body: string, attachments: Emai
         return { keys, sourceURL: "" };
       }
     };
-    void Promise.all(inlineAttachments.map(loadInlineAttachment))
-      .then((items) => {
-        if (cancelled) return;
-        const nextSources: Record<string, string> = {};
-        for (const item of items) {
-          if (!item.sourceURL) continue;
-          for (const key of item.keys) nextSources[key] = item.sourceURL;
-        }
-        setSourceByContentID(nextSources);
-      })
-      .catch(() => {
-        if (!cancelled) setSourceByContentID({});
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+    void Promise.all(attachmentsToDownload.map(async (attachment) => {
+      const item = await loadInlineAttachment(attachment);
+      if (cancelled || !item.sourceURL) return;
+      setDownloadedSourceByContentID((current) => {
+        const next = current.hydrationKey === hydrationKey ? { ...current.sources } : {};
+        for (const key of item.keys) next[key] = item.sourceURL;
+        return { hydrationKey, sources: next };
       });
+    }));
     return () => {
       cancelled = true;
       controller.abort();
       objectURLs.forEach((objectURL) => URL.revokeObjectURL(objectURL));
     };
-  }, [apiBase, body, companyID, inlineAttachmentKey, inlineAttachments, messageID, sharedInboxID]);
+  }, [apiBase, body, companyID, enabled, hydrationKey, inlineAttachmentKey, inlineAttachments, messageID, sharedInboxID]);
 
   const srcDoc = React.useMemo(() => {
+    if (!enabled) return "";
     const documentHTML = messageDocument(body);
-    return rewriteEmailDocumentCIDSources(documentHTML, sourceByContentID);
-  }, [body, sourceByContentID]);
+    const downloadedSources = downloadedCIDState.hydrationKey === hydrationKey ? downloadedCIDState.sources : {};
+    return rewriteEmailDocumentCIDSources(documentHTML, { ...embeddedSourceByContentID, ...downloadedSources });
+  }, [body, downloadedCIDState, embeddedSourceByContentID, enabled, hydrationKey]);
 
-  return { srcDoc, loading };
+  return { srcDoc };
 }
 
-function EmailConversationMessage({ message, companyID, sharedInboxID, fill, expanded, busy, calendarResponseAvailable, loadingBody = false, onToggleExpanded, onReply, onReplyAll, onForward }: {
+function EmailConversationMessage({ message, companyID, sharedInboxID, fill, expanded, busy, calendarResponseAvailable, loadingBody = false, onToggleExpanded, onLoadBody, onReply, onReplyAll, onForward }: {
   message: EmailMessage;
   companyID: string;
   sharedInboxID?: string;
@@ -5808,6 +5815,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, exp
   calendarResponseAvailable: boolean;
   loadingBody?: boolean;
   onToggleExpanded: () => void;
+  onLoadBody: () => void;
   onReply: (message: EmailMessage) => void;
   onReplyAll: (message: EmailMessage) => void;
   onForward: (message: EmailMessage) => void;
@@ -5817,11 +5825,12 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, exp
     [message.attachments],
   );
   const messageDate = formatMessageDate(message.date);
-  const body = message.body?.trim() ? message.body : loadingBody ? "" : (message.snippet || "");
+  const bodyLoaded = emailMessageBodyIsLoaded(message);
+  const body = bodyLoaded ? (message.body ?? "") : "";
   const attachments = visibleEmailAttachmentsForBody(body, allAttachments);
   const hasAttachments = attachments.length > 0;
   const hasCalendarInvite = allAttachments.some(emailAttachmentIsCalendarInvite);
-  const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID);
+  const bodyDocument = useEmailBodyDocument(message.id, body, allAttachments, companyID, sharedInboxID, expanded && bodyLoaded);
   const showMessageMeta = !fill;
   const frameMinHeight = fill ? (hasAttachments ? 300 : 360) : 120;
   const frameStyle: React.CSSProperties | undefined = fill ? undefined : { boxShadow: "none" };
@@ -5868,8 +5877,11 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, exp
           </div>
         </div>
       )}
-      {expanded && ((loadingBody && !body) || bodyDocument.loading ? (
-        <div style={emailBodyLoadingStyle}>Loading message</div>
+      {expanded && (!bodyLoaded ? (
+        <div style={emailBodyLoadingStyle}>
+          <span>{loadingBody ? "Loading message" : "Message body unavailable"}</span>
+          {!loadingBody && <button type="button" style={mailPanelSmallButtonStyle} onClick={onLoadBody}>Retry</button>}
+        </div>
       ) : (
         <AutoHeightEmailBodyFrame srcDoc={bodyDocument.srcDoc} minHeight={frameMinHeight} style={frameStyle} />
       ))}
@@ -5903,7 +5915,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, fill, exp
   );
 }
 
-export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, onReply, onReplyAll, onForward, onArchive, onDelete, onToggleRead, onToggleStar }: {
+export function MessageDetail({ message, threadMessages = [], companyID, sharedInboxID, loading, archiveAvailable, archiveLabel, busy, deleteAvailable, onLoadMessageBody, onReply, onReplyAll, onForward, onArchive, onDelete, onToggleRead, onToggleStar }: {
   message: EmailMessage;
   threadMessages?: EmailMessage[];
   companyID: string;
@@ -5913,6 +5925,7 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   archiveLabel: string;
   busy: boolean;
   deleteAvailable: boolean;
+  onLoadMessageBody: (messageID: string) => Promise<EmailMessage | null>;
   onReply: (message: EmailMessage) => void;
   onReplyAll: (message: EmailMessage) => void;
   onForward: (message: EmailMessage) => void;
@@ -5926,18 +5939,57 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
   const singleMessage = conversationMessages.length <= 1;
   const newestMessageID = conversationMessages[0]?.id ?? message.id;
   const [expandedMessageIDs, setExpandedMessageIDs] = React.useState<Set<string>>(() => new Set([newestMessageID]));
+  const [loadingMessageBodyIDs, setLoadingMessageBodyIDs] = React.useState<Set<string>>(() => new Set());
+  const messageBodyInflightRef = React.useRef<Map<string, Promise<EmailMessage | null>>>(new Map());
+  const loadConversationMessageBody = React.useCallback((conversationMessage: EmailMessage): Promise<EmailMessage | null> => {
+    if (emailMessageBodyIsLoaded(conversationMessage)) return Promise.resolve(conversationMessage);
+    const messageID = conversationMessage.id.trim();
+    if (!messageID) return Promise.resolve(null);
+    const existing = messageBodyInflightRef.current.get(messageID);
+    if (existing) return existing;
+    setLoadingMessageBodyIDs((current) => new Set(current).add(messageID));
+    const request = onLoadMessageBody(messageID).finally(() => {
+      if (messageBodyInflightRef.current.get(messageID) === request) messageBodyInflightRef.current.delete(messageID);
+      setLoadingMessageBodyIDs((current) => {
+        if (!current.has(messageID)) return current;
+        const next = new Set(current);
+        next.delete(messageID);
+        return next;
+      });
+    });
+    messageBodyInflightRef.current.set(messageID, request);
+    return request;
+  }, [onLoadMessageBody]);
   React.useLayoutEffect(() => {
     setExpandedMessageIDs(newestMessageID ? new Set([newestMessageID]) : new Set());
-  }, [newestMessageID]);
-  const toggleConversationMessage = (messageID: string) => {
+    const newestMessage = conversationMessages[0];
+    if (newestMessage && !emailMessageBodyIsLoaded(newestMessage)) void loadConversationMessageBody(newestMessage);
+  }, [loadConversationMessageBody, newestMessageID]);
+  const toggleConversationMessage = (conversationMessage: EmailMessage) => {
+    const messageID = conversationMessage.id;
+    const expanding = !expandedMessageIDs.has(messageID);
     setExpandedMessageIDs((current) => {
       const next = new Set(current);
       if (next.has(messageID)) next.delete(messageID);
       else next.add(messageID);
       return next;
     });
+    if (expanding) void loadConversationMessageBody(conversationMessage);
   };
   const allConversationMessagesExpanded = conversationMessages.every((conversationMessage) => expandedMessageIDs.has(conversationMessage.id));
+  const expandAllConversationMessages = () => {
+    setExpandedMessageIDs(new Set(conversationMessages.map((conversationMessage) => conversationMessage.id)));
+    for (const conversationMessage of conversationMessages) void loadConversationMessageBody(conversationMessage);
+  };
+  const runMessageAction = (conversationMessage: EmailMessage, action: (loadedMessage: EmailMessage) => void) => {
+    if (emailMessageBodyIsLoaded(conversationMessage)) {
+      action(conversationMessage);
+      return;
+    }
+    void loadConversationMessageBody(conversationMessage).then((loadedMessage) => {
+      if (loadedMessage) action(loadedMessage);
+    });
+  };
   const bodyContainerStyle: React.CSSProperties = {
     minHeight: 0,
     overflowX: "hidden",
@@ -5968,7 +6020,7 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
           <button
             style={mailPanelSmallButtonStyle}
             disabled={allConversationMessagesExpanded}
-            onClick={() => setExpandedMessageIDs(new Set(conversationMessages.map((conversationMessage) => conversationMessage.id)))}
+            onClick={expandAllConversationMessages}
           >
             Expand all threads
           </button>
@@ -5992,11 +6044,12 @@ export function MessageDetail({ message, threadMessages = [], companyID, sharedI
             expanded={singleMessage || expandedMessageIDs.has(conversationMessage.id)}
             busy={busy}
             calendarResponseAvailable={!sharedInboxID || archiveAvailable}
-            loadingBody={loading && conversationMessage.id === message.id && !conversationMessage.body?.trim()}
-            onToggleExpanded={() => toggleConversationMessage(conversationMessage.id)}
-            onReply={onReply}
-            onReplyAll={onReplyAll}
-            onForward={onForward}
+            loadingBody={loadingMessageBodyIDs.has(conversationMessage.id) || (loading && conversationMessage.id === message.id && !emailMessageBodyIsLoaded(conversationMessage))}
+            onToggleExpanded={() => toggleConversationMessage(conversationMessage)}
+            onLoadBody={() => { void loadConversationMessageBody(conversationMessage); }}
+            onReply={(replyMessage) => runMessageAction(replyMessage, onReply)}
+            onReplyAll={(replyMessage) => runMessageAction(replyMessage, onReplyAll)}
+            onForward={(forwardMessage) => runMessageAction(forwardMessage, onForward)}
           />
         ))}
       </div>

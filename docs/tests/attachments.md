@@ -68,6 +68,9 @@ ATT35 - A node uses one StrictMode-safe resource-attachment metadata singlefligh
 ATT36 - Successful supported still-image uploads create repository-backed high-quality `display` and small `thumbnail` variants after the original attachment and resource link have committed. Generation is bounded, best-effort, idempotent, and retryable on completed-intent replay; it currently server-sniffs static JPEG/PNG only, never upscales, and safely leaves GIF/WebP/APNG/SVG/AVIF/HEIC or over-limit inputs on authorized original fallback. Derivative failure must never change a completed original into a failed upload.
 ATT37 - Each attachment variant row owns nullable content SHA-256, generation version, and update time while `attachments.sha256` remains the original-file hash. Derivative object keys include the generated digest and are immutable for that content. The content route performs one minimal repository read for attachment, requested-or-original variant, and active authorization links; authorizes those links; emits strong validators only for verified current rows plus `Cache-Control: private, max-age=0, no-cache, must-revalidate` and `X-Content-Type-Options: nosniff`; validates object length against repository metadata; and returns a matching `304` before object storage. A legacy/stale or missing derivative falls back once to the authorized original without exposing a bucket or key.
 ATT38 - Existing supported images are repaired through the human-only `mango-attachment-variants` repository command. It requires company scope and an explicit limit, defaults to dry-run, requires both apply and a scary confirmation string to write, runs with concurrency one, and resumes deterministically with `-after-attachment-id` plus a reported next cursor. Apply reports failures and exits nonzero when any item failed. Current-generation rows are included so storage existence checks can heal missing objects. Normal tests cover the command without any agent running it against dev or production storage; the database-agent boundary verifier does not authorize this writer/S3 operation.
+ATT39 - Incoming email body text and HTML never wait for inline attachment bytes. CID images resolve independently through authenticated Mango/provider reads, and a slow, failed, or aborted image leaves the body readable.
+ATT40 - Collapsed historical email cards issue no attachment-content reads. Expanded-card reads are abortable when scope, thread, message, or attachment changes and release transient object URLs during cleanup.
+ATT41 - Initial body detail carries provider attachment metadata and only the inline content required by concrete CID recovery; ordinary body-only or ordinary file-attachment detail does not fetch or embed raw MIME bytes. Calendar RSVP may still authenticate and parse raw MIME at the action boundary.
 
 ## Scenarios
 
@@ -277,13 +280,18 @@ Business logic covered:
 - ATT24
 - ATT25
 - ATT32
+- ATT39
+- ATT40
+- ATT41
 
 Given:
 - A personal, shared, or node-attached email body contains an inline screenshot referenced by `cid:` or provider attachment metadata.
 - A user selects or copies an inline image in any unified rich editor surface, including a personal/shared email signature.
 
 Expected:
-- Mango resolves the incoming image through the authorized attachment boundary and renders it inside the email body.
+- Mango renders the sanitized incoming body before CID attachment bytes finish loading, then resolves each inline image independently through the authorized attachment boundary.
+- Collapsed historical cards make no body-detail or attachment-content reads. Expanding a card activates its lazy body read and abortable CID downloads; replacing or collapsing the card aborts work that no longer has a visible consumer.
+- Ordinary message detail does not fetch raw MIME merely because attachment metadata is empty or no calendar part is present; MIME recovery remains limited to a concrete missing inline-CID body reference, while calendar RSVP may still use authenticated raw MIME parsing.
 - A single click on the incoming image exposes an explicit authenticated download action, and a double-click opens fullscreen preview.
 - Selecting the editable image preserves its resize selection and places a document caret immediately before its frame.
 - Typing text or spaces at that caret moves the editable image forward, and resize behavior is consistent in node, Logic Gate, project, My Triage, Shared Triage, attached-email reply, and email-signature editors.

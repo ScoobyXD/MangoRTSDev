@@ -54,7 +54,7 @@ ST40 - Shared Triage mail is non-live. Nylas webhooks may update backend cache/s
 ST41 - No Shared Triage, My Work, Updates, GVIC matrix, root, or folder view issues mail GETs because of a WebSocket event; there is no communications product scope.
 ST42 - Shared Triage mailbox inboxes load current messages on initial open, explicit list-identity changes, or manual refresh; temporary cross-user/provider staleness between those loads is accepted.
 ST43 - Shared Triage mailbox inboxes must show a fixed, predictable message batch size of 12 messages per page.
-ST44 - Shared Triage mailbox inboxes must immediately prefetch the next message page after the first visible page loads, without waiting for scrolling or the archive/advance action.
+ST44 - Shared Triage mailbox inboxes automatically prefetch the next message page after the selected-detail foreground path settles, without waiting for scrolling or the archive/advance action.
 ST45 - Scrolling a Shared Triage mailbox inbox must not archive messages and must not load the next primary-inbox page.
 ST46 - Advancing a Shared Triage mailbox inbox page is an explicit user action that archives only the messages visible on the current page.
 ST47 - Advancing must display the prefetched next page before archiving the previous page whenever a prefetched page is available.
@@ -156,13 +156,18 @@ Shared mailbox read receipts depend on both outbound send tracking and webhook d
 
 ## Email Threading Contract
 
-Shared Triage uses Nylas `thread_id` and thread `message_ids` to group related messages into one inbox row and to load the selected conversation history. Message bodies still come from single-message detail reads because list/thread responses can omit full HTML bodies. Detail cards are newest first; the newest expands while older cards collapse, and expanded cards auto-size inside the thread's single scroll surface. Every thread, message, body, and send remains scoped to the selected `shared_inbox_id` and company-owned shared mailbox grant.
+Shared Triage uses Nylas `thread_id` to group related messages into one inbox row. After the selected detail hydrates, bounded thread-filtered message pages provide conversation header metadata; older cards fetch single-message detail only when expanded. Detail cards are newest first, the newest expands while older cards collapse, and expanded cards auto-size inside the thread's single scroll surface. Every preview, message, body, attachment, and send remains scoped to the selected `shared_inbox_id` and company-owned shared mailbox grant.
 
 ST133 - Shared Triage automatically inserts the default signature scoped to the exact selected `shared_inbox_id` exactly once into each new compose, reply, and reply-all editor. A late database load may backfill only the matching still-open new draft while preserving typed text; personal or other shared-inbox signatures must never leak into it, and reopening a saved draft must not add or replace a signature.
 ST134 - Shared Triage thread inspection exposes expand-all, To/Cc/Bcc, authenticated image download/fullscreen, immediate reply focus, and bounded vertical resizing under the selected shared-inbox scope. Pointer-up, pointer-cancel, lost capture, or window blur ends resizing, and calendar RSVP controls prevent duplicate submission and show a selected response only after provider success.
 ST135 - Shared remote-draft reconciliation keeps the newest reply draft for each user/shared-inbox/source-message scope, deletes superseded remote duplicates, and restores saved Reply All To/Cc/Bcc addressing without adding the active shared mailbox or duplicate recipients.
 ST136 - Shared Save Draft and Send flush the mounted unified editor first and persist or submit the exact sanitized HTML returned by that flush, including the user's final DOM edit.
 ST137 - The shared-inbox signature editor is a `shared_inbox_id`-scoped unified rich editor using the shared toolbar, including working font-size minus/value/plus and highlight controls. Save Signature persists the exact flushed HTML; stale loads cannot overwrite newer edits, empty remote rows remain authoritative, and failed saves retain ordered shared-inbox pending sync without overtaking newer saves or leaking across inboxes.
+ST138 - Shared primary-inbox prefetch builds a bounded logical page of at most 12 unique thread rows, stops on repeated tokens or the provider-page budget, and keys all work by company, `shared_inbox_id`, mailbox, filters, and page token.
+ST139 - Shared Advance directly consumes the exact matching prefetch, awaiting matching in-flight work rather than duplicating it; personal or another shared inbox's prefetched page must never be reused.
+ST140 - Shared prefetch and provider mark-read yield foreground priority to the selected shared detail request while retaining immediate optimistic unread UI.
+ST141 - Clicking a different shared thread replaces prior conversation state immediately, and stale work from the previous `shared_inbox_id` or thread cannot repopulate it.
+ST142 - Shared thread history uses bounded preview pages and lazy scoped body/attachment hydration. Collapsed cards issue no provider or Mango attachment-content reads; Expand all intentionally hydrates all cards.
 
 ## Scenarios
 
@@ -430,6 +435,9 @@ Business logic covered:
 - ST76
 - ST77
 - ST87
+- ST138
+- ST139
+- ST140
 
 Given:
 - A user opens a mailbox-capable Shared Triage inbox with view access to the shared mailbox.
@@ -438,13 +446,13 @@ Given:
 
 Expected:
 - The visible page contains no more than 12 messages.
-- The next page is prefetched after the visible page loads.
+- After the selected shared detail request gets foreground priority, the next page is prefetched as a bounded logical page of at most 12 unique thread rows; filling stops on a repeated provider token or the configured request budget.
 - Created, updated, and deleted provider state appears on the next canonical shared-inbox list load; no message event mutates the visible list live.
 - Newly received mail appears on the next canonical page/list load.
 - Local committed commands patch affected visible rows; external updates appear on the next canonical load.
 - The next explicit page/list load reconciles provider state; no communications realtime event exists.
 - Scrolling the visible page does not archive any messages and does not append another primary-inbox page.
-- Clicking the advance action freezes the currently visible message IDs, shows the prefetched next page, and enqueues only the frozen previous-page IDs for background archive.
+- Clicking the advance action freezes the currently visible message IDs, directly consumes (or awaits) the matching company/shared-inbox-scoped prefetched logical page without duplicating provider reads, and enqueues only the frozen previous-page IDs for background archive.
 - The frozen previous-page IDs are accepted by one page-level backend archive request only after durable archive job rows are written, and provider archive mutations continue from the backend worker using the shared mailbox grant.
 - The advance action becomes usable again immediately after the next page is shown and the previous page is queued.
 - The hidden archive queue accepts at most 140 pending emails; if adding the current page would exceed that limit, the advance action is disabled until enough background archive work completes.
@@ -579,6 +587,8 @@ Business logic covered:
 - ST126
 - ST127
 - ST128
+- ST141
+- ST142
 
 Given:
 - A mailbox-capable Shared Triage inbox has multiple provider messages with the same Nylas `thread_id`.
@@ -595,6 +605,8 @@ Expected:
 - Each card's Reply, Reply All, and Forward actions target that card's message ID while retaining the selected shared-inbox scope.
 - The thread detail pane owns the only vertical scrollbar; every expanded body auto-sizes to its full rendered height without an iframe/card scrollbar.
 - Thread IDs and message bodies are loaded only through the selected `shared_inbox_id` and company-owned shared grant; the UI must not fall back to the actor's personal mailbox.
+- The selected shared message detail is the foreground read. Thread history starts from bounded, thread-filtered list previews; each older body is fetched only when that card is expanded or Expand all is chosen.
+- Selecting a row from another shared thread immediately replaces the prior conversation cards, while same-thread reconciliation may preserve already hydrated detail; no personal/shared cache entry is reused across scopes.
 - Sent shared rich HTML preserves block indentation instead of flattening indented paragraphs.
 - Local shared Sent/reply caches keep provider-ready Mango HTML when the send response omits body content, including CID-rewritten inline-image HTML rather than stale internal attachment URLs.
 - Mango's own shared Inbox, All, Sent, thread, and detail displays preserve Mango-authored line breaks, spaces, and indentation instead of flattening the same email body into one sentence.

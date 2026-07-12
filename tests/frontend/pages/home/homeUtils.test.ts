@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { CommunicationsSharedInbox, EmailMessage } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 import type { LogicGateRecord } from "../../../../frontend/src/modules/logic-gate-map/shared.js";
@@ -53,6 +55,23 @@ function sharedInbox(id: string, name: string, position: number, parentID?: stri
     updated_timestamp: "2026-01-01T00:00:00Z",
   };
 }
+
+test("triage email bodies render before cancellable inline-image hydration completes", () => {
+  const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
+
+  assert.match(homeParts, /useEmailBodyDocument\(message\.id, body, allAttachments, companyID, sharedInboxID, expanded && bodyLoaded\)/);
+  assert.match(homeParts, /if \(!enabled \|\| !body\.trim\(\) \|\| inlineAttachments\.length === 0\) return undefined/);
+  assert.match(homeParts, /downloadEmailAttachment\(messageID, providerAttachmentID, companyID, sharedInboxID, \{ signal: controller\.signal \}\)/);
+  assert.match(homeParts, /const item = await loadInlineAttachment\(attachment\);[\s\S]{0,300}setDownloadedSourceByContentID/);
+  assert.match(homeParts, /controller\.abort\(\)/);
+  assert.doesNotMatch(homeParts, /bodyDocument\.loading/);
+  assert.match(homeParts, /const loadConversationMessageBody = React\.useCallback/);
+  assert.match(homeParts, /if \(emailMessageBodyIsLoaded\(conversationMessage\)\) return Promise\.resolve\(conversationMessage\)/);
+  assert.match(homeParts, /const body = bodyLoaded \? \(message\.body \?\? ""\) : ""/);
+  assert.match(homeParts, /Message body unavailable/);
+  assert.doesNotMatch(homeParts, /const body = [^\n]+message\.snippet/);
+  assert.match(homeParts, /for \(const conversationMessage of conversationMessages\) void loadConversationMessageBody\(conversationMessage\)/);
+});
 
 function node(id: string, title: string, overrides: Partial<NodeRecord> = {}): NodeRecord {
   return {

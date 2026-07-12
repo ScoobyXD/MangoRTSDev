@@ -64,6 +64,7 @@ export type EmailFolder = {
 
 export type EmailMessage = {
   id: string;
+  detail_fetched?: boolean;
   thread_id?: string;
   subject: string;
   snippet?: string;
@@ -362,6 +363,10 @@ type CacheEntry<T> = {
   fetchedAt: number;
 };
 
+type MessageDetailCacheEntry = CacheEntry<EmailMessage> & {
+  detailFetched: boolean;
+};
+
 const STATUS_CACHE_TTL_MS = 60_000;
 const WORKDAY_EMAIL_CACHE_TTL_MS = 10 * 60 * 60_000;
 const FOLDERS_CACHE_TTL_MS = WORKDAY_EMAIL_CACHE_TTL_MS;
@@ -380,7 +385,8 @@ export const EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED = "mangorts:communicati
 let statusCache: CacheEntry<CommunicationsStatus> | null = null;
 const foldersCache = new Map<string, CacheEntry<EmailFolder[]>>();
 const messagePageCache = new Map<string, CacheEntry<MessagePage>>();
-const messageDetailCache = new Map<string, CacheEntry<EmailMessage>>();
+const messageDetailCache = new Map<string, MessageDetailCacheEntry>();
+const emailThreadCache = new Map<string, CacheEntry<EmailThread>>();
 const recentArchivedMessages = new Map<string, CacheEntry<EmailMessage>>();
 const recentPrimaryMessages = new Map<string, CacheEntry<EmailMessage>>();
 const recentStarredMessages = new Map<string, CacheEntry<EmailMessage>>();
@@ -388,6 +394,7 @@ let statusInflight: Promise<CommunicationsStatus> | null = null;
 const foldersInflight = new Map<string, Promise<EmailFolder[]>>();
 const messagePageInflight = new Map<string, Promise<MessagePage>>();
 const messageDetailInflight = new Map<string, Promise<EmailMessage>>();
+const emailThreadInflight = new Map<string, Promise<EmailThread>>();
 const communicationsReadCache = new Map<string, CacheEntry<unknown>>();
 const communicationsReadInflight = new Map<string, Promise<unknown>>();
 let communicationsAuthSessionGeneration = getAuthSessionCacheGeneration();
@@ -466,16 +473,17 @@ export async function listEmailMessages(params: ListMessagesParams): Promise<Mes
   const cachePath = `/v1/communications/messages${createMessageQuery(cacheParams)}`;
   const requestPath = params.refresh ? `/v1/communications/messages${createMessageQuery(params)}` : cachePath;
   const cacheEntry = messagePageCache.get(cachePath) ?? null;
+  const inflightKey = requestPath;
   if (!params.refresh) {
     const cached = readCache(cacheEntry, MESSAGE_PAGE_CACHE_TTL_MS, cloneMessagePage);
     if (cached) return applyLocalMessageOverlaysToPage(cached, cacheParams);
-    const existingInflight = messagePageInflight.get(cachePath);
-    if (existingInflight) return applyLocalMessageOverlaysToPage(cloneMessagePage(await existingInflight), cacheParams);
   }
+  const existingInflight = messagePageInflight.get(inflightKey);
+  if (existingInflight) return applyLocalMessageOverlaysToPage(cloneMessagePage(await existingInflight), cacheParams);
   const pagePromise = apiFetchJSON<MessagePage>(requestPath).finally(() => {
-    messagePageInflight.delete(cachePath);
+    if (messagePageInflight.get(inflightKey) === pagePromise) messagePageInflight.delete(inflightKey);
   });
-  messagePageInflight.set(cachePath, pagePromise);
+  messagePageInflight.set(inflightKey, pagePromise);
   let page: MessagePage;
   try {
     page = await pagePromise;
@@ -509,7 +517,7 @@ export async function getEmailMessage(messageID: string, companyID?: string, sha
   const cacheKey = messageDetailCacheKey(messageID, companyID, sharedInboxID);
   const cacheEntry = messageDetailCache.get(cacheKey) ?? null;
   const cached = readCache(cacheEntry, MESSAGE_DETAIL_CACHE_TTL_MS, cloneMessage);
-  if (cached && isEmailMessageDetailed(cached)) return hydrateEmailMessageLocalReplies(cached);
+  if (cached && cacheEntry?.detailFetched) return hydrateEmailMessageLocalReplies({ ...cached, detail_fetched: true });
   const existingInflight = messageDetailInflight.get(cacheKey);
   if (existingInflight) return cloneMessage(await existingInflight);
   const queryParams = new URLSearchParams();
@@ -518,7 +526,7 @@ export async function getEmailMessage(messageID: string, companyID?: string, sha
   const query = queryParams.toString();
   const request = apiFetchJSON<{ message: EmailMessage }>(`/v1/communications/messages/${encodeURIComponent(messageID)}${query ? `?${query}` : ""}`)
     .then((payload) => {
-      const message = cloneMessage(payload.message);
+      const message = cloneMessage({ ...payload.message, detail_fetched: true });
       const previous = messageDetailCache.get(cacheKey)?.value;
       const replies = mergeLocalReplies(previous?.local_replies ?? [], [
         ...(message.local_replies ?? []),
@@ -526,7 +534,7 @@ export async function getEmailMessage(messageID: string, companyID?: string, sha
         ...readStoredLocalThreadReplies(message.thread_id),
       ]);
       const value = cloneMessage({ ...message, local_replies: replies.length > 0 ? replies : undefined });
-      messageDetailCache.set(cacheKey, { value, fetchedAt: Date.now() });
+      messageDetailCache.set(cacheKey, { value, fetchedAt: Date.now(), detailFetched: true });
       return value;
     })
     .finally(() => {
@@ -537,7 +545,7 @@ export async function getEmailMessage(messageID: string, companyID?: string, sha
     return cloneMessage(await request);
   } catch (error) {
     const stale = isNylasRateLimitedError(error) ? readCache(cacheEntry, MESSAGE_STALE_ON_RATE_LIMIT_TTL_MS, cloneMessage) : null;
-    if (stale && isEmailMessageDetailed(stale)) return stale;
+    if (stale && cacheEntry?.detailFetched) return hydrateEmailMessageLocalReplies({ ...stale, detail_fetched: true });
     throw error;
   }
 }
@@ -546,22 +554,38 @@ export async function getEmailThread(threadID: string, companyID?: string, share
   ensureCommunicationsCacheAuthScope();
   const cleanThreadID = threadID.trim();
   if (!cleanThreadID) throw new Error("email_thread_id_required");
+  const cacheKey = emailThreadCacheKey(cleanThreadID, companyID, sharedInboxID);
+  const cacheEntry = emailThreadCache.get(cacheKey) ?? null;
+  const cached = readCache(cacheEntry, MESSAGE_DETAIL_CACHE_TTL_MS, cloneEmailThread);
+  if (cached) return cached;
+  const existingInflight = emailThreadInflight.get(cacheKey);
+  if (existingInflight) return cloneEmailThread(await existingInflight);
   const queryParams = new URLSearchParams();
   if (companyID?.trim()) queryParams.set("company_id", companyID.trim());
   if (sharedInboxID?.trim()) queryParams.set("shared_inbox_id", sharedInboxID.trim());
   const query = queryParams.toString();
-  const payload = await apiFetchJSON<{ thread: EmailThread }>(`/v1/communications/threads/${encodeURIComponent(cleanThreadID)}${query ? `?${query}` : ""}`);
-  return {
-    ...payload.thread,
-    participants: cloneEmailAddresses(payload.thread.participants),
-    folders: payload.thread.folders ? [...payload.thread.folders] : undefined,
-    message_ids: payload.thread.message_ids ? [...payload.thread.message_ids] : undefined,
-    draft_ids: payload.thread.draft_ids ? [...payload.thread.draft_ids] : undefined,
-    latest_draft_or_message: payload.thread.latest_draft_or_message ? cloneMessage(payload.thread.latest_draft_or_message) : undefined,
-  };
+  const request = apiFetchJSON<{ thread: EmailThread }>(`/v1/communications/threads/${encodeURIComponent(cleanThreadID)}${query ? `?${query}` : ""}`)
+    .then((payload) => {
+      const thread = cloneEmailThread(payload.thread);
+      if (emailThreadInflight.get(cacheKey) === request) {
+        emailThreadCache.set(cacheKey, { value: thread, fetchedAt: Date.now() });
+      }
+      return thread;
+    })
+    .finally(() => {
+      if (emailThreadInflight.get(cacheKey) === request) emailThreadInflight.delete(cacheKey);
+    });
+  emailThreadInflight.set(cacheKey, request);
+  try {
+    return cloneEmailThread(await request);
+  } catch (error) {
+    const stale = isNylasRateLimitedError(error) ? readCache(cacheEntry, MESSAGE_STALE_ON_RATE_LIMIT_TTL_MS, cloneEmailThread) : null;
+    if (stale) return stale;
+    throw error;
+  }
 }
 
-export async function downloadEmailAttachment(messageID: string, attachmentID: string, companyID?: string, sharedInboxID?: string): Promise<Blob> {
+export async function downloadEmailAttachment(messageID: string, attachmentID: string, companyID?: string, sharedInboxID?: string, options: { signal?: AbortSignal } = {}): Promise<Blob> {
   const cleanMessageID = messageID.trim();
   const cleanAttachmentID = attachmentID.trim();
   if (!cleanMessageID || !cleanAttachmentID) throw new Error("email_attachment_id_required");
@@ -573,7 +597,7 @@ export async function downloadEmailAttachment(messageID: string, attachmentID: s
   const headers = new Headers({ Accept: "application/octet-stream" });
   const token = await getApiAccessToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(`${readAuthConfig().apiBase}${path}`, { headers });
+  const response = await fetch(`${readAuthConfig().apiBase}${path}`, { headers, signal: options.signal });
   if (!response.ok) {
     const text = (await response.text()).trim();
     throw new Error(text || `Failed to download attachment (${response.status})`);
@@ -1310,6 +1334,10 @@ export function invalidateCommunicationsCache(scope?: { status?: boolean; folder
     messageDetailCache.clear();
     messageDetailInflight.clear();
   }
+  if (full || scope?.messagePages || scope?.messages) {
+    emailThreadCache.clear();
+    emailThreadInflight.clear();
+  }
   if (full) {
     recentArchivedMessages.clear();
     recentPrimaryMessages.clear();
@@ -1428,7 +1456,7 @@ export function patchEmailMessagesLogicGatePlacement(messageIDs: string[], logic
   );
   for (const [key, entry] of messageDetailCache.entries()) {
     const next = patch(entry.value);
-    if (next !== entry.value) messageDetailCache.set(key, { value: next, fetchedAt: entry.fetchedAt });
+    if (next !== entry.value) messageDetailCache.set(key, { ...entry, value: next });
   }
   for (const cache of [recentArchivedMessages, recentPrimaryMessages, recentStarredMessages]) {
     for (const id of ids) {
@@ -1448,7 +1476,7 @@ export function addLocalEmailReply(replyToMessageID: string, reply: EmailMessage
   for (const [key, entry] of messageDetailCache.entries()) {
     if (!messageCacheKeyMatchesID(key, cleanReplyToMessageID)) continue;
     const message = addLocalReplyToEmailMessage(entry.value, reply);
-    messageDetailCache.set(key, { value: message, fetchedAt: Date.now() });
+    messageDetailCache.set(key, { ...entry, value: message, fetchedAt: Date.now() });
   }
   patchCachedPageMessages((message) => (
     message.id === cleanReplyToMessageID ? addLocalReplyToEmailMessage(message, reply) : message
@@ -1461,7 +1489,7 @@ export function reconcileLocalEmailReply(reply: EmailMessage): void {
   if (!cleanReplyID && !cleanThreadID) return;
   for (const [key, entry] of messageDetailCache.entries()) {
     const message = reconcileEmailMessageLocalReply(entry.value, reply);
-    if (message !== entry.value) messageDetailCache.set(key, { value: message, fetchedAt: Date.now() });
+    if (message !== entry.value) messageDetailCache.set(key, { ...entry, value: message, fetchedAt: Date.now() });
   }
   patchCachedPageMessages((message) => reconcileEmailMessageLocalReply(message, reply));
 }
@@ -2008,13 +2036,17 @@ function primeMessageCaches(message: EmailMessage): void {
     const baseMessage = hydratedIsDetailed ? hydratedMessage : mergeEmailMessageForDetailCache(entry.value, hydratedMessage);
     const replies = mergeLocalReplies(entry.value.local_replies ?? [], baseMessage.local_replies ?? []);
     const value = cloneMessage({ ...baseMessage, local_replies: replies.length > 0 ? replies : undefined });
-    messageDetailCache.set(key, { value, fetchedAt: now });
+    messageDetailCache.set(key, { value, fetchedAt: now, detailFetched: entry.detailFetched || hydratedIsDetailed });
   }
   const existing = messageDetailCache.get(cleanMessageID)?.value;
   if (!hydratedIsDetailed && !existing) return;
   const baseMessage = existing && !hydratedIsDetailed ? mergeEmailMessageForDetailCache(existing, hydratedMessage) : hydratedMessage;
   const replies = mergeLocalReplies(existing?.local_replies ?? [], baseMessage.local_replies ?? []);
-  messageDetailCache.set(cleanMessageID, { value: cloneMessage({ ...baseMessage, local_replies: replies.length > 0 ? replies : undefined }), fetchedAt: now });
+  messageDetailCache.set(cleanMessageID, {
+    value: cloneMessage({ ...baseMessage, local_replies: replies.length > 0 ? replies : undefined }),
+    fetchedAt: now,
+    detailFetched: true,
+  });
 }
 
 function mergeEmailMessageForDetailCache(previous: EmailMessage, next: EmailMessage): EmailMessage {
@@ -2033,6 +2065,12 @@ function messageDetailCacheKey(messageID: string, companyID?: string, sharedInbo
   const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
   const cleanMessageID = messageID.trim();
   return cleanCompanyID || cleanSharedInboxID ? `${cleanCompanyID}\x1f${cleanSharedInboxID}\x1f${cleanMessageID}` : cleanMessageID;
+}
+
+function emailThreadCacheKey(threadID: string, companyID?: string, sharedInboxID?: string): string {
+  const cleanCompanyID = companyID?.trim() ?? "";
+  const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
+  return `${cleanCompanyID}\x1f${cleanSharedInboxID}\x1f${threadID.trim()}`;
 }
 
 function messageCacheKeyMatchesID(key: string, messageID: string): boolean {
@@ -2096,6 +2134,17 @@ function cloneMessage(message: EmailMessage): EmailMessage {
     logic_gate_count: message.logic_gate_count,
     read_status: message.read_status ? { ...message.read_status } : undefined,
     local_replies: message.local_replies ? message.local_replies.map((reply) => cloneMessage(reply)) : undefined,
+  };
+}
+
+function cloneEmailThread(thread: EmailThread): EmailThread {
+  return {
+    ...thread,
+    participants: cloneEmailAddresses(thread.participants),
+    folders: thread.folders ? [...thread.folders] : undefined,
+    message_ids: thread.message_ids ? [...thread.message_ids] : undefined,
+    draft_ids: thread.draft_ids ? [...thread.draft_ids] : undefined,
+    latest_draft_or_message: thread.latest_draft_or_message ? cloneMessage(thread.latest_draft_or_message) : undefined,
   };
 }
 
