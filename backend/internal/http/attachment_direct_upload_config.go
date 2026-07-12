@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	defaultAttachmentMaxBrowserUploadBytes = int64(250 * 1024 * 1024)
+	defaultAttachmentMaxBrowserUploadBytes = int64(1024 * 1024 * 1024)
 	attachmentSinglePutMaxBytes            = int64(64 * 1024 * 1024)
 	attachmentMultipartPartBytes           = int64(16 * 1024 * 1024)
 	attachmentMaxConcurrentParts           = 3

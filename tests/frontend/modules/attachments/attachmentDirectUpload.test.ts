@@ -336,7 +336,7 @@ test("cancel aborts the active S3 request, removes resume state, and calls the i
 function standardPolicy(): MangoAttachmentUploadPolicy {
   return {
     directUploadEnabled: true,
-    maxFileBytes: 250 * 1024 * 1024,
+    maxFileBytes: 1024 * 1024 * 1024,
     singlePutMaxBytes: 64 * 1024 * 1024,
     multipartPartBytes: 16 * 1024 * 1024,
     maxConcurrentParts: 3,
