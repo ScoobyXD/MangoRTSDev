@@ -248,6 +248,7 @@ func (s *Server) unstarConvertedCommunicationsMessages(ctx context.Context, conn
 		updated.Starred = false
 		if s.commCache != nil {
 			s.commCache.patchMessagePages(connection.UserID, cacheScope, updated, now)
+			s.commCache.patchMessageMetadata(connection.UserID, cacheScope, messageID, NylasMessageUpdate{Starred: &unstarred}, updated)
 		}
 		unstarredIDs = append(unstarredIDs, messageID)
 	}

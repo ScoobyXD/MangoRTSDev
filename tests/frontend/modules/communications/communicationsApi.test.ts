@@ -9,9 +9,11 @@ import {
   createMessageQuery,
   convertTriageMessagesToExplorerTarget,
   deleteCommunicationsSharedInbox,
+  downloadEmailAttachment,
   emailMessageMatchesListFilters,
   getEmailMessage,
   getEmailSignature,
+  getEmailThread,
   invalidateCommunicationsCache,
   listCompanyUsers,
   listLogicGates,
@@ -751,6 +753,115 @@ test("message list refresh bypasses stale page cache and replaces the normal cac
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
+  }
+});
+
+test("identical forced message-list refreshes share one in-flight request", async () => {
+  invalidateCommunicationsCache();
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  let releaseGate!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls.push(input.toString());
+    await gate;
+    return jsonResponse({ messages: [message("fresh")] });
+  }) as typeof fetch;
+  try {
+    const first = listEmailMessages({ mailbox: "primary", limit: 12, refresh: true });
+    const second = listEmailMessages({ mailbox: "primary", limit: 12, refresh: true });
+    releaseGate();
+    const [firstPage, secondPage] = await Promise.all([first, second]);
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls, ["/v1/communications/messages?limit=12&mailbox=primary&refresh=true"]);
+    assert.deepEqual(firstPage.messages.map((item) => item.id), ["fresh"]);
+    assert.deepEqual(secondPage.messages.map((item) => item.id), ["fresh"]);
+    assert.equal((await listEmailMessages({ mailbox: "primary", limit: 12 })).messages[0]?.id, "fresh");
+    assert.equal(calls.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("email thread reads coalesce, cache, clone, and preserve mailbox scope", async () => {
+  invalidateCommunicationsCache();
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  let releaseGate!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = input.toString();
+    calls.push(path);
+    if (calls.length === 1) await gate;
+    return jsonResponse({
+      thread: {
+        id: "thread-1",
+        message_ids: path.includes("shared_inbox_id") ? ["shared-message"] : ["personal-message"],
+        participants: [{ email: "person@example.test" }],
+      },
+    });
+  }) as typeof fetch;
+  try {
+    const first = getEmailThread("thread-1", "company-1");
+    const second = getEmailThread("thread-1", "company-1");
+    releaseGate();
+    const [firstThread, secondThread] = await Promise.all([first, second]);
+    firstThread.message_ids?.push("caller-only");
+
+    assert.deepEqual(secondThread.message_ids, ["personal-message"]);
+    assert.deepEqual((await getEmailThread("thread-1", "company-1")).message_ids, ["personal-message"]);
+    assert.deepEqual((await getEmailThread("thread-1", "company-1", "shared-1")).message_ids, ["shared-message"]);
+    assert.deepEqual(calls, [
+      "/v1/communications/threads/thread-1?company_id=company-1",
+      "/v1/communications/threads/thread-1?company_id=company-1&shared_inbox_id=shared-1",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("a fetched empty email body remains a valid detail-cache entry", async () => {
+  invalidateCommunicationsCache();
+  const calls: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    calls.push(input.toString());
+    return jsonResponse({ message: message("empty-body") });
+  };
+  try {
+    const first = await getEmailMessage("empty-body");
+    const second = await getEmailMessage("empty-body");
+    assert.equal(first.body, undefined);
+    assert.equal(first.detail_fetched, true);
+    assert.equal(second.detail_fetched, true);
+    assert.deepEqual(calls, ["/v1/communications/messages/empty-body"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("provider attachment downloads forward cancellation signals", async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  let observedSignal: AbortSignal | null | undefined;
+  globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+    observedSignal = init?.signal;
+    return new Response(new Blob(["attachment-bytes"]), { status: 200 });
+  };
+  try {
+    const blob = await downloadEmailAttachment("message-1", "attachment-1", "company-1", "shared-1", { signal: controller.signal });
+    assert.equal(observedSignal, controller.signal);
+    assert.equal(await blob.text(), "attachment-bytes");
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 

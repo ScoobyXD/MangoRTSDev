@@ -315,13 +315,14 @@ func (s *Server) applyNylasWebhookCacheInvalidation(userID, accountScope string,
 	case strings.HasPrefix(trigger, "folder."):
 		s.commCache.invalidateFolders(userID, accountScope)
 	case strings.HasPrefix(trigger, "message.created"):
-		s.commCache.invalidateMessagePages(userID)
+		s.commCache.invalidateMessagePages(userID, accountScope)
 		s.commCache.invalidateMessage(userID, accountScope, change.MessageID)
 	case strings.HasPrefix(trigger, "message.opened"):
-		s.commCache.invalidateMessage(userID, accountScope, change.MessageID)
+		// Read-receipt status is enriched from the store on every response; the
+		// cached provider body and list payload remain valid.
 	case strings.HasPrefix(trigger, "message.updated"), strings.HasPrefix(trigger, "message.deleted"):
 		s.commCache.invalidateMessage(userID, accountScope, change.MessageID)
-		s.commCache.invalidateMessagePages(userID)
+		s.commCache.invalidateMessagePages(userID, accountScope)
 	default:
 		s.commCache.invalidateUser(userID)
 	}

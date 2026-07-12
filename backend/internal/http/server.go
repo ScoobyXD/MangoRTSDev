@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type AuthTokenValidator interface {
@@ -67,6 +69,8 @@ type Server struct {
 	communicationsArchiveWorkerDisabled     bool
 	metrics                                 MetricsRecorder
 	commCache                               *communicationsCache
+	communicationsMessageFlights            singleflight.Group
+	communicationsMessagePageFlights        singleflight.Group
 	commArchiveMutations                    *communicationsArchiveMutationTracker
 	nylasGate                               *nylasRequestGate
 	nylasWebhooks                           *nylasWebhookReceiptCache

@@ -55,23 +55,20 @@ func messageNeedsRawMIMEAttachmentRecovery(message NylasMessage) bool {
 	if message.RawMIMEAttachmentsRecovered {
 		return false
 	}
-	if len(message.Attachments) == 0 {
-		return true
-	}
-	if !slices.ContainsFunc(message.Attachments, rawMIMEAttachmentIsCalendar) {
-		return true
-	}
 	refs := rawMIMEBodyCIDReferences(message.Body)
-	if len(refs) == 0 {
-		return false
-	}
 	for ref := range refs {
 		attachment, ok := findRawMIMEAttachmentByContentID(message.Attachments, ref)
-		if !ok || strings.TrimSpace(attachment.Content) == "" {
+		if !ok || !rawMIMEAttachmentHasUsableContent(attachment) {
 			return true
 		}
 	}
 	return false
+}
+
+func rawMIMEAttachmentHasUsableContent(attachment NylasAttachment) bool {
+	return strings.TrimSpace(attachment.Content) != "" ||
+		strings.TrimSpace(attachment.ID) != "" ||
+		strings.TrimSpace(attachment.AttachmentID) != ""
 }
 
 func rawMIMEBodyCIDReferences(body string) map[string]bool {

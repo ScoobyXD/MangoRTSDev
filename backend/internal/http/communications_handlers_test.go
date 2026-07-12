@@ -61,6 +61,70 @@ type fakeNylasUpdateCall struct {
 	Update    NylasMessageUpdate
 }
 
+type blockingCommunicationsNylasClient struct {
+	*fakeNylasClient
+	blockingMu       sync.Mutex
+	detailStarted    chan struct{}
+	detailRelease    chan struct{}
+	detailSecondCall chan struct{}
+	detailCallCount  int
+	pageStarted      chan struct{}
+	pageRelease      chan struct{}
+	pageSecondCall   chan struct{}
+	pageCallCount    int
+}
+
+func (f *blockingCommunicationsNylasClient) GetMessage(_ context.Context, _, messageID string) (NylasMessage, error) {
+	f.blockingMu.Lock()
+	f.detailCallCount++
+	callCount := f.detailCallCount
+	message := f.message
+	if message.ID == "" {
+		message.ID = messageID
+	}
+	if callCount == 1 && f.detailStarted != nil {
+		close(f.detailStarted)
+	}
+	if callCount == 2 && f.detailSecondCall != nil {
+		close(f.detailSecondCall)
+	}
+	f.blockingMu.Unlock()
+	if f.detailRelease != nil {
+		<-f.detailRelease
+	}
+	return message, nil
+}
+
+func (f *blockingCommunicationsNylasClient) ListMessages(_ context.Context, _ string, _ NylasMessageQuery) (NylasMessagePage, error) {
+	f.blockingMu.Lock()
+	f.pageCallCount++
+	callCount := f.pageCallCount
+	page := NylasMessagePage{Messages: append([]NylasMessage(nil), f.messages...), NextPageToken: "next-token"}
+	if callCount == 1 && f.pageStarted != nil {
+		close(f.pageStarted)
+	}
+	if callCount == 2 && f.pageSecondCall != nil {
+		close(f.pageSecondCall)
+	}
+	f.blockingMu.Unlock()
+	if f.pageRelease != nil {
+		<-f.pageRelease
+	}
+	return page, nil
+}
+
+func (f *blockingCommunicationsNylasClient) detailCalls() int {
+	f.blockingMu.Lock()
+	defer f.blockingMu.Unlock()
+	return f.detailCallCount
+}
+
+func (f *blockingCommunicationsNylasClient) pageCalls() int {
+	f.blockingMu.Lock()
+	defer f.blockingMu.Unlock()
+	return f.pageCallCount
+}
+
 func (f *fakeNylasClient) ExchangeCode(_ context.Context, _, _ string) (NylasGrant, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1085,7 +1149,7 @@ func TestCommunicationsProxyHandlersUseStoredGrant(t *testing.T) {
 	}
 }
 
-func TestCommunicationsMessageFallsBackToRawMIMEAttachments(t *testing.T) {
+func TestCommunicationsMessageSkipsRawMIMEWithoutCIDReferences(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
@@ -1105,7 +1169,11 @@ func TestCommunicationsMessageFallsBackToRawMIMEAttachments(t *testing.T) {
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{
-		message: NylasMessage{ID: "message-1", Subject: "Photos", Body: "Body"},
+		message: NylasMessage{ID: "message-1", Subject: "Photos", Body: "Body", Attachments: []NylasAttachment{{
+			ID:          "provider-file-1",
+			Filename:    "photo.png",
+			ContentType: "image/png",
+		}}},
 		rawMIME: strings.Join([]string{
 			"From: Sender <sender@example.com>",
 			"To: User <user@example.com>",
@@ -1147,32 +1215,47 @@ func TestCommunicationsMessageFallsBackToRawMIMEAttachments(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if nylas.lastRawMIMEGrantID != "grant-1" || nylas.lastRawMIMEMessageID != "message-1" {
-		t.Fatalf("raw mime scope grant=%q message=%q", nylas.lastRawMIMEGrantID, nylas.lastRawMIMEMessageID)
+	if nylas.lastRawMIMEGrantID != "" || nylas.lastRawMIMEMessageID != "" {
+		t.Fatalf("ordinary message fetched raw MIME grant=%q message=%q", nylas.lastRawMIMEGrantID, nylas.lastRawMIMEMessageID)
 	}
 	if len(payload.Message.Attachments) != 1 {
-		t.Fatalf("attachments = %+v, want one raw MIME attachment", payload.Message.Attachments)
+		t.Fatalf("attachments = %+v, want provider attachment only", payload.Message.Attachments)
 	}
 	attachment := payload.Message.Attachments[0]
-	if attachment.Filename != "photo.png" || attachment.ContentType != "image/png" || attachment.Content != "aW1hZ2UtYnl0ZXM=" || attachment.Size != int64(len("image-bytes")) {
-		t.Fatalf("attachment = %+v, want png content from raw MIME", attachment)
-	}
-	attachmentReq := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1/attachments/raw-mime-1", nil)
-	attachmentReq.Header.Set("Authorization", token)
-	attachmentRec := httptest.NewRecorder()
-	handler.ServeHTTP(attachmentRec, attachmentReq)
-	if attachmentRec.Code != http.StatusOK {
-		t.Fatalf("raw MIME attachment status = %d body=%s", attachmentRec.Code, attachmentRec.Body.String())
-	}
-	if attachmentRec.Header().Get("Content-Type") != "image/png" || attachmentRec.Body.String() != "image-bytes" {
-		t.Fatalf("raw MIME attachment content-type=%q body=%q, want image/png image-bytes", attachmentRec.Header().Get("Content-Type"), attachmentRec.Body.String())
-	}
-	if nylas.lastDownloadAttachmentID != "" {
-		t.Fatalf("download attachment id = %q, want raw MIME inline content without provider download", nylas.lastDownloadAttachmentID)
+	if attachment.ID != "provider-file-1" || attachment.Content != "" {
+		t.Fatalf("attachment = %+v, want unchanged provider attachment", attachment)
 	}
 }
 
-func TestCommunicationsMessageMergesRawMIMEInlineAttachmentContent(t *testing.T) {
+func TestMessageNeedsRawMIMEAttachmentRecoveryOnlyForUnresolvedCID(t *testing.T) {
+	t.Parallel()
+
+	resolvedInline := NylasAttachment{ID: "inline-1", ContentID: "image-1", Content: "aW1hZ2U="}
+	tests := []struct {
+		name    string
+		message NylasMessage
+		want    bool
+	}{
+		{name: "body only", message: NylasMessage{Body: "<p>Hello</p>"}},
+		{name: "ordinary attachment", message: NylasMessage{Body: "<p>Hello</p>", Attachments: []NylasAttachment{{ID: "file-1", Filename: "report.pdf"}}}},
+		{name: "unresolved cid", message: NylasMessage{Body: "<img src=\"cid:image-1\">"}, want: true},
+		{name: "cid metadata with provider download id", message: NylasMessage{Body: "<img src=\"cid:image-1\">", Attachments: []NylasAttachment{{ID: "inline-1", ContentID: "image-1"}}}},
+		{name: "cid metadata without usable content", message: NylasMessage{Body: "<img src=\"cid:image-1\">", Attachments: []NylasAttachment{{ContentID: "image-1"}}}, want: true},
+		{name: "resolved cid", message: NylasMessage{Body: "<img src=\"cid:image-1\">", Attachments: []NylasAttachment{resolvedInline}}},
+		{name: "already recovered", message: NylasMessage{Body: "<img src=\"cid:image-1\">", RawMIMEAttachmentsRecovered: true}},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := messageNeedsRawMIMEAttachmentRecovery(test.message); got != test.want {
+				t.Fatalf("messageNeedsRawMIMEAttachmentRecovery() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestCommunicationsMessageUsesProviderDownloadForResolvableCIDAttachment(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
@@ -1238,6 +1321,7 @@ func TestCommunicationsMessageMergesRawMIMEInlineAttachmentContent(t *testing.T)
 			"--mango-related--",
 			"",
 		}, "\r\n"),
+		downloadContent: []byte("image-bytes"),
 	}
 	handler := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
@@ -1259,8 +1343,8 @@ func TestCommunicationsMessageMergesRawMIMEInlineAttachmentContent(t *testing.T)
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if nylas.lastRawMIMEGrantID != "grant-1" || nylas.lastRawMIMEMessageID != "message-1" {
-		t.Fatalf("raw mime scope grant=%q message=%q", nylas.lastRawMIMEGrantID, nylas.lastRawMIMEMessageID)
+	if nylas.lastRawMIMEGrantID != "" || nylas.lastRawMIMEMessageID != "" {
+		t.Fatalf("downloadable CID metadata fetched raw MIME grant=%q message=%q", nylas.lastRawMIMEGrantID, nylas.lastRawMIMEMessageID)
 	}
 	if len(payload.Message.Attachments) != 2 {
 		t.Fatalf("attachments = %+v, want existing inline attachment merged without duplicating regular attachments", payload.Message.Attachments)
@@ -1271,8 +1355,8 @@ func TestCommunicationsMessageMergesRawMIMEInlineAttachmentContent(t *testing.T)
 			attachment = item
 		}
 	}
-	if attachment.ID != "provider-inline-1" || attachment.ContentID != "image-1@local" || attachment.Content != "aW1hZ2UtYnl0ZXM=" || !attachment.IsInline {
-		t.Fatalf("attachment = %+v, want provider metadata with raw MIME inline bytes", attachment)
+	if attachment.ID != "provider-inline-1" || attachment.ContentID != "image-1@local" || attachment.Content != "" || !attachment.IsInline {
+		t.Fatalf("attachment = %+v, want unchanged downloadable provider metadata", attachment)
 	}
 
 	attachmentReq := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1/attachments/provider-inline-1", nil)
@@ -1280,13 +1364,13 @@ func TestCommunicationsMessageMergesRawMIMEInlineAttachmentContent(t *testing.T)
 	attachmentRec := httptest.NewRecorder()
 	handler.ServeHTTP(attachmentRec, attachmentReq)
 	if attachmentRec.Code != http.StatusOK {
-		t.Fatalf("merged inline attachment status = %d body=%s", attachmentRec.Code, attachmentRec.Body.String())
+		t.Fatalf("provider inline attachment status = %d body=%s", attachmentRec.Code, attachmentRec.Body.String())
 	}
 	if attachmentRec.Header().Get("Content-Type") != "image/png" || attachmentRec.Body.String() != "image-bytes" {
-		t.Fatalf("merged inline attachment content-type=%q body=%q, want image/png image-bytes", attachmentRec.Header().Get("Content-Type"), attachmentRec.Body.String())
+		t.Fatalf("provider inline attachment content-type=%q body=%q, want image/png image-bytes", attachmentRec.Header().Get("Content-Type"), attachmentRec.Body.String())
 	}
-	if nylas.lastDownloadAttachmentID != "" {
-		t.Fatalf("download attachment id = %q, want raw MIME inline content without provider download", nylas.lastDownloadAttachmentID)
+	if nylas.lastDownloadAttachmentID != "provider-inline-1" {
+		t.Fatalf("download attachment id = %q, want provider-inline-1", nylas.lastDownloadAttachmentID)
 	}
 }
 
@@ -1343,7 +1427,6 @@ func TestCommunicationsCachedMessageRecoversRawMIMEInlineAttachmentContent(t *te
 		Subject: "Cached inline image",
 		Body:    `<div>Here</div><img src="cid:image-1@local" alt="image.png">`,
 		Attachments: []NylasAttachment{{
-			ID:                 "provider-inline-1",
 			Filename:           "image.png",
 			ContentType:        "image/png",
 			ContentID:          "image-1@local",
@@ -1557,6 +1640,119 @@ func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 	assertJSONStatus(t, handler, http.MethodGet, path, "", token, http.StatusOK)
 	if nylas.lastFolderGrantID != "grant-shared" {
 		t.Fatalf("folder grant = %q, want shared inbox grant", nylas.lastFolderGrantID)
+	}
+}
+
+func TestCommunicationsMessageCoalescesSameKeyProviderReads(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	secondCall := make(chan struct{})
+	client := &blockingCommunicationsNylasClient{
+		fakeNylasClient:  &fakeNylasClient{message: NylasMessage{ID: "message-1", Body: "<p>Body</p>"}},
+		detailStarted:    started,
+		detailRelease:    release,
+		detailSecondCall: secondCall,
+	}
+	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{NylasClient: client})
+	server.nylasGate = newNylasRequestGate(0)
+	connection := domain.UserEmailConnection{
+		UserID:       "user-1",
+		Provider:     "google",
+		AccountEmail: "user@example.com",
+		GrantID:      "grant-1",
+		Scope:        "personal",
+	}
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := server.communicationsMessage(context.Background(), connection, "message-1")
+			errs <- err
+		}()
+		if i == 0 {
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				close(release)
+				t.Fatal("first detail provider call did not start")
+			}
+		}
+	}
+	duplicateStarted := false
+	select {
+	case <-secondCall:
+		duplicateStarted = true
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-errs:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("coalesced detail request did not complete")
+		}
+	}
+	if duplicateStarted || client.detailCalls() != 1 {
+		t.Fatalf("detail provider calls = %d duplicate_started=%t, want one", client.detailCalls(), duplicateStarted)
+	}
+}
+
+func TestCommunicationsMessagePageCoalescesSameKeyForcedRefreshes(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	secondCall := make(chan struct{})
+	client := &blockingCommunicationsNylasClient{
+		fakeNylasClient: &fakeNylasClient{messages: []NylasMessage{{ID: "message-1"}}},
+		pageStarted:     started,
+		pageRelease:     release,
+		pageSecondCall:  secondCall,
+	}
+	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{NylasClient: client})
+	server.nylasGate = newNylasRequestGate(0)
+	connection := domain.UserEmailConnection{
+		UserID:       "user-1",
+		Provider:     "google",
+		AccountEmail: "user@example.com",
+		GrantID:      "grant-1",
+		Scope:        "personal",
+	}
+	query := NylasMessageQuery{Limit: communicationsNylasMaxMessageLimit, Mailbox: "primary", Refresh: true}
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := server.communicationsMessagePage(context.Background(), connection, query)
+			errs <- err
+		}()
+		if i == 0 {
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				close(release)
+				t.Fatal("first page provider call did not start")
+			}
+		}
+	}
+	duplicateStarted := false
+	select {
+	case <-secondCall:
+		duplicateStarted = true
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-errs:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("coalesced page request did not complete")
+		}
+	}
+	if duplicateStarted || client.pageCalls() != 1 {
+		t.Fatalf("page provider calls = %d duplicate_started=%t, want one", client.pageCalls(), duplicateStarted)
 	}
 }
 
@@ -1876,12 +2072,14 @@ func TestNylasWebhookCacheInvalidationIsGranular(t *testing.T) {
 	if _, ok := cache.getMessagePage("user-1", "account:user@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
 		t.Fatal("message.opened invalidated message page; want list cache preserved")
 	}
-	if _, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
-		t.Fatal("message.opened preserved detail; want changed message detail invalidated")
+	if message, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); !ok || message.Subject != "Cached" {
+		t.Fatal("message.opened invalidated provider detail; want read status enriched without discarding the body")
 	}
 
 	cache.setMessagePage("user-1", "account:user@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "message-1"}}}, now)
 	cache.setMessage("user-1", "account:user@example.com", NylasMessage{ID: "message-1", Subject: "Cached"}, now)
+	cache.setMessagePage("user-1", "account:other@example.com", query, NylasMessagePage{Messages: []NylasMessage{{ID: "other-message"}}}, now)
+	cache.setMessage("user-1", "account:other@example.com", NylasMessage{ID: "other-message", Subject: "Other cached body"}, now)
 	server.applyNylasWebhookCacheInvalidation("user-1", "account:user@example.com", nylasWebhookChange{Trigger: "message.updated", MessageID: "message-1"})
 	if _, ok := cache.getFolders("user-1", "account:user@example.com", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
 		t.Fatal("message.updated invalidated folders; want folder cache preserved")
@@ -1891,6 +2089,12 @@ func TestNylasWebhookCacheInvalidationIsGranular(t *testing.T) {
 	}
 	if _, ok := cache.getMessage("user-1", "account:user@example.com", "message-1", communicationsMaxStaleTTL, now.Add(time.Second)); ok {
 		t.Fatal("message.updated preserved detail; want changed message detail invalidated")
+	}
+	if _, ok := cache.getMessagePage("user-1", "account:other@example.com", query, communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+		t.Fatal("message.updated invalidated an unrelated account page")
+	}
+	if _, ok := cache.getMessage("user-1", "account:other@example.com", "other-message", communicationsMaxStaleTTL, now.Add(time.Second)); !ok {
+		t.Fatal("message.updated invalidated an unrelated account detail")
 	}
 
 	cache = newCommunicationsCache()
@@ -2127,6 +2331,64 @@ func TestCommunicationsStarMessagePreservesGmailInboxLabel(t *testing.T) {
 	}
 	if nylas.update.Folders != nil {
 		t.Fatalf("folders update = %v, want nil so starring preserves mailbox folders", nylas.update.Folders)
+	}
+}
+
+func TestCommunicationsUnreadAndStarUpdatesPreserveHydratedDetailCache(t *testing.T) {
+	t.Parallel()
+
+	key := mustRSAKey(t)
+	repo := store.NewMemoryRepo()
+	const subject = "email-cache-user"
+	user, err := repo.UpsertAuthUser(subject, "cache@example.com", "Cache User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID:       user.UserID,
+		Provider:     "google",
+		AccountEmail: user.Email,
+		GrantID:      "grant-cache",
+		Status:       "connected",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nylas := &fakeNylasClient{message: NylasMessage{ID: "message-1", Unread: true}}
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator: testValidator(t, "kid", key),
+		NylasConfig:   testNylasConfig(),
+		NylasClient:   nylas,
+	})
+	server.commCache.setMessage(user.UserID, communicationsConnectionCacheScope(connection), NylasMessage{
+		ID:      "message-1",
+		Subject: "Hydrated subject",
+		Body:    "<p>Hydrated body</p>",
+		Unread:  true,
+	}, time.Now().UTC())
+	handler := server.Routes()
+	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
+
+	assertJSONStatus(t, handler, http.MethodPut, "/v1/communications/messages/message-1", "{\"unread\":false,\"starred\":true}", token, http.StatusOK)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages/message-1", nil)
+	req.Header.Set("Authorization", token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("message status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Message NylasMessage
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if nylas.detailCalls != 0 {
+		t.Fatalf("detail calls = %d, want hydrated body cache preserved", nylas.detailCalls)
+	}
+	if payload.Message.Body != "<p>Hydrated body</p>" || payload.Message.Unread || !payload.Message.Starred {
+		t.Fatalf("message = %+v, want cached body with patched unread/starred metadata", payload.Message)
 	}
 }
 
