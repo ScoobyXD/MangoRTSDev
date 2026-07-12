@@ -1,10 +1,10 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-12
 
 # Project Management Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: 0% (rule IDs are not mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Project Logic Gates / Nodes universal grouping model, including normalization, empty Logic Gates, flat rows, and collapsed visible-node ordering; other rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -51,6 +51,11 @@ PM40 - The node workspace project assignment menu must use the compact project-p
 PM41 - The node workspace project assignment menu must avoid right-edge clipping by shifting left when there is not enough visible space to the right of the button; project rows and optional Logic Gate rows must remain readable without horizontal viewport overflow.
 PM42 - Project permission controls use the canonical permissions contract in `docs/tests/permissions.md`: every editable dialog or embedded view exposes **Save**, saving persists the current selection without closing, and read-only/denied states never issue a write.
 PM43 - Project Management attached-email views follow `docs/tests/projects.md` P32: personal picker attachments and personal email-drop conversions retain `account_email`, shared conversions retain both `shared_inbox_id` and `account_email`, and subsequent thread, attachment, reply, draft, and calendar operations use that stored mailbox scope.
+PM44 - Project Logic Gates / Nodes uses the shared universal grouping engine to render recursive group headers and relationship rows instead of Logic Gate cards. Logic Gate ascending is the default, while an explicit empty grouping stack renders a flat list.
+PM45 - Project relationship grouping supports Logic Gate, Type, Status, Date Added, and Email Origin with ordered levels and ascending/descending direction. Changing these settings changes presentation only and never mutates relationship data. The stack is a browser-local preference scoped to company/current user and shared across that user's projects, not an API-backed named My Work/Updates saved view.
+PM46 - Empty visible Logic Gates remain in the grouped row tree. A node may group under a Logic Gate only when that Logic Gate relationship is itself visible; otherwise it appears under No logic gate.
+PM47 - Logic Gate group/resource rows retain Logic Gate open, context-menu, create-node, node-move, and email-drop behavior; node rows retain selection, standard node opening, context menus, and status/critical/email-origin indicators.
+PM48 - Collapsed grouping branches are excluded from the rendered node selection order, so Shift/Ctrl/Command selection operates on the exact currently visible node rows.
 
 ## Scenarios
 
@@ -197,6 +202,11 @@ Business logic covered:
 - PM36
 - PM37
 - PM38
+- PM44
+- PM45
+- PM46
+- PM47
+- PM48
 
 Given:
 - A project has related Logic Gates and nodes.
@@ -209,6 +219,9 @@ Expected:
 - The opened node window applies node access and saves node edits through node information/projection persistence.
 - The project relationship remains opener context only; it does not own node text-box edits, attached-email edits, or node chat messages.
 - Node text boxes use the unified editor semantics, and node chats remain separate chat panes.
+- Logic Gates and nodes render as recursive indented rows rather than Logic Gate cards, with Logic Gate ascending as the default grouping.
+- The grouping stack can be reordered, changed, or emptied without changing the underlying relationships; empty Logic Gates and nodes without a visible gate remain visible in the appropriate row path.
+- Collapse state controls the visible node ordering used by multi-selection, while group/resource rows preserve their existing open, context-menu, and drop behavior.
 
 ### Scenario PM-S7: Project Permission Controls
 

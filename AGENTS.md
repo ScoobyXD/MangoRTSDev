@@ -21,6 +21,18 @@ MangoRTS is a Windows-friendly Go + Vite/React app with a Go API backend and fro
 - Full test runner: `scripts/run_all_tests.mjs`.
 - Cloud-integrated local backend helper: `scripts/start_local_cognito_backend.ps1`.
 
+## Worktree task completion and local merge
+
+For one coherent feature or fix, the agent task that implements the work owns it through the local merge into `main`. Do not declare the task done while its intended changes remain only in a worker worktree. Use a separate integration task only when the user explicitly requests one, when several completed workers must be merged sequentially, or when the original task is unavailable.
+
+1. Implement the requested change and run proportionate focused verification in the worker worktree.
+2. Review the worker diff, exclude unrelated changes, and commit every intended worker change.
+3. From `C:\Users\Jonat\MangoRTSDev`, run `scripts\merge_worker_branch.ps1` for that worker with `-CommitWorkerChanges` and `-Verification Full`; let the helper resolve the worker branch from `-WorkerPath`.
+4. Resolve any merge conflicts or integration failures while preserving both current `main` behavior and the worker's intended product behavior.
+5. After every merge-time fix, rerun `node scripts\run_all_tests.mjs` on merged `main` and do not finish until the complete verification gate passes.
+6. Report the worker path and branch, worker commit SHA, merge commit SHA, verification result, final `git status --short --branch`, and any conflict-resolution or post-merge fixes separately.
+7. Keep the merge local: do not push the branch or `main` unless the user explicitly asks for a push.
+
 ## Local development commands
 
 Windows PowerShell / PowerShell 7 preferred:
