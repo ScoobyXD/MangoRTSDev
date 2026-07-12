@@ -107,6 +107,23 @@ export function buildProjectRoute(projectID: string): string {
   return `/projects/${encodeSegment(projectID)}`;
 }
 
+export type ProjectLogicGateNavigationPlan = {
+  replacePath: string;
+  pushPath: string;
+};
+
+export function buildProjectLogicGateNavigationPlan(
+  currentPath: string,
+  projectID: string,
+  logicGateID: string,
+): ProjectLogicGateNavigationPlan {
+  const projectPath = projectID.trim() ? buildProjectRoute(projectID) : "";
+  return {
+    replacePath: projectPath && normalizeAppPath(currentPath) !== projectPath ? projectPath : "",
+    pushPath: buildLogicGateRoute(logicGateID),
+  };
+}
+
 export function buildGvicRoute(role: GVICInboxRole, nodeID?: string): string {
   const cleanRole = encodeSegment(role);
   const cleanNodeID = nodeID?.trim() ? encodeSegment(nodeID) : "";

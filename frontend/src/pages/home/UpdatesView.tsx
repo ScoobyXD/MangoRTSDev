@@ -29,7 +29,9 @@ import {
 import { formatNotificationTimestamp } from "../../modules/notifications/notificationTime";
 import { createSavedViewID, fetchSavedViews, type SavedView, type SavedViewPrincipal } from "./savedViewsApi";
 import { buildUniversalNestedGroups, type UniversalGroupValue, type UniversalNestedGroup } from "../../modules/grouping/universalGrouping";
+import { getUniversalStatusGroupValue } from "../../modules/grouping/universalStatusGrouping";
 import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
+import { resolveUpdateStatusForGrouping } from "./updateStatusGrouping";
 import { orderedUpdateSelection, resolveUpdateClickSelection, resolveUpdateSeenSuccessor, updatesNotificationEventRequiresReload } from "./updatesSelection";
 
 type UpdatesEditorContentComponent = React.FC<{
@@ -63,7 +65,7 @@ type UpdatesViewProps = {
   resolveUserLabel?: (userID: string) => string;
 };
 
-type UpdateGroupingField = "type" | "date" | "gvic" | "project" | "logic_gate";
+type UpdateGroupingField = "type" | "date" | "gvic" | "project" | "logic_gate" | "status";
 type UpdateDisplayGroupingField = UpdateGroupingField;
 type UpdateGroupingDirection = "asc" | "desc";
 
@@ -143,6 +145,7 @@ const UPDATE_GROUPING_FIELDS: ReadonlyArray<{ value: UpdateGroupingField; label:
   { value: "gvic", label: "GVIC" },
   { value: "project", label: "Project" },
   { value: "logic_gate", label: "Logic Gate" },
+  { value: "status", label: "Status" },
 ];
 
 const DEFAULT_UPDATE_GROUPINGS: UpdateGroupingSetting[] = [
@@ -360,7 +363,10 @@ export function UpdatesView({
 
   const sourceGroups = useMemo(() => rootGroups.map((root) => branchByRootID[root.id] ?? root), [branchByRootID, rootGroups]);
   const updateRows = useMemo(() => flattenUpdateRows(sourceGroups, hiddenNotificationIDs), [hiddenNotificationIDs, sourceGroups]);
-  const displayGroups = useMemo(() => buildUpdateDisplayGroups(updateRows, selectedSetting.groupings), [selectedSetting.groupings, updateRows]);
+  const displayGroups = useMemo(
+    () => buildUpdateDisplayGroups(updateRows, selectedSetting.groupings, resolveNodeDetails),
+    [resolveNodeDetails, selectedSetting.groupings, updateRows],
+  );
   const visibleUpdateRows = useMemo(
     () => flattenDisplayRows(displayGroups, expandedGroupIDs),
     [displayGroups, expandedGroupIDs],
@@ -807,8 +813,23 @@ function UpdateGroupIcon({ group }: { group: UpdateGroup }) {
   if (group.resource_type === "project" || group.resource_type === "logic_gate" || group.resource_type === "node") {
     return <ExplorerRowIcon kind={group.resource_type} />;
   }
+  if (group.field === "status") {
+    return <span aria-hidden="true" style={updateStatusGroupDotStyle(group.label)} />;
+  }
   const icon = updateGroupIconBadge(group);
   return <span style={updateGroupBadgeStyle(icon.tone)}>{icon.label}</span>;
+}
+
+function updateStatusGroupDotStyle(status: string): React.CSSProperties {
+  const color = updateStatusColor(status);
+  return {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    background: color,
+    border: "1px solid rgba(255, 255, 255, 0.92)",
+    boxShadow: `0 0 0 1px ${color}55`,
+  };
 }
 
 function updateGroupIconBadge(group: UpdateGroup): { label: string; tone: "urgent" | "mention" | "update" | "generated" | "verified" | "consulted" | "informed" | "other" | "date" } {
@@ -1261,7 +1282,7 @@ function updateActorLabel(item: NotificationItem, resolveUserLabel?: (userID: st
 }
 
 function updateRowStatusLabel(row: UpdateFeedRow, details?: UpdateNodeDetails | null): string {
-  return extractStatusFromNotification(row.item) || details?.status?.trim() || "";
+  return resolveUpdateStatusForGrouping(row.item, details?.status);
 }
 
 function updatePriorityValue(value: number | null | undefined): number | null {
@@ -1299,20 +1320,6 @@ function extractNodeLabelFromPreview(item: NotificationItem): string {
   const changedMatch = body.match(/^.+?\s+changed\s+(.+?)\s+to\b/i);
   if (changedMatch?.[1]) return changedMatch[1].trim();
   return normalizeLegacyUpdateTitle(title);
-}
-
-function extractStatusFromNotification(item: NotificationItem): string {
-  const title = item.title.trim();
-  const body = (item.body_preview ?? "").trim();
-  const titleMatch = title.match(/\bstatus changed to\s+(.+)$/i);
-  if (titleMatch?.[1]) return titleMatch[1].trim();
-  const addedMatch = body.match(/\bwas added in\s+([^.]+)\.?$/i);
-  if (addedMatch?.[1]) return addedMatch[1].trim();
-  const movedMatch = body.match(/\bmoved to\s+([^.]+)\.?$/i);
-  if (movedMatch?.[1]) return movedMatch[1].trim();
-  const changedMatch = body.match(/\bchanged\s+.+?\s+to\s+([^.]+)\.?$/i);
-  if (changedMatch?.[1]) return changedMatch[1].trim();
-  return "";
 }
 
 function normalizeLegacyUpdateTitle(value: string): string {
@@ -1391,7 +1398,11 @@ function updatePathWithGroup(path: { project?: UpdateRowResource; logicGate?: Up
   return path;
 }
 
-function buildUpdateDisplayGroups(rows: UpdateFeedRow[], groupings: UpdateGroupingSetting[]): UpdateDisplayGroup[] {
+function buildUpdateDisplayGroups(
+  rows: UpdateFeedRow[],
+  groupings: UpdateGroupingSetting[],
+  resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined,
+): UpdateDisplayGroup[] {
   const displayGroupings: UpdateDisplayGroupingSetting[] = normalizeUpdateGroupingStack(groupings);
   if (displayGroupings.length === 0) {
     const sortedRows = sortUpdateRows(rows);
@@ -1411,7 +1422,7 @@ function buildUpdateDisplayGroups(rows: UpdateFeedRow[], groupings: UpdateGroupi
   const groups = buildUniversalNestedGroups(rows, displayGroupings, {
     rootID: "updates",
     rowKey: (row) => row.rowKey,
-    getValues: getUpdateGroupValues,
+    getValues: (row, field) => getUpdateGroupValues(row, field, resolveNodeDetails),
     sortRows: sortUpdateRows,
   });
   return groups.map(convertUniversalUpdateGroup);
@@ -1434,11 +1445,21 @@ function convertUniversalUpdateGroup(group: UniversalNestedGroup<UpdateFeedRow, 
   };
 }
 
-function getUpdateGroupValues(row: UpdateFeedRow, field: UpdateDisplayGroupingField): UniversalGroupValue[] {
+function getUpdateGroupValues(
+  row: UpdateFeedRow,
+  field: UpdateDisplayGroupingField,
+  resolveNodeDetails?: (nodeID: string) => UpdateNodeDetails | null | undefined,
+): UniversalGroupValue[] {
   if (field === "project") return [updateResourceGroupValue("project", row.project, "No project")];
   if (field === "logic_gate") return [updateResourceGroupValue("logic_gate", row.logicGate, "No logic gate")];
   if (field === "type") return [updateTypeGroupValue(row.item)];
   if (field === "date") return [updateDateGroupValue(row.item.created_timestamp)];
+  if (field === "status") {
+    const nodeID = row.node?.id.trim() ?? "";
+    const status = updateRowStatusLabel(row, nodeID ? resolveNodeDetails?.(nodeID) : null);
+    const value = getUniversalStatusGroupValue(status);
+    return [{ ...value, key: `status:${value.key}` }];
+  }
   const role = row.item.role?.trim() ?? "";
   return role ? [{ key: `gvic:${role}`, label: updateGVICRoleLabel(role), sortValue: updateGVICRoleSort(role) }] : [{ key: "gvic:none", label: "No GVIC", sortValue: 99, sortLast: true }];
 }

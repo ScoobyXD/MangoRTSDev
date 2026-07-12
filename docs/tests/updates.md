@@ -1,10 +1,10 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-12
 
 # Updates Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project and Logic Gate grouping fields. Frontend selection tests cover row selection and individual Seen successor/reload decisions. Other rule IDs are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: saved-views API coverage exists for Updates Project, Logic Gate, and Status grouping fields. `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the exact shared status order and Updates wiring. Frontend selection tests cover row selection and individual Seen successor/reload decisions. Other rule IDs are not mapped to automated tests yet.
 
 ## Business Logic
 
@@ -32,7 +32,7 @@ U21 - Updates visibility filters out notifications whose project, logic gate, or
 U22 - Malformed legacy notification IDs are ignored or sanitized before access checks so the feed does not crash.
 U23 - Realtime notification created, deleted, and cleared events preserve affected scopes and trigger feed refreshes.
 U24 - Read-state changes refetch the feed instead of locally inventing or mutating unrelated feed rows.
-U25 - Updates saved grouping views persist Project and Logic Gate grouping fields through the saved-views API.
+U25 - Updates saved grouping views persist Project, Logic Gate, and Status grouping fields through the saved-views API.
 U26 - The update trigger canon is limited to the rules in U27 through U49; adding a new update trigger requires updating this file.
 U27 - Adding a node to a Logic Gate creates an update, whether the node is created directly, an existing node is assigned, or an email is converted into a node in that Logic Gate.
 U28 - Moving a node from one Logic Gate status or state to another creates an update.
@@ -79,6 +79,7 @@ U68 - Activating an Updates row that opens the node preview panel keeps keyboard
 U69 - The Home sidebar Updates tab shows separate live unread badges for urgent ! mentions, normal @ mentions, and non-mention update notifications using notification summary counts: urgent comes from `mention.urgent_created`, @ comes from `mention.created`, and regular updates come from total unread minus those mention counts. These badges are display state only, not a second notification source of truth, and must increment or decrement after notification-created, Seen, and Seen all reconciliation.
 U70 - Attachment-related update rows may reference attachment IDs, email IDs, node IDs, and preview metadata, but Updates payloads must not carry file bytes, data URLs, base64 blobs, or S3 object contents.
 U71 - Seeing an individual update activates the next remaining visible row below it and opens that row's node preview when it references a node, so the user can continue down the list with repeated Seen actions. If no row remains below, Updates clears the active row and node preview instead of jumping upward.
+U72 - Updates Status grouping consumes the shared universal status contract also used by My Work and Project Logic Gates / Nodes. A real status carried by a status-bearing notification is authoritative for that event row; arbitrary comment/mention prose and backend placeholders such as `a new status` or `a new state` are never status values. When no real event status exists, Updates falls back to the currently resolved node status, then the distinct No status group. Ascending recognized order is In Progress, Review, Pending, Requested, Backlog, Done. Verify aliases normalize to Review, Request/Requests normalize to Requested, Backlogs/Back Logs/Backlogged normalize to Backlog, and completed/closed/archived aliases normalize to Done. Descending reverses recognized nonterminal groups while Done remains final; unknown nonblank statuses and No status remain before Done.
 
 ## Update Row Copy And Visual Language
 
@@ -239,15 +240,21 @@ Expected:
 Business logic covered:
 - U25
 - U67
+- U72
 
 Given:
-- A user saves an Updates view grouped by Project and Logic Gate.
+- A user saves an Updates view grouped by Project, Logic Gate, and Status.
+- Rows include recognized statuses, a legacy Verify or Backlogged spelling, and a status-changing event whose node has since moved again.
 - The user opens an Updates saved view from the sidebar saved-view rows.
 - The user leaves and later reloads Updates saved views.
 
 Expected:
-- Project and Logic Gate grouping fields save through the saved-views API.
+- Project, Logic Gate, and Status grouping fields save through the saved-views API.
 - The saved fields reload in the same grouping order and direction.
+- The status-changing row groups by the status recorded on that event; rows without an event status use the current resolved node status and otherwise No status.
+- Comment and mention prose that happens to contain phrases such as `moved to` or `changed ... to` never creates a synthetic status group, and legacy `a new status/state` copy falls back to the current node status.
+- Status ascending renders In Progress, Review, Pending, Requested, Backlog, then Done; descending reverses the nonterminal recognized groups but keeps Done at the bottom.
+- Legacy Verify and Backlogged spellings join the Review and Backlog groups rather than creating duplicate groups.
 - Updates saved grouping views live under the Updates entry in the Key Views sidebar, where users can add, activate, edit, rename, reorder, and delete saved grouping rows.
 - Unknown Updates grouping fields are rejected instead of silently stored.
 - Removing every Updates grouping is valid; the saved view reloads with a blank grouping stack instead of restoring default Project and Logic Gate grouping.

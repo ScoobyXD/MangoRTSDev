@@ -9,7 +9,7 @@ import ModulePickerMenu from "./menus/ModulePickerMenu";
 import { MODULE_LIBRARY as FRAME_MODULE_LIBRARY, preloadModuleKind } from "../modules";
 import type { FrameDataModel, DragState } from "../types";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { shouldDeferToNativeTextEditing } from "../hooks/keyboardShortcutRouting";
+import { shouldDeferToNativeTextEditing, shouldNavigateBrowserHistoryBack } from "../hooks/keyboardShortcutRouting";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_FRAME_LINK_GRAPH_UPDATED } from "../modules/node-map/eventbus";
 import { buildLinkModulesLabel, buildLinkPool, computeLinkPlan, delinkForPool, mergeLinkPlan, type FrameLinkEdge } from "./frameLinking";
 import { createAccountManagerFrames, createDefaultNodeViewFrames, createHomeViewFrames, createLogicGateArenaFrames, createProjectManagementFrames, createTeamsFrames } from "./DefaultViews";
@@ -49,7 +49,7 @@ import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMe
 import { AppTaskbar } from "./AppTaskbar";
 import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, appTaskbarStorageScope, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
 import { readAppTimelineState, rollTimelineStateToDate, saveAppTimelineState, type AppTimelineState } from "./timelineState";
-import { buildGvicRoute, buildLogicGateRoute, buildNodeRoute, buildProjectRoute, gvicRoleForViewID, type DeepLinkRoute, type GvicDeepLinkRoute } from "./deepLinkRoutes";
+import { buildGvicRoute, buildLogicGateRoute, buildNodeRoute, buildProjectLogicGateNavigationPlan, buildProjectRoute, gvicRoleForViewID, type DeepLinkRoute, type GvicDeepLinkRoute } from "./deepLinkRoutes";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "./resourceLinks";
 import { createRequestJSON } from "../modules/api/requestJSON";
 import { invalidateNodeRecordStoreCaches } from "../modules/node-map/NodeRecordStore";
@@ -926,7 +926,30 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     pasteSelection: pasteFrame,
     undo,
     redo,
-  });
+  }, !isFullPageView);
+
+  useEffect(() => {
+    if (!isLogicGateArenaView) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const selection = window.getSelection();
+      if (!shouldNavigateBrowserHistoryBack({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        repeat: event.repeat,
+        defaultPrevented: event.defaultPrevented,
+        target: event.target,
+        activeElement: document.activeElement,
+        selectionAnchorNode: selection?.anchorNode ?? null,
+      })) return;
+      event.preventDefault();
+      window.history.back();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isLogicGateArenaView]);
 
   const addTab = useCallback(() => {
     const id = createTabId();
@@ -1398,9 +1421,16 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     const ensured = activatePrimaryPage("logic-gate-arena");
     if (onNavigate) {
       saveViews(ensured.tabs, ensured.tab.id);
-      onNavigate(buildLogicGateRoute(cleanLogicGateID));
+      const returnProjectID = projectManagementTarget?.projectID?.trim() || deepLinkProjectID;
+      const navigation = buildProjectLogicGateNavigationPlan(
+        window.location.pathname,
+        returnProjectID,
+        cleanLogicGateID,
+      );
+      if (navigation.replacePath) onNavigate(navigation.replacePath, { replace: true });
+      onNavigate(navigation.pushPath);
     }
-  }, [activatePrimaryPage, closeMenus, onNavigate]);
+  }, [activatePrimaryPage, closeMenus, deepLinkProjectID, onNavigate, projectManagementTarget?.projectID]);
 
   const openProjectManagementProject = useCallback((projectID: string) => {
     const cleanProjectID = projectID.trim();

@@ -15,8 +15,9 @@ function hasNativeTextSelection(): boolean {
 }
 
 // Global keyboard command router for frame editing workflows (delete/copy/paste/undo/redo).
-export function useKeyboardShortcuts(actions: KeyboardActions) {
+export function useKeyboardShortcuts(actions: KeyboardActions, enabled = true) {
   useEffect(() => {
+    if (!enabled) return undefined;
     const onKeyDown = (e: KeyboardEvent) => {
       const selection = window.getSelection();
       const command = resolveGlobalKeyboardShortcut({
@@ -51,5 +52,5 @@ export function useKeyboardShortcuts(actions: KeyboardActions) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [actions]);
+  }, [actions, enabled]);
 }

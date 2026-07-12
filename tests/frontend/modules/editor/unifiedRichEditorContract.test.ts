@@ -252,6 +252,7 @@ test("unified node shell contract lists every Phase 2 full node-window surface",
     "updates-node-panel",
     "kanban-my-work-node-overlay",
     "project-critical-path-inline-node",
+    "project-relationships-node-panel",
   ]);
   assert.ok(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.every((surface) => surface.body === "node-workspace"));
   assert.ok(UNIFIED_NODE_SHELL_SURFACE_CONTRACTS.every((surface) => surface.persistenceBoundary === "node-information-projection"));
@@ -314,5 +315,10 @@ test("node window adapters mount the shared unified node shell", () => {
 
   assert.match(projectSummary, /UnifiedNodeShell/);
   assert.match(projectSummary, /surfaceID="project-critical-path-inline-node"/);
+  assert.match(projectSummary, /surfaceID="project-relationships-node-panel"/);
+  assert.match(projectSummary, /id: "fullscreen"/);
+  assert.match(projectSummary, /pressed: fullscreen/);
+  assert.match(projectSummary, /NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX/);
+  assert.match(projectSummary, /NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX/);
   assert.match(projectSummary, /onNodeOpen\(selection\.nodeID\)/);
 });

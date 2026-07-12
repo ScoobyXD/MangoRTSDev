@@ -1,6 +1,7 @@
 import type { Account } from "../../modules/accounts/accountsApi.js";
 import type { LogicGateGVICRole } from "../../modules/logic-gate-map/shared.js";
 import { buildUniversalNestedGroups, computeUniversalDefaultExpandedGroupIDs, type UniversalGroupValue, type UniversalNestedGroup } from "../../modules/grouping/universalGrouping.js";
+import { getUniversalStatusGroupValue } from "../../modules/grouping/universalStatusGrouping.js";
 
 export type MyWorkScopeLevel = "me" | "team" | "all";
 export type MyWorkScopeSubjectType = "user" | "group" | "company";
@@ -242,8 +243,8 @@ export function getMyWorkGroupValues(row: MyWorkResourceRow, field: MyWorkGroupi
 
   if (field === "status") {
     const status = row.status?.trim() ?? "";
-    if (!status) return [{ key: "status:none", label: "No status", sortValue: "", sortLast: true }];
-    return [{ key: `status:${normalizeStatus(status)}`, label: statusLabel(status), sortValue: statusSortValue(status) }];
+    const value = getUniversalStatusGroupValue(status);
+    return [{ ...value, key: `status:${value.key}` }];
   }
 
   if (row.teams.length === 0) return [{ key: "team:none", label: "No team", sortValue: "", sortLast: true }];
@@ -346,28 +347,6 @@ export function GVICRoleLabel(role: LogicGateGVICRole): string {
   if (role === "verified") return "Verified";
   if (role === "consulted") return "Consulted";
   return "Informed";
-}
-
-export function normalizeStatus(value: string): string {
-  return value.trim().toLowerCase().replace(/[\s_-]+/g, "_");
-}
-
-function statusLabel(value: string): string {
-  const normalized = normalizeStatus(value);
-  if (normalized === "in_progress") return "In Progress";
-  if (normalized === "pending") return "Pending";
-  if (normalized === "review") return "Review";
-  if (normalized === "done") return "Done";
-  return value.trim().replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function statusSortValue(value: string): number | string {
-  const normalized = normalizeStatus(value);
-  if (normalized === "pending") return 1;
-  if (normalized === "in_progress") return 2;
-  if (normalized === "review") return 3;
-  if (normalized === "done") return 4;
-  return normalized;
 }
 
 function compareGroupValues(left: MyWorkGroupValue, right: MyWorkGroupValue): number {

@@ -4,7 +4,7 @@ Last updated: 2026-07-12
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Project Logic Gates / Nodes universal grouping model, including normalization, empty Logic Gates, flat rows, and collapsed visible-node ordering; other rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Project Logic Gates / Nodes universal grouping model, including normalization, empty Logic Gates, flat rows, collapsed visible-node ordering, and the embedded node-panel opener; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the shared Project relationship node shell and fullscreen action; `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers shared status precedence; `tests/frontend/app/deepLinkRoutes.test.ts` and `tests/frontend/hooks/keyboardShortcutRouting.test.ts` cover the Project return route and Backspace editing boundary; other rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -44,8 +44,8 @@ PM33 - Opening a project from a node workspace Go to Project action navigates to
 PM34 - Confirming a project Logic Gate assignment creates or updates the node/project relationship and assigns or moves the node to the selected project Logic Gate using the normal project and Logic Gate access rules.
 PM35 - Project information/projection attachment payloads must follow `docs/tests/attachments.md`: durable project rows store Mango attachment references instead of data URLs, base64 file bytes, or embedded file payloads, and mutation/read access follows project permissions.
 PM36 - The project detail work panel exposes Critical Path and Logic Gates / Nodes as distinct project relationship views; Critical Path is the default entry view.
-PM37 - Double-clicking a node in the Project Logic Gates / Nodes view opens that node in the standard full node editor window instead of creating a project-owned node editor surface.
-PM38 - Opening a node from Project Management preserves node-level access, node information/projection persistence, unified node shell behavior, unified node text-box editor semantics, and separate chat-pane behavior; the project relationship is opener context only and must not become the persistence owner for node edits.
+PM37 - Double-clicking a node in the Project Logic Gates / Nodes view replaces the right-hand Logic Gates / Nodes region with a Project-owned node-panel selection. It does not open the app/sidebar popup or replace the Project page.
+PM38 - Opening a node from Project Management preserves node-level access, node information/projection persistence, unified node shell behavior, unified node text-box editor semantics, and separate chat-pane behavior; Project Management owns only the local panel selection and must not become the persistence owner for node edits.
 PM39 - The node workspace project assignment control is a content-sized action, not a spacer. The unassigned `Assign to Project` button must remain compact, and the assigned `Project: <project name>` button may grow only until the node header project-control maximum before ellipsizing.
 PM40 - The node workspace project assignment menu must use the compact project-picker width contract: nominal minimum 280px, desktop maximum 390px, compact-layout maximum 320px, and no wider than the browser viewport allows.
 PM41 - The node workspace project assignment menu must avoid right-edge clipping by shifting left when there is not enough visible space to the right of the button; project rows and optional Logic Gate rows must remain readable without horizontal viewport overflow.
@@ -56,6 +56,9 @@ PM45 - Project relationship grouping supports Logic Gate, Type, Status, Date Add
 PM46 - Empty visible Logic Gates remain in the grouped row tree. A node may group under a Logic Gate only when that Logic Gate relationship is itself visible; otherwise it appears under No logic gate.
 PM47 - Logic Gate group/resource rows retain Logic Gate open, context-menu, create-node, node-move, and email-drop behavior; node rows retain selection, standard node opening, context menus, and status/critical/email-origin indicators.
 PM48 - Collapsed grouping branches are excluded from the rendered node selection order, so Shift/Ctrl/Command selection operates on the exact currently visible node rows.
+PM49 - The Project Logic Gates / Nodes node panel exposes the shared fullscreen action. Fullscreen expands the same live node editor across the browser viewport, and toggling it off restores the editor to the right-hand Project region without resetting grouping, collapse, or selected-node state.
+PM50 - Opening a related Logic Gate from Project Management canonicalizes the current history entry to `/projects/{project_id}` before pushing `/logic-gates/{logic_gate_id}`. Browser Back and unmodified Backspace outside editable content return to that exact Project; editable Backspace remains native.
+PM51 - Status grouping uses one shared contract across Updates, My Work, and Project Logic Gates / Nodes. Ascending recognized order is In Progress, Review, Pending, Requested, Backlog, Done; Verify aliases join Review, Request/Requests join Requested, Backlogs/Back Logs/Backlogged join Backlog, and completed/closed/archived aliases join Done. Descending reverses recognized nonterminal groups while Done remains last. Unknown nonblank and No status groups have distinct identities and remain before Done.
 
 ## Scenarios
 
@@ -207,21 +210,28 @@ Business logic covered:
 - PM46
 - PM47
 - PM48
+- PM49
+- PM50
+- PM51
 
 Given:
 - A project has related Logic Gates and nodes.
+- Its nodes include recognized workflow statuses and may include legacy Verify or Backlogged spellings.
 - The viewer can access the project and at least one related node.
 
 Expected:
 - The project detail work panel shows Critical Path before Logic Gates / Nodes and opens on Critical Path by default.
 - Switching to Logic Gates / Nodes shows project relationships without changing the project relationship data.
-- Double-clicking a node in Logic Gates / Nodes opens the standard full node editor window for that node.
-- The opened node window applies node access and saves node edits through node information/projection persistence.
-- The project relationship remains opener context only; it does not own node text-box edits, attached-email edits, or node chat messages.
+- Double-clicking a node in Logic Gates / Nodes replaces that right-hand region with the node editor while keeping the Project page open.
+- The embedded node panel applies node access and saves node edits through node information/projection persistence.
+- Project Management owns only the panel selection; it does not own node text-box edits, attached-email edits, or node chat messages.
 - Node text boxes use the unified editor semantics, and node chats remain separate chat panes.
+- Fullscreen expands the same node editor across the browser viewport, and toggling fullscreen off restores it to the right-hand region with grouping and selection state intact.
 - Logic Gates and nodes render as recursive indented rows rather than Logic Gate cards, with Logic Gate ascending as the default grouping.
 - The grouping stack can be reordered, changed, or emptied without changing the underlying relationships; empty Logic Gates and nodes without a visible gate remain visible in the appropriate row path.
 - Collapse state controls the visible node ordering used by multi-selection, while group/resource rows preserve their existing open, context-menu, and drop behavior.
+- Status ascending is In Progress, Review, Pending, Requested, Backlog, Done; legacy aliases join their canonical group and Done remains last in descending order.
+- Double-clicking a Logic Gate pushes its Logic Gate route over a canonical Project return entry, so browser Back or safe unmodified Backspace returns to the exact Project.
 
 ### Scenario PM-S7: Project Permission Controls
 

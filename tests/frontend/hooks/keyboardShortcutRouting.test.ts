@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveGlobalKeyboardShortcut, shouldDeferToNativeTextEditing, type KeyboardShortcutEventLike } from "../../../frontend/src/hooks/keyboardShortcutRouting.js";
+import { resolveGlobalKeyboardShortcut, shouldDeferToNativeTextEditing, shouldNavigateBrowserHistoryBack, type KeyboardShortcutEventLike } from "../../../frontend/src/hooks/keyboardShortcutRouting.js";
 
 function keyEvent(input: Partial<KeyboardShortcutEventLike> & { key: string }): KeyboardShortcutEventLike {
   return {
@@ -69,4 +69,13 @@ test("delete shortcuts do not steal text editing delete keys", () => {
     })),
     "delete",
   );
+});
+
+test("Logic Gate history can use unmodified Backspace outside editable content", () => {
+  const surface = { tagName: "DIV", isContentEditable: false, closest: () => null };
+  assert.equal(shouldNavigateBrowserHistoryBack(keyEvent({ key: "Backspace", target: surface })), true);
+  assert.equal(shouldNavigateBrowserHistoryBack(keyEvent({ key: "Backspace", target: { tagName: "TEXTAREA" } })), false);
+  assert.equal(shouldNavigateBrowserHistoryBack(keyEvent({ key: "Backspace", altKey: true, target: surface })), false);
+  assert.equal(shouldNavigateBrowserHistoryBack(keyEvent({ key: "Backspace", repeat: true, target: surface })), false);
+  assert.equal(shouldNavigateBrowserHistoryBack(keyEvent({ key: "Delete", target: surface })), false);
 });

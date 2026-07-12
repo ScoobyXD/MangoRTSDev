@@ -4,7 +4,7 @@ Last updated: 2026-07-12
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract, EmailPickerModal attach-only boundary, and Project critical-path inline node shell adapter mounting; `tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Logic Gates / Nodes universal grouping model, empty gates, flat rows, and collapsed visible-node order; shared editor/chat attachment tests cover attachment-reference serialization used by project text blocks and project chats; project-specific persistence rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract, EmailPickerModal attach-only boundary, and both Project node-shell adapters, including the Logic Gates / Nodes fullscreen action; `tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Logic Gates / Nodes universal grouping model, empty gates, flat rows, collapsed visible-node order, and the local node-panel opener wiring; `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the shared status order; `tests/frontend/app/deepLinkRoutes.test.ts` and `tests/frontend/hooks/keyboardShortcutRouting.test.ts` cover the Project-to-Logic-Gate return route and safe Backspace decision; shared editor/chat attachment tests cover attachment-reference serialization used by project text blocks and project chats; project-specific persistence rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -29,8 +29,8 @@ P18 - The project email picker is attach/select only and must not expose compose
 P19 - Project critical-path inline node windows mount `UnifiedNodeShell`; the inline window may keep project row selection/close state in Project Management, but shell actions and body metadata come from the shared node-shell source.
 P20 - Project text-box inline images and project text-block attachment arrays must follow `docs/tests/attachments.md`: durable project information/projection payloads store attachment references, not data URLs, base64 file bytes, or embedded file payloads.
 P21 - Project chat attachments use Mango attachment references, and project critical-path inline node windows inherit node attachment behavior while preserving node-owned persistence for node edits.
-P22 - In the Project Logic Gates / Nodes tab, double-clicking a node opens the standard full node editor window for that node instead of a project-specific editor surface.
-P23 - Nodes opened from the Project Logic Gates / Nodes tab use the unified node shell, unified node text-box editor semantics, node information/projection persistence, attached-email behavior, and separate chat-pane behavior of the standard node editor.
+P22 - In the Project Logic Gates / Nodes tab, double-clicking a node opens a Project-owned node-panel selection in the right-hand Logic Gates / Nodes region. The unified node editor replaces that region in place instead of opening the app/sidebar popup or replacing the Project page.
+P23 - Nodes opened in the Project Logic Gates / Nodes panel use the unified node shell, unified node text-box editor semantics, node information/projection persistence, attached-email behavior, and separate chat-pane behavior of the standard node editor. Project state owns only which node panel is open; it does not own node content persistence.
 P24 - Dropping a My Triage or mailbox-capable Shared Triage email onto a project relationship panel creates an email-derived standalone node relationship for that project.
 P25 - Dropping a My Triage or mailbox-capable Shared Triage email onto a Logic Gate group inside a project creates an email-derived node/card in that Logic Gate and a node relationship in the project.
 P26 - Project relationship node rows created from email expose `created_from_email = true` and show an email-origin icon.
@@ -41,10 +41,13 @@ P30 - Project text-box toolbar controls must use the shared compact editor toolb
 P31 - A project permissions view opened from Project Management, Company Explorer, or another project entry point always displays an explicit `Save` button when permission settings are editable. Save commits the current permission selection without closing the view; denied and read-only states remain dismissible without attempting a write.
 P32 - Project attached-email projections preserve mailbox provenance. Personal picker attachments and personal email-drop conversions store the active `account_email`, while shared-inbox conversions retain both `shared_inbox_id` and `account_email`; the project reader uses that scope for threads, recipients, attachments, drafts, replies, and calendar invitations.
 P33 - The Project Logic Gates / Nodes tab renders visible Logic Gates and nodes as one recursive row list, not as a multi-column set of Logic Gate cards with embedded node lists.
-P34 - The project relationship grouper supports Logic Gate, Type, Status, Date Added, and Email Origin levels. Levels can be added, removed, reordered, and sorted ascending or descending; an explicitly empty stack is valid and renders all visible relationships as flat rows. The compatibility default is Logic Gate ascending. This project-local control stores one browser preference per company/current user and applies it across that user's projects; it is not a named My Work/Updates Key View.
+P34 - The project relationship grouper supports Logic Gate, Type, Status, Date Added, and Email Origin levels. Levels can be added, removed, reordered, and sorted ascending or descending; an explicitly empty stack is valid and renders all visible relationships as flat rows. The compatibility default is Logic Gate ascending. Status grouping follows the shared universal order in P40. This project-local control stores one browser preference per company/current user and applies it across that user's projects; it is not a named My Work/Updates Key View.
 P35 - Group headers and resource rows indent by grouping depth. Disclosure toggles expansion without opening a resource; a visible Logic Gate grouping header remains the Logic Gate open/context-menu/drop target, suppresses its duplicate Logic Gate leaf, and remains visible when the gate has no nodes.
 P36 - Regrouping and collapsing are presentation-only: they do not mutate project relationships, every accessible node remains available when its branch is visible, and Shift/Ctrl/Command selection order follows the currently rendered visible node rows. A node whose Logic Gate relationship is not visible groups under No logic gate instead of exposing the hidden gate ID.
-P37 - The grouped-row view preserves the existing node and Logic Gate openers, node selection and context menus, critical-step/status/email-origin indicators, root project drops, and Logic Gate-targeted node/email drops.
+P37 - The grouped-row view preserves the local node-panel and Logic Gate openers, node selection and context menus, critical-step/status/email-origin indicators, root project drops, and Logic Gate-targeted node/email drops.
+P38 - The Project Logic Gates / Nodes node panel exposes the shared fullscreen action. Turning fullscreen on expands the same live node editor across the browser viewport; turning it off restores that editor to the right-hand Logic Gates / Nodes region without resetting the Project grouping stack, collapse state, or selected node.
+P39 - Opening a Logic Gate from a Project records the exact canonical Project route, `/projects/{project_id}`, as the return history entry before pushing `/logic-gates/{logic_gate_id}`. Browser Back and an unmodified Backspace pressed outside editable content return to that Project route; Backspace inside an input, textarea, select, or content-editable node retains native editing behavior.
+P40 - Status grouping is shared by Updates, My Work, and Project Logic Gates / Nodes. Ascending recognized workflow order is In Progress, Review, Pending, Requested, Backlog, Done. `Verify`, `Verification`, and `Verified` normalize to Review; Request/Requests normalize to Requested; Backlogs/Back Logs/Backlogged normalize to Backlog; completed/closed/archived aliases normalize to Done. Descending reverses the nonterminal recognized groups, while Done remains the final group in both directions. Unknown nonblank statuses sort after recognized nonterminal statuses; No status has a collision-proof group identity, is trailing, and remains before Done.
 
 ## Scenarios
 
@@ -175,17 +178,19 @@ Expected:
 Business logic covered:
 - P22
 - P23
+- P38
 
 Given:
 - A project has at least one related Logic Gate and at least one related node visible in the Logic Gates / Nodes tab.
 - The viewer can open the node.
 
 Expected:
-- Double-clicking the node row opens the standard full node editor window for that node.
-- The opened node window uses the shared node shell actions and shared node workspace body instead of a project-specific node shell.
+- Double-clicking the node row replaces the right-hand Logic Gates / Nodes region with that node's editor and leaves the Project page in place.
+- The embedded node panel uses the shared node shell actions and shared node workspace body instead of a project-specific node shell.
 - Text boxes inside that window use the unified node editor semantics.
 - Node edits save through node information/projection persistence, not project information/projection or project relationship persistence.
 - Chat panes inside the opened node window remain chat surfaces and do not inherit unified rich-editor toolbar or keyboard semantics.
+- Activating fullscreen expands that same live panel across the browser viewport; activating it again restores the panel to the right-hand Project region without resetting grouping or selection state.
 
 ### Scenario P-S8: Email Drop Creates Project Node
 
@@ -250,6 +255,7 @@ Business logic covered:
 - P35
 - P36
 - P37
+- P40
 
 Given:
 - A project has related Logic Gates, including an empty Logic Gate, assigned nodes with different statuses and origins, and a standalone node.
@@ -261,3 +267,20 @@ Expected:
 - Reordering or changing grouping levels changes only the nesting and row order; removing every level produces a flat relationship list.
 - Collapsing a group hides only its descendants and updates Shift-selection order to the remaining visible node rows.
 - Double-click, context-menu, root-drop, and Logic Gate-drop behavior remains available on the corresponding rows.
+- Status ascending renders In Progress, Review, Pending, Requested, Backlog, then Done; legacy Verify and Backlogged values join Review and Backlog rather than creating duplicate groups.
+- Status descending reverses the nonterminal recognized statuses but keeps Done at the bottom.
+
+### Scenario P-S12: Logic Gate History Returns To Project
+
+Business logic covered:
+- P39
+
+Given:
+- A user is viewing a specific Project and double-clicks one of its related Logic Gates.
+- The user later uses browser Back or presses unmodified Backspace outside editable content.
+
+Expected:
+- Opening the Logic Gate first canonicalizes the return entry to `/projects/{project_id}`, then pushes `/logic-gates/{logic_gate_id}`.
+- Browser Back returns to the exact Project instead of leaving the user on the Logic Gate route.
+- Unmodified Backspace outside editable content performs the same history-back action.
+- Backspace inside editable content edits text and never triggers Project navigation.
