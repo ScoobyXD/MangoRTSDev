@@ -1,4 +1,4 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 # Kanban Board Tests
 
@@ -142,6 +142,20 @@ KB105 - We want multi browser click-drag ability. So I can drag an email from My
 KB106 - Email-card transfer must follow `docs/tests/attachments.md`: the target node attached-email projection stores provider/email metadata and Mango attachment references only, not attachment bytes, data URLs, base64 blobs, or S3 object contents.
 KB107 - Fullscreen node editor popups keep a small browser-edge inset, about 12px on the left/right and 8px on the top/bottom, so background context remains visible; while a node editor is fullscreen, the Explorer search box is hidden without clearing the user's current search query.
 KB108 - Direct email-to-Kanban conversion and later email-card transfer preserve mailbox provenance in the attached-email projection: personal mail retains `account_email`, and Shared Triage mail retains both `shared_inbox_id` and `account_email`, so later node email operations use the originating grant.
+KB109 - Forced Logic Gate props and live Logic Gate selection must converge on one guarded board loader; one logical selection must not issue duplicate `/work` requests or apply the same snapshot twice.
+KB110 - Concurrent loads for the same company and Logic Gate board share one in-flight promise, while changing to a different Logic Gate aborts the obsolete request and prevents its late response from rendering.
+KB111 - A complete cached board snapshot renders immediately. A stale cached snapshot remains visible while one targeted revalidation runs; invalidation must not discard the snapshot or create a second in-flight request.
+KB112 - Selection generations guard A-to-B and A-to-B-to-A navigation so an older response for the same board key cannot overwrite the latest selection.
+KB113 - Realtime Kanban deltas reconcile the rendered snapshot and cached snapshot together, including the projection sequence, without a full `/work` reload for a valid consecutive delta.
+KB114 - A sequence gap, invalid delta, or permission uncertainty causes one targeted board revalidation; exact card/assignment deltas must not also trigger duplicate broad workspace reloads.
+KB115 - Projection deltas preserve every minimal card field that can affect rendering, including `created_from_email`, requested-by, placed-by, issue state, due date, priority, accounts, title, position, and timestamps.
+KB116 - Logic Gate work serialization contains only `logic_gate`, actor `permissions`, `board`, `columns`, minimal `cards`, and `projection_sequence`.
+KB117 - Logic Gate work serialization does not contain top-level `company_id` or `logic_gate_id`, `statuses`, `assignments`, `nodes`, `cards_limit`, or a full GVIC collection.
+KB118 - Each minimal card row contains its card, column, node, title, request/placement, issue, position, due-date, priority, direct-email-origin, account, creation, and projection-update fields only as required; the frontend derives repeated board/company/Logic Gate IDs locally.
+KB119 - Database ordering uses the canonical stored status rank requested, backlog, pending, in progress, review, done; unknown historical status text falls back to pending rank, then cards sort by position, assignment creation time, and stable assignment/card identity.
+KB120 - Owning-Logic-Gate authorization runs before a cached ETag can produce `304 Not Modified`; a permission revocation must never expose or preserve unauthorized board data.
+KB121 - The work-version ETag changes for gate/header/default/permission/request-owner, assignment, projection card, email-origin, and projection-sequence changes that affect the response.
+KB122 - Logic Gate boards and columns remain synthesized contract data rather than persisted legacy Kanban board/column rows; a response-contract salt invalidates ETags when synthesized shapes or ordering constants change.
 
 ## Scenarios
 
@@ -445,3 +459,35 @@ Expected:
 - The source Home mail row is reconciled through the local conversion event, including Logic Gate placement and `unstarred_message_ids`.
 - The created attached-email projection records `account_email` and, for Shared Triage, `shared_inbox_id` so later node email actions retain the source mailbox scope.
 - Matching workspace or communications events do not force a broad Home reload after the board has already been updated from the conversion response.
+
+### Scenario KB-S10: Cache-First Single-Flight Arena Load And Realtime Reconciliation
+
+Business logic covered:
+- KB109
+- KB110
+- KB111
+- KB112
+- KB113
+- KB114
+- KB115
+- KB116
+- KB117
+- KB118
+- KB119
+- KB120
+- KB121
+- KB122
+
+Given:
+- Logic Gate A has a complete cached board snapshot and the user opens it through both the forced Arena prop and the matching live selection event.
+- The user quickly selects Logic Gate B and may then return to A.
+- Consecutive card projection deltas and a later sequence-gap delta arrive.
+
+Expected:
+- A renders from cache immediately and starts at most one same-key revalidation.
+- Forced and live paths do not create a second request or duplicate snapshot application.
+- Selecting B aborts A's obsolete request; an old A response cannot overwrite B or a newer A generation.
+- Consecutive deltas patch rendered and cached minimal cards, including `created_from_email`, and advance the cached sequence.
+- The sequence gap starts one targeted revalidation.
+- The work payload contains the required minimal collections and none of the redundant collections.
+- Authorization is checked before any `304`, and canonical status rank preserves business ordering.

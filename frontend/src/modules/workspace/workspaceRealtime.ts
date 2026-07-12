@@ -296,8 +296,8 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
   }
 
   if (WORK_ITEM_ASSIGNMENT_EVENT_TYPES.has(type)) {
-    addScope(scopes, seen, { kind: "work_item_assignment", eventType: type, boardID, logicGateID, nodeID, assignmentID, cardID, columnID });
-    if (boardID) addScope(scopes, seen, { kind: "kanban_board", eventType: type, boardID, logicGateID, nodeID, cardID, columnID });
+    const assignmentBoardID = boardID || (logicGateID ? logicGateKanbanBoardID(logicGateID) : "");
+    addScope(scopes, seen, { kind: "work_item_assignment", eventType: type, boardID: assignmentBoardID, logicGateID, nodeID, assignmentID, cardID, columnID });
     addScope(scopes, seen, { kind: "gvic_matrix", eventType: type, logicGateID, nodeID, assignmentID });
     if (nodeID) addScope(scopes, seen, { kind: "node_graph", eventType: type, nodeID });
     return scopes;
@@ -385,6 +385,15 @@ export function deriveWorkspaceReconciliationScopes(envelope: WorkspaceStreamEnv
   }
 
   return [{ kind: "workspace", eventType: type }];
+}
+
+export function workspaceScopeRequiresKanbanBoardRefetch(scope: WorkspaceReconciliationScope): boolean {
+  if (scope.kind === "work_item_assignment") return false;
+  if (scope.kind !== "kanban_board") return true;
+  if (scope.eventType.startsWith("kanban_card_")) return false;
+  return scope.eventType !== "node_created"
+    && scope.eventType !== "node_updated"
+    && scope.eventType !== "node_deleted";
 }
 
 function fallbackWorkspaceScope(eventType = "workspace_unparseable"): WorkspaceReconciliationScope[] {

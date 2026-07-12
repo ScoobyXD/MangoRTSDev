@@ -99,20 +99,20 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	handler := server.Routes()
 
 	work := getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, viewer, http.StatusOK)
-	if len(work.Assignments) != 1 || work.Assignments[0].Assignment.NodeID != visibleNode.NodeID {
-		t.Fatalf("viewer work assignments = %+v, want only visible node", work.Assignments)
+	if len(work.Cards) != 1 || work.Cards[0].NodeID != visibleNode.NodeID {
+		t.Fatalf("viewer work cards = %+v, want assigned node without node grant", work.Cards)
 	}
-	if len(work.Nodes) != 1 || work.Nodes[0].NodeID != visibleNode.NodeID {
-		t.Fatalf("viewer work nodes = %+v, want assigned node without node grant", work.Nodes)
+	if len(work.Columns) != 6 ||
+		work.Columns[0].ColumnID != store.LogicGateWorkStatusRequested ||
+		work.Columns[1].ColumnID != store.LogicGateWorkStatusBacklog ||
+		work.Columns[2].ColumnID != store.LogicGateWorkStatusPending ||
+		work.Columns[3].ColumnID != store.LogicGateWorkStatusInProgress ||
+		work.Columns[4].ColumnID != store.LogicGateWorkStatusReview ||
+		work.Columns[5].ColumnID != store.LogicGateWorkStatusDone {
+		t.Fatalf("columns = %+v, want canonical status columns", work.Columns)
 	}
-	if len(work.Statuses) != 6 ||
-		work.Statuses[0].StatusKey != store.LogicGateWorkStatusRequested ||
-		work.Statuses[1].StatusKey != store.LogicGateWorkStatusBacklog ||
-		work.Statuses[2].StatusKey != store.LogicGateWorkStatusPending ||
-		work.Statuses[3].StatusKey != store.LogicGateWorkStatusInProgress ||
-		work.Statuses[4].StatusKey != store.LogicGateWorkStatusReview ||
-		work.Statuses[5].StatusKey != store.LogicGateWorkStatusDone {
-		t.Fatalf("statuses = %+v, want canonical statuses", work.Statuses)
+	if !work.Permissions.CanView || work.Permissions.CanEdit || work.Permissions.CanAdmin {
+		t.Fatalf("viewer permissions = %+v, want view only", work.Permissions)
 	}
 	getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
 	getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, admin, http.StatusOK)
@@ -171,14 +171,14 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	}
 	afterCreate := getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
 	createdVisible := false
-	for _, assignment := range afterCreate.Assignments {
-		if assignment.Assignment.NodeID == clientGeneratedNodeID {
+	for _, card := range afterCreate.Cards {
+		if card.NodeID == clientGeneratedNodeID {
 			createdVisible = true
 			break
 		}
 	}
 	if !createdVisible {
-		t.Fatalf("created client-generated node missing from v2 work response: %+v", afterCreate.Assignments)
+		t.Fatalf("created client-generated node missing from v2 work response: %+v", afterCreate.Cards)
 	}
 
 	putPayload := map[string]any{
@@ -209,12 +209,12 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		t.Fatalf("editor DELETE status = %d body=%s, want 200", deleteRecord.Code, deleteRecord.Body.String())
 	}
 	afterDelete := getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
-	for _, assignment := range afterDelete.Assignments {
-		if assignment.Assignment.NodeID == mutableNode.NodeID {
-			t.Fatalf("deleted node still present in v2 work response: %+v", afterDelete.Assignments)
+	for _, card := range afterDelete.Cards {
+		if card.NodeID == mutableNode.NodeID {
+			t.Fatalf("deleted node still present in v2 work response: %+v", afterDelete.Cards)
 		}
-		if assignment.Assignment.NodeID == hiddenNode.NodeID {
-			t.Fatalf("hidden node leaked in visible gate response: %+v", afterDelete.Assignments)
+		if card.NodeID == hiddenNode.NodeID {
+			t.Fatalf("hidden node leaked in visible gate response: %+v", afterDelete.Cards)
 		}
 	}
 }
@@ -246,6 +246,9 @@ func TestLogicGateWorkV2ConditionalGetSkipsWorkPayloadBuild(t *testing.T) {
 	if repo.getWorkCalls != 1 {
 		t.Fatalf("GetLogicGateWork calls after first GET = %d, want 1", repo.getWorkCalls)
 	}
+	if repo.workVersionCalls != 1 || repo.domainSequenceCalls != 0 {
+		t.Fatalf("version reads after first GET = work:%d domain:%d, want one PK work-version lookup and no domain-event scans", repo.workVersionCalls, repo.domainSequenceCalls)
+	}
 
 	secondReq := httptest.NewRequest(http.MethodGet, "/v2/logic-gates/"+logicGate.LogicGateID+"/work?company_id="+companyID, nil)
 	secondReq.Header.Set("If-None-Match", etag)
@@ -256,6 +259,122 @@ func TestLogicGateWorkV2ConditionalGetSkipsWorkPayloadBuild(t *testing.T) {
 	}
 	if repo.getWorkCalls != 1 {
 		t.Fatalf("GetLogicGateWork calls after conditional GET = %d, want 1", repo.getWorkCalls)
+	}
+	if repo.workVersionCalls != 2 || repo.domainSequenceCalls != 0 {
+		t.Fatalf("version reads after conditional GET = work:%d domain:%d, want one PK lookup per request and no domain-event scans", repo.workVersionCalls, repo.domainSequenceCalls)
+	}
+
+	if _, err := base.AppendDomainEvent(store.DomainEventInput{
+		CompanyID:  companyID,
+		StreamType: "workspace",
+		StreamID:   companyID,
+		Type:       "logic_gate_updated",
+		Payload:    map[string]any{"logic_gate_id": logicGate.LogicGateID},
+	}); err != nil {
+		t.Fatalf("AppendDomainEvent invalidation: %v", err)
+	}
+	staleReq := httptest.NewRequest(http.MethodGet, "/v2/logic-gates/"+logicGate.LogicGateID+"/work?company_id="+companyID, nil)
+	staleReq.Header.Set("If-None-Match", etag)
+	staleRec := httptest.NewRecorder()
+	handler.ServeHTTP(staleRec, staleReq)
+	if staleRec.Code != http.StatusOK || staleRec.Header().Get("ETag") == etag {
+		t.Fatalf("invalidated GET status=%d etag=%q old=%q body=%s, want rebuilt 200 with new ETag", staleRec.Code, staleRec.Header().Get("ETag"), etag, staleRec.Body.String())
+	}
+	if repo.getWorkCalls != 2 || repo.workVersionCalls != 3 || repo.domainSequenceCalls != 0 {
+		t.Fatalf("invalidated GET calls = work:%d version:%d domain:%d, want 2/3/0", repo.getWorkCalls, repo.workVersionCalls, repo.domainSequenceCalls)
+	}
+}
+
+func TestLogicGateWorkMissingGateIsNotFoundForManagerAndAuthDisabled(t *testing.T) {
+	base := store.NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666408"
+	base.EnsureCompany(companyID, "Logic Gate Work Missing Co")
+	missingID := "77777777-7777-4777-8777-777777777777"
+
+	managerServer := NewServer(base)
+	managerHandler := handlerWithCompanyAdminForTest(managerServer.Routes(), companyID)
+	defer managerServer.Close()
+	for _, target := range []string{
+		"/v2/logic-gates/" + missingID + "/work?company_id=" + companyID,
+		"/v1/logic-gate-arena?company_id=" + companyID + "&logic_gate_id=" + missingID,
+	} {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		rec := httptest.NewRecorder()
+		managerHandler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("manager GET %s status=%d body=%s, want 404", target, rec.Code, rec.Body.String())
+		}
+	}
+
+	authDisabledServer := NewServer(base)
+	defer authDisabledServer.Close()
+	req := httptest.NewRequest(http.MethodGet, "/v2/logic-gates/"+missingID+"/work?company_id="+companyID, nil)
+	rec := httptest.NewRecorder()
+	authDisabledServer.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("auth-disabled missing GET status=%d body=%s, want 404", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLogicGateWorkV2ResponseSerializationIsMinimal(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666409"
+	repo.EnsureCompany(companyID, "Logic Gate Work Serialization Co")
+	logicGate, err := repo.CreateLogicGate(companyID, "Minimal Gate")
+	if err != nil {
+		t.Fatalf("CreateLogicGate: %v", err)
+	}
+	node, err := repo.CreateNode(companyID, "Minimal card")
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
+		CompanyID:   companyID,
+		LogicGateID: logicGate.LogicGateID,
+		NodeID:      node.NodeID,
+		Status:      store.LogicGateWorkStatusPending,
+		Priority:    testPriority(2),
+		PrioritySet: true,
+	}); err != nil {
+		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
+	}
+	server := NewServer(repo)
+	defer server.Close()
+	req := httptest.NewRequest(http.MethodGet, "/v2/logic-gates/"+logicGate.LogicGateID+"/work?company_id="+companyID, nil)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET work status=%d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &top); err != nil {
+		t.Fatalf("decode raw work JSON: %v", err)
+	}
+	if len(top) != 6 {
+		t.Fatalf("raw /work keys=%v body=%s, want six Kanban-specific keys", top, rec.Body.String())
+	}
+	for _, forbidden := range []string{"company_id", "logic_gate_id", "statuses", "assignments", "nodes", "cards_limit"} {
+		if _, ok := top[forbidden]; ok {
+			t.Fatalf("raw /work retained %q: %s", forbidden, rec.Body.String())
+		}
+	}
+	var header map[string]json.RawMessage
+	if err := json.Unmarshal(top["logic_gate"], &header); err != nil {
+		t.Fatalf("decode raw logic_gate=%s: %v", top["logic_gate"], err)
+	}
+	for _, forbidden := range []string{"company_id", "gvic_assignments", "created_timestamp", "updated_timestamp", "effective_access_level"} {
+		if _, ok := header[forbidden]; ok {
+			t.Fatalf("raw /work logic_gate retained %q: %s", forbidden, top["logic_gate"])
+		}
+	}
+	var cards []map[string]json.RawMessage
+	if err := json.Unmarshal(top["cards"], &cards); err != nil || len(cards) != 1 {
+		t.Fatalf("decode raw cards=%s err=%v, want one", top["cards"], err)
+	}
+	for _, forbidden := range []string{"company_id", "board_id", "logic_gate_id", "description_snapshot", "updated_timestamp"} {
+		if _, ok := cards[0][forbidden]; ok {
+			t.Fatalf("raw /work card retained %q: %s", forbidden, top["cards"])
+		}
 	}
 }
 
@@ -535,12 +654,24 @@ func listLogicGateWorkNotificationsForTest(t *testing.T, handler http.Handler, c
 
 type countingLogicGateWorkRepo struct {
 	store.Repository
-	getWorkCalls int
+	getWorkCalls        int
+	workVersionCalls    int
+	domainSequenceCalls int
 }
 
 func (r *countingLogicGateWorkRepo) GetLogicGateWork(companyID, logicGateID string) (domain.LogicGateWorkView, error) {
 	r.getWorkCalls++
 	return r.Repository.GetLogicGateWork(companyID, logicGateID)
+}
+
+func (r *countingLogicGateWorkRepo) CurrentLogicGateWorkVersion(companyID, logicGateID string) (int64, error) {
+	r.workVersionCalls++
+	return r.Repository.CurrentLogicGateWorkVersion(companyID, logicGateID)
+}
+
+func (r *countingLogicGateWorkRepo) CurrentDomainEventSequence(query store.DomainEventStreamQuery) (int64, error) {
+	r.domainSequenceCalls++
+	return r.Repository.CurrentDomainEventSequence(query)
 }
 
 type logicGateWorkMutationPayloadForTest struct {

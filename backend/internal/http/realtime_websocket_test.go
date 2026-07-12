@@ -263,7 +263,7 @@ func TestRealtimeWebSocketWorkspaceSubscriptionAuthorizesOwnUserAndRejectsOtherU
 	_ = tokenB
 }
 
-func TestRealtimeWebSocketKanbanBoardSubscriptionAuthorizationRequiresEditAccess(t *testing.T) {
+func TestRealtimeWebSocketKanbanBoardSubscriptionAuthorizationRequiresViewAccess(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &recordingRealtimeAccessRepo{Repository: base}
 	companyID := "88888888-8888-4888-8888-888888888007"
@@ -283,7 +283,7 @@ func TestRealtimeWebSocketKanbanBoardSubscriptionAuthorizationRequiresEditAccess
 		Permissions: []store.EntityPermissionInput{{
 			SubjectType: store.EntityPermissionSubjectUser,
 			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionEdit,
+			AccessLevel: store.EntityPermissionView,
 		}},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions: %v", err)
@@ -303,11 +303,11 @@ func TestRealtimeWebSocketKanbanBoardSubscriptionAuthorizationRequiresEditAccess
 	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope {
 		t.Fatalf("subscription accepted message = %+v, want accepted for %s", accepted, scope)
 	}
-	if !repo.sawAccessCheck(store.EntityTypeLogicGate, store.EntityPermissionEdit) {
-		t.Fatalf("subscription authorization access checks = %+v, want logic_gate edit", repo.accessChecks())
+	if !repo.sawAccessCheck(store.EntityTypeLogicGate, store.EntityPermissionView) {
+		t.Fatalf("subscription authorization access checks = %+v, want logic_gate view", repo.accessChecks())
 	}
-	if repo.sawAccessCheck(store.EntityTypeLogicGate, store.EntityPermissionView) {
-		t.Fatalf("subscription authorization used view access: %+v", repo.accessChecks())
+	if repo.sawAccessCheck(store.EntityTypeLogicGate, store.EntityPermissionEdit) {
+		t.Fatalf("subscription authorization unnecessarily required edit access: %+v", repo.accessChecks())
 	}
 }
 
@@ -545,8 +545,8 @@ func TestRealtimeWebSocketKanbanBoardDeltaFiltersPerUserForSameBoard(t *testing.
 		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
 		DefaultAccessSet: true,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: visible.UserID, AccessLevel: store.EntityPermissionEdit},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: blocked.UserID, AccessLevel: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: visible.UserID, AccessLevel: store.EntityPermissionView},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: blocked.UserID, AccessLevel: store.EntityPermissionView},
 		},
 	}); err != nil {
 		t.Fatalf("SetEntityPermissions logic gate: %v", err)
@@ -599,12 +599,36 @@ func TestRealtimeWebSocketKanbanBoardDeltaFiltersPerUserForSameBoard(t *testing.
 	if len(blockedDelta.Deltas) != 1 {
 		t.Fatalf("blocked delta = %+v, want one delta", blockedDelta.Deltas)
 	}
-	if got := blockedDelta.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.CardID != assigned.Card.CardID || got.RowKey.BoardID != boardID {
-		t.Fatalf("blocked delta = %+v, want delete without row payload", blockedDelta.Deltas)
+	if got := blockedDelta.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.CardID != assigned.Card.CardID {
+		t.Fatalf("gate viewer delta = %+v, want snapshot-parity upsert despite no node access", blockedDelta.Deltas)
+	}
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID:        companyID,
+		EntityType:       store.EntityTypeLogicGate,
+		EntityID:         logicGate.LogicGateID,
+		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
+		DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser,
+			SubjectID:   visible.UserID,
+			AccessLevel: store.EntityPermissionView,
+		}},
+	}); err != nil {
+		t.Fatalf("SetEntityPermissions revoke blocked gate view: %v", err)
+	}
+	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rows))
+	visibleAfterRevocation := clientVisible.readProjectionDelta(t)
+	blockedAfterRevocation := clientBlocked.readProjectionDelta(t)
+	if got := visibleAfterRevocation.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil {
+		t.Fatalf("visible delta after peer revocation = %+v, want upsert", got)
+	}
+	if got := blockedAfterRevocation.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.CardID != assigned.Card.CardID {
+		t.Fatalf("revoked gate-view delta = %+v, want leak-safe delete without row", got)
 	}
 }
 
-func TestRealtimeWebSocketKanbanBoardDeltaHidesInaccessibleCardAsDeleteWithoutRowPayload(t *testing.T) {
+func TestRealtimeWebSocketKanbanBoardDeltaMatchesSnapshotDespiteNoNodeAccess(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "88888888-8888-4888-8888-888888888009"
 	token := "hidden-card-token"
@@ -659,8 +683,8 @@ func TestRealtimeWebSocketKanbanBoardDeltaHidesInaccessibleCardAsDeleteWithoutRo
 	if message.Scope != scope || message.Projection != store.ProjectionNameKanbanBoard || len(message.Deltas) != 1 {
 		t.Fatalf("hidden card delta = %+v, want one scoped Kanban delta", message)
 	}
-	if got := message.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.CardID != assigned.Card.CardID || got.RowKey.NodeID != node.NodeID {
-		t.Fatalf("hidden card delta = %+v, want delete row key only", got)
+	if got := message.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.CardID != assigned.Card.CardID || got.Row.NodeID != node.NodeID {
+		t.Fatalf("gate-visible card delta = %+v, want snapshot-parity upsert", got)
 	}
 }
 

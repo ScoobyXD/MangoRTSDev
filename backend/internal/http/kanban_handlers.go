@@ -157,7 +157,12 @@ func logicGateWorkCardByID(work domain.LogicGateWorkView, cardID string) (domain
 	cardID = strings.TrimSpace(cardID)
 	for _, card := range work.Cards {
 		if card.CardID == cardID {
-			return card, true
+			return store.LogicGateWorkCardToKanbanCard(
+				work.Board.CompanyID,
+				work.Board.BoardID,
+				work.LogicGate.LogicGateID,
+				card,
+			), true
 		}
 	}
 	return domain.KanbanCard{}, false

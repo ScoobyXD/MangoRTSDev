@@ -20,7 +20,20 @@ func (s *Server) handleLogicGateArena(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_and_logic_gate_id_required")
 		return
 	}
-	if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
+	flags, actorUserID, ok := s.requireLogicGateWorkReadAccess(w, r, companyID, logicGateID)
+	if !ok {
+		return
+	}
+	etag, err := s.logicGateWorkETag(r, companyID, logicGateID, actorUserID, flags)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "logic_gate_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_read_logic_gate_work_version")
+		return
+	}
+	if writeNotModifiedWithETag(w, r, etag) {
 		return
 	}
 
@@ -38,20 +51,8 @@ func (s *Server) handleLogicGateArena(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_arena")
 		return
 	}
-	sequence, err := s.currentKanbanBoardProjectionSequence(companyID, work.Board.BoardID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_read_kanban_projection_sequence")
-		return
-	}
-
-	writeJSONMaybeNotModified(w, r, http.StatusOK, domain.LogicGateArenaView{
-		LogicGate:          work.LogicGate,
-		Board:              work.Board,
-		Columns:            work.Columns,
-		Cards:              work.Cards,
-		CardsLimit:         work.CardsLimit,
-		ProjectionSequence: sequence,
-	})
+	work.Permissions = flags
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, work, etag)
 }
 
 func selectLogicGateArenaBoard(boards []domain.KanbanBoard, expectedBoardID string) (domain.KanbanBoard, bool) {

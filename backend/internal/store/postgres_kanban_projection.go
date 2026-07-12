@@ -34,17 +34,6 @@ case
   else 'Pending'
 end`
 
-const kanbanProjectionStatusRankSQL = `
-case
-  when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('requested', 'request', 'requests', 'r') then 0
-  when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('backlog', 'backlogs', 'b') then 1
-  when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('pending', 'p') then 2
-  when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('in progress', 'inprogress', 'ip') then 3
-  when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) = 'review' then 4
-  when lower(replace(replace(trim(projection.status), '_', ' '), '-', ' ')) in ('done', 'd') then 5
-  else 2
-end`
-
 const kanbanBoardProjectionCardSelectColumns = `
 projection.company_id::text as company_id,
 projection.compatibility_board_id as compatibility_board_id,
@@ -62,7 +51,7 @@ projection.due_date::text as due_date,
 projection.priority as priority,
 projection.projection_updated_timestamp as projection_updated_timestamp,
 projection.assignment_created_timestamp as assignment_created_timestamp,
-projection.projection_updated_timestamp as projection_updated_timestamp,
+projection.projection_updated_timestamp as card_updated_timestamp,
 projection.accounts::text as accounts_json,
 exists (
   select 1
@@ -255,7 +244,7 @@ with projected as (
   select
     `+kanbanBoardProjectionCardSelectColumns+`,
     projection.column_id::text as source_column_id,
-    `+kanbanProjectionStatusRankSQL+` as status_rank
+    projection.status_rank
   from kanban_board_projection projection
   where projection.company_id=$1::uuid
     and projection.logic_gate_id=$2::uuid
@@ -277,8 +266,9 @@ select
   priority,
   projection_updated_timestamp,
   assignment_created_timestamp,
-  projection_updated_timestamp,
-  accounts_json
+  card_updated_timestamp,
+  accounts_json,
+  created_from_email
 from projected
 where ($3 = '' or column_id=$3 or source_column_id=$3)
   and ($4 = 0 or position > $4)
@@ -322,7 +312,15 @@ projection.assignment_id::text,
 projection.assignment_created_timestamp,
 projection.assignment_updated_timestamp,
 projection.projection_updated_timestamp,
-projection.accounts::text as accounts_json`
+projection.accounts::text as accounts_json,
+exists (
+  select 1
+  from communications_email_nodes email_node
+  where email_node.company_id = projection.company_id
+    and email_node.node_id = projection.node_id
+    and email_node.board_id = projection.compatibility_board_id
+    and email_node.card_id = projection.compatibility_card_id
+) as created_from_email`
 
 func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (KanbanBoardProjectionRow, error) {
 	var item KanbanBoardProjectionRow
@@ -354,6 +352,7 @@ func scanKanbanBoardProjectionRow(row interface{ Scan(dest ...any) error }) (Kan
 		&item.AssignmentUpdatedTimestamp,
 		&item.ProjectionUpdatedTimestamp,
 		&accountsJSON,
+		&item.CreatedFromEmail,
 	)
 	if err != nil {
 		return KanbanBoardProjectionRow{}, err
@@ -387,7 +386,7 @@ func listKanbanBoardProjectionRowsTx(ctx context.Context, db kanbanBoardProjecti
 with projected as (
   select
     `+kanbanBoardProjectionRowSelectColumns+`,
-    `+kanbanProjectionStatusRankSQL+` as status_rank
+    projection.status_rank
   from kanban_board_projection projection
   where projection.company_id=$1::uuid
     and projection.logic_gate_id=$2::uuid
@@ -414,7 +413,8 @@ select
   assignment_created_timestamp,
   assignment_updated_timestamp,
   projection_updated_timestamp,
-  accounts_json
+  accounts_json,
+  created_from_email
 from projected
 where ($3 = '' or column_id=$3 or source_column_id=$3)
   and ($4 = 0 or position > $4)

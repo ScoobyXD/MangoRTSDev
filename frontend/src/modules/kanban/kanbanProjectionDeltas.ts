@@ -26,6 +26,7 @@ export type KanbanBoardProjectionRow = {
   position?: number;
   due_date?: string | null;
   priority?: number | null;
+  created_from_email?: boolean | null;
   created_timestamp?: string;
   assignment_created_timestamp?: string;
   updated_timestamp?: string;
@@ -210,6 +211,7 @@ export function kanbanCardFromProjectionRow(row: KanbanBoardProjectionRow): Kanb
     position: typeof row.position === "number" && Number.isFinite(row.position) ? row.position : 0,
     due_date: cleanOptionalString(row.due_date),
     priority: cleanOptionalNumber(row.priority),
+    created_from_email: row.created_from_email === true,
     accounts: cleanAccounts(row.accounts) ?? [],
     projection_updated_timestamp: projectionUpdated || undefined,
     created_timestamp: cleanString(row.created_timestamp) || cleanString(row.assignment_created_timestamp) || updated,
@@ -232,6 +234,7 @@ function applyPatchToCard(card: KanbanCard, patch: Partial<KanbanBoardProjection
   if (typeof patch.position === "number" && Number.isFinite(patch.position)) patched.position = patch.position;
   if (Object.prototype.hasOwnProperty.call(patch, "due_date")) patched.due_date = cleanOptionalString(patch.due_date);
   if (Object.prototype.hasOwnProperty.call(patch, "priority")) patched.priority = cleanOptionalNumber(patch.priority);
+  if (Object.prototype.hasOwnProperty.call(patch, "created_from_email")) patched.created_from_email = patch.created_from_email === true;
   if (Object.prototype.hasOwnProperty.call(patch, "accounts")) patched.accounts = cleanAccounts(patch.accounts) ?? [];
   const projectionUpdated = cleanString(patch.projection_updated_timestamp) || cleanString(delta.projected_timestamp) || cleanString(envelope.projected_timestamp);
   if (projectionUpdated) patched.projection_updated_timestamp = projectionUpdated;

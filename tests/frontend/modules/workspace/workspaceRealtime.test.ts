@@ -7,6 +7,7 @@ import {
   nodeGraphRealtimeScope,
   subscribeWorkspaceRealtime,
   workspaceRealtimeScope,
+  workspaceScopeRequiresKanbanBoardRefetch,
 } from "../../../../frontend/src/modules/workspace/workspaceRealtime.js";
 
 test("builds user-scoped workspace realtime scopes", () => {
@@ -182,6 +183,8 @@ test("derives scoped invalidation targets from workspace event types", () => {
 
   const assignmentScopes = deriveWorkspaceReconciliationScopes({ type: "work_item.logic_gate_assignment_saved", data: { logic_gate_id: "gate-A", node_id: "node-A", assignment_id: "assignment-A" } });
   assert.equal(assignmentScopes.some((scope) => scope.kind === "gvic_matrix" && scope.logicGateID === "gate-A" && scope.nodeID === "node-A"), true);
+  assert.equal(assignmentScopes.filter((scope) => scope.kind === "work_item_assignment" && scope.boardID === "logic-gate:gate-A").length, 1);
+  assert.equal(assignmentScopes.some((scope) => scope.kind === "kanban_board"), false);
 
   const logicGateScopes = deriveWorkspaceReconciliationScopes({ type: "logic_gate_gvic_updated", data: { logic_gate_id: "gate-B" } });
   assert.equal(logicGateScopes.some((scope) => scope.kind === "gvic_matrix" && scope.logicGateID === "gate-B"), true);
@@ -196,6 +199,29 @@ test("derives scoped invalidation targets from workspace event types", () => {
 
   const unknownScopes = deriveWorkspaceReconciliationScopes({ type: "future_workspace_event", data: { id: "unknown" } });
   assert.deepEqual(unknownScopes, [{ kind: "workspace", eventType: "future_workspace_event" }]);
+});
+
+test("exact Kanban projection events do not request duplicate broad board reloads", () => {
+  assert.equal(workspaceScopeRequiresKanbanBoardRefetch({
+    kind: "work_item_assignment",
+    eventType: "work_item.logic_gate_assignment_saved",
+    boardID: "logic-gate:gate-1",
+  }), false);
+  assert.equal(workspaceScopeRequiresKanbanBoardRefetch({
+    kind: "kanban_board",
+    eventType: "kanban_card_moved",
+    boardID: "logic-gate:gate-1",
+  }), false);
+  assert.equal(workspaceScopeRequiresKanbanBoardRefetch({
+    kind: "kanban_board",
+    eventType: "node_updated",
+    boardID: "logic-gate:gate-1",
+  }), false);
+  assert.equal(workspaceScopeRequiresKanbanBoardRefetch({
+    kind: "kanban_board",
+    eventType: "kanban_column_updated",
+    boardID: "logic-gate:gate-1",
+  }), true);
 });
 
 test("semantic affected scopes override broad workspace heuristics", () => {

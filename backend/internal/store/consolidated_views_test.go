@@ -138,8 +138,8 @@ func TestMemoryConsolidatedLogicGateViewIncludesDetailsProjectionGVICAndAssignme
 	if view.GVICAssignmentCount != 1 || len(view.GVICAssignments) != 1 || view.GVICAssignments[0].UserID != responsible.UserID {
 		t.Fatalf("logic gate view GVIC = %+v, want responsible assignment", view.GVICAssignments)
 	}
-	if view.AssignmentCount != 1 || len(view.Work.Assignments) != 1 || view.Work.Assignments[0].Assignment.NodeID != node.NodeID {
-		t.Fatalf("logic gate view work = %+v, want assignment-backed work node", view.Work.Assignments)
+	if view.AssignmentCount != 1 || len(view.Work.Cards) != 1 || view.Work.Cards[0].NodeID != node.NodeID {
+		t.Fatalf("logic gate view work = %+v, want assignment-backed work card", view.Work.Cards)
 	}
 	if len(view.Work.Cards) != 1 || view.Work.Cards[0].ColumnID != LogicGateWorkStatusDone {
 		t.Fatalf("logic gate synthesized cards = %+v, want done card from assignment", view.Work.Cards)

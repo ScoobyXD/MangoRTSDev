@@ -7,6 +7,7 @@ import (
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -44,10 +45,15 @@ func (s *Server) handleLogicGateWorkV2(w http.ResponseWriter, r *http.Request, l
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionView) {
+	flags, actorUserID, ok := s.requireLogicGateWorkReadAccess(w, r, companyID, logicGateID)
+	if !ok {
 		return
 	}
-	etag, err := s.logicGateWorkETag(r, companyID, logicGateID)
+	etag, err := s.logicGateWorkETag(r, companyID, logicGateID, actorUserID, flags)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "logic_gate_not_found")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_read_logic_gate_work_version")
 		return
@@ -69,23 +75,54 @@ func (s *Server) handleLogicGateWorkV2(w http.ResponseWriter, r *http.Request, l
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_work")
 		return
 	}
-	sequence, err := s.currentKanbanBoardProjectionSequence(companyID, work.Board.BoardID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_read_kanban_projection_sequence")
-		return
-	}
-	work.ProjectionSequence = sequence
+	work.Permissions = flags
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, work, etag)
 }
 
-func (s *Server) logicGateWorkETag(r *http.Request, companyID, logicGateID string) (string, error) {
-	boardID := store.LogicGateKanbanBoardID(logicGateID)
-	return s.workspaceEventETag(r, companyID, "logic-gate-work:"+logicGateID, []store.DomainEventStreamQuery{
-		workspaceEventQuery(nodeListWorkspaceEventTypes...),
-		workspaceEventQuery(logicGateListWorkspaceEventTypes...),
-		workspaceEventQueryPayload(kanbanColumnWorkspaceEventTypes, boardIDPayload(boardID)),
-		workspaceEventQueryPayload(kanbanCardWorkspaceEventTypes, boardIDPayload(boardID)),
-	})
+func (s *Server) logicGateWorkETag(_ *http.Request, companyID, logicGateID, actorUserID string, flags domain.EffectiveAccessFlags) (string, error) {
+	version, err := s.repo.CurrentLogicGateWorkVersion(companyID, logicGateID)
+	if err != nil {
+		return "", err
+	}
+	permissionKey := strconv.FormatBool(flags.CanView) + ":" + strconv.FormatBool(flags.CanEdit) + ":" + strconv.FormatBool(flags.CanAdmin)
+	return strongETagFromString(
+		"logic-gate-work:v3:" + strings.TrimSpace(companyID) + ":" + strings.TrimSpace(logicGateID) + ":" +
+			strings.TrimSpace(actorUserID) + ":" + permissionKey + ":" + strconv.FormatInt(version, 10),
+	), nil
+}
+
+func (s *Server) requireLogicGateWorkReadAccess(w http.ResponseWriter, r *http.Request, companyID, logicGateID string) (domain.EffectiveAccessFlags, string, bool) {
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		if s.authValidator == nil {
+			return domain.EffectiveAccessFlags{CanView: true, CanEdit: true, CanAdmin: true}, "", true
+		}
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return domain.EffectiveAccessFlags{}, "", false
+	}
+	if actorRoleForCompany(actor, companyID) == "" {
+		writeError(w, http.StatusForbidden, "company_access_denied")
+		return domain.EffectiveAccessFlags{}, "", false
+	}
+	actorUserID := strings.TrimSpace(actor.User.UserID)
+	if actorCanManageCompany(actor, companyID) {
+		return domain.EffectiveAccessFlags{CanView: true, CanEdit: true, CanAdmin: true}, actorUserID, true
+	}
+	flags, err := s.repo.LogicGateWorkAccessFlags(companyID, actorUserID, logicGateID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return domain.EffectiveAccessFlags{}, actorUserID, false
+	}
+	if err != nil {
+		log.Printf("failed to check logic gate work access company_id=%s logic_gate_id=%s user_id=%s: %v", companyID, logicGateID, actorUserID, err)
+		writeError(w, http.StatusInternalServerError, "failed_to_check_logic_gate_access")
+		return domain.EffectiveAccessFlags{}, actorUserID, false
+	}
+	if !flags.CanView {
+		writeAccessResourceNotFound(w)
+		return domain.EffectiveAccessFlags{}, actorUserID, false
+	}
+	return flags, actorUserID, true
 }
 
 func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.Request, logicGateID string) {

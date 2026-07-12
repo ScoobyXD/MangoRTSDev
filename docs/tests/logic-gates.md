@@ -1,4 +1,4 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 # Logic Gates Tests
 
@@ -41,6 +41,12 @@ LG27 - Logic Gate editor inline images/files must follow `docs/tests/attachments
 LG28 - The Logic Gate editor toolbar must use the shared rich-editor toolbar source and shared font-size helper/controller. Font-size minus/value/plus, bold, underline, and the outline-style dropdown must match node text boxes, project text boxes, and mail editor surfaces in look and selected-text/sticky-caret behavior.
 LG29 - A Logic Gate permissions view opened from the editor, map, Company Explorer, or another Logic Gate entry point always displays **Save** when editable. Saving persists the current selection without closing; read-only and denied views remain dismissible and do not attempt a write. This permission action is distinct from editor saved-version Save.
 LG30 - When a personal or Shared Triage email is converted into a node/card assigned to a Logic Gate, the created attached-email projection retains the source account email and, for shared mail, the shared-inbox ID. Later node email reads and mutations use that stored mailbox scope.
+LG31 - Logic Gate Arena work loads use one cache-first, cancelable, single-flight loader whether the gate came from forced Arena props or live selection.
+LG32 - Changing the selected Logic Gate aborts the obsolete request, and selection generation prevents a late A response from overwriting B or a newer A selection.
+LG33 - Valid consecutive Kanban projection deltas reconcile the cached/rendered Logic Gate work snapshot and projection sequence; only gaps, invalid data, or permission uncertainty require a targeted full work reload.
+LG34 - The Logic Gate work response exposes only the minimal Logic Gate header/default/request-owner data, actor permission flags, board, columns, minimal cards, and projection sequence.
+LG35 - The work ETag uses one dedicated Logic Gate work-version row plus actor permission identity/flags and a response-contract salt; authorization is evaluated before `304 Not Modified`.
+LG36 - The board request owner is the Logic Gate's Generated user ID. The work payload does not ship the full GVIC assignment collection, and GVIC still does not grant resource permission.
 
 ## Scenarios
 
@@ -218,3 +224,24 @@ Expected:
 - The personal attached-email projection retains `account_email`.
 - The shared attached-email projection retains both `shared_inbox_id` and `account_email`.
 - Reopening either message from the created node uses the stored scope for thread hydration, attachments, Reply/Reply All, drafts, and calendar invitation responses instead of falling back to another mailbox grant.
+
+### Scenario LG-S10: Arena Work Load, Version, And Minimal Header
+
+Business logic covered:
+- LG31
+- LG32
+- LG33
+- LG34
+- LG35
+- LG36
+
+Given:
+- A Logic Gate with a Generated user is opened in Arena from forced props and a matching live selection.
+- A cached snapshot exists, the user quickly changes gates, and a consecutive projection delta arrives.
+
+Expected:
+- The cached board renders immediately and the duplicate selection paths share one request.
+- The obsolete gate request is aborted and cannot commit stale state.
+- The delta updates the cached/rendered cards and sequence without a full reload.
+- The response carries `request_owner_user_id` and actor permission flags but no full GVIC, node, assignment, or status collections.
+- Authorization runs before conditional-response handling, and changes that affect the representation advance its version or contract fingerprint.
