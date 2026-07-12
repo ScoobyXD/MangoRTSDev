@@ -3,6 +3,24 @@ export type TextBlockChatProjectionReference = {
   blockID: string;
 };
 
+export type InitialTextBlockCreationState = {
+  canEdit: boolean;
+  projectionsLoaded: boolean;
+  nodeID: string;
+  editorSequence: number;
+  loadedTextBlockCount: number;
+  renderedTextBlockCount: number;
+};
+
+export function shouldCreateInitialTextBlock(state: InitialTextBlockCreationState): boolean {
+  return state.canEdit
+    && state.projectionsLoaded
+    && Boolean(state.nodeID.trim())
+    && state.editorSequence === 0
+    && state.loadedTextBlockCount === 0
+    && state.renderedTextBlockCount === 0;
+}
+
 export function projectionIDsForTextBlockDeletion(
   blockID: string,
   chatMessages: readonly TextBlockChatProjectionReference[],

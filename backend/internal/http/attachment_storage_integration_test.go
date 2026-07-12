@@ -24,13 +24,13 @@ import (
 //
 // Required opt-in environment:
 //
-//   MANGORTS_RUN_ATTACHMENT_S3_INTEGRATION=1
-//   MANGORTS_ATTACHMENT_S3_INTEGRATION_SAFE_FIXTURE_ACK=dev-only
-//   MANGORTS_ATTACHMENT_S3_INTEGRATION_BUCKET=<private dev fixture bucket>
-//   MANGORTS_ATTACHMENT_S3_INTEGRATION_REGION=<fixture region>
-//   MANGORTS_ATTACHMENT_S3_INTEGRATION_PROFILE=<non-prod AWS SSO profile>
-//   MANGORTS_ATTACHMENT_S3_INTEGRATION_PREFIX=agent-fixtures/<isolated prefix>
-//   MANGORTS_ATTACHMENT_S3_INTEGRATION_ORIGIN=<allowed local/dev app origin>
+//	MANGORTS_RUN_ATTACHMENT_S3_INTEGRATION=1
+//	MANGORTS_ATTACHMENT_S3_INTEGRATION_SAFE_FIXTURE_ACK=dev-only
+//	MANGORTS_ATTACHMENT_S3_INTEGRATION_BUCKET=<private dev fixture bucket>
+//	MANGORTS_ATTACHMENT_S3_INTEGRATION_REGION=<fixture region>
+//	MANGORTS_ATTACHMENT_S3_INTEGRATION_PROFILE=<non-prod AWS SSO profile>
+//	MANGORTS_ATTACHMENT_S3_INTEGRATION_PREFIX=agent-fixtures/<isolated prefix>
+//	MANGORTS_ATTACHMENT_S3_INTEGRATION_ORIGIN=<allowed local/dev app origin>
 //
 // Custom S3 fixtures may also set the backend and browser endpoints. An agent
 // must never opt in until Jonat has confirmed the bucket/prefix is disposable.

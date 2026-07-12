@@ -1,6 +1,16 @@
 # Browser-to-S3 attachment work: continuation handoff
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
+
+> **Continuation audit correction (2026-07-11):** The implementation commit
+> `c13b4a0a5ba90634b78376410d7b2c0c39d745f7` is an ancestor of current `main`
+> through merge commit `b8e0381f84419ffc46ef2111936324deab1eb909`. The merge passed the full
+> repository gate after conflict and verification fixes. Statements below that
+> say the original worker was uncompiled, unformatted, untested, or unmerged
+> describe its historical state at the time this handoff was written. Current
+> lifecycle semantics are also settled: natural TTL cleanup removes provider
+> residue and records `expired`; explicit user cancellation or permission-loss
+> cleanup records `aborted`, while existing terminal states remain unchanged.
 
 Worktree used for this implementation:
 
@@ -161,7 +171,7 @@ Do not log presigned URLs, credentials, upload IDs, tokens, or secrets. Structur
 
 ### Expiry and orphan cleanup
 
-The cleanup worker starts once with the API server and is cancelled by `Server.Close`. It scans for overdue active intents, aborts multipart uploads where needed, removes orphaned single objects where appropriate, and persists terminal state. Static review confirmed that DELETE/abort on an expired intent is safe in both repositories: the memory repository can perform abort cleanup without being trapped by an expiry transition, and the PostgreSQL implementation uses its own atomic transition. Overdue active intents cleaned by abort become aborted; an already persisted expired intent remains expired.
+The cleanup worker starts once with the API server and is cancelled by `Server.Close`. It scans for overdue active intents, aborts multipart uploads where needed, removes orphaned single objects where appropriate, and persists the natural-TTL terminal state as `expired`. Explicit DELETE/cancel or permission-loss cleanup records `aborted`. Both repositories preserve an already terminal `expired`, `aborted`, or `completed` intent.
 
 Defaults represented in code/Terraform are intended to be approximately:
 
@@ -540,7 +550,7 @@ The create response intentionally contains only public workflow data such as `up
 
 `POST /v1/attachments/upload-intents/{intentId}/complete` uses the durable completion claim. For single PUT it HEADs, verifies length/checksum/SSE, and deletes/reopens a safely retryable bad object so the client can obtain a fresh URL. For multipart it lists the exact part set, verifies part number/size/checksum/ETag, computes expected S3 composite checksum from authoritative part checksums, completes with the sorted authoritative metadata, then HEAD-verifies final length/composite provenance/SSE. An irrecoverable completed-object mismatch is deleted and fails the intent. Permanent attachment/resource-link finalization is transactional and replay returns the original resource-link ID.
 
-`DELETE /v1/attachments/upload-intents/{intentId}` is idempotent. It aborts multipart where applicable, deletes any object, and persists a terminal state without changing completed/aborted/expired results. Verify the exact overdue-cleanup terminal transition during tests: the direct backend audit observed overdue active cleanup becoming `aborted`, while an earlier prose description said cleanup marked it `expired`. The code and tests must be made internally consistent; already-persisted `expired` intents must remain expired.
+`DELETE /v1/attachments/upload-intents/{intentId}` is idempotent. It aborts multipart where applicable, deletes any object, and records `aborted` without changing completed/aborted/expired results. Automated overdue cleanup performs the same provider cleanup but records `expired`. Memory and PostgreSQL repository behavior and focused handler tests enforce this distinction.
 
 Legacy `POST /v1/attachments` returns `410 Gone` for browser byte uploads.
 
@@ -585,7 +595,7 @@ Ambiguous completion currently polls HEAD ten times at 50 ms before the wider re
 
 Permission loss on an active intent performs best-effort multipart abort/object deletion and terminal transition. It must not delete an already completed permanent attachment.
 
-The cleanup worker runs once at server startup, then at its bounded interval, scans up to 100 candidates, aborts multipart before deleting objects, and leaves failed provider cleanup eligible for retry. `Server.Close()` must cancel it. Confirm exact failed/expired/aborted transition semantics against both memory and PostgreSQL tests.
+The cleanup worker runs once at server startup, then at its bounded interval, scans up to 100 candidates, aborts multipart before deleting objects, and leaves failed provider cleanup eligible for retry. `Server.Close()` must cancel it. Preserve the tested distinction between natural-TTL `expired` and explicit-cancel/permission-loss `aborted` transitions in both repositories.
 
 Structured logs must not contain presigned URLs, object keys, multipart upload IDs, raw hashes/checksums, credentials, secrets, or file bytes.
 
@@ -645,7 +655,7 @@ When reviewing scheduler changes, verify every success, failure, retry, and canc
 
 Resume after a page reload still requires the user to reselect/provide the same browser `File`; local storage intentionally cannot preserve file bytes. Do not misrepresent metadata resume as offline file persistence.
 
-There is one policy detail to reconcile explicitly during tests: the backend audit states that zero-byte files are supported, while one frontend handoff description said to reject zero-length files. Inspect the brief, backend handler test expectation, frontend policy code, and focused tests. Choose one documented behavior and make both sides agree; do not let the mismatch survive silently. The existing backend test name `TestAttachmentDirectUploadPolicyAndIntentBoundaries` is expected to reveal the backend side.
+Zero-byte files are supported. They use a single PUT and the raw empty-payload SHA-256. Backend request/schema validation, frontend hashing/upload behavior, focused tests, and the attachment/streaming contracts must continue to agree on that rule.
 
 Once the browser can run, inspect actual network traffic in addition to automated tests:
 

@@ -3,7 +3,23 @@ import assert from "node:assert/strict";
 import {
   projectionIDsForTextBlockDeletion,
   resolveAttachedEmailHostBlockID,
+  shouldCreateInitialTextBlock,
 } from "../../../../frontend/src/modules/editor/nodeTextBlockDeletion.js";
+
+test("initial text-box creation does not replace a deleted last box after reload", () => {
+  const base = {
+    canEdit: true,
+    projectionsLoaded: true,
+    nodeID: "node-1",
+    editorSequence: 0,
+    loadedTextBlockCount: 0,
+    renderedTextBlockCount: 0,
+  };
+
+  assert.equal(shouldCreateInitialTextBlock(base), true);
+  assert.equal(shouldCreateInitialTextBlock({ ...base, editorSequence: 1 }), false);
+  assert.equal(shouldCreateInitialTextBlock({ ...base, loadedTextBlockCount: 1 }), false);
+});
 
 test("text-box deletion targets only the block and its chat projections", () => {
   assert.deepEqual(projectionIDsForTextBlockDeletion("block-1", [
