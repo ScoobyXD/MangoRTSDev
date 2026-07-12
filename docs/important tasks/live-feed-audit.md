@@ -1,18 +1,18 @@
-# Live Feed And Realtime Fan-Out Audit
+# Live Feed And Realtime Fan-Out Audit And One-Shot Removal Charter
 
 Last updated: 2026-07-12
 
-Status: static architecture audit complete enough to drive implementation planning. No realtime product code was changed in this branch.
+Status: authoritative implementation charter. The audit is complete enough to execute. The next Codex instance is authorized to implement the entire deletion and retained-foundation scope in one coherent task without reconfirming the product decisions below.
 
-Audit branch: codex/live-feed-audit
+Original audit branch: codex/live-feed-audit
 
-Audit worktree: C:\tmp\MangoRTSDev-workers\MangoRTSDev-live-feed-audit
+Original audit worktree: C:\tmp\MangoRTSDev-workers\MangoRTSDev-live-feed-audit
 
-Base commit: 5747e73f7fbb4c8795870c8be9f014b1ba7ca5fe
+Original audit base: 5747e73f7fbb4c8795870c8be9f014b1ba7ca5fe. The one-shot charter was reconciled against local main through 66fd76c76a17d397326bdafa0aa59f5154957ac0; recheck current main before editing because source lines may move.
 
 ## Executive Decision
 
-The proposed simplification is directionally correct.
+The simplification is approved. This is no longer a proposal.
 
 The current app treats too many ordinary CRUD changes as cross-user live replication problems. It records and distributes workspace domain events, projection delta event rows, permission events, notification events, communications events, and editor collaboration messages through overlapping paths. The result is a large amount of code, database work, cache invalidation, replay logic, permission fan-out, and failure recovery for behavior that the product does not need on most screens.
 
@@ -26,22 +26,22 @@ Immediate consistency for the user who made a change is not a fourth cross-user 
 
 Exact document coediting should not be counted as an existing keep-surface. The current code does not provide safe exact coediting. It relays whole documents without OT, CRDT, a shared revision, cursor state, or conflict resolution. The near-term decision is to remove that pseudo-collaboration path and retain durable autosave. A future opt-in feature called a Huddle may deliberately provide shared editing with CRDT/OT, but Huddle is a separate future product project and is not part of this realtime-deletion effort.
 
-### Proposed product rule
+### Approved product contract
 
 | Experience | Cross-user live? | Freshness rule |
 | --- | --- | --- |
 | Notification badges | Yes | User-targeted and app-lifetime |
 | Updates feed and its three unread badges | Yes | Consume the same user notification lane; `!` urgent mentions, `@` normal mentions, and regular non-mention updates change immediately; no second socket |
-| Node chat while the node/chat is open | Yes | Resource-targeted, committed messages only |
+| Node chat while the node/chat is open | Yes | Preserve current node-chat authorization and durable storage behavior; Project chat is excluded |
 | Mounted Logic Gate Kanban board | Yes | Board-targeted committed node-card title, add/remove, move/reorder, column, and other explicitly card-visible changes |
-| Node or Logic Gate document typing | No for now | Durable HTTP autosave; reopen/revalidate for another user |
+| Node or Logic Gate document typing | No | Durable HTTP autosave; reopen/reload for another user; delete current collaboration relay |
 | The initiating user's own title/card/tree changes | Immediate locally | Patch from the mutation response; never bounce through the server fan-out |
-| Kanban changes made by another user | Yes only on the relevant mounted Logic Gate board | Apply compact committed board deltas; refetch the canonical board snapshot on open/reconnect/gap |
-| Company Explorer changes made by another user | No | Revalidate roots/expanded branches on activation or focus |
-| Node/Logic Gate maps and relationships | No | Conditional refresh on activation or focus |
-| My Work/GVIC/Project Management | No | Refresh when opened/focused and after the local user's commands |
-| Mailbox/communications list changes | No under the stated policy | Refresh while the mailbox is visible, on focus, or on a bounded timer |
-| Permission revocation | Product/security decision | Server authorization remains immediate. Optionally send a narrow user control message to clear already-rendered restricted data. |
+| Kanban changes made by another user | Yes only on the relevant mounted Logic Gate board | Receive a compact committed board-change hint; refetch the canonical board snapshot on open/reconnect/gap |
+| Company Explorer changes made by another user | No | Reload on navigation/manual refresh if needed; temporary staleness during development is accepted |
+| Node/Logic Gate maps and relationships | No | Reload on navigation/manual refresh if needed; no cross-user subscription |
+| My Work/GVIC/Project Management | No | Load when opened and patch only concrete same-user command results |
+| Mailbox/communications list changes | No | Existing HTTP loads/manual refresh are sufficient; delete live mail delivery |
+| Permission revocation | No dedicated live requirement | HTTP authorization remains authoritative; already-rendered data may clear on the next navigation/reload |
 
 ### Recorded product decisions from 2026-07-12
 
@@ -49,8 +49,30 @@ Exact document coediting should not be counted as an existing keep-surface. The 
 2. Cross-user live delivery is retained only for node chat, the user notification/Updates lane, and the currently mounted Logic Gate Kanban board.
 3. The Updates sidebar badges for urgent `!` mentions, normal `@` mentions, and regular non-mention updates must change immediately from the one notification summary source. This restates docs/tests/updates.md:79 and 366-367.
 4. Node-card title and placement changes on a Logic Gate Kanban board should be visible to other users who currently have that same board open. This does not justify company-wide workspace fan-out or background subscriptions for every board.
-5. The notification domain-event catch-up/checkpoint worker is not a product requirement. Delete it after notification rows are written directly and reliably by the originating command path. Loading current notification summary/feed state on mount, reconnect, or focus is ordinary canonical-state loading, not a durable event-recovery subsystem.
+5. The notification domain-event catch-up/checkpoint worker is not a product requirement. Delete checkpoint initialization, the 30-second scan, ReplayDomainEvents notification recovery, repository plumbing used only by that recovery, and their tests in this task. Preserve the existing immediate notification projection and durable notification rows. Missed asynchronous recovery is an accepted single-user development limitation; do not build a replacement recovery system.
 6. The initiating user's successful mutation must still update every relevant surface in that app session immediately from the committed response. Other users do not receive generic title/tree/map/Explorer live replication unless the change is part of the retained active Kanban contract.
+
+## One-Shot Execution Mandate
+
+This repository currently has one active user and is in pure development. Optimize for deletion speed, smaller code, and a clear future realtime foundation—not for zero-downtime migration, compatibility periods, feature flags, observation windows, or preserving cross-user freshness on surfaces that are explicitly non-live.
+
+The complete scope in this document must be implemented in one worker task, one coherent final diff, and one completion flow into main. Internal edit order is allowed; separate batches, later cleanup PRs, or stopping after only frontend/backend halves are not. Do not pause to ask whether the approved deletions are safe. Static source proof, compilation, focused behavior tests for the three retained surfaces, the full repository gate, and final diff inspection are sufficient.
+
+Temporary development behavior that is explicitly acceptable:
+
+- another user's Company Explorer, map, My Work, Project Management, mail, or title surface can remain stale until navigation, reload, or explicit refresh;
+- a missed immediate notification projection will not be recovered by a later domain-event scan;
+- retained realtime may remain process-local in the current single-user development configuration if adding a compact cross-instance broker would materially expand the task;
+- permission revocation does not need a generic live fan-out message; HTTP/API authorization remains mandatory;
+- do not build a generalized local mutation bus or global focus-refresh framework before deleting broad streams. Patch only concrete same-user regressions exposed by the cleanup.
+
+Required end state:
+
+1. Only one notification scope, one node-chat scope, and one mounted Logic Gate Kanban scope remain as product realtime surfaces.
+2. Generic workspace, Company Explorer, graph, GVIC/My Work, Project Management, communications, permission, and document-collaboration live delivery is gone.
+3. event_rows and its worker/lease/sequence/retry infrastructure are gone after retained chat and Kanban no longer depend on them.
+4. The reusable socket/ticket/registry/subscription core remains small and can accept future explicit scope types.
+5. Huddle/CRDT/OT is recorded only as future work; no current collaboration compatibility code survives for it.
 
 ## Important Distinction: Events Are Not One Thing
 
@@ -67,7 +89,7 @@ The cross-user transport can be removed without immediately removing all durable
 
 - domain_events currently feeds notification projection and workspace-derived projection catch-up.
 - workspace_read_versions is updated from workspace domain events and is useful for cheap activation/focus revalidation.
-- notification rows are product data; notification projector checkpoints and catch-up are implementation machinery approved for deletion after direct notification writes replace them.
+- notification rows and the existing immediate request-path projector are product behavior; notification checkpoints and catch-up are approved for immediate deletion without a replacement recovery system.
 - event_rows is primarily a durable UI-replication queue and is the strongest deletion candidate after retained chat and active-Kanban delivery have replacements.
 
 The desired architecture is not “no events.” It is “no generic app-wide live replication.”
@@ -130,7 +152,7 @@ one physical websocket per API/company
 | Notifications | communications_notifications | Direct in-process notifications:user publish plus domain-event catch-up | Badges and Updates freshness | Keep direct durable notification state/live hint; delete generic catch-up/checkpoint recovery and centralize frontend consumption |
 | Communications | Provider webhook plus cache state | Direct in-process communications:user publish | Live mailbox/folder/list refresh | Remove from websocket under the stated policy |
 | Editor collaboration | Transient HTTP POST | Direct in-process editor scope publish | Whole-document opportunistic relay | Remove; it is not safe coediting |
-| Permission changed | event_rows | Event worker revalidates many live scopes | Revoke/refetch broad subscriptions | Narrow to retained chat/Kanban/control scopes or remove with them |
+| Permission changed | event_rows | Event worker revalidates many live scopes | Revoke/refetch broad subscriptions | Delete generic live permission delivery; HTTP authorization remains authoritative |
 
 ## Current Frontend Subscription Inventory
 
@@ -148,7 +170,7 @@ The client shares one physical WebSocket for each API base/company, but it regis
 | HomePage | gvic_matrix:user:{target} | Applies/refetches matrix | Remove |
 | UpdatesView | browser EVENT_NOTIFICATIONS_UPDATED | Refetches roots and loaded branches | Keep as a mounted consumer of notification coordinator, then make reconciliation bounded |
 | MyWorkView | one gvic_matrix:user scope per target user | Reloads matrix on delta/error/refetch | Remove |
-| KanbanContent | board:{board} | Applies projection deltas or refetches | Keep the active-board product behavior, but replace this process-local event_rows delivery with a compact reliable board lane |
+| KanbanContent | board:{board} | Applies projection deltas or refetches | Keep the active-board product behavior, but replace event_rows with direct compact board-changed publication |
 | KanbanContent | workspace:user:{user} | Applies board/list/title updates and invalidates caches | Remove duplicate broad lane after the board-specific contract covers card-visible changes |
 | CompanyExplorerContent | company_explorer:user:{user} | Applies workspace envelopes and refreshes branches | Remove |
 | NodeRelationshipGraph | node_graph:user:{user} | Applies deltas or refreshes graph snapshots | Remove |
@@ -208,7 +230,7 @@ The same process-local limitation exists for:
 
 The broad workspace lane is the only lane with a PostgreSQL cross-instance wake-up. Ironically, it is the lane the product most wants to remove.
 
-Required consequence: do not claim that notifications/chat are safely retained until they have a compact cross-instance wake-up or broker.
+This multi-task flaw is real but does not block the approved single-user deletion. Retain a small publisher boundary so a future broker can replace process-local publication without reviving workspace fan-out.
 
 ### P0: The transient document publisher has an authorization hole
 
@@ -222,7 +244,7 @@ The POST publisher for collaboration validates only shape, entity-kind text, IDs
 
 It does not check that the actor belongs to the supplied company or can access/edit the supplied node or Logic Gate. An authenticated caller who knows IDs can inject transient document updates into sessions belonging to authorized subscribers. The request also accepts caller-provided client ID, display name, revision, and up to 850 KB of HTML.
 
-This is a security/correctness issue independent of the larger architecture decision. If implementation starts before the collaboration path is deleted, disable it or add the same company/entity authorization used by subscription.
+This is a security/correctness issue independent of the larger architecture decision. Delete the publisher, subscription, route, UI, and tests outright in this task; do not spend time repairing it.
 
 ### P0: Current “collaboration” is whole-document last-writer-wins, not exact coediting
 
@@ -504,12 +526,12 @@ Companies after that page receive no notification catch-up from this worker. The
 
 - backend/internal/http/workspace_derived_projection.go:30-60, 86-103
 
-The decision is not to repair or paginate notification catch-up. Replace the reason it exists, then delete it:
+The decision is not to repair or paginate notification catch-up. Delete it now:
 
-1. The originating authenticated command writes every required durable notification row directly and reliably, preferably in the same database transaction as the business fact that requires the notification.
-2. After commit, publish one compact best-effort user wake-up so the badge coordinator and an open Updates view can reconcile immediately.
-3. On app mount, socket reconnect, browser focus, or opening Updates, load the canonical current summary/feed through the normal HTTP APIs. A missed wake-up may delay the screen until that bounded revalidation, but it must not lose the already-written notification row.
-4. Delete notification projection checkpoints, initialization, the 30-second company scan, ReplayDomainEvents usage for notifications, and their tests.
+1. Preserve the existing immediate request-path notification projector and durable notification rows.
+2. Remove its calls to runNotificationDomainEventCatchupOnce; log best-effort immediate projection failures without recovery.
+3. Delete notification projection checkpoints, initialization, the 30-second company scan, ReplayDomainEvents usage for notifications, repository/storage/schema used only by that recovery, and their tests.
+4. Keep ordinary canonical summary/feed loads on app mount or opening Updates. Do not create another recovery queue or make direct transactional notification rewrites a prerequisite for this cleanup.
 
 Do not replace this worker with another generic replay queue. Chat and Kanban use their own narrow canonical-state reconciliation contracts, and workspace-derived processing must be judged separately from notifications.
 
@@ -532,7 +554,7 @@ Long-lived connections are not periodically reauthenticated. Signed tickets are 
 
 - backend/internal/http/realtime_ticket.go:66-94, 124-160
 
-Server-side HTTP authorization remains authoritative, but a retained long-lived chat/control lane needs an explicit membership/session revocation strategy.
+Server-side HTTP authorization remains authoritative. Stronger mid-connection membership/session revocation is future hardening, not a blocker for this single-user cleanup.
 
 ### P2: More realtime fields and routes are dead or unreachable
 
@@ -544,7 +566,7 @@ Additional high-confidence cleanup candidates found in the static call graph:
 - requestPathProjectionDeltas filters out every currently defined projection event type, so request-path projection publisher calls are behaviorally dead: backend/internal/http/projection_deltas.go:180-192.
 - domain_events.published_timestamp, its pending index, ListPendingDomainEvents, and MarkDomainEventPublished have no production publisher/marker caller: backend/db/schema.sql:2185-2218; backend/internal/store/postgres_domain_events.go.
 
-Delete these only after focused source/tests prove no external integration depends on them, but they should not survive merely because nearby retained notification code still uses domain_events.
+Static call-graph evidence plus compilation and focused tests is sufficient. Delete these unreachable fields/routes/buses in this task; do not preserve them for hypothetical external integrations.
 
 ### P2: Go and SQL disagree about read-version handling for internal derived events
 
@@ -556,7 +578,7 @@ The SQL trigger function unconditionally emits workspace-snapshot:full before it
 
 - backend/db/schema.sql:2335-2344
 
-This classification drift means tests or memory-mode behavior can disagree with Postgres about which ETags advance. Before relying on conditional refresh as the replacement for realtime, make one implementation the source of truth and add parity tests.
+This classification drift means tests or memory-mode behavior can disagree with Postgres about which ETags advance. It does not block deleting realtime. Fix parity only if a remaining read-version test or touched canonical HTTP path requires it.
 
 ## Detailed Keep-Surface Findings
 
@@ -581,7 +603,7 @@ That scope currently requires effective Edit permission on the backend, although
 - backend/internal/http/realtime_ws.go:359-374
 - frontend/src/modules/editor/EditorContent.tsx:2255-2297
 
-The dedicated node-chat contract must decide deliberately whether chat viewing follows View access while sending/deleting remains Edit-gated.
+Preserve the current Node-chat access behavior during cleanup; do not expand the product. Sending/deleting remains HTTP-authorized.
 
 One chat submission currently can produce:
 
@@ -603,18 +625,18 @@ Chat submission similarly performs optimistic append, POST, then full snapshot r
 
 Recommended replacement:
 
-1. Keep the existing durable chat write initially.
+1. Keep the existing durable chat storage as the final canonical storage for this cleanup; do not introduce a chat table migration.
 2. Emit one compact committed chat event containing company_id, node_id, block_id, message_id, and operation.
 3. Publish to chat:node:{node_id} only if a local connection is actively subscribed.
-4. Cross backend tasks with one compact broker/NOTIFY message; do not expand all users.
+4. Publish through the retained process-local registry/publisher boundary; a cross-instance broker is future scaling.
 5. Authorize subscription with effective view access if view-only users should see chat. Keep send/delete commands edit-gated.
-6. Use the durable chat message ID/sequence for reconnect catch-up.
+6. Reload canonical durable chat state on reconnect/open if needed; do not build a generic replay system.
 7. Do not emit board, workspace, Explorer, or graph messages for chat.
 8. Keep notification creation as a separate user-targeted outcome.
 
-Storage can remain in the current projection tables for the first migration. A dedicated node_chat_messages table is an optional later cleanup, not required to remove fan-out.
+Storage remains in the current projection tables for this cleanup. There is no chat-table follow-up in this task.
 
-Project text-box chat is a separate implementation and is not currently part of the node-chat notification contract. Product must decide whether it is excluded or becomes another explicit resource scope.
+Project text-box chat is excluded from retained realtime.
 
 Do not confuse node text-block chat with Node Map inline comments. Node Map comments are browser-local localStorage data with no backend API or realtime path:
 
@@ -635,14 +657,11 @@ Recommended replacement:
 - no workspace:user event is needed for Updates;
 - local Seen keeps its current optimistic no-reload path.
 
-Current Updates behavior refetches roots and each expanded/loaded root branch for every external notification change. A better retained contract is either:
-
-1. server-shaped incremental notification rows with placement/group paths; or
-2. one coalesced Updates snapshot/change endpoint.
+Current Updates behavior refetches roots and each expanded/loaded root branch for every external notification change. Keep the simpler contract: one coalesced canonical Updates refresh while Updates is open. Do not design an incremental Updates protocol in this cleanup.
 
 Do not add an updates:user WebSocket in addition to notifications:user.
 
-Notification correctness comes from the durable notification rows written by the originating command, not from later rescanning a company-wide domain-event log. The WebSocket is only the immediate UI wake-up. If it is missed, the next bounded canonical summary/feed load repairs display state without a background notification projector.
+Notification correctness comes from durable notification rows created by the retained immediate projector, not from later rescanning a company-wide domain-event log. The WebSocket is only the immediate UI wake-up. Canonical summary/feed loads remain available without a background notification projector.
 
 Relevant business rules:
 
@@ -657,13 +676,13 @@ This is now an approved retained cross-user live surface, but only while the spe
 
 Required contract:
 
-- one scope per Logic Gate Kanban board, conceptually logic_gate.kanban:{logic_gate_id} or board:{board_id};
+- one existing board:{board_id} scope per mounted Logic Gate Kanban board;
 - authorize against current effective access to that Logic Gate;
 - publish only committed changes that affect the visible board: node-card title, add/remove, move/reorder, column creation/update/delete, and any other field explicitly rendered on a card;
 - the initiating user applies the mutation response immediately and deduplicates the server echo;
 - other users with that same board open apply a compact canonical delta;
 - users without that board open receive nothing;
-- every backend task receives one compact cross-instance wake-up and publishes only to matching local subscribers;
+- the retained process-local publisher sends only to matching local subscribers; a future broker can add cross-instance routing behind the same scope contract;
 - board open/reconnect/gap performs one canonical board snapshot request; do not build a permanent generic event replay log;
 - no workspace:user, Company Explorer, graph, GVIC, Project Management, or mail invalidation is emitted merely because the board changed.
 
@@ -683,7 +702,7 @@ Recommended near-term state:
 - durable HTTP autosave remains;
 - no cross-user per-keystroke/whole-document relay;
 - another user's committed changes appear on reopen, activation, focus revalidation, or manual refresh;
-- optimistic concurrency/version conflict handling should be added before encouraging simultaneous editors.
+- optimistic concurrency/version conflict handling belongs to future Huddle/document work and is not part of this cleanup.
 
 If exact coediting is later required, define Huddle as a separate opt-in collaboration project with:
 
@@ -721,7 +740,7 @@ This is already partially present:
 - My Work applies returned projection rows to local matrix state/cache: frontend/src/pages/home/MyWorkView.tsx:471-484.
 - Kanban API commands invalidate/patch local Kanban and workspace caches: frontend/src/modules/kanban/kanbanApi.ts.
 
-It is not yet complete. Some cross-surface title/list state still depends on a server workspace echo. Before disabling the broad stream, create one explicit local mutation coordinator or shared normalized cache for:
+Some cross-surface title/list state still depends on a server workspace echo. Delete the broad stream anyway and patch only concrete same-user regressions encountered in focused tests for:
 
 - node create/update/delete;
 - Logic Gate create/update/delete;
@@ -734,7 +753,9 @@ It is not yet complete. Some cross-surface title/list state still depends on a s
 - permissions;
 - local mail actions.
 
-Verified rename gaps that make a blind stream shutdown unsafe:
+Do not create a generalized local mutation coordinator as a prerequisite. Existing committed-response patches and local command-result events are the preferred minimal fix.
+
+Verified rename gaps that the one-shot implementation should patch directly if their focused tests regress:
 
 - A Logic Gate rename in Company Explorer updates that reducer and the Logic Gate graph, but the mounted Kanban title currently depends on the broad workspace echo: frontend/src/modules/company-explorer/CompanyExplorerContent.tsx:2876-2920; frontend/src/modules/kanban/KanbanContent.tsx:1691 onward.
 - An editor node rename updates the node graph, which can reach Kanban card titles, but Company Explorer's workspace reducer has no node_updated case and relies on branch refresh/server echo: frontend/src/modules/editor/EditorContent.tsx:1330-1358; frontend/src/modules/company-explorer/companyExplorerStore.ts:310 onward.
@@ -753,7 +774,7 @@ Do not delete all browser event buses with server realtime. Classify them by ori
 - mangorts:communications-shared-inboxes-updated and mangorts:home-triage-conversion-applied are local API-result coordination, not reasons to keep cross-user workspace delivery: frontend/src/modules/communications/communicationsApi.ts:2171 onward; frontend/src/pages/home/HomePage.tsx:2141 onward.
 - saved-view, account, selection, frame-link, map-focus, sidebar, dock, and fullscreen events are same-browser UI coordination. selectionCoordinator explicitly does not touch the backend: frontend/src/modules/selectionCoordinator.ts:97-132.
 
-## Freshness Replacement Before Streams Are Disabled
+## Non-Live Freshness After Deletion
 
 Several caches can remain stale indefinitely today because they assume realtime will invalidate them.
 
@@ -768,15 +789,13 @@ Examples:
 - Workspace snapshots already support ETag/If-None-Match: frontend/src/modules/workspace/workspaceSnapshotCache.ts:136-174.
 - There is no general visibilitychange, pageshow, or window-focus freshness hook under frontend/src at this audit base.
 
-Required replacement policy:
+These cache facts do not block deletion. This is a single-user development app, and temporary cross-user staleness is accepted. Apply the following only where it is simple or where focused tests expose an unacceptable same-user regression:
 
-1. Every non-live surface performs a conditional revalidation when it becomes active.
-2. A visible surface revalidates when the browser returns to the foreground after a bounded stale interval.
-3. Route/panel activation should revalidate even if a singleton cache is already hydrated.
-4. A successful local mutation patches its cache immediately and marks dependent caches stale.
-5. Manual refresh remains available.
-6. Optional low-frequency polling is mounted-and-visible only; it must not be global.
-7. ETag/304 and workspace_read_versions should make these checks cheap.
+1. Preserve or add the obvious local committed-response patch for the initiating user's active surfaces.
+2. Let non-live surfaces load canonical state when opened or navigated to; add a small surface-local activation/focus refresh only when existing cache behavior would otherwise make normal development unusable.
+3. Manual reload/refresh is an acceptable development fallback.
+4. Do not build a generalized mutation coordinator, global visibility framework, hidden polling, or a replacement invalidation bus before deleting broad realtime.
+5. If a conditional request is already used, preserve correct ETag/304 behavior.
 
 The backend already has workspace_read_versions and ETag helpers:
 
@@ -784,7 +803,7 @@ The backend already has workspace_read_versions and ETag helpers:
 - backend/internal/http/etag_helpers.go
 - backend/db/schema.sql:2264-2276, 2577-2607
 
-Keep this mechanism until the non-live revalidation strategy is proven. If domain event creation is later reduced, move read-version bumps into the same source/projection transaction rather than silently breaking ETags.
+Keep read versions because they serve canonical HTTP freshness independently of browser realtime. They are not a prerequisite project. If deletion makes a remaining classifier fail, fix that concrete path in the same task.
 
 ETag support is not uniformly consumable today. requestJSONWithMeta handles 304, while the general apiFetchJSON path treats non-2xx responses as errors:
 
@@ -796,131 +815,132 @@ Backend handlers already emit precomputed or body-hash ETags for several useful 
 - backend/internal/http/logic_gate_work_handlers.go:47-78
 - backend/internal/http/consolidated_view_handlers.go:56-119
 
-The refresh replacement therefore needs a shared conditional-query primitive, not merely more calls to existing API helpers.
+Do not create a new shared conditional-query architecture solely to finish this cleanup. Reuse requestJSONWithMeta where convenient and fix only concrete 304 regressions in touched surfaces.
 
-## What Can Be Deleted First
+## Delete In This One-Shot Task
 
-These are high-confidence, low-product-impact candidates, subject to focused tests:
+Everything in this manifest is approved for deletion now. Internal dependency order is allowed, but there are no separate releases, compatibility periods, kill switches, observation windows, or later cleanup batches.
 
-1. The transient whole-document collaboration publisher/subscriber and unused presence/leave UI. Future Huddle does not depend on this path.
-2. Notification domain-event catch-up, notification projection checkpoint initialization/scanning, and their tests, in the same change that makes the originating commands write required notification rows directly.
-3. Per-user PostgreSQL workspace fan-out notifications. Listeners discard them today. Keep the one company wake-up temporarily only while broad workspace delivery still exists.
-4. localWorkspaceEventBus, after tests assert durable event creation or WebSocket behavior directly.
-5. projectionDeltaHub, after tests use realtimeRegistry or pure delta shaping.
-6. Unsupported editor:project event-row creation/delivery, unless a real subscriber is first identified.
-7. Workspace browser publication of node_information_created and logic_gate_information_created; the frontend explicitly ignores them. Preserve any separately required durable audit fact.
-8. Redundant always-retain connection effect in AppLiveFreshnessBridge.
-9. Duplicate notification subscriptions after the notification coordinator owns the one user scope.
-10. Old Kanban workspace invalidation and process-local event_rows delivery after the dedicated active-board lane is proven.
+### Frontend deletion manifest
 
-Do not start with schema drops. First remove consumers, then producers, then the tables/indexes after observation.
+- In frontend/src/app/AppLiveFreshnessBridge.tsx, delete the communications subscription, ensureMangoRealtimeConnection retain effect, workspace subscription, broad reconciliation/invalidation logic, and server-workspace CustomEvent rebroadcasts. Retain only one notification ownership path or replace the component with an equivalently small notification coordinator.
+- Delete HomePage communications, workspace, and GVIC matrix realtime effects at the current subscribeCommunicationsStream, subscribeWorkspaceRealtime, and GVICMatrixRealtimeScope call sites.
+- Delete the MyWorkView GVIC matrix subscriptions.
+- Delete CompanyExplorerContent's company_explorer:user subscription.
+- Delete NodeRelationshipGraph's node_graph:user subscription and LogicGateRelationshipGraph's logic_gate_graph:user subscription.
+- Delete ProjectManagementContent's Company Explorer and project_management subscriptions.
+- Delete LogicGateArenaPage's workspace title subscription.
+- Delete communications/mail realtime delivery and frontend/src/modules/communications/communicationsStream.ts when no callers remain.
+- Delete KanbanContent's broad workspace:user subscription and the AppLiveFreshnessBridge/global CustomEvent invalidation path. Retain only the explicit mounted-board behavior, rewired away from event_rows in this same task.
+- Delete frontend editor whole-document collaboration publication/subscription, collaborator presence UI that depends on it, and frontend/src/modules/editor/editorCollaboration.ts.
+- Split Node chat from generic editor projection delivery, then delete the generic editor projection subscription and document-update handling.
+- Delete the duplicate notifications:user subscription from useNotificationSummary. Exactly one app-lifetime notification owner remains; summary and an open Updates view consume it.
+- Delete frontend/src/modules/workspace/workspaceRealtime.ts after its broad consumers are gone, plus obsolete workspace/projection/communications protocol types in realtimeWebSocket.ts.
+- Preserve browser CustomEvents only when they originate from a successful local command and coordinate same-browser state. Delete events whose only purpose was to re-fan-out a server workspace message.
 
-## What Must Wait For A Replacement
+### Backend deletion manifest
 
-1. Do not remove notification WebSocket delivery until compact cross-instance user delivery exists.
-2. Do not delete notification catch-up before every required notification is written directly by its originating command; remove both the old dependency and recovery worker together.
-3. Do not remove editor projection delivery for node chat until chat:node delivery exists.
-4. Do not remove the old Kanban paths until the dedicated active-board lane handles the approved card-visible changes across backend tasks.
-5. Do not remove other broad frontend subscriptions until activation/focus revalidation and local mutation propagation are tested.
-6. Do not drop domain_events while workspace-derived processing, read versions, or an explicitly approved audit use still needs them. Notification catch-up is no longer a reason to keep them.
-7. Do not remove workspace_read_versions until an equivalent ETag version source exists.
-8. Do not remove permission-change live handling for retained chat/Kanban/control scopes until those subscriptions can be revoked safely.
-9. Do not drop event_rows until node chat and active-board delivery have moved to their narrow replacements.
+- Delete backend/internal/http/workspace_fanout.go, backend/internal/store/workspace_event_fanout.go, backend/internal/store/postgres_workspace_event_fanout.go, backend/internal/store/workspace_effective_fanout.go, and their tests when no non-browser durable consumer uses them.
+- Remove browser publication, user expansion, four-scope routing, replay, and snapshot-refetch behavior from backend/internal/http/workspace_handlers.go while preserving independently required domain-event append, immediate notification projection, workspace-derived processing, and read-version behavior.
+- Delete workspace:user, company_explorer:user, node_graph:user, and logic_gate_graph:user scope parsing/authorization and company-global workspace replay/gap logic from realtime_ws.go.
+- Delete communications:user publication/subscription protocol and backend communications WebSocket publication while preserving webhook processing and canonical mail APIs.
+- Delete POST /v1/editor/collaboration/events, editor_collaboration_handlers.go, its route wiring/tests, and the durable editor_collaboration_event compatibility branch. Do not repair its authorization hole.
+- Delete generic permission.changed live delivery and broad permission revalidation. HTTP/API authorization remains authoritative.
+- Delete localWorkspaceEventBus, projectionDeltaHub, affected_scopes behavior, unreachable gvic:user production, unsupported editor:project production, and dead requestPathProjectionDeltas publication.
+- Delete notification checkpoint initialization, runNotificationDomainEventCatchup, runNotificationDomainEventCatchupOnce, the 30-second company scan, notification ReplayDomainEvents recovery, startup wiring, repository/schema pieces used only by that recovery, and their tests. Preserve the existing immediate projector and durable notification rows; no replacement recovery system is required.
+- Remove per-user and company-wide PostgreSQL workspace pg_notify fan-out. Retained scopes publish directly through the small retained publisher boundary.
 
-## Proposed Narrow Realtime Design
+### Projection queue and schema deletion manifest
+
+Remove every event_rows type: kanban.projection_delta, gvic_matrix.projection_delta, project_management.projection_delta, project_relationship.projection_delta, editor.projection_delta, gvic.projection_delta, and permission.changed.
+
+- Rewire mounted-board change hints and Node chat to direct compact post-commit registry publication first inside this same task.
+- Delete all production appendEventRowsTx/appendEventRowsLocked calls and ProjectionDeltaEventInputs queue creation.
+- Delete event_worker polling/claim/lease/retry code, event-row repository interfaces and Postgres/memory implementations, legacy projection message shaping, queue-specific sequences, and obsolete tests.
+- Add the repository migration/schema update that drops event_rows and its indexes after code no longer references them.
+- Drop company_projection_sequences only if the final retained direct scopes and canonical GETs no longer use it.
+- Drop notification projection checkpoint schema only if no remaining non-notification consumer shares it.
+- Do not apply remote/dev/prod database changes from an agent session. Repository migration/schema code is part of this task; execution follows docs/security/database-agent-access-contract.md.
+
+## Retained By The End Of This Task
+
+1. One shared frontend WebSocket client per API/company and the backend ticket, connection, subscribe/unsubscribe, registry, scope-authorization, ping/pong, reconnect, and error-handling core.
+2. Exactly one app-lifetime notifications:user:{user_id} product scope.
+3. Exactly one chat:node:{node_id} scope, active only while that Node/chat is mounted. Keep current durable chat storage; do not introduce a new chat table in this cleanup.
+4. Exactly one mounted-board scope. Reuse board:{board_id} unless a rename is mechanically useful; its product semantics are the active Logic Gate Kanban board only.
+5. A small direct publisher boundary for compact committed events. Process-local publication is acceptable for the current single-user development environment. A future broker may replace the publisher internals without changing product scopes.
+6. Canonical HTTP mutation/read APIs, durable notification rows, canonical chat storage, Kanban projection/read tables, domain_events consumers independently required for workspace-derived/read-version/audit behavior, and workspace_read_versions.
+7. Future Huddle/CRDT/OT only as documentation. No current collaboration code is retained for it.
+
+## Final Minimal Realtime Design
 
 One WebSocket per company/user can remain, but its protocol should be small:
 
 | Scope/message | Subscriber | Payload |
 | --- | --- | --- |
-| user.notifications | Logged-in user, app-lifetime | created/deleted/cleared plus summary revision/counts |
-| node.chat:{node_id} | Active node editor/chat viewer | committed message ID, block ID, operation, node chat sequence |
-| logic_gate.kanban:{logic_gate_id} | Viewers with that Logic Gate board mounted | compact committed card/column operation and canonical changed record |
-| user.control | Optional security/control messages | resource revoked or session invalidated |
+| notifications:user:{user_id} | Logged-in user, app-lifetime | existing created/deleted/cleared notification hints; one coalesced summary refresh and one Updates refresh only while open |
+| chat:node:{node_id} | Active Node/chat viewer | compact committed message or deletion data; canonical chat reload on reconnect if needed |
+| board:{board_id} | Viewers with that Logic Gate board mounted | compact board-changed hint derived directly from committed mutation results; coalesced canonical board refresh is acceptable |
 | huddle.document:{huddle_id}:{document_id} | Not in this project | Future CRDT/OT operations and presence inside an explicit Huddle only |
 
 Writes remain authenticated HTTP commands. The socket is a server-to-client change signal.
 
-For current two-task ECS deployment, a small cross-instance mechanism is required:
+The retained publisher should expose an explicit scope plus compact message. For this single-user development cleanup, in-process registry delivery is sufficient and does not block completion:
 
-- notification insert/delete/clear can publish one compact company/user/revision wake-up;
-- chat commit can publish one compact company/node/message/operation wake-up;
-- an approved Kanban mutation can publish one compact company/Logic Gate/board operation wake-up;
-- every backend task listens and sends only to its own matching local subscribers;
-- no company-wide reverse-access expansion is required because notification recipients are known and chat/board subscribers are already authorized;
-- reconnect loads canonical notification summary/feed, chat messages after the durable message cursor, or the current board snapshot. Do not reuse the filtered company-global sequence or notification catch-up worker.
+- notifications publish only to their known user scope;
+- Node chat publishes only to the active Node scope after persistence;
+- Kanban mutations derive affected board IDs from committed mutation/projection results and publish only to those board scopes;
+- no company-wide recipient expansion, domain-event replay, event_rows queue, global workspace cursor, or large document payload is allowed;
+- reconnect/open loads canonical notification, chat, or board state;
+- a future cross-instance broker can implement the same publisher contract later. If PostgreSQL LISTEN/NOTIFY can be added very simply in this one-shot, it may be used, but it is not a completion prerequisite.
 
-PostgreSQL LISTEN/NOTIFY can be an interim broker for compact IDs/wake-ups. It should not carry full documents or large rows. A dedicated broker is preferable if exact collaboration or much higher message volume is later required.
+Future realtime surfaces must add an explicit narrow scope, subscription authorization, compact committed event, and canonical HTTP fallback. They must not revive generic workspace replication.
 
-## Phased Deletion Plan
+## One-Shot Internal Execution Order
 
-### Phase 0: Lock the product contract and baseline
+These are edit-order steps inside one uninterrupted implementation task, not batches, phases, releases, or follow-up work. Continue through every step, focused verification, full verification, commit, and merge to main before declaring completion.
 
-- Approve the target matrix in this document.
-- Decide node chat view-vs-edit subscription access.
-- Decide whether Project chat is excluded.
-- Decide whether immediate permission-revocation clearing is a narrow exception.
-- Record Huddle/CRDT/OT as a separate future project; current pseudo-collaboration is approved for deletion.
-- Lock the minimum active-board payload: node title, card add/remove/move/reorder, columns, and explicitly card-visible fields only.
-- Capture current event table size/rate and live subscription counts.
-- Add a temporary server kill switch for broad workspace/projection publishing if one does not already exist.
+### Internal step 1: Recheck source and lock the final manifest
 
-No schema change in this phase.
+- Recheck current main and every subscribe/publish/event_rows call because the original line references can drift.
+- Use the approved defaults: preserve current Node-chat access semantics without expanding the product; Project chat excluded; no dedicated live permission revocation; mail non-live; same-window local consistency only; no global polling.
+- Use notifications:user:{user_id}, chat:node:{node_id}, and existing board:{board_id} as the three scope families unless a mechanical naming adjustment is clearly smaller.
+- Preserve current unified editor/persistence abstractions added after the original audit; remove only their old collaboration and broad editor-projection realtime dependencies.
+- Do not add feature flags, compatibility nets, shadow publication, runtime measurement prerequisites, or new product decisions.
 
-### Phase 1: Make non-live surfaces safely refreshable
+### Internal step 2: Delete broad frontend consumers
 
-- Add activation/focus conditional revalidation.
-- Make already-hydrated graph and record-store caches revalidate.
-- Make Kanban contents revalidate on activation.
-- Complete local committed-response propagation for titles, cards, Explorer, graphs, Home, and arena targets.
-- Add tests proving another user's change appears after activation/focus, not necessarily instantly.
+- Remove the workspace, Company Explorer, graph, GVIC/My Work, Project Management, communications, Logic Gate Arena, broad Kanban workspace, collaboration, generic editor projection, and always-retain effects in the frontend deletion manifest.
+- Reduce AppLiveFreshnessBridge to the one notification owner and remove the duplicate socket subscription from useNotificationSummary.
+- Keep local command-result CustomEvents; remove server-workspace rebroadcast events.
+- Patch only concrete same-user regressions revealed by focused tests. Do not stop to build a generalized freshness layer.
 
-Keep existing streams during this phase as a compatibility net.
+### Internal step 3: Rewire the three retained lanes directly
 
-### Phase 2: Build the three retained lanes
+- Keep current notification created/deleted/cleared request-path publication and durable rows. One frontend owner drives summary plus an open Updates view.
+- Add chat:node:{node_id} direct post-commit publication from Node chat create/delete handlers. Publish committed row or deletion ID only; do not stream editor documents.
+- Replace board projection deltas with a compact kanban.changed event on existing board:{board_id}. Debounce/coalesce one canonical board reload in the mounted Kanban. Derive affected boards from committed mutation/projection results; a Node title may signal each affected board.
+- Keep scope authorization explicit: notifications must match actor, board requires effective Logic Gate access, chat requires effective Node access. HTTP commands remain authoritative for edit/delete permission.
+- Use the current in-process registry. A broker is future scaling, not a completion gate.
 
-- Central notification coordinator.
-- Direct reliable notification-row creation in the originating commands.
-- Delete notification catch-up/checkpoint scanning and add compact cross-instance notification wake-up plus bounded canonical summary/feed loading.
-- Dedicated committed node chat scope.
-- Cross-instance chat wake-up and resource sequence.
-- Dedicated active Logic Gate Kanban scope with compact committed card/column deltas and canonical snapshot fallback.
-- Cross-instance Kanban wake-up without company-wide recipient expansion.
-- Narrow permission revocation for active chat and Kanban subscriptions.
-- Two-backend integration tests.
+### Internal step 4: Delete notification recovery and broad backend fan-out
 
-### Phase 3: Disable broad frontend consumers
+- Delete notification_projection.go, checkpoint initialization/scanning, fallback catch-up calls, notification ReplayDomainEvents service methods, checkpoint repository/storage/schema, startup wiring, and tests. Keep the immediate request-path projector; log a best-effort failure without recovery.
+- Delete workspace fan-out/listener/effective-user code, localWorkspaceEventBus, browser publication/replay, four broad scope branches, semantic affected-scope shaping, and redundant PostgreSQL notify paths.
+- Delete communications WebSocket publication and collaboration endpoint/publication.
+- Preserve durable domain-event append only where notification immediate projection, workspace-derived projection, read versions, or approved audit behavior still uses it.
 
-Remove workspace/board/GVIC/Project Management/graph/Explorer subscriptions surface by surface. Suggested order after local mutation propagation and focus/open revalidation are green:
+### Internal step 5: Delete event_rows and projection replication completely
 
-- disable the unsafe transient collaboration subscription and publisher;
-- graph stream bootstraps;
-- Company Explorer workspace effect;
-- Logic Gate Arena title workspace effect;
-- My Work and Project Management subscriptions;
-- Home workspace and GVIC matrix effects;
-- Kanban workspace effect and old process-local board projection subscription, replacing them with the dedicated active-board lane rather than removing live Kanban;
-- communications subscriptions under the stated non-live-mail decision;
-- editor projection subscription after chat is split;
-- AppLiveFreshnessBridge workspace, communications, and connection-retain effects last, once no remaining cache relies on its global invalidations.
+- Remove all seven queue types and every Postgres/memory appendEventRows call from the producer files listed in the deletion manifest.
+- Delete event_worker, event_rows store/repository implementations, projectionDeltaHub and old projection publisher, queue-specific claim/lease/retry/sequence/message plumbing, tests, and server wiring.
+- Preserve canonical projection table maintenance and mutation result data that non-realtime reads/local command responses still use; delete live-only ProjectionDeltas plumbing when it becomes unreferenced.
+- Add the forward migration that drops event_rows and its indexes, and remove the table from canonical schema. Preserve historical create migrations.
+- Re-audit company_projection_sequences after deletion; keep it if current canonical reads still use it.
 
-Do not delete AppLiveFreshnessBridge first. It currently masks the indefinite-cache and partial local-reconciliation defects listed above.
+### Internal step 6: Prune the reusable transport core
 
-Use metrics to prove only notifications, active node chat, and currently mounted Logic Gate Kanban subscriptions remain.
-
-### Phase 4: Stop producing UI-replication events
-
-- Stop appending GVIC, Project Management, Project relationship, generic editor, and old Kanban event_rows.
-- Do not retain the generic event_rows queue for chat or Kanban; publish compact post-commit wake-ups and reconcile from their canonical rows/snapshots.
-- Stop publishing routine workspace events to browsers.
-- Separate “append durable domain fact” from “publish to workspace realtime.”
-- Remove request paths that create duplicate workspace and projection signals for the same command.
-
-This is the phase that removes database work from ordinary mutations.
-
-### Phase 5: Delete broad backend transport
-
-Candidate deletions or major reductions:
+Delete or reduce:
 
 - backend/internal/http/workspace_fanout.go
 - backend/internal/store/workspace_event_fanout.go
@@ -929,30 +949,27 @@ Candidate deletions or major reductions:
 - workspace realtime publication and replay portions of backend/internal/http/workspace_handlers.go
 - workspace/company_explorer/node_graph/logic_gate_graph scope parsing in backend/internal/http/realtime_ws.go
 - projection publishing and legacy projectionDeltaHub portions of backend/internal/http/projection_deltas.go
-- non-retained cases and permission revalidation in backend/internal/http/event_worker.go
+- all event_worker code rather than retaining non-live cases
 - frontend/src/modules/workspace/workspaceRealtime.ts
 - most workspace/projection/communications message types in frontend/src/modules/realtime/realtimeWebSocket.ts
 - frontend/src/modules/communications/communicationsStream.ts
 - transient frontend/backend editor collaboration modules
 
-Keep the minimal WebSocket registry/ticket path only if it remains the chosen notification/chat/active-Kanban transport.
+Keep realtimeWebSocket.ts generic connection/subscription machinery and backend ticket/frame/registry/subscribe/unsubscribe/ping/pong/error code. Prune message types, scope authorization, metrics, and helpers until only notifications, chat, and board product scopes remain. Add a source guard that rejects the removed broad scope families.
 
-### Phase 6: Database lifecycle and schema cleanup
+### Internal step 7: Finish schema, tests, and docs in the same task
 
-After code no longer writes/reads them:
+After code no longer writes/reads them in this same diff:
 
-- archive or delete processed event_rows under a human-approved migration;
-- drop event_rows and its indexes if the retained lanes use a different outbox;
+- drop event_rows and its indexes with a forward repository migration;
 - remove obsolete company_projection_sequences rows/table if no GET or retained stream uses them;
 - remove unused domain_events published_timestamp and pending index if no external outbox publisher exists;
-- delete notification projection checkpoints with the catch-up worker, then define domain_events retention around only remaining workspace-derived, read-version, and approved audit requirements;
+- drop notification projection checkpoints if no other consumer shares them; define domain_events retention around only remaining workspace-derived, read-version, and approved audit requirements;
 - retain workspace_read_versions or replace it with transactionally updated read versions.
 
-Database changes must follow the repository database-agent access contract and be executed through the authorized human/migration path.
+Database changes must follow the repository database-agent access contract. Create and test repository migration/schema code, but do not run it against dev/prod from an agent session.
 
-### Phase 7: Documentation and test cleanup
-
-Update:
+Update or delete tests and contracts in this same task:
 
 - docs/tests/REST API & WebSocket.md
 - docs/tests/updates.md
@@ -975,41 +992,38 @@ U23/U24 should describe the one notification coordinator and bounded Updates rec
 
 ### Retained realtime
 
-- notification create/delete/clear reaches a socket on either backend task;
+- notification create/delete/clear reaches the one retained user subscription in the supported development configuration;
 - one notification causes one summary reconciliation;
 - urgent `!`, normal `@`, and regular non-mention unread badges all change immediately from the one notification summary;
 - Updates closed causes no feed request;
 - Updates open causes one bounded reconciliation;
-- every update-producing command writes its required durable notification rows directly without waiting for a catch-up scan;
+- the existing immediate notification projector continues to create the expected durable notification rows without a catch-up scan;
 - no notification projection checkpoint initialization, 30-second company scan, or ReplayDomainEvents notification path remains;
-- a deliberately missed notification wake-up is repaired by the next canonical summary/feed load, without replaying domain events;
+- canonical summary/feed loading still works without replaying domain events;
 - local Seen remains no-reload and selects the next visible row;
-- node chat create/delete reaches another viewer on either backend task;
+- Node chat create/delete publishes only to chat:node:{node_id} after persistence;
 - chat echo is deduplicated for the sender;
-- chat reconnect catches up from durable sequence;
+- chat reconnect/open reloads canonical durable chat state when needed;
 - chat does not publish to workspace, board, Explorer, graph, GVIC, or document scopes;
-- chat subscription and send authorization cover view/edit/no-access policy;
+- chat subscription preserves current Node access behavior and send/delete remain HTTP-authorized;
 - a view-only editor does not enter a reject/refetch/resubscribe loop;
-- permission revocation removes an active chat subscription;
+- HTTP permission checks remain authoritative without a generic permission-change stream;
 - node title changes reach another user only when that user has a relevant Logic Gate Kanban board mounted; they do not generically update that user's Explorer, maps, or unrelated surfaces;
-- card add/remove/move/reorder and column changes reach viewers of the same mounted board on either backend task;
+- card add/remove/move/reorder and column changes emit kanban.changed only to the same mounted board scope;
 - users without that board mounted receive no board event;
 - the initiating Kanban user applies the committed response once and deduplicates any server echo;
-- board reconnect/gap performs one canonical snapshot load rather than domain-event replay;
-- a slow WebSocket client cannot block another client or an event worker;
-- a retained compact PostgreSQL wake-up survives reconnect by reconciling from canonical notification, chat, or board state.
+- board reconnect/open performs one canonical snapshot load rather than domain-event replay;
+- no event worker remains;
+- cross-instance broker behavior is not a completion gate for this single-user development cleanup.
 
 ### Non-live surfaces
 
 - local node/Logic Gate rename updates every mounted same-session surface from the response;
 - no server workspace echo is needed for the initiating user;
 - a Logic Gate rename does not fan out to every other user's Explorer/map/title surface;
-- a second user sees non-Kanban changes after activating/focusing the relevant surface;
-- cached Node/Logic Gate views revalidate on activation;
-- hydrated graph caches revalidate conditionally;
-- Kanban content revalidates on activation;
-- 304 responses are accepted by the shared conditional-query client instead of treated as API errors;
-- Go and SQL read-version classifiers return the same keys for every known workspace event;
+- non-live surfaces load canonical state through their normal open/navigation/manual-refresh paths;
+- concrete same-user rename/card regressions exposed by the deletion are patched from committed responses or existing local events;
+- existing conditional reads continue to accept 304 where they are already used;
 - My Work, Project Management, and Company Explorer do not make background websocket-driven requests;
 - hidden/unmounted surfaces do not poll.
 
@@ -1017,9 +1031,9 @@ U23/U24 should describe the one notification coordinator and bounded Updates rec
 
 - ordinary node, Logic Gate, project, assignment, and Kanban mutations commit without generic event_rows;
 - no production call expands effective users for workspace browser fan-out;
-- no client subscribes to workspace:user, company_explorer:user, node_graph:user, logic_gate_graph:user, gvic_matrix, project_management, or the old process-local projection board scope; only the explicit notification, active node-chat, and active Logic Gate Kanban scopes remain;
+- no client subscribes to workspace:user, company_explorer:user, node_graph:user, logic_gate_graph:user, gvic_matrix, project_management, project relationship, communications, editor collaboration, or generic editor projection scopes; only notifications:user, chat:node, and board scopes remain;
 - notification catch-up/checkpoint code has no production caller and is removed from server startup;
-- no processed event_rows accumulate after migration;
+- event_rows, its worker, repository API, producers, table, and indexes are absent;
 - no full document HTML is published through the generic socket;
 - source/projection writes and ETag read versions remain correct;
 - a source inventory test rejects unclassified new event types/scopes.
@@ -1166,95 +1180,77 @@ Defined in backend/internal/http/realtime_ws.go:34-50:
 - pong
 - error
 
-After migration, the protocol should contain only the retained user-notification, node-chat, optional user-control, lifecycle, and error messages. A source test should fail if a new broad scope or message is added without an explicit product classification.
+After migration, the protocol should contain only retained notification, Node-chat, mounted-board, lifecycle, and error messages. A source test should fail if a new broad scope or message is added without an explicit product classification.
 
-## Runtime Measurements Still Needed
+## No Pre-Implementation Runtime Measurement Required
 
-This audit is source-based. It did not query dev/prod databases or production metrics.
+Do not query dev/prod databases, production metrics, AWS, or browser traffic before starting deletion. The source audit, compiler, focused tests, and full repository gate are sufficient authorization and proof for this single-user development cleanup.
 
-Run the database queries only from a physically read-only agent/human session after the required access-boundary verification.
+Optional proof after implementation:
 
-Suggested read-only measurements:
+- source search shows only notifications:user, chat:node, and board product scopes;
+- source search finds no workspace/Explorer/graph/GVIC/Project Management/communications/collaboration subscriptions or publishers;
+- source search finds no event_rows, appendEventRows, event worker, notification catch-up, or checkpoint startup code outside historical migrations;
+- one notification changes summary/badges once and refreshes Updates only while open;
+- one Node chat create/delete reaches only its Node chat scope;
+- one Kanban change signals only the affected mounted board and causes one coalesced canonical refresh;
+- ordinary Node/Logic Gate/Project/My Work/Explorer/map/mail actions emit no generic realtime message.
 
-~~~sql
-select event_type,
-       count(*) as rows,
-       pg_size_pretty(sum(pg_column_size(payload))::bigint) as payload_bytes,
-       min(created_timestamp) as oldest,
-       max(created_timestamp) as newest
-from event_rows
-group by event_type
-order by rows desc;
+## Approved Implementation Defaults
 
-select processed_at is null as pending,
-       count(*) as rows
-from event_rows
-group by processed_at is null;
+These are resolved. Do not ask the user again during the one-shot task:
 
-select stream_type,
-       event_type,
-       count(*) as rows,
-       pg_size_pretty(sum(pg_column_size(payload))::bigint) as payload_bytes
-from domain_events
-group by stream_type, event_type
-order by rows desc;
+1. Preserve current Node-chat access behavior; do not expand chat product semantics.
+2. Project chat is excluded from retained realtime.
+3. Kanban live behavior covers Node title, card add/remove, placement/move/reorder, columns, and other fields already visibly rendered on a card. A compact board-changed invalidation plus one debounced canonical board load is preferred over a new delta protocol.
+4. Live permission revocation is not required; HTTP authorization remains mandatory and rendered data may clear on navigation/reload.
+5. Mail/communications is non-live.
+6. Same-user immediacy is required within the current app window, not across multiple browser tabs.
+7. No global polling or maximum cross-user freshness interval is required for non-live surfaces.
+8. Updates uses one notification coordinator and one coalesced canonical feed refresh while Updates is open.
+9. Exact document coediting is removed. Future Huddle/CRDT/OT is out of scope.
+10. Cross-instance realtime broker work is not a completion gate in the current single-user environment. Preserve a small publisher boundary so it can be added later.
 
-select pg_size_pretty(pg_total_relation_size('event_rows')) as event_rows_total,
-       pg_size_pretty(pg_total_relation_size('domain_events')) as domain_events_total;
+## One-Shot Implementation And Completion Mandate
+
+- Work in one isolated worker/worktree and own the complete change through its merge into main.
+- Do not stop after frontend deletion, backend deletion, retained-lane rewiring, schema cleanup, tests, or documentation individually. All are part of one task.
+- Do not leave commented code, disabled compatibility code, unused flags, dead types, or promised follow-up cleanup.
+- Preserve unrelated user changes and the newer unified editor/persistence work on current main.
+- Run focused frontend/backend tests while editing, then node scripts/run_all_tests.mjs.
+- Review the entire diff, commit all intended worker changes, and run scripts/merge_worker_branch.ps1 from C:\Users\Jonat\MangoRTSDev with -CommitWorkerChanges and -Verification Full.
+- Resolve integration failures and rerun the complete gate after merge-time fixes.
+- Finish with clean local main. Remote origin push is separate unless the implementation request explicitly says origin/remote push.
+- Update this document's status and handoff at the end to state the actual deleted systems, exact retained scopes, migration files, verification evidence, and any genuine remaining limitation. Do not leave this charter describing work that is already complete.
+
+## Copy-Paste Prompt For The New Codex Instance
+
+~~~text
+Implement the complete MangoRTS realtime simplification in one coherent task and own it through the merge into main.
+
+First read AGENTS.md and docs/important tasks/live-feed-audit.md completely. The live-feed document is the authoritative product contract, source audit, deletion manifest, retained-foundation design, execution order, and acceptance plan. Recheck current main for moved symbols, but do not reopen or reconfirm the approved product decisions.
+
+This is an aggressive single-user development cleanup. Do not split it into batches, phases, later PRs, feature flags, observation periods, or recommended next steps. Continue until the entire final state in the document exists, obsolete code/schema/tests are deleted, focused tests and node scripts/run_all_tests.mjs pass, the worker is committed, and the repository merge helper has merged it into clean local main.
+
+Non-negotiable final state:
+- exactly three product realtime scope families remain: notifications:user:{user_id}, chat:node:{node_id}, and board:{board_id};
+- Company Explorer, Home workspace/GVIC/communications, My Work, maps/graphs, Project Management, Logic Gate Arena title, generic permission, broad Kanban workspace, generic editor/document, and mail live subscriptions/publication are deleted;
+- the pseudo-collaboration endpoint/client/UI is deleted; Huddle/CRDT/OT remains future documentation only;
+- notification catch-up/checkpoint/replay is deleted while the current immediate projector and durable notification rows remain;
+- Node chat and mounted-board change hints publish directly through the retained registry/publisher after persistence and no longer use generic editor/Kanban projection event rows;
+- all event_rows producers, types, repository implementations, event worker/lease/retry/sequence machinery, schema/table/indexes, and obsolete tests are deleted through a forward repository migration;
+- generic workspace browser fan-out, replay, effective-user expansion, PostgreSQL workspace notifications/listener, broad scope authorization, communications publication, permission-change delivery, localWorkspaceEventBus, projectionDeltaHub, unreachable GVIC/project-editor paths, and dead request-path publication are deleted;
+- the shared frontend socket client and backend ticket/frame/registry/subscribe/unsubscribe/ping/reconnect core remain reusable for future explicit scopes;
+- process-local delivery is acceptable for this task; do not let a new broker or generalized freshness framework block deletion;
+- same-user committed responses/local events still update concrete mounted surfaces, and non-live cross-user staleness until navigation/reload is accepted;
+- canonical HTTP APIs, projection/read tables, workspace_read_versions, and independently required domain_events consumers remain intact.
+
+Use subagents for parallel source tracing, producer removal, frontend consumer removal, and test/doc updates where useful, but you own integration. Follow docs/security/database-agent-access-contract.md: create repository migration/schema changes, never mutate dev/prod databases or retrieve secrets from the agent session.
+
+Update all affected docs/tests contracts so they describe the final architecture rather than deleted streams. Delete stale tests instead of restoring compatibility code merely to satisfy them. Add source guards and focused tests for the exact three retained surfaces and absence of forbidden scopes/event_rows.
+
+Do not finish with a plan. Finish with the implementation merged into local main, full verification passing, final git status, worker/merge SHAs, deleted-system summary, retained-scope summary, schema migration summary, and only genuine limitations such as future Huddle or future cross-instance broker scaling.
 ~~~
-
-Browser/runtime measurements:
-
-- scopes registered on a normal Home session;
-- WebSocket frames and GETs caused by one node rename;
-- frames and GETs caused by one Kanban move;
-- frames, event rows, domain events, and GETs caused by one chat message;
-- notification summary and Updates requests caused by one notification;
-- behavior when mutation HTTP and recipient WebSocket land on different backend tasks;
-- reconnect behavior after more than 100 company workspace events;
-- event_worker lag and retry count;
-- realtime active subscriptions by scope type;
-- workspace fan-out recipient expansion duration.
-
-## Open Product Decisions
-
-1. Is node chat visible live to viewers or editors only?
-2. Is Project text-box chat part of the retained chat promise?
-3. Which card-visible fields beyond node title and placement belong in the active Logic Gate Kanban delta contract?
-4. Must permission revocation remove already-rendered data immediately, or is next focus/navigation sufficient while all server writes/reads remain authorized?
-5. Is live inbound mailbox refresh an intentional fourth exception, or should mail use visible-only polling/focus refresh?
-6. Is instant same-user behavior required across multiple browser tabs, or only within one app window?
-7. What maximum non-live freshness interval is acceptable while a surface remains continuously visible?
-8. Should Updates apply server-shaped incremental rows or perform one coalesced feed fetch?
-
-Exact document coediting is no longer an open decision for this cleanup: remove the current relay. Future Huddle/CRDT/OT is recorded but out of scope.
-
-## Recommended First Implementation Slice
-
-The safest first PR should not try to remove the entire system.
-
-Recommended scope:
-
-1. Delete the transient collaboration publisher/subscriber; record Huddle as future work rather than preserving this implementation.
-2. Make notification-producing commands write their durable notification rows directly, then delete the notification catch-up/checkpoint worker and tests.
-3. Add one notification coordinator and prove one notification produces one summary/feed transition and updates all three sidebar badges.
-4. Remove the discarded per-user PostgreSQL workspace notifications.
-5. Add activation/focus revalidation primitives and focused tests for one representative non-live surface.
-6. Specify and feature-flag the dedicated active Logic Gate Kanban lane before removing the old board/workspace paths.
-
-The next retained-lane PRs can introduce chat:node and active Logic Gate Kanban delivery across two backend tasks. Broad consumer removal should start only after notification, chat, Kanban, and non-live revalidation prerequisites are green.
-
-## Continuation Handoff
-
-A future Codex instance should:
-
-1. Read this file first.
-2. Confirm the product decisions above with Jonat or use an explicitly scoped phase request.
-3. Recheck current main because this audit is tied to base commit 5747e73f.
-4. Keep the first implementation phase narrow; do not combine frontend consumer removal, backend producer removal, and schema deletion in one change.
-5. Run focused tests after each lane, then node scripts/run_all_tests.mjs before merge.
-6. Inspect the final diff for unrelated changes.
-7. Preserve workspace-derived, approved audit, and read-version behavior unless the phase explicitly replaces them. Do not preserve notification catch-up merely because it consumes domain_events today.
 
 ## Audit Limitations
 
@@ -1285,4 +1281,4 @@ one user notification lane
 + future Huddle/CRDT/OT as a separate project, not cleanup scope
 ~~~
 
-Durable notification rows and ETag pieces should be disentangled from generic domain-event recovery rather than deleted by name. Once direct notification writes, active chat, active Kanban, and non-live revalidation exist, the notification catch-up worker plus most WebSocket scopes, permission fan-out, event-row production, replay/gap code, frontend freshness bridge, and cache-invalidation cascade can be retired.
+Deletion is authorized now. The one-shot task performs the minimum internal rewiring needed for direct Node-chat and mounted-board publication, preserves the existing immediate notification projector plus durable rows, and removes notification catch-up, broad WebSocket scopes, permission fan-out, event_rows, replay/gap code, the broad frontend freshness bridge, and the cache-invalidation cascade in the same completed change.
