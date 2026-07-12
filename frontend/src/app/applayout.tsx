@@ -50,6 +50,7 @@ import { AppTaskbar } from "./AppTaskbar";
 import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, appTaskbarStorageScope, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
 import { readAppTimelineState, rollTimelineStateToDate, saveAppTimelineState, type AppTimelineState } from "./timelineState";
 import { buildGvicRoute, buildLogicGateRoute, buildNodeRoute, buildProjectLogicGateNavigationPlan, buildProjectRoute, gvicRoleForViewID, type DeepLinkRoute, type GvicDeepLinkRoute } from "./deepLinkRoutes";
+import { replaceProjectWorkPanelHistoryState, type ProjectLogicGateReturnContext } from "./projectRouteHistory";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "./resourceLinks";
 import { createRequestJSON } from "../modules/api/requestJSON";
 import { invalidateNodeRecordStoreCaches } from "../modules/node-map/NodeRecordStore";
@@ -1406,7 +1407,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     setExplorerNodePopup({ nodeID: cleanNodeID, nodeTitle: cleanNodeID, focusRequestID: Date.now() });
   }, [closeMenus, onNavigate]);
 
-  const openProjectManagementLogicGate = useCallback((logicGateID: string) => {
+  const openProjectManagementLogicGate = useCallback((logicGateID: string, returnContext?: ProjectLogicGateReturnContext) => {
     const cleanLogicGateID = logicGateID.trim();
     if (!cleanLogicGateID) return;
     closeMenus();
@@ -1421,13 +1422,19 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     const ensured = activatePrimaryPage("logic-gate-arena");
     if (onNavigate) {
       saveViews(ensured.tabs, ensured.tab.id);
-      const returnProjectID = projectManagementTarget?.projectID?.trim() || deepLinkProjectID;
+      const returnProjectID = returnContext?.projectID.trim() || projectManagementTarget?.projectID?.trim() || deepLinkProjectID;
       const navigation = buildProjectLogicGateNavigationPlan(
         window.location.pathname,
         returnProjectID,
         cleanLogicGateID,
       );
       if (navigation.replacePath) onNavigate(navigation.replacePath, { replace: true });
+      if (returnContext && returnProjectID) {
+        replaceProjectWorkPanelHistoryState(window.history, window.location.href, {
+          ...returnContext,
+          projectID: returnProjectID,
+        });
+      }
       onNavigate(navigation.pushPath);
     }
   }, [activatePrimaryPage, closeMenus, deepLinkProjectID, onNavigate, projectManagementTarget?.projectID]);

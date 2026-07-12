@@ -1,9 +1,10 @@
 import React from "react";
+import type { ProjectLogicGateReturnContext } from "../../app/projectRouteHistory.js";
 import { ProjectManagementContent } from "../../modules/project-management/ProjectManagementContent.js";
 
 export type ProjectManagementPageProps = {
   onNodeOpen?: (nodeID: string) => void;
-  onLogicGateOpen?: (logicGateID: string) => void;
+  onLogicGateOpen?: (logicGateID: string, returnContext?: ProjectLogicGateReturnContext) => void;
   onProjectOpen?: (projectID: string) => void;
   onProjectCollapseToTab?: (target: { projectID: string; label: string }) => void;
   targetProjectID?: string;

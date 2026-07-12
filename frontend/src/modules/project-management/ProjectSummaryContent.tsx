@@ -2,6 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes.js";
 import { MinimizeToLineIcon } from "../../app/nodeEditorPopupControls.js";
+import {
+  projectWorkPanelTabFromHistoryState,
+  replaceProjectWorkPanelHistoryState,
+  type ProjectLogicGateReturnContext,
+  type ProjectWorkPanelTab,
+} from "../../app/projectRouteHistory.js";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks.js";
 import { requestAppSidebarPin } from "../../app/sidebarPins.js";
 import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
@@ -115,7 +121,7 @@ type ProjectSummaryContentProps = {
   refreshToken?: number;
   onBack: () => void;
   onNodeOpen?: (nodeID: string) => void;
-  onLogicGateOpen?: (logicGateID: string) => void;
+  onLogicGateOpen?: (logicGateID: string, returnContext?: ProjectLogicGateReturnContext) => void;
   onOpenInNewTab?: () => void;
   onCollapseToTab?: (target: { projectID: string; label: string }) => void;
   workspace?: ProjectSummaryWorkspaceSnapshot;
@@ -270,7 +276,21 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [hoveredRelationshipNodeID, setHoveredRelationshipNodeID] = useState("");
   const [selectedRelationshipNodeIDs, setSelectedRelationshipNodeIDs] = useState<Set<string>>(() => new Set());
   const [selectionAnchorRelationshipNodeID, setSelectionAnchorRelationshipNodeID] = useState("");
-  const [activeRightPanelTab, setActiveRightPanelTab] = useState<"relationships" | "critical-path">("critical-path");
+  const [activeRightPanelTab, setActiveRightPanelTab] = useState<ProjectWorkPanelTab>(() => (
+    projectWorkPanelTabFromHistoryState(
+      typeof window === "undefined" ? null : window.history.state,
+      projectID,
+    )
+  ));
+  const selectRightPanelTab = useCallback((workPanelTab: ProjectWorkPanelTab) => {
+    setActiveRightPanelTab(workPanelTab);
+    if (typeof window !== "undefined") {
+      replaceProjectWorkPanelHistoryState(window.history, window.location.href, {
+        projectID,
+        workPanelTab,
+      });
+    }
+  }, [projectID]);
   const [selectedCriticalPathNode, setSelectedCriticalPathNode] = useState<CriticalPathNodePreviewSelection | null>(null);
   const [selectedRelationshipNodePanel, setSelectedRelationshipNodePanel] = useState<ProjectRelationshipNodePanelSelection | null>(null);
   const [projectSelectionFontSize, setProjectSelectionFontSize] = useState(TEXT_BLOCK_FONT_SIZE);
@@ -331,7 +351,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }, [loadProject]);
 
   useEffect(() => {
-    setActiveRightPanelTab("critical-path");
+    setActiveRightPanelTab(projectWorkPanelTabFromHistoryState(
+      typeof window === "undefined" ? null : window.history.state,
+      projectID,
+    ));
   }, [projectID]);
 
   useEffect(() => {
@@ -821,7 +844,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const sharedInboxID = drag.sharedInboxID?.trim() || undefined;
     setError("");
     setRelationshipDropActive(false);
-    setActiveRightPanelTab("relationships");
+    selectRightPanelTab("relationships");
     dispatchHomeTriageConversionApplied({ companyID, messageIDs, sharedInboxID });
     try {
       const position = relationships.length + 1;
@@ -863,7 +886,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setError(dropError instanceof Error ? dropError.message : "Email drop failed");
       await loadProject({ showLoading: false });
     }
-  }, [companyID, loadProject, onNodeOpen, projectID, relationships.length]);
+  }, [companyID, loadProject, onNodeOpen, projectID, relationships.length, selectRightPanelTab]);
 
   const saveProjectAssignments = useCallback(async () => {
     if (!project) return;
@@ -1287,7 +1310,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               <span
                 title={logicGateID ? "Double-click to open logic gate" : undefined}
                 style={relationshipResourceTitleStyle}
-                onDoubleClick={() => logicGateID && onLogicGateOpen?.(logicGateID)}
+                onDoubleClick={() => logicGateID && onLogicGateOpen?.(logicGateID, {
+                  projectID,
+                  workPanelTab: "relationships",
+                })}
               >
                 {relationship.display_title}
               </span>
@@ -1386,9 +1412,17 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   type="button"
                   style={relationshipGroupResourceButtonStyle}
                   title="Double-click to open logic gate"
-                  onDoubleClick={() => logicGateID && onLogicGateOpen?.(logicGateID)}
+                  onDoubleClick={() => logicGateID && onLogicGateOpen?.(logicGateID, {
+                    projectID,
+                    workPanelTab: "relationships",
+                  })}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter" && logicGateID) onLogicGateOpen?.(logicGateID);
+                    if (event.key === "Enter" && logicGateID) {
+                      onLogicGateOpen?.(logicGateID, {
+                        projectID,
+                        workPanelTab: "relationships",
+                      });
+                    }
                   }}
                 >
                   <ExplorerRowIcon kind="logic_gate" />
@@ -1774,7 +1808,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 role="tab"
                 aria-selected={activeRightPanelTab === "critical-path"}
                 style={rightPanelTabStyle(activeRightPanelTab === "critical-path")}
-                onClick={() => setActiveRightPanelTab("critical-path")}
+                onClick={() => selectRightPanelTab("critical-path")}
               >
                 Critical Path
               </button>
@@ -1783,7 +1817,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 role="tab"
                 aria-selected={activeRightPanelTab === "relationships"}
                 style={rightPanelTabStyle(activeRightPanelTab === "relationships")}
-                onClick={() => setActiveRightPanelTab("relationships")}
+                onClick={() => selectRightPanelTab("relationships")}
               >
                 Logic Gates / Nodes
               </button>
@@ -1864,7 +1898,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               onSelectNodePreview={setSelectedCriticalPathNode}
               onClearNodePreview={() => setSelectedCriticalPathNode(null)}
               onNodeOpen={onNodeOpen}
-              onLogicGateOpen={onLogicGateOpen}
+              onLogicGateOpen={onLogicGateOpen ? (logicGateID) => onLogicGateOpen(logicGateID, {
+                projectID,
+                workPanelTab: "critical-path",
+              }) : undefined}
             />
           )}
           {relationshipContextMenu ? (
