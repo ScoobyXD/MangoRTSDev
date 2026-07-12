@@ -7,7 +7,6 @@ func (r *MemoryRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVIC
 	}
 
 	result := GVICMatrixNodeCreateResult{}
-	ownedProjectionDeltas := []ProjectionDelta{}
 	logicGateID := input.LogicGateID
 	if input.CreateLogicGateHeader != "" {
 		batch, err := r.CreateWorkspaceEntityBatch(WorkspaceEntityBatchInput{
@@ -31,9 +30,7 @@ func (r *MemoryRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVIC
 		result.LogicGate = &logicGate
 		result.FolderItems = append(result.FolderItems, batch.FolderItems...)
 		r.mu.Lock()
-		deltas := r.syncGVICMatrixProjectionForLogicGateAssignmentsDeltasLocked(input.CompanyID, logicGateID, nil, nil)
-		result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
-		ownedProjectionDeltas = append(ownedProjectionDeltas, deltas...)
+		r.syncGVICMatrixProjectionForLogicGateAssignmentsLocked(input.CompanyID, logicGateID, nil, nil)
 		r.mu.Unlock()
 		eventInputs := []DomainEventInput{
 			logicGateCreatedWorkspaceEventInput(logicGate, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)),
@@ -46,9 +43,6 @@ func (r *MemoryRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVIC
 			return GVICMatrixNodeCreateResult{}, err
 		}
 		result.Events = append(result.Events, events...)
-		if _, err := r.AppendEventRows(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, ownedProjectionDeltas)); err != nil {
-			return GVICMatrixNodeCreateResult{}, err
-		}
 	}
 
 	if logicGateID != "" {
@@ -78,7 +72,6 @@ func (r *MemoryRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVIC
 		result.Assignment = &assignment
 		result.Card = &card
 		result.Events = append(result.Events, assignmentResult.Events...)
-		result.ProjectionDeltas = append(result.ProjectionDeltas, assignmentResult.ProjectionDeltas...)
 		r.mu.RLock()
 		if folderItem, ok := r.folderItems[folderItemKey(input.CompanyID, "node", input.NodeID)]; ok {
 			result.FolderItems = append(result.FolderItems, folderItem)
@@ -99,16 +92,11 @@ func (r *MemoryRepo) CreateGVICMatrixNode(input GVICMatrixNodeCreateInput) (GVIC
 	if folderItem, ok := r.folderItems[folderItemKey(input.CompanyID, "node", node.NodeID)]; ok {
 		result.FolderItems = append(result.FolderItems, folderItem)
 	}
-	result.ProjectionDeltas = diffGVICMatrixProjectionRows(nil, r.GVICMatrixProjectionRowsForResourcesLocked(input.CompanyID, []string{node.NodeID}, nil))
 	event, err := r.appendDomainEventLocked(nodeCreatedWorkspaceEventInputWithMetadata(result.Node, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
 	if err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return GVICMatrixNodeCreateResult{}, err
 	}
 	result.Events = append(result.Events, event)
-	if _, err := r.appendEventRowsLocked(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
-		r.restoreNodeGraphEventStateLocked(snapshot)
-		return GVICMatrixNodeCreateResult{}, err
-	}
 	return result, nil
 }

@@ -18,21 +18,6 @@ import (
 	"time"
 )
 
-type communicationsEventEnvelope struct {
-	UserID        string    `json:"user_id"`
-	Type          string    `json:"type"`
-	Trigger       string    `json:"trigger,omitempty"`
-	Action        string    `json:"action,omitempty"`
-	MessageID     string    `json:"message_id,omitempty"`
-	SharedInboxID string    `json:"shared_inbox_id,omitempty"`
-	TS            time.Time `json:"ts"`
-}
-
-type communicationsEventMetadata struct {
-	Action        string
-	SharedInboxID string
-}
-
 type communicationsWebhookGrantContext struct {
 	connection     domain.UserEmailConnection
 	cacheScope     string
@@ -166,13 +151,7 @@ func (s *Server) handleNylasWebhookNotification(w http.ResponseWriter, r *http.R
 			}
 			log.Printf("stored nylas message.opened read status user_id=%s scope=%s company_id=%s company_email_connection_id=%s grant_id=%s message_id=%s status=%s signal_count=%d last_signal=%s", grantContext.connection.UserID, status.ScopeType, status.CompanyID, status.CompanyEmailConnectionID, grantID, status.MessageID, status.Status, status.SignalCount, status.LastSignalTimestamp.Format(time.RFC3339))
 		}
-		trigger := change.Trigger
-		meta := communicationsEventMetadata{}
-		if normalizedTrigger == "message.updated" && s.consumeRecentCommunicationsArchiveMutation(grantContext.cacheScope, change.MessageID, time.Now().UTC()) {
-			trigger = "message.archived"
-			meta.Action = "archive"
-		}
-		s.publishCommunicationsWebhookEvent(grantContext, "mailbox_changed", trigger, change.MessageID, meta, change)
+		s.applyCommunicationsWebhookChange(grantContext, change)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -327,17 +306,16 @@ func (s *Server) applyNylasWebhookCacheInvalidation(userID, accountScope string,
 	}
 }
 
-func (s *Server) publishCommunicationsWebhookEvent(grantContext communicationsWebhookGrantContext, eventType, trigger, messageID string, meta communicationsEventMetadata, change nylasWebhookChange) {
+func (s *Server) applyCommunicationsWebhookChange(grantContext communicationsWebhookGrantContext, change nylasWebhookChange) {
 	if communicationsMessageReadStatusScopeTypeForConnection(grantContext.connection) != "shared" {
 		s.applyNylasWebhookCacheInvalidation(grantContext.connection.UserID, grantContext.cacheScope, change)
-		s.publishCommunicationsEventWithMeta(grantContext.connection.UserID, eventType, trigger, messageID, meta)
 		return
 	}
 	if len(grantContext.sharedInboxIDs) == 0 {
-		log.Printf("skipping shared communications webhook publish without linked shared inbox company_id=%s company_email_connection_id=%s trigger=%s message_id=%s", grantContext.connection.CompanyID, grantContext.connection.CompanyEmailConnectionID, trigger, messageID)
+		log.Printf("skipping shared communications webhook invalidation without linked shared inbox company_id=%s company_email_connection_id=%s trigger=%s message_id=%s", grantContext.connection.CompanyID, grantContext.connection.CompanyEmailConnectionID, change.Trigger, change.MessageID)
 		return
 	}
-	published := map[string]struct{}{}
+	invalidated := map[string]struct{}{}
 	for _, sharedInboxID := range grantContext.sharedInboxIDs {
 		sharedInboxID = strings.TrimSpace(sharedInboxID)
 		if sharedInboxID == "" {
@@ -345,27 +323,23 @@ func (s *Server) publishCommunicationsWebhookEvent(grantContext communicationsWe
 		}
 		userIDs, err := s.communicationsWebhookSharedInboxAudience(grantContext.connection.CompanyID, sharedInboxID)
 		if err != nil {
-			log.Printf("failed to resolve shared communications webhook audience company_id=%s shared_inbox_id=%s trigger=%s message_id=%s: %v", grantContext.connection.CompanyID, sharedInboxID, trigger, messageID, err)
+			log.Printf("failed to resolve shared communications webhook cache audience company_id=%s shared_inbox_id=%s trigger=%s message_id=%s: %v", grantContext.connection.CompanyID, sharedInboxID, change.Trigger, change.MessageID, err)
 			continue
 		}
-		eventMeta := meta
-		eventMeta.SharedInboxID = sharedInboxID
 		for _, userID := range userIDs {
 			userID = strings.TrimSpace(userID)
 			if userID == "" {
 				continue
 			}
 			key := userID + communicationsCacheKeySeparator + sharedInboxID
-			if _, ok := published[key]; ok {
+			if _, ok := invalidated[key]; ok {
 				continue
 			}
-			published[key] = struct{}{}
+			invalidated[key] = struct{}{}
 			s.applyNylasWebhookCacheInvalidation(userID, grantContext.cacheScope, change)
-			s.publishCommunicationsEventWithMeta(userID, eventType, trigger, messageID, eventMeta)
 		}
 	}
 }
-
 func (s *Server) communicationsSharedInboxIDsForCompanyEmailConnection(connection domain.CompanyEmailConnection) ([]string, error) {
 	companyID := strings.TrimSpace(connection.CompanyID)
 	connectionID := strings.TrimSpace(connection.CompanyEmailConnectionID)
@@ -410,63 +384,6 @@ func (s *Server) communicationsWebhookSharedInboxAudience(companyID, sharedInbox
 		return nil, store.ErrInvalid
 	}
 	return s.repo.ListEffectiveUsersForResource(companyID, store.EntityTypeSharedInbox, sharedInboxID, store.EntityPermissionView)
-}
-
-func (s *Server) publishCommunicationsEvent(userID, eventType, trigger, messageID string) {
-	s.publishCommunicationsEventWithMeta(userID, eventType, trigger, messageID, communicationsEventMetadata{})
-}
-
-func (s *Server) publishCommunicationsEventWithMeta(userID, eventType, trigger, messageID string, meta communicationsEventMetadata) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" || s == nil || s.realtimeRegistry == nil {
-		return
-	}
-	scope := realtimeCommunicationsScope(userID)
-	if scope == "" {
-		return
-	}
-	envelope := communicationsEventEnvelope{
-		UserID:        userID,
-		Type:          strings.TrimSpace(eventType),
-		Trigger:       strings.TrimSpace(trigger),
-		Action:        strings.TrimSpace(meta.Action),
-		MessageID:     strings.TrimSpace(messageID),
-		SharedInboxID: strings.TrimSpace(meta.SharedInboxID),
-		TS:            time.Now().UTC(),
-	}
-	memberships, err := s.repo.ListUserMemberships(userID)
-	if err != nil {
-		log.Printf("failed to load communications realtime memberships user_id=%s: %v", userID, err)
-		return
-	}
-	if len(memberships) == 0 {
-		s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-	}
-	for _, membership := range memberships {
-		companyID := strings.TrimSpace(membership.CompanyID)
-		if companyID == "" {
-			continue
-		}
-		if !s.realtimeRegistry.hasSubscribers(companyID, scope) {
-			s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-			continue
-		}
-		payload, err := json.Marshal(realtimeCommunicationsEventMessage{
-			Type:      realtimeMessageCommunicationsEvent,
-			CompanyID: companyID,
-			Scope:     scope,
-			Event:     envelope,
-		})
-		if err != nil {
-			continue
-		}
-		published := s.realtimeRegistry.publish(companyID, scope, payload)
-		if published == 0 {
-			s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-			continue
-		}
-		s.recordOperationalMetric("realtime.communications_events_published", realtimeScopeType(scope), int64(published), 0)
-	}
 }
 
 func firstStringValue(values map[string]any, keys ...string) string {

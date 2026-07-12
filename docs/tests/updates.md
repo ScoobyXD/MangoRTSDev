@@ -30,8 +30,8 @@ U19 - Groups sort by project, logic gate, node, then fallback update groups, wit
 U20 - Notifications sort newest first, then by title or ID to keep ordering stable.
 U21 - Updates visibility filters out notifications whose project, logic gate, or node is not viewable by the current user.
 U22 - Malformed legacy notification IDs are ignored or sanitized before access checks so the feed does not crash.
-U23 - Realtime notification created, deleted, and cleared events preserve affected scopes and trigger feed refreshes.
-U24 - Read-state changes refetch the feed instead of locally inventing or mutating unrelated feed rows.
+U23 - One app-lifetime notification coordinator owns `notifications:user:{user_id}`. A created, deleted, or cleared hint coalesces one canonical summary reconciliation and immediately updates the urgent `!`, normal `@`, and regular unread badges.
+U24 - Updates registers with the notification coordinator only while open. An external notification hint coalesces one canonical feed reconciliation while open and causes no feed request while closed; local Seen keeps its existing optimistic no-reload behavior.
 U25 - Updates saved grouping views persist Project, Logic Gate, and Status grouping fields through the saved-views API.
 U26 - The update trigger canon is limited to the rules in U27 through U49; adding a new update trigger requires updating this file.
 U27 - Adding a node to a Logic Gate creates an update, whether the node is created directly, an existing node is assigned, or an email is converted into a node in that Logic Gate.
@@ -210,7 +210,7 @@ Expected:
 - Malformed legacy IDs are ignored or sanitized before access checks.
 - The feed still returns valid visible notifications instead of failing the whole request.
 
-### Scenario U-S3: Read State, Delete, Summary, And Realtime
+### Scenario U-S3: Read State, Delete, And Notification Coordination
 
 Business logic covered:
 - U7
@@ -233,7 +233,7 @@ Expected:
 - Deleting one notification removes only that notification.
 - Clearing notifications can be scoped and publishes a cleared event.
 - Summary counts update after read/delete operations.
-- Realtime events trigger refetches instead of fabricated local feed rows.
+- The one notification coordinator coalesces one summary refresh and, only while Updates is open, one canonical feed refresh; it does not fabricate feed rows.
 
 ### Scenario U-S4: Saved Grouping Views
 

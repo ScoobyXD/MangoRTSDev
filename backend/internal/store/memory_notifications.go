@@ -105,45 +105,6 @@ func notificationRoleSummaryTargetKey(item domain.Notification) string {
 	return strings.TrimSpace(item.NotificationID)
 }
 
-func (r *MemoryRepo) GetNotificationDomainEventCheckpoint(companyID string) (NotificationDomainEventCheckpoint, bool, error) {
-	companyID = strings.TrimSpace(companyID)
-	if companyID == "" {
-		return NotificationDomainEventCheckpoint{}, false, ErrInvalid
-	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	checkpoint, ok := r.notificationCheckpoints[companyID]
-	if !ok {
-		return NotificationDomainEventCheckpoint{}, false, nil
-	}
-	return checkpoint, true, nil
-}
-
-func (r *MemoryRepo) SaveNotificationDomainEventCheckpoint(checkpoint NotificationDomainEventCheckpoint) error {
-	checkpoint.CompanyID = strings.TrimSpace(checkpoint.CompanyID)
-	checkpoint.EventID = strings.TrimSpace(checkpoint.EventID)
-	if checkpoint.CompanyID == "" {
-		return ErrInvalid
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	current, ok := r.notificationCheckpoints[checkpoint.CompanyID]
-	if ok {
-		if checkpoint.CreatedTimestamp.Before(current.CreatedTimestamp) {
-			return nil
-		}
-		if checkpoint.CreatedTimestamp.Equal(current.CreatedTimestamp) && strings.Compare(checkpoint.EventID, current.EventID) <= 0 {
-			return nil
-		}
-	}
-	r.notificationCheckpoints[checkpoint.CompanyID] = checkpoint
-	return nil
-}
-
 func (r *MemoryRepo) CreateNotifications(input CreateNotificationsInput) ([]domain.Notification, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

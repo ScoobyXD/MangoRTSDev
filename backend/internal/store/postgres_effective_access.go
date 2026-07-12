@@ -74,7 +74,7 @@ func recomputeLogicGateGVICEffectiveAccessTx(ctx context.Context, tx *sql.Tx, co
 	if err != nil {
 		return err
 	}
-	if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, affected); err != nil {
+	if err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, affected); err != nil {
 		return err
 	}
 	return syncPostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID)
@@ -108,7 +108,7 @@ where company_id=$1::uuid
 		return err
 	}
 	for _, nodeID := range nodeIDs {
-		if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
+		if err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
 			return err
 		}
 		if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
@@ -130,7 +130,7 @@ func recomputeLogicGateAssignedNodeVisibilityTx(ctx context.Context, tx *sql.Tx,
 	}
 	targetNodeIDs = cleanUUIDTextSlice(append(targetNodeIDs, assignedNodeIDs...))
 	for _, nodeID := range targetNodeIDs {
-		if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
+		if err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
 			return err
 		}
 		if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
@@ -330,24 +330,6 @@ order by membership.user_id::text`, companyID, resourceType, resourceID, accessL
 		userIDs = append(userIDs, userID)
 	}
 	return userIDs, rows.Err()
-}
-
-func (r *PostgresRepo) ListEffectiveUsersForWorkspaceEvent(event domain.DomainEvent) ([]string, error) {
-	targets := WorkspaceEventAccessTargets(event)
-	if len(targets) == 0 {
-		return []string{}, nil
-	}
-	seen := map[string]bool{}
-	for _, target := range targets {
-		userIDs, err := r.ListEffectiveUsersForResource(event.CompanyID, target.ResourceType, target.ResourceID, EntityPermissionView)
-		if err != nil {
-			return nil, err
-		}
-		for _, userID := range userIDs {
-			seen[userID] = true
-		}
-	}
-	return sortWorkspaceEventUserIDs(seen), nil
 }
 
 func validatePostgresCompatibilitySourceScope(ctx context.Context, tx effectiveAccessExecer, companyID, sourceType, sourceID string) error {

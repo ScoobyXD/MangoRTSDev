@@ -179,7 +179,9 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 				return
 			}
 			deletedByUserID := actor.User.UserID
-			result, err := s.repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{Kind: "logic_gate", ID: logicGateID}}, deletedByUserID)
+			targets := []store.CompanyExplorerDeleteTargetInput{{Kind: "logic_gate", ID: logicGateID}}
+			capturedBoardIDs := s.captureKanbanBoardsForDeleteTargets(companyID, targets)
+			result, err := s.repo.DeleteCompanyExplorerTargets(companyID, targets, deletedByUserID)
 			if errors.Is(err, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "logic_gate_not_found")
 				return
@@ -188,6 +190,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 				return
 			}
 			s.publishCompanyExplorerDeletedTargets(companyID, result.Targets)
+			s.publishCapturedKanbanDeletes(companyID, capturedBoardIDs)
 			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 			return
 		}

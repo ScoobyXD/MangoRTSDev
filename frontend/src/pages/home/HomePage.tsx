@@ -10,7 +10,6 @@ import { requestAppDockTab } from "../../app/appDockTabs";
 import { MangoWordmark } from "../../app/MangoLogo";
 import { preloadLogicGateArenaSurface, preloadProjectManagementSurface } from "../../app/preloadDashboardModules";
 import {
-  applyEmailMessageToCachedPages,
   addLogicGateGVICAssignments,
   addLocalReplyToEmailMessage,
   disconnectCommunications,
@@ -23,8 +22,6 @@ import {
   getEmailMessage,
   getEmailThread,
   invalidateCommunicationsCache,
-  invalidateCommunicationsFolderCache,
-  invalidateCommunicationsWorkspacePanelCache,
   invalidateEmailMessageCache,
   listCompanyUsers,
   listCompanyUserGroups,
@@ -35,11 +32,7 @@ import {
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
   patchEmailMessagesLogicGatePlacement,
-  primeEmailMessageCache,
-  reconcileEmailMessageLocalReply,
-  reconcileLocalEmailReply,
   removeLogicGateGVICAssignments,
-  removeEmailMessageFromCache,
   sortEmailMessagesByDateDescending,
   updateCommunicationsSharedInboxGVICAssignments,
   type CompanyUser,
@@ -59,7 +52,6 @@ import {
   type UserLogicGateShortcut,
 } from "../../modules/communications/communicationsApi";
 import { buildReplyAllRecipients } from "../../modules/communications/emailRecipients";
-import { subscribeCommunicationsStream } from "../../modules/communications/communicationsStream";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
 import type { NodeRecord, NodeRelationship } from "../../modules/node-map/shared";
 import { buildCompanyExplorerTreeRows } from "../../modules/company-explorer/companyExplorerTreeRows";
@@ -73,10 +65,8 @@ import { removeNodeRelationshipGraphNode, upsertCompanyExplorerFolderItemInNodeR
 import { removeLogicGateRelationshipGraphNode, upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gate-map/LogicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type GVICMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
-import { applyGVICMatrixProjectionEnvelope, parseGVICMatrixProjectionSequence, GVICMatrixRealtimeScope, type GVICMatrixProjectionDeltaEnvelope } from "../../modules/gvic/gvicMatrixProjectionDeltas";
-import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../../modules/realtime/realtimeWebSocket";
+
 import { listMyLogicGates, listGVICMatrixProjectionRows } from "../../modules/work-items/workItemReadApi";
-import { subscribeWorkspaceRealtime, workspaceRealtimeScope, type WorkspaceReconciliationScope } from "../../modules/workspace/workspaceRealtime";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../../modules/node-map/eventbus";
 import { writePendingLogicGateArenaSelection } from "../logic-gate-arena/logicGateArenaLaunch";
@@ -90,9 +80,9 @@ import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "
 import { appendHomeMailPlainText, applyHomeMailSignature, composeHasDraftContent, createHomeMailDraftID, createHomeMailForwardDraftID, createHomeMailReplyDraftID, deleteHomeMailDraft, deleteHomeMailDrafts, deleteHomeMailDraftRemote, deleteHomeMailDraftsRemote, homeMailDraftToCompose, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailDrafts, loadHomeMailSignature, readHomeMailDrafts, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignatureRemote, syncHomeMailDraftFromCompose, type HomeMailDraft } from "./homeMailDrafts";
 import { ARCHIVE_QUEUE_MAX_EMAILS, EVENT_HOME_TRIAGE_CONVERSION_APPLIED, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS, SELF_SEND_DELIVERY_REFRESH_DELAY_MS, TRIAGE_MESSAGE_DRAG_MIME, type HomeTriageConversionAppliedDetail } from "./homeConstants";
 import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeGVICMatrixNodeCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, moveMyWorkNodesToCellCommand, removeMyLogicGateShortcutCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, communicationStreamEventIsArchiveConfirmation, communicationStreamEventIsStarConfirmation, condenseEmailThreadMessages, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, formatMessageDate, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, localMailboxMutationEchoKeys, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortLogicGateShortcuts, sortSharedInboxes, triageMessageIDsFromStreamMessageID, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, workspaceEventTouchesHomePanel } from "./homeUtils";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, condenseEmailThreadMessages, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, formatMessageDate, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyGVICRole, logicGateHasGVICRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeLogicGateShortcuts, messageListFilterKey, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortLogicGateShortcuts, sortSharedInboxes, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
-import { emptyCompose, type ComposeState, type CommunicationsStreamEnvelope, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus, type WorkspaceStreamEnvelope } from "./homeTypes";
+import { emptyCompose, type ComposeState, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type GVICInboxStatus } from "./homeTypes";
 
 function sharedInboxIDForHomeView(viewID: HomeViewID): string {
   return viewID.startsWith("shared:") ? viewID.slice("shared:".length).trim() : "";
@@ -153,71 +143,8 @@ function emailThreadMessageIDs(thread: EmailThread, selectedMessageID: string): 
 const MISSING_LOGIC_GATE_REPAIR_CONCURRENCY = 4;
 const MISSING_LOGIC_GATE_REPAIR_FAILURE_TTL_MS = 5 * 60_000;
 const ARCHIVE_BACKGROUND_CONFIRMATION_TIMEOUT_MS = 3 * 60_000;
-const LOCAL_TRIAGE_CONVERSION_ECHO_TTL_MS = 8_000;
 const LOCAL_TRIAGE_CONVERSION_MAIL_NETWORK_SUPPRESSION_MS = 8_000;
-const LOCAL_TRIAGE_CONVERSION_WORKSPACE_EVENT_TYPES = new Set([
-  "work_item.email_converted",
-  "node_created",
-  "node_updated",
-  "work_item.logic_gate_assignment_saved",
-  "kanban_card_upserted",
-  "company_explorer_folder_item_assigned",
-  "company_explorer_item_placed",
-]);
 
-type LocalTriageConversionWorkspaceEcho = {
-  expiresAt: number;
-  sharedInboxID: string;
-  messageIDs: Set<string>;
-  nodeIDs: Set<string>;
-  boardIDs: Set<string>;
-  cardIDs: Set<string>;
-  logicGateIDs: Set<string>;
-};
-
-function recordStringValue(record: Record<string, unknown>, key: string): string {
-  const value = record[key];
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function nestedRecordValue(record: Record<string, unknown>, key: string): Record<string, unknown> {
-  const value = record[key];
-  return value && typeof value === "object" ? value as Record<string, unknown> : {};
-}
-
-function workspaceEventValue(record: Record<string, unknown>, key: string, nestedKey?: string): string {
-  const direct = recordStringValue(record, key);
-  if (direct || !nestedKey) return direct;
-  return recordStringValue(nestedRecordValue(record, nestedKey), key);
-}
-
-function hasSemanticWorkspaceScopes(scopes: WorkspaceReconciliationScope[]): boolean {
-  return scopes.some((scope) => Boolean(scope.semanticScope));
-}
-
-function workspaceScopeTouchesHomeWorkspacePanel(scope: WorkspaceReconciliationScope): boolean {
-  if (scope.semanticScope) return false;
-  return (
-    scope.kind === "company_explorer" ||
-    (scope.kind === "node_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
-    (scope.kind === "logic_gate_graph" && workspaceEventTouchesHomePanel(scope.eventType)) ||
-    scope.kind === "kanban_board" ||
-    scope.kind === "kanban_board_list" ||
-    scope.kind === "gvic_matrix" ||
-    scope.kind === "work_item_assignment" ||
-    scope.kind === "workspace"
-  );
-}
-
-function workspaceScopeTouchesSharedInbox(scope: WorkspaceReconciliationScope): boolean {
-  if (scope.semanticScope) return false;
-  return (
-    scope.eventType === "communications_shared_inbox_gvic_updated" ||
-    scope.eventType === "shared_triage_access_updated" ||
-    (scope.kind === "company_explorer" && (!scope.folderKind || scope.folderKind === "communications")) ||
-    scope.kind === "workspace"
-  );
-}
 
 function homeMessageIsDraft(message: EmailMessage): boolean {
   return (message.folders ?? []).some((folder) => {
@@ -585,7 +512,6 @@ export function HomePage({
   });
   const [pendingSharedInboxMessageRefreshID, setPendingSharedInboxMessageRefreshID] = useState("");
   const [myWorkLiveRefreshToken, setMyWorkLiveRefreshToken] = useState(0);
-  const [updatesLiveRefreshToken, setUpdatesLiveRefreshToken] = useState(0);
   const [optimisticMyWorkDeletedNodeIDs, setOptimisticMyWorkDeletedNodeIDs] = useState<Set<string>>(new Set());
   const [noticeResourceAction, setNoticeResourceAction] = useState<HomeNoticeResourceAction | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
@@ -620,17 +546,14 @@ export function HomePage({
   const pendingAutoSignatureRef = useRef<{ draftID: string; scopeKey: string } | null>(null);
   const emailSignatureEditRevisionRef = useRef(0);
   const folderReloadTimerRef = useRef<number | null>(null);
-  const workspacePanelReloadTimerRef = useRef<number | null>(null);
   const messageListRefreshTimerRef = useRef<number | null>(null);
   const myWorkLiveRefreshTimerRef = useRef<number | null>(null);
-  const GVICMatrixProjectionSequenceRef = useRef(0);
   const GVICMatrixProjectionRefetchInFlightRef = useRef(false);
   const GVICMatrixProjectionInitializedRef = useRef(false);
   const GVICMatrixProjectionRowsRef = useRef<GVICMatrixProjectionRow[]>([]);
   const GVICMatrixProjectionScopeKeyRef = useRef("");
   const GVICMatrixProjectedNodeIDsRef = useRef<Set<string>>(new Set());
   const GVICMatrixProjectedLogicGateIDsRef = useRef<Set<string>>(new Set());
-  const requestGVICMatrixProjectionRefreshRef = useRef<((minimumSequence?: number) => void) | null>(null);
   const messagesRef = useRef<EmailMessage[]>([]);
   const foldersRef = useRef<EmailFolder[]>([]);
   const sharedInboxesRef = useRef<CommunicationsSharedInbox[]>([]);
@@ -643,11 +566,7 @@ export function HomePage({
   const loadingMoreMessagesRef = useRef(false);
   const activeDeleteSelectionKindRef = useRef<"message" | HomeEntityDeleteKind | "">("");
   const messageListFilterKeyRef = useRef("");
-  const locallyAppliedTriageConversionIDsRef = useRef<Map<string, number>>(new Map());
-  const locallyAppliedTriageConversionWorkspaceEchoesRef = useRef<LocalTriageConversionWorkspaceEcho[]>([]);
   const localTriageConversionMailNetworkSuppressionRef = useRef<{ filterKey: string; expiresAt: number } | null>(null);
-  const locallyArchivedMessageKeysRef = useRef<Map<string, number>>(new Map());
-  const locallyStarMutatedMessageKeysRef = useRef<Map<string, number>>(new Map());
   const missingLogicGateRepairFailureIDsRef = useRef<Map<string, number>>(new Map());
   const noticeResourceTextRef = useRef("");
   const workspaceRef = useRef<HTMLElement | null>(null);
@@ -669,49 +588,26 @@ export function HomePage({
     setOptimisticMyWorkDeletedNodeIDs(new Set());
     setSharedInboxesLoaded(false);
   }, [companyID]);
-  const scheduleMyWorkLiveRefresh = useCallback((scopes?: WorkspaceReconciliationScope[]) => {
-    const myWorkScopes = (scopes ?? []).filter((scope) => scope.kind === "my_work");
-    const targetUserIDs = cleanIDList(myWorkScopes.map((scope) => (
-      scope.userID ?? (scope.semanticTargetType === "user" ? scope.semanticTargetID ?? "" : "")
-    )));
-    if (targetUserIDs.length > 0) markMyWorkMatrixCachesStaleForTargetUsers(targetUserIDs);
-    if (
-      myWorkScopes.length === 0 ||
-      myWorkScopes.some((scope) => scope.semanticTargetType !== "user" && !scope.userID)
-    ) {
-      markMyWorkMatrixCachesStaleForCompany(companyID);
-    }
-    myWorkDebugLog("home.scheduleMyWorkRefresh", {
+  const scheduleMyWorkLiveRefresh = useCallback((targetUserIDs: string[] = []) => {
+    const cleanTargetUserIDs = cleanIDList(targetUserIDs);
+    if (cleanTargetUserIDs.length > 0) markMyWorkMatrixCachesStaleForTargetUsers(cleanTargetUserIDs);
+    else markMyWorkMatrixCachesStaleForCompany(companyID);
+    myWorkDebugLog("home.scheduleMyWorkRefresh", { companyID, targetUserIDs: cleanTargetUserIDs });
+    recordMyWorkDebugCause("local mutation", {
       companyID,
-      targetUserIDs,
-      scopeKinds: myWorkScopes.map((scope) => ({
-        eventType: scope.eventType,
-        semanticScope: scope.semanticScope,
-        semanticTargetType: scope.semanticTargetType,
-        semanticTargetID: scope.semanticTargetID,
-        userID: scope.userID,
-        teamID: scope.teamID,
-      })),
-      broadCompanyRefresh: myWorkScopes.length === 0 || myWorkScopes.some((scope) => scope.semanticTargetType !== "user" && !scope.userID),
-    });
-    recordMyWorkDebugCause(myWorkScopes[0]?.eventType ?? (myWorkScopes.length > 0 ? "realtime delta" : "realtime refetch"), {
-      companyID,
-      targetUserCount: targetUserIDs.length,
-      broadCompanyRefresh: myWorkScopes.length === 0 || myWorkScopes.some((scope) => scope.semanticTargetType !== "user" && !scope.userID),
+      targetUserCount: cleanTargetUserIDs.length,
+      broadCompanyRefresh: cleanTargetUserIDs.length === 0,
     });
     if (myWorkLiveRefreshTimerRef.current !== null) window.clearTimeout(myWorkLiveRefreshTimerRef.current);
     myWorkLiveRefreshTimerRef.current = window.setTimeout(() => {
       myWorkLiveRefreshTimerRef.current = null;
-      myWorkDebugLog("home.fireMyWorkRefreshToken", { companyID, targetUserIDs });
+      myWorkDebugLog("home.fireMyWorkRefreshToken", { companyID, targetUserIDs: cleanTargetUserIDs });
       setMyWorkLiveRefreshToken((value) => value + 1);
     }, 80);
   }, [companyID]);
   const scheduleCurrentUserMyWorkRefresh = useCallback(() => {
-    scheduleMyWorkLiveRefresh(currentUserID
-      ? [{ kind: "my_work", eventType: "local_mutation", userID: currentUserID }]
-      : undefined);
-  }, [currentUserID, scheduleMyWorkLiveRefresh]);
-  useEffect(() => () => {
+    scheduleMyWorkLiveRefresh(currentUserID ? [currentUserID] : []);
+  }, [currentUserID, scheduleMyWorkLiveRefresh]);  useEffect(() => () => {
     if (myWorkLiveRefreshTimerRef.current !== null) {
       window.clearTimeout(myWorkLiveRefreshTimerRef.current);
       myWorkLiveRefreshTimerRef.current = null;
@@ -752,7 +648,6 @@ export function HomePage({
     const scopeKey = companyID && currentUserID && activeGVICMatrixUserID ? `${companyID}\u0000${currentUserID}\u0000${activeGVICMatrixUserID}` : "";
     if (GVICMatrixProjectionScopeKeyRef.current === scopeKey) return;
     GVICMatrixProjectionScopeKeyRef.current = scopeKey;
-    GVICMatrixProjectionSequenceRef.current = 0;
     GVICMatrixProjectionRefetchInFlightRef.current = false;
     GVICMatrixProjectionRowsRef.current = [];
     GVICMatrixProjectionInitializedRef.current = false;
@@ -1344,18 +1239,6 @@ export function HomePage({
       return false;
     }
   }, [apiBase, companyID]);
-  const scheduleWorkspacePanelReload = useCallback(() => {
-    if (!companyID || !isWorkspacePanelHomeViewID(activeViewIDRef.current)) return;
-    invalidateCommunicationsWorkspacePanelCache(companyID);
-    if (workspacePanelReloadTimerRef.current !== null) {
-      window.clearTimeout(workspacePanelReloadTimerRef.current);
-    }
-    workspacePanelReloadTimerRef.current = window.setTimeout(() => {
-      workspacePanelReloadTimerRef.current = null;
-      void loadLogicGatePanel();
-      void refreshNodeRelationshipsForMatrix();
-    }, 250);
-  }, [companyID, loadLogicGatePanel, refreshNodeRelationshipsForMatrix]);
   useEffect(() => {
     if (!companyID || !isInboxMatrixView) {
       nodeRelationshipRequestSeqRef.current += 1;
@@ -1745,133 +1628,6 @@ export function HomePage({
       void loadMessagesRef.current?.({ refresh });
     }, delayMs);
   }, [canLoadMailForView, currentMessageFilterKey, localTriageConversionMailNetworkIsSuppressed]);
-  const localTriageConversionMessageKey = useCallback((sharedInboxID: string | undefined, messageID: string) => (
-    `${sharedInboxID?.trim() ?? ""}\x1f${messageID.trim()}`
-  ), []);
-  const rememberLocallyAppliedTriageConversion = useCallback((messageIDs: string[], options: {
-    sharedInboxID?: string;
-    nodeIDs?: string[];
-    boardIDs?: string[];
-    cardIDs?: string[];
-    logicGateIDs?: string[];
-  } = {}) => {
-    const ids = cleanIDList(messageIDs);
-    if (ids.length === 0) return;
-    const sharedInboxID = options.sharedInboxID?.trim() ?? "";
-    const expiresAt = Date.now() + LOCAL_TRIAGE_CONVERSION_ECHO_TTL_MS;
-    for (const messageID of ids) {
-      locallyAppliedTriageConversionIDsRef.current.set(localTriageConversionMessageKey(sharedInboxID, messageID), expiresAt);
-      if (sharedInboxID) locallyAppliedTriageConversionIDsRef.current.set(localTriageConversionMessageKey("", messageID), expiresAt);
-    }
-    const nodeIDs = cleanIDList(options.nodeIDs ?? []);
-    const boardIDs = cleanIDList(options.boardIDs ?? []);
-    const cardIDs = cleanIDList(options.cardIDs ?? []);
-    const logicGateIDs = cleanIDList(options.logicGateIDs ?? []);
-    if (nodeIDs.length === 0 && boardIDs.length === 0 && cardIDs.length === 0 && logicGateIDs.length === 0) return;
-    locallyAppliedTriageConversionWorkspaceEchoesRef.current = [
-      ...locallyAppliedTriageConversionWorkspaceEchoesRef.current.filter((echo) => echo.expiresAt > Date.now()),
-      {
-        expiresAt,
-        sharedInboxID,
-        messageIDs: new Set(ids),
-        nodeIDs: new Set(nodeIDs),
-        boardIDs: new Set(boardIDs),
-        cardIDs: new Set(cardIDs),
-        logicGateIDs: new Set(logicGateIDs),
-      },
-    ];
-  }, [localTriageConversionMessageKey]);
-  const triageConversionWasAppliedLocally = useCallback((streamMessageID: string, sharedInboxID?: string): boolean => {
-    const ids = triageMessageIDsFromStreamMessageID(streamMessageID);
-    if (ids.length === 0) return false;
-    const now = Date.now();
-    const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
-    let allHandled = true;
-    for (const messageID of ids) {
-      const key = localTriageConversionMessageKey(cleanSharedInboxID, messageID);
-      const expiresAt = locallyAppliedTriageConversionIDsRef.current.get(key) ?? 0;
-      if (expiresAt <= now) {
-        locallyAppliedTriageConversionIDsRef.current.delete(key);
-        allHandled = false;
-      }
-    }
-    return allHandled;
-  }, [localTriageConversionMessageKey]);
-  const triageConversionWorkspaceEventWasAppliedLocally = useCallback((type: string, data: Record<string, unknown>): boolean => {
-    if (!LOCAL_TRIAGE_CONVERSION_WORKSPACE_EVENT_TYPES.has(type)) return false;
-    const now = Date.now();
-    locallyAppliedTriageConversionWorkspaceEchoesRef.current = locallyAppliedTriageConversionWorkspaceEchoesRef.current.filter((echo) => echo.expiresAt > now);
-    if (locallyAppliedTriageConversionWorkspaceEchoesRef.current.length === 0) return false;
-    const messageID = workspaceEventValue(data, "message_id");
-    const nodeID = workspaceEventValue(data, "node_id", "node");
-    const boardID = workspaceEventValue(data, "board_id", "card") || workspaceEventValue(data, "compatibility_board_id");
-    const cardID = workspaceEventValue(data, "card_id", "card") || workspaceEventValue(data, "compatibility_card_id");
-    const logicGateID = workspaceEventValue(data, "logic_gate_id", "card") || workspaceEventValue(data, "logic_gate_id", "logic_gate");
-    const itemID = workspaceEventValue(data, "item_id", "folder_item");
-    const targetID = workspaceEventValue(data, "target_id", "entity");
-    return locallyAppliedTriageConversionWorkspaceEchoesRef.current.some((echo) => (
-      (!!messageID && echo.messageIDs.has(messageID)) ||
-      (!!nodeID && echo.nodeIDs.has(nodeID)) ||
-      (!!itemID && echo.nodeIDs.has(itemID)) ||
-      (!!targetID && echo.nodeIDs.has(targetID)) ||
-      (!!boardID && echo.boardIDs.has(boardID)) ||
-      (!!cardID && echo.cardIDs.has(cardID)) ||
-      (!!logicGateID && echo.logicGateIDs.has(logicGateID))
-    ));
-  }, []);
-  const locallyArchivedMessageKey = useCallback((nextCompanyID: string, sharedInboxID: string | undefined, messageID: string) => (
-    `${nextCompanyID.trim()}\x1f${sharedInboxID?.trim() ?? ""}\x1f${messageID.trim()}`
-  ), []);
-  const rememberLocallyArchivedMessages = useCallback((nextCompanyID: string, sharedInboxID: string | undefined, messageIDs: string[]) => {
-    const ids = cleanIDList(messageIDs);
-    if (ids.length === 0) return;
-    const expiresAt = Date.now() + 120_000;
-    for (const messageID of ids) {
-      locallyArchivedMessageKeysRef.current.set(locallyArchivedMessageKey(nextCompanyID, sharedInboxID, messageID), expiresAt);
-    }
-  }, [locallyArchivedMessageKey]);
-  const archiveUpdateWasAppliedLocally = useCallback((messageID: string, sharedInboxID: string | undefined): boolean => {
-    const cleanMessageID = messageID.trim();
-    if (!cleanMessageID) return false;
-    const key = locallyArchivedMessageKey(companyID, sharedInboxID, cleanMessageID);
-    const expiresAt = locallyArchivedMessageKeysRef.current.get(key) ?? 0;
-    if (expiresAt <= Date.now()) {
-      locallyArchivedMessageKeysRef.current.delete(key);
-      return false;
-    }
-    locallyArchivedMessageKeysRef.current.delete(key);
-    return true;
-  }, [companyID, locallyArchivedMessageKey]);
-  const rememberLocallyStarMutatedMessages = useCallback((nextCompanyID: string, sharedInboxID: string | undefined, messageIDs: string[]) => {
-    const ids = cleanIDList(messageIDs);
-    if (ids.length === 0) return;
-    const expiresAt = Date.now() + 120_000;
-    for (const messageID of ids) {
-      for (const key of localMailboxMutationEchoKeys(nextCompanyID, sharedInboxID, messageID)) {
-        locallyStarMutatedMessageKeysRef.current.set(key, expiresAt);
-      }
-    }
-  }, []);
-  const starUpdateWasAppliedLocally = useCallback((messageID: string, sharedInboxID: string | undefined, options?: { consume?: boolean }): boolean => {
-    const cleanMessageID = messageID.trim();
-    if (!cleanMessageID) return false;
-    const now = Date.now();
-    const keys = localMailboxMutationEchoKeys(companyID, sharedInboxID, cleanMessageID);
-    let handled = false;
-    for (const key of keys) {
-      const expiresAt = locallyStarMutatedMessageKeysRef.current.get(key) ?? 0;
-      if (expiresAt <= now) {
-        locallyStarMutatedMessageKeysRef.current.delete(key);
-        continue;
-      }
-      handled = true;
-    }
-    if (!handled) return false;
-    if (options?.consume !== false) {
-      for (const key of keys) locallyStarMutatedMessageKeysRef.current.delete(key);
-    }
-    return true;
-  }, [companyID]);
   const archiveQueueBatchKey = useCallback((nextCompanyID: string, sharedInboxID?: string) => (
     `${nextCompanyID.trim()}\x1f${sharedInboxID?.trim() ?? ""}`
   ), []);
@@ -1960,7 +1716,6 @@ export function HomePage({
     }
     if (batch.messageIDs.length > 0) queuedArchiveBatchesRef.current.set(batchKey, batch);
     if (queuedIDs.length === 0) return [];
-    rememberLocallyArchivedMessages(args.companyID, sharedInboxID, queuedIDs);
     syncQueuedArchiveEmailCount();
     if (archiveQueueFlushTimerRef.current === null) {
       archiveQueueFlushTimerRef.current = window.setTimeout(() => {
@@ -1969,7 +1724,7 @@ export function HomePage({
       }, 0);
     }
     return queuedIDs;
-  }, [archiveQueueBatchKey, archiveQueueMessageKey, flushQueuedArchiveMessages, rememberLocallyArchivedMessages, syncQueuedArchiveEmailCount]);
+  }, [archiveQueueBatchKey, archiveQueueMessageKey, flushQueuedArchiveMessages, syncQueuedArchiveEmailCount]);
   const advanceTriageMailPage = useCallback(async () => {
     if (!canMutateCurrentMailView || !activeMailViewHasEmailConnection || loadingMessagesRef.current || loadingMoreMessagesRef.current || busy) return;
     if (!isPrimaryTriageMailbox(activeViewIDRef.current, mailboxRef.current)) return;
@@ -2072,10 +1827,9 @@ export function HomePage({
     }
     if (options?.fillAfterRemoval !== false) fillMessageListAfterRemoval();
   }, [fillMessageListAfterRemoval, suppressLocalTriageConversionMailNetwork]);
-  const reconcileConvertedMessageUnstars = useCallback((messageIDs: string[], sharedInboxID: string, options?: { updateVisibleList?: boolean }) => {
+  const reconcileConvertedMessageUnstars = useCallback((messageIDs: string[], _sharedInboxID: string, options?: { updateVisibleList?: boolean }) => {
     const ids = cleanIDList(messageIDs);
     if (ids.length === 0) return;
-    rememberLocallyStarMutatedMessages(companyID, sharedInboxID.trim() || undefined, ids);
     if (options?.updateVisibleList === false) return;
     const idSet = new Set(ids);
     const visibleStarredCount = messagesRef.current.reduce((count, message) => count + (idSet.has(message.id) && message.starred ? 1 : 0), 0);
@@ -2092,7 +1846,7 @@ export function HomePage({
     if (selectedMessageRef.current?.starred && idSet.has(selectedMessageRef.current.id)) {
       setSelectedMessage((current) => current && idSet.has(current.id) && current.starred ? { ...current, starred: false } : current);
     }
-  }, [adjustStarredMailboxCount, companyID, rememberLocallyStarMutatedMessages]);
+  }, [adjustStarredMailboxCount, companyID]);
   const patchConvertedMessageLogicGatePlacement = useCallback((messageIDs: string[], logicGateID: string, options?: { updateVisibleList?: boolean }) => {
     const ids = cleanIDList(messageIDs);
     const cleanLogicGateID = logicGateID.trim();
@@ -2147,13 +1901,6 @@ export function HomePage({
       const messageIDs = cleanIDList(detail.messageIDs ?? []);
       if (messageIDs.length === 0) return;
       const sharedInboxID = detail.sharedInboxID?.trim() ?? "";
-      rememberLocallyAppliedTriageConversion(messageIDs, {
-        sharedInboxID,
-        nodeIDs: detail.nodeIDs,
-        boardIDs: detail.boardIDs,
-        cardIDs: detail.cardIDs,
-        logicGateIDs: detail.logicGateID ? [detail.logicGateID] : undefined,
-      });
       const conversionSucceeded = Boolean(
         detail.logicGateID?.trim()
         || (detail.nodeIDs ?? []).some((id) => id.trim())
@@ -2171,7 +1918,7 @@ export function HomePage({
     };
     window.addEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
     return () => window.removeEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
-  }, [companyID, patchConvertedMessageLogicGatePlacement, reconcileConvertedMessageUnstars, rememberLocallyAppliedTriageConversion]);
+  }, [companyID, patchConvertedMessageLogicGatePlacement, reconcileConvertedMessageUnstars]);
   useEffect(() => { void loadMessages({ refresh: true }); }, [loadMessages]);
   useEffect(() => {
     setNodeEditorOverlay(null);
@@ -2190,363 +1937,6 @@ export function HomePage({
     if (messageListWithinPrefetchDistance()) void prefetchNextMessagePage();
     if (messageListContentScrollHeight(list) <= list.clientHeight + 120) void loadMoreMessages();
   }, [activeViewID, companyID, loadMoreMessages, loadedMessageListKey, loadingMessages, loadingMoreMessages, localTriageConversionMailNetworkIsSuppressed, mailbox, messageListWithinPrefetchDistance, messages.length, nextPageToken, prefetchNextMessagePage, searchQuery, unreadOnly]);
-  useEffect(() => {
-    if (!activeMailViewHasEmailConnection) return undefined;
-    const currentMessageListParams = () => ({
-      limit: MESSAGE_BATCH_SIZE,
-      mailbox: mailboxRef.current,
-      companyID,
-      sharedInboxID: sharedInboxIDForHomeView(activeViewIDRef.current),
-      q: searchQueryRef.current,
-      unread: unreadOnlyRef.current ? true : undefined,
-    });
-    const scheduleFolderRefresh = (options?: { preserveInflight?: boolean }) => {
-      if (options?.preserveInflight) markCommunicationsFolderCacheStale();
-      else invalidateCommunicationsFolderCache();
-      if (folderReloadTimerRef.current !== null) window.clearTimeout(folderReloadTimerRef.current);
-      folderReloadTimerRef.current = window.setTimeout(() => {
-        folderReloadTimerRef.current = null;
-        void loadFolders();
-      }, 300);
-    };
-    const applyMessageToCurrentView = (message: EmailMessage, prependIfMissing: boolean) => {
-      const params = currentMessageListParams();
-      applyEmailMessageToCachedPages(message, { prependIfMissing, maxMessages: MESSAGE_BATCH_SIZE });
-      setMessages((previous) => mergeEmailMessageIntoMessageList(previous, message, params, {
-        prependIfMissing,
-        maxMessages: Math.max(MESSAGE_BATCH_SIZE, previous.length + (prependIfMissing ? 1 : 0)),
-      }));
-      const selectedRepresentative = selectedMessageRef.current;
-      const incomingThreadID = message.thread_id?.trim() ?? "";
-      const selectedThreadID = selectedRepresentative?.thread_id?.trim() ?? "";
-      if (selectedRepresentative && incomingThreadID && incomingThreadID === selectedThreadID) {
-        setSelectedThreadMessages((previous) => mergeEmailThreadDetailMessages(previous, [message]));
-        const incomingIsNewest = sortEmailConversationMessagesNewestFirst([selectedRepresentative, message])[0]?.id === message.id;
-        if (incomingIsNewest && selectedRepresentative.id !== message.id) {
-          const previousSelectedID = selectedRepresentative.id;
-          const nextSelectedMessage = {
-            ...message,
-            local_replies: message.local_replies ?? selectedRepresentative.local_replies,
-          };
-          selectedMessageIDRef.current = message.id;
-          selectedMessageRef.current = nextSelectedMessage;
-          setSelectedMessageID(message.id);
-          setSelectedMessage(nextSelectedMessage);
-          setSelectedMessageIDs((previous) => {
-            const next = new Set(previous);
-            next.delete(previousSelectedID);
-            next.add(message.id);
-            return next;
-          });
-          setSelectionAnchorMessageID(message.id);
-          return;
-        }
-      }
-      if (selectedMessageIDRef.current === message.id) {
-        setSelectedMessage((current) => current?.id === message.id ? {
-          ...mergeEmailDetailMessage(current, message),
-          local_replies: current.local_replies ?? message.local_replies,
-        } : message);
-      }
-    };
-    const unsubscribe = subscribeCommunicationsStream(apiBase, companyID, {
-      onEvent(event) {
-        if (event.event !== "communications") return;
-        if (!canLoadMailForView(activeViewIDRef.current)) return;
-        let envelope: CommunicationsStreamEnvelope;
-        try {
-          envelope = JSON.parse(event.data) as CommunicationsStreamEnvelope;
-        } catch {
-          return;
-        }
-        const trigger = envelope.trigger?.trim().toLowerCase() ?? "";
-        const messageID = envelope.message_id?.trim() ?? "";
-        const eventAction = envelope.action?.trim().toLowerCase() ?? "";
-        const eventSharedInboxID = envelope.shared_inbox_id?.trim() ?? "";
-        const archiveConfirmation = communicationStreamEventIsArchiveConfirmation({ trigger, action: eventAction });
-        const starConfirmation = communicationStreamEventIsStarConfirmation({ trigger, action: eventAction });
-        if (trigger.startsWith("triage.")) {
-          if (trigger.startsWith("triage.converted") && triageConversionWasAppliedLocally(messageID, eventSharedInboxID || undefined)) return;
-          return;
-        }
-        if (trigger.startsWith("folder.")) {
-          scheduleFolderRefresh();
-          return;
-        }
-        if (!trigger.startsWith("message.")) return;
-        if (!messageID) return;
-        const activeSharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
-        const archiveTargetsCurrentMailbox = eventSharedInboxID ? eventSharedInboxID === activeSharedInboxID : activeSharedInboxID === "";
-        const localArchiveConfirmation = archiveUpdateWasAppliedLocally(messageID, eventSharedInboxID || undefined);
-        if (archiveConfirmation || (trigger.startsWith("message.updated") && localArchiveConfirmation)) {
-          forgetPendingArchiveMessages({ companyID, sharedInboxID: eventSharedInboxID || undefined, messageIDs: [messageID] });
-          invalidateEmailMessageCache(messageID);
-          if (localArchiveConfirmation) return;
-          scheduleFolderRefresh({ preserveInflight: true });
-          if (!archiveTargetsCurrentMailbox) return;
-          const visible = messagesRef.current.some((message) => message.id === messageID);
-          const selected = selectedMessageIDRef.current === messageID;
-          const selectedLocalReply = selectedMessageRef.current?.local_replies?.some((reply) => reply.id === messageID) ?? false;
-          if (visible && isPrimaryTriageMailbox(activeViewIDRef.current, mailboxRef.current)) {
-            removeMessagesFromVisibleMailList([messageID], { preserveScrollAnchor: true });
-            return;
-          }
-          if (!visible && !selected && !selectedLocalReply) return;
-          void getEmailMessage(messageID, companyID, activeSharedInboxID)
-            .then((message) => {
-              primeEmailMessageCache(message);
-              reconcileLocalEmailReply(message);
-              setSelectedMessage((current) => current ? reconcileEmailMessageLocalReply(current, message) : current);
-              applyMessageToCurrentView(message, false);
-            })
-            .catch((messageError) => {
-              if (isEmailAccessExpiredError(messageError)) {
-                void handleEmailAccessExpired(messageError);
-              }
-            });
-          return;
-        }
-        const localStarSharedInboxID = eventSharedInboxID || activeSharedInboxID || undefined;
-        const localGenericStarUpdate = trigger.startsWith("message.updated") && starUpdateWasAppliedLocally(messageID, localStarSharedInboxID);
-        if (starConfirmation || localGenericStarUpdate) {
-          scheduleFolderRefresh({ preserveInflight: true });
-          invalidateEmailMessageCache(messageID);
-          const starTargetsCurrentMailbox = eventSharedInboxID ? eventSharedInboxID === activeSharedInboxID : true;
-          if (!starTargetsCurrentMailbox) return;
-          const visible = messagesRef.current.some((message) => message.id === messageID);
-          const selected = selectedMessageIDRef.current === messageID;
-          const selectedLocalReply = selectedMessageRef.current?.local_replies?.some((reply) => reply.id === messageID) ?? false;
-          const localStarConfirmation = localGenericStarUpdate || starUpdateWasAppliedLocally(messageID, localStarSharedInboxID, { consume: false });
-          if (!visible && !selected && !selectedLocalReply) {
-            if (!localStarConfirmation && trigger.startsWith("message.starred") && mailboxRef.current === "starred") {
-              void getEmailMessage(messageID, companyID, activeSharedInboxID)
-                .then((message) => {
-                  primeEmailMessageCache(message);
-                  reconcileLocalEmailReply(message);
-                  applyMessageToCurrentView(message, true);
-                })
-                .catch((messageError) => {
-                  if (isEmailAccessExpiredError(messageError)) {
-                    void handleEmailAccessExpired(messageError);
-                  }
-                });
-            }
-            return;
-          }
-          void getEmailMessage(messageID, companyID, activeSharedInboxID)
-            .then((message) => {
-              primeEmailMessageCache(message);
-              reconcileLocalEmailReply(message);
-              setSelectedMessage((current) => current ? reconcileEmailMessageLocalReply(current, message) : current);
-              applyMessageToCurrentView(message, false);
-            })
-            .catch((messageError) => {
-              if (isEmailAccessExpiredError(messageError)) {
-                void handleEmailAccessExpired(messageError);
-              }
-            });
-          return;
-        }
-        if (trigger.startsWith("message.deleted")) {
-          removeEmailMessageFromCache(messageID);
-          setMessages((previous) => previous.filter((message) => message.id !== messageID));
-          setSelectedMessageIDs((previous) => {
-            if (!previous.has(messageID)) return previous;
-            const next = new Set(previous);
-            next.delete(messageID);
-            return next;
-          });
-          if (selectedMessageIDRef.current === messageID) {
-            setSelectedMessageID("");
-            setSelectedMessage(null);
-          }
-          return;
-        }
-        invalidateEmailMessageCache(messageID);
-        const params = currentMessageListParams();
-        const visible = messagesRef.current.some((message) => message.id === messageID);
-        const selected = selectedMessageIDRef.current === messageID;
-        const selectedLocalReply = selectedMessageRef.current?.local_replies?.some((reply) => reply.id === messageID) ?? false;
-        const shouldFetchCreated = trigger.startsWith("message.created") && emailMessageMatchesListFilters({
-          id: messageID,
-          subject: "",
-          unread: true,
-          starred: false,
-        }, params);
-        if (!visible && !selected && !selectedLocalReply && !shouldFetchCreated) return;
-        void getEmailMessage(messageID, companyID, sharedInboxIDForHomeView(activeViewIDRef.current))
-          .then((message) => {
-            primeEmailMessageCache(message);
-            reconcileLocalEmailReply(message);
-            setSelectedMessage((current) => current ? reconcileEmailMessageLocalReply(current, message) : current);
-            applyMessageToCurrentView(message, trigger.startsWith("message.created"));
-          })
-          .catch((messageError) => {
-            if (isEmailAccessExpiredError(messageError)) {
-              void handleEmailAccessExpired(messageError);
-              return;
-            }
-            if (trigger.startsWith("message.deleted")) removeEmailMessageFromCache(messageID);
-          });
-      },
-      onError() {
-        // The realtime client reconnects automatically; keep the UI quiet unless an API reload fails.
-      },
-    });
-    return () => {
-      unsubscribe();
-      if (folderReloadTimerRef.current !== null) {
-        window.clearTimeout(folderReloadTimerRef.current);
-        folderReloadTimerRef.current = null;
-      }
-    };
-  }, [activeMailViewHasEmailConnection, apiBase, archiveUpdateWasAppliedLocally, canLoadMailForView, companyID, forgetPendingArchiveMessages, handleEmailAccessExpired, loadFolders, removeMessagesFromVisibleMailList, starUpdateWasAppliedLocally, triageConversionWasAppliedLocally]);
-  useEffect(() => {
-    if (!companyID || !currentUserID) return undefined;
-    const unsubscribe = subscribeWorkspaceRealtime(apiBase, companyID, workspaceRealtimeScope(currentUserID), {
-      onGap(gap) {
-        if (gap.companyID !== companyID) return;
-        const touchesSharedInbox = gap.scopes.some(workspaceScopeTouchesSharedInbox);
-        const touchesWorkspacePanel = gap.scopes.some(workspaceScopeTouchesHomeWorkspacePanel);
-        const touchesGVICMatrix = gap.scopes.some((scope) => !scope.semanticScope && (scope.kind === "gvic_matrix" || scope.kind === "workspace"));
-        if (gap.scopes.some((scope) => scope.kind === "my_work")) scheduleMyWorkLiveRefresh(gap.scopes);
-        if (gap.scopes.some((scope) => scope.kind === "updates")) setUpdatesLiveRefreshToken((value) => value + 1);
-        if (touchesSharedInbox) void loadSharedInboxes();
-        if (touchesWorkspacePanel) scheduleWorkspacePanelReload();
-        if (touchesGVICMatrix) requestGVICMatrixProjectionRefreshRef.current?.();
-      },
-      onEvent(event, context) {
-        if (event.event !== "workspace") return;
-        let envelope: WorkspaceStreamEnvelope;
-        try {
-          envelope = JSON.parse(event.data) as WorkspaceStreamEnvelope;
-        } catch {
-          return;
-        }
-        if (envelope.company_id?.trim() && envelope.company_id.trim() !== companyID) return;
-        const type = envelope.type?.trim() ?? "";
-        if (!type) return;
-        const data: Record<string, unknown> = envelope.data && typeof envelope.data === "object" ? envelope.data : {};
-        const localTriageConversionEcho = triageConversionWorkspaceEventWasAppliedLocally(type, data);
-        const scopes = context.scopes ?? [];
-        const semanticScopesPresent = hasSemanticWorkspaceScopes(scopes);
-        const touchesSharedInbox = scopes.some(workspaceScopeTouchesSharedInbox);
-        const touchesWorkspacePanel = scopes.some(workspaceScopeTouchesHomeWorkspacePanel);
-        const touchesGVICMatrix = scopes.some((scope) => !scope.semanticScope && (scope.kind === "gvic_matrix" || scope.kind === "workspace"));
-        const touchesMyWork = scopes.some((scope) => scope.kind === "my_work");
-        const touchesUpdates = scopes.some((scope) => scope.kind === "updates");
-        if (touchesMyWork) scheduleMyWorkLiveRefresh(scopes);
-        if (touchesUpdates) setUpdatesLiveRefreshToken((value) => value + 1);
-        if (touchesSharedInbox) {
-          void loadSharedInboxes();
-        }
-        if (touchesWorkspacePanel && !localTriageConversionEcho) scheduleWorkspacePanelReload();
-        if (touchesGVICMatrix) requestGVICMatrixProjectionRefreshRef.current?.();
-        if (semanticScopesPresent && !touchesSharedInbox && !touchesWorkspacePanel && !touchesGVICMatrix) return;
-        if (type === "node_created" || type === "node_updated" || type === "node_permissions_updated") {
-          const node = data.node && typeof data.node === "object" ? data.node as NodeRecord : null;
-          if (node?.node_id) {
-            setNodes((previous) => {
-              const next = previous.filter((item) => item.node_id !== node.node_id);
-              return [...next, node];
-            });
-            invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id);
-            upsertNodeRelationshipGraphNode(apiBase, companyID, node);
-          }
-        } else if (type === "node_deleted") {
-          const nodeID = typeof data.node_id === "string" ? data.node_id.trim() : "";
-          if (nodeID) {
-            setNodes((previous) => previous.filter((node) => node.node_id !== nodeID));
-            setNodeRelationships((previous) => previous.filter((relationship) => relationship.node_id_a !== nodeID && relationship.node_id_b !== nodeID));
-            setNodeFolderItems((previous) => previous.filter((item) => item.item_type !== "node" || item.item_id !== nodeID));
-            removeNodeRelationshipGraphNode(apiBase, companyID, nodeID);
-          }
-        } else if (type === "relationship_created") {
-          const relationship = data.relationship && typeof data.relationship === "object" ? data.relationship as NodeRelationship : null;
-          if (relationship?.node_relationship_id) {
-            setNodeRelationships((previous) => {
-              const next = previous.filter((item) => item.node_relationship_id !== relationship.node_relationship_id);
-              return [...next, relationship];
-            });
-          } else {
-            void refreshNodeRelationshipsForMatrix();
-          }
-        } else if (type === "relationship_deleted") {
-          const relationshipID = typeof data.node_relationship_id === "string" ? data.node_relationship_id.trim() : "";
-          if (relationshipID) {
-            setNodeRelationships((previous) => previous.filter((relationship) => relationship.node_relationship_id !== relationshipID));
-          } else {
-            void refreshNodeRelationshipsForMatrix();
-          }
-        } else if (type === "logic_gate_created" || type === "logic_gate_updated" || type === "logic_gate_gvic_updated" || type === "logic_gate_permissions_updated") {
-          const logicGate = data.logic_gate && typeof data.logic_gate === "object" ? data.logic_gate as LogicGateRecord : null;
-          if (logicGate?.logic_gate_id) {
-            setLogicGates((previous) => {
-              const next = previous.filter((item) => item.logic_gate_id !== logicGate.logic_gate_id);
-              return [...next, logicGate];
-            });
-            upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(logicGate));
-          }
-        } else if (type === "logic_gate_deleted") {
-          const logicGateID = typeof data.logic_gate_id === "string" ? data.logic_gate_id.trim() : "";
-          if (logicGateID) {
-            setLogicGates((previous) => previous.filter((logicGate) => logicGate.logic_gate_id !== logicGateID));
-            setLogicGateFolderItems((previous) => previous.filter((item) => item.item_type !== "logic_gate" || item.item_id !== logicGateID));
-            removeLogicGateRelationshipGraphNode(apiBase, companyID, logicGateID);
-          }
-        } else if (type === "company_explorer_folder_item_assigned") {
-          const item = data.folder_item && typeof data.folder_item === "object" ? data.folder_item as CompanyExplorerFolderItem : null;
-          if (item?.item_type === "node") {
-            setNodeFolderItems((previous) => [...previous.filter((candidate) => candidate.item_type !== item.item_type || candidate.item_id !== item.item_id), item]);
-          } else if (item?.item_type === "logic_gate") {
-            setLogicGateFolderItems((previous) => [...previous.filter((candidate) => candidate.item_type !== item.item_type || candidate.item_id !== item.item_id), item]);
-          }
-          if (item) {
-            upsertCompanyExplorerFolderItemInNodeRelationshipGraph(apiBase, companyID, item);
-            upsertCompanyExplorerFolderItemInLogicGateRelationshipGraph(apiBase, companyID, item);
-          }
-        } else if (type === "company_explorer_folder_item_removed") {
-          const itemType = typeof data.item_type === "string" ? data.item_type.trim() : "";
-          const itemID = typeof data.item_id === "string" ? data.item_id.trim() : "";
-          if (itemType === "node" && itemID) setNodeFolderItems((previous) => previous.filter((item) => item.item_type !== itemType || item.item_id !== itemID));
-          if (itemType === "logic_gate" && itemID) setLogicGateFolderItems((previous) => previous.filter((item) => item.item_type !== itemType || item.item_id !== itemID));
-        } else if (type === "company_explorer_folder_created" || type === "company_explorer_folder_updated") {
-          const folder = data.folder && typeof data.folder === "object" ? data.folder as CompanyExplorerFolder : null;
-          if (folder?.folder_kind === "node") {
-            setNodeFolders((previous) => [...previous.filter((item) => item.folder_id !== folder.folder_id), folder]);
-          } else if (folder?.folder_kind === "logic_gate") {
-            setLogicGateFolders((previous) => [...previous.filter((item) => item.folder_id !== folder.folder_id), folder]);
-          }
-        } else if (type === "company_explorer_folder_deleted") {
-          const folderID = typeof data.folder_id === "string" ? data.folder_id.trim() : "";
-          const folderKind = typeof data.folder_kind === "string" ? data.folder_kind.trim() : "";
-          if (folderKind === "node" && folderID) {
-            setNodeFolders((previous) => previous.filter((folder) => folder.folder_id !== folderID));
-            setNodeFolderItems((previous) => previous.filter((item) => item.folder_id !== folderID));
-          } else if (folderKind === "logic_gate" && folderID) {
-            setLogicGateFolders((previous) => previous.filter((folder) => folder.folder_id !== folderID));
-            setLogicGateFolderItems((previous) => previous.filter((item) => item.folder_id !== folderID));
-          }
-        }
-        if (!localTriageConversionEcho && !touchesWorkspacePanel && scopes.some((scope) => scope.kind === "workspace") && workspaceEventTouchesHomePanel(type)) {
-          scheduleWorkspacePanelReload();
-        }
-        if (type === "node_permissions_updated") {
-          void refreshNodeRelationshipsForMatrix();
-        }
-      },
-      onError() {
-        // Workspace realtime reconnects automatically; visible errors come from reloads.
-      },
-    });
-    return () => {
-      unsubscribe();
-      if (workspacePanelReloadTimerRef.current !== null) {
-        window.clearTimeout(workspacePanelReloadTimerRef.current);
-        workspacePanelReloadTimerRef.current = null;
-      }
-    };
-  }, [apiBase, companyID, currentUserID, isInboxMatrixView, loadSharedInboxes, refreshNodeRelationshipsForMatrix, scheduleMyWorkLiveRefresh, scheduleWorkspacePanelReload, triageConversionWorkspaceEventWasAppliedLocally]);
   useEffect(() => {
     if (!selectedMessageID) {
       setSelectedThreadMessages([]);
@@ -2761,7 +2151,6 @@ export function HomePage({
     if (starredDelta !== 0) adjustStarredMailboxCount(countKey, starredDelta);
     if (starredDelta !== 0) {
       addPendingStarredMessages([selectedMessage.id]);
-      rememberLocallyStarMutatedMessages(companyID, sharedInboxID, [selectedMessage.id]);
       applyUpdatedMessageToCurrentView({ ...selectedMessage, starred: update.starred ?? selectedMessage.starred });
     }
     try {
@@ -2804,7 +2193,6 @@ export function HomePage({
     const starredDelta = nextStarred ? 1 : -1;
     adjustStarredMailboxCount(countKey, starredDelta);
     addPendingStarredMessages([messageID]);
-    rememberLocallyStarMutatedMessages(companyID, sharedInboxID, [messageID]);
     applyUpdatedMessageToCurrentView(optimistic);
     void updateHomeMailMessageCommand({
       companyID,
@@ -2832,7 +2220,7 @@ export function HomePage({
       .finally(() => {
         removePendingStarredMessages([messageID]);
       });
-  }, [addPendingStarredMessages, adjustStarredMailboxCount, applyUpdatedMessageToCurrentView, cancelPendingStarredMessages, companyID, handleEmailAccessExpired, loadFolders, rememberLocallyStarMutatedMessages, removePendingStarredMessages, scheduleMessageListRefresh]);
+  }, [addPendingStarredMessages, adjustStarredMailboxCount, applyUpdatedMessageToCurrentView, cancelPendingStarredMessages, companyID, handleEmailAccessExpired, loadFolders, removePendingStarredMessages, scheduleMessageListRefresh]);
   const archiveMessages = useCallback(async (messageIDs: string[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
@@ -2847,7 +2235,6 @@ export function HomePage({
     setBusy("archive");
     setError("");
     setNotice("");
-    rememberLocallyArchivedMessages(companyID, sharedInboxID, ids);
     removeMessagesFromVisibleMailList(ids);
     try {
       const result = await archiveHomeMailMessagesCommand({ companyID, sharedInboxID, messageIDs: ids });
@@ -2871,7 +2258,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, companyID, rememberLocallyArchivedMessages, removeMessagesFromVisibleMailList, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
+  }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, companyID, removeMessagesFromVisibleMailList, scheduleFolderMetadataRefresh, scheduleMessageListRefresh]);
   const unarchiveMessages = useCallback(async (messageIDs: string[]) => {
     if (!canMutateCurrentMailView) return;
     const ids = cleanIDList(messageIDs);
@@ -3789,7 +3176,6 @@ export function HomePage({
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     setBusy("triage-convert");
     setError("");
-    rememberLocallyAppliedTriageConversion(ids, { sharedInboxID, logicGateIDs: [logicGateID] });
     try {
       const conversion = await convertMessagesToLogicGateCommand({
         apiBase,
@@ -3821,16 +3207,6 @@ export function HomePage({
         });
       }
       const converted = conversion.convertedMessageIDs;
-      rememberLocallyAppliedTriageConversion(converted, {
-        sharedInboxID,
-        nodeIDs: conversion.result.nodes?.map((node) => node.node_id) ?? [],
-        boardIDs: [
-          conversion.boardID,
-          ...(conversion.result.cards ?? []).map((card) => card.board_id),
-        ],
-        cardIDs: (conversion.result.cards ?? []).map((card) => card.card_id),
-        logicGateIDs: [conversion.logicGateID, logicGateID],
-      });
       reconcileConvertedMessageUnstars(conversion.unstarredMessageIDs, sharedInboxID);
       patchConvertedMessageLogicGatePlacement(converted, conversion.logicGateID || logicGateID);
       const title = logicGateByID.get(logicGateID)?.header || "Logic Gate";
@@ -3840,7 +3216,7 @@ export function HomePage({
     } finally {
       setBusy("");
     }
-  }, [apiBase, companyID, logicGateByID, patchConvertedMessageLogicGatePlacement, reconcileConvertedMessageUnstars, rememberLocallyAppliedTriageConversion, showNoticeWithResourceAction]);
+  }, [apiBase, companyID, logicGateByID, patchConvertedMessageLogicGatePlacement, reconcileConvertedMessageUnstars, showNoticeWithResourceAction]);
   const selectLogicGateTreeID = useCallback((treeID: string, orderedIDs: string[], event: React.MouseEvent) => {
     activeDeleteSelectionKindRef.current = "logic_gate";
     const next = resolveExplorerClickSelection({
@@ -3926,14 +3302,12 @@ export function HomePage({
     if (!cleanLogicGateID) return;
     const cleanNodeID = nodeID?.trim() ?? "";
     const cleanInformationID = informationID?.trim() ?? "";
-    const suppressLegacyWorkspaceStream = isInboxMatrixView && !!cleanNodeID;
     writePendingLogicGateArenaSelection({
       companyID,
       logicGateID: cleanLogicGateID,
       label,
       nodeID: cleanNodeID || undefined,
       informationID: cleanInformationID || undefined,
-      suppressLegacyWorkspaceStream,
     });
     emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
       companyID,
@@ -3944,7 +3318,6 @@ export function HomePage({
       selectedTreeID: logicGateTreeID(cleanLogicGateID),
       nodeID: cleanNodeID || undefined,
       informationID: cleanInformationID || undefined,
-      suppressLegacyWorkspaceStream,
       changedAt: Date.now(),
     });
     preloadLogicGateArenaSurface();
@@ -4100,7 +3473,7 @@ export function HomePage({
       for (const logicGateID of nextProjectedLogicGateIDs) GVICMatrixProjectedLogicGateIDsRef.current.add(logicGateID);
     }
   }, [activeGVICMatrixUserID, apiBase, companyID]);
-  const refreshGVICMatrixProjection = useCallback(async (minimumSequence = 0) => {
+  const refreshGVICMatrixProjection = useCallback(async () => {
     if (!companyID || !activeGVICMatrixUserID || !isInboxMatrixViewID(activeViewIDRef.current)) return;
     if (GVICMatrixProjectionRefetchInFlightRef.current) return;
     const requestScopeKey = `${companyID}\u0000${currentUserID}\u0000${activeGVICMatrixUserID}`;
@@ -4115,69 +3488,17 @@ export function HomePage({
         mode: "replace",
         logicGates: projectedLogicGates.logic_gates ?? [],
       });
-      const sequence = Math.max(minimumSequence, parseGVICMatrixProjectionSequence(projection.projection_sequence));
-      if (sequence > GVICMatrixProjectionSequenceRef.current) {
-        GVICMatrixProjectionSequenceRef.current = sequence;
-      }
     } catch (projectionError) {
       setError(formatError(projectionError, "Failed to refresh GVIC matrix"));
     } finally {
       GVICMatrixProjectionRefetchInFlightRef.current = false;
     }
   }, [activeGVICMatrixUserID, apiBase, applyGVICMatrixProjectionRows, companyID, currentUserID]);
-  const removeGVICMatrixProjectionNodeIfGone = useCallback((nodeID: string) => {
-    const cleanNodeID = nodeID.trim();
-    if (!cleanNodeID) return;
-    if (GVICMatrixProjectionRowsRef.current.some((row) => row.node_id?.trim() === cleanNodeID)) return;
-    GVICMatrixProjectedNodeIDsRef.current.delete(cleanNodeID);
-    setNodes((previous) => previous.filter((node) => node.node_id !== cleanNodeID));
-    removeNodeRelationshipGraphNode(apiBase, companyID, cleanNodeID);
-  }, [apiBase, companyID]);
-  const requestGVICMatrixProjectionRefresh = useCallback((minimumSequence = 0) => {
-    void refreshGVICMatrixProjection(minimumSequence);
-  }, [refreshGVICMatrixProjection]);
-  requestGVICMatrixProjectionRefreshRef.current = requestGVICMatrixProjectionRefresh;
-  const applyRealtimeGVICMatrixProjectionDelta = useCallback((message: RealtimeProjectionDeltaMessage) => {
-    if (!companyID || !activeGVICMatrixUserID) return;
-    if (GVICMatrixProjectionScopeKeyRef.current !== `${companyID}\u0000${currentUserID}\u0000${activeGVICMatrixUserID}`) return;
-    const envelope = message as unknown as GVICMatrixProjectionDeltaEnvelope;
-    const result = applyGVICMatrixProjectionEnvelope({
-      envelope,
-      companyID,
-      userID: activeGVICMatrixUserID,
-      rows: GVICMatrixProjectionRowsRef.current,
-      lastSequence: GVICMatrixProjectionSequenceRef.current,
-    });
-    if (result.fallback) {
-      requestGVICMatrixProjectionRefresh(parseGVICMatrixProjectionSequence(envelope.projection_sequence ?? envelope.sequence));
-      return;
-    }
-    GVICMatrixProjectionRowsRef.current = result.rows;
-    GVICMatrixProjectionSequenceRef.current = result.lastSequence ?? GVICMatrixProjectionSequenceRef.current;
-    if (!result.changed) return;
-
-    for (const key of result.removedRowKeys) {
-      if (key.node_id) removeGVICMatrixProjectionNodeIfGone(key.node_id);
-    }
-    if (result.upsertedRows.length > 0) applyGVICMatrixProjectionRows(result.upsertedRows);
-  }, [activeGVICMatrixUserID, applyGVICMatrixProjectionRows, companyID, currentUserID, removeGVICMatrixProjectionNodeIfGone, requestGVICMatrixProjectionRefresh]);
   useEffect(() => {
     if (!companyID || !activeGVICMatrixUserID || !isInboxMatrixView) return undefined;
     void refreshGVICMatrixProjection();
     return undefined;
   }, [activeGVICMatrixUserID, companyID, isInboxMatrixView, refreshGVICMatrixProjection]);
-  useEffect(() => {
-    const canSubscribeGVICMatrixTarget = activeGVICMatrixUserID === currentUserID || userHasFullSharedInboxAccess(me, companyID);
-    if (!companyID || !activeGVICMatrixUserID || !isInboxMatrixView || !canSubscribeGVICMatrixTarget) return undefined;
-    return subscribeRealtimeScope(apiBase, companyID, GVICMatrixRealtimeScope(activeGVICMatrixUserID), {
-      getAfterSequence: () => GVICMatrixProjectionSequenceRef.current,
-      onRejected: () => requestGVICMatrixProjectionRefresh(),
-      onRefetch: (message) => requestGVICMatrixProjectionRefresh(parseGVICMatrixProjectionSequence(message.sequence)),
-      onPermissionRevoked: () => requestGVICMatrixProjectionRefresh(),
-      onError: () => requestGVICMatrixProjectionRefresh(),
-      onDelta: applyRealtimeGVICMatrixProjectionDelta,
-    });
-  }, [activeGVICMatrixUserID, apiBase, applyRealtimeGVICMatrixProjectionDelta, companyID, currentUserID, isInboxMatrixView, me, requestGVICMatrixProjectionRefresh]);
   const mergeCreatedFolderItems = useCallback((items: CompanyExplorerFolderItem[]) => {
     if (items.length === 0) return;
     setNodeFolderItems((previous) => {
@@ -5003,7 +4324,6 @@ export function HomePage({
               apiBase={apiBase}
               companyID={companyID}
               currentUserID={currentUserID}
-              liveRefreshToken={updatesLiveRefreshToken}
               onOpenNode={() => undefined}
               onOpenLogicGate={(logicGateID, label) => openLogicGateArena(logicGateID, label || logicGateTitle(logicGateByID.get(logicGateID)))}
               onOpenProject={openProjectManagement}

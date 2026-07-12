@@ -1,5 +1,7 @@
 # V6 Backend Refactor Project Tracker
 
+Status: historical and superseded for browser delivery. Exact projection-table maintenance remains useful, but projection delta event rows, `event_rows`, the event worker, and generic projection scopes were removed by the 2026-07-12 realtime simplification. Do not treat the live-delivery requirements below as current.
+
 ## Purpose
 
 This document tracks the V6 backend refactor for MangoRTS.

@@ -265,10 +265,6 @@ func (r *PostgresRepo) UpdateProject(input ProjectInput) (ProjectMutationResult,
 	if err != nil {
 		return ProjectMutationResult{}, err
 	}
-	GVICMatrixBefore, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, GVICMatrixNodeIDs, GVICMatrixLogicGateIDs)
-	if err != nil {
-		return ProjectMutationResult{}, err
-	}
 	args := []any{input.CompanyID, input.ProjectID, input.Name, input.Status, input.Health}
 	query := `
 with updated as (
@@ -307,18 +303,10 @@ from updated project`
 	if err := syncPostgresGVICMatrixProjectionForProjectResourcesTx(ctx, tx, input.CompanyID, GVICMatrixNodeIDs, GVICMatrixLogicGateIDs); err != nil {
 		return ProjectMutationResult{}, err
 	}
-	GVICMatrixAfter, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, input.CompanyID, GVICMatrixNodeIDs, GVICMatrixLogicGateIDs)
-	if err != nil {
-		return ProjectMutationResult{}, err
-	}
-	projectionDeltas := diffGVICMatrixProjectionRows(GVICMatrixBefore, GVICMatrixAfter)
-	if _, err := r.appendEventRowsTx(ctx, tx, GVICMatrixProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)); err != nil {
-		return ProjectMutationResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return ProjectMutationResult{}, err
 	}
-	return ProjectMutationResult{Project: &project, ProjectionDeltas: projectionDeltas}, nil
+	return ProjectMutationResult{Project: &project}, nil
 }
 
 func (r *PostgresRepo) DeleteProject(companyID, projectID, actorUserID string) (ProjectMutationResult, error) {
@@ -337,28 +325,16 @@ func (r *PostgresRepo) DeleteProject(companyID, projectID, actorUserID string) (
 	if err != nil {
 		return ProjectMutationResult{}, err
 	}
-	GVICMatrixBefore, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, GVICMatrixNodeIDs, GVICMatrixLogicGateIDs)
-	if err != nil {
-		return ProjectMutationResult{}, err
-	}
 	if err := postgresDeleteProjectTx(ctx, tx, companyID, projectID); err != nil {
 		return ProjectMutationResult{}, err
 	}
 	if err := syncPostgresGVICMatrixProjectionForProjectResourcesTx(ctx, tx, companyID, GVICMatrixNodeIDs, GVICMatrixLogicGateIDs); err != nil {
 		return ProjectMutationResult{}, err
 	}
-	GVICMatrixAfter, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, GVICMatrixNodeIDs, GVICMatrixLogicGateIDs)
-	if err != nil {
-		return ProjectMutationResult{}, err
-	}
-	projectionDeltas := diffGVICMatrixProjectionRows(GVICMatrixBefore, GVICMatrixAfter)
-	if _, err := r.appendEventRowsTx(ctx, tx, GVICMatrixProjectionDeltaEventInputs(companyID, actorUserID, "", projectionDeltas)); err != nil {
-		return ProjectMutationResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return ProjectMutationResult{}, err
 	}
-	return ProjectMutationResult{DeletedID: projectID, ProjectionDeltas: projectionDeltas}, nil
+	return ProjectMutationResult{DeletedID: projectID}, nil
 }
 
 func postgresGVICMatrixProjectAffectedResourceIDsTx(ctx context.Context, tx *sql.Tx, companyID, projectID string) ([]string, []string, error) {
@@ -647,7 +623,7 @@ returning company_id::text, information_id::text, project_id::text, type::text, 
 	if err != nil {
 		return domain.ProjectInformation{}, err
 	}
-	projection, err := scanProjectProjection(tx.QueryRowContext(ctx, `
+	_, err = scanProjectProjection(tx.QueryRowContext(ctx, `
 insert into project_projection_table (company_id, project_id, information_id, type, information, created_timestamp, updated_timestamp)
 values ($1::uuid, $2::uuid, $3::uuid, $4::information_type, $5, now(), now())
 on conflict (company_id, project_id, information_id)
@@ -659,11 +635,6 @@ returning company_id::text, project_id::text, type::text, information, informati
 		input.CompanyID, input.ProjectID, input.InformationID, input.Type, input.Information))
 	if err != nil {
 		return domain.ProjectInformation{}, err
-	}
-	if eventInput, ok := EditorProjectionUpsertEventInput(input.CompanyID, input.ActorUserID, "", EditorProjectionRowFromProject(projection)); ok {
-		if _, err := r.appendEventRowsTx(ctx, tx, []EventRowInput{eventInput}); err != nil {
-			return domain.ProjectInformation{}, err
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.ProjectInformation{}, err
@@ -738,11 +709,6 @@ func (r *PostgresRepo) DeleteProjectProjection(input ProjectProjectionDeleteInpu
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `delete from project_projection_table where company_id=$1::uuid and project_id=$2::uuid and information_id=$3::uuid`, input.CompanyID, input.ProjectID, input.InformationID); err != nil {
 		return err
-	}
-	if eventInput, ok := EditorProjectionDeleteEventInput(input.CompanyID, input.ActorUserID, "", EntityTypeProject, input.ProjectID, input.InformationID); ok {
-		if _, err := r.appendEventRowsTx(ctx, tx, []EventRowInput{eventInput}); err != nil {
-			return err
-		}
 	}
 	return tx.Commit()
 }
@@ -1029,7 +995,7 @@ returning relationship_id::text`, input.CompanyID, input.RelationshipID, input.P
 	if err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
-	projectionDeltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+	err = syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
 		CompanyID:      input.CompanyID,
 		RelationshipID: returnedID,
 	})
@@ -1038,11 +1004,6 @@ returning relationship_id::text`, input.CompanyID, input.RelationshipID, input.P
 	}
 	projection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, returnedID)
 	if err != nil {
-		return ProjectRelationshipMutationResult{}, err
-	}
-	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)
-	eventInputs = append(eventInputs, GVICMatrixProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)...)
-	if _, err := r.appendEventRowsTx(ctx, tx, eventInputs); err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1081,18 +1042,13 @@ where company_id=$1::uuid
 	if affected == 0 {
 		return ProjectRelationshipMutationResult{}, ErrNotFound
 	}
-	projectionDeltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+	err = syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
 		CompanyID:      input.CompanyID,
 		RelationshipID: input.RelationshipID,
 		Delete:         true,
 		BeforeRows:     projectionBefore,
 	})
 	if err != nil {
-		return ProjectRelationshipMutationResult{}, err
-	}
-	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)
-	eventInputs = append(eventInputs, GVICMatrixProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", projectionDeltas)...)
-	if _, err := r.appendEventRowsTx(ctx, tx, eventInputs); err != nil {
 		return ProjectRelationshipMutationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {

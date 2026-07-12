@@ -30,10 +30,6 @@ export type ProjectManagementTimelineRow = {
 export type ProjectManagementTimelineResponse = {
   company_id: string;
   user_id: string;
-  projection: "project_management_timeline";
-  projection_scope?: string;
-  realtime_scope?: string;
-  projection_sequence?: number;
   rows: ProjectManagementTimelineRow[];
 };
 

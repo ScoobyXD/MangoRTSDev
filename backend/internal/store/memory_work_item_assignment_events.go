@@ -12,7 +12,6 @@ type memoryWorkItemAssignmentEventSnapshot struct {
 	effectiveAccess          map[string]domain.EffectiveResourceAccess
 	GVICMatrixProjectionRows map[string]memoryGVICMatrixProjectionRow
 	domainEvents             map[string]domain.DomainEvent
-	eventRows                map[string]EventRow
 }
 
 func (r *MemoryRepo) snapshotWorkItemAssignmentEventStateLocked() memoryWorkItemAssignmentEventSnapshot {
@@ -26,7 +25,6 @@ func (r *MemoryRepo) snapshotWorkItemAssignmentEventStateLocked() memoryWorkItem
 		effectiveAccess:          cloneMemoryMap(r.effectiveAccess),
 		GVICMatrixProjectionRows: cloneMemoryMap(r.GVICMatrixProjectionRows),
 		domainEvents:             cloneMemoryMap(r.domainEvents),
-		eventRows:                cloneMemoryMap(r.eventRows),
 	}
 }
 
@@ -40,5 +38,4 @@ func (r *MemoryRepo) restoreWorkItemAssignmentEventStateLocked(snapshot memoryWo
 	r.effectiveAccess = snapshot.effectiveAccess
 	r.GVICMatrixProjectionRows = snapshot.GVICMatrixProjectionRows
 	r.domainEvents = snapshot.domainEvents
-	r.eventRows = snapshot.eventRows
 }

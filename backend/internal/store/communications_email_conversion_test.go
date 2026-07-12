@@ -461,9 +461,6 @@ func TestMemoryEmailConversionCommandCreatesNodeInProjectTarget(t *testing.T) {
 	if len(relationships) != 1 || relationships[0].RelationshipID != relationship.RelationshipID {
 		t.Fatalf("relationships = %+v, want created relationship %s", relationships, relationship.RelationshipID)
 	}
-	if len(result.ProjectionDeltas) == 0 {
-		t.Fatalf("projection deltas = %+v, want scoped project relationship delta", result.ProjectionDeltas)
-	}
 	durable, err := repo.ListDomainEventsAfter(DomainEventReplayQuery{CompanyID: companyID, StreamType: workspaceDomainStreamType, StreamID: companyID, AfterSequence: afterSequence, Limit: 20})
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)

@@ -45,7 +45,6 @@ type UpdatesEditorContentComponent = React.FC<{
   focusInformationID?: string;
   focusRequestID?: number;
   focusInformationMode?: "focus" | "scroll";
-  suppressLegacyWorkspaceStream?: boolean;
 }>;
 
 const LazyUpdatesEditorContent = React.lazy(async () => {
@@ -194,6 +193,7 @@ export function UpdatesView({
   const [activeNodePanel, setActiveNodePanel] = useState<UpdatesNodePanelState | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const updatesListRef = useRef<HTMLDivElement | null>(null);
+  const notificationRefreshTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -355,10 +355,20 @@ export function UpdatesView({
         source: detail?.source,
         localSeenSource: NOTIFICATION_UPDATE_SOURCE_UPDATES_LOCAL_SEEN,
       })) return;
-      setReloadToken((value) => value + 1);
+      if (notificationRefreshTimerRef.current !== null) window.clearTimeout(notificationRefreshTimerRef.current);
+      notificationRefreshTimerRef.current = window.setTimeout(() => {
+        notificationRefreshTimerRef.current = null;
+        setReloadToken((value) => value + 1);
+      }, 80);
     };
     window.addEventListener(EVENT_NOTIFICATIONS_UPDATED, handleNotificationsUpdated);
-    return () => window.removeEventListener(EVENT_NOTIFICATIONS_UPDATED, handleNotificationsUpdated);
+    return () => {
+      window.removeEventListener(EVENT_NOTIFICATIONS_UPDATED, handleNotificationsUpdated);
+      if (notificationRefreshTimerRef.current !== null) {
+        window.clearTimeout(notificationRefreshTimerRef.current);
+        notificationRefreshTimerRef.current = null;
+      }
+    };
   }, [companyID]);
 
   const sourceGroups = useMemo(() => rootGroups.map((root) => branchByRootID[root.id] ?? root), [branchByRootID, rootGroups]);
@@ -1230,7 +1240,6 @@ function UpdatesNodePanel({
             focusInformationID={panel.focusInformationID}
             focusRequestID={panel.focusRequestID}
             focusInformationMode="scroll"
-            suppressLegacyWorkspaceStream
           />
         </React.Suspense>
       </UnifiedNodeShell>

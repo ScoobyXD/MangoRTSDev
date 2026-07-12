@@ -211,7 +211,6 @@ export type LogicGateArenaView = {
   board: KanbanBoard;
   columns: KanbanColumn[];
   cards: LogicGateArenaCard[];
-  projection_sequence?: number;
 };
 
 export function hydrateKanbanCardsFromNodes(cards: KanbanCard[], nodes: KanbanCardNodeMetadata[] = []): KanbanCard[] {

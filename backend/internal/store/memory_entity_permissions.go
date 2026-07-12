@@ -343,7 +343,6 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	nodesSnapshot := cloneMemoryMap(r.nodes)
 	logicGatesSnapshot := cloneMemoryMap(r.logicGates)
-	eventRowsSnapshot := cloneMemoryMap(r.eventRows)
 	if !r.entityExistsLocked(companyID, entityType, entityID) {
 		return nil, ErrNotFound
 	}
@@ -441,7 +440,6 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 			r.effectiveAccess = effectiveAccessSnapshot
 			r.nodes = nodesSnapshot
 			r.logicGates = logicGatesSnapshot
-			r.eventRows = eventRowsSnapshot
 			return nil, err
 		}
 		if entityType == EntityTypeNode || entityType == EntityTypeLogicGate {
@@ -450,7 +448,6 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 				r.effectiveAccess = effectiveAccessSnapshot
 				r.nodes = nodesSnapshot
 				r.logicGates = logicGatesSnapshot
-				r.eventRows = eventRowsSnapshot
 				return nil, err
 			}
 		}
@@ -461,21 +458,8 @@ func (r *MemoryRepo) SetEntityPermissions(input EntityPermissionUpdateInput) ([]
 			r.effectiveAccess = effectiveAccessSnapshot
 			r.nodes = nodesSnapshot
 			r.logicGates = logicGatesSnapshot
-			r.eventRows = eventRowsSnapshot
 			return nil, err
 		}
-	}
-	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(companyID, input.ActorUserID, "", r.projectRelationshipPermissionProjectionDeltasLocked(companyID, entityType, entityID))
-	if eventInput, ok := PermissionChangedEventInput(companyID, entityType, entityID, input.ActorUserID); ok {
-		eventInputs = append(eventInputs, eventInput)
-	}
-	if _, err := r.appendEventRowsLocked(eventInputs); err != nil {
-		r.entityPermissions = permissionsSnapshot
-		r.effectiveAccess = effectiveAccessSnapshot
-		r.nodes = nodesSnapshot
-		r.logicGates = logicGatesSnapshot
-		r.eventRows = eventRowsSnapshot
-		return nil, err
 	}
 	sortEntityPermissions(out)
 	return out, nil
@@ -488,7 +472,6 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 	logicGatesSnapshot := cloneMemoryMap(r.logicGates)
 	projectsSnapshot := cloneMemoryMap(r.projects)
 	foldersSnapshot := cloneMemoryMap(r.folders)
-	eventRowsSnapshot := cloneMemoryMap(r.eventRows)
 	resourcePolicySequenceSnapshot := r.resourcePolicySequence
 	resourcePermissionRevisionsSnapshot := cloneMemoryMap(r.resourcePermissionRevisions)
 	resourcePermissionApplicationsSnapshot := clonePermissionApplications(r.resourcePermissionApplications)
@@ -499,7 +482,6 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 		r.logicGates = logicGatesSnapshot
 		r.projects = projectsSnapshot
 		r.folders = foldersSnapshot
-		r.eventRows = eventRowsSnapshot
 		r.resourcePolicySequence = resourcePolicySequenceSnapshot
 		r.resourcePermissionRevisions = resourcePermissionRevisionsSnapshot
 		r.resourcePermissionApplications = resourcePermissionApplicationsSnapshot
@@ -695,26 +677,6 @@ func (r *MemoryRepo) setDefaultResourceAccessPolicyLocked(input EntityPermission
 				return nil, err
 			}
 		}
-	}
-	projectionDeltas := []ProjectionDelta{}
-	permissionEvents := []EventRowInput{}
-	seenPermissionEvents := map[string]bool{}
-	for _, target := range changedTargets {
-		projectionDeltas = append(projectionDeltas, r.projectRelationshipPermissionProjectionDeltasLocked(companyID, target.ResourceType, target.ResourceID)...)
-		eventKey := target.ResourceType + ":" + target.ResourceID
-		if seenPermissionEvents[eventKey] {
-			continue
-		}
-		seenPermissionEvents[eventKey] = true
-		if eventInput, ok := PermissionChangedEventInput(companyID, target.ResourceType, target.ResourceID, input.ActorUserID); ok {
-			permissionEvents = append(permissionEvents, eventInput)
-		}
-	}
-	eventInputs := ProjectRelationshipProjectionDeltaEventInputs(companyID, input.ActorUserID, "", projectionDeltas)
-	eventInputs = append(eventInputs, permissionEvents...)
-	if _, err := r.appendEventRowsLocked(eventInputs); err != nil {
-		restore()
-		return nil, err
 	}
 	sortEntityPermissions(out)
 	return out, nil

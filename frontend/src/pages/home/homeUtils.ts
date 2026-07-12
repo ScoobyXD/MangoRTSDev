@@ -291,30 +291,9 @@ export function cleanIDList(values: string[]): string[] {
   return ids;
 }
 
-export function localMailboxMutationEchoKeys(companyID: string, sharedInboxID: string | undefined, messageID: string): string[] {
-  const cleanCompanyID = companyID.trim();
-  const cleanMessageID = messageID.trim();
-  if (!cleanCompanyID || !cleanMessageID) return [];
-  const cleanSharedInboxID = sharedInboxID?.trim() ?? "";
-  const scopedKey = `${cleanCompanyID}\x1f${cleanSharedInboxID}\x1f${cleanMessageID}`;
-  return cleanSharedInboxID ? [scopedKey, `${cleanCompanyID}\x1f\x1f${cleanMessageID}`] : [scopedKey];
-}
 
-export function triageMessageIDsFromStreamMessageID(value: string): string[] {
-  return cleanIDList(value.split(","));
-}
 
-export function communicationStreamEventIsArchiveConfirmation(event: { trigger?: string; action?: string }): boolean {
-  const trigger = event.trigger?.trim().toLowerCase() ?? "";
-  const action = event.action?.trim().toLowerCase() ?? "";
-  return action === "archive" || trigger.startsWith("message.archived");
-}
 
-export function communicationStreamEventIsStarConfirmation(event: { trigger?: string; action?: string }): boolean {
-  const trigger = event.trigger?.trim().toLowerCase() ?? "";
-  const action = event.action?.trim().toLowerCase() ?? "";
-  return action === "star" || action === "unstar" || trigger.startsWith("message.starred") || trigger.startsWith("message.unstarred");
-}
 
 export function logicGateTreeID(logicGateID: string): string {
   return `logic-gate-${logicGateID.trim()}`;
@@ -985,34 +964,6 @@ export function isInboxMatrixViewID(viewID: HomeViewID): boolean {
   return gvicInboxSectionForView(viewID) !== null;
 }
 
-export function workspaceEventTouchesHomePanel(type: string): boolean {
-  const cleanType = type.trim();
-  if (!cleanType) return false;
-  if (
-    cleanType === "workspace_derived_projection_requested"
-    || cleanType === "company_explorer_folder_item_assign_requested"
-    || cleanType === "node_map_position_upsert_requested"
-    || cleanType === "logic_gate_map_position_upsert_requested"
-  ) {
-    return false;
-  }
-  return cleanType === "node_created"
-    || cleanType === "node_updated"
-    || cleanType === "node_deleted"
-    || cleanType === "node_permissions_updated"
-    || cleanType === "relationship_created"
-    || cleanType === "relationship_deleted"
-    || cleanType === "logic_gate_created"
-    || cleanType === "logic_gate_updated"
-    || cleanType === "logic_gate_deleted"
-    || cleanType === "logic_gate_gvic_updated"
-    || cleanType === "logic_gate_permissions_updated"
-    || cleanType === "communications_shared_inbox_gvic_updated"
-    || cleanType === "shared_triage_access_updated"
-    || cleanType.startsWith("company_explorer_folder_")
-    || cleanType.startsWith("kanban_")
-    || cleanType.startsWith("work_item.");
-}
 
 export function isWorkspacePanelHomeViewID(viewID: HomeViewID): boolean {
   return isArchivableHomeViewID(viewID) || isInboxMatrixViewID(viewID) || viewID === "my-work" || viewID === "updates" || viewID === "my-nodes" || viewID === "my-logic-gates";
@@ -1237,4 +1188,3 @@ export function formatErrorCode(code: string): string {
       return code.replace(/_/g, " ");
   }
 }
-

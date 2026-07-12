@@ -83,7 +83,6 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 	}
 	var assignment *domain.NodeLogicGateAssignment
 	var card *domain.KanbanCard
-	assignmentDeltas := make([]ProjectionDelta, 0)
 	assignmentEvents := make([]domain.DomainEvent, 0)
 	if input.InitialAssignment != nil {
 		assignmentInput := LogicGateNodeAssignmentInput{
@@ -114,7 +113,6 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 		assignment = &assignmentResult.Assignment
 		cardValue := assignmentResult.Card
 		card = &cardValue
-		assignmentDeltas = append(assignmentDeltas, assignmentResult.ProjectionDeltas...)
 		assignmentEvents = append(assignmentEvents, assignmentResult.Events...)
 	}
 	relationshipID, err := insertProjectRelationshipForScopedCreateTx(ctx, tx, ProjectRelationshipInput{
@@ -127,14 +125,14 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 	if err != nil {
 		return ProjectScopedNodeCreateResult{}, err
 	}
-	nodeDeltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+	err = syncNodeProjectionDependenciesTx(ctx, tx, NodeProjectionDependencyInput{
 		CompanyID: input.CompanyID,
 		NodeID:    node.NodeID,
 	})
 	if err != nil {
 		return ProjectScopedNodeCreateResult{}, err
 	}
-	relationshipDeltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+	err = syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
 		CompanyID:      input.CompanyID,
 		RelationshipID: relationshipID,
 	})
@@ -145,7 +143,6 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 	if err != nil {
 		return ProjectScopedNodeCreateResult{}, err
 	}
-	projectionDeltas := append(nodeDeltas, relationshipDeltas...)
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
 		nodeCreatedWorkspaceEventInputWithMetadata(node, meta),
@@ -155,19 +152,13 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 		return ProjectScopedNodeCreateResult{}, err
 	}
 	events = append(assignmentEvents, events...)
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
-		return ProjectScopedNodeCreateResult{}, err
-	}
-	resultDeltas := append([]ProjectionDelta{}, assignmentDeltas...)
-	resultDeltas = append(resultDeltas, projectionDeltas...)
 	return ProjectScopedNodeCreateResult{
-		Node:             node,
-		Relationship:     &projection,
-		Information:      information,
-		Assignment:       assignment,
-		Card:             card,
-		Events:           events,
-		ProjectionDeltas: resultDeltas,
+		Node:         node,
+		Relationship: &projection,
+		Information:  information,
+		Assignment:   assignment,
+		Card:         card,
+		Events:       events,
 	}, nil
 }
 
@@ -197,14 +188,14 @@ func (r *PostgresRepo) createLogicGateAssociatedWithProjectTx(ctx context.Contex
 	if err != nil {
 		return ProjectScopedLogicGateCreateResult{}, err
 	}
-	logicGateDeltas, err := applyLogicGateProjectionDeltaDependenciesTx(ctx, tx, LogicGateProjectionDeltaDependencyInput{
+	err = syncLogicGateProjectionDependenciesTx(ctx, tx, LogicGateProjectionDependencyInput{
 		CompanyID:   input.CompanyID,
 		LogicGateID: logicGate.LogicGateID,
 	})
 	if err != nil {
 		return ProjectScopedLogicGateCreateResult{}, err
 	}
-	relationshipDeltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+	err = syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
 		CompanyID:      input.CompanyID,
 		RelationshipID: relationshipID,
 	})
@@ -215,7 +206,6 @@ func (r *PostgresRepo) createLogicGateAssociatedWithProjectTx(ctx context.Contex
 	if err != nil {
 		return ProjectScopedLogicGateCreateResult{}, err
 	}
-	projectionDeltas := append(logicGateDeltas, relationshipDeltas...)
 	meta := workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)
 	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
 		logicGateCreatedWorkspaceEventInput(logicGate, meta),
@@ -224,15 +214,11 @@ func (r *PostgresRepo) createLogicGateAssociatedWithProjectTx(ctx context.Contex
 	if err != nil {
 		return ProjectScopedLogicGateCreateResult{}, err
 	}
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, projectionDeltas)); err != nil {
-		return ProjectScopedLogicGateCreateResult{}, err
-	}
 	return ProjectScopedLogicGateCreateResult{
-		LogicGate:        logicGate,
-		Relationship:     &projection,
-		Information:      information,
-		Events:           events,
-		ProjectionDeltas: projectionDeltas,
+		LogicGate:    logicGate,
+		Relationship: &projection,
+		Information:  information,
+		Events:       events,
 	}, nil
 }
 
@@ -369,11 +355,6 @@ func (r *PostgresRepo) addInitialNodeInformationTx(ctx context.Context, tx *sql.
 			return domain.NodeInformation{}, err
 		}
 	}
-	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, input.ActorUserID, "", EditorProjectionRowFromNode(projection)); ok {
-		if _, err := r.appendEventRowsTx(ctx, tx, []EventRowInput{eventInput}); err != nil {
-			return domain.NodeInformation{}, err
-		}
-	}
 	return item, nil
 }
 
@@ -442,11 +423,6 @@ func (r *PostgresRepo) addInitialLogicGateInformationTx(ctx context.Context, tx 
 		&projection.UpdatedTimestamp,
 	); err != nil {
 		return domain.LogicGateInformation{}, err
-	}
-	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, actorUserID, "", EditorProjectionRowFromLogicGate(projection)); ok {
-		if _, err := r.appendEventRowsTx(ctx, tx, []EventRowInput{eventInput}); err != nil {
-			return domain.LogicGateInformation{}, err
-		}
 	}
 	return item, nil
 }

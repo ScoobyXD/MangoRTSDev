@@ -84,8 +84,6 @@ type ExplorerEntityActivatedDetail = {
   label?: string;
   nodeID?: string;
   informationID?: string;
-  suppressLegacyWorkspaceStream?: boolean;
-  suppressWorkspaceStream?: boolean;
   suppressNavigation?: boolean;
 };
 type NodeEditorPopupState = {
@@ -100,7 +98,6 @@ type LogicGateArenaTarget = {
   label: string;
   nodeID?: string;
   informationID?: string;
-  suppressLegacyWorkspaceStream?: boolean;
   requestID: number;
 };
 type ProjectManagementTarget = {
@@ -1106,7 +1103,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         logicGateID: deepLinkLogicGateID,
         label: preserveContext ? current.label : "Logic Gate",
         nodeID: deepLinkLogicGateNodeID || undefined,
-        suppressLegacyWorkspaceStream: preserveContext ? current.suppressLegacyWorkspaceStream : undefined,
         requestID: Date.now(),
       };
     });
@@ -1591,14 +1587,12 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       const label = typeof detail.label === "string" && detail.label.trim() ? detail.label.trim() : id;
 
       if (detail.kind === "logic_gate") {
-        const suppressLegacyWorkspaceStream = detail.suppressLegacyWorkspaceStream === true || detail.suppressWorkspaceStream === true;
         setExplorerNodePopup(null);
         setLogicGateArenaTarget({
           logicGateID: id,
           label,
           nodeID: typeof detail.nodeID === "string" && detail.nodeID.trim() ? detail.nodeID.trim() : undefined,
           informationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
-          suppressLegacyWorkspaceStream,
           requestID: Date.now(),
         });
         writePendingLogicGateArenaSelection({
@@ -1607,7 +1601,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           label,
           nodeID: typeof detail.nodeID === "string" && detail.nodeID.trim() ? detail.nodeID.trim() : undefined,
           informationID: typeof detail.informationID === "string" && detail.informationID.trim() ? detail.informationID.trim() : undefined,
-          suppressLegacyWorkspaceStream,
         });
         const ensured = activatePrimaryPage("logic-gate-arena");
         if (onNavigate) {

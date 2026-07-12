@@ -9,31 +9,26 @@ import (
 	"strings"
 )
 
-type NodeProjectionDeltaDependencyInput struct {
+type NodeProjectionDependencyInput struct {
 	CompanyID string
 	NodeID    string
 	Delete    bool
 }
 
-type LogicGateProjectionDeltaDependencyInput struct {
+type LogicGateProjectionDependencyInput struct {
 	CompanyID       string
 	LogicGateID     string
 	Delete          bool
 	AffectedNodeIDs []string
 }
 
-type NodeLogicGateAssignmentProjectionDeltaDependencyInput struct {
+type NodeLogicGateAssignmentProjectionDependencyInput struct {
 	CompanyID    string
 	AssignmentID string
 	NodeID       string
 }
 
-type ProjectProjectionDeltaDependencyInput struct {
-	CompanyID string
-	ProjectID string
-}
-
-type ProjectRelationshipProjectionDeltaDependencyInput struct {
+type ProjectRelationshipProjectionDependencyInput struct {
 	CompanyID      string
 	RelationshipID string
 	NodeID         string
@@ -43,310 +38,159 @@ type ProjectRelationshipProjectionDeltaDependencyInput struct {
 	BeforeRows     []ProjectRelationshipProjectionRow
 }
 
-type ResourcePermissionProjectionDeltaDependencyInput struct {
-	CompanyID    string
-	ResourceType string
-	ResourceID   string
-}
-
-func applyNodeProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, input NodeProjectionDeltaDependencyInput) ([]ProjectionDelta, error) {
+func syncNodeProjectionDependenciesTx(ctx context.Context, tx *sql.Tx, input NodeProjectionDependencyInput) error {
 	companyID := cleanUUIDText(input.CompanyID)
 	nodeID := cleanUUIDText(input.NodeID)
 	if companyID == "" || nodeID == "" {
-		return nil, ErrInvalid
-	}
-	kanbanBefore, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, companyID, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	GVICMatrixBefore, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
-	if err != nil {
-		return nil, err
-	}
-	gvicBeforeDomain, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID})
-	if err != nil {
-		return nil, err
-	}
-	gvicBefore := make([]GVICEffectiveAssignmentProjectionRow, 0, len(gvicBeforeDomain))
-	for _, item := range gvicBeforeDomain {
-		gvicBefore = append(gvicBefore, gvicEffectiveProjectionRowFromDomain(item))
-	}
-	projectManagementBefore, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeNode, nodeID)
-	if err != nil {
-		return nil, err
+		return ErrInvalid
 	}
 	projectRelationshipBefore, err := projectRelationshipProjectionRowsForNodeTx(ctx, tx, companyID, nodeID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if input.Delete {
 		if err := deleteKanbanBoardProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return nil, err
+			return err
 		}
 		if err := deletePostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return nil, err
+			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
 delete from resource_gvic_effective_assignments
 where company_id=$1::uuid
   and resource_type='node'
   and resource_id=$2::uuid`, companyID, nodeID); err != nil {
-			return nil, err
+			return err
 		}
 		if err := deleteProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return nil, err
+			return err
 		}
 	} else {
 		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return nil, err
+			return err
 		}
-		if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
-			return nil, err
+		if err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, []resourceGVICKey{{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID}}); err != nil {
+			return err
 		}
 		if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return nil, err
+			return err
 		}
 		if err := syncProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	projectRelationshipDeltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+	return syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
 		CompanyID:  companyID,
 		NodeID:     nodeID,
 		Delete:     input.Delete,
 		BeforeRows: projectRelationshipBefore,
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	kanbanAfter, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, companyID, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	GVICMatrixAfter, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
-	if err != nil {
-		return nil, err
-	}
-	gvicAfterDomain, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeNode, resourceID: nodeID})
-	if err != nil {
-		return nil, err
-	}
-	gvicAfter := make([]GVICEffectiveAssignmentProjectionRow, 0, len(gvicAfterDomain))
-	for _, item := range gvicAfterDomain {
-		gvicAfter = append(gvicAfter, gvicEffectiveProjectionRowFromDomain(item))
-	}
-	projectManagementAfter, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeNode, nodeID)
-	if err != nil {
-		return nil, err
-	}
-
-	deltas := diffKanbanProjectionRows(kanbanBefore, kanbanAfter)
-	deltas = append(deltas, diffGVICMatrixProjectionRows(GVICMatrixBefore, GVICMatrixAfter)...)
-	deltas = append(deltas, diffGVICEffectiveProjectionRows(gvicBefore, gvicAfter)...)
-	deltas = append(deltas, diffProjectManagementProjectionRows(projectManagementBefore, projectManagementAfter)...)
-	deltas = append(deltas, projectRelationshipDeltas...)
-	return deltas, nil
 }
 
-func applyNodeProjectionDeltaDependenciesForNodesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs []string) ([]ProjectionDelta, error) {
-	deltas := make([]ProjectionDelta, 0)
+func syncNodeProjectionDependenciesForNodesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs []string) error {
 	for _, nodeID := range cleanUUIDTextSlice(nodeIDs) {
-		nodeDeltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+		if err := syncNodeProjectionDependenciesTx(ctx, tx, NodeProjectionDependencyInput{
 			CompanyID: companyID,
 			NodeID:    nodeID,
-		})
-		if err != nil {
-			return nil, err
+		}); err != nil {
+			return err
 		}
-		deltas = append(deltas, nodeDeltas...)
 	}
-	return deltas, nil
+	return nil
 }
 
-func applyLogicGateProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, input LogicGateProjectionDeltaDependencyInput) ([]ProjectionDelta, error) {
+func syncLogicGateProjectionDependenciesTx(ctx context.Context, tx *sql.Tx, input LogicGateProjectionDependencyInput) error {
 	companyID := cleanUUIDText(input.CompanyID)
 	logicGateID := cleanUUIDText(input.LogicGateID)
 	if companyID == "" || logicGateID == "" {
-		return nil, ErrInvalid
-	}
-	kanbanBefore, err := postgresKanbanProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
-	if err != nil {
-		return nil, err
-	}
-	GVICMatrixBefore, err := postgresGVICMatrixProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
-	if err != nil {
-		return nil, err
-	}
-	gvicBeforeDomain, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID})
-	if err != nil {
-		return nil, err
-	}
-	gvicBefore := make([]GVICEffectiveAssignmentProjectionRow, 0, len(gvicBeforeDomain))
-	for _, item := range gvicBeforeDomain {
-		gvicBefore = append(gvicBefore, gvicEffectiveProjectionRowFromDomain(item))
-	}
-	projectManagementBefore, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeLogicGate, logicGateID)
-	if err != nil {
-		return nil, err
+		return ErrInvalid
 	}
 	projectRelationshipBefore, err := projectRelationshipProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if input.Delete {
 		if err := deleteKanbanBoardProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-			return nil, err
+			return err
 		}
 		if err := deletePostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-			return nil, err
+			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
 delete from resource_gvic_effective_assignments
 where company_id=$1::uuid
   and source_resource_type='logic_gate'
   and source_resource_id=$2::uuid`, companyID, logicGateID); err != nil {
-			return nil, err
+			return err
 		}
 		if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-			return nil, err
+			return err
 		}
 	} else {
 		affected, err := postgresAffectedGVICResourceKeysTx(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID})
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if _, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, affected); err != nil {
-			return nil, err
+		if err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, affected); err != nil {
+			return err
 		}
 		if err := syncPostgresGVICMatrixProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-			return nil, err
+			return err
 		}
 		if err := syncProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	projectRelationshipDeltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+	if err := syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGateID,
 		Delete:      input.Delete,
 		BeforeRows:  projectRelationshipBefore,
-	})
-	if err != nil {
-		return nil, err
+	}); err != nil {
+		return err
 	}
-
-	kanbanAfter, err := postgresKanbanProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
-	if err != nil {
-		return nil, err
-	}
-	GVICMatrixAfter, err := postgresGVICMatrixProjectionRowsForLogicGateTx(ctx, tx, companyID, logicGateID)
-	if err != nil {
-		return nil, err
-	}
-	gvicAfterDomain, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, resourceGVICKey{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID})
-	if err != nil {
-		return nil, err
-	}
-	gvicAfter := make([]GVICEffectiveAssignmentProjectionRow, 0, len(gvicAfterDomain))
-	for _, item := range gvicAfterDomain {
-		gvicAfter = append(gvicAfter, gvicEffectiveProjectionRowFromDomain(item))
-	}
-	projectManagementAfter, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeLogicGate, logicGateID)
-	if err != nil {
-		return nil, err
-	}
-
-	deltas := diffKanbanProjectionRows(kanbanBefore, kanbanAfter)
-	deltas = append(deltas, diffGVICMatrixProjectionRows(GVICMatrixBefore, GVICMatrixAfter)...)
-	deltas = append(deltas, diffGVICEffectiveProjectionRows(gvicBefore, gvicAfter)...)
-	deltas = append(deltas, diffProjectManagementProjectionRows(projectManagementBefore, projectManagementAfter)...)
-	deltas = append(deltas, projectRelationshipDeltas...)
 	for _, nodeID := range cleanUUIDTextSlice(input.AffectedNodeIDs) {
-		nodeDeltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+		if err := syncNodeProjectionDependenciesTx(ctx, tx, NodeProjectionDependencyInput{
 			CompanyID: companyID,
 			NodeID:    nodeID,
-		})
-		if err != nil {
-			return nil, err
+		}); err != nil {
+			return err
 		}
-		deltas = append(deltas, nodeDeltas...)
 	}
-	return deltas, nil
+	return nil
 }
 
-func applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, input NodeLogicGateAssignmentProjectionDeltaDependencyInput) ([]ProjectionDelta, error) {
+func syncNodeLogicGateAssignmentProjectionDependenciesTx(ctx context.Context, tx *sql.Tx, input NodeLogicGateAssignmentProjectionDependencyInput) error {
 	companyID := cleanUUIDText(input.CompanyID)
 	nodeID := cleanUUIDText(input.NodeID)
 	assignmentID := cleanUUIDText(input.AssignmentID)
 	if companyID == "" || (nodeID == "" && assignmentID == "") {
-		return nil, ErrInvalid
+		return ErrInvalid
 	}
 	if nodeID != "" {
-		return applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+		return syncNodeProjectionDependenciesTx(ctx, tx, NodeProjectionDependencyInput{
 			CompanyID: companyID,
 			NodeID:    nodeID,
 		})
 	}
-	projectRelationshipDeltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+	return syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
 		CompanyID:    companyID,
 		AssignmentID: assignmentID,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return projectRelationshipDeltas, nil
 }
 
-func applyProjectProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, input ProjectProjectionDeltaDependencyInput) ([]ProjectionDelta, error) {
-	_ = ctx
-	_ = tx
-	if cleanUUIDText(input.CompanyID) == "" || cleanUUIDText(input.ProjectID) == "" {
-		return nil, ErrInvalid
-	}
-	// Project editor information writes own their source row, project_projection_table row,
-	// and editor projection event directly in the same transaction; there is no dependent
-	// projection fanout to apply here yet.
-	return nil, nil
-}
-
-func applyResourcePermissionProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, input ResourcePermissionProjectionDeltaDependencyInput) ([]ProjectionDelta, error) {
-	resourceType, ok := NormalizeEntityType(input.ResourceType)
-	companyID := cleanUUIDText(input.CompanyID)
-	resourceID := cleanUUIDText(input.ResourceID)
-	if companyID == "" || resourceID == "" || !ok {
-		return nil, ErrInvalid
-	}
-	var rows []ProjectRelationshipProjectionRow
-	var err error
-	switch resourceType {
-	case EntityTypeNode:
-		rows, err = projectRelationshipProjectionRowsForNodeTx(ctx, tx, companyID, resourceID)
-	case EntityTypeLogicGate:
-		rows, err = projectRelationshipProjectionRowsForLogicGateTx(ctx, tx, companyID, resourceID)
-	case EntityTypeProject:
-		rows, err = projectRelationshipProjectionRowsForProjectTx(ctx, tx, companyID, resourceID)
-	default:
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return ProjectRelationshipProjectionUpsertDeltas(rows), nil
-}
-
-func applyProjectRelationshipProjectionDeltaDependenciesTx(ctx context.Context, tx *sql.Tx, input ProjectRelationshipProjectionDeltaDependencyInput) ([]ProjectionDelta, error) {
+func syncProjectRelationshipProjectionDependenciesTx(ctx context.Context, tx *sql.Tx, input ProjectRelationshipProjectionDependencyInput) error {
 	companyID := cleanUUIDText(input.CompanyID)
 	relationshipID := cleanUUIDText(input.RelationshipID)
 	nodeID := cleanUUIDText(input.NodeID)
 	logicGateID := cleanUUIDText(input.LogicGateID)
 	assignmentID := cleanUUIDText(input.AssignmentID)
 	if companyID == "" {
-		return nil, ErrInvalid
+		return ErrInvalid
 	}
 
 	var before []ProjectRelationshipProjectionRow
@@ -356,7 +200,7 @@ func applyProjectRelationshipProjectionDeltaDependenciesTx(ctx context.Context, 
 	} else {
 		before, err = projectRelationshipProjectionRowsForDependencyKeyTx(ctx, tx, companyID, relationshipID, nodeID, logicGateID, assignmentID)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 	gvicNodeSet := map[string]bool{}
@@ -371,7 +215,7 @@ func applyProjectRelationshipProjectionDeltaDependenciesTx(ctx context.Context, 
 	if relationshipID != "" && !input.Delete {
 		resourceType, resourceID, err := projectRelationshipSourceResourceTx(ctx, tx, companyID, relationshipID)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		switch resourceType {
 		case EntityTypeNode:
@@ -380,74 +224,56 @@ func applyProjectRelationshipProjectionDeltaDependenciesTx(ctx context.Context, 
 			gvicLogicGateSet[resourceID] = true
 		}
 	}
-	gvicNodeIDs := mapKeys(gvicNodeSet)
-	gvicLogicGateIDs := mapKeys(gvicLogicGateSet)
-	gvicBefore, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, gvicNodeIDs, gvicLogicGateIDs)
-	if err != nil {
-		return nil, err
-	}
 
 	switch {
 	case input.Delete:
 		switch {
 		case relationshipID != "":
 			if err := deleteProjectRelationshipProjectionForRelationshipTx(ctx, tx, companyID, relationshipID); err != nil {
-				return nil, err
+				return err
 			}
 		case nodeID != "":
 			if err := deleteProjectRelationshipProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-				return nil, err
+				return err
 			}
 		case logicGateID != "":
 			if err := deleteProjectRelationshipProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-				return nil, err
+				return err
 			}
 		case assignmentID != "":
 			if err := deleteProjectRelationshipProjectionForAssignmentTx(ctx, tx, companyID, assignmentID); err != nil {
-				return nil, err
+				return err
 			}
 		default:
-			return nil, ErrInvalid
+			return ErrInvalid
 		}
 	case relationshipID != "":
 		if err := syncProjectRelationshipProjectionForRelationshipTx(ctx, tx, companyID, relationshipID); err != nil {
-			return nil, err
+			return err
 		}
 	case nodeID != "":
 		if err := syncProjectRelationshipProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return nil, err
+			return err
 		}
 	case logicGateID != "":
 		if err := syncProjectRelationshipProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-			return nil, err
+			return err
 		}
 	case assignmentID != "":
 		if err := syncProjectRelationshipProjectionForNodeLogicGateAssignmentTx(ctx, tx, companyID, assignmentID); err != nil {
-			return nil, err
+			return err
 		}
 	default:
-		return nil, ErrInvalid
+		return ErrInvalid
 	}
 
 	after, err := projectRelationshipProjectionRowsAfterDependencyTx(ctx, tx, companyID, relationshipID, nodeID, logicGateID, assignmentID, before)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	addProjectRelationshipGVICMatrixResourceIDs(gvicNodeSet, gvicLogicGateSet, after)
-	gvicNodeIDs = mapKeys(gvicNodeSet)
-	gvicLogicGateIDs = mapKeys(gvicLogicGateSet)
-	if err := syncPostgresGVICMatrixProjectionForProjectResourcesTx(ctx, tx, companyID, gvicNodeIDs, gvicLogicGateIDs); err != nil {
-		return nil, err
-	}
-	gvicAfter, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, gvicNodeIDs, gvicLogicGateIDs)
-	if err != nil {
-		return nil, err
-	}
-	deltas := diffProjectRelationshipProjectionRows(before, after)
-	deltas = append(deltas, diffGVICMatrixProjectionRows(gvicBefore, gvicAfter)...)
-	return deltas, nil
+	return syncPostgresGVICMatrixProjectionForProjectResourcesTx(ctx, tx, companyID, mapKeys(gvicNodeSet), mapKeys(gvicLogicGateSet))
 }
-
 func addProjectRelationshipGVICMatrixResourceIDs(nodeSet, logicGateSet map[string]bool, rows []ProjectRelationshipProjectionRow) {
 	for _, row := range rows {
 		resourceType := strings.TrimSpace(row.ResourceType)

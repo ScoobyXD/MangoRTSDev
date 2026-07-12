@@ -92,28 +92,28 @@ import { useEditorDocumentPersistence } from "./useEditorDocumentPersistence";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { invalidateWorkspaceSnapshot } from "../workspace/workspaceSnapshotCache";
-import { subscribeWorkspaceRealtime } from "../workspace/workspaceRealtime";
-import { subscribeRealtimeScope, type RealtimeProjectionDeltaMessage } from "../realtime/realtimeWebSocket";
+import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
 import { listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
 import { ExplorerRowIcon } from "../company-explorer/CompanyExplorerIcons";
+import { publishCompanyExplorerEntityTitleUpdate } from "../company-explorer/companyExplorerLocalEntityUpdates";
 import { listCompanyUserGroups, listCompanyUsers, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
 import { useCompanyAccounts } from "../accounts/AccountFilterControl";
 import { setNodeAccountAssignments, type Account } from "../accounts/accountsApi";
-import {
-  createEditorCollaborationClientID,
-  editorCollaborationLabel,
-  editorCollaboratorColor,
-  canPublishEditorCollaborationDocumentHTML,
-  parseEditorCollaborationWorkspaceEvent,
-  publishEditorCollaborationEvent,
-  sameEditorCollaborationTarget,
-  type EditorCollaborationEventPayload,
-} from "./editorCollaboration";
-import { applyEditorProjectionEnvelope, editorRealtimeScope, parseEditorProjectionSequence, type EditorProjectionDeltaEnvelope } from "./editorProjectionDeltas";
 
-function clampEditorSelectionFontSize(value: number): number {
+
+function editorSnapshotScope(resourceType: "node" | "logic_gate", resourceID: string): string {
+  const cleanID = resourceID.trim();
+  return cleanID ? `${resourceType}:${cleanID}` : "";
+}
+
+function parseEditorSnapshotSequence(value: unknown): number {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return 0;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : 0;
+}function clampEditorSelectionFontSize(value: number): number {
   return Math.max(EDITOR_DOCUMENT_MIN_FONT_SIZE_PX, Math.min(EDITOR_DOCUMENT_MAX_FONT_SIZE_PX, Math.round(value)));
 }
 
@@ -137,7 +137,6 @@ type EditorContentProps = {
   focusInformationID?: string;
   focusRequestID?: number;
   focusInformationMode?: "focus" | "scroll";
-  suppressLegacyWorkspaceStream?: boolean;
   compactLinkedDocumentHeader?: boolean;
   onLogicGateTitleChange?: (update: { logicGateID: string; label: string }) => void;
 };
@@ -156,16 +155,6 @@ type EditorNodeBatchResponse = {
   node_map_positions?: Array<{ entity_id?: string; node_id?: string; x: number; y: number; updated_timestamp?: string }>;
 };
 
-type EditorCollaboratorPresence = {
-  clientID: string;
-  name: string;
-  color: string;
-  lastSeen: number;
-};
-
-const EDITOR_COLLABORATOR_TTL_MS = 30_000;
-const EDITOR_COLLABORATION_SEND_DELAY_MS = 140;
-const EDITOR_REMOTE_APPLY_IDLE_MS = 900;
 const EDITOR_RELATIONSHIP_WORLD_W = 12800;
 const EDITOR_RELATIONSHIP_WORLD_H = 8800;
 const EDITOR_SAVE_VERSION_INTERVAL_OPTIONS = [5, 10, 30, 60] as const;
@@ -586,7 +575,7 @@ const EditorSaveSettingsSurface: React.FC<{
 };
 
 // Editor module: linked document canvas for node or logic-gate context.
-export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID, focusInformationMode = "focus", suppressLegacyWorkspaceStream = false, compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
+export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusRequestID, focusInformationMode = "focus", compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -620,8 +609,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [companyUserGroups, setCompanyUserGroups] = useState<CompanyUserGroup[]>([]);
   const [companyUserGroupMembers, setCompanyUserGroupMembers] = useState<CompanyUserGroupMember[]>([]);
   const [documentInformationID, setDocumentInformationID] = useState("");
-  const [collaborators, setCollaborators] = useState<EditorCollaboratorPresence[]>([]);
-  const [collaborationStatus, setCollaborationStatus] = useState("");
   const [error, setError] = useState("");
   const [linkedEntityAccessDeniedMessage, setLinkedEntityAccessDeniedMessage] = useState("");
   const [activeTab, setActiveTab] = useState<EditorTabID>("editor");
@@ -676,22 +663,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const saveVersionStatusTimerRef = useRef<number | null>(null);
   const autoSaveVersionBusyRef = useRef(false);
   const lastAutoSaveVersionSignatureRef = useRef("");
-  const collaborationClientIDRef = useRef(createEditorCollaborationClientID());
-  const collaborationSendTimerRef = useRef<number | null>(null);
-  const collaborationStatusTimerRef = useRef<number | null>(null);
   const nodePriorityRequirementTimerRef = useRef<number | null>(null);
-  const pendingCollaborationHTMLRef = useRef<string | null>(null);
-  const applyingRemoteCollaborationRef = useRef(false);
-  const lastLocalCollaborationEditAtRef = useRef(0);
-  const pendingRemoteCollaborationRef = useRef<EditorCollaborationEventPayload | null>(null);
-  const remoteCollaborationTimerRef = useRef<number | null>(null);
-  const remoteRevisionByClientRef = useRef(new Map<string, number>());
   const nodeWorkspaceProjectionsRef = useRef<NodeProjectionItem[]>([]);
   const logicGateWorkspaceProjectionsRef = useRef<LogicGateProjectionItem[]>([]);
   const logicGateGVICAssignmentsRef = useRef<LogicGateGVICAssignment[]>([]);
   const logicGateGVICMutationSequenceRef = useRef(0);
   const logicGateGVICApplyToAssignedNodesRequestRef = useRef(0);
-  const editorProjectionSequenceByScopeRef = useRef(new Map<string, number>());
+  const editorSnapshotSequenceByScopeRef = useRef(new Map<string, number>());
   const editorSnapshotRefreshTokenRef = useRef(0);
   const nodeContentChangesRefreshTokenRef = useRef(0);
   const linkedEditorTargetRef = useRef<{ kind: "" | "node" | "logic_gate"; id: string }>({ kind: "", id: "" });
@@ -910,62 +888,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     }
   }, [companyID, linkedEntityKind, linkedNodeID]);
 
-  const publishCollaborationEvent = useCallback((eventType: EditorCollaborationEventPayload["eventType"], documentHTML?: string) => {
-    if (!companyID || !linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) return;
-    const revision = Date.now();
-    void publishEditorCollaborationEvent(apiBase, companyID, {
-      eventType,
-      entityKind: linkedEntityKind,
-      entityID: linkedNodeID,
-      informationID: documentInformationIDRef.current || documentInformationID,
-      clientID: collaborationClientIDRef.current,
-      documentHTML,
-      revision,
-    }).catch(() => {
-      // Collaboration is opportunistic; durable autosave remains the source of truth.
-    });
-  }, [apiBase, companyID, documentInformationID, linkedEntityKind, linkedNodeID]);
-
-  const queueCollaborationDocumentUpdate = useCallback((documentHTML: string, immediate = false) => {
-    if (applyingRemoteCollaborationRef.current) return;
-    lastLocalCollaborationEditAtRef.current = Date.now();
-    if (!canPublishEditorCollaborationDocumentHTML(documentHTML)) {
-      pendingCollaborationHTMLRef.current = null;
-      return;
-    }
-    pendingCollaborationHTMLRef.current = documentHTML;
-    if (collaborationSendTimerRef.current !== null) {
-      window.clearTimeout(collaborationSendTimerRef.current);
-      collaborationSendTimerRef.current = null;
-    }
-    const publishPending = () => {
-      collaborationSendTimerRef.current = null;
-      const pendingHTML = pendingCollaborationHTMLRef.current;
-      pendingCollaborationHTMLRef.current = null;
-      if (pendingHTML !== null) publishCollaborationEvent("document_update", pendingHTML);
-    };
-    if (immediate) {
-      publishPending();
-      return;
-    }
-    collaborationSendTimerRef.current = window.setTimeout(publishPending, EDITOR_COLLABORATION_SEND_DELAY_MS);
-  }, [publishCollaborationEvent]);
-
-  const scheduleCollaborativeDocumentSave = useCallback((nextText: string, immediate = false) => {
-    if (!linkedEntityCanEdit) return;
-    scheduleDocumentSave(nextText, immediate);
-    queueCollaborationDocumentUpdate(nextText, immediate);
-  }, [linkedEntityCanEdit, queueCollaborationDocumentUpdate, scheduleDocumentSave]);
-
-  const flashCollaborationStatus = useCallback((message: string) => {
-    setCollaborationStatus(message);
-    if (collaborationStatusTimerRef.current !== null) window.clearTimeout(collaborationStatusTimerRef.current);
-    collaborationStatusTimerRef.current = window.setTimeout(() => {
-      collaborationStatusTimerRef.current = null;
-      setCollaborationStatus("");
-    }, 2_400);
-  }, []);
-
   const showNodePriorityRequirementError = useCallback(() => {
     const message = "Must give node a priority";
     setNodePriorityRequirementError(message);
@@ -975,64 +897,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setNodePriorityRequirementError("");
     }, 2_400);
   }, []);
-
-  const applyRemoteCollaborationUpdate = useCallback((payload: EditorCollaborationEventPayload) => {
-    const element = editorDocumentRef.current;
-    if (!element || payload.documentHTML === undefined) return;
-    if (linkedEntityKind !== payload.entityKind || linkedNodeID !== payload.entityID) return;
-    const lastRevision = remoteRevisionByClientRef.current.get(payload.clientID) ?? 0;
-    if (payload.revision <= lastRevision) return;
-    remoteRevisionByClientRef.current.set(payload.clientID, payload.revision);
-
-    const currentHTML = serializeEditorDocumentHTML(element);
-    if (currentHTML === payload.documentHTML) return;
-    restoreDocumentSelectionForHydrationRef.current?.(element);
-    const selectionOffsets = getEditorSelectionOffsets(element);
-    applyingRemoteCollaborationRef.current = true;
-    try {
-      const nextHTML = deserializeEditorDocumentHTML(payload.documentHTML);
-      element.innerHTML = nextHTML;
-      if (selectionOffsets) setEditorSelectionByOffsets(element, selectionOffsets.start, selectionOffsets.end);
-      resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
-      documentDraftRef.current = payload.documentHTML;
-      if (payload.informationID && !documentInformationIDRef.current) {
-        documentInformationIDRef.current = payload.informationID;
-        setDocumentInformationID(payload.informationID);
-      }
-      const informationID = payload.informationID || documentInformationIDRef.current;
-      if (informationID) {
-        persistedDocumentRef.current = payload.documentHTML;
-        persistedDocumentTargetKeyRef.current = documentTargetKey({ entityKind: payload.entityKind, entityID: payload.entityID, informationID });
-      }
-      scheduleIndentGuideUpdate(readEditorDocumentText(element));
-      flashCollaborationStatus(`${editorCollaborationLabel(payload.clientID, payload.clientName)} edited`);
-    } finally {
-      window.requestAnimationFrame(() => {
-        applyingRemoteCollaborationRef.current = false;
-      });
-    }
-  }, [flashCollaborationStatus, linkedEntityKind, linkedNodeID, scheduleIndentGuideUpdate]);
-
-  const applyOrDeferRemoteCollaborationUpdate = useCallback((payload: EditorCollaborationEventPayload) => {
-    const localEditorIsActive = Date.now() - lastLocalCollaborationEditAtRef.current < EDITOR_REMOTE_APPLY_IDLE_MS
-      || pendingSaveRef.current !== null
-      || saveInFlightRef.current;
-    if (localEditorIsActive) {
-      pendingRemoteCollaborationRef.current = payload;
-      flashCollaborationStatus(`${editorCollaborationLabel(payload.clientID, payload.clientName)} edited`);
-      if (remoteCollaborationTimerRef.current !== null) return;
-      remoteCollaborationTimerRef.current = window.setTimeout(() => {
-        remoteCollaborationTimerRef.current = null;
-        const pending = pendingRemoteCollaborationRef.current;
-        pendingRemoteCollaborationRef.current = null;
-        if (pending) applyOrDeferRemoteCollaborationUpdate(pending);
-      }, EDITOR_REMOTE_APPLY_IDLE_MS);
-      return;
-    }
-    pendingRemoteCollaborationRef.current = null;
-    applyRemoteCollaborationUpdate(payload);
-  }, [applyRemoteCollaborationUpdate, flashCollaborationStatus, pendingSaveRef, saveInFlightRef]);
-
   const updateSelectionFontSize = useCallback((nextFontSize: number) => {
     setSelectionFontSize(clampEditorSelectionFontSize(nextFontSize));
   }, []);
@@ -1325,6 +1189,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         onLogicGateTitleChange?.({ logicGateID: updated.logic_gate_id, label: updated.header });
         invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
         upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateCanvasRecord(updated));
+        publishCompanyExplorerEntityTitleUpdate({
+          companyID,
+          entityType: "logic_gate",
+          resourceID: updated.logic_gate_id,
+          title: updated.header,
+        });
       } else {
         const updated = await requestJSON<NodeRecord>(`/v1/nodes/${linkedNodeID}`, {
           method: "PUT",
@@ -1333,6 +1203,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setLinkedNodeTitle(getNodeTitle(updated));
         invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
         upsertNodeRelationshipGraphNode(apiBase, companyID, updated);
+        publishCompanyExplorerEntityTitleUpdate({
+          companyID,
+          entityType: "node",
+          resourceID: updated.node_id,
+          title: getNodeTitle(updated),
+        });
       }
       invalidateWorkspaceSnapshot(apiBase, companyID);
     } catch (err) {
@@ -1938,71 +1814,32 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     };
   }, [activeTab, hasLinkedDocument, linkedEntityKind]);
 
-  useEffect(() => {
-    if (suppressLegacyWorkspaceStream || !companyID || !linkedNodeID || (linkedEntityKind !== "node" && linkedEntityKind !== "logic_gate")) {
-      setCollaborators([]);
-      return;
-    }
-    const currentTarget = { entityKind: linkedEntityKind, entityID: linkedNodeID };
-    const realtimeScope = editorRealtimeScope(linkedEntityKind, linkedNodeID);
-    return subscribeWorkspaceRealtime(apiBase, companyID, realtimeScope, {
-      onEvent(event) {
-        if (event.event !== "workspace") return;
-        const payload = parseEditorCollaborationWorkspaceEvent(event.data);
-        if (!payload || payload.clientID === collaborationClientIDRef.current) return;
-        if (!sameEditorCollaborationTarget(payload, currentTarget)) return;
 
-        if (payload.eventType === "leave") {
-          setCollaborators((current) => current.filter((item) => item.clientID !== payload.clientID));
-          return;
-        }
-
-        const seenAt = Date.now();
-        setCollaborators((current) => {
-          const remaining = current.filter((item) => item.clientID !== payload.clientID && seenAt - item.lastSeen < EDITOR_COLLABORATOR_TTL_MS);
-          return [
-            ...remaining,
-            {
-              clientID: payload.clientID,
-              name: editorCollaborationLabel(payload.clientID, payload.clientName),
-              color: editorCollaboratorColor(payload.clientID),
-              lastSeen: seenAt,
-            },
-          ];
-        });
-
-        if (payload.eventType === "document_update") {
-          applyOrDeferRemoteCollaborationUpdate(payload);
-        }
-      },
-    });
-  }, [apiBase, applyOrDeferRemoteCollaborationUpdate, companyID, linkedEntityKind, linkedNodeID, suppressLegacyWorkspaceStream]);
-
-  const rememberEditorProjectionSequence = useCallback((scope: string, value: unknown) => {
+  const rememberEditorSnapshotSequence = useCallback((scope: string, value: unknown) => {
     const cleanScope = scope.trim();
     if (!cleanScope) return;
-    const nextSequence = parseEditorProjectionSequence(value);
-    const currentSequence = editorProjectionSequenceByScopeRef.current.get(cleanScope) ?? 0;
-    editorProjectionSequenceByScopeRef.current.set(cleanScope, Math.max(currentSequence, nextSequence));
+    const nextSequence = parseEditorSnapshotSequence(value);
+    const currentSequence = editorSnapshotSequenceByScopeRef.current.get(cleanScope) ?? 0;
+    editorSnapshotSequenceByScopeRef.current.set(cleanScope, Math.max(currentSequence, nextSequence));
   }, []);
 
   const isFreshEditorSnapshot = useCallback((scope: string, value: unknown, minimumValue: unknown = 0) => {
     const cleanScope = scope.trim();
     if (!cleanScope) return false;
-    const nextSequence = parseEditorProjectionSequence(value);
-    const minimumSequence = parseEditorProjectionSequence(minimumValue);
-    const currentSequence = editorProjectionSequenceByScopeRef.current.get(cleanScope) ?? 0;
+    const nextSequence = parseEditorSnapshotSequence(value);
+    const minimumSequence = parseEditorSnapshotSequence(minimumValue);
+    const currentSequence = editorSnapshotSequenceByScopeRef.current.get(cleanScope) ?? 0;
     return nextSequence >= Math.max(currentSequence, minimumSequence);
   }, []);
 
   const refreshEditorSnapshot = useCallback(async (minimumSequenceValue: unknown = 0) => {
     const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
     const resourceID = linkedNodeID.trim();
-    const realtimeScope = resourceType ? editorRealtimeScope(resourceType, resourceID) : "";
-    if (!companyID || !resourceType || !resourceID || !realtimeScope) return;
+    const snapshotScope = resourceType ? editorSnapshotScope(resourceType, resourceID) : "";
+    if (!companyID || !resourceType || !resourceID || !snapshotScope) return;
 
     const refreshToken = ++editorSnapshotRefreshTokenRef.current;
-    const minimumSequence = parseEditorProjectionSequence(minimumSequenceValue);
+    const minimumSequence = parseEditorSnapshotSequence(minimumSequenceValue);
     const isCurrentTarget = () => {
       const currentTarget = linkedEditorTargetRef.current;
       return currentTarget.kind === resourceType && currentTarget.id === resourceID && editorSnapshotRefreshTokenRef.current === refreshToken;
@@ -2017,13 +1854,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           getNodeContentChangesSingleFlight(apiBase, companyID, resourceID),
           getNodeEditorSequenceSingleFlight(apiBase, companyID, resourceID),
         ]);
-        if (!isCurrentTarget() || !isFreshEditorSnapshot(realtimeScope, editorSequence, minimumSequence)) return;
+        if (!isCurrentTarget() || !isFreshEditorSnapshot(snapshotScope, editorSequence, minimumSequence)) return;
         setNodeWorkspaceProjections(projections);
         setNodeWorkspaceLoadedNodeID(resourceID);
         setNodeContentChanges(contentChanges);
         setNodeContentChangesLoadedNodeID(resourceID);
-        rememberEditorProjectionSequence(realtimeScope, editorSequence);
-        setEditorSnapshotLoadedScope(realtimeScope);
+        rememberEditorSnapshotSequence(snapshotScope, editorSequence);
+        setEditorSnapshotLoadedScope(snapshotScope);
         return;
       }
 
@@ -2032,10 +1869,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         getLogicGateInformationProjectionSingleFlight(apiBase, companyID, resourceID),
         getLogicGateEditorSequenceSingleFlight(apiBase, companyID, resourceID),
       ]);
-      if (!isCurrentTarget() || !isFreshEditorSnapshot(realtimeScope, editorSequence, minimumSequence)) return;
+      if (!isCurrentTarget() || !isFreshEditorSnapshot(snapshotScope, editorSequence, minimumSequence)) return;
       setLogicGateWorkspaceProjections(projections);
-      rememberEditorProjectionSequence(realtimeScope, editorSequence);
-      setEditorSnapshotLoadedScope(realtimeScope);
+      rememberEditorSnapshotSequence(snapshotScope, editorSequence);
+      setEditorSnapshotLoadedScope(snapshotScope);
 
       const activeInformationID = documentInformationIDRef.current;
       const cleanFocusInformationID = focusInformationID?.trim() ?? "";
@@ -2060,8 +1897,42 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
       setError(cause instanceof Error ? cause.message : "Failed to refresh linked information");
     }
-  }, [apiBase, applyLoadedDocument, clearVisibleDocumentForSelection, companyID, focusInformationID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, rememberEditorProjectionSequence]);
+  }, [apiBase, applyLoadedDocument, clearVisibleDocumentForSelection, companyID, focusInformationID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, rememberEditorSnapshotSequence]);
 
+  useEffect(() => {
+    const nodeID = linkedEntityKind === "node" ? linkedNodeID.trim() : "";
+    const snapshotScope = nodeID ? editorSnapshotScope("node", nodeID) : "";
+    if (!companyID || !nodeID || editorSnapshotLoadedScope !== snapshotScope) return undefined;
+    let acceptedOnce = false;
+    let refreshTimer: number | null = null;
+    const scheduleCanonicalRefresh = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void refreshEditorSnapshot();
+      }, 80);
+    };
+    const unsubscribe = subscribeRealtimeScope(apiBase, companyID, `chat:node:${nodeID}`, {
+      onAccepted() {
+        if (acceptedOnce) scheduleCanonicalRefresh();
+        acceptedOnce = true;
+      },
+      onChatMessageCreated(message) {
+        if (message.company_id !== companyID || message.node_id !== nodeID) return;
+        if (nodeWorkspaceProjectionsRef.current.some((item) => item.information_id === message.message_id)) return;
+        scheduleCanonicalRefresh();
+      },
+      onChatMessageDeleted(message) {
+        if (message.company_id !== companyID || message.node_id !== nodeID) return;
+        if (!nodeWorkspaceProjectionsRef.current.some((item) => item.information_id === message.message_id)) return;
+        scheduleCanonicalRefresh();
+      },
+    });
+    return () => {
+      unsubscribe();
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+    };
+  }, [apiBase, companyID, editorSnapshotLoadedScope, linkedEntityKind, linkedNodeID, refreshEditorSnapshot]);
   const currentEditorVersionSignature = useCallback(() => {
     if (linkedEntityKind === "node") {
       return JSON.stringify(nodeWorkspaceProjectionsRef.current
@@ -2161,137 +2032,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     };
   }, [companyID, currentEditorVersionSignature, linkedEntityAccessDenied, linkedEntityCanEdit, linkedEntityKind, linkedNodeID, saveCurrentEditorVersion, saveVersionIntervalMinutes]);
 
-  const applyRealtimeEditorProjectionDelta = useCallback((message: RealtimeProjectionDeltaMessage) => {
-    const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
-    const resourceID = linkedNodeID.trim();
-    const realtimeScope = resourceType ? editorRealtimeScope(resourceType, resourceID) : "";
-    if (!companyID || !resourceType || !resourceID || message.scope !== realtimeScope) return;
-
-    const envelope = message as unknown as EditorProjectionDeltaEnvelope;
-    const lastSequence = editorProjectionSequenceByScopeRef.current.get(realtimeScope);
-    const minimumSequence = parseEditorProjectionSequence(message.sequence);
-    if (resourceType === "node") {
-      const result = applyEditorProjectionEnvelope<NodeProjectionItem>({
-        envelope,
-        companyID,
-        resourceType,
-        resourceID,
-        scope: realtimeScope,
-        items: nodeWorkspaceProjectionsRef.current,
-        lastSequence,
-      });
-      if (result.fallback) {
-        void refreshEditorSnapshot(minimumSequence);
-        return;
-      }
-      rememberEditorProjectionSequence(realtimeScope, result.lastSequence ?? minimumSequence);
-      if (!result.changed) return;
-      setNodeWorkspaceProjections(result.items);
-      setNodeWorkspaceLoadedNodeID(resourceID);
-      invalidateNodeRecordStoreCaches(apiBase, companyID, resourceID);
-
-      const contentChangesRefreshToken = ++nodeContentChangesRefreshTokenRef.current;
-      void getNodeContentChangesSingleFlight(apiBase, companyID, resourceID).then((contentChanges) => {
-        const currentTarget = linkedEditorTargetRef.current;
-        if (contentChangesRefreshToken !== nodeContentChangesRefreshTokenRef.current || currentTarget.kind !== "node" || currentTarget.id !== resourceID) return;
-        setNodeContentChanges(contentChanges);
-        setNodeContentChangesLoadedNodeID(resourceID);
-      }).catch(() => {
-        // The projection delta has already been applied; stale unseen-change badges can wait for the next snapshot fallback.
-      });
-      return;
-    }
-
-    const result = applyEditorProjectionEnvelope<LogicGateProjectionItem>({
-      envelope,
-      companyID,
-      resourceType,
-      resourceID,
-      scope: realtimeScope,
-      items: logicGateWorkspaceProjectionsRef.current,
-      lastSequence,
-    });
-    if (result.fallback) {
-      void refreshEditorSnapshot(minimumSequence);
-      return;
-    }
-    rememberEditorProjectionSequence(realtimeScope, result.lastSequence ?? minimumSequence);
-    if (!result.changed) return;
-    setLogicGateWorkspaceProjections(result.items);
-    invalidateLogicGateRecordStoreCaches(apiBase, companyID, resourceID);
-
-    const activeInformationID = documentInformationIDRef.current;
-    const activeRemoved = activeInformationID ? result.removedInformationIDs.includes(activeInformationID) : false;
-    const activeUpdated = activeInformationID
-      ? result.upsertedItems.some((item) => item.type === EDITOR_TEXT_BLOCK_TYPE && item.information_id === activeInformationID)
-      : false;
-    const currentTextBox = activeInformationID && !activeRemoved
-      ? result.items.find((item) => item.type === EDITOR_TEXT_BLOCK_TYPE && item.information_id === activeInformationID)
-      : selectCurrentEditorTextProjection(result.items);
-    const shouldApplyDocument = activeRemoved || activeUpdated || (!activeInformationID && currentTextBox);
-    const localDocumentSaveActive = pendingSaveRef.current !== null || queuedSaveRef.current !== null || saveInFlightRef.current;
-    if (shouldApplyDocument && !localDocumentSaveActive) {
-      applyLoadedDocument("logic_gate", resourceID, currentTextBox?.information_id ?? "", currentTextBox?.information ?? "");
-    }
-  }, [apiBase, applyLoadedDocument, companyID, linkedEntityKind, linkedNodeID, refreshEditorSnapshot, rememberEditorProjectionSequence]);
-
-  useEffect(() => {
-    const resourceType = linkedEntityKind === "node" || linkedEntityKind === "logic_gate" ? linkedEntityKind : "";
-    const resourceID = linkedNodeID.trim();
-    const realtimeScope = resourceType ? editorRealtimeScope(resourceType, resourceID) : "";
-    if (!companyID || !resourceType || !resourceID || !realtimeScope || editorSnapshotLoadedScope !== realtimeScope) return;
-    return subscribeRealtimeScope(apiBase, companyID, realtimeScope, {
-      getAfterSequence: () => editorProjectionSequenceByScopeRef.current.get(realtimeScope),
-      onAccepted(message) {
-        rememberEditorProjectionSequence(realtimeScope, message.current_sequence);
-      },
-      onRejected(message) {
-        setEditorSnapshotLoadedScope("");
-        setError(message.message || message.error || "Editor realtime subscription rejected");
-        void refreshEditorSnapshot();
-      },
-      onDelta(message) {
-        applyRealtimeEditorProjectionDelta(message);
-      },
-      onRefetch(message) {
-        setEditorSnapshotLoadedScope("");
-        void refreshEditorSnapshot(message.sequence);
-      },
-      onPermissionRevoked() {
-        setEditorSnapshotLoadedScope("");
-        setLinkedEntityCanEdit(false);
-        setLinkedEntityCanAdmin(false);
-        if (resourceType === "node") {
-          setNodeWorkspaceProjections([]);
-          setNodeWorkspaceLoadedNodeID("");
-          setNodeContentChanges([]);
-          setNodeContentChangesLoadedNodeID("");
-          invalidateNodeRecordStoreCaches(apiBase, companyID, resourceID);
-        } else {
-          setLogicGateWorkspaceProjections([]);
-          invalidateLogicGateRecordStoreCaches(apiBase, companyID, resourceID);
-          applyLoadedDocument("logic_gate", resourceID, "", "");
-        }
-      },
-      onError(message) {
-        setError(message.message || message.error || "Editor realtime error");
-      },
-    });
-  }, [apiBase, applyLoadedDocument, applyRealtimeEditorProjectionDelta, companyID, editorSnapshotLoadedScope, linkedEntityKind, linkedNodeID, refreshEditorSnapshot, rememberEditorProjectionSequence]);
-
-  useEffect(() => {
-    const intervalID = window.setInterval(() => {
-      const now = Date.now();
-      setCollaborators((current) => current.filter((item) => now - item.lastSeen < EDITOR_COLLABORATOR_TTL_MS));
-    }, 5_000);
-    return () => window.clearInterval(intervalID);
-  }, []);
 
   useEffect(() => () => {
-    if (collaborationSendTimerRef.current !== null) window.clearTimeout(collaborationSendTimerRef.current);
-    if (collaborationStatusTimerRef.current !== null) window.clearTimeout(collaborationStatusTimerRef.current);
     if (nodePriorityRequirementTimerRef.current !== null) window.clearTimeout(nodePriorityRequirementTimerRef.current);
-    if (remoteCollaborationTimerRef.current !== null) window.clearTimeout(remoteCollaborationTimerRef.current);
     if (saveVersionStatusTimerRef.current !== null) window.clearTimeout(saveVersionStatusTimerRef.current);
     if (autoSaveVersionTimerRef.current !== null) window.clearInterval(autoSaveVersionTimerRef.current);
   }, []);
@@ -2543,8 +2286,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             getLogicGateInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
             getLogicGateEditorSequenceSingleFlight(apiBase, companyID, linkedNodeID),
           ]);
-          const realtimeScope = editorRealtimeScope("logic_gate", linkedNodeID);
-          if (!isCurrentLinkedLoad() || !isFreshEditorSnapshot(realtimeScope, editorSequence)) return;
+          const snapshotScope = editorSnapshotScope("logic_gate", linkedNodeID);
+          if (!isCurrentLinkedLoad() || !isFreshEditorSnapshot(snapshotScope, editorSequence)) return;
           setLinkedEntityCanEdit(canEditResourceAccess(details));
           setLinkedEntityCanAdmin(canAdminResourceAccess(details));
           setLinkedNodeTitle(getLogicGateTitle({ header: details.logic_gate.header, title: details.logic_gate.header }));
@@ -2560,8 +2303,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodeWorkspaceLoadedNodeID("");
           setNodeContentChanges([]);
           setNodeContentChangesLoadedNodeID("");
-          rememberEditorProjectionSequence(realtimeScope, editorSequence);
-          setEditorSnapshotLoadedScope(realtimeScope);
+          rememberEditorSnapshotSequence(snapshotScope, editorSequence);
+          setEditorSnapshotLoadedScope(snapshotScope);
           const nonText = details.information.filter((item) => item.type !== EDITOR_TEXT_BLOCK_TYPE);
           const textBoxes = projections.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE);
           setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
@@ -2594,8 +2337,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           getNodeEditorSequenceSingleFlight(apiBase, companyID, linkedNodeID),
           requestJSON<ResourceGVICPayload>(`/v1/resources/node/${encodeURIComponent(linkedNodeID)}/gvic?company_id=${encodeURIComponent(companyID)}`),
         ]);
-        const realtimeScope = editorRealtimeScope("node", linkedNodeID);
-        if (!isCurrentLinkedLoad() || !isFreshEditorSnapshot(realtimeScope, editorSequence)) return;
+        const snapshotScope = editorSnapshotScope("node", linkedNodeID);
+        if (!isCurrentLinkedLoad() || !isFreshEditorSnapshot(snapshotScope, editorSequence)) return;
         setLinkedEntityCanEdit(canEditResourceAccess(details));
         setLinkedEntityCanAdmin(canAdminResourceAccess(details));
         setLinkedNodeTitle((current) => preserveNodeTitle(getNodeTitle(details.node), current, linkedNodeID));
@@ -2610,8 +2353,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodeWorkspaceLoadedNodeID(linkedNodeID);
         setNodeContentChanges(contentChanges);
         setNodeContentChangesLoadedNodeID(linkedNodeID);
-        rememberEditorProjectionSequence(realtimeScope, editorSequence);
-        setEditorSnapshotLoadedScope(realtimeScope);
+        rememberEditorSnapshotSequence(snapshotScope, editorSequence);
+        setEditorSnapshotLoadedScope(snapshotScope);
         const currentInformation = details.information.length > 0
           ? details.information
           : projections.map((item) => ({
@@ -2654,7 +2397,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, clearVisibleDocumentForSelection, companyID, focusInformationID, focusRequestID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, preserveNodeTitle, rememberEditorProjectionSequence, requestJSON, scheduleIndentGuideUpdate]);
+  }, [apiBase, applyLoadedDocument, applyLogicGateGVICAssignments, clearVisibleDocumentForSelection, companyID, focusInformationID, focusRequestID, isFreshEditorSnapshot, linkedEntityKind, linkedNodeID, preserveNodeTitle, rememberEditorSnapshotSequence, requestJSON, scheduleIndentGuideUpdate]);
 
   const isDarkTheme = theme === "dark";
   const surfaceBackground = isDarkTheme ? "#0f1216" : EDITOR_NEU_PANEL_BACKGROUND;
@@ -2699,7 +2442,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     pendingEditorFontSizeRef,
     outlineStyle,
     setDocumentScrollTop,
-    scheduleDocumentSave: scheduleCollaborativeDocumentSave,
+    scheduleDocumentSave: scheduleDocumentSave,
     scheduleIndentGuideUpdate,
     rememberCurrentDocumentScroll,
     flushPendingDocumentSave,
@@ -2727,7 +2470,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     pendingEditorFontSizeRef,
     restoreSelection: restoreDocumentSelection,
     insertTable: insertDocumentTable,
-    scheduleDocumentSave: scheduleCollaborativeDocumentSave,
+    scheduleDocumentSave: scheduleDocumentSave,
     scheduleIndentGuideUpdate,
     onSelectionFontSizeChange: updateSelectionFontSize,
     onSelectionInlineFormatChange: updateSelectionInlineFormat,
@@ -2788,10 +2531,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setError(cause instanceof Error ? cause.message : "failed_to_mark_node_changes_seen");
     });
   }, [apiBase, companyID, linkedEntityKind, linkedNodeID, nodeContentChanges, requestJSON]);
-  const visibleCollaborators = useMemo(() => {
-    const now = Date.now();
-    return collaborators.filter((item) => now - item.lastSeen < EDITOR_COLLABORATOR_TTL_MS);
-  }, [collaborators]);
   const updateRelationshipTabAnchor = useCallback((anchor: { left: number; width: number } | null) => {
     const root = editorRootRef.current;
     if (!anchor || !root) {
@@ -2902,25 +2641,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           </div>
         )}
 
-        {hasLinkedDocument && (visibleCollaborators.length > 0 || collaborationStatus) && (
-          <div style={{ position: "absolute", top: 42, right: 12, zIndex: 61, display: "flex", alignItems: "center", gap: 6, maxWidth: "58%", pointerEvents: "none", justifyContent: "flex-end", flexWrap: "wrap" }}>
-            {collaborationStatus && (
-              <div style={{ border: `1px solid ${strokeColor}`, background: tabSelectedBackground, color: surfaceText, borderRadius: 6, padding: "4px 7px", fontSize: 10, fontWeight: 700, boxShadow: "0 6px 18px rgba(0,0,0,0.08)" }}>
-                {collaborationStatus}
-              </div>
-            )}
-            {visibleCollaborators.map((collaborator) => (
-              <div
-                key={collaborator.clientID}
-                title={collaborator.name}
-                style={{ display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0, maxWidth: 150, border: `1px solid ${strokeColor}`, background: tabSelectedBackground, color: surfaceText, borderRadius: 6, padding: "3px 7px 3px 4px", fontSize: 10, fontWeight: 800, boxShadow: "0 6px 18px rgba(0,0,0,0.08)" }}
-              >
-                <span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: 999, background: collaborator.color, flex: "0 0 auto" }} />
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{collaborator.name}</span>
-              </div>
-            ))}
-          </div>
-        )}
 
         {hasLinkedDocument && linkedEntityKind === "node" && activeTab === "relationships" && (
           <NodeRelationshipsSurface
@@ -3008,7 +2728,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             unseenChanges={nodeContentChangesLoadedNodeID === linkedNodeID ? nodeContentChanges : []}
             companyUsers={companyUsers}
             projectionsLoaded={nodeWorkspaceLoadedNodeID === linkedNodeID}
-            editorSequence={editorProjectionSequenceByScopeRef.current.get(editorRealtimeScope("node", linkedNodeID)) ?? 0}
+            editorSequence={editorSnapshotSequenceByScopeRef.current.get(editorSnapshotScope("node", linkedNodeID)) ?? 0}
             hidden={documentIsolation.visibility === "hidden"}
             focusInformationID={focusInformationID}
             focusRequestID={focusRequestID}

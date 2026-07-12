@@ -46,8 +46,6 @@ export type GVICMatrixProjectionResponse = {
   company_id: string;
   user_id: string;
   limit: number;
-  projection?: "gvic_matrix";
-  projection_sequence?: number | string;
   rows: GVICMatrixProjectionRow[];
 };
 

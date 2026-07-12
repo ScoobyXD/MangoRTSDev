@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import {
-  companyExplorerAffectedScopesFromEnvelope,
-  companyExplorerRefreshPlanFromAffectedScopes,
+  applyCompanyExplorerSearchTitleUpdate,
   companyExplorerBranchHasMaterializedRows,
   createCompanyExplorerStoreState,
   reduceCompanyExplorerStore,
   shouldLoadCompanyExplorerBranchChildren,
-  shouldInvalidateKanbanBoardListForExplorerEnvelope,
-  shouldRefreshCompanyExplorerSnapshotForGap,
   shouldRefreshKanbanBoardsAfterUpdate,
 } from "../../../../frontend/src/modules/company-explorer/companyExplorerStore.js";
+import {
+  type CompanyExplorerEntityTitleUpdate,
+  publishCompanyExplorerEntityTitleUpdate,
+  subscribeCompanyExplorerEntityTitleUpdates,
+} from "../../../../frontend/src/modules/company-explorer/companyExplorerLocalEntityUpdates.js";
 
 function run(name: string, fn: () => void): void {
   try {
@@ -108,47 +110,6 @@ run("snapshot reducer replaces explorer snapshot and preserves board list", () =
   assert.deepEqual(state.kanbanBoards.map((item) => item.board_id), ["board-a"]);
 });
 
-run("workspace stream reducer upserts and removes explorer entities", () => {
-  let state = reduceCompanyExplorerStore(createCompanyExplorerStoreState(), {
-    type: "applySnapshot",
-    snapshot: {
-      nodes: [node("node-a", "Old")],
-      logic_gates: [logicGate("gate-a", "Gate A")],
-      folders: [folder("parent"), folder("child", "parent")],
-      folder_items: [
-        folderItem("child", "node", "node-a"),
-        folderItem("child", "logic_gate", "gate-a"),
-      ],
-      rows: [v2Row({ entityID: "node-entity", entityType: "node", resourceID: "node-a", parentEntityID: "child", edgeID: "edge-node-a" })],
-    },
-  });
-
-  state = reduceCompanyExplorerStore(state, {
-    type: "applyWorkspaceEnvelope",
-    companyID: "c",
-    envelope: { company_id: "c", type: "node_updated", data: { node: node("node-a", "New") } },
-  });
-  assert.equal(state.nodes[0]?.name, "Old");
-  assert.deepEqual(state.rows, []);
-
-  state = reduceCompanyExplorerStore(state, {
-    type: "applyWorkspaceEnvelope",
-    companyID: "c",
-    envelope: { company_id: "c", type: "node_deleted", data: { node_id: "node-a" } },
-  });
-  assert.deepEqual(state.nodes.map((item) => item.name), ["Old"]);
-  assert.deepEqual(state.folderItems.map((item) => `${item.item_type}:${item.item_id}`), ["logic_gate:gate-a"]);
-  assert.deepEqual(state.rows, []);
-
-  state = reduceCompanyExplorerStore(state, {
-    type: "applyWorkspaceEnvelope",
-    companyID: "c",
-    envelope: { company_id: "c", type: "company_explorer_folder_deleted", data: { folder_id: "parent" } },
-  });
-  assert.deepEqual(state.folders, []);
-  assert.deepEqual(state.folderItems, []);
-});
-
 run("kanban board reducer keeps sorted boards and removes explorer placement", () => {
   let state = reduceCompanyExplorerStore(createCompanyExplorerStoreState(), {
     type: "setKanbanBoards",
@@ -166,12 +127,14 @@ run("kanban board reducer keeps sorted boards and removes explorer placement", (
   assert.deepEqual(state.kanbanBoards.map((item) => item.board_id), ["board-a", "board-c", "board-b"]);
 
   state = reduceCompanyExplorerStore(state, {
-    type: "applyWorkspaceEnvelope",
+    type: "applyKanbanBoardsUpdated",
     companyID: "c",
-    envelope: { company_id: "c", type: "kanban_board_deleted", data: { board_id: "board-b" } },
+    detail: { companyID: "c", deletedBoardID: "board-b" },
   });
   assert.deepEqual(state.kanbanBoards.map((item) => item.board_id), ["board-a", "board-c"]);
   assert.deepEqual(state.folderItems, []);
+  assert.equal(shouldRefreshKanbanBoardsAfterUpdate({ companyID: "c", board: board("board-a", 1000) }, "c"), false);
+  assert.equal(shouldRefreshKanbanBoardsAfterUpdate(undefined, "c"), true);
 });
 
 run("v2 row reducer preserves manual and native parent contexts", () => {
@@ -237,83 +200,6 @@ run("v2 row reducer preserves manual and native parent contexts", () => {
   assert.equal(state.rows.find((row) => row.parent_entity_id === "project-entity")?.name, "Gate A");
 });
 
-run("v2 folder row reducer replaces the previous parent placement after a move", () => {
-  let state = createCompanyExplorerStoreState();
-  state = reduceCompanyExplorerStore(state, {
-    type: "upsertV2Rows",
-    rows: [
-      v2Row({ entityID: "folder-child", entityType: "folder", parentEntityID: "folder-parent" }),
-    ],
-  });
-
-  state = reduceCompanyExplorerStore(state, {
-    type: "applyWorkspaceEnvelope",
-    companyID: "c",
-    envelope: {
-      company_id: "c",
-      type: "company_explorer_folder_updated",
-      data: {
-        parent_entity_id: "",
-        entity: v2Row({ entityID: "folder-child", entityType: "folder", parentEntityID: "" }),
-      },
-    },
-  });
-
-  assert.equal(state.rows.length, 1);
-  assert.deepEqual(state.rows.map((row) => `${row.parent_entity_id ?? ""}:${row.entity_id}`), [":folder-child"]);
-});
-
-run("affected scope helpers plan only matching Company Explorer branch refreshes", () => {
-  const affectedScopes = companyExplorerAffectedScopesFromEnvelope({
-    company_id: "c",
-    type: "node_updated",
-    data: {
-      affected_scopes: [
-        "updates:user:user-1",
-        "company_explorer:root:c",
-        "company_explorer:folder:folder-entity",
-        "company_explorer:node:node-a",
-        "company_explorer:node:node-a",
-      ],
-    },
-  });
-  assert.deepEqual(affectedScopes, [
-    "updates:user:user-1",
-    "company_explorer:root:c",
-    "company_explorer:folder:folder-entity",
-    "company_explorer:node:node-a",
-  ]);
-
-  const plan = companyExplorerRefreshPlanFromAffectedScopes({
-    companyID: "c",
-    affectedScopes,
-    rows: [
-      v2Row({ entityID: "root-entity", entityType: "company", resourceID: "c" }),
-      v2Row({ entityID: "folder-entity", entityType: "folder", parentEntityID: "root-entity", edgeID: "edge-folder-root" }),
-      v2Row({ entityID: "node-entity", entityType: "node", resourceID: "node-a", parentEntityID: "folder-entity", edgeID: "edge-node-folder" }),
-      v2Row({ entityID: "node-entity", entityType: "node", resourceID: "node-a", parentEntityID: "project-entity" }),
-    ],
-  });
-
-  assert.equal(plan.hasAffectedScopes, true);
-  assert.equal(plan.hasCompanyExplorerScopes, true);
-  assert.equal(plan.refreshRoot, true);
-  assert.deepEqual(plan.parentEntityIDs.sort(), ["folder-entity", "root-entity"].sort());
-});
-
-run("affected scope helpers ignore non-Explorer semantic scopes", () => {
-  const plan = companyExplorerRefreshPlanFromAffectedScopes({
-    companyID: "c",
-    affectedScopes: ["my_work:user:user-1", "updates:user:user-1"],
-    rows: [v2Row({ entityID: "node-entity", entityType: "node", resourceID: "node-a", parentEntityID: "folder-entity" })],
-  });
-
-  assert.equal(plan.hasAffectedScopes, true);
-  assert.equal(plan.hasCompanyExplorerScopes, false);
-  assert.equal(plan.refreshRoot, false);
-  assert.deepEqual(plan.parentEntityIDs, []);
-});
-
 run("loaded branch guard refetches when child rows are no longer materialized", () => {
   const rows = [
     v2Row({ entityID: "folder-entity", entityType: "folder", parentEntityID: "root-entity" }),
@@ -354,14 +240,58 @@ run("loaded branch guard refetches when child rows are no longer materialized", 
   }), false);
 });
 
-run("store event helpers preserve existing refresh contracts", () => {
-  assert.equal(shouldRefreshCompanyExplorerSnapshotForGap({ companyID: "c", scopes: [{ kind: "company_explorer" }] }, "c"), true);
-  assert.equal(shouldRefreshCompanyExplorerSnapshotForGap({ companyID: "c", scopes: [{ kind: "node_graph" }] }, "c"), false);
-  assert.equal(shouldRefreshCompanyExplorerSnapshotForGap({ companyID: "other", scopes: [{ kind: "workspace" }] }, "c"), false);
+run("committed editor titles patch mounted explorer records and every materialized V2 placement", () => {
+  let state = createCompanyExplorerStoreState();
+  state = reduceCompanyExplorerStore(state, {
+    type: "mergeSnapshot",
+    snapshot: {
+      nodes: [node("node-a", "Old node")],
+      logic_gates: [logicGate("gate-a", "Old gate")],
+      rows: [
+        { ...v2Row({ entityID: "gate-entity", entityType: "logic_gate", resourceID: "gate-a", parentEntityID: "folder-a", edgeID: "edge-a" }), name: "Old gate" },
+        { ...v2Row({ entityID: "gate-entity", entityType: "logic_gate", resourceID: "gate-a", parentEntityID: "folder-b", edgeID: "edge-b" }), name: "Old gate" },
+      ],
+    },
+  });
 
-  assert.equal(shouldRefreshKanbanBoardsAfterUpdate({ companyID: "c", board: board("board-a", 1000) }, "c"), false);
-  assert.equal(shouldRefreshKanbanBoardsAfterUpdate(undefined, "c"), true);
+  state = reduceCompanyExplorerStore(state, {
+    type: "applyEntityTitleUpdate",
+    update: { companyID: "c", entityType: "node", resourceID: "node-a", title: "Renamed node" },
+  });
+  state = reduceCompanyExplorerStore(state, {
+    type: "applyEntityTitleUpdate",
+    update: { companyID: "c", entityType: "logic_gate", resourceID: "gate-a", title: "Renamed gate" },
+  });
 
-  assert.equal(shouldInvalidateKanbanBoardListForExplorerEnvelope("c", { company_id: "c", type: "kanban_board_updated" }), true);
-  assert.equal(shouldInvalidateKanbanBoardListForExplorerEnvelope("c", { company_id: "c", type: "node_updated" }), false);
+  assert.equal(state.nodes[0]?.name, "Renamed node");
+  assert.equal(state.logicGates[0]?.header, "Renamed gate");
+  assert.equal(state.logicGates[0]?.title, "Renamed gate");
+  assert.deepEqual(state.rows.map((row) => row.name), ["Renamed gate", "Renamed gate"]);
+});
+
+run("committed editor titles patch active explorer search labels and use a concrete local event", () => {
+  const update = { companyID: "c", entityType: "logic_gate" as const, resourceID: "gate-a", title: "Renamed gate" };
+  const results = applyCompanyExplorerSearchTitleUpdate([{
+    company_id: "c",
+    resource_type: "logic_gate",
+    resource_id: "gate-a",
+    entity_id: "gate-entity",
+    display_name: "Old gate",
+    match_reason: "name",
+    location_path: [{ entity_type: "logic_gate", entity_id: "gate-entity", resource_id: "gate-a", name: "Old gate" }],
+    created_timestamp: "1",
+    updated_timestamp: "1",
+  }], update);
+  assert.equal(results[0]?.display_name, "Renamed gate");
+  assert.equal(results[0]?.location_path[0]?.name, "Renamed gate");
+
+  const target = new EventTarget();
+  let received: CompanyExplorerEntityTitleUpdate | null = null;
+  const unsubscribe = subscribeCompanyExplorerEntityTitleUpdates((detail) => { received = detail; }, target);
+  publishCompanyExplorerEntityTitleUpdate(update, target);
+  assert.deepEqual(received, update);
+  unsubscribe();
+  received = null;
+  publishCompanyExplorerEntityTitleUpdate(update, target);
+  assert.equal(received, null);
 });

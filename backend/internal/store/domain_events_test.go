@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestMemoryDomainEventsSequenceIdempotencyAndPublish(t *testing.T) {
+func TestMemoryDomainEventsSequenceAndIdempotency(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"
 
@@ -67,34 +67,12 @@ func TestMemoryDomainEventsSequenceIdempotencyAndPublish(t *testing.T) {
 	if otherStream.Sequence != 1 {
 		t.Fatalf("other stream sequence = %d, want 1", otherStream.Sequence)
 	}
-
-	pending, err := repo.ListPendingDomainEvents(10)
-	if err != nil {
-		t.Fatalf("ListPendingDomainEvents: %v", err)
-	}
-	if len(pending) != 3 {
-		t.Fatalf("pending count = %d, want 3", len(pending))
-	}
-
-	if err := repo.MarkDomainEventPublished(companyID, first.EventID); err != nil {
-		t.Fatalf("MarkDomainEventPublished: %v", err)
-	}
-	pending, err = repo.ListPendingDomainEvents(10)
-	if err != nil {
-		t.Fatalf("ListPendingDomainEvents after publish: %v", err)
-	}
-	if len(pending) != 2 {
-		t.Fatalf("pending count after publish = %d, want 2", len(pending))
-	}
 }
 
 func TestMemoryDomainEventsRejectInvalidInput(t *testing.T) {
 	repo := NewMemoryRepo()
 	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: "company", StreamType: "node", StreamID: "node-1"}); err != ErrInvalid {
 		t.Fatalf("AppendDomainEvent invalid err = %v, want ErrInvalid", err)
-	}
-	if err := repo.MarkDomainEventPublished("", "event"); err != ErrInvalid {
-		t.Fatalf("MarkDomainEventPublished invalid err = %v, want ErrInvalid", err)
 	}
 }
 

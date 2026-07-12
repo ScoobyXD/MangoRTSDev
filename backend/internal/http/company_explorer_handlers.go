@@ -645,6 +645,7 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 		}
 	}
 
+	capturedBoardIDs := s.captureKanbanBoardsForDeleteTargets(req.CompanyID, deleteTargets)
 	result := store.CompanyExplorerDeleteResult{Targets: []store.CompanyExplorerDeletedTarget{}}
 	var err error
 	result, err = s.repo.DeleteCompanyExplorerTargets(req.CompanyID, deleteTargets, deletedByUserID)
@@ -662,6 +663,7 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 	}
 
 	s.publishCompanyExplorerDeletedTargets(req.CompanyID, result.Targets)
+	s.publishCapturedKanbanDeletes(req.CompanyID, capturedBoardIDs)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 }
 

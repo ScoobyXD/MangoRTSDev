@@ -14,7 +14,6 @@ import { hasCompanyExplorerFolderPermissionRules, type CompanyExplorerFolder, ty
 import { invalidateKanbanBoardListCache, listKanbanBoards, type GVICMatrixProjectionRow } from "../kanban/kanbanApi";
 import { EVENT_KANBAN_BOARDS_UPDATED, logicGateKanbanBoardID, type ExplorerEntityDragItem, type KanbanBoardsUpdatedDetail } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
-import { companyExplorerRealtimeScope, subscribeWorkspaceUserRealtime, type WorkspaceStreamGapSignal } from "../workspace/workspaceRealtime";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand, type WorkspaceEntityBatchCreatorLogicGateGVICRole } from "../workspace/workspaceEntityCommands";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItemTypes, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
@@ -70,16 +69,13 @@ import {
   type CompanyExplorerWorkspaceEntityBatchResponse,
 } from "./CompanyExplorerContentModel";
 import {
-  companyExplorerAffectedScopesFromEnvelope,
-  companyExplorerRefreshPlanFromAffectedScopes,
+  applyCompanyExplorerSearchTitleUpdate,
   createCompanyExplorerStoreState,
   reduceCompanyExplorerStore,
   shouldLoadCompanyExplorerBranchChildren,
-  shouldInvalidateKanbanBoardListForExplorerEnvelope,
-  shouldRefreshCompanyExplorerSnapshotForGap,
   shouldRefreshKanbanBoardsAfterUpdate,
-  type CompanyExplorerWorkspaceStreamEnvelope,
 } from "./companyExplorerStore";
+import { subscribeCompanyExplorerEntityTitleUpdates } from "./companyExplorerLocalEntityUpdates";
 import { fetchCompanyExplorerChildren, fetchCompanyExplorerRoots, fetchCompanyExplorerSearchResults, type CompanyExplorerLazyScope, type CompanyExplorerSearchResult, type CompanyExplorerV2Row } from "./companyExplorerLazyApi";
 import { shouldIncludeGVICCustomRootFolder, shouldShowGVICCompanyScopedFolderShell } from "./companyExplorerGVICVisibility";
 
@@ -224,24 +220,6 @@ function hideMainExplorerRootFolders(rows: ExplorerTreeNode[]): ExplorerTreeNode
   return filtered;
 }
 
-function shouldRefreshGVICExplorerProjectionForGap(gap: WorkspaceStreamGapSignal, companyID: string): boolean {
-  if (gap.companyID !== companyID) return false;
-  return gap.scopes.some((scope) => scope.kind === "gvic_matrix" || scope.kind === "workspace");
-}
-
-function shouldRefreshGVICExplorerProjectionForEnvelope(companyID: string, envelope: CompanyExplorerWorkspaceStreamEnvelope): boolean {
-  if (envelope.company_id !== companyID) return false;
-  const type = envelope.type?.trim() ?? "";
-  return type === "logic_gate_created"
-    || type === "logic_gate_updated"
-    || type === "logic_gate_deleted"
-    || type === "logic_gate_gvic_updated"
-    || type === "logic_gate_permissions_updated"
-    || type === "project_created"
-    || type === "project_updated"
-    || type === "project_deleted";
-}
-
 function cleanExplorerID(value: string | null | undefined): string {
   return value?.trim() ?? "";
 }
@@ -258,15 +236,6 @@ function companyExplorerTriageConversionTarget(target: CompanyExplorerTriageMess
 function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent<HomeTriageConversionAppliedDetail>(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, { detail }));
-}
-
-function companyExplorerEnvelopeParentEntityID(data: Record<string, unknown>): string | null {
-  if (typeof data.parent_entity_id === "string") return cleanExplorerID(data.parent_entity_id);
-  if (data.entity && typeof data.entity === "object" && !Array.isArray(data.entity)) {
-    const entity = data.entity as { parent_entity_id?: unknown };
-    if (typeof entity.parent_entity_id === "string") return cleanExplorerID(entity.parent_entity_id);
-  }
-  return null;
 }
 
 function companyExplorerUserLabel(user: Pick<CompanyUser, "user_id" | "display_name" | "email"> | null | undefined, fallbackUserID: string): string {
@@ -1375,6 +1344,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   useEffect(() => {
     companyExplorerV2RowsRef.current = companyExplorerV2Rows;
   }, [companyExplorerV2Rows]);
+  useEffect(() => subscribeCompanyExplorerEntityTitleUpdates((update) => {
+    if (update.companyID !== companyID) return;
+    dispatchExplorerStore({ type: "applyEntityTitleUpdate", update });
+    setCompanyExplorerSearchResults((current) => applyCompanyExplorerSearchTitleUpdate(current, update));
+  }), [companyID]);
   useEffect(() => {
     if (!internalTriageDropSuccess) return undefined;
     const timerID = window.setTimeout(() => {
@@ -1503,9 +1477,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     return branchKey.startsWith(prefix) ? branchKey.slice(prefix.length) : null;
   }, [companyExplorerLazyScope]);
 
-  const isCompanyExplorerBranchLoaded = useCallback((parentEntityID: string) => (
-    loadedCompanyExplorerBranchesRef.current.has(companyExplorerBranchKey(parentEntityID))
-  ), [companyExplorerBranchKey]);
 
   const refreshCompanyExplorerBranch = useCallback(async (parentEntityID: string) => {
     const cleanParentEntityID = cleanExplorerID(parentEntityID);
@@ -1521,96 +1492,11 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
       staleCompanyExplorerBranchesRef.current.delete(branchKey);
       setError("");
     } catch {
-      // Realtime branch refresh is best effort; explicit expansion reloads the same bounded branch.
+      // Explicit expansion can retry the same bounded branch.
     } finally {
       inflightCompanyExplorerBranchesRef.current.delete(branchKey);
     }
   }, [apiBase, companyExplorerBranchKey, companyExplorerLazyScope, companyID]);
-
-  const refreshActiveCompanyExplorerBranch = useCallback((parentEntityID: string) => {
-    const branchKey = companyExplorerBranchKey(parentEntityID);
-    if (!isCompanyExplorerBranchLoaded(parentEntityID)) return;
-    if (!activeCompanyExplorerBranchesRef.current.has(branchKey)) {
-      staleCompanyExplorerBranchesRef.current.add(branchKey);
-      return;
-    }
-    void refreshCompanyExplorerBranch(parentEntityID);
-  }, [companyExplorerBranchKey, isCompanyExplorerBranchLoaded, refreshCompanyExplorerBranch]);
-
-  const refreshActiveCompanyExplorerBranches = useCallback((options: { markInactiveLoadedStale?: boolean } = {}) => {
-    if (options.markInactiveLoadedStale) {
-      for (const branchKey of loadedCompanyExplorerBranchesRef.current) {
-        if (!activeCompanyExplorerBranchesRef.current.has(branchKey)) staleCompanyExplorerBranchesRef.current.add(branchKey);
-      }
-    }
-    for (const branchKey of activeCompanyExplorerBranchesRef.current) {
-      if (!loadedCompanyExplorerBranchesRef.current.has(branchKey)) continue;
-      const parentEntityID = companyExplorerBranchParentEntityID(branchKey);
-      if (parentEntityID !== null) void refreshCompanyExplorerBranch(parentEntityID);
-    }
-  }, [companyExplorerBranchParentEntityID, refreshCompanyExplorerBranch]);
-
-  const refreshCompanyExplorerBranchesForEnvelope = useCallback((envelope: CompanyExplorerWorkspaceStreamEnvelope) => {
-    if (envelope.company_id !== companyID) return;
-    const type = envelope.type?.trim() ?? "";
-    const data = envelope.data ?? {};
-    const affectedScopes = companyExplorerAffectedScopesFromEnvelope(envelope);
-    if (affectedScopes.length > 0) {
-      const plan = companyExplorerRefreshPlanFromAffectedScopes({ companyID, affectedScopes, rows: companyExplorerV2RowsRef.current });
-      if (!plan.hasCompanyExplorerScopes) return;
-      if (plan.refreshRoot) refreshActiveCompanyExplorerBranch("");
-      for (const parentEntityID of plan.parentEntityIDs) refreshActiveCompanyExplorerBranch(parentEntityID);
-      const payloadParentEntityID = companyExplorerEnvelopeParentEntityID(data);
-      if (payloadParentEntityID !== null) refreshActiveCompanyExplorerBranch(payloadParentEntityID);
-      return;
-    }
-    const refreshAllLoadedBranchTypes = new Set([
-      "company_explorer_folder_deleted",
-      "company_explorer_item_removed",
-      "logic_gate_created",
-      "logic_gate_updated",
-      "logic_gate_deleted",
-      "project_created",
-      "project_updated",
-      "project_deleted",
-    ]);
-    if (refreshAllLoadedBranchTypes.has(type)) {
-      refreshActiveCompanyExplorerBranches({ markInactiveLoadedStale: true });
-      return;
-    }
-    if (
-      type !== "company_explorer_folder_created"
-      && type !== "company_explorer_folder_updated"
-      && type !== "company_explorer_item_placed"
-    ) {
-      return;
-    }
-    const parentEntityID = typeof data.parent_entity_id === "string"
-      ? cleanExplorerID(data.parent_entity_id)
-      : typeof data.entity === "object" && data.entity && typeof (data.entity as { parent_entity_id?: unknown }).parent_entity_id === "string"
-        ? cleanExplorerID((data.entity as { parent_entity_id: string }).parent_entity_id)
-        : "";
-    refreshActiveCompanyExplorerBranch(parentEntityID);
-  }, [companyID, refreshActiveCompanyExplorerBranch, refreshActiveCompanyExplorerBranches]);
-  const reconcileCompanyExplorerGap = useCallback((gap: WorkspaceStreamGapSignal) => {
-    if (gap.envelope) {
-      const affectedScopes = companyExplorerAffectedScopesFromEnvelope(gap.envelope);
-      if (affectedScopes.length > 0) {
-        const plan = companyExplorerRefreshPlanFromAffectedScopes({ companyID, affectedScopes, rows: companyExplorerV2RowsRef.current });
-        if (!plan.hasCompanyExplorerScopes) return;
-        if (plan.refreshRoot) refreshActiveCompanyExplorerBranch("");
-        for (const parentEntityID of plan.parentEntityIDs) refreshActiveCompanyExplorerBranch(parentEntityID);
-        const data: Record<string, unknown> = gap.envelope.data ?? {};
-        const payloadParentEntityID = companyExplorerEnvelopeParentEntityID(data);
-        if (payloadParentEntityID !== null) refreshActiveCompanyExplorerBranch(payloadParentEntityID);
-        return;
-      }
-    }
-    if (!shouldRefreshCompanyExplorerSnapshotForGap(gap, companyID)) return;
-    void refreshCompanyExplorerSnapshot().catch(() => {
-      // Stream recovery is best effort; the next explicit Explorer action can retry the same bounded reads.
-    });
-  }, [companyID, refreshCompanyExplorerSnapshot, refreshActiveCompanyExplorerBranch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1657,33 +1543,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     return () => window.removeEventListener(EVENT_KANBAN_BOARDS_UPDATED, onKanbanBoardsUpdated);
   }, [apiBase, companyID, refreshKanbanBoards]);
 
-  useEffect(() => {
-    return subscribeWorkspaceUserRealtime(apiBase, companyID, companyExplorerRealtimeScope, {
-      onGap(gap) {
-        reconcileCompanyExplorerGap(gap);
-        if (shouldRefreshGVICExplorerProjectionForGap(gap, companyID)) requestGVICExplorerProjectionRefreshRef.current();
-      },
-      onEvent(event) {
-        if (event.event !== "workspace" || event.data.length === 0) return;
-        try {
-          const envelope = JSON.parse(event.data) as CompanyExplorerWorkspaceStreamEnvelope;
-          const affectedScopes = companyExplorerAffectedScopesFromEnvelope(envelope);
-          if (affectedScopes.length > 0) {
-            const plan = companyExplorerRefreshPlanFromAffectedScopes({ companyID, affectedScopes, rows: companyExplorerV2RowsRef.current });
-            if (!plan.hasCompanyExplorerScopes) return;
-          }
-          if (shouldInvalidateKanbanBoardListForExplorerEnvelope(companyID, envelope)) {
-            invalidateKanbanBoardListCache(apiBase, companyID);
-          }
-          dispatchExplorerStore({ type: "applyWorkspaceEnvelope", companyID, envelope });
-          refreshCompanyExplorerBranchesForEnvelope(envelope);
-          if (shouldRefreshGVICExplorerProjectionForEnvelope(companyID, envelope)) requestGVICExplorerProjectionRefreshRef.current();
-        } catch {
-          // The stream is best-effort UI sync; the explicit refresh path remains available.
-        }
-      },
-    });
-  }, [apiBase, companyID, reconcileCompanyExplorerGap, refreshCompanyExplorerBranchesForEnvelope]);
   useEffect(() => {
     if (!scopeViewsEnabled) return undefined;
     let cancelled = false;

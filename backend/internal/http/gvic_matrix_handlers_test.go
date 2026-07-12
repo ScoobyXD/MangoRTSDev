@@ -194,18 +194,14 @@ func getGVICMatrixProjectionRowsForTest(t *testing.T, handler http.Handler, comp
 		t.Fatalf("GET GVIC projection status = %d body=%s, want 200", rr.Code, rr.Body.String())
 	}
 	var payload struct {
-		Projection         string                          `json:"projection"`
-		ProjectionSequence *int64                          `json:"projection_sequence"`
-		Rows               []store.GVICMatrixProjectionRow `json:"rows"`
+		Projection string                          `json:"projection"`
+		Rows       []store.GVICMatrixProjectionRow `json:"rows"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode GVIC projection response: %v body=%s", err, rr.Body.String())
 	}
-	if payload.Projection != store.ProjectionNameGVICMatrix {
-		t.Fatalf("projection = %q, want %q", payload.Projection, store.ProjectionNameGVICMatrix)
-	}
-	if payload.ProjectionSequence == nil {
-		t.Fatalf("projection_sequence missing from GVIC projection response")
+	if payload.Projection != "gvic_matrix" {
+		t.Fatalf("projection = %q, want %q", payload.Projection, "gvic_matrix")
 	}
 	return payload.Rows
 }

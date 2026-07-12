@@ -240,32 +240,6 @@ func (r *MemoryRepo) effectiveUserIDsForResourceLocked(companyID, resourceType, 
 	return seen
 }
 
-func (r *MemoryRepo) ListEffectiveUsersForWorkspaceEvent(event domain.DomainEvent) ([]string, error) {
-	targets := WorkspaceEventAccessTargets(event)
-	if len(targets) == 0 {
-		return []string{}, nil
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	return r.effectiveUsersForWorkspaceEventLocked(event), nil
-}
-
-func (r *MemoryRepo) effectiveUsersForWorkspaceEventLocked(event domain.DomainEvent) []string {
-	targets := WorkspaceEventAccessTargets(event)
-	if len(targets) == 0 {
-		return []string{}
-	}
-	seen := map[string]bool{}
-	for _, target := range targets {
-		resourceSeen := r.effectiveUserIDsForResourceLocked(event.CompanyID, target.ResourceType, target.ResourceID, EntityPermissionView)
-		for userID := range resourceSeen {
-			seen[userID] = true
-		}
-	}
-	return sortWorkspaceEventUserIDs(seen)
-}
-
 func (r *MemoryRepo) userHasEffectiveAccessLocked(companyID, userID, resourceType, resourceID, accessLevel string) bool {
 	return r.userHasResourcePermissionLocked(companyID, userID, resourceType, resourceID, accessLevel)
 }

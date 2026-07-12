@@ -67,19 +67,7 @@ export type MessageSelectionModifiers = {
   metaKey: boolean;
 };
 
-export type CommunicationsStreamEnvelope = {
-  type?: string;
-  trigger?: string;
-  action?: string;
-  message_id?: string;
-  shared_inbox_id?: string;
-};
 
-export type WorkspaceStreamEnvelope = {
-  company_id?: string;
-  type?: string;
-  data?: Record<string, unknown>;
-};
 
 export type LoadMessagesOptions = {
   refresh?: boolean;

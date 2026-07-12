@@ -1,6 +1,4 @@
 import type { MyWorkMatrixResponse, MyWorkMatrixRow } from "../../modules/work-items/workItemReadApi.js";
-import { GVIC_MATRIX_PROJECTION_NAME, GVICMatrixRealtimeScope } from "../../modules/gvic/gvicMatrixProjectionDeltas.js";
-import type { RealtimeProjectionDeltaMessage } from "../../modules/realtime/realtimeWebSocket.js";
 import type { MyWorkSelectedScope } from "./myWorkGrouping.js";
 import {
   myWorkDebugDurationMs,
@@ -334,37 +332,6 @@ export function myWorkMatrixCacheKey({
   return "my_work:" + cleanCompanyID + ":" + level + ":" + subjectType + ":" + subjectID + ":targets:" + targets;
 }
 
-export function myWorkProjectionDeltaAffectsTargetUsers(
-  message: Pick<RealtimeProjectionDeltaMessage, "scope" | "projection" | "projection_scope" | "affected_scopes" | "deltas">,
-  targetUserIDs: string[],
-): boolean {
-  const targetUsers = new Set(uniqueNonEmptyStrings(targetUserIDs));
-  if (targetUsers.size === 0) return false;
-
-  for (const affectedScope of message.affected_scopes ?? []) {
-    const [surface, targetType, ...idParts] = affectedScope.trim().split(":").filter(Boolean);
-    const targetID = idParts.join(":").trim();
-    if (surface !== "my_work" || !targetType || !targetID) continue;
-    if (targetType === "user" && targetUsers.has(targetID)) return true;
-    if (targetType === "company") return true;
-  }
-
-  const projection = cleanString(message.projection);
-  if (projection && projection !== GVIC_MATRIX_PROJECTION_NAME) return false;
-
-  const projectionScopeUserID = userIDFromProjectionScope(message.projection_scope);
-  if (projectionScopeUserID && targetUsers.has(projectionScopeUserID)) return true;
-
-  const scopeUserID = userIDFromGVICRealtimeScope(message.scope);
-  if (scopeUserID && targetUsers.has(scopeUserID)) return true;
-
-  for (const delta of message.deltas ?? []) {
-    const userID = userIDFromProjectionDelta(delta);
-    if (userID && targetUsers.has(userID)) return true;
-  }
-  return false;
-}
-
 function uniqueNonEmptyStrings(values: string[]): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -422,35 +389,6 @@ function pruneMyWorkMatrixCache(): void {
     if (entry.loading) continue;
     myWorkMatrixCache.delete(cacheKey);
   }
-}
-
-function cleanString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function recordValue(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
-}
-
-function userIDFromProjectionScope(value: unknown): string {
-  const clean = cleanString(value);
-  if (!clean.startsWith("user:")) return "";
-  return clean.slice("user:".length).trim();
-}
-
-function userIDFromGVICRealtimeScope(value: unknown): string {
-  const clean = cleanString(value);
-  const prefix = GVICMatrixRealtimeScope("");
-  if (!clean.startsWith(prefix)) return "";
-  return clean.slice(prefix.length).trim();
-}
-
-function userIDFromProjectionDelta(value: unknown): string {
-  const delta = recordValue(value);
-  if (!delta) return "";
-  const row = recordValue(delta.row);
-  const rowKey = recordValue(delta.row_key);
-  return cleanString(row?.user_id) || cleanString(rowKey?.user_id);
 }
 
 function sortMyWorkMatrixCells(left: MyWorkMatrixCellWithUser, right: MyWorkMatrixCellWithUser): number {

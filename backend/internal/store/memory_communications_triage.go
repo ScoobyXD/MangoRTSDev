@@ -328,12 +328,11 @@ func (r *MemoryRepo) ConvertCommunicationsTriageItems(input CommunicationsTriage
 		r.addEmailProjectionLocked(input.CompanyID, nodeID, input.SharedInboxID, input.AccountEmail, triageItem.Message, now, true)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		if input.Target.ProjectID != "" {
-			relationship, deltas, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
+			relationship, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
 			if err != nil {
 				return CommunicationsTriageConversionResult{}, err
 			}
 			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
-			result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
 		}
 
 		node = r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, nodeID)])
@@ -440,12 +439,11 @@ func (r *MemoryRepo) convertCommunicationsTriageItemsToExplorerTargetLocked(inpu
 		r.addEmailProjectionLocked(input.CompanyID, nodeID, input.SharedInboxID, input.AccountEmail, triageItem.Message, now, true)
 		delete(r.triageItems, triageItemKey(input.UserID, messageID))
 		if input.Target.ProjectID != "" {
-			relationship, deltas, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
+			relationship, err := r.upsertCommunicationsTriageProjectRelationshipLocked(input, nodeID, now)
 			if err != nil {
 				return CommunicationsTriageConversionResult{}, err
 			}
 			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
-			result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
 		}
 		node = r.withNodeReadModelLocked(r.nodes[key(input.CompanyID, nodeID)])
 		result.Nodes = append(result.Nodes, node)
@@ -471,14 +469,13 @@ func (r *MemoryRepo) nextProjectRelationshipPositionLocked(companyID, projectID 
 	return position
 }
 
-func (r *MemoryRepo) upsertCommunicationsTriageProjectRelationshipLocked(input CommunicationsTriageConversionInput, nodeID string, now time.Time) (domain.ProjectRelationshipProjection, []ProjectionDelta, error) {
+func (r *MemoryRepo) upsertCommunicationsTriageProjectRelationshipLocked(input CommunicationsTriageConversionInput, nodeID string, now time.Time) (domain.ProjectRelationshipProjection, error) {
 	position := input.Target.Position
 	if position <= 0 {
 		position = r.nextProjectRelationshipPositionLocked(input.CompanyID, input.Target.ProjectID)
 	}
 	relationshipID := newUUIDv7String()
 	relationshipKey := projectRelationshipKey(input.CompanyID, relationshipID)
-	before := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, relationshipID)
 	r.projectRelationships[relationshipKey] = domain.ProjectRelationship{
 		CompanyID:        input.CompanyID,
 		RelationshipID:   relationshipID,
@@ -490,14 +487,13 @@ func (r *MemoryRepo) upsertCommunicationsTriageProjectRelationshipLocked(input C
 		UpdatedTimestamp: now,
 	}
 	if err := r.syncProjectRelationshipProjectionLocked(input.CompanyID, relationshipID); err != nil {
-		return domain.ProjectRelationshipProjection{}, nil, err
+		return domain.ProjectRelationshipProjection{}, err
 	}
-	after := r.projectRelationshipProjectionRowsForRelationshipLocked(input.CompanyID, relationshipID)
 	projection, ok := r.projectRelationshipProjection[relationshipKey]
 	if !ok {
-		return domain.ProjectRelationshipProjection{}, nil, ErrNotFound
+		return domain.ProjectRelationshipProjection{}, ErrNotFound
 	}
-	return projection, diffProjectRelationshipProjectionRows(before, after), nil
+	return projection, nil
 }
 func (r *MemoryRepo) attachCommunicationsTriageItemsToExistingNodeLocked(input CommunicationsTriageConversionInput) (CommunicationsTriageConversionResult, error) {
 	if input.LogicGateID == "" {

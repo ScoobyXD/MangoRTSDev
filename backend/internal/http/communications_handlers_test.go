@@ -2130,25 +2130,6 @@ func TestCommunicationsStarMessagePreservesGmailInboxLabel(t *testing.T) {
 	}
 }
 
-func TestCommunicationsMessageUpdateEventClassifiesStarMutations(t *testing.T) {
-	t.Parallel()
-
-	trigger, meta := communicationsMessageUpdateEvent(nil, " shared-1 ")
-	if trigger != "message.updated" || meta.Action != "" || meta.SharedInboxID != "shared-1" {
-		t.Fatalf("generic update event = %q %+v, want message.updated with shared inbox metadata", trigger, meta)
-	}
-	starred := true
-	trigger, meta = communicationsMessageUpdateEvent(&starred, "shared-1")
-	if trigger != "message.starred" || meta.Action != "star" || meta.SharedInboxID != "shared-1" {
-		t.Fatalf("star update event = %q %+v, want message.starred star metadata", trigger, meta)
-	}
-	starred = false
-	trigger, meta = communicationsMessageUpdateEvent(&starred, "shared-1")
-	if trigger != "message.unstarred" || meta.Action != "unstar" || meta.SharedInboxID != "shared-1" {
-		t.Fatalf("unstar update event = %q %+v, want message.unstarred unstar metadata", trigger, meta)
-	}
-}
-
 func TestCommunicationsCacheIncludesStarredMessagesInSourceMailboxes(t *testing.T) {
 	t.Parallel()
 
@@ -2610,7 +2591,7 @@ func TestCommunicationsUnarchiveMessageMovesFolderProvidersToInboxFolder(t *test
 	}
 }
 
-func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
+func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "70707070-7070-4070-8070-707070707001"
 	token := "communications-webhook-ws-token"
@@ -2635,16 +2616,6 @@ func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 	defer server.Close()
 	handler := server.Routes()
 
-	client := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, token)
-	defer client.close()
-	client.readJSON(t)
-	scope := realtimeCommunicationsScope(user.UserID)
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
-	accepted := client.readJSON(t)
-	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope {
-		t.Fatalf("communications subscription accepted = %+v, want %s", accepted, scope)
-	}
-
 	challengeReq := httptest.NewRequest(http.MethodGet, "/nylas/webhook?challenge=abc123", nil)
 	challengeRec := httptest.NewRecorder()
 	handler.ServeHTTP(challengeRec, challengeReq)
@@ -2660,15 +2631,6 @@ func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("webhook status = %d body=%s", rec.Code, rec.Body.String())
 	}
-	message := client.readJSON(t)
-	if message["type"] != realtimeMessageCommunicationsEvent || message["company_id"] != companyID || message["scope"] != scope {
-		t.Fatalf("communications websocket message = %+v, want communications event for %s", message, scope)
-	}
-	event := message["event"].(map[string]any)
-	if event["user_id"] != user.UserID || event["type"] != "mailbox_changed" || event["trigger"] != "message.created" || event["message_id"] != "message-1" {
-		t.Fatalf("communications event = %+v", event)
-	}
-
 	duplicateReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
 	duplicateReq.Header.Set("X-Nylas-Signature", signWebhookBody("webhook-secret", body))
 	duplicateRec := httptest.NewRecorder()
@@ -2676,7 +2638,6 @@ func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 	if duplicateRec.Code != http.StatusOK {
 		t.Fatalf("duplicate webhook status = %d body=%s", duplicateRec.Code, duplicateRec.Body.String())
 	}
-	client.assertNoMessage(t)
 
 	openedBody := `{"type":"message.opened","time":"2026-06-09T21:14:00Z","data":{"object":{"message_id":"message-1","thread_id":"thread-1","grant_id":"grant-1","count":2}}}`
 	openedReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(openedBody))
@@ -2699,12 +2660,6 @@ func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 	if got := statuses[0].LastSignalTimestamp.Format(time.RFC3339); got != "2026-06-09T21:14:00Z" {
 		t.Fatalf("last signal timestamp = %s", got)
 	}
-	openedMessage := client.readJSON(t)
-	openedEvent := openedMessage["event"].(map[string]any)
-	if openedEvent["user_id"] != user.UserID || openedEvent["type"] != "mailbox_changed" || openedEvent["trigger"] != "message.opened" || openedEvent["message_id"] != "message-1" {
-		t.Fatalf("opened communications event = %+v", openedEvent)
-	}
-
 	badReq := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
 	badReq.Header.Set("X-Nylas-Signature", "bad")
 	badRec := httptest.NewRecorder()
@@ -2714,14 +2669,11 @@ func TestNylasWebhookVerifiesSignatureAndPublishesMailboxEvent(t *testing.T) {
 	}
 }
 
-func TestNylasWebhookStoresSharedReadStatusAndPublishesToSharedInboxAudience(t *testing.T) {
+func TestNylasWebhookStoresSharedReadStatusForSharedInbox(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "80808080-8080-4080-8080-808080808001"
-	tokenVisible := "communications-shared-webhook-visible-token"
-	tokenBlocked := "communications-shared-webhook-blocked-token"
 	repo.EnsureCompany(companyID, "Communications Shared Webhook")
 	visible := mustRealtimeAuthUser(t, repo, companyID, "communications-shared-webhook-visible", domain.RoleCompanyUser)
-	blocked := mustRealtimeAuthUser(t, repo, companyID, "communications-shared-webhook-blocked", domain.RoleCompanyUser)
 	companyConnection, err := repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
 		CompanyID:         companyID,
 		Provider:          "google",
@@ -2753,35 +2705,9 @@ func TestNylasWebhookStoresSharedReadStatusAndPublishesToSharedInboxAudience(t *
 	}
 	config := testNylasConfig()
 	config.WebhookSecret = "webhook-secret"
-	server := NewServerWithOptions(repo, ServerOptions{
-		NylasConfig: config,
-		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
-			tokenVisible: {Subject: visible.CognitoSubject, Email: visible.Email, Name: visible.DisplayName},
-			tokenBlocked: {Subject: blocked.CognitoSubject, Email: blocked.Email, Name: blocked.DisplayName},
-		}},
-	})
+	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: config})
 	defer server.Close()
 	handler := server.Routes()
-
-	visibleClient := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, tokenVisible)
-	defer visibleClient.close()
-	visibleClient.readJSON(t)
-	visibleScope := realtimeCommunicationsScope(visible.UserID)
-	visibleClient.writeJSON(t, map[string]any{"type": "subscribe", "scope": visibleScope})
-	visibleAccepted := visibleClient.readJSON(t)
-	if visibleAccepted["type"] != realtimeMessageSubscriptionAccepted || visibleAccepted["scope"] != visibleScope {
-		t.Fatalf("visible communications subscription accepted = %+v, want %s", visibleAccepted, visibleScope)
-	}
-
-	blockedClient := openRealtimeWebSocketForTest(t, handler, "/v1/realtime/ws?company_id="+companyID, tokenBlocked)
-	defer blockedClient.close()
-	blockedClient.readJSON(t)
-	blockedScope := realtimeCommunicationsScope(blocked.UserID)
-	blockedClient.writeJSON(t, map[string]any{"type": "subscribe", "scope": blockedScope})
-	blockedAccepted := blockedClient.readJSON(t)
-	if blockedAccepted["type"] != realtimeMessageSubscriptionAccepted || blockedAccepted["scope"] != blockedScope {
-		t.Fatalf("blocked communications subscription accepted = %+v, want %s", blockedAccepted, blockedScope)
-	}
 
 	body := `{"type":"message.opened","data":{"object":{"message_id":"shared-message-1","thread_id":"shared-thread-1","grant_id":"shared-grant-1","message_data":{"count":3,"timestamp":"2026-06-10T12:30:00Z"}}}}`
 	req := httptest.NewRequest(http.MethodPost, "/nylas/webhook", strings.NewReader(body))
@@ -2818,15 +2744,6 @@ func TestNylasWebhookStoresSharedReadStatusAndPublishesToSharedInboxAudience(t *
 		t.Fatalf("personal read statuses = %+v, want shared webhook not stored in viewer personal scope", personalStatuses)
 	}
 
-	message := visibleClient.readJSON(t)
-	if message["type"] != realtimeMessageCommunicationsEvent || message["company_id"] != companyID || message["scope"] != visibleScope {
-		t.Fatalf("shared communications websocket message = %+v, want visible user communications event", message)
-	}
-	event := message["event"].(map[string]any)
-	if event["user_id"] != visible.UserID || event["type"] != "mailbox_changed" || event["trigger"] != "message.opened" || event["message_id"] != "shared-message-1" || event["shared_inbox_id"] != folder.FolderID {
-		t.Fatalf("shared opened communications event = %+v", event)
-	}
-	blockedClient.assertNoMessage(t)
 }
 
 func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {

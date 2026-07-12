@@ -103,17 +103,15 @@ func normalizeTimingLabel(label string) string {
 		return "delete.folder_access_cleanup"
 	case "repo.DeleteCompanyExplorerTargets.folder_root_delete":
 		return "delete.folder_root_delete"
-	case "repo.DeleteCompanyExplorerTargets.projection_event_append":
-		return "delete.projection_event_append"
 	case "repo.DeleteCompanyExplorerTargets.commit":
 		return "delete.commit"
-	case "repo.postgresDeleteNodeWithProjectionDeltasTx.total":
+	case "repo.postgresDeleteNodeWithDependentProjectionsTx.total":
 		return "delete.node.total"
-	case "repo.postgresDeleteNodeWithProjectionDeltasTx.projection_dependencies":
+	case "repo.postgresDeleteNodeWithDependentProjectionsTx.projection_dependencies":
 		return "delete.node.projection_dependencies"
-	case "repo.postgresDeleteNodeWithProjectionDeltasTx.project_relationship_delete":
+	case "repo.postgresDeleteNodeWithDependentProjectionsTx.project_relationship_delete":
 		return "delete.node.project_relationship_delete"
-	case "repo.postgresDeleteNodeWithProjectionDeltasTx.node_rows_delete":
+	case "repo.postgresDeleteNodeWithDependentProjectionsTx.node_rows_delete":
 		return "delete.node.rows_total"
 	case "repo.postgresDeleteNodeRowsTx.total":
 		return "delete.node.rows.total"
@@ -240,8 +238,6 @@ func normalizeTimingLabel(label string) string {
 		"repo.MoveLogicGateNodeAssignment.domain_event_append",
 		"repo.CreateGVICMatrixNode.domain_event_append":
 		return "events.append.total"
-	case "repo.assignNodeToLogicGateStatusTx.projection_event_append":
-		return "events.projection_delta_append"
 	case "repo.appendDomainEventTx.normalize_payload":
 		return "events.payload_build"
 	case "repo.appendDomainEventTx.advisory_lock":

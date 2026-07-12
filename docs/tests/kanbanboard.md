@@ -23,7 +23,7 @@ KB6 - Generic Kanban board card APIs remain node-card APIs. Logic Gate work stat
 KB7 - Deleting a node from Kanban uses node soft-delete semantics: the actor must have edit access to the node, the node moves to that actor's Recycle Bin, and Kanban card placements plus Logic Gate Kanban projection rows are removed.
 KB8 - Deleting a Logic Gate removes the Logic Gate Kanban board/work placements owned by that Logic Gate.
 KB9 - Logic Gate Kanban board reads must be permission-filtered by the owning Logic Gate.
-KB10 - Users without view access to the owning Logic Gate must not receive card rows, projection deltas, saved board state, or card metadata for that Logic Gate board.
+KB10 - Users without view access to the owning Logic Gate must not receive card rows, `kanban.changed` hints, saved board state, or card metadata for that Logic Gate board.
 
 ### Columns, Status, And Card State
 
@@ -104,9 +104,9 @@ KB72 - A requested card can still show `from: {person} {date/time}` in the foote
 KB73 - Search filters cards before subgrouping is built.
 KB74 - Account filters cards before subgrouping is built.
 KB75 - Subgroup headers should reflect only the cards currently visible after search and account filters.
-KB76 - Kanban projection live deltas must include placed-by metadata when it changes.
-KB77 - A projection delta that changes card placement, title, priority, due date, issue state, accounts, requested-by, placed-by, or creation timestamp must update the rendered card without requiring a full page refresh.
-KB78 - Sequence gaps, invalid deltas, or permission uncertainty may trigger a targeted Kanban board refresh.
+KB76 - After a committed card-visible change, the backend publishes one compact `kanban.changed` hint only to the affected mounted `board:{board_id}` scope; card metadata remains in the canonical board response.
+KB77 - A `kanban.changed` hint for card placement, title, priority, due date, issue state, accounts, requested-by, placed-by, creation timestamp, or column structure coalesces one canonical mounted-board refresh without a full page refresh.
+KB78 - Board open/reconnect and a `kanban.changed` hint use one targeted canonical board refresh; there is no projection sequence or replay log.
 
 ### Date Added, Manual Order, And Grouped Drops
 
@@ -129,7 +129,7 @@ KB94 - Email-card transfer does not restore the email to My Triage and does not 
 KB95 - Multi-card drags, non-email-created source cards, same-card drops, and same-node drops must not run email-card transfer semantics.
 KB96 - Direct email-created Kanban cards can originate from My Triage or from a mailbox-capable Shared Triage inbox, including when the email is dropped onto a Company Explorer Logic Gate row; the created card belongs to the Logic Gate/Kanban work path, not Company Explorer placement storage, and the visible email-origin marker and transfer behavior are the same after creation.
 KB97 - Email-card transfer uses the stored direct email-node provenance and board/card IDs; it must not require the actor to have a connected personal mailbox at transfer time.
-KB98 - When a local email-to-Logic-Gate conversion has already updated the board from the POST response, matching immediate communications/workspace events must not force repeated Home workspace panel reloads, and the source mail list must keep the source email row visible with patched Logic Gate icon state instead of being refreshed, row-removed, refilled from stale prefetched pages, or message-length-prefetched by broad communications cache invalidation.
+KB98 - When a local email-to-Logic-Gate conversion has updated the board from the POST response, local command-result reconciliation updates Home once; no communications/workspace WebSocket event or broad cache invalidation is emitted, and the source mail row remains visible with patched Logic Gate icon state.
 KB99 - The initial email-to-Logic-Gate conversion sets the source email to unstarred and returns `unstarred_message_ids` for local Home reconciliation; later direct email-card transfer between Kanban cards uses stored email-node provenance only and must not perform another mailbox star/unstar mutation.
 KB100 - Node editor popups opened from Kanban expose a fullscreen toggle in the popup header; fullscreen uses a browser-viewport-fixed overlay that escapes normal Kanban board-relative bounds while preserving a way to restore the previous board-relative popup size and position.
 KB101 - Dragging a triage/mailbox email directly onto a Logic Gate Kanban column converts it into a direct email-created node card on that Logic Gate board and in that target column.
@@ -146,9 +146,9 @@ KB109 - Forced Logic Gate props and live Logic Gate selection must converge on o
 KB110 - Concurrent loads for the same company and Logic Gate board share one in-flight promise, while changing to a different Logic Gate aborts the obsolete request and prevents its late response from rendering.
 KB111 - A complete cached board snapshot renders immediately. A stale cached snapshot remains visible while one targeted revalidation runs; invalidation must not discard the snapshot or create a second in-flight request.
 KB112 - Selection generations guard A-to-B and A-to-B-to-A navigation so an older response for the same board key cannot overwrite the latest selection.
-KB113 - Realtime Kanban deltas reconcile the rendered snapshot and cached snapshot together, including the projection sequence, without a full `/work` reload for a valid consecutive delta.
-KB114 - A sequence gap, invalid delta, or permission uncertainty causes one targeted board revalidation; exact card/assignment deltas must not also trigger duplicate broad workspace reloads.
-KB115 - Projection deltas preserve every minimal card field that can affect rendering, including `created_from_email`, requested-by, placed-by, issue state, due date, priority, accounts, title, position, and timestamps.
+KB113 - Mounted Kanban consumes only `kanban.changed` on `board:{board_id}` and coalesces one canonical `/work` reload; no projection delta or sequence is applied in the browser.
+KB114 - Board open, reconnect, or a compact change hint causes at most one targeted board revalidation and never a broad workspace reload.
+KB115 - The canonical `/work` response preserves every minimal card field that can affect rendering, including `created_from_email`, requested-by, placed-by, issue state, due date, priority, accounts, title, position, and timestamps.
 KB116 - Logic Gate work serialization contains only `logic_gate`, actor `permissions`, `board`, `columns`, minimal `cards`, and `projection_sequence`.
 KB117 - Logic Gate work serialization does not contain top-level `company_id` or `logic_gate_id`, `statuses`, `assignments`, `nodes`, `cards_limit`, or a full GVIC collection.
 KB118 - Each minimal card row contains its card, column, node, title, request/placement, issue, position, due-date, priority, direct-email-origin, account, creation, and projection-update fields only as required; the frontend derives repeated board/company/Logic Gate IDs locally.
@@ -410,7 +410,7 @@ Expected:
 - The target node's attached-email projection stores metadata and Mango attachment references only.
 - The transferred projection retains the source `account_email` and, for Shared Triage, `shared_inbox_id`; later thread, attachment, reply, draft, and calendar operations remain on that originating grant.
 - The initial conversion sets the original source email to unstarred and reconciles Home from `unstarred_message_ids`; the later card-to-card transfer does not call the mailbox provider to star or unstar the email.
-- Matching workspace events from the original local conversion do not repeatedly reload the Home workspace panel or source mail list, do not remove the source email row, and do not refill the source list from stale prefetched pages, after the board has already been updated from the conversion response.
+- Local conversion reconciliation does not repeatedly reload the Home workspace panel or source mail list, remove the source email row, or refill the source list from stale prefetched pages after the board was updated from the response.
 
 ### Scenario KB-S8: Kanban Node Popup Fullscreen
 
@@ -458,7 +458,7 @@ Expected:
 - If the drop target is a supported priority group, the created node/card uses that priority; otherwise the backend default priority is used.
 - The source Home mail row is reconciled through the local conversion event, including Logic Gate placement and `unstarred_message_ids`.
 - The created attached-email projection records `account_email` and, for Shared Triage, `shared_inbox_id` so later node email actions retain the source mailbox scope.
-- Matching workspace or communications events do not force a broad Home reload after the board has already been updated from the conversion response.
+- No workspace or communications WebSocket event is emitted, and local command-result reconciliation does not force a broad Home reload after the response updated the board.
 
 ### Scenario KB-S10: Cache-First Single-Flight Arena Load And Realtime Reconciliation
 
@@ -481,13 +481,13 @@ Business logic covered:
 Given:
 - Logic Gate A has a complete cached board snapshot and the user opens it through both the forced Arena prop and the matching live selection event.
 - The user quickly selects Logic Gate B and may then return to A.
-- Consecutive card projection deltas and a later sequence-gap delta arrive.
+- A compact `kanban.changed` hint arrives and the socket later reconnects.
 
 Expected:
 - A renders from cache immediately and starts at most one same-key revalidation.
 - Forced and live paths do not create a second request or duplicate snapshot application.
 - Selecting B aborts A's obsolete request; an old A response cannot overwrite B or a newer A generation.
-- Consecutive deltas patch rendered and cached minimal cards, including `created_from_email`, and advance the cached sequence.
-- The sequence gap starts one targeted revalidation.
+- The hint and reconnect each coalesce through the guarded loader; the canonical response refreshes rendered and cached minimal cards, including `created_from_email`.
+- No projection replay or sequence-gap path exists.
 - The work payload contains the required minimal collections and none of the redundant collections.
 - Authorization is checked before any `304`, and canonical status rank preserves business ordering.

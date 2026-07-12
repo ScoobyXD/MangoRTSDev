@@ -117,7 +117,7 @@ The permanent response does not include top-level `company_id`, top-level `logic
 | Card projection fields, including account snapshot | `kanban_board_projection` | bump old and/or new gate |
 | Node title/due date/priority source change | `nodes` for an assigned node | bump assigned gate; projection write bumps again when visible data changes |
 | Direct email-created marker | `communications_email_nodes` | bump old and/or new gate |
-| Realtime reconciliation cursor | `company_projection_sequences` for `kanban_board` scope `board:logic-gate:{id}` | bump parsed gate |
+| Mounted-board change hint | Direct post-commit `kanban.changed` on `board:{board_id}` | canonical `/work` reload reads the bumped work version; no projection cursor |
 | Synthesized board/columns/status constants | application release | change response-contract salt |
 
 Deletes of a Logic Gate cascade its version row. The response becomes not found, so a deleted gate does not retain an orphaned cache-version record.

@@ -397,11 +397,6 @@ func (r *PostgresRepo) UpsertProjectManagementTimelineItem(input ProjectManageme
 		return ProjectManagementTimelineMutationResult{}, err
 	}
 	defer tx.Rollback()
-
-	before, err := projectManagementTimelineProjectionRowsForEntityTx(ctx, tx, input.CompanyID, input.UserID, input.EntityType, input.EntityID)
-	if err != nil {
-		return ProjectManagementTimelineMutationResult{}, err
-	}
 	itemID := cleanUUIDText(input.ItemID)
 	if itemID == "" {
 		itemID = newUUIDv7String()
@@ -443,10 +438,6 @@ returning item_id::text`, input.CompanyID, itemID, input.UserID, input.EntityID,
 	if err != nil {
 		return ProjectManagementTimelineMutationResult{}, err
 	}
-	deltas := diffProjectManagementProjectionRows(before, after)
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)); err != nil {
-		return ProjectManagementTimelineMutationResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return ProjectManagementTimelineMutationResult{}, err
 	}
@@ -458,7 +449,7 @@ returning item_id::text`, input.CompanyID, itemID, input.UserID, input.EntityID,
 			break
 		}
 	}
-	return ProjectManagementTimelineMutationResult{Item: item, UserID: input.UserID, ProjectionDeltas: deltas}, nil
+	return ProjectManagementTimelineMutationResult{Item: item, UserID: input.UserID}, nil
 }
 
 func (r *PostgresRepo) UpdateProjectManagementTimelineItem(input ProjectManagementTimelineItemUpdateInput) (ProjectManagementTimelineMutationResult, error) {
@@ -497,10 +488,6 @@ where company_id=$1::uuid
 	if err != nil {
 		return ProjectManagementTimelineMutationResult{}, err
 	}
-	deltas := diffProjectManagementProjectionRows(before, after)
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)); err != nil {
-		return ProjectManagementTimelineMutationResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return ProjectManagementTimelineMutationResult{}, err
 	}
@@ -509,7 +496,7 @@ where company_id=$1::uuid
 		copied := after[0]
 		item = &copied
 	}
-	return ProjectManagementTimelineMutationResult{Item: item, UserID: before[0].UserID, ProjectionDeltas: deltas}, nil
+	return ProjectManagementTimelineMutationResult{Item: item, UserID: before[0].UserID}, nil
 }
 
 func (r *PostgresRepo) DeleteProjectManagementTimelineItem(input ProjectManagementTimelineItemDeleteInput) (ProjectManagementTimelineMutationResult, error) {
@@ -545,15 +532,10 @@ where company_id=$1::uuid
 	if affected == 0 {
 		return ProjectManagementTimelineMutationResult{}, ErrNotFound
 	}
-	after := []ProjectManagementTimelineProjectionRow{}
-	deltas := diffProjectManagementProjectionRows(before, after)
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)); err != nil {
-		return ProjectManagementTimelineMutationResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return ProjectManagementTimelineMutationResult{}, err
 	}
-	return ProjectManagementTimelineMutationResult{DeletedItemID: input.ItemID, UserID: before[0].UserID, ProjectionDeltas: deltas}, nil
+	return ProjectManagementTimelineMutationResult{DeletedItemID: input.ItemID, UserID: before[0].UserID}, nil
 }
 
 func projectManagementTimelineItemOwnerTx(ctx context.Context, db projectManagementDB, companyID, itemID string) (string, error) {

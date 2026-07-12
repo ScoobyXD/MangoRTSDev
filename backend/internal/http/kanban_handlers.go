@@ -341,7 +341,6 @@ func (s *Server) handleKanbanCards(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.publishCommittedWorkspaceEvents(result.Events)
-	s.publishProjectionDeltas(result.ProjectionDeltas)
 	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusCreated, result.Card)
 }
@@ -418,7 +417,6 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.publishCommittedWorkspaceEvents(result.Events)
-		s.publishProjectionDeltas(result.ProjectionDeltas)
 		s.projectCommittedNotificationEvents(result.Events)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
@@ -441,7 +439,6 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.publishCommittedWorkspaceEvents(result.Events)
-		s.publishProjectionDeltas(result.ProjectionDeltas)
 		s.projectCommittedNotificationEvents(result.Events)
 		card = result.Card
 	}
@@ -458,7 +455,6 @@ func (s *Server) handleKanbanCardByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.publishCommittedWorkspaceEvents(issueResult.Events)
-		s.publishProjectionDeltas(issueResult.ProjectionDeltas)
 		s.projectCommittedNotificationEvents(issueResult.Events)
 		card = issueResult.Card
 		result = issueResult

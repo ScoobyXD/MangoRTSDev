@@ -282,7 +282,7 @@ returning company_id::text, group_id::text, parent_group_id::text, name, positio
 		if err != nil {
 			return domain.CompanyUserGroup{}, err
 		}
-		if _, err := syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, affectedKeys); err != nil {
+		if err := syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, affectedKeys); err != nil {
 			return domain.CompanyUserGroup{}, err
 		}
 	}
@@ -385,7 +385,7 @@ where company_id=$1::uuid and group_id=$2::uuid`, companyID, groupID)
 	if err := syncCompanyUserGroupClosureTx(ctx, tx, companyID); err != nil {
 		return err
 	}
-	if _, err := syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, affectedKeys); err != nil {
+	if err := syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, affectedKeys); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -638,33 +638,6 @@ func (r *PostgresRepo) SetEntityPermissions(input EntityPermissionUpdateInput) (
 				return nil, err
 			}
 			changedTargets = append(changedTargets, descendantTargets...)
-		}
-		projectionDeltas := []ProjectionDelta{}
-		permissionEvents := []EventRowInput{}
-		seenPermissionEvents := map[string]bool{}
-		for _, target := range changedTargets {
-			targetDeltas, err := applyResourcePermissionProjectionDeltaDependenciesTx(ctx, tx, ResourcePermissionProjectionDeltaDependencyInput{
-				CompanyID:    companyID,
-				ResourceType: target.ResourceType,
-				ResourceID:   target.ResourceID,
-			})
-			if err != nil {
-				return nil, err
-			}
-			projectionDeltas = append(projectionDeltas, targetDeltas...)
-			eventKey := target.ResourceType + ":" + target.ResourceID
-			if seenPermissionEvents[eventKey] {
-				continue
-			}
-			seenPermissionEvents[eventKey] = true
-			if eventInput, ok := PermissionChangedEventInput(companyID, target.ResourceType, target.ResourceID, input.ActorUserID); ok {
-				permissionEvents = append(permissionEvents, eventInput)
-			}
-		}
-		eventInputs := ProjectRelationshipProjectionDeltaEventInputs(companyID, input.ActorUserID, "", projectionDeltas)
-		eventInputs = append(eventInputs, permissionEvents...)
-		if _, err := r.appendEventRowsTx(ctx, tx, eventInputs); err != nil {
-			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
 			return nil, err

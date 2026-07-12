@@ -107,11 +107,6 @@ func (r *PostgresRepo) UpsertNodeProjectionWithActor(input NodeInformationInput)
 			return domain.NodeProjection{}, err
 		}
 	}
-	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, input.ActorUserID, "", EditorProjectionRowFromNode(projection)); ok {
-		if _, err := r.appendEventRowsTx(ctx, tx, []EventRowInput{eventInput}); err != nil {
-			return domain.NodeProjection{}, err
-		}
-	}
 	if err := tx.Commit(); err != nil {
 		return domain.NodeProjection{}, err
 	}
@@ -176,11 +171,6 @@ func (r *PostgresRepo) UpsertLogicGateProjection(input LogicGateProjectionInput)
 		&projection.UpdatedTimestamp,
 	); err != nil {
 		return domain.LogicGateProjection{}, err
-	}
-	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, input.ActorUserID, "", EditorProjectionRowFromLogicGate(projection)); ok {
-		if _, err := r.appendEventRowsTx(ctx, tx, []EventRowInput{eventInput}); err != nil {
-			return domain.LogicGateProjection{}, err
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.LogicGateProjection{}, err
@@ -412,7 +402,6 @@ func (r *PostgresRepo) restoreEditorSaveVersion(input EditorSaveVersionRestoreIn
 	companyID := cleanUUIDText(input.CompanyID)
 	resourceID := cleanUUIDText(input.ResourceID)
 	saveID := cleanUUIDText(input.SaveID)
-	actorUserID := cleanUUIDText(input.ActorUserID)
 	if companyID == "" || resourceID == "" || saveID == "" {
 		return domain.EditorSaveVersion{}, ErrInvalid
 	}
@@ -425,32 +414,6 @@ func (r *PostgresRepo) restoreEditorSaveVersion(input EditorSaveVersionRestoreIn
 		return domain.EditorSaveVersion{}, ErrNotFound
 	}
 
-	current, err := selectCurrentEditorTextProjectionsTx(ctx, tx, companyID, resourceType, resourceID)
-	if err != nil {
-		return domain.EditorSaveVersion{}, err
-	}
-	keep := map[string]bool{}
-	for _, item := range version.Items {
-		sourceID := cleanUUIDText(item.SourceInformationID)
-		if sourceID == "" {
-			sourceID = cleanUUIDText(item.InformationID)
-		}
-		if sourceID != "" {
-			keep[sourceID] = true
-		}
-	}
-	eventRows := make([]EventRowInput, 0, len(current)+len(version.Items))
-	for _, item := range current {
-		if !keep[cleanUUIDText(item.SourceInformationID)] {
-			if resourceType == EntityTypeNode {
-				if eventInput, ok := EditorProjectionDeleteEventInput(companyID, actorUserID, "", EntityTypeNode, resourceID, item.SourceInformationID); ok {
-					eventRows = append(eventRows, eventInput)
-				}
-			} else if eventInput, ok := EditorProjectionDeleteEventInput(companyID, actorUserID, "", EntityTypeLogicGate, resourceID, item.SourceInformationID); ok {
-				eventRows = append(eventRows, eventInput)
-			}
-		}
-	}
 	if resourceType == EntityTypeNode {
 		if _, err := tx.ExecContext(ctx,
 			`delete from node_projection_table
@@ -488,9 +451,6 @@ func (r *PostgresRepo) restoreEditorSaveVersion(input EditorSaveVersionRestoreIn
 			).Scan(&projection.CompanyID, &projection.NodeID, &projection.InformationID, &projection.Type, &projection.Information, &projection.CreatedTimestamp, &projection.UpdatedTimestamp); err != nil {
 				return domain.EditorSaveVersion{}, err
 			}
-			if eventInput, ok := EditorProjectionUpsertEventInput(companyID, actorUserID, "", EditorProjectionRowFromNode(projection)); ok {
-				eventRows = append(eventRows, eventInput)
-			}
 		} else {
 			var projection domain.LogicGateProjection
 			if err := tx.QueryRowContext(ctx,
@@ -502,14 +462,6 @@ func (r *PostgresRepo) restoreEditorSaveVersion(input EditorSaveVersionRestoreIn
 			).Scan(&projection.CompanyID, &projection.LogicGateID, &projection.InformationID, &projection.Type, &projection.Information, &projection.CreatedTimestamp, &projection.UpdatedTimestamp); err != nil {
 				return domain.EditorSaveVersion{}, err
 			}
-			if eventInput, ok := EditorProjectionUpsertEventInput(companyID, actorUserID, "", EditorProjectionRowFromLogicGate(projection)); ok {
-				eventRows = append(eventRows, eventInput)
-			}
-		}
-	}
-	if len(eventRows) > 0 {
-		if _, err := r.appendEventRowsTx(ctx, tx, eventRows); err != nil {
-			return domain.EditorSaveVersion{}, err
 		}
 	}
 	if err := tx.Commit(); err != nil {

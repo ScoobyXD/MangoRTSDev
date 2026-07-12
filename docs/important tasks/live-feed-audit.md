@@ -2,7 +2,43 @@
 
 Last updated: 2026-07-12
 
-Status: authoritative implementation charter. The audit is complete enough to execute. The next Codex instance is authorized to implement the entire deletion and retained-foundation scope in one coherent task without reconfirming the product decisions below.
+Status: implemented and complete on 2026-07-12. The body below is retained as the pre-implementation audit, deletion rationale, and acceptance history; it no longer describes the current runtime. The current architecture contract is `docs/v4-architecture-doc.md`.
+
+## Implementation Completion Record
+
+The one-shot simplification is implemented on `codex/019f5860-1682-7782-92ae-081660f3b51d-implement-complete0000544`.
+
+Final product realtime scopes:
+
+- `notifications:user:{user_id}` is owned once at app lifetime and drives one notification summary plus bounded Updates reconciliation only while Updates is open.
+- `chat:node:{node_id}` publishes compact durable Node-chat create/delete hints while that Node chat is mounted. Project chat is non-live.
+- `board:{board_id}` publishes compact `kanban.changed` hints for committed card/column-visible changes while that Logic Gate board is mounted; clients coalesce a canonical `/work` reload.
+
+Deleted systems:
+
+- browser workspace/Explorer/graph/GVIC/My Work/Project Management/communications/permission/generic-editor scopes, replay, effective-user expansion, PostgreSQL workspace listener/notifications, broad authorization, and global freshness rebroadcasts;
+- transient whole-document collaboration endpoint/client/presence UI and generic editor projection delivery;
+- communications/mail WebSocket publication and subscriptions;
+- notification checkpoint initialization, company scan, catch-up, and `ReplayDomainEvents` recovery;
+- `event_rows`, every producer/type/repository implementation, event worker, lease/retry/affected-scope/sequence machinery, projection delta hubs/clients, and obsolete tests;
+- `company_projection_sequences`, dead `domain_events.published_timestamp`/pending index, and notification checkpoint storage.
+
+Retained foundations:
+
+- the shared frontend socket and backend ticket/frame/registry/subscribe/unsubscribe/ping/pong/reconnect/error core;
+- immediate notification projection and durable notification rows;
+- canonical HTTP mutation/read APIs, projection/read tables, `workspace_read_versions`, workspace-derived processing, and independently required `domain_events` consumers;
+- direct process-local publisher boundary for the three explicit scopes.
+
+Repository schema change: `backend/db/migrations/20260712_realtime_simplification.sql` drops `event_rows`, `notification_domain_event_projection_checkpoints`, `company_projection_sequences`, `idx_domain_events_pending`, and `domain_events.published_timestamp`, plus the obsolete projection-sequence trigger function. Canonical `backend/db/schema.sql` no longer creates them. No dev/prod database or cloud resource was mutated by this task.
+
+Verification recorded at completion:
+
+- focused frontend build and full frontend node suite passed;
+- focused backend realtime, store, notification, and schema/source-guard tests passed;
+- `node scripts/run_all_tests.mjs` passed before worker commit and again through the repository merge helper on local `main`.
+
+Genuine remaining limitations are deliberate: realtime delivery is process-local until a future broker is needed, and exact multi-user document coediting remains a separate future Huddle/CRDT/OT project. Non-live cross-user surfaces may remain stale until navigation, open, reload, or explicit refresh.
 
 Original audit branch: codex/live-feed-audit
 

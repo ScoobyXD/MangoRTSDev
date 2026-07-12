@@ -886,7 +886,6 @@ type LogicGateWorkView struct {
 	Board              KanbanBoard          `json:"board"`
 	Columns            []KanbanColumn       `json:"columns"`
 	Cards              []LogicGateWorkCard  `json:"cards"`
-	ProjectionSequence int64                `json:"projection_sequence"`
 }
 
 type CompanyExplorerFolder struct {
@@ -1084,7 +1083,6 @@ type DomainEvent struct {
 	ActorUserID        *string        `json:"actor_user_id,omitempty"`
 	IdempotencyKey     string         `json:"idempotency_key,omitempty"`
 	Payload            map[string]any `json:"payload,omitempty"`
-	PublishedTimestamp *time.Time     `json:"published_timestamp,omitempty"`
 	CreatedTimestamp   time.Time      `json:"created_timestamp"`
 }
 

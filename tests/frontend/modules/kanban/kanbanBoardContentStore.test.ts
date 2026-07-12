@@ -70,7 +70,6 @@ test("Kanban board content store loads Logic Gate board contents from v2 work re
       board,
       columns,
       cards,
-      projection_sequence: 7,
     });
   }) as typeof fetch;
 
@@ -85,7 +84,6 @@ test("Kanban board content store loads Logic Gate board contents from v2 work re
     assert.equal(result.cards[0]?.created_from_email, true);
     assert.equal(result.logicGate?.request_owner_user_id, "user-1");
     assert.equal(result.permissions?.can_edit, true);
-    assert.equal(result.projectionSequence, 7);
     assert.equal(calls.length, 1);
     assert.match(calls[0] ?? "", /\/v2\/logic-gates\/gate-1\/work\?company_id=company-1$/);
     assert.equal(calls.some((url) => url.includes("/v1/kanban/cards")), false);
@@ -290,7 +288,7 @@ test("guarded loader cancels obsolete generations and applies only the final A i
   assert.deepEqual(applied, ["final-A"]);
 });
 
-test("realtime reconciliation updates cached cards and projection sequence atomically", () => {
+test("local reconciliation updates cached cards atomically", () => {
   const apiBase = "https://api.example.test/realtime-cache";
   const companyID = "company-1";
   const boardID = logicGateKanbanBoardID("gate-1");
@@ -300,18 +298,16 @@ test("realtime reconciliation updates cached cards and projection sequence atomi
   reconcileKanbanBoardContentsCache(apiBase, companyID, boardID, (contents) => ({
     ...contents,
     cards: [{ ...contents.cards[0]!, card_id: "new-card", created_from_email: true }],
-    projectionSequence: 5,
   }));
   const reconciled = peekKanbanBoardContentsCache(apiBase, companyID, boardID);
   assert.equal(reconciled?.stale, false);
   assert.equal(reconciled?.contents.cards[0]?.card_id, "new-card");
   assert.equal(reconciled?.contents.cards[0]?.created_from_email, true);
-  assert.equal(reconciled?.contents.projectionSequence, 5);
 
   clearKanbanBoardContentsCache(apiBase, companyID, boardID);
 });
 
-function boardContents(companyID: string, logicGateID: string, cardID: string, projectionSequence: number): KanbanBoardContents {
+function boardContents(companyID: string, logicGateID: string, cardID: string, _legacySequence: number): KanbanBoardContents {
   const boardID = logicGateKanbanBoardID(logicGateID);
   return {
     logicGate: { logic_gate_id: logicGateID, header: `Gate ${logicGateID}`, default_access: "edit", request_owner_user_id: "user-1" },
@@ -339,12 +335,11 @@ function boardContents(companyID: string, logicGateID: string, cardID: string, p
       created_timestamp: "2026-01-01T00:00:00.000Z",
       updated_timestamp: "2026-01-01T00:00:00.000Z",
     }],
-    projectionSequence,
   };
 }
 
-function workViewPayload(companyID: string, logicGateID: string, cardID: string, projectionSequence: number): Record<string, unknown> {
-  const contents = boardContents(companyID, logicGateID, cardID, projectionSequence);
+function workViewPayload(companyID: string, logicGateID: string, cardID: string, legacySequence: number): Record<string, unknown> {
+  const contents = boardContents(companyID, logicGateID, cardID, legacySequence);
   const card = contents.cards[0]!;
   return {
     logic_gate: {
@@ -364,7 +359,6 @@ function workViewPayload(companyID: string, logicGateID: string, cardID: string,
       position: card.position,
       created_timestamp: card.created_timestamp,
     }],
-    projection_sequence: projectionSequence,
   };
 }
 

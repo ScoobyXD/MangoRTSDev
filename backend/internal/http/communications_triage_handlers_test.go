@@ -41,8 +41,6 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 		NylasConfig: testNylasConfig(),
 		NylasClient: nylas,
 	})
-	stream := server.workspaceEvents.subscribe(companyID)
-	defer server.workspaceEvents.unsubscribe(companyID, stream)
 
 	body, _ := json.Marshal(map[string]any{
 		"company_id":    companyID,
@@ -85,20 +83,6 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 		t.Fatalf("response leaked hidden committed events: %s", rec.Body.String())
 	}
 
-	semantic := readWorkspaceEventForTest(t, stream)
-	if semantic.Type != store.WorkItemEmailConvertedEventType || semantic.Data["message_id"] != "http-message-1" || semantic.Data["thread_id"] != "http-thread-1" {
-		t.Fatalf("email conversion hub event = %+v", semantic)
-	}
-	if semantic.Data["actor_user_id"] != user.UserID || semantic.Data["idempotency_key"] != "http-email-convert-key" {
-		t.Fatalf("email conversion metadata = %+v", semantic.Data)
-	}
-	nodeCreated := readWorkspaceEventForTest(t, stream)
-	assignmentEvent := readWorkspaceEventForTest(t, stream)
-	cardEvent := readWorkspaceEventForTest(t, stream)
-	nodeUpdated := readWorkspaceEventForTest(t, stream)
-	if nodeCreated.Type != "node_created" || assignmentEvent.Type != store.WorkItemLogicGateAssignmentSavedEventType || cardEvent.Type != "kanban_card_upserted" || nodeUpdated.Type != "node_updated" {
-		t.Fatalf("compatibility hub events = %s / %s / %s / %s", nodeCreated.Type, assignmentEvent.Type, cardEvent.Type, nodeUpdated.Type)
-	}
 	durable, err := repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, AfterSequence: 0, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)

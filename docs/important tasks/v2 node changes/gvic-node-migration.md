@@ -186,7 +186,7 @@ If this table does not exist, add it. If the existing group model already has eq
 
 ## Write Model
 
-POST and PUT handlers write source-of-truth data and maintain projection deltas in the same transaction.
+POST and PUT handlers write source-of-truth data and maintain exact projection rows in the same transaction.
 
 They do not full rebuild projection tables during normal runtime mutations.
 
@@ -516,18 +516,9 @@ If admin behavior is needed, keep it separate from GVIC roles. Do not invent a f
 
 Company admins and dev admins can still bypass through the existing company/admin role model.
 
-## Projection Events
+## Projection Maintenance
 
-Every mutation that changes effective GVIC must emit projection deltas for the exact users/resources changed.
-
-Delta payloads should support:
-
-- effective row added
-- effective row removed
-- effective row source changed
-- resource display fields changed, if the GVIC/My Work read model includes display fields
-
-If the existing RACIO projection event model remains useful, rename it fully to GVIC and update scopes. Do not keep `racio` scope names.
+Every mutation that changes effective GVIC must update the exact affected projection rows transactionally. My Work/GVIC has no browser realtime scope, projection event row, or sequence. The initiating browser uses the source-shaped committed response; other sessions read current rows on open/navigation/manual refresh.
 
 ## Runtime Sync Functions
 
@@ -545,7 +536,7 @@ Required behavior:
 4. Diff current vs next.
 5. Delete removed rows.
 6. Insert added rows.
-7. Return projection deltas for event publication.
+7. Return the source-shaped result and any exact changed-row information still required by the initiating command; do not publish a generic browser event.
 
 Do not expose this function to HTTP as a write endpoint.
 

@@ -16,17 +16,9 @@ type Service struct {
 	Repo store.Repository
 }
 
-const DefaultDomainEventReplayLimit = 100
-
 var mentionElementPattern = regexp.MustCompile(`(?is)<[^>]*data-mango-mention\s*=\s*(?:\\?["']true\\?["']|true)[^>]*>`)
 var mentionUserIDAttributePattern = regexp.MustCompile(`(?i)data-mango-mention-user-id\s*=\s*(?:\\?["']([^"'\\]+)\\?["']|([^\s>]+))`)
 var mentionKindAttributePattern = regexp.MustCompile(`(?i)data-mango-mention-kind\s*=\s*(?:\\?["']([^"'\\]+)\\?["']|([^\s>]+))`)
-
-type DomainEventReplayResult struct {
-	ProcessedEvents      int
-	CreatedNotifications int
-	LastCheckpoint       store.NotificationDomainEventCheckpoint
-}
 
 type notificationRecipientMeta struct {
 	Surface       string
@@ -119,10 +111,6 @@ func UpdateFeedEventFromDomainEvent(event domain.DomainEvent) (UpdateFeedEventRu
 	}, true
 }
 
-func UpdateFeedAffectedScopes(item domain.Notification) []string {
-	return store.UpdatesAffectedScopes(item.CompanyID, item.RecipientUserID)
-}
-
 func observeNotificationTiming(recorder store.TimingRecorder, label string) func() {
 	if recorder == nil || strings.TrimSpace(label) == "" {
 		return func() {}
@@ -131,82 +119,6 @@ func observeNotificationTiming(recorder store.TimingRecorder, label string) func
 	return func() {
 		recorder.RecordTiming(label, time.Since(start))
 	}
-}
-
-func (s *Service) InitializeDomainEventCheckpoint(ctx context.Context, companyID string) error {
-	if ctx != nil {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-	}
-	companyID = strings.TrimSpace(companyID)
-	if companyID == "" {
-		return store.ErrInvalid
-	}
-	if _, ok, err := s.Repo.GetNotificationDomainEventCheckpoint(companyID); err != nil || ok {
-		return err
-	}
-	checkpoint, ok, err := s.Repo.LatestDomainEventForNotificationProjection(companyID)
-	if err != nil || !ok {
-		return err
-	}
-	return s.Repo.SaveNotificationDomainEventCheckpoint(checkpoint)
-}
-
-func (s *Service) ReplayDomainEvents(ctx context.Context, companyID string, limit int) (DomainEventReplayResult, []domain.Notification, error) {
-	result := DomainEventReplayResult{}
-	companyID = strings.TrimSpace(companyID)
-	if companyID == "" {
-		return result, nil, store.ErrInvalid
-	}
-	if limit <= 0 || limit > store.DomainEventListMaxLimit {
-		limit = DefaultDomainEventReplayLimit
-	}
-	checkpoint, ok, err := s.Repo.GetNotificationDomainEventCheckpoint(companyID)
-	if err != nil {
-		return result, nil, err
-	}
-	if !ok {
-		checkpoint = store.NotificationDomainEventCheckpoint{CompanyID: companyID}
-	}
-
-	events, err := s.Repo.ListDomainEventsForNotificationProjection(store.DomainEventNotificationProjectionQuery{
-		CompanyID:             companyID,
-		AfterCreatedTimestamp: checkpoint.CreatedTimestamp,
-		AfterEventID:          checkpoint.EventID,
-		Limit:                 limit,
-	})
-	if err != nil {
-		return result, nil, err
-	}
-	all := make([]domain.Notification, 0)
-	for _, event := range events {
-		if ctx != nil {
-			if err := ctx.Err(); err != nil {
-				return result, all, err
-			}
-		}
-		items, err := s.ProcessDomainEvent(ctx, event)
-		if err != nil {
-			return result, all, err
-		}
-		checkpoint = store.NotificationDomainEventCheckpoint{
-			CompanyID:        event.CompanyID,
-			CreatedTimestamp: event.CreatedTimestamp,
-			EventID:          event.EventID,
-		}
-		if err := s.Repo.SaveNotificationDomainEventCheckpoint(checkpoint); err != nil {
-			return result, all, err
-		}
-		result.ProcessedEvents++
-		result.CreatedNotifications += len(items)
-		result.LastCheckpoint = checkpoint
-		all = append(all, items...)
-	}
-	if result.LastCheckpoint.CompanyID == "" {
-		result.LastCheckpoint = checkpoint
-	}
-	return result, all, nil
 }
 
 func (s *Service) notificationCandidates(event notificationProjectionEvent, recorder store.TimingRecorder) ([]store.NotificationCreateInput, error) {

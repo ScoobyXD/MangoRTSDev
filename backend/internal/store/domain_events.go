@@ -113,9 +113,5 @@ func cloneDomainEvent(item domain.DomainEvent) domain.DomainEvent {
 		actor := *item.ActorUserID
 		item.ActorUserID = &actor
 	}
-	if item.PublishedTimestamp != nil {
-		published := *item.PublishedTimestamp
-		item.PublishedTimestamp = &published
-	}
 	return item
 }
