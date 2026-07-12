@@ -71,6 +71,7 @@
     "../../../frontend/src/pages/home/homeTypes.ts",
     "../../../frontend/src/pages/home/homeConstants.ts",
     "../../../frontend/src/app/deepLinkRoutes.ts",
+    "../../../frontend/src/app/projectRouteHistory.ts",
     "../app/deepLinkRoutes.test.ts",
     "../../../frontend/src/app/resourceLinks.ts",
     "../app/resourceLinks.test.ts",

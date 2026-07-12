@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { buildProjectRoute } from "../../app/deepLinkRoutes.js";
+import type { ProjectLogicGateReturnContext } from "../../app/projectRouteHistory.js";
 import { openAppPathInNewTab } from "../../app/resourceLinks.js";
 import { requestAppSidebarPin } from "../../app/sidebarPins.js";
 import { fetchCurrentUser, readAuthConfig } from "../../auth/cognitoAuth.js";
@@ -62,7 +63,7 @@ type ProjectManagementContentProps = {
   hideTopControls?: boolean;
   theme?: "mango" | "teal" | "light" | "dark";
   onNodeOpen?: (nodeID: string) => void;
-  onLogicGateOpen?: (logicGateID: string) => void;
+  onLogicGateOpen?: (logicGateID: string, returnContext?: ProjectLogicGateReturnContext) => void;
   onProjectOpen?: (projectID: string) => void;
   onProjectCollapseToTab?: (target: { projectID: string; label: string }) => void;
   targetProjectID?: string;
@@ -1773,7 +1774,7 @@ function TimelineChart({
   onDropEntity: (payload: ProjectTimelinePayload, startOffset: number) => void;
   onRemoveItem: (item: ProjectManagementTimelineRow) => void;
   onNodeOpen?: (nodeID: string) => void;
-  onLogicGateOpen?: (logicGateID: string) => void;
+  onLogicGateOpen?: (logicGateID: string, returnContext?: ProjectLogicGateReturnContext) => void;
   contextMenu: TimelineContextMenuState | null;
   onOpenContextMenu: (state: TimelineContextMenuState | null) => void;
   onDeleteNode: (item: ProjectManagementTimelineRow, position?: ConfirmActionMenuPosition) => void;

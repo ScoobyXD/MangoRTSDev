@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it } from "node:test";
 import {
   buildLogicGateRoute,
@@ -9,6 +11,11 @@ import {
   gvicRoleForViewID,
   gvicViewIDForRole,
 } from "../../../frontend/src/app/deepLinkRoutes.js";
+import {
+  buildProjectWorkPanelHistoryState,
+  projectWorkPanelTabFromHistoryState,
+  replaceProjectWorkPanelHistoryState,
+} from "../../../frontend/src/app/projectRouteHistory.js";
 
 describe("deepLinkRoutes", () => {
   it("round-trips canonical Logic Gate routes", () => {
@@ -48,6 +55,59 @@ describe("deepLinkRoutes", () => {
       buildProjectLogicGateNavigationPlan("/project-management", "project-1", "gate-1"),
       { replacePath: "/projects/project-1", pushPath: "/logic-gates/gate-1" },
     );
+  });
+
+  it("restores the Project work-panel tab only from the matching history entry", () => {
+    const state = buildProjectWorkPanelHistoryState({ unrelated: "preserved" }, {
+      projectID: " project-1 ",
+      workPanelTab: "relationships",
+    });
+    assert.deepEqual(state, {
+      unrelated: "preserved",
+      mangortsProjectWorkPanel: {
+        projectID: "project-1",
+        workPanelTab: "relationships",
+      },
+    });
+    assert.equal(projectWorkPanelTabFromHistoryState(state, "project-1"), "relationships");
+    assert.equal(projectWorkPanelTabFromHistoryState(state, "project-2"), "critical-path");
+    assert.equal(projectWorkPanelTabFromHistoryState({}, "project-1"), "critical-path");
+  });
+
+  it("writes the return tab onto the current Project history entry", () => {
+    let replacement: { data: unknown; url: string | URL | null | undefined } | null = null;
+    const history = {
+      state: { unrelated: "preserved" },
+      replaceState: (data: unknown, _unused: string, url?: string | URL | null) => {
+        replacement = { data, url };
+      },
+    };
+    replaceProjectWorkPanelHistoryState(history, "http://localhost/projects/project-1", {
+      projectID: "project-1",
+      workPanelTab: "relationships",
+    });
+    assert.deepEqual(replacement, {
+      data: {
+        unrelated: "preserved",
+        mangortsProjectWorkPanel: {
+          projectID: "project-1",
+          workPanelTab: "relationships",
+        },
+      },
+      url: "http://localhost/projects/project-1",
+    });
+  });
+
+  it("wires Project relationship and critical-path openers to distinct return tabs", () => {
+    const summary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
+    const appLayout = readFileSync(resolve(process.cwd(), "frontend/src/app/applayout.tsx"), "utf8");
+    assert.match(summary, /useState<ProjectWorkPanelTab>\(\(\) => \([\s\S]*projectWorkPanelTabFromHistoryState/);
+    assert.match(summary, /const selectRightPanelTab = useCallback[\s\S]*replaceProjectWorkPanelHistoryState/);
+    assert.match(summary, /onClick=\{\(\) => selectRightPanelTab\("critical-path"\)\}/);
+    assert.match(summary, /onClick=\{\(\) => selectRightPanelTab\("relationships"\)\}/);
+    assert.match(summary, /workPanelTab: "relationships"/);
+    assert.match(summary, /workPanelTab: "critical-path"/);
+    assert.match(appLayout, /if \(navigation\.replacePath\) onNavigate[\s\S]*replaceProjectWorkPanelHistoryState[\s\S]*onNavigate\(navigation\.pushPath\)/);
   });
 
   it("round-trips GVIC node routes with existing role and view IDs", () => {

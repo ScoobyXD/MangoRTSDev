@@ -4,7 +4,7 @@ Last updated: 2026-07-12
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract, EmailPickerModal attach-only boundary, and both Project node-shell adapters, including the Logic Gates / Nodes fullscreen action; `tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Logic Gates / Nodes universal grouping model, empty gates, flat rows, collapsed visible-node order, and the local node-panel opener wiring; `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the shared status order; `tests/frontend/app/deepLinkRoutes.test.ts` and `tests/frontend/hooks/keyboardShortcutRouting.test.ts` cover the Project-to-Logic-Gate return route and safe Backspace decision; shared editor/chat attachment tests cover attachment-reference serialization used by project text blocks and project chats; project-specific persistence rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract, EmailPickerModal attach-only boundary, and both Project node-shell adapters, including the Logic Gates / Nodes fullscreen action; `tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Logic Gates / Nodes universal grouping model, empty gates, flat rows, collapsed visible-node order, and the local node-panel opener wiring; `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the shared status order; `tests/frontend/app/deepLinkRoutes.test.ts` covers the Project-to-Logic-Gate return route, project-matched work-panel history marker, fresh-entry fallback, and opener wiring; `tests/frontend/hooks/keyboardShortcutRouting.test.ts` covers safe Backspace; shared editor/chat attachment tests cover attachment-reference serialization used by project text blocks and project chats; project-specific persistence rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -18,7 +18,7 @@ P7 - Project view access alone does not reveal node editor content; the selected
 P8 - Multiple node text boxes, emails, and chats remain scrollable inside the inline node window without changing critical-path row ordering.
 P9 - Node editor mutations made inside the inline node window follow the existing node editor update, attachment, chat, highlight, and intent behavior.
 P10 - Opening the selected node in the standalone node popup remains available from the inline node window.
-P11 - The project work panel opens with Critical Path selected before Logic Gates / Nodes.
+P11 - A fresh Project work-panel entry, or a history entry without a valid marker for that exact Project, opens with Critical Path selected before Logic Gates / Nodes.
 P12 - Empty critical-path resource cells use an Add node action, not a drag/drop node-or-logic-gate prompt.
 P13 - Add node opens a Company Explorer node search picker that uses Company Explorer search results and visibility rules.
 P14 - Selecting a node search result creates or reuses the project node relationship and saves that relationship onto the critical-path step.
@@ -46,7 +46,7 @@ P35 - Group headers and resource rows indent by grouping depth. Disclosure toggl
 P36 - Regrouping and collapsing are presentation-only: they do not mutate project relationships, every accessible node remains available when its branch is visible, and Shift/Ctrl/Command selection order follows the currently rendered visible node rows. A node whose Logic Gate relationship is not visible groups under No logic gate instead of exposing the hidden gate ID.
 P37 - The grouped-row view preserves the local node-panel and Logic Gate openers, node selection and context menus, critical-step/status/email-origin indicators, root project drops, and Logic Gate-targeted node/email drops.
 P38 - The Project Logic Gates / Nodes node panel exposes the shared fullscreen action. Turning fullscreen on expands the same live node editor across the browser viewport; turning it off restores that editor to the right-hand Logic Gates / Nodes region without resetting the Project grouping stack, collapse state, or selected node.
-P39 - Opening a Logic Gate from a Project records the exact canonical Project route, `/projects/{project_id}`, as the return history entry before pushing `/logic-gates/{logic_gate_id}`. Browser Back and an unmodified Backspace pressed outside editable content return to that Project route; Backspace inside an input, textarea, select, or content-editable node retains native editing behavior.
+P39 - Opening a Logic Gate from the Project detail work panel records the exact canonical Project route, `/projects/{project_id}`, and the current Project work-panel tab on that return history entry before pushing `/logic-gates/{logic_gate_id}`. Changing the toggle updates that entry, so Browser Back and an unmodified Backspace pressed outside editable content return to that exact Project with its latest Critical Path or Logic Gates / Nodes selection. The marker is accepted only for its matching Project and does not change the fresh-entry default in P11; Backspace inside an input, textarea, select, or content-editable node retains native editing behavior.
 P40 - Status grouping is shared by Updates, My Work, and Project Logic Gates / Nodes. Ascending recognized workflow order is In Progress, Review, Pending, Requested, Backlog, Done. `Verify`, `Verification`, and `Verified` normalize to Review; Request/Requests normalize to Requested; Backlogs/Back Logs/Backlogged normalize to Backlog; completed/closed/archived aliases normalize to Done. Descending reverses the nonterminal recognized groups, while Done remains the final group in both directions. Unknown nonblank statuses sort after recognized nonterminal statuses; No status has a collision-proof group identity, is trailing, and remains before Done.
 
 ## Scenarios
@@ -281,6 +281,9 @@ Given:
 
 Expected:
 - Opening the Logic Gate first canonicalizes the return entry to `/projects/{project_id}`, then pushes `/logic-gates/{logic_gate_id}`.
-- Browser Back returns to the exact Project instead of leaving the user on the Logic Gate route.
+- The canonical return entry records the exact Project and the Project work-panel tab from which the Logic Gate was opened.
+- Browser Back returns to the exact Project and restores Logic Gates / Nodes when that was the originating tab, instead of resetting to Critical Path.
+- Changing the toggle after returning updates that Project history entry, so a later history return does not restore a stale earlier selection.
+- A fresh Project entry or a marker belonging to another Project still opens on Critical Path.
 - Unmodified Backspace outside editable content performs the same history-back action.
 - Backspace inside editable content edits text and never triggers Project navigation.
