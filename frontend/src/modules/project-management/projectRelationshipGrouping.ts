@@ -3,6 +3,7 @@ import {
   type UniversalGroupValue,
   type UniversalNestedGroup,
 } from "../grouping/universalGrouping.js";
+import { getUniversalStatusGroupValue } from "../grouping/universalStatusGrouping.js";
 import type { ProjectRelationshipProjection } from "./projectManagementApi.js";
 
 export type ProjectRelationshipGroupingField =
@@ -158,13 +159,7 @@ export function getProjectRelationshipGroupValues(
 
   if (field === "status") {
     const status = relationship.status?.trim() ?? "";
-    if (!status) return [{ key: "none", label: "No status", sortValue: "", sortLast: true }];
-    const normalizedStatus = normalizeProjectRelationshipToken(status);
-    return [{
-      key: normalizedStatus,
-      label: projectRelationshipStatusLabel(status),
-      sortValue: projectRelationshipStatusSortValue(normalizedStatus),
-    }];
+    return [getUniversalStatusGroupValue(status)];
   }
 
   if (field === "date_added") {
@@ -284,22 +279,4 @@ function gateLeafDuplicatesAncestor(
   if (relationship.resource_type !== "logic_gate") return false;
   const logicGateID = projectRelationshipLogicGateID(relationship);
   return Boolean(logicGateID && ancestorLogicGateIDs.has(logicGateID));
-}
-
-function normalizeProjectRelationshipToken(value: string): string {
-  return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
-}
-
-function projectRelationshipStatusLabel(value: string): string {
-  return normalizeProjectRelationshipToken(value)
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function projectRelationshipStatusSortValue(status: string): string {
-  if (status === "pending") return "01:pending";
-  if (status === "in_progress") return "02:in_progress";
-  if (status === "review") return "03:review";
-  if (status === "done" || status === "complete" || status === "completed") return `04:${status}`;
-  return `50:${status}`;
 }

@@ -98,11 +98,11 @@ test("builds Logic Gate then status nesting with stable depths and no anchor-onl
   const model = buildProjectRelationshipGroupingModel(rows, groupings);
 
   assert.deepEqual(model.groups.map((group) => group.label), ["Alpha Gate", "Empty Gate"]);
-  assert.deepEqual(model.groups[0]?.groups.map((group) => group.label), ["Pending", "Review"]);
+  assert.deepEqual(model.groups[0]?.groups.map((group) => group.label), ["Review", "Pending"]);
   assert.deepEqual(model.groups[0]?.groups.map((group) => group.depth), [1, 1]);
   assert.deepEqual(model.groups[0]?.groups.flatMap((group) => group.rows.map((row) => row.relationship_id)), [
-    "relationship-node-node-pending",
     "relationship-node-node-review",
+    "relationship-node-node-pending",
   ]);
   assert.deepEqual(model.groups[1]?.groups, []);
   assert.deepEqual(model.groups[1]?.rows, []);
@@ -110,8 +110,8 @@ test("builds Logic Gate then status nesting with stable depths and no anchor-onl
   const expanded = new Set(collectProjectRelationshipGroupIDs(model.groups));
   const visibleRows = flattenVisibleProjectRelationshipLeafRows(model, expanded);
   assert.deepEqual(visibleRows.map((item) => [item.row.relationship_id, item.depth]), [
-    ["relationship-node-node-pending", 2],
     ["relationship-node-node-review", 2],
+    ["relationship-node-node-pending", 2],
   ]);
 });
 
@@ -217,8 +217,8 @@ test("suppresses a gate leaf only when the same gate is already a Logic Gate anc
   ]);
   const expanded = new Set(collectProjectRelationshipGroupIDs(groupedByStatus.groups));
   assert.deepEqual(flattenVisibleProjectRelationshipLeafRows(groupedByStatus, expanded).map((item) => item.row.relationship_id), [
-    "relationship-gate-gate-a",
     "relationship-node-node-a",
+    "relationship-gate-gate-a",
   ]);
 });
 
@@ -261,5 +261,13 @@ test("Project Logic Gates and Nodes wires universal rows without the old card gr
   assert.match(source, /convertTriageMessagesToProject/);
   assert.match(source, /projectRelationshipGroupingPreferenceKey\(companyID, currentUserID\)/);
   assert.match(source, /projectWorkPanelToolbarStyle/);
+  assert.match(source, /ProjectRelationshipNodePanel/);
+  assert.match(source, /surfaceID="project-relationships-node-panel"/);
+  assert.match(source, /position: fullscreen \? "fixed" : "absolute"/);
+  assert.match(source, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);
+  assert.match(source, /setSelectedRelationshipNodePanel/);
+  assert.match(source, /selectedRelationshipNodePanel\?\.projectID === projectID/);
+  assert.match(source, /current\.projectID !== projectID/);
+  assert.doesNotMatch(source, /onDoubleClick=\{\(\) => nodeID && onNodeOpen\?\.\(nodeID\)\}/);
   assert.doesNotMatch(source, /gateGroupStyle|logicGateCardHeaderStyle|repeat\(4, minmax\(170px/);
 });

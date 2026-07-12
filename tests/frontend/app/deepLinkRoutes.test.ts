@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildLogicGateRoute,
+  buildProjectLogicGateNavigationPlan,
   buildNodeRoute,
   buildGvicRoute,
   parseDeepLinkRoute,
@@ -36,6 +37,17 @@ describe("deepLinkRoutes", () => {
       kind: "node",
       nodeID: "node/42",
     });
+  });
+
+  it("preserves the exact project route before pushing a Logic Gate route", () => {
+    assert.deepEqual(
+      buildProjectLogicGateNavigationPlan("/projects/project-1", "project-1", "gate-1"),
+      { replacePath: "", pushPath: "/logic-gates/gate-1" },
+    );
+    assert.deepEqual(
+      buildProjectLogicGateNavigationPlan("/project-management", "project-1", "gate-1"),
+      { replacePath: "/projects/project-1", pushPath: "/logic-gates/gate-1" },
+    );
   });
 
   it("round-trips GVIC node routes with existing role and view IDs", () => {

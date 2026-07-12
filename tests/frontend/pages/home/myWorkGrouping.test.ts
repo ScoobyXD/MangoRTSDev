@@ -89,6 +89,26 @@ test("groups My Work rows by project, logic gate, person, and status with missin
   assert.equal(getMyWorkGroupValues(row({ id: "empty", title: "Empty" }), "status")[0].label, "Pending");
 });
 
+test("My Work status grouping follows the universal workflow order", () => {
+  const groups = buildNestedGroups([
+    row({ id: "done", title: "Done", status: "Done" }),
+    row({ id: "backlog", title: "Backlog", status: "Backlogs" }),
+    row({ id: "requested", title: "Requested", status: "Requested" }),
+    row({ id: "pending", title: "Pending", status: "Pending" }),
+    row({ id: "review", title: "Review", status: "Review" }),
+    row({ id: "progress", title: "Progress", status: "In Progress" }),
+  ], [{ field: "status", direction: "asc" }]);
+
+  assert.deepEqual(groups.map((group) => group.label), [
+    "In Progress",
+    "Review",
+    "Pending",
+    "Requested",
+    "Backlog",
+    "Done",
+  ]);
+});
+
 test("default expansion opens the first N groups at level N", () => {
   const rows = [
     row({ id: "a-1", title: "A1", accounts: [account("a", "Account A")], people: [{ userID: "u1", label: "Person 1" }], projectLabels: ["Project 1"] }),

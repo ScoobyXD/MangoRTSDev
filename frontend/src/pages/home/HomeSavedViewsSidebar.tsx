@@ -50,6 +50,7 @@ const UPDATES_GROUPING_FIELDS: ReadonlyArray<{ value: string; label: string }> =
   { value: "gvic", label: "GVIC" },
   { value: "project", label: "Project" },
   { value: "logic_gate", label: "Logic Gate" },
+  { value: "status", label: "Status" },
 ];
 const DEFAULT_UPDATE_GROUPINGS: SavedViewGrouping[] = [
   { field: "project", direction: "asc" },

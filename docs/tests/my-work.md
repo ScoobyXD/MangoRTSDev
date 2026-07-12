@@ -1,10 +1,10 @@
-Last updated: 2026-06-25
+Last updated: 2026-07-12
 
 # My Work Rules
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: core read path, projection sync, permission filtering, and realtime delta behavior have backend coverage. Rule ID mapping is partial.
+- Business Logic Covered By Automated Tests: core read path, projection sync, permission filtering, and realtime delta behavior have backend coverage. `tests/frontend/pages/home/myWorkGrouping.test.ts` and `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` cover the My Work grouping model and exact shared status order. Rule ID mapping is partial.
 
 ## Definitions
 
@@ -66,7 +66,7 @@ MW39 - Dragging a node from one My Work cell to another preserves an existing lo
 MW40 - Dragging a node without existing logic-gate context between My Work cells updates the node's own priority and GVIC assignment without attaching it to a logic gate.
 MW41 - The My Work node context menu is a compact command list with Open in new browser tab, Rename, Pin, and Delete. Delete is visually separated from the non-destructive commands.
 MW42 - A node deleted from My Work may be hidden optimistically while the delete request is pending. On delete failure the hidden row is restored; on success My Work is refreshed.
-MW43 - Updates grouping supports project and logic gate as normal grouping fields, and those fields persist through the saved-views API. Updates remains an event/mention feed and must not share My Work's active-work semantics.
+MW43 - Updates grouping supports project, logic gate, and status as normal grouping fields, and those fields persist through the saved-views API. Updates remains an event/mention feed and must not share My Work's active-work semantics.
 MW44 - My Work saved grouping views persist through the saved-views API. `logic_gate` is a valid My Work saved-view grouping field and must round-trip through save and reload.
 MW45 - My Work remembers the selected saved view per company and current user so returning to the My Work tab does not reset to the first saved view.
 MW46 - My Work saved grouping view rows render under the My Work entry in the Key Views sidebar, not in the My Work header. + Add new opens the floating grouping editor for a new saved view without navigating the main content area to My Work. Existing views expose Edit, Rename, and Delete commands, and saved-view rows reorder by drag. My Work may have zero saved grouping rows. The Me, My Team, and All scope tabs remain in the My Work header.
@@ -74,6 +74,7 @@ MW47 - Me, My Team, and All scope menus open from click and close after selectin
 MW48 - The active My Work saved-view row is visibly highlighted.
 MW49 - Right-clicking a My Work saved-view row exposes Edit, Rename, and Delete commands. Renames persist to the saved-view name and drag reorder persists through saved-view `position`.
 MW50 - Dragging a node between My Work cells updates both target priority and target GVIC role. A logic-gate-backed node must keep the same logic-gate relationship while moving, for example from priority 1 Generated to priority 3 Consulted.
+MW51 - My Work Status grouping consumes the shared universal status contract also used by Updates and Project Logic Gates / Nodes. Ascending recognized order is In Progress, Review, Pending, Requested, Backlog, Done. Verify/Verification/Verified normalize to Review, Request/Requests normalize to Requested, Backlogs/Back Logs/Backlogged normalize to Backlog, and Complete/Completed/Closed/Archived normalize to Done. Descending reverses recognized nonterminal groups while Done remains final; unknown nonblank statuses and the distinct No status group remain before Done.
 
 ## Projection Sync Events
 
@@ -145,7 +146,7 @@ Expected:
 ### Scenario MW-S3: Grouping, Open Behavior, And Creation
 
 Business logic covered:
-- MW25 through MW31, MW37 through MW50
+- MW25 through MW31, MW37 through MW51
 
 Given:
 - A user changes My Work grouping settings.
@@ -161,6 +162,8 @@ Given:
 Expected:
 - Supported My Work grouping fields are account, due date, logic gate, person, project, status, and team.
 - The default grouping is project ascending.
+- Status ascending renders In Progress, Review, Pending, Requested, Backlog, then Done; descending reverses the nonterminal recognized groups but keeps Done at the bottom.
+- Legacy Verify and Backlogged spellings join the Review and Backlog groups rather than creating duplicate status groups.
 - API-backed saved grouping views are isolated by company and user.
 - Logic Gate grouping saves and reloads through the saved-views API.
 - The selected saved view is restored when returning to My Work.
@@ -181,7 +184,7 @@ Expected:
 - A dropped node appears in the target priority and GVIC role cell after the move.
 - A dropped standalone node updates its own target priority and GVIC role and remains standalone.
 - Deleting a My Work node hides it optimistically, restores it on failure, and refreshes My Work on success.
-- Updates grouping supports Project and Logic Gate as ordinary grouping choices while staying separate from My Work active-work grouping.
+- Updates grouping supports Project, Logic Gate, and Status as ordinary grouping choices while staying separate from My Work active-work grouping.
 
 ### Scenario MW-S4: Transactional Projection And Realtime
 

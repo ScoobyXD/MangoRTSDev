@@ -22,6 +22,7 @@ var savedViewGroupingFieldsBySurface = map[string]map[string]bool{
 		"gvic":       true,
 		"project":    true,
 		"logic_gate": true,
+		"status":     true,
 	},
 	SavedViewSurfaceLogicGateKanban: {
 		"account":  true,

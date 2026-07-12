@@ -38,6 +38,11 @@ import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS } from "../editor/editorTabs.js";
 import { EditorContent } from "../editor/EditorContent.js";
 import { generateStableInformationID } from "../editor/editorTypes.js";
 import { UnifiedNodeShell } from "../editor/UnifiedNodeShell.js";
+import {
+  NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
+  NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
+  setNodeEditorFullscreenChromeActive,
+} from "../editor/nodeEditorFullscreenChrome.js";
 import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState } from "../editor/useEditorDocumentSurfaceHandlers.js";
 import {
   AttachedEmailOrganizerPane,
@@ -180,6 +185,13 @@ type CriticalPathNodePreviewSelection = {
   title: string;
 };
 
+type ProjectRelationshipNodePanelSelection = {
+  projectID: string;
+  relationshipID: string;
+  nodeID: string;
+  title: string;
+};
+
 const PROJECT_SUMMARY_SURFACE_TEXT = "#172033";
 const PROJECT_SUMMARY_RULE = "rgba(91, 141, 239, 0.24)";
 const PROJECT_SUMMARY_SPLIT_MIN = 42;
@@ -260,6 +272,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [selectionAnchorRelationshipNodeID, setSelectionAnchorRelationshipNodeID] = useState("");
   const [activeRightPanelTab, setActiveRightPanelTab] = useState<"relationships" | "critical-path">("critical-path");
   const [selectedCriticalPathNode, setSelectedCriticalPathNode] = useState<CriticalPathNodePreviewSelection | null>(null);
+  const [selectedRelationshipNodePanel, setSelectedRelationshipNodePanel] = useState<ProjectRelationshipNodePanelSelection | null>(null);
   const [projectSelectionFontSize, setProjectSelectionFontSize] = useState(TEXT_BLOCK_FONT_SIZE);
   const [projectInlineFormat, setProjectInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
@@ -438,6 +451,18 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     });
     if (!stillVisible) setSelectedCriticalPathNode(null);
   }, [criticalPath, relationships, selectedCriticalPathNode]);
+
+  useEffect(() => {
+    setSelectedRelationshipNodePanel((current) => {
+      if (!current) return current;
+      if (current.projectID !== projectID) return null;
+      const relationship = relationships.find((item) => item.relationship_id === current.relationshipID);
+      const nodeID = relationship ? (relationship.node_id || relationship.resource_id || "").trim() : "";
+      if (!relationship || relationship.resource_type !== "node" || nodeID !== current.nodeID) return null;
+      const title = relationship.display_title.trim() || "Node";
+      return title === current.title ? current : { ...current, title };
+    });
+  }, [projectID, relationships]);
 
   const chatMessagesByBlockID = useMemo(() => {
     const grouped = new Map<string, EditorTextBlockChatMessage[]>();
@@ -1286,7 +1311,18 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             onDragStart={(event) => startProjectRelationshipNodeDrag(event, relationship, visibleGateID)}
             onMouseEnter={() => setHoveredRelationshipNodeID(relationship.relationship_id)}
             onMouseLeave={() => setHoveredRelationshipNodeID((current) => current === relationship.relationship_id ? "" : current)}
-            onDoubleClick={() => nodeID && onNodeOpen?.(nodeID)}
+            onDoubleClick={(event) => {
+              if (!nodeID) return;
+              event.preventDefault();
+              event.stopPropagation();
+              setRelationshipContextMenu(null);
+              setSelectedRelationshipNodePanel({
+                projectID,
+                relationshipID: relationship.relationship_id,
+                nodeID,
+                title: relationship.display_title.trim() || "Node",
+              });
+            }}
             onContextMenu={(event) => openRelationshipNodeContextMenu(event, relationship, visibleGateID)}
           >
             <span style={relationshipResourceIconStyle}><ExplorerRowIcon kind="node" /></span>
@@ -1884,6 +1920,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               onCancel={() => setRelationshipDeleteConfirmation(null)}
             />
           ) : null}
+          {selectedRelationshipNodePanel?.projectID === projectID ? (
+            <ProjectRelationshipNodePanel
+              key={`${selectedRelationshipNodePanel.projectID}:${selectedRelationshipNodePanel.nodeID}`}
+              accent={accent}
+              selection={selectedRelationshipNodePanel}
+              onClose={() => setSelectedRelationshipNodePanel(null)}
+            />
+          ) : null}
         </aside>
       </div>
       {emailPickerBlockID ? (
@@ -2356,6 +2400,64 @@ function ProjectCriticalPathNodeWindow({
         forcedEntityID={selection.nodeID}
         forcedLabel={selection.title}
         forcedEmptyMessage="Select a critical-path node."
+        compactLinkedDocumentHeader
+      />
+    </UnifiedNodeShell>
+  );
+}
+
+function ProjectRelationshipNodePanel({
+  accent,
+  selection,
+  onClose,
+}: {
+  accent: string;
+  selection: ProjectRelationshipNodePanelSelection;
+  onClose: () => void;
+}) {
+  const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => setNodeEditorFullscreenChromeActive(fullscreen), [fullscreen]);
+
+  return (
+    <UnifiedNodeShell
+      className="project-relationships-node-panel"
+      surfaceID="project-relationships-node-panel"
+      title={selection.title}
+      style={projectRelationshipNodePanelStyle(accent, fullscreen)}
+      bodyStyle={projectRelationshipNodePanelBodyStyle}
+      actionButtonStyle={criticalPathNodePreviewActionButtonStyle}
+      closeButtonStyle={criticalPathNodePreviewActionButtonStyle}
+      actions={[
+        {
+          id: "fullscreen",
+          pressed: fullscreen,
+          onClick: () => setFullscreen((current) => !current),
+        },
+        {
+          id: "open-in-new-tab",
+          onClick: () => openAppPathInNewTab(buildContextualNodeRoute(selection.nodeID)),
+        },
+        {
+          id: "pin",
+          title: "Pin node to Pinned",
+          ariaLabel: "Pin node to Pinned",
+          onClick: () => requestAppSidebarPin({ kind: "node", id: selection.nodeID, name: selection.title }),
+        },
+        {
+          id: "close",
+          onClick: onClose,
+        },
+      ]}
+    >
+      <EditorContent
+        accent={accent}
+        widgetId={`project-relationship-node:${selection.nodeID}`}
+        theme="light"
+        forcedEntityKind="node"
+        forcedEntityID={selection.nodeID}
+        forcedLabel={selection.title}
+        forcedEmptyMessage="Select a project node."
         compactLinkedDocumentHeader
       />
     </UnifiedNodeShell>
@@ -3087,6 +3189,7 @@ const summarySplitHandleStyle: React.CSSProperties = {
 };
 
 const relationshipsColumnStyle = (splitPct: number): React.CSSProperties => ({
+  position: "relative",
   minWidth: 0,
   minHeight: 0,
   display: "flex",
@@ -3539,6 +3642,36 @@ const criticalPathNodePreviewActionButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   padding: 0,
   boxShadow: EDITOR_NEU_SHADOW,
+};
+
+function projectRelationshipNodePanelStyle(accent: string, fullscreen: boolean): React.CSSProperties {
+  return {
+    position: fullscreen ? "fixed" : "absolute",
+    zIndex: fullscreen ? 240 : 70,
+    top: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : 0,
+    right: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : 0,
+    bottom: fullscreen ? NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX : 0,
+    left: fullscreen ? NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX : 0,
+    minWidth: 0,
+    minHeight: 0,
+    border: "1px solid transparent",
+    borderRadius: fullscreen ? 14 : 10,
+    background: `${EDITOR_NEU_PANEL_BACKGROUND} padding-box, linear-gradient(135deg, rgba(255,255,255,0.95), ${accent}) border-box`,
+    color: PROJECT_SUMMARY_SURFACE_TEXT,
+    overflow: "hidden",
+    boxShadow: fullscreen
+      ? "0 24px 70px rgba(15, 23, 42, 0.28)"
+      : "8px 10px 22px rgba(174,174,192,0.18), -6px -6px 16px rgba(255,255,255,0.84), inset 1px 1px 0 rgba(255,255,255,0.86)",
+  };
+}
+
+const projectRelationshipNodePanelBodyStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 0,
+  width: "100%",
+  height: "100%",
+  overflow: "hidden",
+  background: EDITOR_NEU_PANEL_BACKGROUND,
 };
 
 function criticalPathResourceIconStyle(resourceType: "logic_gate" | "node" | ""): React.CSSProperties {

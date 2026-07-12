@@ -6,6 +6,7 @@ export type KeyboardShortcutEventLike = {
   metaKey?: boolean;
   shiftKey?: boolean;
   altKey?: boolean;
+  repeat?: boolean;
   defaultPrevented?: boolean;
   target?: unknown;
   activeElement?: unknown;
@@ -59,4 +60,14 @@ export function resolveGlobalKeyboardShortcut(event: KeyboardShortcutEventLike):
   if (key === "z") return event.shiftKey ? "redo" : "undo";
   if (key === "y" && !event.shiftKey) return "redo";
   return null;
+}
+
+export function shouldNavigateBrowserHistoryBack(event: KeyboardShortcutEventLike): boolean {
+  if (event.defaultPrevented) return false;
+  if (event.repeat) return false;
+  if (shouldDeferToNativeTextEditing(event.target)) return false;
+  if (shouldDeferToNativeTextEditing(event.activeElement)) return false;
+  if (shouldDeferToNativeTextEditing(event.selectionAnchorNode)) return false;
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false;
+  return event.key === "Backspace";
 }
