@@ -1,4 +1,4 @@
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 # Kanban Board Tests
 
@@ -149,12 +149,12 @@ KB112 - Selection generations guard A-to-B and A-to-B-to-A navigation so an olde
 KB113 - Mounted Kanban consumes only `kanban.changed` on `board:{board_id}` and coalesces one canonical `/work` reload; no projection delta or sequence is applied in the browser.
 KB114 - Board open, reconnect, or a compact change hint causes at most one targeted board revalidation and never a broad workspace reload.
 KB115 - The canonical `/work` response preserves every minimal card field that can affect rendering, including `created_from_email`, requested-by, placed-by, issue state, due date, priority, accounts, title, position, and timestamps.
-KB116 - Logic Gate work serialization contains only `logic_gate`, actor `permissions`, `board`, `columns`, minimal `cards`, and `projection_sequence`.
+KB116 - Logic Gate work serialization contains only `logic_gate`, actor `permissions`, `board`, `columns`, and minimal `cards`; no projection sequence or replay cursor is serialized.
 KB117 - Logic Gate work serialization does not contain top-level `company_id` or `logic_gate_id`, `statuses`, `assignments`, `nodes`, `cards_limit`, or a full GVIC collection.
 KB118 - Each minimal card row contains its card, column, node, title, request/placement, issue, position, due-date, priority, direct-email-origin, account, creation, and projection-update fields only as required; the frontend derives repeated board/company/Logic Gate IDs locally.
 KB119 - Database ordering uses the canonical stored status rank requested, backlog, pending, in progress, review, done; unknown historical status text falls back to pending rank, then cards sort by position, assignment creation time, and stable assignment/card identity.
 KB120 - Owning-Logic-Gate authorization runs before a cached ETag can produce `304 Not Modified`; a permission revocation must never expose or preserve unauthorized board data.
-KB121 - The work-version ETag changes for gate/header/default/permission/request-owner, assignment, projection card, email-origin, and projection-sequence changes that affect the response.
+KB121 - The dedicated Logic Gate work version changes for gate/header/default/permission/request-owner, assignment, projection-card, and email-origin mutations that affect the response, and that version participates in the actor-safe work ETag.
 KB122 - Logic Gate boards and columns remain synthesized contract data rather than persisted legacy Kanban board/column rows; a response-contract salt invalidates ETags when synthesized shapes or ordering constants change.
 
 ## Scenarios
