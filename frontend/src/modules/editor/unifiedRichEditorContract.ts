@@ -1,3 +1,16 @@
+/**
+ * MAINTAINER / AGENT NOTE
+ *
+ * This is a real cross-surface product contract, not only an inventory for tests.
+ * Changes to editor semantics or shared controls must be implemented in the shared
+ * behavior, formatting-controller, DOM-host, or toolbar sources so every surface
+ * below receives the same behavior. Do not add a node-only, project-only,
+ * mail-only, attached-reply-only, or signature-only semantic workaround unless
+ * the product requirement explicitly calls for a documented exception.
+ *
+ * When an exception is genuinely required, document it in docs/tests/editor.md
+ * and add contract/behavior coverage that makes its boundary explicit.
+ */
 export const UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE = "useEditorDocumentSurfaceHandlers";
 export const UNIFIED_RICH_EDITOR_TOOLBAR_SOURCE = "EditorTabBar";
 

@@ -3495,6 +3495,10 @@ export function useEditorDocumentFormattingController({
   ]);
 }
 
+// Unified editor semantics live here. Fix keyboard, indentation, clipboard,
+// paste/drop, list, image, mention, undo/redo, and flush behavior here (or in a
+// shared helper called here), not in a single surface wrapper. See
+// unifiedRichEditorContract.ts before introducing any surface-specific branch.
 export function useEditorDocumentSurfaceHandlers({
   restoringScrollRef,
   currentDocumentTargetKeyRef,
