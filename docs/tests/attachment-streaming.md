@@ -10,7 +10,7 @@ AST2 - Browser preparation computes the raw file-content SHA-256 incrementally i
 
 AST3 - Browser files through and including 64 MiB use one presigned PUT. Larger browser files use resumable multipart upload with 16 MiB parts, at most three parts in flight for one file and four S3 PUTs in flight across the page. Raw `File`/`Blob` or bounded `File.slice` bodies go to S3 with only the exact signed headers and no Mango authorization header or cookie.
 
-AST4 - The configurable browser limit defaults to 250 MiB (262,144,000 bytes) per file. The old 12 MiB aggregate-per-text-box limit does not apply to direct browser upload. Each file succeeds or fails independently, and only completed attachments enter normal lists/counts.
+AST4 - The configurable browser limit defaults to 1 GiB (1,073,741,824 bytes) per file. The old 12 MiB aggregate-per-text-box limit does not apply to direct browser upload. Each file succeeds or fails independently, and only completed attachments enter normal lists/counts.
 
 AST5 - Browser upload intents and multipart part state are durable and idempotent. Retry refreshes an expired URL for the same intent/part; resume reconciles accepted S3 parts; cancel aborts active requests and best-effort aborts the intent; expiry cleanup aborts multipart work or deletes an unfinalized single-PUT object. S3 AbortIncompleteMultipartUpload lifecycle is a backstop, not the primary cleanup path.
 
@@ -39,10 +39,10 @@ Given a user selects browser files on both sides of the 64 MiB strategy boundary
 
 ### Scenario AST-S2: Browser Limit, Empty File, And Partial Success
 
-Given an empty file, a file exactly 250 MiB, a file one byte too large, and sibling uploads:
+Given an empty file, a file exactly 1 GiB, a file one byte too large, and sibling uploads:
 
 - The empty file uses single PUT and the raw empty-payload SHA-256.
-- Exactly 250 MiB is accepted; one byte above is rejected before S3 is touched.
+- Exactly 1 GiB is accepted; one byte above is rejected before S3 is touched.
 - The old 12 MiB text-box aggregate does not reject direct uploads.
 - A failed sibling does not discard already completed files.
 - Pending/failed/canceled uploads stay in progress UI and outside normal attachment counts.

@@ -214,7 +214,7 @@ variable "attachment_direct_upload_enabled" {
 variable "attachment_max_browser_upload_bytes" {
   description = "Authoritative maximum size in bytes for one browser-originated attachment."
   type        = number
-  default     = 262144000
+  default     = 1073741824
 
   validation {
     condition     = var.attachment_max_browser_upload_bytes > 0 && floor(var.attachment_max_browser_upload_bytes) == var.attachment_max_browser_upload_bytes

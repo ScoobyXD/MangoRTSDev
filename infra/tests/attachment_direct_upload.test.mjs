@@ -93,7 +93,7 @@ test("ECS receives the complete browser upload policy configuration", () => {
 
 test("module defaults and the dev consumer preserve the V1 product policy", () => {
   const defaults = [
-    ["attachment_max_browser_upload_bytes", "262144000"],
+    ["attachment_max_browser_upload_bytes", "1073741824"],
     ["attachment_upload_intent_ttl_seconds", "86400"],
     ["attachment_single_put_url_ttl_seconds", "3600"],
     ["attachment_multipart_part_url_ttl_seconds", "900"],
