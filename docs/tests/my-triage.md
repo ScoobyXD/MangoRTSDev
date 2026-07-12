@@ -1,12 +1,12 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-12
 
 # My Triage Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (store-level conversion and transfer coverage exists; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting and full rich-control exposure for My Triage compose/reply; `tests/frontend/pages/home/homeCommands.test.ts` covers personal compose attachment references without durable `content`; `backend/internal/http/communications_handlers_test.go` covers personal send-time Mango attachment resolution and raw-content rejection; Mango email body marking/display preservation is covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; local sent-body cache priming is covered by `tests/frontend/modules/communications/communicationsApi.test.ts`; rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (store-level conversion and transfer coverage exists; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers unified editor adapter mounting, shared highlight controls, exact compose/signature flush submission, and unified signature editing for My Triage; `tests/frontend/pages/home/homeCommands.test.ts` covers personal compose attachment references without durable `content` plus mailbox-scoped signature load/save ordering; `backend/internal/http/communications_handlers_test.go` covers personal send-time Mango attachment resolution and raw-content rejection, while `backend/internal/http/communications_email_draft_handlers_test.go` covers durable draft/signature inline-byte rejection; Mango email body marking/display and highlight preservation are covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; local sent-body cache priming is covered by `tests/frontend/modules/communications/communicationsApi.test.ts`; rule IDs are not fully mapped to automated tests yet)
 
-- Automatic personal signature insertion, rich-body deduplication, and compose-scope wiring are covered by `tests/frontend/pages/home/homeCommands.test.ts` and `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`.
+- Automatic personal signature insertion, rich-body deduplication, compose-scope wiring, unified signature mounting, exact flush behavior, and stale-load/save ordering are covered by `tests/frontend/pages/home/homeCommands.test.ts` and `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`.
 
 ## Business Logic
 
@@ -89,7 +89,7 @@ MT76 - Personal reply drafts are unique per company, user, mailbox scope, and or
 MT77 - A saved personal reply draft stores or reloads the original message context, and reopening the draft shows the original email being answered above the compose editor.
 MT78 - Personal compose supports To, Cc, Bcc, Reply, Reply All, and Forward; Reply All excludes the active mailbox address from generated recipients.
 MT79 - Personal compose supports scheduled sends by saving a scheduled draft with a due timestamp, sending it through the normal personal send path when due while the app is open, and deleting the scheduled draft only after send succeeds.
-MT80 - Personal compose and reply use the unified editor semantics shared with node, Logic Gate, project, and attached-email reply editor surfaces, including numbered/alphanumeric list, indent/outdent, bullet list, checklist, font size, bold, underline, hyperlink creation, paste cleanup, Delete/Backspace, and copy/cut/paste behavior; the visible compose/reply controls must include the shared segmented font-size control, bold/underline controls, and outline-style dropdown instead of a personal-compose-only toolbar. Each font-size/bold/underline segment must have its own divider and hover state wherever the shared toolbar appears.
+MT80 - Personal compose and reply use the unified editor semantics shared with node, Logic Gate, project, attached-email reply, and signature editor surfaces, including numbered/alphanumeric list, indent/outdent, bullet list, checklist, font size, bold, underline, text highlight color, hyperlink creation, paste cleanup, Delete/Backspace, and copy/cut/paste behavior. The visible controls use the shared font-size minus/value/plus, Bold, Underline, highlight-color, and outline-style controls rather than a personal-compose-only toolbar.
 MT81 - Personal compose stores rich editor content as sanitized rich HTML, while legacy plain text drafts continue to load and send as escaped/linkified HTML.
 MT82 - Received personal email detail must display Cc recipients when the provider returns them; Bcc is displayed only when it is present on messages the user is allowed to see.
 MT83 - Links in received personal email bodies, forwarded/replied original-message previews, sent reply bodies, and email signatures must open in a new browser tab when clicked.
@@ -103,7 +103,7 @@ MT90 - Selecting a My Triage thread row opens a full-height conversation detail 
 MT91 - Personal rich compose send must preserve sanitized block indentation, explicit line breaks, blank lines, and spacing, including indent/outdent and blockquote-style indents, so sent email HTML does not flatten intended paragraph indentation or collapse the body into one long line.
 MT92 - Expired or revoked personal My Triage mailbox provider credentials return a My Triage reconnect/repair state, not a Mango auth logout. Personal mailbox folder, message-list, message-detail, send, archive, star, draft, and calendar RSVP endpoints must not represent provider reauthorization as a Mango session `401`, `unauthorized`, terminal-auth, logout, or login-redirect response; they must return a recoverable provider-specific response, such as `409 nylas_reauth_required`, while the user remains signed in to Mango.
 MT93 - Any future change to unified editor semantics or shared editor format/outline controls must apply to My Triage compose and reply through the shared editor behavior and shared toolbar controls, not through a separate personal-compose-only implementation.
-MT94 - Personal email compose/reply file attachments must follow `docs/tests/attachments.md`: files upload to Mango attachments before durable draft/send state is saved, and normal durable payloads store attachment references instead of raw base64 `content`.
+MT94 - Personal email compose/reply file attachments must follow `docs/tests/attachments.md`: files upload to Mango attachments before durable draft/send state is saved, normal durable payloads store attachment references instead of raw base64 `content`, and the draft API rejects embedded inline file bytes before persistence.
 MT95 - Personal compose/reply inline body images use the unified rich-editor image attachment path and remain durable Mango attachment references until the backend send boundary, while normal file attachments use the mail attachment path.
 MT96 - Incoming personal provider attachments can stay provider-referenced as mailbox metadata, but when converted into work, attached to a node, or otherwise made durable Mango work context, bytes must be cached/persisted into Mango S3 and stored as Mango attachment references.
 MT97 - Mango-generated personal outgoing email HTML is marked as a Mango email body. When send-time preparation rewrites internal inline-image references, local Sent/reply caches must keep the provider-ready CID HTML plus metadata-only Mango attachment references when the provider send response omits body or attachment metadata; they must not restore the pre-send `mango-attachment:` HTML or cache raw attachment bytes.
@@ -114,7 +114,7 @@ MT101 - The conversation detail pane is the only vertical scroll container for a
 MT102 - The newest conversation card is expanded by default and older cards are collapsed to headers. When a new inbound or outbound message joins the selected thread it becomes the expanded card and the previously expanded cards collapse; users can manually expand or collapse a card without introducing nested scrolling.
 MT103 - The personal reply editor has a useful minimum/default height, can be resized vertically, and automatically saves and restores the user's clamped height preference for that mailbox scope; layout changes must not squeeze it below the minimum.
 MT104 - Clicking a My Triage list row while compose/reply is open quietly preserves the current draft, exits compose, selects the clicked row, and displays its detail on the first click without reloading or blanking the list.
-MT105 - Personal compose/reply font-size, Bold, and Underline controls preserve the editor selection when toolbar focus changes. Font size applies to the selected text or pending caret, and Bold/Underline are true toggles whose second activation removes the format and updates the active state.
+MT105 - Personal compose/reply font-size, Bold, Underline, and highlight controls preserve the editor selection when toolbar focus changes. Font size applies to selected text or pending caret; Bold/Underline toggle off as well as on; highlight applies only to a restored non-collapsed selection and supports clear/no-highlight. Enter commits a numeric font-size value once, while Escape cancels it without a blur commit.
 MT106 - At personal send time, each authorized `mango-attachment:` image reference is deduplicated, resolved from Mango S3, assigned a unique alphanumeric content ID, added as an inline provider attachment, and rewritten to `cid:` in outbound HTML. Missing or unauthorized references fail the send instead of producing a broken image placeholder.
 
 ## Nylas Configuration Contract
@@ -134,6 +134,8 @@ My Triage uses Nylas `thread_id` and thread `message_ids` to group related messa
 MT107 - My Triage automatically inserts the default signature for the exact active personal account exactly once into each new compose, reply, and reply-all editor. A late database load may backfill only the matching still-open new draft while preserving typed text; reopening a saved draft must not add or replace a signature.
 MT108 - My Triage thread inspection exposes expand-all, To/Cc/Bcc, authenticated image download/fullscreen, immediate reply focus, and bounded vertical resizing. Pointer-up, pointer-cancel, lost capture, or window blur ends resizing, and calendar RSVP controls prevent duplicate submission and show a selected response only after provider success.
 MT109 - Personal remote-draft reconciliation keeps the newest reply draft for each mailbox/source-message scope, deletes superseded remote duplicates, and restores saved Reply All To/Cc/Bcc addressing without reintroducing the active mailbox or duplicate recipients.
+MT110 - Personal Save Draft and Send flush the mounted unified editor first and persist or submit the exact sanitized HTML returned by that flush, including the user's final DOM edit.
+MT111 - The personal-account signature editor is a mailbox-scoped unified rich editor using the shared toolbar, including working font-size minus/value/plus and highlight controls. Save Signature persists the exact flushed HTML; stale loads cannot overwrite newer edits, empty remote rows remain authoritative, and failed saves retain ordered mailbox-scoped pending sync without overtaking newer saves.
 
 ## Scenarios
 
@@ -311,6 +313,7 @@ Business logic covered:
 - MT85
 - MT86
 - MT93
+- MT110
 
 Given:
 - A user opens My Triage or a Shared Triage primary inbox with a connected mailbox.
@@ -345,6 +348,7 @@ Expected:
 - A future scheduled send is saved as a scheduled draft, is sent through the normal personal send path when due while the app is open, and is deleted only after send succeeds.
 - Rich compose controls use the unified editor behavior and shared segmented format/outline toolbar controls used by node, Logic Gate, project, and attached-email reply editor surfaces.
 - Rich compose controls persist sanitized rich HTML, and legacy plain text drafts still send as escaped/linkified HTML.
+- Save Draft and Send flush the compose editor and use the exact returned sanitized HTML.
 - Received Cc recipients are visible in message detail.
 - Email body/signature/original-preview links open in a new browser tab on click.
 - Node editor, logic-gate editor, and inline comment/chat links render as clickable underlined links and open on single left click.
@@ -455,6 +459,24 @@ Expected:
 - If the signature arrives late, it is appended once to the matching still-open new draft without removing text already typed.
 - Reopened saved drafts are not mutated, and rich-editor serialization cannot cause a duplicate signature.
 
+### Scenario MT-S8C: Personal Signature Uses The Unified Editor
+
+Business logic covered:
+- MT94
+- MT105
+- MT111
+
+Given:
+- A user opens the signature editor for a personal account, formats text with font-size, Bold, Underline, or highlight controls, and saves.
+- A signature load, legacy backfill, failed retry, or newer save may overlap that edit.
+
+Expected:
+- The signature editor uses the same unified rich editor host, semantics, formatting controller, and toolbar as personal compose/reply; it is not a native textarea.
+- Font-size minus/value/plus and highlight controls operate on the preserved selection.
+- Save Signature persists the exact flushed sanitized HTML for that account and reports success only after the remote save succeeds.
+- Stale hydration cannot overwrite the newer local edit, an empty remote row remains authoritative, and pending retries/backfills are serialized before newer saves without replacing them.
+- Embedded inline file bytes are rejected before durable signature persistence.
+
 ### Scenario MT-S9: Personal Mail Attachments Use Mango Attachments
 
 Business logic covered:
@@ -477,6 +499,7 @@ Given:
 Expected:
 - File attachments upload to Mango attachments before durable draft/send state is saved.
 - Personal draft/send payloads store Mango attachment references, not raw base64 attachment content.
+- The draft API rejects embedded inline file bytes before durable storage.
 - Inline body images use the unified rich-editor image attachment path and durable drafts keep Mango attachment references.
 - At send time the backend deduplicates inline references, authorizes and reads the S3 bytes, creates matching inline provider/CID attachments, and rewrites image sources to `cid:`; ordinary attached files remain ordinary attachments.
 - The send response/cache fallback contains provider-ready CID HTML and metadata-only attachment references, never raw bytes; missing or unauthorized inline references reject the send visibly.
@@ -493,6 +516,7 @@ Business logic covered:
 - MT104
 - MT105
 - MT109
+- MT110
 
 Given:
 - A user has a multi-message personal thread open.
@@ -502,7 +526,8 @@ Expected:
 - Choosing Reply, Reply All, or Forward on an older card builds the action from that exact message and resumes only that message's stable draft.
 - Reconciliation removes older remote reply drafts for the same mailbox/source-message scope, and reopening Reply All restores saved To/Cc/Bcc recipients with active-mailbox exclusion intact.
 - The reply editor never collapses below its minimum, saves its resized height automatically, and restores the preference when another personal reply opens.
-- Font size applies to the preserved selection; Bold and Underline can each be turned on and off, and their active indicators follow the current caret/selection.
+- Font-size minus/value/plus applies to the preserved selection or pending caret; Bold and Underline toggle on/off; highlight applies to the preserved selected range and can be cleared; the active indicators follow the current selection.
+- Saving, transitioning away, or sending flushes the mounted editor first so the final edit cannot be lost to stale compose state.
 - Clicking a different email row quietly saves the active draft, closes compose, and shows the clicked message on the first click without replacing the visible list.
 
 ### Scenario MT-S11: Thread Inspection, Resize Release, And Calendar RSVP

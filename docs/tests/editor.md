@@ -1,11 +1,11 @@
-Last updated: 2026-07-10
+Last updated: 2026-07-12
 
 # Unified Editor Tests
 
 Coverage Status:
 - People-picker profile palette stability, fallback-key behavior, and minimum contrast are covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified surface contract, unified toolbar source/inventory, full mail compose/attached-reply control exposure, shared controller wiring, and EmailPickerModal attach-only source guard; shared editing primitives also have rich/plain editor module tests, including automatic outline numbering toggle behavior and the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers rich email compose send serialization and Mango attachment-reference payloads; backend communications tests cover send-time attachment byte resolution outside the shared editor contract)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the declared surface inventory, the one rich `contentEditable` host, the shared behavior and formatting-controller sources, the shared toolbar inventory, mailbox-scoped signature mounting, highlight-control/sanitizer wiring, font-selection restoration, and the EmailPickerModal attach-only source guard; shared editing primitives also have rich/plain editor module tests, including automatic outline numbering toggle behavior and the durable rich-editor image attachment reference source; `tests/frontend/pages/home/homeCommands.test.ts` covers rich email compose send serialization and Mango attachment-reference payloads; backend communications tests cover send-time attachment byte resolution outside the shared editor contract)
 
 ## Business Logic
 
@@ -22,41 +22,63 @@ Required regression scenario:
 - Confirm the text-box projection stays deleted, no replacement block is created, retained associations remain in the node-level lists, previews and the standalone global email organizer do not dirty editor state, and view-only access can use both viewers.
 
 ED1 - Unified editor means shared user-facing editing semantics across rich editor surfaces; it does not require one shared backend table, API route, save controller, or storage owner.
-ED2 - The unified editor contract applies to Logic Gate editor text, node editor text boxes wherever a node editor is opened, project text boxes, project inline critical-path node windows, My Triage compose/reply, Shared Triage compose/reply, and attached-email reply bodies that send or draft real mail.
-ED3 - Node text boxes must keep saving through node information/projection persistence, Logic Gate text through Logic Gate information/projection persistence, project text boxes through project information/projection persistence, personal compose/reply through personal mailbox draft/send scope, and shared compose/reply through the selected shared mailbox scope.
-ED4 - Editing semantics for Enter, Backspace, Delete, Tab, Shift+Tab, indent/outdent, copy, cut, paste, paste cleanup, source-font normalization, linkification, undo/redo routing, selection preservation, and keyboard shortcut routing must come from one shared editor behavior source or a deliberately shared helper used by every target surface.
-ED5 - Rich controls for numbered/alphanumerical lists, bullet lists, checklist, indent guides, font size, bold, underline, hyperlink creation, and table insertion where supported must not be reimplemented per surface with divergent semantics.
+ED2 - The unified editor contract applies to Logic Gate editor text, node editor text boxes wherever a node editor is opened, project text boxes, project inline critical-path node windows, My Triage compose/reply, Shared Triage compose/reply, attached-email reply bodies that send or draft real mail, and mailbox-scoped personal/shared email signature editing.
+ED3 - Node text boxes must keep saving through node information/projection persistence, Logic Gate text through Logic Gate information/projection persistence, project text boxes through project information/projection persistence, personal compose/reply through personal mailbox draft/send scope, shared compose/reply through the selected shared mailbox scope, and signatures through their personal-account or shared-inbox signature scope.
+ED4 - Editing semantics for Enter, Backspace, Delete, Tab, Shift+Tab, indent/outdent, copy, cut, paste, paste cleanup, source-font normalization, linkification, undo/redo routing, selection preservation, keyboard shortcut routing, and formatting-command routing must come from the shared editor behavior/controller sources used by every target surface.
+ED5 - Rich controls for numbered/alphanumerical lists, bullet lists, checklist, indent guides, font size, bold, underline, text highlight color, hyperlink creation, and table insertion where supported must not be reimplemented per surface with divergent semantics.
 ED6 - Pasted rich text in any unified editor surface must normalize to the app/editor font family and must not add extra blank rows around selected inline pasted text because of source boundary whitespace.
 ED7 - Legacy plain text loaded into a unified rich editor surface must load through safe escaping/linkification and must not bypass the same sanitization boundary used for rich HTML.
 ED8 - Email compose/reply bodies using the unified editor must send sanitized rich HTML and preserve sanitized block indentation, including indent/outdent and blockquote-style indentation.
 ED9 - Chat panes inside node/project text boxes are conversation UI, not unified editor surfaces; chat textareas must not inherit rich editor toolbar, indentation, paste, or delete semantics unless a future chat-specific rule explicitly adds that behavior. They may share the people suggestion component used by rich editors, including its visible per-user profile colors.
 ED10 - Node/project email pickers are attach/select surfaces only and must not expose compose, send, scheduled send, or draft-save behavior.
 ED11 - Map and legacy map-specific editing behavior is outside the V1 unified editor project unless a live non-map editor surface imports a helper that must be changed for the shared contract.
-ED12 - Any future change to unified editor semantics must update one shared behavior test plus adapter/mount coverage proving each target surface receives the shared behavior.
-ED13 - The V1 shared rich editor behavior source is the editor module handler contract behind `useEditorDocumentSurfaceHandlers`; target surfaces must either call that handler directly or mount a narrow adapter such as `UnifiedRichEditorSurface`, while preserving their own persistence/send adapter.
-ED14 - Mail compose/reply and attached-email reply must expose the shared editor format/outline toolbar controls for font size, bold, underline, the outline-style dropdown, and table insertion where supported; mail-specific wrapper controls may add list insertion, indent/outdent, and link commands, but must call the shared editor controller instead of local DOM commands.
+ED12 - Any future change to unified editor semantics must update one shared behavior or formatting-controller test plus adapter/mount coverage proving each target surface receives the shared behavior.
+ED13 - The shared rich editor behavior source is `useEditorDocumentSurfaceHandlers`; the shared formatting-command source is `useEditorDocumentFormattingController`; and `EditorDocumentSurface` is the only reusable rich `contentEditable` host. Target adapters may preserve their own persistence/send callbacks, but must not render another rich editable DOM host or reimplement a local formatting controller.
+ED14 - Mail compose/reply, attached-email reply, and email signature editing must expose the shared editor format/outline toolbar controls for font size, bold, underline, highlight color, the outline-style dropdown, and table insertion where supported. Wrapper-specific controls may add commands, but must call the shared formatting controller instead of local DOM commands.
 ED15 - Nodes opened from Projects participate in the same unified editor contract in both project entry paths: the Critical Path inline node window and the Logic Gates / Nodes tab double-click opener. The Logic Gates / Nodes opener may route to the standard standalone node popup, but the node text boxes inside that popup must still use the shared node editor behavior rather than a project-local editor implementation.
 ED16 - The Logic Gate editor text body is a unified editor surface.
 ED17 - Node editor text boxes are unified editor surfaces wherever a full node editor is opened, including Home, My Work, Updates, Kanban, Company Explorer/sidebar, minimized dock restore, Project critical-path inline node windows, and Project Logic Gates / Nodes double-click node popups.
 ED18 - Project text boxes and project information editors are unified editor surfaces.
 ED19 - My Triage email compose and reply bodies are unified editor surfaces.
 ED20 - Shared Triage email compose and reply bodies are unified editor surfaces.
-ED21 - Attached-email reply bodies opened from an email attached to a node or project are unified editor surfaces when that reply sends or drafts real mail.
+ED21 - Attached-email reply bodies opened from an email attached to a node or project are unified editor surfaces when that reply sends or drafts real mail. Node replies use their attached-email resource context; project replies use the project resource plus the originating project text-block information ID, so file and inline-image tools remain durable on both hosts.
 ED22 - Chat panes inside node or project text boxes are explicitly not unified editor surfaces; they are conversation UI with chat-specific behavior.
 ED23 - Node and project email pickers are explicitly not compose editor surfaces; they may search, filter, scroll, drag, and attach existing email, but they must not contain compose, send, scheduled send, draft-save, or rich body editing behavior.
 ED24 - Map and legacy map-specific editor surfaces are explicitly outside the V1 unified editor contract unless they import a helper that is actively shared by a live non-map unified editor surface.
 ED25 - Backend persistence unification is explicitly outside the unified editor contract; shared editing behavior must not force node, Logic Gate, project, personal mailbox, shared mailbox, or attached-email reply content into one storage owner.
-ED26 - Rich-editor pasted or dropped inline images in unified editor surfaces must follow the global attachment contract in `docs/tests/attachments.md`: temporary previews are allowed, durable editor/email content stores attachment references instead of data URLs or base64 bytes, and email adapters convert those references to CID attachments only at the backend send boundary.
+ED26 - Rich-editor pasted or dropped inline images in unified editor surfaces must follow the global attachment contract in `docs/tests/attachments.md`: temporary previews are allowed, durable editor/email content stores attachment references instead of data URLs or base64 bytes, copying an existing attachment-backed image links that attachment to the target editor resource before insertion, and email adapters convert those references to CID attachments only at the backend send boundary. An asynchronous image upload/link may commit only while the original editor root, document target, attachment resource context, and saved range remain current; a target switch or unmount must not mutate the next document.
 ED27 - Chat attachments remain outside the unified rich-editor contract; they must use the global attachment contract as chat attachments rather than inheriting rich-editor body semantics.
 ED28 - Project text boxes must expose the same shared format and outline toolbar controls as node text boxes, including font-size controls, bold, underline, automatic numbering, bullets, checklist, and outline-style selection; project-specific toolbar toggles must call the shared editor controller instead of defining separate semantics.
-ED29 - The unified rich-editor toolbar source is `EditorTabBar`. Any rich editor surface that exposes formatting controls must use the same font-size minus/value/plus controls, bold/underline controls, and outline-style dropdown UI instead of reimplementing a look-alike toolbar.
-ED30 - The shared outline-style dropdown inventory is Automatic Numbering, Indent Guides, Bullet Points, and Checklist. The compact toolbar inventory used by project text boxes, mail compose/reply, and attached-email reply must come from one shared toolbar tab list so adding, removing, renaming, or restyling those controls changes every compact editor surface together.
-ED31 - Font-size toolbar actions must route through the shared editor formatting controller/helper for every unified rich editor surface, including Logic Gate editor text, node text boxes, project text boxes, My Triage/Shared Triage compose and reply bodies, and attached-email reply bodies. A surface must not keep a local font-size span mutation path behind the shared toolbar.
-ED32 - The shared formatting controller must restore the last valid editor range before toolbar actions that can move browser focus. Font size applies to the restored range or pending caret, and Bold/Underline state must reflect the browser command state so activating the same control again removes the format.
+ED29 - The unified rich-editor toolbar source is `EditorTabBar`. Every unified rich editor surface must use the same font-size minus/value/plus controls, bold/underline controls, highlight-color control, and outline-style dropdown UI instead of reimplementing a look-alike toolbar.
+ED30 - The shared outline-style dropdown inventory is Automatic Numbering, Indent Guides, Bullet Points, and Checklist. The compact toolbar inventory used by project text boxes, mail compose/reply, attached-email reply, and email signature editing must come from one shared toolbar tab list so adding, removing, renaming, or restyling those controls changes every compact editor surface together.
+ED31 - Font-size toolbar actions must route through the shared editor formatting controller/helper for every unified rich editor surface, including Logic Gate editor text, node text boxes, project text boxes, My Triage/Shared Triage compose and reply bodies, attached-email reply bodies, and mailbox-scoped email signatures. A surface must not keep a local font-size span mutation path behind the shared toolbar.
+ED32 - The shared formatting controller must restore the last valid editor range before toolbar actions that can move browser focus. Font size applies to the restored range or becomes visible pending-caret state, including composition/IME text committed after a collapsed-caret size choice; highlight color applies to the restored selected range, and Bold/Underline state must reflect the browser command state so activating the same control again removes the format. Enter in the numeric font-size input commits once, while Escape cancels the draft, keeps keyboard focus in the control, and must not let the following blur commit it. Escape from a shared popover consumes the event, closes only that popover, and restores focus to its trigger without closing the surrounding node/editor window; passive format-state reads may restore the saved range but must not force focus out of the toolbar.
 ED33 - An image-only rich email body containing a durable Mango attachment image counts as sendable content. The frontend must preserve the reference without raw bytes, and the backend email adapter must authorize/resolve it and produce provider-ready CID HTML plus an inline attachment.
 ED34 - Normal browser attachment file bodies bypass Mango API and editor persistence: the editor requests an authorized upload intent with JSON metadata, incrementally hashes with bounded memory, and sends raw File/Blob bytes to private S3 through the exact presigned request. Server-originated email/import/migration/job uploads retain their separate streaming path.
 ED35 - Node attachment progress is transient node-level UI outside the rich document. It exposes per-file byte progress, preparing/uploading/retrying/completing/complete/canceled/failed states, cancel, and retry without blocking edits or creating projection saves; pending/failed/canceled items do not enter normal attachment counts.
 ED36 - Deleting the origin text box does not cancel node ownership, delete a completed attachment/attached email, or recreate the projection. An active upload can remain in node-level progress and finalize to the node only when the node exists and current edit permission still passes.
+
+ED37 - The personal-account and shared-inbox email signature editor is a mailbox-scoped unified rich editor surface. It must use `UnifiedRichEditorSurface` plus `EditorTabBar`, store the exact flushed sanitized editor HTML, reject embedded inline file bytes at the durable API boundary, and keep its existing mailbox signature persistence boundary; a native signature `<textarea>` is not an allowed implementation. An in-flight remote load must not overwrite a newer local edit, an existing remote row is authoritative even when its body is empty, and success UI is shown only after the remote save resolves. A failed remote save keeps an exact mailbox-scoped pending-sync body, retries it before accepting an older remote row, and clears that marker only after the same body is saved successfully. Remote loads and legacy backfills are serialized with user saves, focused external hydration preserves the live selection, and each mailbox signature/draft/reply target remounts with isolated selection and undo state.
+ED38 - `EditorDocumentSurface` is the sole rich editable DOM component for Logic Gate, node, project, triage compose/reply, attached-email reply, and signature surfaces. `EditorContent`, `NodeTextBlockEditor`, `UnifiedRichEditorSurface`, and domain wrappers configure or mount it, but do not render their own `contentEditable` element.
+ED39 - `useEditorDocumentFormattingController` is the sole controller for font size, bold, underline, highlight color, list/indent commands, links, tables, selection restoration, format-state reads, and pending-caret formatting. Logic Gate, node/project, and mail/signature hosts must all use that hook rather than constructing controller objects locally.
+ED40 - Text highlighting uses one shared `EditorTabBar` color control and one `applyEditorHighlightColorToRoot` command. It applies to the restored non-collapsed selection, supports a clear/no-highlight choice, reports the active selection color in toolbar state, and round-trips as sanitized rich HTML through node, Logic Gate, project, draft, sent-mail, attached-reply, and signature serialization. Font-size and highlight commands format selected text runs without wrapping paragraph, list-item, or table block ancestors inside an inline span; repeated font-size changes split/normalize the prior wrapper rather than nesting indefinitely. A collapsed caret does not create pending highlight state; pending-caret formatting remains font-size-only.
+ED41 - Focusing an attached-email reply invalidates the surrounding node/project text-block formatting target immediately. The outer toolbar must disable instead of retaining a stale controller that could format the previously focused text block; the reply's own shared toolbar remains the only formatting owner while the reply editor has focus.
+ED42 - External hydration preserves the shared logical selection by restoring the handler's last valid range, recording text offsets, replacing the DOM, and restoring those offsets. This applies while the document, numeric font input, highlight picker, or another shared toolbar control owns focus. A changed node/project text block received while the document itself is focused is deferred until blur: an untouched local DOM accepts the external value without flushing stale HTML, while a locally edited conflict keeps the local value and shows a conflict notice instead of silently overwriting either side.
+ED43 - Rich-document persistence queues are target-safe. Logic Gate/root editor saves retain the latest pending request for every target rather than one global overwrite slot; project text-block saves serialize and coalesce the latest full title/document/attachment envelope per block; and node text-block teardown drains every debounced changed block on close or company/node switch before clearing its target-scoped controller. Hidden documents never accept toolbar formatting commands.
+
+### Required Unified Rich-Editor Surface Inventory
+
+| Surface | Required runtime host | Shared toolbar/controller | Persistence boundary |
+|---|---|---|---|
+| Logic Gate editor body | `EditorContent` configures the one `EditorDocumentSurface` | `EditorTabBar` + `useEditorDocumentFormattingController` + `useEditorDocumentSurfaceHandlers` | Logic Gate information/projection |
+| Node text box in every full node opener | `NodeTextBlockEditor` configures the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | Node information/projection inside the text-block envelope |
+| Project text box/information editor | Project Summary reuses `NodeTextBlockEditor` and the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | Project information/projection inside the text-block envelope |
+| My Triage compose/reply | `ComposePanel` mounts `UnifiedRichEditorSurface`, which mounts the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | Personal mailbox draft/send |
+| Shared Triage compose/reply | The same `ComposePanel`/`UnifiedRichEditorSurface` path selects shared mailbox scope | Same shared toolbar, controller, and behavior handler | Shared mailbox draft/send |
+| Attached-email reply from a node or project | `EmailConversationPane` mounts `UnifiedRichEditorSurface`, which mounts the one `EditorDocumentSurface` | Same shared toolbar, controller, and behavior handler | Source personal/shared mailbox send scope; draft lifecycle remains domain-owned |
+| Personal/shared email signature | The signature panel mounts `EditorTabBar` and `UnifiedRichEditorSurface`, which mounts the one `EditorDocumentSurface` | Same shared toolbar, controller, behavior handler, and highlight palette | Mailbox-scoped personal-account or shared-inbox signature record |
+
+The architecture has four distinct responsibilities: `EditorDocumentSurface` owns the actual rich editable DOM; `useEditorDocumentSurfaceHandlers` owns keyboard, clipboard, paste/drop, list, image, mention, undo/redo, and flush semantics; `useEditorDocumentFormattingController` owns every toolbar command and selection/pending-format state; and `EditorTabBar` owns the visible controls. Domain adapters own only loading, value changes, flush/save/send callbacks, permissions, attachment context, and surface-specific layout.
 
 ## Scenarios
 
@@ -83,26 +105,32 @@ Business logic covered:
 - ED30
 - ED31
 - ED32
+- ED37
+- ED38
+- ED39
+- ED40
 
 Given:
-- A user can edit a Logic Gate body, a node text box, a project text box, a My Triage compose body, a Shared Triage compose body, and an attached-email reply body.
+- A user can edit a Logic Gate body, a node text box, a project text box, a My Triage compose body, a Shared Triage compose body, an attached-email reply body, and a personal/shared mailbox signature.
 - A user can open a node from a Project critical-path row and by double-clicking a node in the Project Logic Gates / Nodes tab.
-- The implementation changes indentation, paste cleanup, list behavior, hyperlink creation, font size, the format toolbar, the outline-style dropdown, Delete/Backspace, copy/cut/paste, or keyboard routing.
+- The implementation changes indentation, paste cleanup, list behavior, hyperlink creation, font size, highlight color, the format toolbar, the outline-style dropdown, Delete/Backspace, copy/cut/paste, or keyboard routing.
 
 Expected:
-- The behavior change is made in the shared editor behavior source or deliberately shared helper.
+- The behavior change is made in the shared editor behavior source or shared formatting-controller hook.
 - Each target surface receives the same user-facing semantics.
-- The unified editor target inventory is Logic Gate editor text, node editor text boxes from every full node editor opener, project text boxes/information editors, My Triage compose/reply, Shared Triage compose/reply, and attached-email reply bodies that send or draft real mail.
+- The unified editor target inventory is Logic Gate editor text, node editor text boxes from every full node editor opener, project text boxes/information editors, My Triage compose/reply, Shared Triage compose/reply, attached-email reply bodies that send or draft real mail, and personal/shared mailbox signatures.
 - Project critical-path node text boxes and Project Logic Gates / Nodes standalone node-popup text boxes receive the same node editor semantics.
 - No target surface keeps a separate local implementation that disagrees with the shared behavior.
 - Tests cover the shared behavior once and prove each adapter/mount uses that shared behavior.
+- Every rich target mounts the one `EditorDocumentSurface` editable host and uses `useEditorDocumentFormattingController`.
 - Mail compose/reply adapters do not call browser `document.execCommand` directly for rich editing commands when a shared editor command exists.
-- Mail compose/reply and attached-email reply adapters expose numbered list, indent, outdent, bullet list, checklist, font size, bold, underline, link, and table controls where table insertion is supported.
-- Font size, bold, underline, the outline-style dropdown, and table insertion where supported are supplied by the shared editor toolbar control source rather than a compose-only, project-only, Logic Gate-only, node-only, or attached-reply-only toolbar implementation.
+- Mail compose/reply, attached-email reply, and signature adapters expose numbered list, indent, outdent, bullet list, checklist, font size, bold, underline, highlight color, link, and table controls where table insertion is supported.
+- Font size, bold, underline, highlight color, the outline-style dropdown, and table insertion where supported are supplied by the shared editor toolbar control source rather than a compose-only, signature-only, project-only, Logic Gate-only, node-only, or attached-reply-only toolbar implementation.
 - The same visible toolbar styling is used for the format controls wherever the shared toolbar appears.
 - The outline-style dropdown lists Automatic Numbering, Indent Guides, Bullet Points, and Checklist from the shared inventory.
 - Font-size minus/value/plus actions route through the shared formatting helper/controller for selected text and sticky collapsed-caret formatting.
-- Toolbar focus changes do not discard the editor range; Bold and Underline toggle off on their second activation and active state follows the caret/selection.
+- Toolbar focus changes do not discard the editor range; Bold and Underline toggle off on their second activation; font state follows the caret, selection, or pending collapsed-caret format; and highlight state follows the selected range.
+- Highlight selection, clearing, and sanitized serialization use one shared command and palette on every target; collapsed-caret highlight is a no-op.
 - Project text-box adapters expose the shared node-style format and outline controls and route those actions through the shared editor controller.
 
 ### Scenario ED-S2: Domain Persistence Stays Separate
@@ -111,9 +139,10 @@ Business logic covered:
 - ED1
 - ED3
 - ED25
+- ED37
 
 Given:
-- A user edits node, Logic Gate, project, personal email, and shared email rich editor content.
+- A user edits node, Logic Gate, project, personal email, shared email, and mailbox signature rich content.
 
 Expected:
 - Node edits persist to node information/projection state.
@@ -121,9 +150,10 @@ Expected:
 - Project edits persist to project information/projection state.
 - Personal email compose/reply sends or drafts through the personal mailbox scope.
 - Shared email compose/reply sends or drafts through the selected shared mailbox scope.
+- Personal and shared signatures save through their current mailbox-scoped signature record.
 - The shared editor behavior does not force unrelated domains into one backend persistence path.
 
-### Scenario ED-S3: Email Compose And Reply Use Unified Rich Editing
+### Scenario ED-S3: Email Compose, Reply, And Signature Use Unified Rich Editing
 
 Business logic covered:
 - ED2
@@ -135,9 +165,11 @@ Business logic covered:
 - ED21
 - ED32
 - ED33
+- ED37
+- ED40
 
 Given:
-- A user writes a personal compose, personal reply, shared compose, shared reply, or attached-email reply body.
+- A user writes a personal compose, personal reply, shared compose, shared reply, attached-email reply body, or mailbox-scoped email signature.
 - The body contains links, pasted content, rich formatting, indented blocks, or legacy plain text loaded from a draft.
 
 Expected:
@@ -146,8 +178,9 @@ Expected:
 - Sent or saved rich content is sanitized.
 - Indented blocks remain indented in sent HTML instead of flattening.
 - Numbered-list toolbar actions create or toggle a shared automatic numbered/alphanumerical list item rather than only changing an outline-style setting.
-- The visible mail toolbar includes the shared font-size control, bold/underline controls, and outline-style dropdown used by the main editor.
-- The numeric font-size picker restores the prior editor selection before applying, and Bold/Underline are reversible toggles whose serialized HTML preserves the final state.
+- The visible compose/reply/signature toolbar includes the shared font-size control, bold/underline controls, highlight-color control, and outline-style dropdown used by the main editor.
+- The numeric font-size picker and highlight palette restore the prior editor selection before applying, pending collapsed-caret font-size state remains visible, and Bold/Underline are reversible toggles whose serialized HTML preserves the final state.
+- Signature content round-trips as sanitized rich editor HTML and inserting it into a message preserves formatting and highlight color.
 - A body containing only a pasted attachment-backed image is sendable without adding placeholder text.
 
 ### Scenario ED-S4: Chat Is Excluded
@@ -189,6 +222,13 @@ Business logic covered:
 - ED11
 - ED24
 
+Given:
+- A V1 unified editor implementation pass is changing rich editor behavior.
+
+Expected:
+- The pass does not spend implementation or verification time on legacy Map behavior.
+- Map code is touched only if a shared helper used by live non-map editor surfaces requires a compatible update.
+
 ### Scenario ED-S7: Unified Rich-Editor Images Use Mango Attachments
 
 Business logic covered:
@@ -216,12 +256,32 @@ Expected:
 - Node upload progress stays outside the rich document, does not dirty editor content, and refreshes the shared completed-attachment query only after completion.
 - Deleting the origin text box keeps the projection deleted and preserves node-owned completed files/attached emails; an authorized in-flight upload may complete without recreating the box.
 
+### Scenario ED-S8: One Rich DOM Host, Shared Formatting Controller, Signature, And Highlight
+
+Business logic covered:
+- ED13
+- ED29
+- ED31
+- ED32
+- ED37
+- ED38
+- ED39
+- ED40
+
 Given:
-- A V1 unified editor implementation pass is changing rich editor behavior.
+- A user selects text, places a collapsed caret, or returns to a saved rich selection in any unified editor surface.
+- The user changes font size or chooses/clears a highlight color from the shared toolbar.
+- The active surface may be Logic Gate, node, project, My Triage, Shared Triage, attached-email reply, or personal/shared email signature.
 
 Expected:
-- The pass does not spend implementation or verification time on legacy Map behavior.
-- Map code is touched only if a shared helper used by live non-map editor surfaces requires a compatible update.
+- `EditorDocumentSurface` is the only target component that emits the rich `contentEditable` DOM element.
+- Each domain host uses `useEditorDocumentFormattingController` and passes its own save/send callbacks to the shared surface instead of reimplementing formatting commands.
+- Toolbar interaction restores the last valid editor range before font or highlight commands run.
+- A non-collapsed range is formatted immediately; a collapsed caret retains visible pending font-size state and applies it to subsequently typed text, while a highlight command at a collapsed caret makes no document or pending-format change.
+- `EditorTabBar` exposes one shared highlight palette, including a clear/no-highlight choice, on every target surface.
+- `applyEditorHighlightColorToRoot` is the single highlight mutation path.
+- The sanitizer preserves only supported safe highlight colors, strips unsupported background styling, and serialized/saved/reloaded rich HTML retains supported highlighting.
+- The signature surface mounts `EditorTabBar` and `UnifiedRichEditorSurface`, never a native signature `<textarea>`.
 
 ---
 
@@ -230,6 +290,8 @@ Expected:
 > Attribution: This entire appended audit section was explicitly authored by Codex, the OpenAI coding agent that performed the editor-semantics audit for this repository. These are Codex's findings and observations, not a pre-existing MangoRTS product specification.
 >
 > Investigation boundary: Codex made no code changes during this audit. The local PowerShell runner failed before every process start with Windows error 1312, so Codex could not inspect uncommitted-only local differences or execute the test suite. To continue without guessing, Codex performed a read-only inspection of the connected GitHub repository, `ScoobyXD/MangoRTSDev`, at remote `main` commit `1d3a3a119d835ae78619fbc5d683459aec30592b`. Any local-only changes after or outside that commit require a follow-up comparison.
+>
+> Historical-status note: this section records the pre-remediation snapshot at that commit. Its observations about multiple rich DOM wrappers, local formatting controllers, and the native signature textarea explain the defects that prompted ED37-ED40; the required contract and surface inventory above supersede those observations for the implementation end state.
 
 ### Codex Audit Summary
 
@@ -373,7 +435,7 @@ These surfaces do not inherit the rich editor's list, indentation, paste, image,
 - Ctrl/Cmd+B and Ctrl/Cmd+U remain browser rich-text commands, with mutations subsequently sanitized and saved.
 - Font size is clamped to 10-28px for toolbar operations.
 - A collapsed caret can hold a pending font size for the next typed character.
-- Escape clears editor selections/menus and blurs the editor, which also flushes pending persistence.
+- Escape inside the editable document clears editor selections/menus and blurs the document, which also flushes pending persistence. Toolbar inputs and popovers follow the focus-preserving cancellation rules in ED32.
 - Pasted and legacy plain-text URLs are linkified only for HTTP(S) URLs.
 - Typing a URL does not generally create a link automatically.
 - Clicking an existing link opens it in a new tab rather than placing the caret in it.

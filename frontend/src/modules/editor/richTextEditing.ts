@@ -32,10 +32,27 @@ export const EDITOR_LIST_ITEM_ATTRIBUTE = "data-mango-editor-list-item";
 export const EDITOR_CHECKLIST_CHECKED_ATTRIBUTE = "data-mango-editor-checklist-checked";
 export const EDITOR_LIST_MARKER_ATTRIBUTE = "data-mango-editor-list-marker";
 export const EDITOR_EMAIL_BODY_ATTRIBUTE = "data-mango-email-body";
+export const EDITOR_HIGHLIGHT_ATTRIBUTE = "data-mango-editor-highlight";
+export const EDITOR_HIGHLIGHT_CLEAR_VALUE = "none";
 
 export type EditorListKind = "bullet" | "checklist";
 export type EditorListMarkerStyle = "solid-circle" | "hollow-circle" | "solid-square" | "hollow-square";
 export type EditorTableTextAlign = "left" | "center" | "right";
+export type EditorHighlightColor = `#${string}`;
+export type EditorHighlightColorItem = { id: string; label: string; color: EditorHighlightColor };
+
+export const EDITOR_HIGHLIGHT_COLOR_ITEMS: readonly EditorHighlightColorItem[] = [
+  { id: "yellow", label: "Yellow", color: "#fef08a" },
+  { id: "orange", label: "Orange", color: "#fed7aa" },
+  { id: "red", label: "Red", color: "#fecaca" },
+  { id: "pink", label: "Pink", color: "#fbcfe8" },
+  { id: "purple", label: "Purple", color: "#ddd6fe" },
+  { id: "blue", label: "Blue", color: "#bfdbfe" },
+  { id: "cyan", label: "Cyan", color: "#a5f3fc" },
+  { id: "green", label: "Green", color: "#bbf7d0" },
+] as const;
+
+export type EditorElementHighlight = { explicit: boolean; color: EditorHighlightColor | null };
 
 export const EDITOR_TABLE_DEFAULT_ROWS = 3;
 export const EDITOR_TABLE_DEFAULT_COLUMNS = 3;
@@ -123,6 +140,128 @@ function applySafeFontSize(source: HTMLElement, target: HTMLElement) {
   const parsed = Number.parseFloat(fontSize);
   if (!Number.isFinite(parsed) || parsed < 6 || parsed > 96) return;
   target.style.fontSize = `${Math.round(parsed)}px`;
+}
+
+function editorHighlightByteHex(value: number): string {
+  return Math.round(value).toString(16).padStart(2, "0");
+}
+
+const EDITOR_HIGHLIGHT_NAMED_COLOR_ALIASES: Readonly<Record<string, EditorHighlightColor>> = {
+  yellow: "#ffff00",
+  orange: "#ffa500",
+  red: "#ff0000",
+  pink: "#ffc0cb",
+  purple: "#800080",
+  blue: "#0000ff",
+  cyan: "#00ffff",
+  aqua: "#00ffff",
+  green: "#008000",
+  lime: "#00ff00",
+};
+
+export function normalizeEditorHighlightColor(value: string | null | undefined): EditorHighlightColor | null {
+  const cleanValue = value?.trim().toLowerCase() ?? "";
+  if (!cleanValue) return null;
+  const named = EDITOR_HIGHLIGHT_NAMED_COLOR_ALIASES[cleanValue];
+  if (named) return named;
+  const shortHex = /^#([0-9a-f]{3})$/.exec(cleanValue);
+  if (shortHex) {
+    const [r, g, b] = shortHex[1].split("");
+    return `#${r}${r}${g}${g}${b}${b}` as EditorHighlightColor;
+  }
+  const longHex = /^#([0-9a-f]{6})$/.exec(cleanValue);
+  if (longHex) return `#${longHex[1]}` as EditorHighlightColor;
+  const rgb = /^rgba?\(\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*([0-9]+(?:\.[0-9]+)?)\s*,\s*([0-9]+(?:\.[0-9]+)?)(?:\s*,\s*([0-9]+(?:\.[0-9]+)?))?\s*\)$/.exec(cleanValue);
+  if (!rgb) return null;
+  const red = Number.parseFloat(rgb[1]);
+  const green = Number.parseFloat(rgb[2]);
+  const blue = Number.parseFloat(rgb[3]);
+  const alpha = rgb[4] === undefined ? 1 : Number.parseFloat(rgb[4]);
+  if (![red, green, blue, alpha].every(Number.isFinite)) return null;
+  if (red < 0 || red > 255 || green < 0 || green > 255 || blue < 0 || blue > 255 || alpha !== 1) return null;
+  return `#${editorHighlightByteHex(red)}${editorHighlightByteHex(green)}${editorHighlightByteHex(blue)}` as EditorHighlightColor;
+}
+
+export function readEditorElementHighlight(element: HTMLElement): EditorElementHighlight {
+  const storedValue = element.getAttribute(EDITOR_HIGHLIGHT_ATTRIBUTE)?.trim().toLowerCase() ?? "";
+  if (storedValue === EDITOR_HIGHLIGHT_CLEAR_VALUE) return { explicit: true, color: null };
+  const storedColor = normalizeEditorHighlightColor(storedValue);
+  if (storedColor) return { explicit: true, color: storedColor };
+  const styleColor = normalizeEditorHighlightColor(element.style.backgroundColor);
+  return styleColor ? { explicit: true, color: styleColor } : { explicit: false, color: null };
+}
+
+export function setEditorElementHighlight(element: HTMLElement, color: EditorHighlightColor | null) {
+  if (color) {
+    element.setAttribute(EDITOR_HIGHLIGHT_ATTRIBUTE, color);
+    element.style.backgroundColor = color;
+    return;
+  }
+  element.setAttribute(EDITOR_HIGHLIGHT_ATTRIBUTE, EDITOR_HIGHLIGHT_CLEAR_VALUE);
+  element.style.backgroundColor = "transparent";
+}
+
+export function removeEditorElementHighlight(element: HTMLElement) {
+  element.removeAttribute(EDITOR_HIGHLIGHT_ATTRIBUTE);
+  element.style.removeProperty("background-color");
+}
+
+function appendCloneWhenNotEmpty(clone: HTMLElement, output: Node[]) {
+  if (clone.childNodes.length > 0) output.push(clone);
+}
+
+function liftEditorHighlightSpanOutOfAncestor(target: HTMLSpanElement, ancestor: HTMLElement) {
+  let pivot: HTMLElement = target;
+  while (pivot.parentElement && pivot.parentElement !== ancestor) {
+    const wrapper = pivot.parentElement;
+    const before = wrapper.cloneNode(false) as HTMLElement;
+    const after = wrapper.cloneNode(false) as HTMLElement;
+    while (wrapper.firstChild && wrapper.firstChild !== pivot) before.appendChild(wrapper.firstChild);
+    while (pivot.nextSibling) after.appendChild(pivot.nextSibling);
+    const middle = wrapper.cloneNode(false) as HTMLElement;
+    middle.appendChild(pivot);
+    const replacements: Node[] = [];
+    appendCloneWhenNotEmpty(before, replacements);
+    replacements.push(middle);
+    appendCloneWhenNotEmpty(after, replacements);
+    wrapper.replaceWith(...replacements);
+    pivot = middle;
+  }
+  if (pivot.parentElement !== ancestor) return;
+  const before = ancestor.cloneNode(false) as HTMLElement;
+  const after = ancestor.cloneNode(false) as HTMLElement;
+  while (ancestor.firstChild && ancestor.firstChild !== pivot) before.appendChild(ancestor.firstChild);
+  while (pivot.nextSibling) after.appendChild(pivot.nextSibling);
+  const replacements: Node[] = [];
+  appendCloneWhenNotEmpty(before, replacements);
+  replacements.push(pivot);
+  appendCloneWhenNotEmpty(after, replacements);
+  ancestor.replaceWith(...replacements);
+}
+
+/** Splits outer highlight wrappers so applied or cleared selections are never represented by nested transparent spans. */
+export function normalizeEditorHighlightSpans(root: HTMLElement) {
+  const highlightedSpans = Array.from(root.querySelectorAll(`span[${EDITOR_HIGHLIGHT_ATTRIBUTE}]`)) as HTMLSpanElement[];
+  for (const span of highlightedSpans) {
+    if (!root.contains(span)) continue;
+    let ancestor = span.parentElement;
+    while (ancestor && ancestor !== root) {
+      if (readEditorElementHighlight(ancestor).explicit) {
+        liftEditorHighlightSpanOutOfAncestor(span, ancestor);
+        ancestor = span.parentElement;
+        continue;
+      }
+      ancestor = ancestor.parentElement;
+    }
+    if (readEditorElementHighlight(span).explicit && readEditorElementHighlight(span).color === null) {
+      removeEditorElementHighlight(span);
+    }
+  }
+}
+
+function applySafeHighlight(source: HTMLElement, target: HTMLElement) {
+  const highlight = readEditorElementHighlight(source);
+  if (highlight.explicit) setEditorElementHighlight(target, highlight.color);
 }
 
 export function readEditorTableTextAlignValue(value: string | null | undefined): EditorTableTextAlign | null {
@@ -647,7 +786,7 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
     return;
   }
 
-  if (tagName === "span") {
+  if (tagName === "span" || tagName === "mark") {
     const imageData = readEditorImageData(element);
     if (imageData) {
       target.appendChild(createEditorImageFrame(ownerDocument, imageData, { durable: true }));
@@ -666,6 +805,7 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
     }
     const span = ownerDocument.createElement("span");
     applySafeFontSize(element, span);
+    applySafeHighlight(element, span);
     appendSanitizedChildren(element, span, ownerDocument);
     target.appendChild(span);
     return;
@@ -749,6 +889,7 @@ function collapseRedundantFontSizeSpans(root: HTMLElement) {
     for (const span of spans) {
       if (span.getAttribute(EDITOR_IMAGE_NODE_ATTRIBUTE) === "true") continue;
       if (!hasSafeFontSize(span)) continue;
+      if (readEditorElementHighlight(span).explicit) continue;
       const meaningfulChildren = Array.from(span.childNodes).filter((child) => !isEmptyTextNode(child));
       if (meaningfulChildren.length !== 1) continue;
       const onlyChild = meaningfulChildren[0];
@@ -804,6 +945,7 @@ export function sanitizeEditorDocumentHTML(html: string): string {
   appendSanitizedChildren(template.content, clean, document);
   trimEditorPasteBoundaryWhitespace(clean);
   collapseRedundantFontSizeSpans(clean);
+  normalizeEditorHighlightSpans(clean);
   applyEditorListMarkerStyles(clean);
   return collapseRedundantFontSizeSpanHTML(clean.innerHTML);
 }

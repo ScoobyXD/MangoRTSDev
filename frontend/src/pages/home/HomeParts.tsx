@@ -21,6 +21,7 @@ import {
   downloadMangoAttachment,
   loadMangoAttachmentObjectURL,
   mangoEmailDraftResourceID,
+  mangoEmailSignatureResourceID,
   uploadMangoAttachment,
 } from "../../modules/attachments/attachmentApi";
 import { downloadEmailAttachment, parseEmailAddressList, respondToCalendarInvite, type CalendarInviteRSVPStatus, type CommunicationsSharedInbox, type CommunicationsSharedInboxGVICRole, type CommunicationsSharedInboxGVICPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
@@ -29,6 +30,7 @@ import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "../../m
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "../../modules/editor/UnifiedRichEditorSurface";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../../modules/editor/UnifiedNodeShell";
 import type { EditorOutlineStyleID } from "../../modules/editor/plainTextEditing";
+import type { EditorHighlightColor } from "../../modules/editor/richTextEditing";
 import type { EditorSelectionInlineFormatState } from "../../modules/editor/useEditorDocumentSurfaceHandlers";
 import { EDITOR_DOCUMENT_FONT_SIZE_PX } from "../../modules/editor/useEditorPreferences";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../../modules/folders/companyExplorerFolders";
@@ -4951,23 +4953,25 @@ function matchingCompanyUsers(users: CompanyUser[], value: string, existingRecip
     .slice(0, 6);
 }
 
-export function ComposePanel({ compose, busy, replyMessage, emailSignature, companyID, currentUserID, companyUsers, onChange, onCancel, onSubmit, onEmailSignatureChange, onSaveEmailSignature, onSaveDraft }: {
+export function ComposePanel({ compose, busy, replyMessage, emailSignature, emailSignatureAccountEmail, companyID, currentUserID, companyUsers, onChange, onCancel, onSubmit, onEmailSignatureChange, onSaveEmailSignature, onSaveDraft }: {
   compose: ComposeState;
   busy: boolean;
   replyMessage?: EmailMessage | null;
   emailSignature: string;
+  emailSignatureAccountEmail: string;
   companyID: string;
   currentUserID: string;
   companyUsers: CompanyUser[];
-  onChange: (next: ComposeState) => void;
+  onChange: React.Dispatch<React.SetStateAction<ComposeState>>;
   onCancel: () => void;
-  onSubmit: (event: React.FormEvent) => void;
+  onSubmit: (event: React.FormEvent, compose: ComposeState) => void;
   onEmailSignatureChange: (value: string) => void;
-  onSaveEmailSignature: () => void;
-  onSaveDraft: () => void;
+  onSaveEmailSignature: (signature: string) => void;
+  onSaveDraft: (compose: ComposeState) => void;
 }) {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const bodyEditorControllerRef = React.useRef<UnifiedRichEditorFormattingController | null>(null);
+  const signatureEditorControllerRef = React.useRef<UnifiedRichEditorFormattingController | null>(null);
   const recipientInputRefs = React.useRef<Record<ComposeRecipientField, HTMLInputElement | null>>({ to: null, cc: null, bcc: null });
   const [attachmentError, setAttachmentError] = React.useState("");
   const [signatureEditorOpen, setSignatureEditorOpen] = React.useState(false);
@@ -4980,9 +4984,20 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   const [bodyToolbarTab, setBodyToolbarTab] = React.useState<EditorTabID>("format");
   const [bodySelectionFontSize, setBodySelectionFontSize] = React.useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [bodySelectionInlineFormat, setBodySelectionInlineFormat] = React.useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
+  const [bodyHighlightColor, setBodyHighlightColor] = React.useState<EditorHighlightColor | null>(null);
+  const [signatureOutlineStyle, setSignatureOutlineStyle] = React.useState<EditorOutlineStyleID>("automatic-outline-numbering");
+  const [signatureToolbarTab, setSignatureToolbarTab] = React.useState<EditorTabID>("format");
+  const [signatureSelectionFontSize, setSignatureSelectionFontSize] = React.useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
+  const [signatureSelectionInlineFormat, setSignatureSelectionInlineFormat] = React.useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
+  const [signatureHighlightColor, setSignatureHighlightColor] = React.useState<EditorHighlightColor | null>(null);
   const apiBase = readAuthConfig().apiBase;
   const attachmentRequestJSON = React.useMemo(() => defaultAttachmentRequestJSON(apiBase), [apiBase]);
-  const update = (patch: Partial<ComposeState>) => onChange({ ...compose, ...patch });
+  const update = (patch: Partial<ComposeState> | ((current: ComposeState) => Partial<ComposeState>)) => {
+    onChange((current) => ({
+      ...current,
+      ...(typeof patch === "function" ? patch(current) : patch),
+    }));
+  };
   const totalAttachmentBytes = compose.attachments.reduce((sum, attachment) => sum + Math.max(0, attachment.size || 0), 0);
   React.useEffect(() => {
     setReplyEditorHeight(readMailReplyEditorHeight(companyID, currentUserID, compose.sharedInboxID, compose.accountEmail));
@@ -5176,7 +5191,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
         };
       }));
       const additions = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-      if (additions.length > 0) update({ draftID: cleanDraftID, attachments: [...compose.attachments, ...additions] });
+      if (additions.length > 0) update((current) => ({ draftID: cleanDraftID, attachments: [...current.attachments, ...additions] }));
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
       if (failures.length > 0) {
         const first = failures[0]?.reason;
@@ -5187,13 +5202,14 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     }
   };
   const removeAttachment = (attachmentID: string) => {
-    update({ attachments: compose.attachments.filter((attachment) => attachment.id !== attachmentID) });
+    update((current) => ({ attachments: current.attachments.filter((attachment) => attachment.id !== attachmentID) }));
   };
   const insertSignature = () => {
     const signature = emailSignature.trim();
     if (!signature) return;
-    const body = applyHomeMailSignature(compose.body, signature);
-    if (body === compose.body) return;
+    const currentBody = bodyEditorControllerRef.current?.flush() ?? compose.body;
+    const body = applyHomeMailSignature(currentBody, signature);
+    if (body === currentBody) return;
     update({ body });
   };
   const syncBodyToolbarFormatState = () => {
@@ -5201,6 +5217,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
     if (!state) return;
     setBodySelectionFontSize(state.fontSize);
     setBodySelectionInlineFormat({ bold: state.bold, underline: state.underline });
+    setBodyHighlightColor(state.highlightColor);
   };
   const adjustBodyFontSize = (delta: number) => {
     bodyEditorControllerRef.current?.adjustFontSize(delta);
@@ -5213,6 +5230,33 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
   const toggleBodyInlineFormat = (command: "bold" | "underline") => {
     bodyEditorControllerRef.current?.toggleInlineFormat(command);
     syncBodyToolbarFormatState();
+  };
+  const setBodySelectionHighlightColor = (color: EditorHighlightColor | null) => {
+    bodyEditorControllerRef.current?.applyHighlightColor(color);
+    syncBodyToolbarFormatState();
+  };
+  const syncSignatureToolbarFormatState = () => {
+    const state = signatureEditorControllerRef.current?.readFormatState();
+    if (!state) return;
+    setSignatureSelectionFontSize(state.fontSize);
+    setSignatureSelectionInlineFormat({ bold: state.bold, underline: state.underline });
+    setSignatureHighlightColor(state.highlightColor);
+  };
+  const adjustSignatureFontSize = (delta: number) => {
+    signatureEditorControllerRef.current?.adjustFontSize(delta);
+    syncSignatureToolbarFormatState();
+  };
+  const setSignatureFontSize = (fontSize: number) => {
+    signatureEditorControllerRef.current?.applyFontSizeValue(fontSize);
+    syncSignatureToolbarFormatState();
+  };
+  const toggleSignatureInlineFormat = (command: "bold" | "underline") => {
+    signatureEditorControllerRef.current?.toggleInlineFormat(command);
+    syncSignatureToolbarFormatState();
+  };
+  const setSignatureSelectionHighlightColor = (color: EditorHighlightColor | null) => {
+    signatureEditorControllerRef.current?.applyHighlightColor(color);
+    syncSignatureToolbarFormatState();
   };
   const isReplyMode = !!replyMessage;
   const startReplyEditorResize = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -5298,9 +5342,32 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
       editorSurface: composeEditorSurfaceID,
     }
     : undefined;
+  const signatureAttachmentResourceID = React.useMemo(() => mangoEmailSignatureResourceID({
+    userID: currentUserID,
+    accountEmail: emailSignatureAccountEmail,
+    sharedInboxID: compose.sharedInboxID,
+  }), [compose.sharedInboxID, currentUserID, emailSignatureAccountEmail]);
+  const signatureEditorImageAttachmentContext = companyID.trim() && signatureAttachmentResourceID
+    ? {
+      requestJSON: attachmentRequestJSON,
+      apiBase,
+      companyID: companyID.trim(),
+      resourceType: "email_signature" as const,
+      resourceID: signatureAttachmentResourceID,
+      editorSurface: compose.sharedInboxID.trim() ? "shared-email-signature" : "personal-email-signature",
+    }
+    : undefined;
   const handleSubmit = (event: React.FormEvent) => {
-    bodyEditorControllerRef.current?.flush();
-    onSubmit(event);
+    const body = bodyEditorControllerRef.current?.flush() ?? compose.body;
+    const submittedCompose = body === compose.body ? compose : { ...compose, body };
+    onChange(submittedCompose);
+    onSubmit(event, submittedCompose);
+  };
+  const handleSaveDraft = () => {
+    const body = bodyEditorControllerRef.current?.flush() ?? compose.body;
+    const composeToSave = body === compose.body ? compose : { ...compose, body };
+    onChange(composeToSave);
+    onSaveDraft(composeToSave);
   };
   return (
     <form style={composePanelStyle(isReplyMode)} onSubmit={handleSubmit}>
@@ -5315,7 +5382,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           </div>
         )}
         <div style={isReplyMode ? composeHeaderActionsStyle : { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <button type="button" style={mailPanelSmallButtonStyle} onClick={onSaveDraft}>Save to My Drafts</button>
+          <button type="button" style={mailPanelSmallButtonStyle} onClick={handleSaveDraft}>Save to My Drafts</button>
           <button type="button" style={mailPanelSmallButtonStyle} onClick={onCancel}>Close</button>
         </div>
       </div>
@@ -5363,8 +5430,10 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
             onSetSelectionFontSize={setBodyFontSize}
             boldActive={bodySelectionInlineFormat.bold}
             underlineActive={bodySelectionInlineFormat.underline}
+            highlightColor={bodyHighlightColor}
             onToggleBold={() => toggleBodyInlineFormat("bold")}
             onToggleUnderline={() => toggleBodyInlineFormat("underline")}
+            onSetSelectionHighlightColor={setBodySelectionHighlightColor}
             onOutlineStyleFocus={() => setBodyToolbarTab("outline-styles")}
             onOutlineStyleChange={(nextOutlineStyle) => {
               setBodyOutlineStyle(nextOutlineStyle);
@@ -5375,6 +5444,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           />
         </div>
         <UnifiedRichEditorSurface
+          key={`compose-editor:${composeAttachmentResourceID || `${composeEditorSurfaceID}:${compose.draftID}:${compose.accountEmail}`}`}
           value={compose.body}
           outlineStyle={bodyOutlineStyle}
           surfaceID={composeEditorSurfaceID}
@@ -5387,6 +5457,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
           style={richEditorStyle}
           onSelectionFontSizeChange={setBodySelectionFontSize}
           onSelectionInlineFormatChange={setBodySelectionInlineFormat}
+          onSelectionHighlightColorChange={setBodyHighlightColor}
           editorImageAttachmentContext={composeEditorImageAttachmentContext}
           onEditorImageAttachmentError={setAttachmentError}
           onChange={(body) => update({ body })}
@@ -5428,14 +5499,63 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, comp
         )}
         {signatureEditorOpen && (
           <div style={mailComposeSignatureBoxStyle}>
-            <textarea
-              style={mailComposeSignatureTextareaStyle}
+            <EditorTabBar
+              activeTab={signatureToolbarTab}
+              outlineStyle={signatureOutlineStyle}
+              accent={HOME_CYAN}
+              strokeColor="rgba(148, 163, 184, 0.34)"
+              surfaceText="#111827"
+              tabBackground="rgba(255, 255, 255, 0.76)"
+              tabSelectedBackground="rgba(240, 253, 255, 0.9)"
+              outlineMenuAccent={HOME_CYAN}
+              onSelectTab={setSignatureToolbarTab}
+              onAdjustSelectionFontSize={adjustSignatureFontSize}
+              documentFontSize={signatureSelectionFontSize}
+              onSetSelectionFontSize={setSignatureFontSize}
+              boldActive={signatureSelectionInlineFormat.bold}
+              underlineActive={signatureSelectionInlineFormat.underline}
+              highlightColor={signatureHighlightColor}
+              onToggleBold={() => toggleSignatureInlineFormat("bold")}
+              onToggleUnderline={() => toggleSignatureInlineFormat("underline")}
+              onSetSelectionHighlightColor={setSignatureSelectionHighlightColor}
+              onOutlineStyleFocus={() => setSignatureToolbarTab("outline-styles")}
+              onOutlineStyleChange={(nextOutlineStyle) => {
+                setSignatureOutlineStyle(nextOutlineStyle);
+                setSignatureToolbarTab("outline-styles");
+              }}
+              reserveHeaderOffset={false}
+              visibleTabIDs={UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS}
+            />
+            <UnifiedRichEditorSurface
+              key={`signature-editor:${signatureAttachmentResourceID || `${compose.sharedInboxID}:${emailSignatureAccountEmail}`}`}
               value={emailSignature}
-              onChange={(event) => onEmailSignatureChange(event.target.value)}
+              outlineStyle={signatureOutlineStyle}
+              surfaceID="email-signature"
+              ariaLabel="Email signature"
               placeholder="Email signature"
+              surfaceText="#111827"
+              accent={HOME_CYAN}
+              indentGuideColor="rgba(14,165,233,0.38)"
+              formattingControllerRef={signatureEditorControllerRef}
+              style={mailComposeSignatureTextareaStyle}
+              onSelectionFontSizeChange={setSignatureSelectionFontSize}
+              onSelectionInlineFormatChange={setSignatureSelectionInlineFormat}
+              onSelectionHighlightColorChange={setSignatureHighlightColor}
+              editorImageAttachmentContext={signatureEditorImageAttachmentContext}
+              onEditorImageAttachmentError={setAttachmentError}
+              onChange={onEmailSignatureChange}
             />
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" style={mailPanelSmallButtonStyle} onClick={onSaveEmailSignature}>Save signature</button>
+              <button
+                type="button"
+                style={mailPanelSmallButtonStyle}
+                onClick={() => {
+                  const signature = signatureEditorControllerRef.current?.flush() ?? emailSignature;
+                  onSaveEmailSignature(signature);
+                }}
+              >
+                Save signature
+              </button>
               <button type="button" style={mailPanelSmallButtonStyle} onClick={insertSignature} disabled={!emailSignature.trim()}>Insert signature</button>
             </div>
           </div>

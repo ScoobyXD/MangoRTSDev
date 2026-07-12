@@ -58,6 +58,7 @@ import {
   EDITOR_DOCUMENT_BOTTOM_BUFFER_LINES,
   readEditorDocumentText,
   serializeEditorDocumentHTML,
+  type EditorHighlightColor,
 } from "./richTextEditing";
 import {
   documentTargetKey,
@@ -79,9 +80,9 @@ import {
   useEditorPreferences,
 } from "./useEditorPreferences";
 import {
-  applyEditorSelectionFontSizeToRoot,
-  applyEditorInlineFormatToRoot,
-  readEditorSelectionFormatState,
+  getEditorSelectionOffsets,
+  setEditorSelectionByOffsets,
+  useEditorDocumentFormattingController,
   useEditorDocumentSurfaceHandlers,
   type EditorDocumentFormattingController,
   type EditorInlineStyleCommand,
@@ -636,6 +637,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [documentFontSize, setDocumentFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [selectionFontSize, setSelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [selectionInlineFormat, setSelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
+  const [selectionHighlightColor, setSelectionHighlightColor] = useState<EditorHighlightColor | null>(null);
+  const [nodeFormattingControllerAvailable, setNodeFormattingControllerAvailable] = useState(false);
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -665,7 +668,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const lastAppliedSelectionChangedAtRef = useRef(0);
   const shouldFocusEditorForSelectionRef = useRef(true);
   const pendingEditorFontSizeRef = useRef<number | null>(null);
+  const restoreDocumentSelectionForHydrationRef = useRef<((root: HTMLElement) => boolean) | null>(null);
   const nodeFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
+  const logicFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
   const nodeWorkspaceSaveControllerRef = useRef<NodeWorkspaceSaveController | null>(null);
   const autoSaveVersionTimerRef = useRef<number | null>(null);
   const saveVersionStatusTimerRef = useRef<number | null>(null);
@@ -981,10 +986,13 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
     const currentHTML = serializeEditorDocumentHTML(element);
     if (currentHTML === payload.documentHTML) return;
+    restoreDocumentSelectionForHydrationRef.current?.(element);
+    const selectionOffsets = getEditorSelectionOffsets(element);
     applyingRemoteCollaborationRef.current = true;
     try {
       const nextHTML = deserializeEditorDocumentHTML(payload.documentHTML);
       element.innerHTML = nextHTML;
+      if (selectionOffsets) setEditorSelectionByOffsets(element, selectionOffsets.start, selectionOffsets.end);
       resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
       documentDraftRef.current = payload.documentHTML;
       if (payload.informationID && !documentInformationIDRef.current) {
@@ -1029,22 +1037,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setSelectionFontSize(clampEditorSelectionFontSize(nextFontSize));
   }, []);
 
+  const currentFormattingController = useCallback(() => (
+    linkedEntityKind === "node" ? nodeFormattingControllerRef.current : logicFormattingControllerRef.current
+  ), [linkedEntityKind]);
+
   const applyEditorSelectionFontSizeValue = useCallback((nextFontSizeInput: number) => {
     if (!linkedEntityCanEdit) return;
-    if (linkedEntityKind === "node") {
-      nodeFormattingControllerRef.current?.applyFontSizeValue(nextFontSizeInput);
-      return;
-    }
-    const element = editorDocumentRef.current;
-    if (!element) return;
-    applyEditorSelectionFontSizeToRoot(element, nextFontSizeInput, {
-      documentUndoHistory: documentUndoHistoryRef.current,
-      pendingEditorFontSizeRef,
-      scheduleDocumentSave: scheduleCollaborativeDocumentSave,
-      scheduleIndentGuideUpdate,
-      onSelectionFontSizeChange: updateSelectionFontSize,
-    });
-  }, [linkedEntityCanEdit, linkedEntityKind, scheduleCollaborativeDocumentSave, scheduleIndentGuideUpdate, updateSelectionFontSize]);
+    currentFormattingController()?.applyFontSizeValue(nextFontSizeInput);
+  }, [currentFormattingController, linkedEntityCanEdit]);
 
   const updateSelectionInlineFormat = useCallback((nextFormat: EditorSelectionInlineFormatState) => {
     setSelectionInlineFormat(nextFormat);
@@ -1052,41 +1052,18 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const toggleEditorInlineFormat = useCallback((command: EditorInlineStyleCommand) => {
     if (!linkedEntityCanEdit) return;
-    if (linkedEntityKind === "node") {
-      const applied = nodeFormattingControllerRef.current?.toggleInlineFormat(command) ?? false;
-      const state = nodeFormattingControllerRef.current?.readFormatState();
-      if (applied && state) setSelectionInlineFormat({ bold: state.bold, underline: state.underline });
-      return;
-    }
-    const element = editorDocumentRef.current;
-    if (!element) return;
-    const applied = applyEditorInlineFormatToRoot(element, command, {
-      documentUndoHistory: documentUndoHistoryRef.current,
-      scheduleDocumentSave: scheduleCollaborativeDocumentSave,
-      scheduleIndentGuideUpdate,
-      onSelectionInlineFormatChange: updateSelectionInlineFormat,
-    });
-    if (applied) {
-      const state = readEditorSelectionFormatState(element, selectionFontSize);
-      if (state) setSelectionInlineFormat({ bold: state.bold, underline: state.underline });
-    }
-  }, [linkedEntityCanEdit, linkedEntityKind, scheduleCollaborativeDocumentSave, scheduleIndentGuideUpdate, selectionFontSize, updateSelectionInlineFormat]);
+    currentFormattingController()?.toggleInlineFormat(command);
+  }, [currentFormattingController, linkedEntityCanEdit]);
+
+  const applyEditorSelectionHighlightColor = useCallback((color: EditorHighlightColor | null) => {
+    if (!linkedEntityCanEdit) return;
+    currentFormattingController()?.applyHighlightColor(color);
+  }, [currentFormattingController, linkedEntityCanEdit]);
 
   const applyEditorSelectionFontSize = useCallback((delta: number) => {
-    if (linkedEntityKind === "node") {
-      const applied = nodeFormattingControllerRef.current?.adjustFontSize(delta) ?? false;
-      if (applied) {
-        const state = nodeFormattingControllerRef.current?.readFormatState();
-        if (state) setSelectionFontSize(state.fontSize);
-      }
-      return;
-    }
-    const element = editorDocumentRef.current;
-    if (!element) return;
-    const currentState = readEditorSelectionFormatState(element, selectionFontSize);
-    const currentFontSize = pendingEditorFontSizeRef.current ?? currentState?.fontSize ?? selectionFontSize;
-    applyEditorSelectionFontSizeValue(currentFontSize + delta);
-  }, [applyEditorSelectionFontSizeValue, linkedEntityKind, selectionFontSize]);
+    if (!linkedEntityCanEdit) return;
+    currentFormattingController()?.adjustFontSize(delta);
+  }, [currentFormattingController, linkedEntityCanEdit]);
 
   const selectTab = useCallback((tab: EditorTabID) => {
     rememberCurrentDocumentScroll();
@@ -1108,23 +1085,28 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [flushPendingDocumentSave, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
 
   const applyLoadedDocument = useCallback((entityKind: LinkedEntityKind, entityID: string, informationID: string, text: string) => {
+    const targetKey = informationID ? documentTargetKey({ entityKind, entityID, informationID }) : `${entityKind}:${entityID}:`;
+    const element = editorDocumentRef.current;
+    const preserveSelection = currentDocumentTargetKeyRef.current === targetKey;
+    if (element && preserveSelection) restoreDocumentSelectionForHydrationRef.current?.(element);
+    const selectionOffsets = element && preserveSelection ? getEditorSelectionOffsets(element) : null;
     resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
     documentDraftRef.current = text;
     persistedDocumentRef.current = text;
     documentInformationIDRef.current = informationID;
     setDocumentInformationID(informationID);
-    const targetKey = informationID ? documentTargetKey({ entityKind, entityID, informationID }) : `${entityKind}:${entityID}:`;
     currentDocumentTargetKeyRef.current = targetKey;
     persistedDocumentTargetKeyRef.current = targetKey;
     setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
     setSelectionInlineFormat({ bold: false, underline: false });
+    setSelectionHighlightColor(null);
     pendingEditorFontSizeRef.current = null;
-    const element = editorDocumentRef.current;
     restoringScrollRef.current = true;
     const restoredScrollTop = scrollMemoryRef.current.read(targetKey) ?? 0;
     if (element) {
       const nextHTML = deserializeEditorDocumentHTML(text);
       if (element.innerHTML !== nextHTML) element.innerHTML = nextHTML;
+      if (selectionOffsets) setEditorSelectionByOffsets(element, selectionOffsets.start, selectionOffsets.end);
       hydrateEditorAttachmentImageFrames(element, (attachmentID, variant, options) => (
         loadMangoAttachmentObjectURL(apiBase, companyID, attachmentID, variant, options)
       ));
@@ -1261,6 +1243,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     pendingEditorFontSizeRef.current = null;
     setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
     setSelectionInlineFormat({ bold: false, underline: false });
+    setSelectionHighlightColor(null);
     restoringScrollRef.current = false;
     if (editorDocumentRef.current) {
       editorDocumentRef.current.innerHTML = "";
@@ -2534,6 +2517,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       pendingEditorFontSizeRef.current = null;
       setSelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
       setSelectionInlineFormat({ bold: false, underline: false });
+      setSelectionHighlightColor(null);
       if (editorDocumentRef.current) {
         editorDocumentRef.current.innerHTML = "";
         editorDocumentRef.current.scrollTop = 0;
@@ -2721,13 +2705,40 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     flushPendingDocumentSave,
     onSelectionFontSizeChange: updateSelectionFontSize,
     onSelectionInlineFormatChange: updateSelectionInlineFormat,
+    onSelectionHighlightColorChange: setSelectionHighlightColor,
     mentionUsers: companyUsers,
     mentionAccent: accent,
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: strokeColor,
     editorImageAttachmentContext,
   });
-  const { mentionMenu: documentMentionMenu, insertTable: insertDocumentTable, ...documentSurfaceEventHandlers } = documentSurfaceHandlers;
+  const {
+    mentionMenu: documentMentionMenu,
+    insertTable: insertDocumentTable,
+    restoreSelection: restoreDocumentSelection,
+    ...documentSurfaceEventHandlers
+  } = documentSurfaceHandlers;
+  restoreDocumentSelectionForHydrationRef.current = restoreDocumentSelection;
+  const logicFormattingController = useEditorDocumentFormattingController({
+    editorRef: editorDocumentRef,
+    editable: linkedEntityCanEdit && linkedEntityKind !== "node",
+    outlineStyle,
+    documentUndoHistoryRef,
+    pendingEditorFontSizeRef,
+    restoreSelection: restoreDocumentSelection,
+    insertTable: insertDocumentTable,
+    scheduleDocumentSave: scheduleCollaborativeDocumentSave,
+    scheduleIndentGuideUpdate,
+    onSelectionFontSizeChange: updateSelectionFontSize,
+    onSelectionInlineFormatChange: updateSelectionInlineFormat,
+    onSelectionHighlightColorChange: setSelectionHighlightColor,
+  });
+  useEffect(() => {
+    logicFormattingControllerRef.current = logicFormattingController;
+    return () => {
+      if (logicFormattingControllerRef.current === logicFormattingController) logicFormattingControllerRef.current = null;
+    };
+  }, [logicFormattingController]);
   const handleNodeWorkspaceProjectionMutation = useCallback(() => {
     if (linkedEntityKind !== "node" || !linkedNodeID) return;
     editorSnapshotRefreshTokenRef.current += 1;
@@ -2819,15 +2830,18 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onSetSelectionFontSize={applyEditorSelectionFontSizeValue}
             boldActive={selectionInlineFormat.bold}
             underlineActive={selectionInlineFormat.underline}
+            highlightColor={selectionHighlightColor}
             onToggleBold={() => toggleEditorInlineFormat("bold")}
             onToggleUnderline={() => toggleEditorInlineFormat("underline")}
+            onSetSelectionHighlightColor={applyEditorSelectionHighlightColor}
+            formattingDisabled={documentIsolation.pointerEvents !== "auto" || !linkedEntityCanEdit || (linkedEntityKind === "node" && !nodeFormattingControllerAvailable)}
             onOutlineStyleFocus={() => setActiveTab("outline-styles")}
             onOutlineStyleChange={(nextOutlineStyle) => {
               setOutlineStyle(nextOutlineStyle);
               setActiveTab("outline-styles");
             }}
             onCreateRelatedNode={linkedEntityKind === "node" && linkedEntityCanEdit ? createRelatedNode : undefined}
-            onInsertTable={linkedEntityKind !== "node" && linkedEntityCanEdit ? () => insertDocumentTable(editorDocumentRef.current) : undefined}
+            onInsertTable={linkedEntityKind !== "node" && linkedEntityCanEdit ? () => logicFormattingControllerRef.current?.insertTable() : undefined}
             onSaveCurrentVersion={linkedEntityCanEdit ? () => { void saveCurrentEditorVersion("manual"); } : undefined}
             saveCurrentVersionDisabled={!linkedEntityCanEdit || saveVersionRestoring}
             saveCurrentVersionBusy={saveVersionSaving}
@@ -2995,7 +3009,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             companyUsers={companyUsers}
             projectionsLoaded={nodeWorkspaceLoadedNodeID === linkedNodeID}
             editorSequence={editorProjectionSequenceByScopeRef.current.get(editorRealtimeScope("node", linkedNodeID)) ?? 0}
-            hidden={activeTab === "save-settings"}
+            hidden={documentIsolation.visibility === "hidden"}
             focusInformationID={focusInformationID}
             focusRequestID={focusRequestID}
             focusInformationMode={focusInformationMode}
@@ -3018,6 +3032,8 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onRequireNodePriorityForLogicGateAssignment={showNodePriorityRequirementError}
             onSelectionFontSizeChange={updateSelectionFontSize}
             onSelectionInlineFormatChange={updateSelectionInlineFormat}
+            onSelectionHighlightColorChange={setSelectionHighlightColor}
+            onFormattingControllerAvailabilityChange={setNodeFormattingControllerAvailable}
             onRegisterSaveController={(controller) => {
               nodeWorkspaceSaveControllerRef.current = controller;
             }}
@@ -3027,6 +3043,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         {hasLinkedDocument && linkedEntityKind !== "node" && (
           <EditorDocumentSurface
             documentRef={editorDocumentRef}
+            surfaceID="logic-gate-editor"
             documentIsolation={documentIsolation}
             editable={linkedEntityCanEdit}
             documentTopPx={documentTopPx}

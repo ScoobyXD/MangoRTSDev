@@ -37,18 +37,21 @@ import {
   parseEditorTextBlockContent,
   type EditorAttachedEmail,
   type EditorChatAttachment,
+  type EditorTextBlockContent,
   type EditorTextBlockChatMessage,
 } from "../editor/editorProjection.js";
 import { EditorTabBar } from "../editor/EditorTabBar.js";
 import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS } from "../editor/editorTabs.js";
 import { EditorContent } from "../editor/EditorContent.js";
-import { generateStableInformationID } from "../editor/editorTypes.js";
+import { createTextBlockProjectionSaveController, type TextBlockProjectionSaveController } from "../editor/nodeTextBlockProjectionSaves.js";
+import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "../editor/editorTypes.js";
 import { UnifiedNodeShell } from "../editor/UnifiedNodeShell.js";
 import {
   NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
   NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
   setNodeEditorFullscreenChromeActive,
 } from "../editor/nodeEditorFullscreenChrome.js";
+import type { EditorHighlightColor } from "../editor/richTextEditing.js";
 import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState } from "../editor/useEditorDocumentSurfaceHandlers.js";
 import {
   AttachedEmailOrganizerPane,
@@ -231,6 +234,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const relationshipGroupIDsRef = useRef<Set<string>>(new Set());
   const relationshipGroupingSignatureRef = useRef("");
   const projectFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
+  const projectTextBlockSaveTimersRef = useRef(new Map<string, number>());
+  const projectTextBlockContentRef = useRef(new Map<string, EditorTextBlockContent>());
+  const projectTextBlockContentRevisionRef = useRef(0);
+  const projectLoadRequestRef = useRef(0);
+  const projectSaveScopeRef = useRef("");
   const { accounts } = useCompanyAccounts(companyID);
   const [project, setProject] = useState<ProjectRecord | null>(null);
   const [projectTitleEditing, setProjectTitleEditing] = useState(false);
@@ -249,6 +257,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [summarySplitPct, setSummarySplitPct] = useState(58);
   const [splitResizeState, setSplitResizeState] = useState<SummarySplitResizeState | null>(null);
   const [focusedTextBlockID, setFocusedTextBlockID] = useState("");
+  const [activeRichTextBlockID, setActiveRichTextBlockID] = useState("");
   const [tableInsertRequests, setTableInsertRequests] = useState<Record<string, number>>({});
   const [openChatBlockIDs, setOpenChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [openEmailBlockIDs, setOpenEmailBlockIDs] = useState<Set<string>>(() => new Set());
@@ -295,13 +304,21 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [selectedRelationshipNodePanel, setSelectedRelationshipNodePanel] = useState<ProjectRelationshipNodePanelSelection | null>(null);
   const [projectSelectionFontSize, setProjectSelectionFontSize] = useState(TEXT_BLOCK_FONT_SIZE);
   const [projectInlineFormat, setProjectInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
+  const [projectHighlightColor, setProjectHighlightColor] = useState<EditorHighlightColor | null>(null);
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
+  const projectSaveScope = `${companyID}:${projectID.trim()}`;
+  projectSaveScopeRef.current = projectSaveScope;
+  const projectTextBlockSaveController = useMemo<TextBlockProjectionSaveController<EditorTextBlockContent>>(
+    () => createTextBlockProjectionSaveController<EditorTextBlockContent>(),
+    [projectSaveScope],
+  );
 
   const refreshProjectSelectionFormat = useCallback(() => {
     const state = projectFormattingControllerRef.current?.readFormatState();
     if (!state) return;
     setProjectSelectionFontSize(state.fontSize);
     setProjectInlineFormat({ bold: state.bold, underline: state.underline });
+    setProjectHighlightColor(state.highlightColor);
   }, []);
 
   const runProjectFormatCommand = useCallback((command: (controller: EditorDocumentFormattingController) => boolean) => {
@@ -312,11 +329,29 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     if (!state) return;
     setProjectSelectionFontSize(state.fontSize);
     setProjectInlineFormat({ bold: state.bold, underline: state.underline });
+    setProjectHighlightColor(state.highlightColor);
   }, []);
+
+  useEffect(() => {
+    projectLoadRequestRef.current += 1;
+    projectTextBlockContentRef.current.clear();
+    projectTextBlockContentRevisionRef.current = 0;
+    setSavingID("");
+    return () => {
+      for (const timer of projectTextBlockSaveTimersRef.current.values()) window.clearTimeout(timer);
+      projectTextBlockSaveTimersRef.current.clear();
+      void projectTextBlockSaveController.flushChangedBlocks().catch(() => undefined);
+    };
+  }, [projectTextBlockSaveController]);
 
   const loadProject = useCallback(async (options: { showLoading?: boolean } = {}) => {
     const cleanProjectID = projectID.trim();
     if (!companyID || !cleanProjectID) return;
+    const requestID = projectLoadRequestRef.current + 1;
+    projectLoadRequestRef.current = requestID;
+    const requestScope = `${companyID}:${cleanProjectID}`;
+    const contentRevisionAtStart = projectTextBlockContentRevisionRef.current;
+    const contentSaveWasPendingAtStart = projectTextBlockSaveController.hasAnyChangedOrSaveInProgress();
     if (options.showLoading !== false) setLoading(true);
     setError("");
     try {
@@ -326,6 +361,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         listCompanyUsers(companyID).catch(() => [] as CompanyUser[]),
         listCompanyUserGroups(companyID).catch(() => ({ groups: [] as CompanyUserGroup[], members: [] })),
       ]);
+      if (projectLoadRequestRef.current !== requestID || projectSaveScopeRef.current !== requestScope) return;
       setProject(view.project);
       setProjectTitleDraft(view.project.name || "");
       setRelationships(view.relationships ?? []);
@@ -335,15 +371,37 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setAssignmentAccountIDs(projectAccountIDs(view.project));
       setAssignmentTeamIDs(projectTeamIDs(view.project));
       setCurrentUserID(current?.user.user_id.trim() ?? "");
-      setBlocks(blockDraftsFromProjections(view.projections ?? []));
+      const nextBlocks = blockDraftsFromProjections(view.projections ?? []);
+      if (
+        !contentSaveWasPendingAtStart
+        && projectTextBlockContentRevisionRef.current === contentRevisionAtStart
+        && !projectTextBlockSaveController.hasAnyChangedOrSaveInProgress()
+      ) {
+        projectTextBlockContentRef.current = new Map(nextBlocks.map((block) => [
+          block.id,
+          { title: block.title, document: block.document, attachments: block.attachments },
+        ]));
+        projectTextBlockSaveController.replaceBlocksAsHasNotChanged(nextBlocks.map((block) => ({
+          blockID: block.id,
+          content: { title: block.title, document: block.document, attachments: block.attachments },
+        })));
+        setBlocks(nextBlocks);
+      }
       setChatMessages(parseEditorTextBlockChats(view.projections ?? []));
       setAttachedEmails(parseEditorAttachedEmails(view.projections ?? []));
     } catch (loadError) {
+      if (projectLoadRequestRef.current !== requestID || projectSaveScopeRef.current !== requestScope) return;
       setError(loadError instanceof Error ? loadError.message : "Failed to load project");
     } finally {
-      if (options.showLoading !== false) setLoading(false);
+      if (
+        options.showLoading !== false
+        && projectLoadRequestRef.current === requestID
+        && projectSaveScopeRef.current === requestScope
+      ) {
+        setLoading(false);
+      }
     }
-  }, [companyID, projectID]);
+  }, [companyID, projectID, projectTextBlockSaveController]);
 
   useEffect(() => {
     setLoading(true);
@@ -521,61 +579,133 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     return user?.display_name?.trim() || user?.email?.trim() || cleanUserID || "Project user";
   }, [companyUsers, currentUserID]);
 
-  const updateBlockDocument = useCallback((blockID: string, document: string) => {
-    setBlocks((current) => current.map((block) => block.id === blockID ? { ...block, document } : block));
-  }, []);
+  useEffect(() => {
+    const configuredScope = projectSaveScope;
+    projectTextBlockSaveController.configure({
+      saveBlock: async ({ blockID, content, sentVersion }) => {
+        const information = buildEditorTextBlockContentPayload(content);
+        const savedTimestamp = new Date().toISOString();
+        await addProjectInformation({
+          companyID,
+          projectID,
+          informationID: blockID,
+          type: EDITOR_TEXT_BLOCK_TYPE,
+          information,
+        });
+        if (projectSaveScopeRef.current !== configuredScope) return;
+        const snapshot = projectTextBlockSaveController.getSnapshot(blockID);
+        if (!snapshot || snapshot.localVersion !== sentVersion) return;
+        setBlocks((current) => current.map((item) => (
+          item.id === blockID ? { ...item, updatedTimestamp: savedTimestamp } : item
+        )));
+      },
+      onBlockSaveInProgressChange: (blockID, saveInProgress) => {
+        if (projectSaveScopeRef.current !== configuredScope) return;
+        setSavingID((current) => saveInProgress ? blockID : current === blockID ? "" : current);
+      },
+      onSaveError: (_blockID, saveError) => {
+        if (projectSaveScopeRef.current !== configuredScope) return;
+        setError(saveError instanceof Error ? saveError.message : "Failed to save project text");
+      },
+    });
+  }, [companyID, projectID, projectSaveScope, projectTextBlockSaveController]);
 
-  const saveTextBlock = useCallback(async (block: ProjectTextBlockDraft, updates: Partial<Pick<ProjectTextBlockDraft, "title" | "document" | "attachments">> = {}) => {
-    const nextBlock = {
-      ...block,
-      ...updates,
+  const updateProjectTextBlockContent = useCallback((
+    blockID: string,
+    updates: Partial<EditorTextBlockContent>,
+  ): EditorTextBlockContent => {
+    const existing = projectTextBlockContentRef.current.get(blockID) ?? {
+      title: "",
+      document: "",
+      attachments: [],
     };
-    const now = new Date().toISOString();
-    setSavingID(block.id);
-    setError("");
-    try {
-      const information = buildEditorTextBlockContentPayload({
-        title: nextBlock.title,
-        document: nextBlock.document,
-        attachments: nextBlock.attachments,
-      });
-      await addProjectInformation({
-        companyID,
-        projectID,
-        informationID: block.id,
-        type: EDITOR_TEXT_BLOCK_TYPE,
-        information,
-      });
-      setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, ...updates, updatedTimestamp: now } : item));
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Failed to save project text");
-    } finally {
-      setSavingID("");
-    }
-  }, [companyID, projectID]);
+    const nextContent: EditorTextBlockContent = {
+      title: updates.title ?? existing.title,
+      document: updates.document ?? existing.document,
+      attachments: updates.attachments ?? existing.attachments ?? [],
+    };
+    const unchanged = (
+      nextContent.title === existing.title
+      && nextContent.document === existing.document
+      && nextContent.attachments === existing.attachments
+    );
+    if (unchanged) return existing;
+    projectTextBlockContentRef.current.set(blockID, nextContent);
+    projectTextBlockContentRevisionRef.current += 1;
+    projectTextBlockSaveController.markHasChanged(blockID, nextContent);
+    setBlocks((current) => current.map((block) => block.id === blockID ? {
+      ...block,
+      title: nextContent.title,
+      document: nextContent.document,
+      attachments: nextContent.attachments ?? [],
+    } : block));
+    return nextContent;
+  }, [projectTextBlockSaveController]);
 
-  const addTextBlock = useCallback(async () => {
+  const scheduleProjectTextBlockSave = useCallback((blockID: string, updates: Partial<EditorTextBlockContent>) => {
+    updateProjectTextBlockContent(blockID, updates);
+    setError("");
+    const existingTimer = projectTextBlockSaveTimersRef.current.get(blockID);
+    if (existingTimer !== undefined) window.clearTimeout(existingTimer);
+    const timer = window.setTimeout(() => {
+      projectTextBlockSaveTimersRef.current.delete(blockID);
+      projectTextBlockSaveController.startLatestContentSave(blockID);
+    }, EDITOR_AUTOSAVE_DELAY_MS);
+    projectTextBlockSaveTimersRef.current.set(blockID, timer);
+  }, [projectTextBlockSaveController, updateProjectTextBlockContent]);
+
+  const flushProjectTextBlockSave = useCallback(async (
+    blockID: string,
+    updates: Partial<EditorTextBlockContent> = {},
+  ) => {
+    updateProjectTextBlockContent(blockID, updates);
+    const timer = projectTextBlockSaveTimersRef.current.get(blockID);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      projectTextBlockSaveTimersRef.current.delete(blockID);
+    }
+    await projectTextBlockSaveController.saveLatestContent(blockID);
+  }, [projectTextBlockSaveController, updateProjectTextBlockContent]);
+
+  const addTextBlock = useCallback(() => {
     const id = generateStableInformationID();
-    const nextBlock: ProjectTextBlockDraft = {
-      id,
+    const initialContent: EditorTextBlockContent = {
       title: "Project Summary",
       document: "",
       attachments: [],
+    };
+    const nextBlock: ProjectTextBlockDraft = {
+      id,
+      ...initialContent,
+      attachments: initialContent.attachments ?? [],
       createdTimestamp: new Date().toISOString(),
       updatedTimestamp: new Date().toISOString(),
     };
+    projectTextBlockContentRef.current.set(id, initialContent);
+    projectTextBlockContentRevisionRef.current += 1;
+    projectTextBlockSaveController.markHasChanged(id, initialContent);
+    setError("");
     setBlocks((current) => [nextBlock, ...current]);
-    await saveTextBlock(nextBlock);
-  }, [saveTextBlock]);
+    projectTextBlockSaveController.startLatestContentSave(id);
+  }, [projectTextBlockSaveController]);
 
   const removeTextBlock = useCallback(async (blockID: string) => {
-    const previous = blocks;
-    const previousChatMessages = chatMessages;
-    const previousAttachedEmails = attachedEmails;
+    const timer = projectTextBlockSaveTimersRef.current.get(blockID);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      projectTextBlockSaveTimersRef.current.delete(blockID);
+    }
+    await projectTextBlockSaveController.waitForInProgressSaveThenRemoveBlock(blockID);
+    const latestContent = projectTextBlockContentRef.current.get(blockID);
+    const previousBlock = blocks.find((block) => block.id === blockID);
+    const removedChatMessages = chatMessages.filter((message) => message.blockID === blockID);
+    const removedAttachedEmails = attachedEmails.filter((email) => email.blockID === blockID);
     const relatedProjectionIDs = [
-      ...chatMessages.filter((message) => message.blockID === blockID).map((message) => message.id),
-      ...attachedEmails.filter((email) => email.blockID === blockID).map((email) => email.id),
+      ...removedChatMessages.map((message) => message.id),
+      ...removedAttachedEmails.map((email) => email.id),
     ];
+    projectTextBlockContentRef.current.delete(blockID);
+    projectTextBlockContentRevisionRef.current += 1;
     setBlocks((current) => current.filter((block) => block.id !== blockID));
     setChatMessages((current) => current.filter((message) => message.blockID !== blockID));
     setAttachedEmails((current) => current.filter((email) => email.blockID !== blockID));
@@ -586,16 +716,36 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         ...relatedProjectionIDs.map((informationID) => deleteProjectProjection({ companyID, projectID, informationID })),
       ]);
     } catch (deleteError) {
-      setBlocks(previous);
-      setChatMessages(previousChatMessages);
-      setAttachedEmails(previousAttachedEmails);
+      if (previousBlock && latestContent) {
+        const restoredBlock: ProjectTextBlockDraft = {
+          ...previousBlock,
+          title: latestContent.title,
+          document: latestContent.document,
+          attachments: latestContent.attachments ?? [],
+        };
+        projectTextBlockContentRef.current.set(blockID, latestContent);
+        projectTextBlockContentRevisionRef.current += 1;
+        projectTextBlockSaveController.markHasChanged(blockID, latestContent);
+        projectTextBlockSaveController.startLatestContentSave(blockID);
+        setBlocks((current) => current.some((block) => block.id === blockID) ? current : [restoredBlock, ...current]);
+      }
+      setChatMessages((current) => {
+        const currentIDs = new Set(current.map((message) => message.id));
+        return [...removedChatMessages.filter((message) => !currentIDs.has(message.id)), ...current];
+      });
+      setAttachedEmails((current) => {
+        const currentIDs = new Set(current.map((email) => email.id));
+        return [...removedAttachedEmails.filter((email) => !currentIDs.has(email.id)), ...current];
+      });
       setError(deleteError instanceof Error ? deleteError.message : "Failed to delete project text");
     }
-  }, [attachedEmails, blocks, chatMessages, companyID, projectID]);
+  }, [attachedEmails, blocks, chatMessages, companyID, projectID, projectTextBlockSaveController]);
 
   const addTextBlockAttachments = useCallback(async (block: ProjectTextBlockDraft, files: FileList | File[]) => {
     const incomingFiles = Array.from(files);
     if (incomingFiles.length === 0) return;
+    setError("");
+    const uploadScope = projectSaveScope;
     const results = await Promise.allSettled(incomingFiles.map((file) => uploadEditorAttachment(file, {
       requestJSON: attachmentRequestJSON,
       companyID,
@@ -606,12 +756,17 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       informationID: block.id,
       editorSurface: "project_text_block",
     })));
+    if (projectSaveScopeRef.current !== uploadScope) return;
     const attachments = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
     if (attachments.length > 0) {
-      const nextAttachments = [...block.attachments, ...attachments];
-      setBlocks((current) => current.map((item) => item.id === block.id ? { ...item, attachments: nextAttachments } : item));
+      const latest = projectTextBlockContentRef.current.get(block.id) ?? {
+        title: block.title,
+        document: block.document,
+        attachments: block.attachments,
+      };
+      const nextAttachments = [...(latest.attachments ?? []), ...attachments];
       try {
-        await saveTextBlock(block, { attachments: nextAttachments });
+        await flushProjectTextBlockSave(block.id, { attachments: nextAttachments });
       } catch (attachmentError) {
         setError(attachmentError instanceof Error ? attachmentError.message : "Failed to save attachment references");
       }
@@ -621,7 +776,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       const first = failures[0]?.reason;
       setError(first instanceof Error ? first.message : "Failed to add attachment");
     }
-  }, [attachmentRequestJSON, companyID, projectID, saveTextBlock]);
+  }, [attachmentRequestJSON, companyID, flushProjectTextBlockSave, projectID, projectSaveScope]);
 
   const submitChatMessage = useCallback(async (blockID: string) => {
     const message = (chatDrafts[blockID] ?? "").trim();
@@ -1580,18 +1735,20 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 onSetSelectionFontSize={(fontSize) => runProjectFormatCommand((controller) => controller.applyFontSizeValue(fontSize))}
                 boldActive={projectInlineFormat.bold}
                 underlineActive={projectInlineFormat.underline}
+                highlightColor={projectHighlightColor}
                 onToggleBold={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("bold"))}
                 onToggleUnderline={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("underline"))}
+                onSetSelectionHighlightColor={(color) => runProjectFormatCommand((controller) => controller.applyHighlightColor(color))}
                 onOutlineStyleFocus={refreshProjectSelectionFormat}
                 onOutlineStyleChange={setOutlineStyle}
                 onInsertTable={() => {
-                  const targetBlockID = focusedTextBlockID || blocks[0]?.id || "";
+                  const targetBlockID = activeRichTextBlockID;
                   if (!targetBlockID) return;
                   setTableInsertRequests((current) => ({ ...current, [targetBlockID]: (current[targetBlockID] ?? 0) + 1 }));
                 }}
                 reserveHeaderOffset={false}
                 visibleTabIDs={UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS}
-                disabled={!focusedTextBlockID}
+                disabled={!activeRichTextBlockID || !blocks.some((block) => block.id === activeRichTextBlockID)}
               />
             </div>
           </div>
@@ -1708,13 +1865,17 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       formattingControllerRef={projectFormattingControllerRef}
                       onFocus={() => {
                         setFocusedTextBlockID(block.id);
+                        setActiveRichTextBlockID(block.id);
                         window.setTimeout(refreshProjectSelectionFormat, 0);
                       }}
-                      onBlur={() => setFocusedTextBlockID((current) => current === block.id ? "" : current)}
-                      onDocumentChange={(document) => updateBlockDocument(block.id, document)}
+                      onBlur={() => undefined}
+                      onDocumentChange={(document) => scheduleProjectTextBlockSave(block.id, { document })}
                       onDocumentFlush={(document) => {
-                        updateBlockDocument(block.id, document);
-                        void saveTextBlock(block, { document });
+                        void flushProjectTextBlockSave(block.id, { document }).catch(() => undefined);
+                      }}
+                      onDocumentConflict={() => {
+                        setError("This project text box changed elsewhere while you were editing. Mango kept and saved your local version.");
+                        void flushProjectTextBlockSave(block.id).catch(() => undefined);
                       }}
                       onChangeSeen={() => undefined}
                       onSelectionChatRequest={(selection) => {
@@ -1726,6 +1887,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       onImageNodeRequest={() => undefined}
                       onSelectionFontSizeChange={setProjectSelectionFontSize}
                       onSelectionInlineFormatChange={setProjectInlineFormat}
+                      onSelectionHighlightColorChange={setProjectHighlightColor}
                     />
                   </div>
                   {(openChatBlockIDs.has(block.id) || openEmailBlockIDs.has(block.id)) ? (
@@ -1745,7 +1907,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                             </div>
                             <AttachedEmailOrganizerPane
                               emails={attachedEmailsByBlockID.get(block.id) ?? []}
+                              apiBase={apiBase}
                               companyID={companyID}
+                              attachmentRequestJSON={attachmentRequestJSON}
+                              attachmentResourceType="project"
+                              attachmentResourceID={projectID}
+                              attachmentInformationID={block.id}
+                              attachmentEditorSurface="project-attached-email-reply"
                               storageKey={`project-summary-email-pane:${companyID}:${projectID}:${block.id}`}
                               editable
                               accent={accent}
@@ -1756,6 +1924,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                               onSelectMessage={(messageID) => setSelectedEmailIDsByBlock((current) => ({ ...current, [block.id]: messageID }))}
                               onClearSelectedMessage={() => setSelectedEmailIDsByBlock((current) => omitRecordKey(current, block.id))}
                               onRemoveEmail={removeAttachedEmail}
+                              onReplyEditorFocus={() => {
+                                setFocusedTextBlockID(block.id);
+                                setActiveRichTextBlockID("");
+                                projectFormattingControllerRef.current = null;
+                              }}
                               onError={setError}
                             />
                           </div>
@@ -1775,7 +1948,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         panelBackground={EDITOR_NEU_PANEL_BACKGROUND}
                         strokeColor={EDITOR_NEU_SOFT_BORDER}
                         ruleColor={PROJECT_SUMMARY_RULE}
-                        onFocus={() => setFocusedTextBlockID(block.id)}
+                        onFocus={() => {
+                          setFocusedTextBlockID(block.id);
+                          setActiveRichTextBlockID("");
+                          projectFormattingControllerRef.current = null;
+                        }}
                         onActiveTabChange={(tab) => {
                           setActivePaneTabs((current) => ({ ...current, [block.id]: tab }));
                           if (tab === "email") setOpenEmailBlockIDs((current) => new Set(current).add(block.id));

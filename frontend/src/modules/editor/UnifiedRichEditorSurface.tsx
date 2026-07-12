@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { buildEditorIndentGuideSegments, editorIndentGuideLeftForDepth, resolveEditorIndentGuideLineHeightPx, type EditorIndentGuideSegment } from "./editorIndentGuides";
+import { buildEditorIndentGuideSegments, resolveEditorIndentGuideLineHeightPx, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import { createEditorScrollMemory } from "./editorScroll";
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { EDITOR_TAB_TEXT, type EditorOutlineStyleID } from "./plainTextEditing";
@@ -8,17 +8,13 @@ import {
   editorBodyHasEmailContent,
   readEditorDocumentText,
   serializeEditorDocumentHTML,
-  type EditorListKind,
+  type EditorHighlightColor,
 } from "./richTextEditing";
 import {
-  applyEditorIndentCommandToRoot,
-  applyEditorInlineFormatToRoot,
-  applyEditorLinkToRoot,
-  applyEditorNumberedListToRoot,
-  applyEditorSelectionFontSizeToRoot,
-  insertEditorListKindToRoot,
-  readEditorSelectionFormatState,
+  useEditorDocumentFormattingController,
   useEditorDocumentSurfaceHandlers,
+  getEditorSelectionOffsets,
+  setEditorSelectionByOffsets,
   type EditorDocumentFormattingController,
   type EditorImageAttachmentContext,
   type EditorSelectionInlineFormatState,
@@ -27,12 +23,11 @@ import { hydrateEditorAttachmentImageFrames } from "./editorImages";
 import { loadMangoAttachmentObjectURL } from "../attachments/attachmentApi";
 import { EDITOR_DOCUMENT_FONT_SIZE_PX, EDITOR_DOCUMENT_LINE_HEIGHT, getEditorDocumentFontFamily } from "./useEditorPreferences";
 import { UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE, type UnifiedRichEditorSurfaceID } from "./unifiedRichEditorContract";
+import { EditorDocumentSurface } from "./EditorDocumentSurface";
 
 export type UnifiedRichEditorFormattingController = EditorDocumentFormattingController & {
   focus: () => void;
-  flush: () => void;
-  insertLink: (href: string) => boolean;
-  insertList: (kind: EditorListKind) => boolean;
+  flush: () => string;
 };
 
 type UnifiedRichEditorSurfaceProps = {
@@ -57,12 +52,8 @@ type UnifiedRichEditorSurfaceProps = {
   onBlur?: () => void;
   onSelectionFontSizeChange?: (fontSize: number) => void;
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
+  onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
 };
-
-function editorHasFocus(element: HTMLElement): boolean {
-  const activeElement = element.ownerDocument.activeElement;
-  return activeElement === element || Boolean(activeElement && element.contains(activeElement));
-}
 
 export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> = ({
   value,
@@ -86,17 +77,18 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   onBlur,
   onSelectionFontSizeChange,
   onSelectionInlineFormatChange,
+  onSelectionHighlightColorChange,
 }) => {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const restoringScrollRef = useRef(false);
   const scrollMemoryRef = useRef(createEditorScrollMemory());
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
   const pendingFontSizeRef = useRef<number | null>(null);
+  const restoreSelectionForHydrationRef = useRef<((root: HTMLElement) => boolean) | null>(null);
   const indentGuideFrameRef = useRef<number | null>(null);
   const targetKeyRef = useRef(`unified-rich-editor:${surfaceID}`);
   const lastAppliedValueRef = useRef("");
   const userEditedRef = useRef(false);
-  const selectionFontSizeRef = useRef(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [documentScrollTop, setDocumentScrollTop] = useState(0);
   const [indentGuideSegments, setIndentGuideSegments] = useState<EditorIndentGuideSegment[]>([]);
   const documentFontFamily = getEditorDocumentFontFamily(outlineStyle);
@@ -139,7 +131,8 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     const editor = editorRef.current;
     if (!editor) return;
     if (lastAppliedValueRef.current === value) return;
-    if (editorHasFocus(editor)) return;
+    restoreSelectionForHydrationRef.current?.(editor);
+    const selectionOffsets = getEditorSelectionOffsets(editor);
     editor.innerHTML = deserializeEditorDocumentHTML(value);
     if (editorImageAttachmentContext) {
       hydrateEditorAttachmentImageFrames(editor, (attachmentID, variant, options) => (
@@ -156,6 +149,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     lastAppliedValueRef.current = value;
     userEditedRef.current = false;
     scheduleIndentGuideUpdate(readEditorDocumentText(editor));
+    if (selectionOffsets) setEditorSelectionByOffsets(editor, selectionOffsets.start, selectionOffsets.end);
   }, [editorImageAttachmentContext, scheduleIndentGuideUpdate, value]);
 
   useEffect(() => {
@@ -185,16 +179,16 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   }, [editable, onChange]);
 
   const flushDocumentSave = useCallback((fallbackValue?: string) => {
-    if (!editable) return;
     const nextValue = fallbackValue ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedValueRef.current);
+    if (!editable) return nextValue;
     lastAppliedValueRef.current = nextValue;
     if (userEditedRef.current) onChange(nextValue);
     onFlush?.(nextValue);
     userEditedRef.current = false;
+    return nextValue;
   }, [editable, onChange, onFlush]);
 
   const handleSelectionFontSizeChange = useCallback((fontSize: number) => {
-    selectionFontSizeRef.current = fontSize;
     onSelectionFontSizeChange?.(fontSize);
   }, [onSelectionFontSizeChange]);
 
@@ -212,6 +206,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     flushPendingDocumentSave: flushDocumentSave,
     onSelectionFontSizeChange: handleSelectionFontSizeChange,
     onSelectionInlineFormatChange,
+    onSelectionHighlightColorChange,
     mentionAccent: accent,
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: indentGuideColor,
@@ -220,6 +215,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     onEditorImageAttachmentError,
   });
   const { mentionMenu, insertTable, restoreSelection, ...documentSurfaceHandlers } = handlers;
+  restoreSelectionForHydrationRef.current = restoreSelection;
 
   const restoreFormattingSelection = useCallback(() => {
     const editor = editorRef.current;
@@ -229,110 +225,31 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     return editor;
   }, [restoreSelection]);
 
+  const sharedFormattingController = useEditorDocumentFormattingController({
+    editorRef,
+    editable,
+    outlineStyle,
+    documentUndoHistoryRef,
+    pendingEditorFontSizeRef: pendingFontSizeRef,
+    restoreSelection,
+    insertTable,
+    scheduleDocumentSave,
+    scheduleIndentGuideUpdate,
+    onSelectionFontSizeChange: handleSelectionFontSizeChange,
+    onSelectionInlineFormatChange,
+    onSelectionHighlightColorChange,
+  });
+
   const formattingController = useMemo<UnifiedRichEditorFormattingController>(() => ({
+    ...sharedFormattingController,
     focus: () => {
       restoreFormattingSelection();
     },
-    flush: () => {
-      flushDocumentSave();
-    },
-    applyFontSizeValue: (fontSize: number) => {
-      const editor = restoreFormattingSelection();
-      if (!editable || !editor) return false;
-      return applyEditorSelectionFontSizeToRoot(editor, fontSize, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        pendingEditorFontSizeRef: pendingFontSizeRef,
-        scheduleDocumentSave,
-        scheduleIndentGuideUpdate,
-        onSelectionFontSizeChange: handleSelectionFontSizeChange,
-      });
-    },
-    adjustFontSize: (delta: number) => {
-      const editor = restoreFormattingSelection();
-      if (!editable || !editor) return false;
-      const currentState = readEditorSelectionFormatState(editor, selectionFontSizeRef.current);
-      const currentFontSize = pendingFontSizeRef.current ?? currentState?.fontSize ?? selectionFontSizeRef.current;
-      return applyEditorSelectionFontSizeToRoot(editor, currentFontSize + delta, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        pendingEditorFontSizeRef: pendingFontSizeRef,
-        scheduleDocumentSave,
-        scheduleIndentGuideUpdate,
-        onSelectionFontSizeChange: handleSelectionFontSizeChange,
-      });
-    },
-    toggleInlineFormat: (command) => {
-      const editor = restoreFormattingSelection();
-      if (!editable || !editor) return false;
-      return applyEditorInlineFormatToRoot(editor, command, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        scheduleDocumentSave,
-        scheduleIndentGuideUpdate,
-        onSelectionInlineFormatChange,
-      });
-    },
-    insertTable: () => {
-      if (!editable) return false;
-      return insertTable(editorRef.current);
-    },
-    insertLink: (href: string) => {
-      const editor = restoreFormattingSelection();
-      if (!editable || !editor) return false;
-      return applyEditorLinkToRoot(editor, href, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        scheduleDocumentSave,
-        scheduleIndentGuideUpdate,
-      });
-    },
-    toggleNumberedList: () => {
-      const editor = restoreFormattingSelection();
-      if (!editable || !editor) return false;
-      return applyEditorNumberedListToRoot(editor, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        scheduleDocumentSave,
-        scheduleIndentGuideUpdate,
-      });
-    },
-    indent: () => {
-      const editor = restoreFormattingSelection();
-      if (!editable || !editor) return false;
-      return applyEditorIndentCommandToRoot(editor, "indent", outlineStyle, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        scheduleDocumentSave,
-        scheduleIndentGuideUpdate,
-      });
-    },
-    outdent: () => {
-      const editor = restoreFormattingSelection();
-      if (!editable || !editor) return false;
-      return applyEditorIndentCommandToRoot(editor, "outdent", outlineStyle, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        scheduleDocumentSave,
-        scheduleIndentGuideUpdate,
-      });
-    },
-    insertList: (kind: EditorListKind) => {
-      const editor = restoreFormattingSelection();
-      if (!editable || !editor) return false;
-      return insertEditorListKindToRoot(editor, kind, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        scheduleDocumentSave,
-        scheduleIndentGuideUpdate,
-      });
-    },
-    readFormatState: () => {
-      const editor = restoreFormattingSelection();
-      return editor ? readEditorSelectionFormatState(editor, selectionFontSizeRef.current) : null;
-    },
+    flush: () => flushDocumentSave(),
   }), [
-    editable,
     flushDocumentSave,
-    handleSelectionFontSizeChange,
-    insertTable,
-    onSelectionInlineFormatChange,
-    outlineStyle,
     restoreFormattingSelection,
-    scheduleDocumentSave,
-    scheduleIndentGuideUpdate,
+    sharedFormattingController,
   ]);
 
   useEffect(() => {
@@ -343,164 +260,43 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     };
   }, [formattingController, formattingControllerRef]);
 
-  const documentIsEditable = editable;
   return (
     <div style={{ position: "relative", minWidth: 0 }}>
-      {showIndentGuides && (
-        <div
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            inset: 0,
-            zIndex: 0,
-            pointerEvents: "none",
-            boxSizing: "border-box",
-            overflow: "hidden",
-            padding: style?.padding,
-            fontSize: style?.fontSize ?? EDITOR_DOCUMENT_FONT_SIZE_PX,
-            lineHeight: style?.lineHeight ?? EDITOR_DOCUMENT_LINE_HEIGHT,
-            fontFamily: documentFontFamily,
-            letterSpacing: 0,
-            tabSize: EDITOR_TAB_TEXT.length,
-          }}
-        >
-          <div style={{ position: "relative", transform: `translateY(-${documentScrollTop}px)` }}>
-            {indentGuideSegments.map((segment) => (
-              <div
-                key={`${segment.depth}-${segment.lineStart}-${segment.lineEnd}`}
-                style={{
-                  position: "absolute",
-                  top: segment.lineStart * documentLineHeightPx,
-                  left: editorIndentGuideLeftForDepth(segment.depth, EDITOR_TAB_TEXT.length),
-                  height: Math.max(documentLineHeightPx, (segment.lineEnd - segment.lineStart + 1) * documentLineHeightPx),
-                  borderLeft: `1px solid ${indentGuideColor}`,
-                  opacity: 0.9,
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-      <div
-        ref={editorRef}
-        className={className ? `editor-document-scroll mango-editor-hover-highlight ${className}` : "editor-document-scroll mango-editor-hover-highlight"}
-        data-mango-unified-rich-editor={surfaceID}
-        data-mango-rich-editor-behavior-source={UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE}
-        data-mango-editor-empty={documentIsEmpty ? "true" : undefined}
-        data-placeholder={placeholder}
-        role="textbox"
-        aria-label={ariaLabel}
-        aria-multiline="true"
-        aria-readonly={!documentIsEditable || undefined}
-        tabIndex={documentIsEditable ? undefined : -1}
-        contentEditable={documentIsEditable}
-        suppressContentEditableWarning
-        spellCheck
+      <EditorDocumentSurface
+        documentRef={editorRef}
+        editable={editable}
+        surfaceID={surfaceID}
+        ariaLabel={ariaLabel}
+        placeholder={placeholder}
+        documentIsEmpty={documentIsEmpty}
+        dataAttributes={{ "data-mango-rich-editor-behavior-source": UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE }}
+        className={className}
+        layout="flow"
+        documentFontSize={style?.fontSize ?? EDITOR_DOCUMENT_FONT_SIZE_PX}
+        documentLineHeightPx={documentLineHeightPx}
+        documentLineHeight={style?.lineHeight ?? EDITOR_DOCUMENT_LINE_HEIGHT}
+        documentFontFamily={documentFontFamily}
+        documentPadding={style?.padding ?? 0}
+        documentScrollTop={documentScrollTop}
+        showIndentGuides={showIndentGuides}
+        indentGuideSegments={indentGuideSegments}
+        indentGuideColor={indentGuideColor}
+        surfaceText={surfaceText}
+        caretColor={surfaceText}
+        scrollbarAccent={accent}
+        scrollbarTrack={scrollbarTrack}
+        {...documentSurfaceHandlers}
         onFocus={() => {
-          if (!documentIsEditable) return;
           formattingControllerRef && (formattingControllerRef.current = formattingController);
           onFocus?.();
         }}
-        onBeforeInput={(event) => {
-          if (!documentIsEditable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onBeforeInput(event);
-        }}
-        onPaste={(event) => {
-          if (!documentIsEditable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onPaste(event);
-        }}
-        onCopy={documentSurfaceHandlers.onCopy}
-        onCut={(event) => {
-          if (!documentIsEditable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onCut(event);
-        }}
-        onDrop={(event) => {
-          if (!documentIsEditable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onDrop(event);
-        }}
-        onInput={(event) => {
-          if (!documentIsEditable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onInput(event);
-        }}
-        onSelect={documentSurfaceHandlers.onSelect}
-        onClick={documentSurfaceHandlers.onClick}
-        onDoubleClick={(event) => {
-          if (!documentIsEditable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onDoubleClick(event);
-        }}
-        onContextMenu={(event) => {
-          if (!documentIsEditable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onContextMenu(event);
-        }}
-        onPointerDown={(event) => {
-          if (!documentIsEditable) {
-            editorRef.current?.blur();
-            return;
-          }
-          documentSurfaceHandlers.onPointerDown(event);
-        }}
-        onPointerMove={documentSurfaceHandlers.onPointerMove}
-        onKeyUp={documentSurfaceHandlers.onKeyUp}
         onBlur={(event) => {
           documentSurfaceHandlers.onBlur(event);
           onBlur?.();
         }}
-        onScroll={documentSurfaceHandlers.onScroll}
-        onWheel={documentSurfaceHandlers.onWheel}
-        onKeyDown={(event) => {
-          if (!documentIsEditable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onKeyDown(event);
-        }}
         style={{
-          position: "relative",
-          zIndex: 1,
-          display: "block",
-          width: "100%",
-          minWidth: 0,
           minHeight: 120,
-          border: 0,
-          outline: "none",
-          color: surfaceText,
           background: "transparent",
-          fontSize: EDITOR_DOCUMENT_FONT_SIZE_PX,
-          lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT,
-          fontFamily: documentFontFamily,
-          tabSize: EDITOR_TAB_TEXT.length,
-          letterSpacing: 0,
-          whiteSpace: "pre-wrap",
-          overflowWrap: "anywhere",
-          wordBreak: "break-word",
-          caretColor: documentIsEditable ? surfaceText : "transparent",
-          cursor: documentIsEditable ? "text" : "default",
-          overflowY: "auto",
-          overflowX: "hidden",
-          scrollbarGutter: "stable",
-          ["--editor-document-scroll-accent" as string]: accent,
-          ["--editor-document-scroll-track" as string]: scrollbarTrack,
           ...style,
         }}
       />

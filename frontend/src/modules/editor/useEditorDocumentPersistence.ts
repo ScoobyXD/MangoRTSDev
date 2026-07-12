@@ -1,5 +1,5 @@
 import type React from "react";
-import { useCallback } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import {
   documentTargetKey,
   EDITOR_AUTOSAVE_DELAY_MS,
@@ -9,6 +9,7 @@ import {
   type DocumentSaveTarget,
   type LinkedEntityKind,
 } from "./editorTypes";
+import { createEditorDocumentSaveQueue, type EditorDocumentSaveQueue } from "./editorDocumentSaveQueue";
 
 type UseEditorDocumentPersistenceInput = {
   companyID: string;
@@ -124,37 +125,28 @@ export function useEditorDocumentPersistence({
     setError,
   ]);
 
-  const enqueueDocumentSave = useCallback((request: DocumentSaveRequest) => {
-    if (saveInFlightRef.current) {
-      queuedSaveRef.current = request;
-      return;
-    }
+  const saveQueueRef = useRef<EditorDocumentSaveQueue<DocumentSaveRequest> | null>(null);
+  if (!saveQueueRef.current) saveQueueRef.current = createEditorDocumentSaveQueue<DocumentSaveRequest>();
+  const saveQueue = saveQueueRef.current;
+  useLayoutEffect(() => {
+    saveQueue.configure({
+      targetKey: (request) => documentTargetKey(request.target),
+      sameRequest: (left, right) => sameSaveRequest(left, right),
+      persist: persistDocumentRequest,
+      onStateChange: (state) => {
+        saveInFlightRef.current = state.inFlight;
+        queuedSaveRef.current = state.queuedRequests[0] ?? null;
+      },
+    });
+  }, [persistDocumentRequest, queuedSaveRef, saveInFlightRef, saveQueue]);
 
-    // Autosaves must preserve the user's final text without POSTing every
-    // keystroke. One request runs at a time; while it is running, we keep only
-    // the newest queued value for this editor instance.
-    saveInFlightRef.current = true;
-    void (async () => {
-      let nextRequest: DocumentSaveRequest | null = request;
-      try {
-        while (nextRequest) {
-          const activeRequest: DocumentSaveRequest = nextRequest;
-          queuedSaveRef.current = null;
-          await persistDocumentRequest(activeRequest);
-          const queued = queuedSaveRef.current;
-          nextRequest = queued && !sameSaveRequest(queued, activeRequest) ? queued : null;
-        }
-      } finally {
-        saveInFlightRef.current = false;
-      }
-    })();
-  }, [persistDocumentRequest, queuedSaveRef, saveInFlightRef]);
+  const enqueueDocumentSave = useCallback((request: DocumentSaveRequest) => {
+    saveQueue.enqueue(request);
+  }, [saveQueue]);
 
   const waitForSaveQueue = useCallback(async () => {
-    while (saveInFlightRef.current || queuedSaveRef.current) {
-      await new Promise((resolve) => window.setTimeout(resolve, 40));
-    }
-  }, [queuedSaveRef, saveInFlightRef]);
+    await saveQueue.waitForIdle();
+  }, [saveQueue]);
 
   const saveDocumentNow = useCallback(async (nextText: string) => {
     documentDraftRef.current = nextText;
@@ -165,26 +157,9 @@ export function useEditorDocumentPersistence({
     const request = buildDocumentSaveRequest(nextText);
     pendingSaveRef.current = null;
     if (!request) return;
-    if (saveInFlightRef.current) {
-      queuedSaveRef.current = request;
-      await waitForSaveQueue();
-      return;
-    }
-
-    saveInFlightRef.current = true;
-    try {
-      let nextRequest: DocumentSaveRequest | null = request;
-      while (nextRequest) {
-        const activeRequest: DocumentSaveRequest = nextRequest;
-        queuedSaveRef.current = null;
-        await persistDocumentRequest(activeRequest);
-        const queued = queuedSaveRef.current;
-        nextRequest = queued && !sameSaveRequest(queued, activeRequest) ? queued : null;
-      }
-    } finally {
-      saveInFlightRef.current = false;
-    }
-  }, [buildDocumentSaveRequest, documentDraftRef, pendingSaveRef, persistDocumentRequest, queuedSaveRef, saveInFlightRef, saveTimerRef, waitForSaveQueue]);
+    saveQueue.enqueue(request);
+    await waitForSaveQueue();
+  }, [buildDocumentSaveRequest, documentDraftRef, pendingSaveRef, saveQueue, saveTimerRef, waitForSaveQueue]);
 
   const scheduleDocumentSave = useCallback((nextText: string, immediate = false) => {
     documentDraftRef.current = nextText;

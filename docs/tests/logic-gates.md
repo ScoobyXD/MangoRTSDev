@@ -1,4 +1,4 @@
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 # Logic Gates Tests
 
@@ -7,7 +7,7 @@ Detailed Logic Gate Kanban board behavior, including subgrouping, request card f
 Coverage Status:
 - Shared `@`/`!` people-picker palette key, fallback, and contrast behavior is covered by `tests/frontend/modules/editor/editorMentions.test.ts`.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract; shared editor attachment tests cover durable rich-editor image attachment references; Logic Gate-specific projection/persistence rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the sole rich-editor host, shared formatting controller, highlight controls/sanitization wiring, selection-preserving hydration, hidden-document toolbar state, and target-safe persistence mounting; `tests/frontend/modules/editor/editorDocumentSaveQueue.test.ts` covers per-target latest-save retention and deterministic serial draining; shared editor attachment tests cover durable rich-editor image attachment references; Logic Gate-specific projection/persistence rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -24,7 +24,7 @@ LG10 - The requesting user sees request-sent status on the requested card and ca
 LG11 - Pasted rich text in Logic Gate editor surfaces must normalize to the app/editor font family instead of preserving source document fonts.
 LG12 - Pasting selected inline text into a Logic Gate editor must not create extra blank rows above or below the pasted content from source boundary whitespace.
 LG13 - New Logic Gate editor documents default to alphanumerical numbering, and the editor outline dropdown lists alphanumerical numbering before indent guides.
-LG14 - The Logic Gate editor font-size control applies to highlighted text and, for a collapsed caret, becomes the sticky font size for subsequently typed characters until changed again.
+LG14 - The Logic Gate editor font-size control applies to selected text and, for a collapsed caret, becomes the sticky font size for subsequently typed characters until changed again.
 LG15 - Logic Gate editor bold and underline controls must toggle the selected text or sticky caret formatting and must visually reflect the formatting at the current caret or selection.
 LG16 - Inserting a table in a Logic Gate editor must insert the table at the current caret/selection location, not at the top-left or beginning of the editor.
 LG17 - Live Logic Gate editor typing writes the current text state to the Logic Gate editor projection table and must not append a full rich-text document row to `logic_gate_information` on every keystroke autosave.
@@ -32,13 +32,13 @@ LG18 - Logic Gate Save Settings lists saved editor versions sorted by saved time
 LG19 - Clicking Save in the Logic Gate editor flushes pending projection saves first, then creates a manual saved editor version in `logic_gate_information`.
 LG20 - Logic Gate automatic saved-version creation must not run in the background during the emergency slowness fix. If auto saved versions are re-enabled later, they must only consider active Logic Gates, must only save Logic Gates whose editor projection has changed, and must never scan or save every Logic Gate in the system.
 LG21 - Restoring a Logic Gate saved version requires confirmation and overwrites the current Logic Gate editor projection row from that saved version without creating another saved-version row.
-LG22 - Logic Gate editor projection saves must use one-save-at-a-time latest-content behavior: while a save is in progress, later edits update the latest in-memory content and mark that another save is needed, but they must not start overlapping `POST /v1/logic-gates/{logic_gate_id}/projection` requests for the same editor document.
+LG22 - Logic Gate editor projection saves must use one-save-at-a-time, target-safe latest-content behavior: while a save is in progress, later edits update the latest queued content for their own document target without starting an overlapping persistence request. A pending value for one Logic Gate/document target must not be erased by editing another target, and queued targets drain serially in deterministic first-target order.
 LG23 - Logic Gate editor save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. The editor is marked `has not changed` only when the completed request's version matches the latest local version.
 LG24 - The Logic Gate editor exposes applying the current GVIC template to already assigned nodes as a one-shot action next to the GVIC role fields, not as a persistent checkbox or vertical control between the title and GVIC fields.
 LG25 - Pressing the Logic Gate editor's apply-to-assigned-nodes action asks for confirmation; canceling makes no write, and confirming applies the current Logic Gate GVIC template to nodes currently assigned to that Logic Gate. Ordinary GVIC role edits remain template-only for existing assigned nodes.
-LG26 - Logic Gate editor surfaces participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, table, and people-suggestion semantics must apply to Logic Gate editor text wherever it is opened. The `@`/`!` people picker uses stable, visible per-user profile colors rather than gray-only rows.
+LG26 - Logic Gate editor surfaces participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, text highlight color, table, and people-suggestion semantics must apply to Logic Gate editor text wherever it is opened. The `@`/`!` people picker uses stable, visible per-user profile colors rather than gray-only rows.
 LG27 - Logic Gate editor inline images/files must follow `docs/tests/attachments.md`: rich-editor paste/drop uses the shared editor image path, and durable Logic Gate information/projection rows store attachment references instead of data URLs or base64 file bytes.
-LG28 - The Logic Gate editor toolbar must use the shared rich-editor toolbar source and shared font-size helper/controller. Font-size minus/value/plus, bold, underline, and the outline-style dropdown must match node text boxes, project text boxes, and mail editor surfaces in look and selected-text/sticky-caret behavior.
+LG28 - The Logic Gate editor toolbar must use the shared rich-editor toolbar source and shared formatting controller. Font-size minus/value/plus, bold, underline, highlight color, and the outline-style dropdown must match node text boxes, project text boxes, mail editor surfaces, and email signatures in look and selected-text behavior.
 LG29 - A Logic Gate permissions view opened from the editor, map, Company Explorer, or another Logic Gate entry point always displays **Save** when editable. Saving persists the current selection without closing; read-only and denied views remain dismissible and do not attempt a write. This permission action is distinct from editor saved-version Save.
 LG30 - When a personal or Shared Triage email is converted into a node/card assigned to a Logic Gate, the created attached-email projection retains the source account email and, for shared mail, the shared-inbox ID. Later node email reads and mutations use that stored mailbox scope.
 LG31 - Logic Gate Arena work loads use one cache-first, cancelable, single-flight loader whether the gate came from forced Arena props or live selection.
@@ -47,6 +47,9 @@ LG33 - Valid consecutive Kanban projection deltas reconcile the cached/rendered 
 LG34 - The Logic Gate work response exposes only the minimal Logic Gate header/default/request-owner data, actor permission flags, board, columns, minimal cards, and projection sequence.
 LG35 - The work ETag uses one dedicated Logic Gate work-version row plus actor permission identity/flags and a response-contract salt; authorization is evaluated before `304 Not Modified`.
 LG36 - The board request owner is the Logic Gate's Generated user ID. The work payload does not ship the full GVIC assignment collection, and GVIC still does not grant resource permission.
+LG37 - Logic Gate text highlighting must use the shared `EditorTabBar` palette/custom/clear control and shared formatting controller. Highlight applies only to the restored non-collapsed selection, reports the active selection color, and round-trips through sanitized rich HTML; a collapsed caret does not create sticky highlight state.
+LG38 - Hydrating changed Logic Gate editor content while the editor or one of its shared toolbar controls owns focus must preserve the logical selection. The editor restores the last valid range, records text offsets before replacing the DOM, and restores those offsets afterward so toolbar focus does not move formatting to an unrelated location.
+LG39 - When a Logic Gate document is hidden by Metadata, History, or Save Settings isolation, its rich editor must also be hidden and formatting commands must be disabled. Editor navigation tabs remain usable so the user can return to the document.
 
 ## Scenarios
 
@@ -114,21 +117,26 @@ Business logic covered:
 - LG16
 - LG26
 - LG28
+- LG37
+- LG38
 
 Given:
 - A user edits a Logic Gate text body.
 - The user pastes styled text copied from another application.
-- The user changes font size, bold, underline, outline style, or inserts a table.
+- The user changes font size, bold, underline, highlight color, outline style, or inserts a table.
+- A document refresh arrives while the editor or one of its shared toolbar controls owns focus.
 
 Expected:
 - Pasted content renders in the Logic Gate editor's normal font family.
 - Pasted inline text does not gain empty rows above or below the copied text.
 - New Logic Gate editor text uses alphanumerical numbering by default, and alphanumerical numbering appears first in the outline dropdown.
-- Changing font size while text is highlighted changes that selected text.
+- Changing font size while text is selected changes that selected text.
 - Changing font size with only a caret sets the font size for the next typed characters.
 - Bold and underline buttons reflect the caret or selected text state and can be active at the same time.
 - Toggling bold or underline affects the selection or the next typed characters when the selection is collapsed.
-- The toolbar uses the shared font-size, bold, underline, and outline-style controls rather than a Logic Gate-only implementation.
+- Highlight applies through the shared palette/custom/clear control to the restored selected range, preserves its active color through sanitized serialization, and does not become sticky at a collapsed caret.
+- The toolbar uses the shared font-size, bold, underline, highlight, and outline-style controls rather than a Logic Gate-only implementation.
+- External hydration restores the same logical selection offsets after replacing the editor DOM, including when toolbar focus has moved the browser selection.
 - Table insertion uses the current caret/selection position.
 - The same rich editing semantics come from the unified editor behavior used by node, project, and email compose/reply editor surfaces.
 - Typing `@` or `!` opens the shared people picker with a stable color keyed by normalized user ID, then email, then display name. Keyboard-active treatment adds a translucent same-color tint and the existing active rail while preserving the opaque profile avatar and tested readable contrast.
@@ -143,10 +151,12 @@ Business logic covered:
 - LG21
 - LG22
 - LG23
+- LG39
 
 Given:
 - A user has edit access to a Logic Gate.
 - The user types in the Logic Gate editor.
+- The user switches between document targets while a projection save is in progress.
 - The user opens Save Settings, changes the auto-save interval, manually saves, or waits for an auto-save interval.
 
 Expected:
@@ -160,6 +170,8 @@ Expected:
 - If the user keeps typing while that save is in progress, the editor keeps the newest content in memory, marks `save needed after current save`, and does not start overlapping saves.
 - When the in-progress save finishes, the editor marks the projection `has not changed` only if the completed save version is still the latest local version.
 - If newer edits arrived while the save was in progress, the editor sends exactly one follow-up projection save using the newest in-memory content.
+- Pending latest content for each edited document target remains queued; switching targets cannot replace another target's pending save, and the queue persists targets serially in first-target order.
+- Opening Metadata, History, or Save Settings hides the document and disables its formatting commands without disabling the navigation tabs needed to return.
 
 ### Scenario LG-S6: Logic Gate GVIC Apply To Assigned Nodes Action
 

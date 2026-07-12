@@ -4,7 +4,7 @@ Last updated: 2026-07-12
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the unified editor surface contract, EmailPickerModal attach-only boundary, and both Project node-shell adapters, including the Logic Gates / Nodes fullscreen action; `tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Logic Gates / Nodes universal grouping model, empty gates, flat rows, collapsed visible-node order, and the local node-panel opener wiring; `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the shared status order; `tests/frontend/app/deepLinkRoutes.test.ts` covers the Project-to-Logic-Gate return route, project-matched work-panel history marker, fresh-entry fallback, and opener wiring; `tests/frontend/hooks/keyboardShortcutRouting.test.ts` covers safe Backspace; shared editor/chat attachment tests cover attachment-reference serialization used by project text blocks and project chats; project-specific persistence rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the sole shared rich editor host, shared highlight/formatting controller, project attached-reply attachment context, reply-focus invalidation, focused hydration/conflict behavior, EmailPickerModal attach-only boundary, and both Project node-shell adapters including the Logic Gates / Nodes fullscreen action; `tests/frontend/modules/editor/nodeTextBlockProjectionSaves.test.ts` covers serialized latest-content project envelopes; `tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Logic Gates / Nodes universal grouping model, empty gates, flat rows, collapsed visible-node order, and the local node-panel opener wiring; `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers the shared status order; `tests/frontend/app/deepLinkRoutes.test.ts` covers the Project-to-Logic-Gate return route, project-matched work-panel history marker, fresh-entry fallback, and opener wiring; `tests/frontend/hooks/keyboardShortcutRouting.test.ts` covers safe Backspace; shared editor/chat attachment tests cover attachment-reference serialization used by project text blocks and project chats; remaining project-specific persistence and access rules are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -22,7 +22,7 @@ P11 - A fresh Project work-panel entry, or a history entry without a valid marke
 P12 - Empty critical-path resource cells use an Add node action, not a drag/drop node-or-logic-gate prompt.
 P13 - Add node opens a Company Explorer node search picker that uses Company Explorer search results and visibility rules.
 P14 - Selecting a node search result creates or reuses the project node relationship and saves that relationship onto the critical-path step.
-P15 - Project text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, and table semantics must apply to project text boxes.
+P15 - Project text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, text highlight color, clear highlight, and table semantics must apply to project text boxes.
 P16 - Project text-box persistence remains project-owned: project text boxes save to project information/projection state, not node information/projection state.
 P17 - Project critical-path inline node windows use the unified node shell and unified node text-box editor semantics, while mutations inside that inline node window remain node editor mutations instead of project critical-path data mutations.
 P18 - The project email picker is attach/select only and must not expose compose, send, scheduled send, or draft-save behavior.
@@ -36,8 +36,8 @@ P25 - Dropping a My Triage or mailbox-capable Shared Triage email onto a Logic G
 P26 - Project relationship node rows created from email expose `created_from_email = true` and show an email-origin icon.
 P27 - Successful project email drops dispatch the same Home triage conversion reconciliation event as Kanban and Company Explorer drops, including `shared_inbox_id` and `unstarred_message_ids` when present.
 P28 - Successful project email drops open the created node in the normal node popup.
-P29 - Project text-box creation and formatting controls must match the shared node text-box editor pattern: users add a new text box from a compact plus control in the left timeline gutter, and the toolbar exposes shared font-size, bold, underline, automatic numbering, bullet, checklist, and outline-style controls instead of project-only `Indent`, `A1`, or text-labeled `New Text Box` controls.
-P30 - Project text-box toolbar controls must use the shared compact editor toolbar tab inventory and shared formatting controller path. Font-size minus/value/plus, bold, underline, and the outline-style dropdown must match node text boxes, Logic Gate editor text, and mail editor surfaces in look and selected-text/sticky-caret behavior.
+P29 - Project text-box creation and formatting controls must match the shared node text-box editor pattern: users add a new text box from a compact plus control in the left timeline gutter, and the toolbar exposes shared font-size, bold, underline, text highlight color, automatic numbering, bullet, checklist, and outline-style controls instead of project-only `Indent`, `A1`, or text-labeled `New Text Box` controls.
+P30 - Project text-box toolbar controls must use the shared compact editor toolbar tab inventory and shared formatting controller path. Font-size minus/value/plus, bold, underline, text-highlight picker and clear action, and the outline-style dropdown must match node text boxes, Logic Gate editor text, and mail editor surfaces in look and selected-text/sticky-caret behavior.
 P31 - A project permissions view opened from Project Management, Company Explorer, or another project entry point always displays an explicit `Save` button when permission settings are editable. Save commits the current permission selection without closing the view; denied and read-only states remain dismissible without attempting a write.
 P32 - Project attached-email projections preserve mailbox provenance. Personal picker attachments and personal email-drop conversions store the active `account_email`, while shared-inbox conversions retain both `shared_inbox_id` and `account_email`; the project reader uses that scope for threads, recipients, attachments, drafts, replies, and calendar invitations.
 P33 - The Project Logic Gates / Nodes tab renders visible Logic Gates and nodes as one recursive row list, not as a multi-column set of Logic Gate cards with embedded node lists.
@@ -48,6 +48,10 @@ P37 - The grouped-row view preserves the local node-panel and Logic Gate openers
 P38 - The Project Logic Gates / Nodes node panel exposes the shared fullscreen action. Turning fullscreen on expands the same live node editor across the browser viewport; turning it off restores that editor to the right-hand Logic Gates / Nodes region without resetting the Project grouping stack, collapse state, or selected node.
 P39 - Opening a Logic Gate from the Project detail work panel records the exact canonical Project route, `/projects/{project_id}`, and the current Project work-panel tab on that return history entry before pushing `/logic-gates/{logic_gate_id}`. Changing the toggle updates that entry, so Browser Back and an unmodified Backspace pressed outside editable content return to that exact Project with its latest Critical Path or Logic Gates / Nodes selection. The marker is accepted only for its matching Project and does not change the fresh-entry default in P11; Backspace inside an input, textarea, select, or content-editable node retains native editing behavior.
 P40 - Status grouping is shared by Updates, My Work, and Project Logic Gates / Nodes. Ascending recognized workflow order is In Progress, Review, Pending, Requested, Backlog, Done. `Verify`, `Verification`, and `Verified` normalize to Review; Request/Requests normalize to Requested; Backlogs/Back Logs/Backlogged normalize to Backlog; completed/closed/archived aliases normalize to Done. Descending reverses the nonterminal recognized groups, while Done remains the final group in both directions. Unknown nonblank statuses sort after recognized nonterminal statuses; No status has a collision-proof group identity, is trailing, and remains before Done.
+P41 - Project text-block saves are project-scoped, serialized, and latest-content preserving. Every save writes one coherent title/document/attachments envelope; edits arriving during a save coalesce into one follow-up containing the newest full envelope, and a stale completion cannot mark newer content saved.
+P42 - Project reloads and text-block deletion cannot race project text-block edits. A reload started before a local revision or pending save must not overwrite that local content, deletion waits for any in-progress save, and changing project or unmounting drains changed blocks from the old project scope.
+P43 - Focused project text blocks use the shared deferred external-hydration and conflict behavior: untouched local content accepts the deferred remote value on blur without a stale flush, while a locally edited conflict keeps and saves the local value and reports the conflict.
+P44 - Replies to email attached to a project text block use the project as attachment resource owner, retain the originating project information ID, and identify the editor as `project-attached-email-reply`. Focusing that reply clears the outer project text-block formatting controller so only the reply toolbar can format text.
 
 ## Scenarios
 
@@ -144,8 +148,9 @@ Given:
 
 Expected:
 - The project text box uses the same unified editor semantics as node, Logic Gate, and email compose/reply rich editor surfaces.
-- The project text-box toolbar exposes the shared node-style font-size, bold, underline, automatic numbering, bullet, checklist, and outline-style controls.
+- The project text-box toolbar exposes the shared node-style font-size, bold, underline, text-highlight picker and clear action, automatic numbering, bullet, checklist, and outline-style controls.
 - Those toolbar controls come from the shared compact editor toolbar inventory and route through the shared formatting controller for selected text and sticky collapsed-caret formatting.
+- Applying a highlight color changes selected text, Clear highlight removes it, and a collapsed caret does not create sticky highlight state.
 - Creating a project text box uses the compact plus control in the left timeline gutter; project-only `Indent`, `A1`, and text-labeled `New Text Box` controls are not part of the target UI.
 - Project text-box edits save to project information/projection state.
 - Project text-box edits do not write node information/projection state.
@@ -237,15 +242,19 @@ Business logic covered:
 - P23
 - P27
 - P32
+- P44
 
 Given:
 - A personal mailbox message is attached through the project picker.
 - A shared-inbox message is converted into project work and later reopened from its attached-email row.
+- The user focuses the attached-email reply editor and adds a file or inline image.
 
 Expected:
 - The personal attachment records the active account email and the shared conversion records both shared-inbox ID and account email.
 - Reopening either message uses the same thread viewer contract as My Triage, Shared Triage, and nodes, including recipients, attachments, Reply/Reply All, drafts, and invitation responses.
 - Shared attachment reads and actions retain shared-inbox authorization and do not silently fall back to a personal grant.
+- The reply links files and inline images to the project resource with the originating project text-block information ID and the `project-attached-email-reply` editor surface.
+- Focusing the reply immediately clears the outer project text-block formatting controller, leaving the reply toolbar as the only formatting owner.
 
 ### Scenario P-S11: Universal Grouped Project Relationships
 
@@ -287,3 +296,23 @@ Expected:
 - A fresh Project entry or a marker belonging to another Project still opens on Critical Path.
 - Unmodified Backspace outside editable content performs the same history-back action.
 - Backspace inside editable content edits text and never triggers Project navigation.
+
+### Scenario P-S13: Project Text-Block Save And Hydration Races
+
+Business logic covered:
+- P16
+- P41
+- P42
+- P43
+
+Given:
+- A user changes a project text-block title, document, and attachment list while a projection save is in progress.
+- A project reload or external projection update arrives while the project text block is focused.
+- The user deletes the block, closes the project, or switches to another project while a save or debounced edit remains.
+
+Expected:
+- At most one save for the block is in progress, and edits made during it coalesce into one follow-up containing the latest title, document, and attachment references together.
+- A completed older version cannot mark a newer local envelope saved.
+- A reload started before the local revision or pending save does not overwrite the dirty local block.
+- Deletion waits for the in-progress save before deleting the projection, and project teardown drains changed blocks from the old scope.
+- An untouched focused DOM accepts the deferred external value on blur without flushing stale HTML; a locally edited conflict keeps and saves the local value and reports the conflict.

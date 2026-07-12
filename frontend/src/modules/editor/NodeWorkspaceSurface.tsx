@@ -46,10 +46,7 @@ import {
 } from "./editorProjection";
 import { EDITOR_AUTOSAVE_DELAY_MS, generateStableInformationID } from "./editorTypes";
 import type { NodeContentChange } from "./nodeContentChanges";
-import {
-  createTextBlockProjectionSaveController,
-  type TextBlockProjectionSaveController,
-} from "./nodeTextBlockProjectionSaves";
+import { createTextBlockProjectionSaveController } from "./nodeTextBlockProjectionSaves";
 import {
   appendUniqueEditorAttachments,
   nodeAttachmentUploadScopeMatches,
@@ -352,6 +349,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   onRequireNodePriorityForLogicGateAssignment,
   onSelectionFontSizeChange,
   onSelectionInlineFormatChange,
+  onSelectionHighlightColorChange,
+  onFormattingControllerAvailabilityChange,
   onRegisterSaveController,
   onError,
 }) => {
@@ -366,7 +365,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const logicGateAssignStatusTimerRef = useRef<number | null>(null);
   const logicGateAssignFlashTimerRef = useRef<number | null>(null);
   const contentByBlockRef = useRef(new Map<string, EditorTextBlockContent>());
-  const textBlockProjectionSaveControllerRef = useRef<TextBlockProjectionSaveController<EditorTextBlockContent> | null>(null);
   const focusBlockIDRef = useRef("");
   const handledFocusRequestRef = useRef("");
   const previousNodeIDRef = useRef(nodeID);
@@ -420,15 +418,22 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [assigningProjectID, setAssigningProjectID] = useState("");
   const [assigningProjectLogicGateID, setAssigningProjectLogicGateID] = useState("");
   const [projectAssignStatus, setProjectAssignStatus] = useState("");
+  const formattingControllerAvailable = canEdit && blocks.some((block) => block.id === focusedTextBlockID);
+  useEffect(() => {
+    onFormattingControllerAvailabilityChange?.(formattingControllerAvailable);
+  }, [formattingControllerAvailable, onFormattingControllerAvailabilityChange]);
+  useEffect(() => () => {
+    onFormattingControllerAvailabilityChange?.(false);
+  }, [onFormattingControllerAvailabilityChange]);
   const [projectAssignerDropdownLeft, setProjectAssignerDropdownLeft] = useState(0);
   const [dropActive, setDropActive] = useState(false);
   const [author, setAuthor] = useState({ userID: "", name: "You" });
   const [deleteTextBlockConfirmation, setDeleteTextBlockConfirmation] = useState<{ blockID: string; title: string; chatCount: number; position: ConfirmActionMenuPosition } | null>(null);
   const autoCreatedTextBlockNodeIDsRef = useRef(new Set<string>());
-  if (textBlockProjectionSaveControllerRef.current === null) {
-    textBlockProjectionSaveControllerRef.current = createTextBlockProjectionSaveController<EditorTextBlockContent>();
-  }
-  const textBlockProjectionSaveController = textBlockProjectionSaveControllerRef.current;
+  const textBlockProjectionSaveController = useMemo(
+    () => createTextBlockProjectionSaveController<EditorTextBlockContent>(),
+    [companyID, nodeID],
+  );
 
   const projectionIdentity = useMemo(() => projectionsKey(projections), [projections]);
   const loadedTextBlockProjections = useMemo(() => listEditorTextBlockProjections(projections), [projectionIdentity, projections]);
@@ -887,8 +892,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
     saveTimersRef.current.clear();
     contentByBlockRef.current = new Map();
-    textBlockProjectionSaveController.clear();
-  }, [companyID, nodeID, textBlockProjectionSaveController]);
+  }, [companyID, nodeID]);
 
   useEffect(() => {
     if (skipNextPaneLayoutPersistRef.current) {
@@ -1039,7 +1043,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (logicGateAssignFlashTimerRef.current !== null) window.clearTimeout(logicGateAssignFlashTimerRef.current);
     for (const timer of saveTimersRef.current.values()) window.clearTimeout(timer);
     saveTimersRef.current.clear();
-    textBlockProjectionSaveController.clear();
+    void textBlockProjectionSaveController.flushChangedBlocks()
+      .finally(() => textBlockProjectionSaveController.clear());
   }, [textBlockProjectionSaveController]);
 
   useEffect(() => {
@@ -2347,9 +2352,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         right: 0,
         bottom: 0,
         left: 0,
+        display: hidden ? "none" : "block",
         overflowY: "auto",
         overflowX: "hidden",
-        visibility: hidden ? "hidden" : "visible",
         pointerEvents: hidden ? "none" : "auto",
         scrollbarGutter: "stable",
         padding: "0 14px 38px 14px",
@@ -2692,6 +2697,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               onSelectMessage={(messageID) => openBlockEmail(block.id, messageID)}
               onClearSelectedMessage={() => clearBlockEmail(block.id)}
               onRemoveEmail={(emailID) => { void removeAttachedEmail(emailID); }}
+              onReplyEditorFocus={() => {
+                setFocusedTextBlockID("");
+                if (formattingControllerRef) formattingControllerRef.current = null;
+              }}
               onEmailSelectionChatRequest={(messageID, selection) => openSelectionChat({
                 blockID: block.id,
                 source: "email",
@@ -2917,13 +2926,14 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                       setFocusedTextBlockID(block.id);
                     }}
                     onBlur={() => {
-                      setFocusedTextBlockID((current) => current === block.id ? "" : current);
+                      // Keep the last focused editor active while toolbar inputs own browser focus.
                     }}
                     onDocumentChange={(document) => updateTextBlockContent(block.id, { document })}
                     onDocumentFlush={(document) => {
                       updateTextBlockContent(block.id, { document });
                       flushTextBlockSave(block.id);
                     }}
+                    onDocumentConflict={() => onError("This text box changed elsewhere while you were editing. Mango kept and saved your local version.")}
                     onChangeSeen={onMarkChangeSeen}
                     onSelectionChatRequest={openSelectionChat}
                     onImageChatRequest={addImageChatComment}
@@ -2931,6 +2941,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     formattingControllerRef={formattingControllerRef}
                     onSelectionFontSizeChange={onSelectionFontSizeChange}
                     onSelectionInlineFormatChange={onSelectionInlineFormatChange}
+                    onSelectionHighlightColorChange={onSelectionHighlightColorChange}
                   />
                 </div>
                 {emailPaneIsVisible && !stackedSidePanes && renderTextSidePaneResizeHandle(block.id, "email", emailPaneWidth, emailPaneMaxWidth)}
@@ -3039,6 +3050,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 onSelectMessage={setNodeEmailModalMessageID}
                 onClearSelectedMessage={() => setNodeEmailModalMessageID("")}
                 onRemoveEmail={canEdit ? (emailID) => { void removeAttachedEmail(emailID); } : undefined}
+                onReplyEditorFocus={() => {
+                  setFocusedTextBlockID("");
+                  if (formattingControllerRef) formattingControllerRef.current = null;
+                }}
                 onError={onError}
               />
             </div>

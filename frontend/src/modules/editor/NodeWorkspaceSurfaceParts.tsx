@@ -9,9 +9,10 @@ import { canDeleteEditorTextBlockChatMessage, type EditorAttachedEmail, type Edi
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { createEditorScrollMemory } from "./editorScroll";
 import { EditorTabBar } from "./EditorTabBar";
+import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import { UNIFIED_EDITOR_FORMAT_TOOLBAR_TAB_IDS, type EditorTabID } from "./editorTabs";
 import { EDITOR_TAB_TEXT, type EditorOutlineStyleID } from "./plainTextEditing";
-import { buildEditorIndentGuideSegments, editorIndentGuideLeftForDepth, type EditorIndentGuideSegment } from "./editorIndentGuides";
+import { buildEditorIndentGuideSegments, type EditorIndentGuideSegment } from "./editorIndentGuides";
 import {
   EDITOR_RICH_TEXT_PREFIX,
   deserializeEditorDocumentHTML,
@@ -21,15 +22,14 @@ import {
   readEditorDocumentText,
   serializeEditorDocumentHTML,
   serializeEditorBodyForEmailHTML,
+  type EditorHighlightColor,
 } from "./richTextEditing";
 import { resolveEditorTextBlockChatAnchorRanges } from "./editorTextBlockChatHighlights";
 import { splitChatTextLinks } from "./nodeChatLinks";
 import {
-  applyEditorIndentCommandToRoot,
-  applyEditorInlineFormatToRoot,
-  applyEditorNumberedListToRoot,
-  applyEditorSelectionFontSizeToRoot,
-  readEditorSelectionFormatState,
+  getEditorSelectionOffsets,
+  setEditorSelectionByOffsets,
+  useEditorDocumentFormattingController,
   useEditorDocumentSurfaceHandlers,
   type EditorDocumentFormattingController,
   type EditorSelectionInlineFormatState,
@@ -278,6 +278,7 @@ type NodeTextBlockEditorProps = {
   onBlur: () => void;
   onDocumentChange: (document: string) => void;
   onDocumentFlush: (document: string) => void;
+  onDocumentConflict?: () => void;
   onChangeSeen: (changeID: string) => void;
   onSelectionChatRequest: (selection: TextBlockSelectionDraft) => void;
   onImageChatRequest: (image: TextBlockImageDraft) => void;
@@ -285,6 +286,7 @@ type NodeTextBlockEditorProps = {
   formattingControllerRef?: React.MutableRefObject<EditorDocumentFormattingController | null>;
   onSelectionFontSizeChange?: (fontSize: number) => void;
   onSelectionInlineFormatChange?: (format: EditorSelectionInlineFormatState) => void;
+  onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
 };
 
 function readStoredTextBlockHeight(storageKey: string): number {
@@ -688,6 +690,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   onBlur,
   onDocumentChange,
   onDocumentFlush,
+  onDocumentConflict,
   onChangeSeen,
   onSelectionChatRequest,
   onImageChatRequest,
@@ -695,6 +698,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   formattingControllerRef,
   onSelectionFontSizeChange,
   onSelectionInlineFormatChange,
+  onSelectionHighlightColorChange,
 }) => {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -705,11 +709,15 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const scrollMemoryRef = useRef(createEditorScrollMemory());
   const documentUndoHistoryRef = useRef(createEditorDocumentUndoHistory());
   const pendingFontSizeRef = useRef<number | null>(null);
+  const publishedFormattingControllerRef = useRef<EditorDocumentFormattingController | null>(null);
+  const formattingControllerWasActivatedRef = useRef(false);
   const indentGuideFrameRef = useRef<number | null>(null);
   const selectionPointerDownRef = useRef(false);
   const lastHandledTableInsertRequestIDRef = useRef(0);
   const lastAppliedDocumentRef = useRef("");
   const userEditedDocumentRef = useRef(false);
+  const deferredExternalDocumentRef = useRef<{ targetKey: string; value: string } | null>(null);
+  const suppressNextDocumentFlushRef = useRef(false);
   const lastStoredHeightRef = useRef(0);
   const heightStorageKey = `node-editor-text-block-height-v2:${currentUserID}:${companyID}:${nodeID}:${blockID}`;
   const [height, setHeight] = useState(() => readStoredTextBlockHeight(heightStorageKey));
@@ -725,9 +733,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   const documentLineHeightPx = TEXT_BLOCK_FONT_SIZE * TEXT_BLOCK_LINE_HEIGHT;
   const textBlockBottomBufferPx = documentLineHeightPx * TEXT_BLOCK_BOTTOM_BUFFER_ROWS;
   const textBlockPaddingBottomPx = TEXT_BLOCK_PADDING_BOTTOM + textBlockBottomBufferPx;
+  const textBlockPadding = `${TEXT_BLOCK_PADDING_TOP}px ${TEXT_BLOCK_PADDING_RIGHT}px ${textBlockPaddingBottomPx}px ${TEXT_BLOCK_PADDING_LEFT}px`;
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
-  const selectionFontSizeRef = useRef(TEXT_BLOCK_FONT_SIZE);
-
   const refreshTextHighlights = useCallback(() => {
     const editor = editorRef.current;
     const wrapper = wrapperRef.current;
@@ -761,28 +768,6 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     setHeight(nextHeight);
   }, [heightStorageKey]);
 
-  useLayoutEffect(() => {
-    const element = editorRef.current;
-    if (!element) return;
-    const nextHTML = deserializeEditorDocumentHTML(documentValue);
-    const targetChanged = loadedDocumentTargetKeyRef.current !== documentTargetKey;
-    if (!targetChanged && documentValue === lastAppliedDocumentRef.current) return;
-    if (!targetChanged) {
-      const currentDocument = serializeEditorDocumentHTML(element);
-      if (documentValue === currentDocument) {
-        lastAppliedDocumentRef.current = documentValue;
-        userEditedDocumentRef.current = false;
-        return;
-      }
-      if (editorHasFocus(element)) return;
-    }
-    element.innerHTML = nextHTML;
-    resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
-    lastAppliedDocumentRef.current = documentValue;
-    userEditedDocumentRef.current = false;
-    loadedDocumentTargetKeyRef.current = documentTargetKey;
-  }, [documentTargetKey, documentValue]);
-
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || !apiBase.trim() || !companyID.trim()) return;
@@ -797,7 +782,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     const observer = new ResizeObserver(() => {
       const nextHeight = Math.round(element.getBoundingClientRect().height);
       refreshTextHighlights();
-      if (!Number.isFinite(nextHeight) || Math.abs(nextHeight - lastStoredHeightRef.current) < 2) return;
+      if (!Number.isFinite(nextHeight) || nextHeight < TEXT_BLOCK_MIN_HEIGHT || Math.abs(nextHeight - lastStoredHeightRef.current) < 2) return;
       lastStoredHeightRef.current = nextHeight;
       setHeight(nextHeight);
       storeTextBlockHeight(heightStorageKey, nextHeight);
@@ -855,7 +840,6 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   }, []);
 
   const handleSelectionFontSizeChange = useCallback((fontSize: number) => {
-    selectionFontSizeRef.current = fontSize;
     onSelectionFontSizeChange?.(fontSize);
   }, [onSelectionFontSizeChange]);
 
@@ -869,12 +853,17 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
 
   const flushNodeDocumentSave = useCallback((fallbackDocument?: string) => {
     if (!editable) return;
+    if (suppressNextDocumentFlushRef.current) {
+      suppressNextDocumentFlushRef.current = false;
+      return;
+    }
     const nextDocument = fallbackDocument ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedDocumentRef.current);
     if (!userEditedDocumentRef.current && nextDocument.trim().length === 0 && documentValue.trim().length > 0 && lastAppliedDocumentRef.current !== documentValue) {
       return;
     }
     lastAppliedDocumentRef.current = nextDocument;
     onDocumentFlush(nextDocument);
+    userEditedDocumentRef.current = false;
   }, [documentValue, editable, onDocumentFlush]);
 
   const editorImageAttachmentContext = useMemo(() => (
@@ -905,6 +894,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     flushPendingDocumentSave: flushNodeDocumentSave,
     onSelectionFontSizeChange: handleSelectionFontSizeChange,
     onSelectionInlineFormatChange,
+    onSelectionHighlightColorChange,
     mentionUsers: companyUsers,
     mentionAccent: accent,
     mentionSurfaceText: surfaceText,
@@ -912,83 +902,80 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
     mentionMenuPosition: "absolute",
     editorImageAttachmentContext,
   });
-  const { mentionMenu: documentMentionMenu, insertTable, ...documentSurfaceHandlers } = handlers;
-  const formattingController = useMemo<EditorDocumentFormattingController>(() => ({
-    applyFontSizeValue: (fontSize: number) => {
-      const editor = editorRef.current;
-      if (!editable || !editor) return false;
-      return applyEditorSelectionFontSizeToRoot(editor, fontSize, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        pendingEditorFontSizeRef: pendingFontSizeRef,
-        scheduleDocumentSave: scheduleNodeDocumentSave,
-        scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
-        onSelectionFontSizeChange: handleSelectionFontSizeChange,
-      });
-    },
-    adjustFontSize: (delta: number) => {
-      const editor = editorRef.current;
-      if (!editable || !editor) return false;
-      const currentState = readEditorSelectionFormatState(editor, selectionFontSizeRef.current);
-      const currentFontSize = pendingFontSizeRef.current ?? currentState?.fontSize ?? selectionFontSizeRef.current;
-      return applyEditorSelectionFontSizeToRoot(editor, currentFontSize + delta, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        pendingEditorFontSizeRef: pendingFontSizeRef,
-        scheduleDocumentSave: scheduleNodeDocumentSave,
-        scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
-        onSelectionFontSizeChange: handleSelectionFontSizeChange,
-      });
-    },
-    toggleInlineFormat: (command) => {
-      const editor = editorRef.current;
-      if (!editable || !editor) return false;
-      return applyEditorInlineFormatToRoot(editor, command, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        scheduleDocumentSave: scheduleNodeDocumentSave,
-        scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
-        onSelectionInlineFormatChange,
-      });
-    },
-    toggleNumberedList: () => {
-      const editor = editorRef.current;
-      if (!editable || !editor) return false;
-      return applyEditorNumberedListToRoot(editor, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        scheduleDocumentSave: scheduleNodeDocumentSave,
-        scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
-      });
-    },
-    indent: () => {
-      const editor = editorRef.current;
-      if (!editable || !editor) return false;
-      return applyEditorIndentCommandToRoot(editor, "indent", outlineStyle, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        scheduleDocumentSave: scheduleNodeDocumentSave,
-        scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
-      });
-    },
-    outdent: () => {
-      const editor = editorRef.current;
-      if (!editable || !editor) return false;
-      return applyEditorIndentCommandToRoot(editor, "outdent", outlineStyle, {
-        documentUndoHistory: documentUndoHistoryRef.current,
-        scheduleDocumentSave: scheduleNodeDocumentSave,
-        scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
-      });
-    },
-    insertTable: () => {
-      if (!editable) return false;
-      return insertTable(editorRef.current);
-    },
-    readFormatState: () => {
-      const editor = editorRef.current;
-      return editor ? readEditorSelectionFormatState(editor, selectionFontSizeRef.current) : null;
-    },
-  }), [editable, handleSelectionFontSizeChange, insertTable, onSelectionInlineFormatChange, outlineStyle, scheduleNodeDocumentSave, scheduleTextBlockIndentGuideUpdate]);
+  const { mentionMenu: documentMentionMenu, insertTable, restoreSelection, ...documentSurfaceHandlers } = handlers;
+  const applyExternalDocumentValue = useCallback((element: HTMLDivElement, value: string, preserveSelection: boolean) => {
+    if (preserveSelection) restoreSelection(element);
+    const selectionOffsets = preserveSelection ? getEditorSelectionOffsets(element) : null;
+    element.innerHTML = deserializeEditorDocumentHTML(value);
+    if (apiBase.trim() && companyID.trim()) {
+      hydrateEditorAttachmentImageFrames(element, (attachmentID, variant, options) => (
+        loadMangoAttachmentObjectURL(apiBase, companyID, attachmentID, variant, options)
+      ));
+    }
+    resetEditorDocumentUndoHistory(documentUndoHistoryRef.current);
+    lastAppliedDocumentRef.current = value;
+    userEditedDocumentRef.current = false;
+    loadedDocumentTargetKeyRef.current = documentTargetKey;
+    deferredExternalDocumentRef.current = null;
+    scheduleTextBlockIndentGuideUpdate(readEditorDocumentText(element));
+    if (selectionOffsets) setEditorSelectionByOffsets(element, selectionOffsets.start, selectionOffsets.end);
+  }, [apiBase, companyID, documentTargetKey, restoreSelection, scheduleTextBlockIndentGuideUpdate]);
+
+  useLayoutEffect(() => {
+    const element = editorRef.current;
+    if (!element) return;
+    const targetChanged = loadedDocumentTargetKeyRef.current !== documentTargetKey;
+    if (!targetChanged && documentValue === lastAppliedDocumentRef.current) return;
+    if (!targetChanged) {
+      const currentDocument = serializeEditorDocumentHTML(element);
+      if (documentValue === currentDocument) {
+        lastAppliedDocumentRef.current = documentValue;
+        deferredExternalDocumentRef.current = null;
+        return;
+      }
+      if (editorHasFocus(element)) {
+        deferredExternalDocumentRef.current = { targetKey: documentTargetKey, value: documentValue };
+        return;
+      }
+    }
+    applyExternalDocumentValue(element, documentValue, !targetChanged);
+  }, [applyExternalDocumentValue, documentTargetKey, documentValue]);
+
+  const formattingController = useEditorDocumentFormattingController({
+    editorRef,
+    editable,
+    outlineStyle,
+    documentUndoHistoryRef,
+    pendingEditorFontSizeRef: pendingFontSizeRef,
+    restoreSelection,
+    insertTable,
+    scheduleDocumentSave: scheduleNodeDocumentSave,
+    scheduleIndentGuideUpdate: scheduleTextBlockIndentGuideUpdate,
+    onSelectionFontSizeChange: handleSelectionFontSizeChange,
+    onSelectionInlineFormatChange,
+    onSelectionHighlightColorChange,
+  });
 
   const activateFormattingController = useCallback(() => {
     if (!formattingControllerRef || !editable) return;
+    formattingControllerWasActivatedRef.current = true;
+    publishedFormattingControllerRef.current = formattingController;
     formattingControllerRef.current = formattingController;
   }, [editable, formattingController, formattingControllerRef]);
+
+  useEffect(() => {
+    const previousController = publishedFormattingControllerRef.current;
+    publishedFormattingControllerRef.current = formattingController;
+    if (formattingControllerWasActivatedRef.current && formattingControllerRef?.current === previousController) {
+      formattingControllerRef.current = formattingController;
+    }
+  }, [formattingController, formattingControllerRef]);
+
+  useEffect(() => () => {
+    if (formattingControllerRef?.current === publishedFormattingControllerRef.current) {
+      formattingControllerRef.current = null;
+    }
+  }, [formattingControllerRef]);
 
   useEffect(() => {
     if (!tableInsertRequestID || !editable) return;
@@ -999,6 +986,16 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
   }, [activateFormattingController, editable, formattingController, tableInsertRequestID]);
 
   const handleBlur: React.FocusEventHandler<HTMLDivElement> = (event) => {
+    const deferred = deferredExternalDocumentRef.current;
+    if (deferred?.targetKey === documentTargetKey) {
+      if (userEditedDocumentRef.current) {
+        deferredExternalDocumentRef.current = null;
+        onDocumentConflict?.();
+      } else {
+        suppressNextDocumentFlushRef.current = true;
+        applyExternalDocumentValue(event.currentTarget, deferred.value, true);
+      }
+    }
     handlers.onBlur(event);
     onBlur();
   };
@@ -1119,41 +1116,6 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
         overflow: "hidden",
       }}
     >
-      {showIndentGuides && (
-        <div
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            inset: 0,
-            zIndex: 0,
-            pointerEvents: "none",
-            boxSizing: "border-box",
-            overflow: "hidden",
-            padding: `${TEXT_BLOCK_PADDING_TOP}px ${TEXT_BLOCK_PADDING_RIGHT}px ${textBlockPaddingBottomPx}px ${TEXT_BLOCK_PADDING_LEFT}px`,
-            fontSize: TEXT_BLOCK_FONT_SIZE,
-            lineHeight: TEXT_BLOCK_LINE_HEIGHT,
-            fontFamily: documentFontFamily,
-            letterSpacing: 0,
-            tabSize: EDITOR_TAB_TEXT.length,
-          }}
-        >
-          <div style={{ position: "relative", transform: `translateY(-${documentScrollTop}px)` }}>
-            {indentGuideSegments.map((segment) => (
-              <div
-                key={`${segment.depth}-${segment.lineStart}-${segment.lineEnd}`}
-                style={{
-                  position: "absolute",
-                  top: segment.lineStart * documentLineHeightPx,
-                  left: editorIndentGuideLeftForDepth(segment.depth, EDITOR_TAB_TEXT.length),
-                  height: Math.max(documentLineHeightPx, (segment.lineEnd - segment.lineStart + 1) * documentLineHeightPx),
-                  borderLeft: `1px solid ${indentGuideColor}`,
-                  opacity: 0.9,
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
       {contentChangeHighlightRects.length > 0 && (
         <div
           aria-hidden="true"
@@ -1210,78 +1172,36 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           ))}
         </div>
       )}
-      <div
-        ref={editorRef}
-        className="editor-document-scroll mango-editor-hover-highlight"
-        data-node-text-block-id={surfaceKind === "node" ? blockID : undefined}
-        data-project-text-block-id={surfaceKind === "project" ? blockID : undefined}
-        role="textbox"
-        aria-label={surfaceKind === "project" ? "Project text block" : "Node text block"}
-        aria-multiline="true"
-        aria-readonly={!editable || undefined}
-        tabIndex={editable ? undefined : -1}
-        contentEditable={editable}
-        suppressContentEditableWarning
-        spellCheck
+      <EditorDocumentSurface
+        documentRef={editorRef}
+        editable={editable}
+        surfaceID={surfaceKind === "project" ? "project-text-block" : "node-text-block"}
+        ariaLabel={surfaceKind === "project" ? "Project text block" : "Node text block"}
+        dataAttributes={{
+          "data-node-text-block-id": surfaceKind === "node" ? blockID : undefined,
+          "data-project-text-block-id": surfaceKind === "project" ? blockID : undefined,
+        }}
+        layout="flow"
+        documentFontSize={TEXT_BLOCK_FONT_SIZE}
+        documentLineHeightPx={documentLineHeightPx}
+        documentLineHeight={TEXT_BLOCK_LINE_HEIGHT}
+        documentFontFamily={documentFontFamily}
+        documentPadding={textBlockPadding}
+        documentScrollTop={documentScrollTop}
+        showIndentGuides={showIndentGuides}
+        indentGuideSegments={indentGuideSegments}
+        indentGuideColor={indentGuideColor}
+        surfaceText={surfaceText}
+        caretColor={surfaceText}
+        scrollbarAccent={accent}
+        scrollbarTrack={scrollbarTrack}
+        {...documentSurfaceHandlers}
         onFocus={() => {
-          if (editable) {
-            activateFormattingController();
-            onFocus();
-          }
-        }}
-        onBeforeInput={(event) => {
-          if (!editable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onBeforeInput(event);
-        }}
-        onPaste={(event) => {
-          if (!editable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onPaste(event);
-        }}
-        onCopy={documentSurfaceHandlers.onCopy}
-        onCut={(event) => {
-          if (!editable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onCut(event);
-        }}
-        onDrop={(event) => {
-          if (!editable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onDrop(event);
-        }}
-        onInput={(event) => {
-          if (!editable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onInput(event);
-        }}
-        onSelect={documentSurfaceHandlers.onSelect}
-        onClick={documentSurfaceHandlers.onClick}
-        onDoubleClick={documentSurfaceHandlers.onDoubleClick}
-        onContextMenu={(event) => {
-          if (!editable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onContextMenu(event);
+          activateFormattingController();
+          onFocus();
         }}
         onPointerDown={(event) => {
           setSelectionDraft(null);
-          if (!editable) {
-            setImageDraft(null);
-            editorRef.current?.blur();
-            return;
-          }
           const frame = findEditorImageFrame(event.currentTarget, event.target);
           const wrapper = wrapperRef.current;
           setImageDraft(frame && wrapper ? readImageDraftFromFrame(blockID, frame, wrapper) : null);
@@ -1295,44 +1215,13 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = ({
           captureSelectionDraft();
         }}
         onBlur={handleBlur}
-        onScroll={documentSurfaceHandlers.onScroll}
-        onWheel={documentSurfaceHandlers.onWheel}
-        onKeyDown={(event) => {
-          if (!editable) {
-            event.preventDefault();
-            return;
-          }
-          documentSurfaceHandlers.onKeyDown(event);
-        }}
         style={{
-          position: "relative",
           zIndex: 2,
-          display: "block",
-          width: "100%",
           height,
           minHeight: TEXT_BLOCK_MIN_HEIGHT,
           maxHeight: TEXT_BLOCK_MAX_HEIGHT,
           resize: editable ? "vertical" : "none",
-          border: 0,
-          outline: "none",
-          padding: `${TEXT_BLOCK_PADDING_TOP}px ${TEXT_BLOCK_PADDING_RIGHT}px ${textBlockPaddingBottomPx}px ${TEXT_BLOCK_PADDING_LEFT}px`,
-          boxSizing: "border-box",
-          color: surfaceText,
           background: "transparent",
-          fontSize: TEXT_BLOCK_FONT_SIZE,
-          lineHeight: TEXT_BLOCK_LINE_HEIGHT,
-          fontFamily: documentFontFamily,
-          tabSize: EDITOR_TAB_TEXT.length,
-          letterSpacing: 0,
-          overflowWrap: "anywhere",
-          wordBreak: "break-word",
-          whiteSpace: "pre-wrap",
-          overflowY: "auto",
-          overflowX: "hidden",
-          caretColor: editable ? surfaceText : "transparent",
-          cursor: editable ? "text" : "default",
-          ["--editor-document-scroll-accent" as string]: accent,
-          ["--editor-document-scroll-track" as string]: scrollbarTrack,
         }}
       />
       {contentChangeLabels.length > 0 && (
@@ -3493,6 +3382,10 @@ type AttachedEmailOrganizerPaneProps = {
   apiBase?: string;
   companyID: string;
   attachmentRequestJSON?: AttachmentRequestJSON;
+  attachmentResourceType?: MangoAttachmentResourceType;
+  attachmentResourceID?: string;
+  attachmentInformationID?: string;
+  attachmentEditorSurface?: string;
   storageKey: string;
   editable: boolean;
   accent: string;
@@ -3507,6 +3400,7 @@ type AttachedEmailOrganizerPaneProps = {
   onRemoveEmail?: (emailID: string) => void;
   onEmailSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
   onEmailSelectionNodeRequest?: (messageID: string, quote: string) => void;
+  onReplyEditorFocus?: () => void;
   onError: (message: string) => void;
 };
 
@@ -3661,6 +3555,10 @@ const AttachedEmailThreadCard: React.FC<{
   apiBase?: string;
   companyID: string;
   attachmentRequestJSON?: AttachmentRequestJSON;
+  attachmentResourceType?: MangoAttachmentResourceType;
+  attachmentResourceID?: string;
+  attachmentInformationID?: string;
+  attachmentEditorSurface?: string;
   editable: boolean;
   accent: string;
   surfaceText: string;
@@ -3677,6 +3575,7 @@ const AttachedEmailThreadCard: React.FC<{
   onSelect: () => void;
   onReply: (messageID: string, replyAll: boolean) => void;
   onReplyComplete: () => void;
+  onReplyEditorFocus?: () => void;
   onError: (message: string) => void;
   onContextMenu: (event: React.MouseEvent<HTMLDivElement>, email: EditorAttachedEmail) => void;
   onDragStart: React.DragEventHandler<HTMLDivElement>;
@@ -3684,7 +3583,7 @@ const AttachedEmailThreadCard: React.FC<{
   onDropOnEmail: React.DragEventHandler<HTMLDivElement>;
   onSelectionChatRequest?: (messageID: string, selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (messageID: string, quote: string) => void;
-}> = ({ email, nodeID = "", apiBase = "", companyID, attachmentRequestJSON, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyAll = false, activeSelection = null, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
+}> = ({ email, nodeID = "", apiBase = "", companyID, attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyAll = false, activeSelection = null, highlightRemovalRequest = null, onToggleCollapsed, onSelect, onReply, onReplyComplete, onReplyEditorFocus, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionNodeRequest }) => {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -3856,6 +3755,10 @@ const AttachedEmailThreadCard: React.FC<{
               sharedInboxID={email.sharedInboxID}
               accountEmail={email.accountEmail}
               attachmentRequestJSON={attachmentRequestJSON}
+              attachmentResourceType={attachmentResourceType}
+              attachmentResourceID={attachmentResourceID}
+              attachmentInformationID={attachmentInformationID}
+              attachmentEditorSurface={attachmentEditorSurface}
               editable={editable}
               accent={accent}
               surfaceText={surfaceText}
@@ -3867,6 +3770,7 @@ const AttachedEmailThreadCard: React.FC<{
               initialReplyAll={replyAll}
               inlineExpansion
               onReplyComplete={onReplyComplete}
+              onReplyEditorFocus={onReplyEditorFocus}
               onError={onError}
               onSelectionChatRequest={onSelectionChatRequest ? (selection) => onSelectionChatRequest(selection.messageID || email.messageID, selection) : undefined}
               onSelectionNodeRequest={onSelectionNodeRequest ? (selection) => onSelectionNodeRequest(selection.messageID || email.messageID, selection.quote) : undefined}
@@ -3933,7 +3837,7 @@ const AttachedEmailThreadCard: React.FC<{
   );
 };
 
-export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, attachmentRequestJSON, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionNodeRequest, onError }) => {
+export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProps> = ({ emails, nodeID = "", apiBase = "", companyID, attachmentRequestJSON, attachmentResourceType, attachmentResourceID, attachmentInformationID, attachmentEditorSurface, storageKey, editable, accent, surfaceText, strokeColor, ruleColor, selectedMessageID, activeEmailSelection = null, emailHighlightRemovalRequest = null, onSelectMessage, onClearSelectedMessage, onRemoveEmail, onEmailSelectionChatRequest, onEmailSelectionNodeRequest, onReplyEditorFocus, onError }) => {
   const [layout, setLayout] = useState<AttachedEmailPaneLayout>(() => readStoredAttachedEmailPaneLayout(storageKey));
   const [draggingMessageID, setDraggingMessageID] = useState("");
   const [localSelectedMessageID, setLocalSelectedMessageID] = useState("");
@@ -4180,6 +4084,10 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       apiBase={apiBase}
       companyID={companyID}
       attachmentRequestJSON={attachmentRequestJSON}
+      attachmentResourceType={attachmentResourceType}
+      attachmentResourceID={attachmentResourceID}
+      attachmentInformationID={attachmentInformationID}
+      attachmentEditorSurface={attachmentEditorSurface}
       editable={editable}
       accent={accent}
       surfaceText={surfaceText}
@@ -4201,6 +4109,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       onReplyComplete={() => {
         setReplyComposer((current) => current?.rootMessageID === email.messageID ? null : current);
       }}
+      onReplyEditorFocus={onReplyEditorFocus}
       onError={onError}
       onContextMenu={(event, targetEmail) => setEmailMenu({ messageID: targetEmail.messageID, x: event.clientX, y: event.clientY })}
       onDragStart={(event) => {
@@ -4492,6 +4401,10 @@ type EmailConversationPaneProps = {
   sharedInboxID?: string;
   accountEmail?: string;
   attachmentRequestJSON?: AttachmentRequestJSON;
+  attachmentResourceType?: MangoAttachmentResourceType;
+  attachmentResourceID?: string;
+  attachmentInformationID?: string;
+  attachmentEditorSurface?: string;
   editable: boolean;
   accent: string;
   surfaceText: string;
@@ -4503,6 +4416,7 @@ type EmailConversationPaneProps = {
   initialReplyAll?: boolean;
   inlineExpansion?: boolean;
   onReplyComplete?: () => void;
+  onReplyEditorFocus?: () => void;
   onError: (message: string) => void;
   onSelectionChatRequest?: (selection: EmailSelectionDraft) => void;
   onSelectionNodeRequest?: (selection: EmailSelectionDraft) => void;
@@ -5247,6 +5161,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   sharedInboxID,
   accountEmail = "",
   attachmentRequestJSON,
+  attachmentResourceType = "attached_email",
+  attachmentResourceID = "",
+  attachmentInformationID,
+  attachmentEditorSurface = "attached-email-reply",
   editable,
   accent,
   surfaceText,
@@ -5258,6 +5176,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   initialReplyAll = false,
   inlineExpansion = false,
   onReplyComplete,
+  onReplyEditorFocus,
   onError,
   onSelectionChatRequest,
   onSelectionNodeRequest,
@@ -5278,6 +5197,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [replyToolbarTab, setReplyToolbarTab] = useState<EditorTabID>("format");
   const [replySelectionFontSize, setReplySelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [replySelectionInlineFormat, setReplySelectionInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false });
+  const [replyHighlightColor, setReplyHighlightColor] = useState<EditorHighlightColor | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -5304,6 +5224,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setReplyToolbarTab("format");
     setReplySelectionFontSize(EDITOR_DOCUMENT_FONT_SIZE_PX);
     setReplySelectionInlineFormat({ bold: false, underline: false });
+    setReplyHighlightColor(null);
     setDraftAttachments([]);
     setCcDraft("");
     setBccDraft("");
@@ -5391,17 +5312,19 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const replyEditorMinHeight = inlineExpansion ? 112 : 138;
   const replyEditorMaxHeight = inlineExpansion ? 272 : 340;
   const replyEditorHeight = Math.min(replyEditorMaxHeight, replyEditorMinHeight + Math.max(0, replyEditorLineCount - 4) * 18);
-  const attachedEmailAttachmentResourceID = useMemo(() => (
-    nodeID.trim() && messageID.trim() ? mangoAttachedEmailResourceID({ nodeID, messageID }) : ""
-  ), [messageID, nodeID]);
-  const replyEditorImageAttachmentContext = attachmentRequestJSON && apiBase.trim() && companyID.trim() && attachedEmailAttachmentResourceID
+  const replyAttachmentResourceID = useMemo(() => (
+    attachmentResourceID.trim()
+    || (nodeID.trim() && messageID.trim() ? mangoAttachedEmailResourceID({ nodeID, messageID }) : "")
+  ), [attachmentResourceID, messageID, nodeID]);
+  const replyEditorImageAttachmentContext = attachmentRequestJSON && apiBase.trim() && companyID.trim() && replyAttachmentResourceID
     ? {
       requestJSON: attachmentRequestJSON,
       apiBase,
       companyID,
-      resourceType: "attached_email" as const,
-      resourceID: attachedEmailAttachmentResourceID,
-      editorSurface: "attached-email-reply",
+      resourceType: attachmentResourceType,
+      resourceID: replyAttachmentResourceID,
+      informationID: attachmentInformationID?.trim() || undefined,
+      editorSurface: attachmentEditorSurface,
     }
     : undefined;
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionNodeRequest);
@@ -5558,22 +5481,22 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     if (!editable) return;
     const incomingFiles = Array.from(files);
     if (incomingFiles.length === 0) return;
-    if (!attachmentRequestJSON || !apiBase.trim() || !companyID.trim() || !nodeID.trim()) {
+    if (!attachmentRequestJSON || !apiBase.trim() || !companyID.trim() || !replyAttachmentResourceID) {
       const nextError = "Email attachment upload context is unavailable.";
       setError(nextError);
       onError(nextError);
       return;
     }
-    const resourceID = mangoAttachedEmailResourceID({ nodeID, messageID });
     void Promise.allSettled(incomingFiles.map((file) => uploadEditorAttachment(file, {
       requestJSON: attachmentRequestJSON,
       companyID,
-      resourceType: "attached_email",
-      resourceID,
+      resourceType: attachmentResourceType,
+      resourceID: replyAttachmentResourceID,
       sourceKind: "email_outgoing",
       relationshipKind: "email_attachment",
+      informationID: attachmentInformationID?.trim() || undefined,
       messageID: replyTargetMessageID || messageID,
-      editorSurface: "attached-email-reply",
+      editorSurface: attachmentEditorSurface,
     })))
       .then((results) => {
         const attachments = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
@@ -5588,7 +5511,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         setError(nextError);
         onError(nextError);
       });
-  }, [apiBase, attachmentRequestJSON, companyID, editable, messageID, nodeID, onError, replyTargetMessageID]);
+  }, [apiBase, attachmentEditorSurface, attachmentInformationID, attachmentRequestJSON, attachmentResourceType, companyID, editable, messageID, onError, replyAttachmentResourceID, replyTargetMessageID]);
 
   const removeEmailDraftAttachment = useCallback((attachmentID: string) => {
     setDraftAttachments((current) => current.filter((attachment) => attachment.id !== attachmentID));
@@ -5613,13 +5536,14 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 
   const submitReply = () => {
     if (!message || !replyTargetMessage || !canSend) return;
+    const replyBody = replyEditorControllerRef.current?.flush() ?? bodyDraft;
     setSending(true);
     void sendEmail({
       to: recipients,
       cc: ccRecipients,
       bcc: bccRecipients,
       subject: subjectDraft.trim(),
-      body: serializeEditorBodyForEmailHTML(bodyDraft),
+      body: serializeEditorBodyForEmailHTML(replyBody),
       attachments: draftAttachments
         .map((attachment) => {
           const attachmentID = attachment.attachmentID?.trim() || attachment.id.trim();
@@ -5658,6 +5582,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     if (!state) return;
     setReplySelectionFontSize(state.fontSize);
     setReplySelectionInlineFormat({ bold: state.bold, underline: state.underline });
+    setReplyHighlightColor(state.highlightColor);
   }, []);
   const adjustReplyFontSize = useCallback((delta: number) => {
     replyEditorControllerRef.current?.adjustFontSize(delta);
@@ -5669,6 +5594,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   }, [syncReplyToolbarFormatState]);
   const toggleReplyInlineFormat = useCallback((command: "bold" | "underline") => {
     replyEditorControllerRef.current?.toggleInlineFormat(command);
+    syncReplyToolbarFormatState();
+  }, [syncReplyToolbarFormatState]);
+  const setReplySelectionHighlightColor = useCallback((color: EditorHighlightColor | null) => {
+    replyEditorControllerRef.current?.applyHighlightColor(color);
     syncReplyToolbarFormatState();
   }, [syncReplyToolbarFormatState]);
   const changeReplyOutlineStyle = useCallback((nextOutlineStyle: EditorOutlineStyleID) => {
@@ -6013,8 +5942,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   onSetSelectionFontSize={setReplyFontSize}
                   boldActive={replySelectionInlineFormat.bold}
                   underlineActive={replySelectionInlineFormat.underline}
+                  highlightColor={replyHighlightColor}
                   onToggleBold={() => toggleReplyInlineFormat("bold")}
                   onToggleUnderline={() => toggleReplyInlineFormat("underline")}
+                  onSetSelectionHighlightColor={setReplySelectionHighlightColor}
                   onOutlineStyleFocus={() => setReplyToolbarTab("outline-styles")}
                   onOutlineStyleChange={changeReplyOutlineStyle}
                   reserveHeaderOffset={false}
@@ -6023,6 +5954,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 />
               </div>
               <UnifiedRichEditorSurface
+                key={`attached-email-reply:${replyAttachmentResourceID}:${replyTargetMessageID}`}
                 value={bodyDraft}
                 editable={editable}
                 outlineStyle={replyOutlineStyle}
@@ -6036,11 +5968,13 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 style={{ width: "100%", height: replyEditorHeight, minHeight: replyEditorMinHeight, maxHeight: replyEditorMaxHeight, resize: editable ? "vertical" : "none", overflowY: "auto", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px 24px", scrollPaddingBottom: 24, color: surfaceText, background: EDITOR_NEU_ACTIVE_SURFACE, fontSize: 12, lineHeight: 1.35, letterSpacing: 0, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxSizing: "border-box", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
                 onSelectionFontSizeChange={setReplySelectionFontSize}
                 onSelectionInlineFormatChange={setReplySelectionInlineFormat}
+                onSelectionHighlightColorChange={setReplyHighlightColor}
                 editorImageAttachmentContext={replyEditorImageAttachmentContext}
                 onEditorImageAttachmentError={(message) => {
                   setError(message);
                   onError(message);
                 }}
+                onFocus={onReplyEditorFocus}
                 onChange={setBodyDraft}
               />
             </div>

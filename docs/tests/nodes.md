@@ -8,7 +8,7 @@ Coverage Status:
 - Shared conversion projection provenance is covered by `backend/internal/http/communications_triage_handlers_test.go` and `backend/internal/store/communications_email_conversion_test.go`.
 - Browser-direct additions must prove the 250 MiB/64 MiB/16 MiB policy, node-level progress/cancel/retry/resume, completed-only counts, one completion refresh, and completion after origin text-box deletion without projection recreation.
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial. Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; Company Explorer search resource-type filtering has backend coverage; node editor projection-save helpers have frontend coverage; Tab-at-caret editor behavior is covered by `tests/frontend/modules/editor/plainTextEditing.test.ts`; Mango email body marking/display preservation is covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; the unified editor contract, attached-email reply bottom buffer, EmailPickerModal attach-only boundary, red unified close chrome, unified node-shell contract/adapter mounting, and the Project Logic Gates / Nodes panel fullscreen contract are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; shared attachment tests cover node resource links/content authorization and `attached_email` resource authorization; GVIC picker rule IDs, the Assign to Logic Gate picker no-preload UI behavior, and node header project-assignment layout rules are not mapped to automated tests yet.
+- Business Logic Covered By Automated Tests: Partial. Node soft-delete edit gating and recycle-bin owner stamping have backend coverage; Company Explorer search resource-type filtering has backend coverage; node editor projection-save helpers, including target-scoped teardown and latest-content draining, have frontend coverage; Tab-at-caret editor behavior is covered by `tests/frontend/modules/editor/plainTextEditing.test.ts`; Mango email body marking/display preservation is covered by `tests/frontend/modules/editor/richTextEditing.test.ts` and `tests/frontend/pages/home/homeUtils.test.ts`; the unified editor contract, sole rich DOM host, shared highlight control, attached-email reply focus invalidation, hidden-document formatting disablement, hydration conflict handling, attached-email reply bottom buffer, EmailPickerModal attach-only boundary, red unified close chrome, unified node-shell contract/adapter mounting, and the Project Logic Gates / Nodes panel fullscreen contract are covered by `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts`; shared attachment tests cover node resource links/content authorization and `attached_email` resource authorization; GVIC picker rule IDs, the Assign to Logic Gate picker no-preload UI behavior, and node header project-assignment layout rules are not mapped to automated tests yet.
 
 ## Business Logic
 
@@ -41,7 +41,7 @@ N12 - The node Assign to Logic Gate picker should not preload or display Logic G
 N13 - Pasted rich text in node editor surfaces must normalize to the app/editor font family instead of preserving source document fonts.
 N14 - Pasting selected inline text into a node editor must not create extra blank rows above or below the pasted content from source boundary whitespace.
 N15 - New node editor documents default to alphanumerical numbering, and the editor outline dropdown lists alphanumerical numbering before indent guides.
-N16 - The node editor font-size control applies to highlighted text and, for a collapsed caret, becomes the sticky font size for subsequently typed characters until changed again.
+N16 - The node editor font-size control applies to selected text and, for a collapsed caret, becomes the sticky font size for subsequently typed characters until changed again.
 N17 - Node editor bold and underline controls must toggle the selected text or sticky caret formatting and must visually reflect the formatting at the current caret or selection.
 N18 - Inserting a table in a node editor must insert the table at the current caret/selection location, not at the top-left or beginning of the editor.
 N19 - A node header can show and edit the node's project placement: the project button displays the current project when one is known and otherwise offers project assignment.
@@ -57,7 +57,7 @@ N28 - Node editor text-block projection saves must use one-save-at-a-time latest
 N29 - Node editor text-block save state must use the vocabulary and behavior `has changed`, `has not changed`, `save in progress`, and `save needed after current save`. A block is marked `has not changed` only when the completed request's version matches the latest local version.
 N30 - Node editor forced projection flushes must save only blocks that have changed and must not `Promise.all` every text block in the node. The flush must preserve all user characters by waiting for in-progress saves and then saving the latest content if newer edits arrived.
 N31 - Deleting a node text block must not race with an in-flight projection save. If a projection save is already in progress for that block, deletion must wait for that save to finish or otherwise cancel/ignore it before issuing the projection DELETE, so a late POST cannot recreate the deleted block.
-N32 - Node text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, and table semantics must apply to node text boxes wherever a node editor is opened.
+N32 - Node text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, text highlight color, clear highlight, and table semantics must apply to node text boxes wherever a node editor is opened.
 N33 - Full node editor windows participate in the unified node shell contract: header, title behavior, top-right actions, close/minimize/open/fullscreen/delete controls, sizing, and body layout must come from one shared user-facing shell behavior wherever practical.
 N34 - Adding, removing, reordering, or restyling a top-right node-window action must happen through the unified node shell so Home, sidebar/app shell, Updates, Kanban/My Work, dock-restored, Project critical-path inline node windows, and Project Logic Gates / Nodes embedded node panels stay aligned when the capability is available.
 N35 - Unified node shell does not require one opener, route, page state, or backend path; a node may be opened from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, a Project critical-path row, or the Project Logic Gates / Nodes tab while still sharing the same user-facing shell.
@@ -89,7 +89,7 @@ N60 - In automatic numbering mode, pressing Tab in ordinary non-outline node tex
 N61 - Full node-window close actions render through the unified node shell's red close chrome with a white X across Home, app/sidebar, Kanban/My Work, Updates, Project, and dock-restored node shell surfaces.
 N62 - Attached-email reply body editors include a visual one-row bottom buffer through editor padding/scroll padding so the caret stays visible at the bottom; the buffer must not add fake blank lines to the sent email body.
 N63 - Mango-authored outgoing email bodies are marked and displayed in Mango with preserved line breaks, spaces, and indentation in node-attached email detail views instead of being normalized into a flat sentence.
-N64 - Node text-box formatting is driven by the shared editor toolbar and formatting controller: the font-size minus/value/plus controls, bold/underline controls, and outline-style dropdown must match Logic Gate, project, and mail editor surfaces in look and behavior wherever a full node editor is opened.
+N64 - Node text-box formatting is driven by the shared editor toolbar and formatting controller: the font-size minus/value/plus controls, bold/underline controls, text-highlight picker and clear action, and outline-style dropdown must match Logic Gate, project, and mail editor surfaces in look and behavior wherever a full node editor is opened.
 N65 - Each node text box exposes an attachment-list control beside its attachment-upload control. Its count and rows include only active node `file_attachment` resource links whose `information_id` matches that text block.
 N66 - The shared node workspace toolbar exposes one node-wide attachment counter and list. It aggregates all active `file_attachment` resource links for the node across its text boxes, labels each row with its text-box title when available, and excludes inline images, chat attachments, email attachments, and attached emails.
 N67 - A node attachment row displays the original filename and byte size and exposes a download action on the right. Download requests the attachment's `original` variant through Mango's authenticated attachment-content API and preserves the original filename; the UI must not use a raw S3 URL, storage key, or legacy durable `dataURL` as the download source.
@@ -107,6 +107,11 @@ N78 - Node upload preparation computes raw SHA-256 incrementally with bounded me
 N79 - Upload progress belongs to the node rather than the origin text box. It shows each selected filename/extension/size once with preparing, uploading, retrying, completing, complete, canceled, or failed state plus progress/cancel/retry; it does not block node editing or enter the normal completed list/count.
 N80 - Deleting an origin text box while upload is active keeps node-level progress and permits completion when the node still exists and current node edit authorization passes. It must not recreate the deleted projection. Deleting the node or losing edit access rejects completion and cleans up the unfinalized S3 object.
 N81 - One successful completion invalidates the shared node attachment metadata once. Part progress/retry does not repeatedly refetch the completed list, and one failed file does not discard completed siblings.
+N82 - Node text boxes use `EditorDocumentSurface` as their rich editable host and the shared formatting controller for font size, bold, underline, highlight color, lists, links, tables, selection restoration, and pending-caret font size; node wrappers must not render a second rich `contentEditable` host or construct a local formatting controller.
+N83 - Node text-block save controllers are scoped by company and node. Closing a node or switching company/node drains every debounced changed block before clearing the old controller.
+N84 - External node text-block hydration preserves the logical selection while the document or a shared toolbar control owns focus. Remote content received while the document itself is focused is deferred until blur; an untouched local DOM accepts it without flushing stale HTML, while a locally edited conflict keeps and saves the local version and shows a conflict notice.
+N85 - Focusing a node-attached email reply immediately clears the surrounding text block as the outer formatting target. The outer node toolbar disables its formatting controls, the reply toolbar becomes the only formatting owner, and node navigation tabs remain usable.
+N86 - Opening Metadata, History, or Save Settings hides the node document workspace and prevents toolbar formatting against the hidden editor without unmounting or resetting its text-block layout. Only formatting controls are disabled; editor navigation tabs remain operable.
 
 ## Scenarios
 
@@ -203,13 +208,15 @@ Business logic covered:
 - N16
 - N17
 - N18
+- N32
 - N64
 - N60
+- N82
 
 Given:
 - A user edits a node text body.
 - The user pastes styled text copied from another application.
-- The user changes font size, bold, underline, outline style, or inserts a table.
+- The user changes font size, bold, underline, text highlight color, outline style, or inserts a table.
 
 Expected:
 - Pasted content renders in the node editor's normal font family.
@@ -219,7 +226,9 @@ Expected:
 - Changing font size with only a caret sets the font size for the next typed characters.
 - Bold and underline buttons reflect the caret or selected text state and can be active at the same time.
 - Toggling bold or underline affects the selection or the next typed characters when the selection is collapsed.
-- The shared toolbar controls for font size, bold, underline, and outline style have the same visual styling and command behavior as Logic Gate, project, and mail editor surfaces.
+- Applying a highlight color changes the selected text, Clear highlight removes it, and a collapsed caret does not create sticky highlight state.
+- The shared toolbar controls for font size, bold, underline, highlight color, and outline style have the same visual styling and command behavior as Logic Gate, project, and mail editor surfaces.
+- The node wrapper mounts the shared rich editor host and formatting controller rather than a separate rich editable DOM or local formatting-command implementation.
 - Table insertion uses the current caret/selection position.
 - Pressing Tab at the end of ordinary non-outline text inserts a five-space tab at the caret without shifting the whole text block; structural indent runs only for a parsed outline/list line.
 
@@ -263,11 +272,14 @@ Business logic covered:
 - N29
 - N30
 - N31
+- N83
+- N84
 
 Given:
 - A user has edit access to a node.
 - The user types in one or more node text boxes.
-- The user opens Save Settings, changes the auto-save interval, manually saves, waits for an auto-save interval, or deletes a text box while a save may still be in progress.
+- The user opens Save Settings, changes the auto-save interval, manually saves, waits for an auto-save interval, deletes a text box while a save may still be in progress, or closes/switches nodes while debounced edits remain.
+- A newer projection value may arrive while the document or a shared toolbar control has focus.
 
 Expected:
 - Regular typing updates `node_projection_table` for the current text box state instead of appending repeated full-document rows to `node_information`.
@@ -283,6 +295,8 @@ Expected:
 - Forced flushes save only changed text blocks and complete without dropping characters typed during in-progress saves.
 - If the user deletes a text block while a projection save for that block is in progress, the delete path waits for the in-progress save to finish or prevents its result from applying before issuing the projection DELETE.
 - A late projection POST must not recreate a deleted text block after the DELETE succeeds.
+- Closing the node or switching company/node drains every changed block from the old target-scoped controller before it is cleared.
+- Hydration preserves the logical selection while a toolbar control owns focus. While the document itself is focused, untouched local content accepts a deferred remote value on blur without flushing stale HTML; a locally edited conflict keeps and saves the local value and reports the conflict.
 
 ### Scenario N-S9: Unified Node Shell And Editor Semantics
 
@@ -308,10 +322,13 @@ Business logic covered:
 - N50
 - N61
 - N64
+- N85
+- N86
 
 Given:
 - A user opens the same node from Home, Updates, Company Explorer/sidebar, Kanban/My Work, dock restore, a Project critical-path row, and a Project Logic Gates / Nodes row.
 - The node has text boxes, attached emails, and text-block chats.
+- The user switches from the document to Metadata, History, or Save Settings and then returns.
 - A future product change adds a new top-right node-window action or changes rich editor indentation/paste/delete semantics.
 
 Expected:
@@ -324,7 +341,8 @@ Expected:
 - The Project Logic Gates / Nodes node panel replaces only the right-hand Project relationship region. Its fullscreen control expands the same live editor to the browser viewport and restores it to that region without resetting Project grouping or node selection state.
 - Node text boxes use the unified editor semantics on every node-window surface.
 - Typing `@` or `!` in a node text box or its chat opens the people picker with each user represented by a stable profile color keyed by normalized user ID, then email, then display name. Rich-editor keyboard selection adds a translucent same-color row tint and active rail; chat retains its active-row treatment. Both keep the profile avatar opaque/full-color with tested white-text contrast instead of washing every user gray.
-- The shared format toolbar controls the focused node text box through the shared formatting controller, so font size and outline-style behavior cannot diverge by node opener.
+- The shared format toolbar controls the focused node text box through the shared formatting controller, so font size, highlight color, and outline-style behavior cannot diverge by node opener.
+- Metadata, History, and Save Settings hide the document workspace and disable only its formatting controls; the navigation tabs remain usable, and returning to the document preserves the text-block layout.
 - Node text-box edits continue to save through node information/projection persistence.
 - Text-block chats remain chat composers and do not receive rich editor toolbar or rich editor keyboard semantics.
 - Opening the node email picker allows attaching existing email but does not expose compose, send, scheduled send, or draft-save controls.
@@ -408,6 +426,7 @@ Business logic covered:
 - N63
 - N72
 - N75
+- N85
 
 Given:
 - A text box or node has an attached multi-message email thread with To, Cc, Bcc, ordinary attachments, and CID screenshots.
@@ -423,6 +442,7 @@ Expected:
 - Non-inline attachments show filename/type/size, download, and full-screen image preview.
 - Calendar invitations expose Accept, Tentative, and Decline when the viewer has edit access, prevent duplicate submission while pending, and show a selected response only after provider success.
 - Opening a reply focuses the unified reply editor immediately while the original message remains visible.
+- Reply focus synchronously clears the surrounding node text block as the outer formatting target, leaving the reply toolbar as the only formatting owner while the outer navigation tabs stay usable.
 - Releasing a vertical resize, cancelling it, losing pointer capture, or blurring the window ends resizing; later pointer movement cannot continue changing the editor height.
 
 ### Scenario N-S13: Remove Attached Rows From Node
