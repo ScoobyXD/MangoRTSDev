@@ -85,10 +85,8 @@ func (r *MemoryRepo) UpsertProjectManagementTimelineItem(input ProjectManagement
 		return ProjectManagementTimelineMutationResult{}, err
 	}
 	var after []ProjectManagementTimelineProjectionRow
-	var deltas []ProjectionDelta
 	var item *ProjectManagementTimelineProjectionRow
 	r.mu.Lock()
-	before := r.projectManagementTimelineProjectionRowsForEntityLocked(input.CompanyID, input.UserID, input.EntityType, input.EntityID)
 	itemID := r.projectManagementTimelineItemIDForEntityLocked(input.CompanyID, input.UserID, input.EntityType, input.EntityID)
 	if itemID == "" {
 		itemID = strings.TrimSpace(input.ItemID)
@@ -114,7 +112,6 @@ func (r *MemoryRepo) UpsertProjectManagementTimelineItem(input ProjectManagement
 	r.projectTimelineItems[projectManagementTimelineItemMemoryKey(input.CompanyID, itemID)] = existing
 	r.syncProjectManagementTimelineProjectionForItemLocked(input.CompanyID, itemID)
 	after = r.projectManagementTimelineProjectionRowsForEntityLocked(input.CompanyID, input.UserID, input.EntityType, input.EntityID)
-	deltas = diffProjectManagementProjectionRows(before, after)
 	for index := range after {
 		if after[index].ItemID == itemID {
 			copied := after[index]
@@ -123,8 +120,7 @@ func (r *MemoryRepo) UpsertProjectManagementTimelineItem(input ProjectManagement
 		}
 	}
 	r.mu.Unlock()
-	_, _ = r.AppendEventRows(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas))
-	return ProjectManagementTimelineMutationResult{Item: item, UserID: input.UserID, ProjectionDeltas: deltas}, nil
+	return ProjectManagementTimelineMutationResult{Item: item, UserID: input.UserID}, nil
 }
 
 func (r *MemoryRepo) UpdateProjectManagementTimelineItem(input ProjectManagementTimelineItemUpdateInput) (ProjectManagementTimelineMutationResult, error) {
@@ -132,9 +128,7 @@ func (r *MemoryRepo) UpdateProjectManagementTimelineItem(input ProjectManagement
 	if err != nil {
 		return ProjectManagementTimelineMutationResult{}, err
 	}
-	var before []ProjectManagementTimelineProjectionRow
 	var after []ProjectManagementTimelineProjectionRow
-	var deltas []ProjectionDelta
 	var item *ProjectManagementTimelineProjectionRow
 	userID := ""
 	r.mu.Lock()
@@ -145,7 +139,6 @@ func (r *MemoryRepo) UpdateProjectManagementTimelineItem(input ProjectManagement
 		return ProjectManagementTimelineMutationResult{}, ErrNotFound
 	}
 	userID = existing.UserID
-	before = r.projectManagementTimelineProjectionRowsForItemLocked(input.CompanyID, input.ItemID)
 	existing.StartDate = input.StartDate
 	existing.DurationDays = input.DurationDays
 	existing.Position = input.Position
@@ -153,14 +146,12 @@ func (r *MemoryRepo) UpdateProjectManagementTimelineItem(input ProjectManagement
 	r.projectTimelineItems[key] = existing
 	r.syncProjectManagementTimelineProjectionForItemLocked(input.CompanyID, input.ItemID)
 	after = r.projectManagementTimelineProjectionRowsForItemLocked(input.CompanyID, input.ItemID)
-	deltas = diffProjectManagementProjectionRows(before, after)
 	if len(after) > 0 {
 		copied := after[0]
 		item = &copied
 	}
 	r.mu.Unlock()
-	_, _ = r.AppendEventRows(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas))
-	return ProjectManagementTimelineMutationResult{Item: item, UserID: userID, ProjectionDeltas: deltas}, nil
+	return ProjectManagementTimelineMutationResult{Item: item, UserID: userID}, nil
 }
 
 func (r *MemoryRepo) DeleteProjectManagementTimelineItem(input ProjectManagementTimelineItemDeleteInput) (ProjectManagementTimelineMutationResult, error) {
@@ -168,8 +159,6 @@ func (r *MemoryRepo) DeleteProjectManagementTimelineItem(input ProjectManagement
 	if err != nil {
 		return ProjectManagementTimelineMutationResult{}, err
 	}
-	var before []ProjectManagementTimelineProjectionRow
-	var deltas []ProjectionDelta
 	userID := ""
 	r.mu.Lock()
 	key := projectManagementTimelineItemMemoryKey(input.CompanyID, input.ItemID)
@@ -179,13 +168,10 @@ func (r *MemoryRepo) DeleteProjectManagementTimelineItem(input ProjectManagement
 		return ProjectManagementTimelineMutationResult{}, ErrNotFound
 	}
 	userID = existing.UserID
-	before = r.projectManagementTimelineProjectionRowsForItemLocked(input.CompanyID, input.ItemID)
 	delete(r.projectTimelineItems, key)
 	delete(r.projectTimelineProjection, key)
-	deltas = diffProjectManagementProjectionRows(before, nil)
 	r.mu.Unlock()
-	_, _ = r.AppendEventRows(ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas))
-	return ProjectManagementTimelineMutationResult{DeletedItemID: input.ItemID, UserID: userID, ProjectionDeltas: deltas}, nil
+	return ProjectManagementTimelineMutationResult{DeletedItemID: input.ItemID, UserID: userID}, nil
 }
 
 func (r *MemoryRepo) syncProjectManagementTimelineProjectionForNodeLocked(companyID, nodeID string) {

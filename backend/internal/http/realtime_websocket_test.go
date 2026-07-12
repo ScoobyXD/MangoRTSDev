@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"io"
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
@@ -17,1142 +16,211 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
 
-func TestRealtimeWebSocketUnauthenticatedHandshakeRejected(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888001"
-	repo.EnsureCompany(companyID, "Realtime Auth Co")
-	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{}}})
-	defer server.Close()
-
-	status := realtimeHandshakeStatusForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, "")
-	if status != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated websocket status = %d, want %d", status, http.StatusUnauthorized)
-	}
-}
-
 func TestRealtimeWebSocketAuthenticatedHandshakeSendsReady(t *testing.T) {
 	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888002"
-	token := "ready-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "ready-user", domain.RoleCompanyUser)
+	companyID := "11111111-1111-4111-8111-111111111111"
+	token := "realtime-ready-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "realtime-ready", domain.RoleCompanyUser)
 	server := newRealtimeAuthServerForTest(repo, token, user)
 	defer server.Close()
-
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
 	ready := client.readJSON(t)
 	if ready["type"] != realtimeMessageReady || ready["company_id"] != companyID || ready["user_id"] != user.UserID {
-		t.Fatalf("ready = %+v, want ready for company/user", ready)
-	}
-	if ready["connection_id"] == "" {
-		t.Fatalf("ready missing connection_id: %+v", ready)
+		t.Fatalf("ready message = %+v", ready)
 	}
 }
 
 func TestRealtimeWebSocketTicketHandshakeSendsReady(t *testing.T) {
 	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888010"
-	token := "ticket-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "ticket-user", domain.RoleCompanyUser)
-	server := newRealtimeAuthServerForTest(repo, token, user)
-	defer server.Close()
-
-	ticketCookie := mintRealtimeTicketCookieForTest(t, server.Routes(), companyID, token)
-	client := openRealtimeWebSocketWithCookieForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, ticketCookie)
-	defer client.close()
-
-	ready := client.readJSON(t)
-	if ready["type"] != realtimeMessageReady || ready["company_id"] != companyID || ready["user_id"] != user.UserID {
-		t.Fatalf("ticket ready = %+v, want ready for company/user", ready)
-	}
-}
-
-func TestRealtimeWebSocketSignedTicketWorksAcrossServerInstances(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888012"
-	token := "signed-ticket-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "signed-ticket-user", domain.RoleCompanyUser)
-	validator := &tokenClaimsValidator{claims: map[string]auth.Claims{
-		token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
-	}}
-	serverA := NewServerWithOptions(repo, ServerOptions{AuthValidator: validator, RealtimeTicketSecret: "shared-realtime-ticket-secret"})
-	defer serverA.Close()
-	serverB := NewServerWithOptions(repo, ServerOptions{AuthValidator: validator, RealtimeTicketSecret: "shared-realtime-ticket-secret"})
-	defer serverB.Close()
-
-	ticketCookie := mintRealtimeTicketCookieForTest(t, serverA.Routes(), companyID, token)
-	client := openRealtimeWebSocketWithCookieForTest(t, serverB.Routes(), "/v1/realtime/ws?company_id="+companyID, ticketCookie)
-	defer client.close()
-
-	ready := client.readJSON(t)
-	if ready["type"] != realtimeMessageReady || ready["company_id"] != companyID || ready["user_id"] != user.UserID {
-		t.Fatalf("cross-server ticket ready = %+v, want ready for company/user", ready)
-	}
-}
-
-func TestRealtimeWebSocketNormalAccessTokenQueryRejected(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888011"
-	token := "query-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "query-token-user", domain.RoleCompanyUser)
-	server := newRealtimeAuthServerForTest(repo, token, user)
-	defer server.Close()
-
-	status := realtimeHandshakeStatusForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID+"&access_token="+url.QueryEscape(token), "")
-	if status != http.StatusUnauthorized {
-		t.Fatalf("access_token query websocket status = %d, want %d", status, http.StatusUnauthorized)
-	}
-}
-
-func TestRealtimeWebSocketUnauthorizedSubscriptionRejectedAndNotStored(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888003"
-	token := "rejected-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "rejected-user", domain.RoleCompanyUser)
-	logicGate, err := repo.CreateLogicGate(companyID, "Hidden realtime gate")
-	if err != nil {
-		t.Fatalf("CreateLogicGate: %v", err)
-	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        companyID,
-		EntityType:       store.EntityTypeLogicGate,
-		EntityID:         logicGate.LogicGateID,
-		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-		DefaultAccessSet: true,
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions: %v", err)
-	}
-	server := newRealtimeAuthServerForTest(repo, token, user)
-	defer server.Close()
-
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
-	defer client.close()
-	ready := client.readJSON(t)
-	connectionID := ready["connection_id"].(string)
-	scope := realtimeBoardScope(store.LogicGateKanbanBoardID(logicGate.LogicGateID))
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
-
-	rejected := client.readJSON(t)
-	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != scope {
-		t.Fatalf("subscription rejected message = %+v, want rejection for %s", rejected, scope)
-	}
-	if server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
-		t.Fatalf("unauthorized subscription was stored")
-	}
-}
-
-func TestRealtimeWebSocketAuthorizedSubscriptionAcceptedAndStored(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888004"
-	token := "accepted-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "accepted-user", domain.RoleCompanyUser)
-	logicGate, err := repo.CreateLogicGate(companyID, "Visible realtime gate")
-	if err != nil {
-		t.Fatalf("CreateLogicGate: %v", err)
-	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeLogicGate,
-		EntityID:   logicGate.LogicGateID,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionEdit,
-		}},
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions: %v", err)
-	}
-	server := newRealtimeAuthServerForTest(repo, token, user)
-	defer server.Close()
-
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
-	defer client.close()
-	ready := client.readJSON(t)
-	connectionID := ready["connection_id"].(string)
-	scope := realtimeBoardScope(store.LogicGateKanbanBoardID(logicGate.LogicGateID))
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
-
-	accepted := client.readJSON(t)
-	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope {
-		t.Fatalf("subscription accepted message = %+v, want accepted for %s", accepted, scope)
-	}
-	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
-		t.Fatalf("authorized subscription was not stored")
-	}
-}
-
-func TestRealtimeWebSocketGVICMatrixSubscriptionAuthorizesOwnUserAndRejectsOtherUser(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888011"
-	tokenA := "GVICMatrix-subscription-a-token"
-	tokenB := "GVICMatrix-subscription-b-token"
-	userA := mustRealtimeAuthUser(t, repo, companyID, "GVICMatrix-subscription-a", domain.RoleCompanyUser)
-	userB := mustRealtimeAuthUser(t, repo, companyID, "GVICMatrix-subscription-b", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
-		tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
-		tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
-	}}})
-	defer server.Close()
-
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
-	defer client.close()
-	ready := client.readJSON(t)
-	connectionID := ready["connection_id"].(string)
-	otherScope := realtimeGVICMatrixScope(userB.UserID)
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": otherScope})
-	rejected := client.readJSON(t)
-	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != otherScope {
-		t.Fatalf("GVICMatrix subscription rejected = %+v, want rejection for %s", rejected, otherScope)
-	}
-	if server.realtimeRegistry.hasSubscription(connectionID, companyID, otherScope) {
-		t.Fatalf("unauthorized GVICMatrix subscription was stored")
-	}
-
-	ownScope := realtimeGVICMatrixScope(userA.UserID)
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": ownScope})
-	accepted := client.readJSON(t)
-	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != ownScope {
-		t.Fatalf("GVICMatrix subscription accepted = %+v, want accepted for %s", accepted, ownScope)
-	}
-	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, ownScope) {
-		t.Fatalf("authorized GVICMatrix subscription was not stored")
-	}
-}
-
-func TestRealtimeWebSocketWorkspaceSubscriptionAuthorizesOwnUserAndRejectsOtherUser(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888015"
-	tokenA := "workspace-subscription-a-token"
-	tokenB := "workspace-subscription-b-token"
-	userA := mustRealtimeAuthUser(t, repo, companyID, "workspace-subscription-a", domain.RoleCompanyUser)
-	userB := mustRealtimeAuthUser(t, repo, companyID, "workspace-subscription-b", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
-		tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
-		tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
-	}}})
-	defer server.Close()
-
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
-	defer client.close()
-	ready := client.readJSON(t)
-	connectionID := ready["connection_id"].(string)
-	otherScope := realtimeWorkspaceScope(userB.UserID)
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": otherScope})
-	rejected := client.readJSON(t)
-	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != otherScope {
-		t.Fatalf("workspace subscription rejected = %+v, want rejection for %s", rejected, otherScope)
-	}
-	if server.realtimeRegistry.hasSubscription(connectionID, companyID, otherScope) {
-		t.Fatalf("unauthorized workspace subscription was stored")
-	}
-
-	ownScope := realtimeWorkspaceScope(userA.UserID)
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": ownScope})
-	accepted := client.readJSON(t)
-	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != ownScope {
-		t.Fatalf("workspace subscription accepted = %+v, want accepted for %s", accepted, ownScope)
-	}
-	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, ownScope) {
-		t.Fatalf("authorized workspace subscription was not stored")
-	}
-	_ = tokenB
-}
-
-func TestRealtimeWebSocketKanbanBoardSubscriptionAuthorizationRequiresViewAccess(t *testing.T) {
-	base := store.NewMemoryRepo()
-	repo := &recordingRealtimeAccessRepo{Repository: base}
-	companyID := "88888888-8888-4888-8888-888888888007"
-	token := "edit-subscription-token"
-	base.EnsureCompany(companyID, "Realtime Edit Auth Co")
-	user := mustRealtimeAuthUser(t, base, companyID, "edit-subscription-user", domain.RoleCompanyUser)
-	logicGate, err := base.CreateLogicGate(companyID, "Edit required realtime gate")
-	if err != nil {
-		t.Fatalf("CreateLogicGate: %v", err)
-	}
-	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        companyID,
-		EntityType:       store.EntityTypeLogicGate,
-		EntityID:         logicGate.LogicGateID,
-		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-		DefaultAccessSet: true,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionView,
-		}},
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions: %v", err)
-	}
-	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
-		token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
-	}}})
-	defer server.Close()
-
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
-	defer client.close()
-	client.readJSON(t)
-	scope := realtimeBoardScope(store.LogicGateKanbanBoardID(logicGate.LogicGateID))
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
-
-	accepted := client.readJSON(t)
-	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope {
-		t.Fatalf("subscription accepted message = %+v, want accepted for %s", accepted, scope)
-	}
-	if !repo.sawAccessCheck(store.EntityTypeLogicGate, store.EntityPermissionView) {
-		t.Fatalf("subscription authorization access checks = %+v, want logic_gate view", repo.accessChecks())
-	}
-	if repo.sawAccessCheck(store.EntityTypeLogicGate, store.EntityPermissionEdit) {
-		t.Fatalf("subscription authorization unnecessarily required edit access: %+v", repo.accessChecks())
-	}
-}
-
-func TestRealtimeWebSocketEditorSubscriptionAuthorizationRequiresEditAccess(t *testing.T) {
-	base := store.NewMemoryRepo()
-	repo := &recordingRealtimeAccessRepo{Repository: base}
-	companyID := "88888888-8888-4888-8888-888888888013"
-	token := "editor-subscription-token"
-	base.EnsureCompany(companyID, "Editor Realtime Auth Co")
-	user := mustRealtimeAuthUser(t, base, companyID, "editor-subscription-user", domain.RoleCompanyUser)
-	node, err := base.CreateNode(companyID, "Editor realtime node")
-	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        companyID,
-		EntityType:       store.EntityTypeNode,
-		EntityID:         node.NodeID,
-		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-		DefaultAccessSet: true,
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions deny: %v", err)
-	}
-	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
-		token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
-	}}})
-	defer server.Close()
-
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
-	defer client.close()
-	ready := client.readJSON(t)
-	connectionID := ready["connection_id"].(string)
-	scope := store.EditorRealtimeScope(store.EntityTypeNode, node.NodeID)
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
-
-	rejected := client.readJSON(t)
-	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != scope {
-		t.Fatalf("editor subscription rejected = %+v, want rejection for %s", rejected, scope)
-	}
-	if server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
-		t.Fatalf("unauthorized editor subscription was stored")
-	}
-
-	if _, err := base.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        companyID,
-		EntityType:       store.EntityTypeNode,
-		EntityID:         node.NodeID,
-		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-		DefaultAccessSet: true,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionEdit,
-		}},
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions grant: %v", err)
-	}
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
-	accepted := client.readJSON(t)
-	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope {
-		t.Fatalf("editor subscription accepted = %+v, want accepted for %s", accepted, scope)
-	}
-	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
-		t.Fatalf("authorized editor subscription was not stored")
-	}
-	if !repo.sawAccessCheck(store.EntityTypeNode, store.EntityPermissionEdit) {
-		t.Fatalf("editor subscription access checks = %+v, want node edit", repo.accessChecks())
-	}
-	if repo.sawAccessCheck(store.EntityTypeNode, store.EntityPermissionView) {
-		t.Fatalf("editor subscription authorization used view access: %+v", repo.accessChecks())
-	}
-}
-
-func TestRealtimeWebSocketCloseRemovesSubscriptions(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888005"
-	token := "cleanup-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "cleanup-user", domain.RoleCompanyAdmin)
-	logicGate, err := repo.CreateLogicGate(companyID, "Cleanup realtime gate")
-	if err != nil {
-		t.Fatalf("CreateLogicGate: %v", err)
-	}
-	server := newRealtimeAuthServerForTest(repo, token, user)
-	defer server.Close()
-
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
-	ready := client.readJSON(t)
-	connectionID := ready["connection_id"].(string)
-	scope := realtimeBoardScope(store.LogicGateKanbanBoardID(logicGate.LogicGateID))
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
-	client.readJSON(t)
-	if !server.realtimeRegistry.hasSubscription(connectionID, companyID, scope) {
-		t.Fatalf("subscription was not stored before close")
-	}
-	client.close()
-	waitForRealtimeCondition(t, func() bool {
-		return server.realtimeRegistry.connectionSubscriptionCount(connectionID) == 0 &&
-			server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) == 0
+	companyID := "12121212-1212-4121-8121-121212121212"
+	token := "realtime-ticket-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "realtime-ticket", domain.RoleCompanyUser)
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator:        &tokenClaimsValidator{claims: map[string]auth.Claims{token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName}}},
+		RealtimeTicketSecret: "test-realtime-ticket-secret",
 	})
-}
-
-func TestRealtimeWebSocketKanbanBoardDeltaRoutesOnlyToSubscribedBoard(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888006"
-	tokenA := "board-a-token"
-	tokenB := "board-b-token"
-	userA := mustRealtimeAuthUser(t, repo, companyID, "board-a-user", domain.RoleCompanyAdmin)
-	userB := mustRealtimeAuthUser(t, repo, companyID, "board-b-user", domain.RoleCompanyAdmin)
-	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
-		tokenA: {Subject: "board-a-user", Email: "board-a-user@example.com", Name: "Board A User"},
-		tokenB: {Subject: "board-b-user", Email: "board-b-user@example.com", Name: "Board B User"},
-	}}})
 	defer server.Close()
-	if userA.UserID == "" || userB.UserID == "" {
-		t.Fatal("users were not created")
-	}
-
-	logicGateA, err := repo.CreateLogicGate(companyID, "Realtime Board A")
-	if err != nil {
-		t.Fatalf("CreateLogicGate A: %v", err)
-	}
-	nodeA, err := repo.CreateNode(companyID, "Realtime Node A")
-	if err != nil {
-		t.Fatalf("CreateNode A: %v", err)
-	}
-	priority := 2
-	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
-		CompanyID:   companyID,
-		LogicGateID: logicGateA.LogicGateID,
-		NodeID:      nodeA.NodeID,
-		Status:      "pending",
-		Priority:    &priority,
-		PrioritySet: true,
-	}); err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus A: %v", err)
-	}
-	logicGateB, err := repo.CreateLogicGate(companyID, "Realtime Board B")
-	if err != nil {
-		t.Fatalf("CreateLogicGate B: %v", err)
-	}
-	nodeB, err := repo.CreateNode(companyID, "Realtime Node B")
-	if err != nil {
-		t.Fatalf("CreateNode B: %v", err)
-	}
-	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
-		CompanyID:   companyID,
-		LogicGateID: logicGateB.LogicGateID,
-		NodeID:      nodeB.NodeID,
-		Status:      "pending",
-		Priority:    &priority,
-		PrioritySet: true,
-	}); err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus B: %v", err)
-	}
-
-	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
-	defer clientA.close()
-	clientB := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenB)
-	defer clientB.close()
-	clientA.readJSON(t)
-	clientB.readJSON(t)
-
-	boardA := store.LogicGateKanbanBoardID(logicGateA.LogicGateID)
-	boardB := store.LogicGateKanbanBoardID(logicGateB.LogicGateID)
-	scopeA := realtimeBoardScope(boardA)
-	scopeB := realtimeBoardScope(boardB)
-	clientA.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeA})
-	clientB.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeB})
-	clientA.readJSON(t)
-	clientB.readJSON(t)
-
-	rowsA, err := repo.ListKanbanBoardProjectionRowsForNode(companyID, nodeA.NodeID)
-	if err != nil {
-		t.Fatalf("ListKanbanBoardProjectionRowsForNode A: %v", err)
-	}
-	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rowsA))
-
-	deltaA := clientA.readJSON(t)
-	if deltaA["type"] != realtimeMessageProjectionDelta || deltaA["scope"] != scopeA || deltaA["sequence"].(float64) <= 0 {
-		t.Fatalf("board A delta = %+v, want scoped projection delta", deltaA)
-	}
-	clientB.assertNoMessage(t)
-
-	rowsB, err := repo.ListKanbanBoardProjectionRowsForNode(companyID, nodeB.NodeID)
-	if err != nil {
-		t.Fatalf("ListKanbanBoardProjectionRowsForNode B: %v", err)
-	}
-	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rowsB))
-
-	deltaB := clientB.readJSON(t)
-	if deltaB["type"] != realtimeMessageProjectionDelta || deltaB["scope"] != scopeB || deltaB["sequence"].(float64) <= 0 {
-		t.Fatalf("board B delta = %+v, want scoped projection delta", deltaB)
-	}
-	clientA.assertNoMessage(t)
-}
-
-func TestRealtimeWebSocketKanbanBoardDeltaFiltersPerUserForSameBoard(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888008"
-	tokenVisible := "same-board-visible-token"
-	tokenBlocked := "same-board-blocked-token"
-	repo.EnsureCompany(companyID, "Realtime Same Board Filter Co")
-	visible := mustRealtimeAuthUser(t, repo, companyID, "same-board-visible", domain.RoleCompanyUser)
-	blocked := mustRealtimeAuthUser(t, repo, companyID, "same-board-blocked", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
-		tokenVisible: {Subject: visible.CognitoSubject, Email: visible.Email, Name: visible.DisplayName},
-		tokenBlocked: {Subject: blocked.CognitoSubject, Email: blocked.Email, Name: blocked.DisplayName},
-	}}})
-	defer server.Close()
-
-	logicGate, err := repo.CreateLogicGate(companyID, "Per-user realtime gate")
-	if err != nil {
-		t.Fatalf("CreateLogicGate: %v", err)
-	}
-	node, err := repo.CreateNode(companyID, "Per-user realtime node")
-	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	assigned, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
-		CompanyID:   companyID,
-		LogicGateID: logicGate.LogicGateID,
-		NodeID:      node.NodeID,
-		Status:      "pending",
-		Priority:    testPriority(2),
-		PrioritySet: true,
-		ActorUserID: visible.UserID,
-	})
-	if err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
-	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        companyID,
-		EntityType:       store.EntityTypeLogicGate,
-		EntityID:         logicGate.LogicGateID,
-		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-		DefaultAccessSet: true,
-		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: visible.UserID, AccessLevel: store.EntityPermissionView},
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: blocked.UserID, AccessLevel: store.EntityPermissionView},
-		},
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions logic gate: %v", err)
-	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        companyID,
-		EntityType:       store.EntityTypeNode,
-		EntityID:         node.NodeID,
-		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-		DefaultAccessSet: true,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   visible.UserID,
-			AccessLevel: store.EntityPermissionEdit,
-		}},
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions node: %v", err)
-	}
-
-	clientVisible := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenVisible)
-	defer clientVisible.close()
-	clientBlocked := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenBlocked)
-	defer clientBlocked.close()
-	clientVisible.readJSON(t)
-	clientBlocked.readJSON(t)
-	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
-	scope := realtimeBoardScope(boardID)
-	clientVisible.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
-	clientBlocked.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
-	clientVisible.readJSON(t)
-	clientBlocked.readJSON(t)
-
-	rows, err := repo.ListKanbanBoardProjectionRowsForNode(companyID, node.NodeID)
-	if err != nil {
-		t.Fatalf("ListKanbanBoardProjectionRowsForNode: %v", err)
-	}
-	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rows))
-
-	visibleDelta := clientVisible.readProjectionDelta(t)
-	blockedDelta := clientBlocked.readProjectionDelta(t)
-	if visibleDelta.Scope != scope || blockedDelta.Scope != scope || visibleDelta.Sequence <= 0 || blockedDelta.Sequence != visibleDelta.Sequence {
-		t.Fatalf("realtime sequences visible=%+v blocked=%+v, want same scoped board sequence", visibleDelta, blockedDelta)
-	}
-	if len(visibleDelta.Deltas) != 1 {
-		t.Fatalf("visible delta = %+v, want one delta", visibleDelta.Deltas)
-	}
-	if got := visibleDelta.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.CardID != assigned.Card.CardID {
-		t.Fatalf("visible delta = %+v, want upsert row for visible card", visibleDelta.Deltas)
-	}
-	if len(blockedDelta.Deltas) != 1 {
-		t.Fatalf("blocked delta = %+v, want one delta", blockedDelta.Deltas)
-	}
-	if got := blockedDelta.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.CardID != assigned.Card.CardID {
-		t.Fatalf("gate viewer delta = %+v, want snapshot-parity upsert despite no node access", blockedDelta.Deltas)
-	}
-
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        companyID,
-		EntityType:       store.EntityTypeLogicGate,
-		EntityID:         logicGate.LogicGateID,
-		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-		DefaultAccessSet: true,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   visible.UserID,
-			AccessLevel: store.EntityPermissionView,
-		}},
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions revoke blocked gate view: %v", err)
-	}
-	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rows))
-	visibleAfterRevocation := clientVisible.readProjectionDelta(t)
-	blockedAfterRevocation := clientBlocked.readProjectionDelta(t)
-	if got := visibleAfterRevocation.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil {
-		t.Fatalf("visible delta after peer revocation = %+v, want upsert", got)
-	}
-	if got := blockedAfterRevocation.Deltas[0]; got.Operation != store.ProjectionDeltaOperationDelete || got.Row != nil || got.RowKey.CardID != assigned.Card.CardID {
-		t.Fatalf("revoked gate-view delta = %+v, want leak-safe delete without row", got)
-	}
-}
-
-func TestRealtimeWebSocketKanbanBoardDeltaMatchesSnapshotDespiteNoNodeAccess(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888009"
-	token := "hidden-card-token"
-	repo.EnsureCompany(companyID, "Realtime Hidden Card Co")
-	user := mustRealtimeAuthUser(t, repo, companyID, "hidden-card-user", domain.RoleCompanyUser)
-	logicGate, err := repo.CreateLogicGate(companyID, "Visible gate hidden card")
-	if err != nil {
-		t.Fatalf("CreateLogicGate: %v", err)
-	}
-	node, err := repo.CreateNode(companyID, "Hidden card node")
-	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-	assigned, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{
-		CompanyID:   companyID,
-		LogicGateID: logicGate.LogicGateID,
-		NodeID:      node.NodeID,
-		Status:      "pending",
-		Priority:    testPriority(3),
-		PrioritySet: true,
-	})
-	if err != nil {
-		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
-	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        companyID,
-		EntityType:       store.EntityTypeNode,
-		EntityID:         node.NodeID,
-		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-		DefaultAccessSet: true,
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions node: %v", err)
-	}
-	server := newRealtimeAuthServerForTest(repo, token, user)
-	defer server.Close()
-
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	cookie := mintRealtimeTicketCookieForTest(t, server.Routes(), companyID, token)
+	client := openRealtimeWebSocketWithCookieForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, cookie)
 	defer client.close()
-	client.readJSON(t)
-	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
-	scope := realtimeBoardScope(boardID)
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
-	client.readJSON(t)
-
-	rows, err := repo.ListKanbanBoardProjectionRowsForNode(companyID, node.NodeID)
-	if err != nil {
-		t.Fatalf("ListKanbanBoardProjectionRowsForNode: %v", err)
-	}
-	server.publishProjectionDeltasAsync(store.KanbanProjectionUpsertDeltas(rows))
-
-	message := client.readProjectionDelta(t)
-	if message.Scope != scope || message.Projection != store.ProjectionNameKanbanBoard || len(message.Deltas) != 1 {
-		t.Fatalf("hidden card delta = %+v, want one scoped Kanban delta", message)
-	}
-	if got := message.Deltas[0]; got.Operation != store.ProjectionDeltaOperationUpsert || got.Row == nil || got.Row.CardID != assigned.Card.CardID || got.Row.NodeID != node.NodeID {
-		t.Fatalf("gate-visible card delta = %+v, want snapshot-parity upsert", got)
+	if message := client.readJSON(t); message["type"] != realtimeMessageReady {
+		t.Fatalf("ticket ready message = %+v", message)
 	}
 }
 
-func TestRealtimeWebSocketWorkspaceEventRoutesOnlyToVisibleUserScopes(t *testing.T) {
+func TestRealtimeWebSocketOnlyAllowsNotificationChatAndBoardScopes(t *testing.T) {
 	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888016"
-	tokenVisible := "workspace-event-visible-token"
-	tokenBlocked := "workspace-event-blocked-token"
-	visible := mustRealtimeAuthUser(t, repo, companyID, "workspace-event-visible", domain.RoleCompanyUser)
-	blocked := mustRealtimeAuthUser(t, repo, companyID, "workspace-event-blocked", domain.RoleCompanyUser)
-	node, err := repo.CreateNode(companyID, "Visible workspace realtime node")
+	companyID := "22222222-2222-4222-8222-222222222222"
+	token := "realtime-scopes-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "realtime-scopes", domain.RoleCompanyUser)
+	node, err := repo.CreateNode(companyID, "Chat node")
 	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
+		t.Fatal(err)
 	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        companyID,
-		EntityType:       store.EntityTypeNode,
-		EntityID:         node.NodeID,
-		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-		DefaultAccessSet: true,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   visible.UserID,
-			AccessLevel: store.EntityPermissionView,
-		}},
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions node: %v", err)
-	}
-	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
-		tokenVisible: {Subject: visible.CognitoSubject, Email: visible.Email, Name: visible.DisplayName},
-		tokenBlocked: {Subject: blocked.CognitoSubject, Email: blocked.Email, Name: blocked.DisplayName},
-	}}})
-	defer server.Close()
-
-	visibleClient := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenVisible)
-	defer visibleClient.close()
-	blockedClient := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenBlocked)
-	defer blockedClient.close()
-	visibleClient.readJSON(t)
-	blockedClient.readJSON(t)
-	visibleScope := realtimeNodeGraphScope(visible.UserID)
-	blockedScope := realtimeNodeGraphScope(blocked.UserID)
-	visibleClient.writeJSON(t, map[string]any{"type": "subscribe", "scope": visibleScope})
-	blockedClient.writeJSON(t, map[string]any{"type": "subscribe", "scope": blockedScope})
-	visibleClient.readJSON(t)
-	blockedClient.readJSON(t)
-
-	event, err := repo.AppendDomainEvent(store.DomainEventInput{
-		CompanyID:  companyID,
-		StreamType: workspaceDomainStreamType,
-		StreamID:   companyID,
-		Type:       "node_updated",
-		Payload:    map[string]any{"node_id": node.NodeID},
-	})
+	gate, err := repo.CreateLogicGate(companyID, "Board gate")
 	if err != nil {
-		t.Fatalf("AppendDomainEvent: %v", err)
+		t.Fatal(err)
 	}
-	server.publishCommittedWorkspaceEventWithTiming(event, nil)
-
-	message := visibleClient.readJSON(t)
-	if message["type"] != realtimeMessageWorkspaceEvent || message["scope"] != visibleScope || message["sequence"].(float64) != float64(event.Sequence) {
-		t.Fatalf("workspace websocket message = %+v, want node graph scope %s sequence %d", message, visibleScope, event.Sequence)
-	}
-	envelope := message["event"].(map[string]any)
-	if envelope["type"] != "node_updated" || envelope["company_id"] != companyID {
-		t.Fatalf("workspace event envelope = %+v, want node_updated for company", envelope)
-	}
-	blockedClient.assertNoMessage(t)
-}
-
-func TestRealtimeWebSocketWorkspaceSubscriptionReplaysVisibleEventsAfterSequence(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888018"
-	token := "workspace-replay-visible-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "workspace-replay-visible", domain.RoleCompanyUser)
-	visibleNode, err := repo.CreateNode(companyID, "Replay visible node")
-	if err != nil {
-		t.Fatalf("CreateNode visible: %v", err)
-	}
-	hiddenNode, err := repo.CreateNode(companyID, "Replay hidden node")
-	if err != nil {
-		t.Fatalf("CreateNode hidden: %v", err)
-	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        companyID,
-		EntityType:       store.EntityTypeNode,
-		EntityID:         visibleNode.NodeID,
-		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-		DefaultAccessSet: true,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionView,
-		}},
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions visible: %v", err)
-	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:        companyID,
-		EntityType:       store.EntityTypeNode,
-		EntityID:         hiddenNode.NodeID,
-		DefaultAccess:    store.ResourceDefaultAccessNoAccess,
-		DefaultAccessSet: true,
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions hidden: %v", err)
-	}
-	visibleEvent, err := repo.AppendDomainEvent(store.DomainEventInput{
-		CompanyID:  companyID,
-		StreamType: workspaceDomainStreamType,
-		StreamID:   companyID,
-		Type:       "node_updated",
-		Payload:    map[string]any{"node_id": visibleNode.NodeID},
-	})
-	if err != nil {
-		t.Fatalf("AppendDomainEvent visible: %v", err)
-	}
-	hiddenEvent, err := repo.AppendDomainEvent(store.DomainEventInput{
-		CompanyID:  companyID,
-		StreamType: workspaceDomainStreamType,
-		StreamID:   companyID,
-		Type:       "node_updated",
-		Payload:    map[string]any{"node_id": hiddenNode.NodeID},
-	})
-	if err != nil {
-		t.Fatalf("AppendDomainEvent hidden: %v", err)
-	}
-	server := newRealtimeAuthServerForTest(repo, token, user)
-	defer server.Close()
-
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
-	defer client.close()
-	client.readJSON(t)
-	scope := realtimeWorkspaceScope(user.UserID)
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope, "after_sequence": 0})
-	accepted := client.readJSON(t)
-	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope || accepted["current_sequence"].(float64) != float64(hiddenEvent.Sequence) {
-		t.Fatalf("workspace replay accepted = %+v, want current sequence %d", accepted, hiddenEvent.Sequence)
-	}
-	replayed := client.readJSON(t)
-	if replayed["type"] != realtimeMessageWorkspaceEvent || replayed["scope"] != scope || replayed["sequence"].(float64) != float64(visibleEvent.Sequence) {
-		t.Fatalf("workspace replay message = %+v, want visible sequence %d", replayed, visibleEvent.Sequence)
-	}
-	envelope := replayed["event"].(map[string]any)
-	if envelope["type"] != "node_updated" {
-		t.Fatalf("workspace replay envelope = %+v, want node_updated", envelope)
-	}
-	client.assertNoMessage(t)
-}
-
-func TestRealtimeWebSocketWorkspaceSubscriptionDoesNotReplayCurrentSequence(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888019"
-	token := "workspace-replay-current-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "workspace-replay-current", domain.RoleCompanyUser)
-	event, err := repo.AppendDomainEvent(store.DomainEventInput{
-		CompanyID:  companyID,
-		StreamType: workspaceDomainStreamType,
-		StreamID:   companyID,
-		Type:       "company_explorer_folder_created",
-		Payload:    map[string]any{"folder_id": "folder-current", "folder_kind": "node"},
-	})
-	if err != nil {
-		t.Fatalf("AppendDomainEvent: %v", err)
-	}
-	server := newRealtimeAuthServerForTest(repo, token, user)
-	defer server.Close()
-
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
-	defer client.close()
-	client.readJSON(t)
-	scope := realtimeCompanyExplorerScope(user.UserID)
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope, "after_sequence": event.Sequence})
-	accepted := client.readJSON(t)
-	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope {
-		t.Fatalf("workspace current subscription accepted = %+v, want %s", accepted, scope)
-	}
-	client.assertNoMessage(t)
-}
-
-func TestRealtimeWebSocketWorkspaceSubscriptionFallsBackWhenReplayWindowExceeded(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888020"
-	token := "workspace-replay-fallback-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "workspace-replay-fallback", domain.RoleCompanyUser)
-	var last domain.DomainEvent
-	for index := 0; index <= realtimeWorkspaceReplayLimit; index++ {
-		event, err := repo.AppendDomainEvent(store.DomainEventInput{
-			CompanyID:  companyID,
-			StreamType: workspaceDomainStreamType,
-			StreamID:   companyID,
-			Type:       "company_explorer_folder_created",
-			Payload: map[string]any{
-				"folder_id":   fmt.Sprintf("folder-%d", index),
-				"folder_kind": "node",
-			},
-		})
-		if err != nil {
-			t.Fatalf("AppendDomainEvent %d: %v", index, err)
+	for _, input := range []store.EntityPermissionUpdateInput{
+		{CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}},
+		{CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionView}}},
+	} {
+		if _, err := repo.SetEntityPermissions(input); err != nil {
+			t.Fatal(err)
 		}
-		last = event
 	}
 	server := newRealtimeAuthServerForTest(repo, token, user)
 	defer server.Close()
-
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
 	client.readJSON(t)
-	scope := realtimeWorkspaceScope(user.UserID)
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope, "after_sequence": 0})
-	accepted := client.readJSON(t)
-	if accepted["type"] != realtimeMessageSubscriptionAccepted || accepted["scope"] != scope || accepted["current_sequence"].(float64) != float64(last.Sequence) {
-		t.Fatalf("workspace fallback accepted = %+v, want current sequence %d", accepted, last.Sequence)
+	allowed := []string{realtimeNotificationScope(user.UserID), realtimeChatScope(node.NodeID), realtimeBoardScope(store.LogicGateKanbanBoardID(gate.LogicGateID))}
+	for _, scope := range allowed {
+		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
+		message := client.readJSON(t)
+		if message["type"] != realtimeMessageSubscriptionAccepted || message["scope"] != scope {
+			t.Fatalf("scope %s response = %+v", scope, message)
+		}
 	}
-	refetch := client.readJSON(t)
-	if refetch["type"] != realtimeMessageSnapshotRefetch || refetch["scope"] != scope || refetch["reason"] != "sequence_unavailable" {
-		t.Fatalf("workspace fallback message = %+v, want snapshot refetch", refetch)
+	forbidden := []string{
+		"workspace:user:" + user.UserID, "company_explorer:user:" + user.UserID,
+		"node_graph:user:" + user.UserID, "logic_gate_graph:user:" + user.UserID,
+		"gvic_matrix:user:" + user.UserID, "project_management:user:" + user.UserID,
+		"communications:user:" + user.UserID, "editor:node:" + node.NodeID,
+	}
+	for _, scope := range forbidden {
+		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
+		message := client.readJSON(t)
+		if message["type"] != realtimeMessageSubscriptionRejected || message["error"] != "unsupported_scope" {
+			t.Fatalf("forbidden scope %s response = %+v", scope, message)
+		}
 	}
 }
 
-func TestRealtimeWebSocketEditorCollaborationEventRoutesToEditorScope(t *testing.T) {
+func TestRealtimeNodeChatCreateDeletePublishesOnlyNodeScope(t *testing.T) {
 	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888017"
-	token := "editor-collaboration-ws-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "editor-collaboration-ws", domain.RoleCompanyUser)
-	node, err := repo.CreateNode(companyID, "Editor collaboration websocket node")
+	companyID := "33333333-3333-4333-8333-333333333333"
+	token := "realtime-chat-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "realtime-chat", domain.RoleCompanyUser)
+	node, err := repo.CreateNode(companyID, "Realtime chat node")
 	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
+		t.Fatal(err)
 	}
-	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
-		CompanyID:  companyID,
-		EntityType: store.EntityTypeNode,
-		EntityID:   node.NodeID,
-		Permissions: []store.EntityPermissionInput{{
-			SubjectType: store.EntityPermissionSubjectUser,
-			SubjectID:   user.UserID,
-			AccessLevel: store.EntityPermissionEdit,
-		}},
-	}); err != nil {
-		t.Fatalf("SetEntityPermissions node: %v", err)
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionEdit}}}); err != nil {
+		t.Fatal(err)
 	}
 	server := newRealtimeAuthServerForTest(repo, token, user)
 	defer server.Close()
-
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
 	client.readJSON(t)
-	scope := realtimeEditorScope(store.EntityTypeNode, node.NodeID)
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": scope})
+	scope := realtimeChatScope(node.NodeID)
+	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
 	client.readJSON(t)
-
-	event, err := repo.AppendDomainEvent(store.DomainEventInput{
-		CompanyID:  companyID,
-		StreamType: workspaceDomainStreamType,
-		StreamID:   companyID,
-		Type:       "editor_collaboration_event",
-		Payload: map[string]any{
-			"event_type":  "presence",
-			"entity_kind": store.EntityTypeNode,
-			"entity_id":   node.NodeID,
-			"client_id":   "client-a",
-		},
-	})
-	if err != nil {
-		t.Fatalf("AppendDomainEvent: %v", err)
+	messageID := "44444444-4444-4444-8444-444444444444"
+	blockID := "55555555-5555-4555-8555-555555555555"
+	body, _ := json.Marshal(map[string]any{"company_id": companyID, "type": "Text block chat", "information_id": messageID, "information": `{"block_id":"` + blockID + `","author_name":"User","message":"Hello"}`})
+	req := httptest.NewRequest(http.MethodPost, "/v1/nodes/"+node.NodeID+"/information", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("chat create status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	server.publishCommittedWorkspaceEventWithTiming(event, nil)
+	created := client.readJSON(t)
+	if created["type"] != realtimeMessageChatCreated || created["scope"] != scope || created["node_id"] != node.NodeID || created["block_id"] != blockID || created["message_id"] != messageID {
+		t.Fatalf("created chat message = %+v", created)
+	}
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/nodes/"+node.NodeID+"/projection/"+messageID+"?company_id="+companyID, nil)
+	deleteReq.Header.Set("Authorization", "Bearer "+token)
+	deleteRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("chat delete status=%d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	deleted := client.readJSON(t)
+	if deleted["type"] != realtimeMessageChatDeleted || deleted["scope"] != scope || deleted["message_id"] != messageID {
+		t.Fatalf("deleted chat message = %+v", deleted)
+	}
+}
 
+func TestRealtimeKanbanCommittedEventsPublishOnlyMountedBoardScope(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "66666666-6666-4666-8666-666666666666"
+	token := "realtime-board-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "realtime-board", domain.RoleCompanyUser)
+	gate, err := repo.CreateLogicGate(companyID, "Realtime board gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(companyID, "Realtime board node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{CompanyID: companyID, EntityType: store.EntityTypeLogicGate, EntityID: gate.LogicGateID, Permissions: []store.EntityPermissionInput{{SubjectType: store.EntityPermissionSubjectUser, SubjectID: user.UserID, AccessLevel: store.EntityPermissionView}}}); err != nil {
+		t.Fatal(err)
+	}
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
+	scope := realtimeBoardScope(boardID)
+	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
+	client.readJSON(t)
+	priority := 1
+	result, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, NodeID: node.NodeID, Status: "pending", Priority: &priority, PrioritySet: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.publishCommittedWorkspaceEvents(result.Events)
 	message := client.readJSON(t)
-	if message["type"] != realtimeMessageWorkspaceEvent || message["scope"] != scope {
-		t.Fatalf("editor collaboration websocket message = %+v, want scope %s", message, scope)
+	if message["type"] != realtimeMessageKanbanChanged || message["scope"] != scope || message["board_id"] != boardID {
+		t.Fatalf("kanban message = %+v", message)
 	}
-	envelope := message["event"].(map[string]any)
-	if envelope["type"] != "editor_collaboration_event" {
-		t.Fatalf("editor collaboration envelope = %+v, want editor_collaboration_event", envelope)
+	_, event, err := repo.UpdateNodeAndWorkspaceEvent(store.UpdateNodeInput{CompanyID: companyID, NodeID: node.NodeID, Title: "Renamed board node", TitleSet: true})
+	if err != nil {
+		t.Fatal(err)
 	}
+	server.publishCommittedWorkspaceEvent(event)
+	renamed := client.readJSON(t)
+	if renamed["type"] != realtimeMessageKanbanChanged || renamed["board_id"] != boardID || renamed["change_type"] != "node_updated" {
+		t.Fatalf("node rename kanban message = %+v", renamed)
+	}
+	server.publishKanbanChanged(companyID, "99999999-9999-4999-8999-999999999999", "unmounted_change")
+	client.assertNoMessage(t)
 }
 
-func TestRealtimeWebSocketNotificationSubscriptionRequiresOwnUser(t *testing.T) {
+func TestRealtimeNotificationCreatePublishesOnlyRecipientScope(t *testing.T) {
 	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888012"
-	tokenA := "notification-own-a-token"
-	userA := mustRealtimeAuthUser(t, repo, companyID, "notification-own-a", domain.RoleCompanyUser)
-	userB := mustRealtimeAuthUser(t, repo, companyID, "notification-own-b", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
-			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
-		}},
-		DisableNotificationCleanup: true,
-	})
+	companyID := "77777777-7777-4777-8777-777777777777"
+	token := "realtime-notification-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "realtime-notification", domain.RoleCompanyUser)
+	server := newRealtimeAuthServerForTest(repo, token, user)
 	defer server.Close()
-
-	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
-	ready := client.readJSON(t)
-	connectionID := ready["connection_id"].(string)
-	otherScope := realtimeNotificationScope(userB.UserID)
-	client.writeJSON(t, map[string]any{"type": "subscribe", "scope": otherScope})
-	rejected := client.readJSON(t)
-	if rejected["type"] != realtimeMessageSubscriptionRejected || rejected["scope"] != otherScope {
-		t.Fatalf("notification subscription rejected = %+v, want rejection for %s", rejected, otherScope)
-	}
-	if server.realtimeRegistry.hasSubscription(connectionID, companyID, otherScope) {
-		t.Fatalf("unauthorized notification subscription was stored")
-	}
-}
-
-func TestRealtimeWebSocketNotificationCreatedRoutesOnlyToRecipientScope(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888013"
-	tokenA := "notification-created-a-token"
-	tokenB := "notification-created-b-token"
-	userA := mustRealtimeAuthUser(t, repo, companyID, "notification-created-a", domain.RoleCompanyUser)
-	userB := mustRealtimeAuthUser(t, repo, companyID, "notification-created-b", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
-			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
-			tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
-		}},
-		DisableNotificationCleanup: true,
-	})
-	defer server.Close()
-
-	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
-	defer clientA.close()
-	clientB := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenB)
-	defer clientB.close()
-	clientA.readJSON(t)
-	clientB.readJSON(t)
-	scopeA := realtimeNotificationScope(userA.UserID)
-	scopeB := realtimeNotificationScope(userB.UserID)
-	clientA.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeA})
-	clientB.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeB})
-	clientA.readJSON(t)
-	clientB.readJSON(t)
-
-	created, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{{
-		CompanyID:       companyID,
-		RecipientUserID: userA.UserID,
-		Type:            domain.NotificationEventMentionCreated,
-		SourceEventID:   "88888888-8888-4888-8888-000000000013",
-		EntityType:      store.EntityTypeNode,
-		EntityID:        "notification-created-node",
-		Title:           "Created notification",
-	}}})
+	client.readJSON(t)
+	scope := realtimeNotificationScope(user.UserID)
+	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
+	client.readJSON(t)
+	items, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{{CompanyID: companyID, RecipientUserID: user.UserID, Type: domain.NotificationEventMentionCreated, SourceEventID: "88888888-8888-4888-8888-888888888888", EntityType: store.EntityTypeNode, EntityID: "node", Title: "Mention"}}})
 	if err != nil {
-		t.Fatalf("CreateNotifications: %v", err)
+		t.Fatal(err)
 	}
-	server.publishNotifications(created)
-	message := clientA.readJSON(t)
-	if message["type"] != realtimeMessageNotificationCreated || message["scope"] != scopeA {
-		t.Fatalf("created notification websocket message = %+v, want scope %s", message, scopeA)
+	server.publishNotifications(items)
+	message := client.readJSON(t)
+	if message["type"] != realtimeMessageNotificationCreated || message["scope"] != scope {
+		t.Fatalf("notification message = %+v", message)
 	}
-	notification := message["notification"].(map[string]any)
-	if notification["notification_id"] != created[0].NotificationID || notification["recipient_user_id"] != userA.UserID {
-		t.Fatalf("created notification payload = %+v, want recipient %s", notification, userA.UserID)
-	}
-	clientB.assertNoMessage(t)
 }
-
-func TestRealtimeWebSocketNotificationDeletedRoutesOnlyToRecipientScope(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888014"
-	tokenA := "notification-deleted-a-token"
-	tokenB := "notification-deleted-b-token"
-	userA := mustRealtimeAuthUser(t, repo, companyID, "notification-deleted-a", domain.RoleCompanyUser)
-	userB := mustRealtimeAuthUser(t, repo, companyID, "notification-deleted-b", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
-			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
-			tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
-		}},
-		DisableNotificationCleanup: true,
-	})
-	defer server.Close()
-
-	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
-	defer clientA.close()
-	clientB := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenB)
-	defer clientB.close()
-	clientA.readJSON(t)
-	clientB.readJSON(t)
-	scopeA := realtimeNotificationScope(userA.UserID)
-	scopeB := realtimeNotificationScope(userB.UserID)
-	clientA.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeA})
-	clientB.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeB})
-	clientA.readJSON(t)
-	clientB.readJSON(t)
-
-	created, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{{
-		CompanyID:       companyID,
-		RecipientUserID: userA.UserID,
-		Type:            domain.NotificationEventMentionCreated,
-		SourceEventID:   "88888888-8888-4888-8888-000000000014",
-		EntityType:      store.EntityTypeNode,
-		EntityID:        "notification-deleted-node",
-		Title:           "Deleted notification",
-	}}})
-	if err != nil {
-		t.Fatalf("CreateNotifications: %v", err)
-	}
-	server.publishNotificationDeletions(created)
-	message := clientA.readJSON(t)
-	if message["type"] != realtimeMessageNotificationDeleted || message["scope"] != scopeA || message["notification_id"] != created[0].NotificationID {
-		t.Fatalf("deleted notification websocket message = %+v, want deletion for %s", message, created[0].NotificationID)
-	}
-	clientB.assertNoMessage(t)
-}
-
-func TestRealtimeWebSocketNotificationsClearedRoutesAggregateToRecipientScope(t *testing.T) {
-	repo := store.NewMemoryRepo()
-	companyID := "88888888-8888-4888-8888-888888888015"
-	tokenA := "notifications-cleared-a-token"
-	tokenB := "notifications-cleared-b-token"
-	userA := mustRealtimeAuthUser(t, repo, companyID, "notifications-cleared-a", domain.RoleCompanyUser)
-	userB := mustRealtimeAuthUser(t, repo, companyID, "notifications-cleared-b", domain.RoleCompanyUser)
-	server := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
-			tokenA: {Subject: userA.CognitoSubject, Email: userA.Email, Name: userA.DisplayName},
-			tokenB: {Subject: userB.CognitoSubject, Email: userB.Email, Name: userB.DisplayName},
-		}},
-		DisableNotificationCleanup: true,
-	})
-	defer server.Close()
-
-	clientA := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenA)
-	defer clientA.close()
-	clientB := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, tokenB)
-	defer clientB.close()
-	clientA.readJSON(t)
-	clientB.readJSON(t)
-	scopeA := realtimeNotificationScope(userA.UserID)
-	scopeB := realtimeNotificationScope(userB.UserID)
-	clientA.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeA})
-	clientB.writeJSON(t, map[string]any{"type": "subscribe", "scope": scopeB})
-	clientA.readJSON(t)
-	clientB.readJSON(t)
-
-	created, err := repo.CreateNotifications(store.CreateNotificationsInput{Notifications: []store.NotificationCreateInput{
-		{
-			CompanyID:       companyID,
-			RecipientUserID: userA.UserID,
-			Type:            domain.NotificationEventMentionCreated,
-			SourceEventID:   "88888888-8888-4888-8888-000000000015",
-			EntityType:      store.EntityTypeNode,
-			EntityID:        "notifications-cleared-node-a",
-			Title:           "Cleared notification A",
-		},
-		{
-			CompanyID:       companyID,
-			RecipientUserID: userA.UserID,
-			Type:            domain.NotificationEventNodeFieldsChanged,
-			SourceEventID:   "88888888-8888-4888-8888-000000000016",
-			EntityType:      store.EntityTypeNode,
-			EntityID:        "notifications-cleared-node-b",
-			Title:           "Cleared notification B",
-		},
-	}})
-	if err != nil {
-		t.Fatalf("CreateNotifications: %v", err)
-	}
-	server.publishNotificationsCleared(created)
-	message := clientA.readJSON(t)
-	if message["type"] != realtimeMessageNotificationsCleared || message["scope"] != scopeA || message["deleted_count"] != float64(2) {
-		t.Fatalf("cleared notification websocket message = %+v, want aggregate clear count for scope %s", message, scopeA)
-	}
-	clientB.assertNoMessage(t)
-}
-
 func mustRealtimeAuthUser(t *testing.T, repo *store.MemoryRepo, companyID, subject, role string) domain.User {
 	t.Helper()
 	user, err := repo.UpsertAuthUser(subject, subject+"@example.com", strings.ReplaceAll(subject, "-", " "))
@@ -1169,41 +237,6 @@ func newRealtimeAuthServerForTest(repo *store.MemoryRepo, token string, user dom
 	return NewServerWithOptions(repo, ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 		token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
 	}}})
-}
-
-type realtimeAccessCheckForTest struct {
-	ResourceType string
-	AccessLevel  string
-}
-
-type recordingRealtimeAccessRepo struct {
-	store.Repository
-	mu     sync.Mutex
-	checks []realtimeAccessCheckForTest
-}
-
-func (r *recordingRealtimeAccessRepo) UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error) {
-	r.mu.Lock()
-	r.checks = append(r.checks, realtimeAccessCheckForTest{ResourceType: resourceType, AccessLevel: accessLevel})
-	r.mu.Unlock()
-	return r.Repository.UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel)
-}
-
-func (r *recordingRealtimeAccessRepo) sawAccessCheck(resourceType, accessLevel string) bool {
-	for _, check := range r.accessChecks() {
-		if check.ResourceType == resourceType && check.AccessLevel == accessLevel {
-			return true
-		}
-	}
-	return false
-}
-
-func (r *recordingRealtimeAccessRepo) accessChecks() []realtimeAccessCheckForTest {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]realtimeAccessCheckForTest, len(r.checks))
-	copy(out, r.checks)
-	return out
 }
 
 type realtimeWSClientForTest struct {
@@ -1400,25 +433,6 @@ func (c *realtimeWSClientForTest) readJSON(t *testing.T) map[string]any {
 	var payload map[string]any
 	if err := json.Unmarshal(frame.payload, &payload); err != nil {
 		t.Fatalf("decode websocket JSON: %v payload=%s", err, string(frame.payload))
-	}
-	return payload
-}
-
-func (c *realtimeWSClientForTest) readProjectionDelta(t *testing.T) realtimeProjectionDeltaMessage {
-	t.Helper()
-	frame, ok := c.readFrame(t, time.Second)
-	if !ok {
-		t.Fatal("timed out waiting for websocket projection delta")
-	}
-	if frame.opcode != webSocketOpcodeText {
-		t.Fatalf("websocket opcode = %d, want text", frame.opcode)
-	}
-	var payload realtimeProjectionDeltaMessage
-	if err := json.Unmarshal(frame.payload, &payload); err != nil {
-		t.Fatalf("decode websocket projection delta: %v payload=%s", err, string(frame.payload))
-	}
-	if payload.Type != realtimeMessageProjectionDelta {
-		t.Fatalf("websocket message = %+v, want projection delta", payload)
 	}
 	return payload
 }

@@ -350,8 +350,8 @@ func TestLogicGateWorkV2ResponseSerializationIsMinimal(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &top); err != nil {
 		t.Fatalf("decode raw work JSON: %v", err)
 	}
-	if len(top) != 6 {
-		t.Fatalf("raw /work keys=%v body=%s, want six Kanban-specific keys", top, rec.Body.String())
+	if len(top) != 5 {
+		t.Fatalf("raw /work keys=%v body=%s, want five Kanban-specific keys", top, rec.Body.String())
 	}
 	for _, forbidden := range []string{"company_id", "logic_gate_id", "statuses", "assignments", "nodes", "cards_limit"} {
 		if _, ok := top[forbidden]; ok {

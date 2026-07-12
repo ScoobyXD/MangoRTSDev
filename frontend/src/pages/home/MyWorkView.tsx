@@ -6,10 +6,8 @@ import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../../modules/communications/communicationsApi";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../modules/company-explorer/CompanyExplorerIcons";
-import { GVICMatrixRealtimeScope } from "../../modules/gvic/gvicMatrixProjectionDeltas";
 import type { LogicGateGVICRole, LogicGateRecord } from "../../modules/logic-gate-map/shared";
 import type { NodeRecord } from "../../modules/node-map/shared";
-import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket";
 import { listMyWorkMatrixRows, type MyWorkMatrixRow } from "../../modules/work-items/workItemReadApi";
 import { cleanIDList, logicGateTitle } from "./homeUtils";
 import { EVENT_HOME_SAVED_VIEWS_CHANGED } from "./HomeSavedViewsSidebar";
@@ -30,7 +28,6 @@ import {
   markMyWorkMatrixCacheStale,
   markMyWorkMatrixCachesStaleForTargetUsers,
   myWorkMatrixCacheKey,
-  myWorkProjectionDeltaAffectsTargetUsers,
   patchMyWorkMatrixCacheEntry,
   patchMyWorkMatrixCells,
   readMyWorkMatrixCache,
@@ -451,22 +448,6 @@ export function MyWorkView({
     if (!apiBase || !companyID.trim() || matrixTargetUserIDs.length === 0) return;
     requestMatrixRefresh(matrixTargetUserIDs, "liveRefreshToken");
   }, [apiBase, companyID, liveRefreshToken, matrixTargetUserIDs, requestMatrixRefresh]);
-
-  useEffect(() => {
-    if (!apiBase || !companyID || matrixTargetUserIDs.length === 0) return undefined;
-    const unsubscribes = matrixTargetUserIDs.map((targetUserID) => subscribeRealtimeScope(apiBase, companyID, GVICMatrixRealtimeScope(targetUserID), {
-      onDelta: (message) => {
-        if (myWorkProjectionDeltaAffectsTargetUsers(message, matrixTargetUserIDs)) requestMatrixRefresh(matrixTargetUserIDs, "realtime.delta");
-      },
-      onRejected: () => requestMatrixRefresh(matrixTargetUserIDs, "realtime.rejected"),
-      onRefetch: () => requestMatrixRefresh(matrixTargetUserIDs, "realtime.refetch"),
-      onPermissionRevoked: () => requestMatrixRefresh(matrixTargetUserIDs, "realtime.permissionRevoked"),
-      onError: () => requestMatrixRefresh(matrixTargetUserIDs, "realtime.error"),
-    }));
-    return () => {
-      for (const unsubscribe of unsubscribes) unsubscribe();
-    };
-  }, [apiBase, companyID, matrixCacheKey, matrixTargetUserIDs, requestMatrixRefresh]);
 
   const applyNodeDropResult = useCallback((result: MyWorkNodeDropResult) => {
     const rows = result?.gvic_projection_rows ?? [];

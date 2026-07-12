@@ -48,7 +48,7 @@ backend_image_uri = ""
 # apply has reconciled/imported any existing singleton CORS/lifecycle settings.
 attachment_s3_bucket                      = ""
 attachment_direct_upload_enabled          = true
-attachment_max_browser_upload_bytes       = 262144000 # 250 MiB
+attachment_max_browser_upload_bytes       = 1073741824 # 1 GiB
 attachment_upload_intent_ttl_seconds       = 86400     # 24 hours
 attachment_single_put_url_ttl_seconds      = 3600      # 60 minutes
 attachment_multipart_part_url_ttl_seconds = 900       # 15 minutes

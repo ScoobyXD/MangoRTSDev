@@ -6,7 +6,6 @@ import { logicGateIDFromKanbanBoardID } from "../../modules/kanban/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../../modules/selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { humanLabelOrFallback } from "../../modules/entityLabels.js";
-import { subscribeWorkspaceUserRealtime, workspaceRealtimeScope, type WorkspaceStreamEnvelope } from "../../modules/workspace/workspaceRealtime";
 import { consumePendingLogicGateArenaSelection, readPendingLogicGateArenaSelection, type PendingLogicGateArenaSelection } from "./logicGateArenaLaunch";
 
 type LogicGateArenaPageProps = {
@@ -17,7 +16,6 @@ type LogicGateArenaPageProps = {
     label: string;
     nodeID?: string;
     informationID?: string;
-    suppressLegacyWorkspaceStream?: boolean;
     requestID?: number;
   } | null;
   onCollapseToTab?: (selection: { logicGateID: string; label: string; nodeID?: string }) => void;
@@ -42,7 +40,6 @@ type ArenaLogicGateSelection = {
   emptyMessage: string;
   nodeID?: string;
   informationID?: string;
-  suppressLegacyWorkspaceStream?: boolean;
   requestID?: number;
 };
 
@@ -60,7 +57,6 @@ const LazyArenaEditorContent = React.lazy(() => import("../../modules/editor/Edi
     forcedEmptyMessage?: string;
     focusInformationID?: string;
     focusRequestID?: number;
-    suppressLegacyWorkspaceStream?: boolean;
     onLogicGateTitleChange?: (update: { logicGateID: string; label: string }) => void;
   }>,
 })));
@@ -85,7 +81,6 @@ function selectionFromTargetLogicGate(targetLogicGate: LogicGateArenaPageProps["
     emptyMessage: "",
     nodeID: targetLogicGate.nodeID,
     informationID: targetLogicGate.informationID,
-    suppressLegacyWorkspaceStream: targetLogicGate.suppressLegacyWorkspaceStream === true,
     requestID: targetLogicGate.requestID,
   };
 }
@@ -98,7 +93,6 @@ function selectionFromPendingLogicGateArenaSelection(pending: PendingLogicGateAr
     emptyMessage: "",
     nodeID: pending.nodeID,
     informationID: pending.informationID,
-    suppressLegacyWorkspaceStream: pending.suppressLegacyWorkspaceStream === true,
     requestID: pending.createdAt,
   };
 }
@@ -119,26 +113,7 @@ function sameArenaLogicGateSelection(current: ArenaLogicGateSelection, next: Are
     && current.emptyMessage === next.emptyMessage
     && (current.nodeID ?? "") === (next.nodeID ?? "")
     && (current.informationID ?? "") === (next.informationID ?? "")
-    && current.suppressLegacyWorkspaceStream === next.suppressLegacyWorkspaceStream
     && (current.requestID ?? 0) === (next.requestID ?? 0);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function cleanString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function logicGateTitleUpdateFromEnvelope(envelope: WorkspaceStreamEnvelope | undefined): { logicGateID: string; label: string } | null {
-  if (envelope?.type !== "logic_gate_updated") return null;
-  const data = isRecord(envelope.data) ? envelope.data : {};
-  const logicGate = isRecord(data.logic_gate) ? data.logic_gate : {};
-  const logicGateID = cleanString(logicGate.logic_gate_id) || cleanString(data.logic_gate_id);
-  const label = cleanString(logicGate.header);
-  if (!logicGateID || !label) return null;
-  return { logicGateID, label };
 }
 
 function getArenaFrames(frames: FrameDataModel[]) {
@@ -149,7 +124,6 @@ function getArenaFrames(frames: FrameDataModel[]) {
 }
 
 export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, updateFrames, targetLogicGate, onCollapseToTab, onNodeOpen, onNodeClose, onLogicGateTitleChange }) => {
-  const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ArenaResizeState | null>(null);
@@ -249,16 +223,7 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
     if (!nextSelection) return;
     lastArenaSelectionChangedAtRef.current = Math.max(lastArenaSelectionChangedAtRef.current, arenaSelectionChangedAt(nextSelection));
     setSelectedLogicGate((current) => sameArenaLogicGateSelection(current, nextSelection) ? current : nextSelection);
-  }, [targetLogicGate?.informationID, targetLogicGate?.logicGateID, targetLogicGate?.label, targetLogicGate?.nodeID, targetLogicGate?.requestID, targetLogicGate?.suppressLegacyWorkspaceStream]);
-
-  useEffect(() => {
-    return subscribeWorkspaceUserRealtime(apiBase, companyID, workspaceRealtimeScope, {
-      onEvent(_event, context) {
-        const update = logicGateTitleUpdateFromEnvelope(context.envelope);
-        if (update) applyLogicGateTitle(update);
-      },
-    });
-  }, [apiBase, applyLogicGateTitle, companyID]);
+  }, [targetLogicGate?.informationID, targetLogicGate?.logicGateID, targetLogicGate?.label, targetLogicGate?.nodeID, targetLogicGate?.requestID]);
 
   const applySelection = useCallback((selection: LiveSelectionChange | null) => {
     if (!selection || selection.companyID !== companyID) return;
@@ -396,7 +361,6 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
             forcedEmptyMessage={selectedLogicGate.emptyMessage}
             focusInformationID={selectedLogicGate.informationID}
             focusRequestID={selectedLogicGate.requestID}
-            suppressLegacyWorkspaceStream={selectedLogicGate.suppressLegacyWorkspaceStream}
             onLogicGateTitleChange={applyLogicGateTitle}
           />
         </React.Suspense>
@@ -419,7 +383,6 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
           forcedHighlightedNodeID={selectedLogicGate.nodeID}
           forcedOpenNodeID={selectedLogicGate.nodeID}
           controlForcedOpenNode={!!targetLogicGate}
-          suppressLegacyWorkspaceStream={selectedLogicGate.suppressLegacyWorkspaceStream}
           onCollapseArenaToTab={onCollapseToTab ? collapseArenaToTab : undefined}
           onNodeEditorOverlayOpen={openKanbanNode}
           onNodeEditorOverlayClose={closeKanbanNode}

@@ -207,7 +207,7 @@ variable "attachment_direct_upload_enabled" {
 variable "attachment_max_browser_upload_bytes" {
   description = "Authoritative maximum size in bytes for one browser-originated attachment."
   type        = number
-  default     = 262144000
+  default     = 1073741824
 }
 
 variable "attachment_upload_intent_ttl_seconds" {

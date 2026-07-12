@@ -143,7 +143,6 @@ func (s *Server) handleGVICMatrixNodesV2(w http.ResponseWriter, r *http.Request)
 	}
 	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
-	s.publishProjectionDeltasWithTiming(result.ProjectionDeltas, timings)
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	writeJSON(w, http.StatusCreated, result)
 }
@@ -257,7 +256,6 @@ func (s *Server) handleGVICMatrixNodeMoveV2(w http.ResponseWriter, r *http.Reque
 	}
 	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
-	s.publishProjectionDeltasWithTiming(result.ProjectionDeltas, timings)
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	writeJSON(w, http.StatusOK, logicGateWorkAssignmentResultPayload(result))
 }

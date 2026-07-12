@@ -1,4 +1,4 @@
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 # Permissions Tests
 
@@ -31,7 +31,7 @@ P19 - Kanban board and card access derives from the access level of the owning l
 P20 - Regular users cannot load or update permission settings, even when they have resource edit/admin access.
 P21 - Malformed or unknown resource IDs do not crash visibility checks.
 P22 - Permission changes recompute effective access for affected users and resources, including descendants when the change is explicitly applied to descendants.
-P23 - Permission changes publish or append the refresh data needed for affected projections and clients, including descendant resources changed by an apply-to-descendants command.
+P23 - Permission changes synchronously update effective access, canonical projection rows, and read versions for affected resources, including descendants changed by an apply-to-descendants command. Clients reconcile from the committed response or a later canonical read; no generic permission or workspace browser event is published.
 P24 - Company managers do not bypass resource permissions.
 P25 - Company managers can update permission exceptions for company users only; dev admins and company admins can update manager and user exceptions.
 P26 - Default access has only two states, edit and no access; `resource_permissions` stores explicit user/group source rows with their own access level.
@@ -174,7 +174,8 @@ Expected:
 - Opening a node from a Kanban card checks node-level access and shows "You do not have permission to see this." when the node itself is inaccessible.
 - Malformed resource IDs are ignored or handled without crashing.
 - Effective access is recomputed after permission changes.
-- Affected projections and clients receive refresh data for the edited resource and for descendants changed by an apply-to-descendants command.
+- Canonical effective-access rows, affected projections, and read versions are current for the edited resource and descendants changed by an apply-to-descendants command.
+- The initiating client patches concrete mounted state from the committed response when applicable; other clients reconcile on a later canonical read, with no generic permission or workspace browser event.
 
 ### Scenario P-S4: Parent Template Permission Snapshots And Descendant Apply
 

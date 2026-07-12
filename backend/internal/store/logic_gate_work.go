@@ -134,7 +134,7 @@ func sortLogicGateWorkAssignments(items []logicGateWorkAssignment) {
 	})
 }
 
-func buildLogicGateWorkView(logicGate domain.LogicGate, assignments []logicGateWorkAssignment, projectionSequence int64) domain.LogicGateWorkView {
+func buildLogicGateWorkView(logicGate domain.LogicGate, assignments []logicGateWorkAssignment) domain.LogicGateWorkView {
 	sortLogicGateWorkAssignments(assignments)
 	board := synthesizeLogicGateWorkBoard(logicGate)
 	columns := synthesizeLogicGateWorkColumns(logicGate.CompanyID, board.BoardID, logicGate.CreatedTimestamp)
@@ -150,10 +150,9 @@ func buildLogicGateWorkView(logicGate domain.LogicGate, assignments []logicGateW
 			DefaultAccess:      defaultResourceAccessOrEdit(logicGate.DefaultAccess),
 			RequestOwnerUserID: logicGateWorkRequestOwnerUserID(logicGate.GVICAssignments),
 		},
-		Board:              board,
-		Columns:            columns,
-		Cards:              cards,
-		ProjectionSequence: projectionSequence,
+		Board:   board,
+		Columns: columns,
+		Cards:   cards,
 	}
 }
 

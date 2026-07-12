@@ -248,7 +248,7 @@ func TestPostgresKanbanRuntimeDoesNotQueryLegacyTables(t *testing.T) {
 	}
 }
 
-func TestPostgresKanbanProjectionHelpersAreBoundedDeltas(t *testing.T) {
+func TestPostgresKanbanProjectionHelpersUseBoundedSynchronization(t *testing.T) {
 	raw, err := os.ReadFile("postgres_kanban_projection.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_kanban_projection.go: %v", err)
@@ -284,18 +284,18 @@ func TestPostgresKanbanProjectionHelpersAreBoundedDeltas(t *testing.T) {
 	assignBody := postgresKanbanFunctionBodyForTest(t, strings.ReplaceAll(string(kanbanRaw), "\r\n", "\n"), "func (r *PostgresRepo) assignNodeToLogicGateStatusTx")
 	moveBody := postgresKanbanFunctionBodyForTest(t, strings.ReplaceAll(string(kanbanRaw), "\r\n", "\n"), "func (r *PostgresRepo) MoveLogicGateNodeAssignment")
 	removeBody := postgresKanbanFunctionBodyForTest(t, strings.ReplaceAll(string(kanbanRaw), "\r\n", "\n"), "func (r *PostgresRepo) RemoveLogicGateNodeAssignment")
-	if !strings.Contains(assignBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(assignBody, "applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx") || !strings.Contains(assignBody, "kanbanBoardProjectionCardByNodeTx") {
-		t.Fatal("assignNodeToLogicGateStatusTx does not write source assignment, apply dependency deltas, and reread the Kanban projection")
+	if !strings.Contains(assignBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(assignBody, "syncNodeLogicGateAssignmentProjectionDependenciesTx") || !strings.Contains(assignBody, "kanbanBoardProjectionCardByNodeTx") {
+		t.Fatal("assignNodeToLogicGateStatusTx does not write source assignment, synchronize dependent projections, and reread the Kanban projection")
 	}
-	if !strings.Contains(moveBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(moveBody, "applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx") || !strings.Contains(moveBody, "kanbanBoardProjectionCardByNodeTx") {
-		t.Fatal("MoveLogicGateNodeAssignment does not write source assignment, apply dependency deltas, and reread the Kanban projection")
+	if !strings.Contains(moveBody, "upsertNodeLogicGateAssignmentSQL") || !strings.Contains(moveBody, "syncNodeLogicGateAssignmentProjectionDependenciesTx") || !strings.Contains(moveBody, "kanbanBoardProjectionCardByNodeTx") {
+		t.Fatal("MoveLogicGateNodeAssignment does not write source assignment, synchronize dependent projections, and reread the Kanban projection")
 	}
-	if !strings.Contains(removeBody, "applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx") || strings.Contains(removeBody, "delete from kanban_cards") {
-		t.Fatal("RemoveLogicGateNodeAssignment should apply dependency deltas without deleting legacy Kanban cards")
+	if !strings.Contains(removeBody, "syncNodeLogicGateAssignmentProjectionDependenciesTx") || strings.Contains(removeBody, "delete from kanban_cards") {
+		t.Fatal("RemoveLogicGateNodeAssignment should synchronize dependent projections without deleting legacy Kanban cards")
 	}
 }
 
-func TestPostgresCommunicationsTriageConversionAppliesProjectionDependencyDeltas(t *testing.T) {
+func TestPostgresCommunicationsTriageConversionSynchronizesProjectionDependencies(t *testing.T) {
 	raw, err := os.ReadFile("postgres_communications_triage.go")
 	if err != nil {
 		t.Fatalf("ReadFile postgres_communications_triage.go: %v", err)
@@ -305,19 +305,18 @@ func TestPostgresCommunicationsTriageConversionAppliesProjectionDependencyDeltas
 	attachBody := postgresKanbanFunctionBodyForTest(t, source, "func (r *PostgresRepo) attachCommunicationsTriageItemsToExistingNodeTx")
 
 	for _, needle := range []string{
-		"applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx",
-		"result.ProjectionDeltas = append(result.ProjectionDeltas, projectionDeltas...)",
+		"syncNodeLogicGateAssignmentProjectionDependenciesTx",
 		"kanbanBoardProjectionCardByNodeTx",
 	} {
 		if !strings.Contains(convertBody, needle) {
-			t.Fatalf("ConvertCommunicationsTriageItems missing new-node projection dependency step %q", needle)
+			t.Fatalf("ConvertCommunicationsTriageItems missing new-node projection synchronization step %q", needle)
 		}
 		if !strings.Contains(attachBody, needle) {
-			t.Fatalf("attachCommunicationsTriageItemsToExistingNodeTx missing existing-node projection dependency step %q", needle)
+			t.Fatalf("attachCommunicationsTriageItemsToExistingNodeTx missing existing-node projection synchronization step %q", needle)
 		}
 	}
-	if count := strings.Count(convertBody, "ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)"); count < 2 {
-		t.Fatalf("ConvertCommunicationsTriageItems should emit projection delta event rows for both conversion exits, found %d", count)
+	if strings.Contains(source, "appendEventRows") {
+		t.Fatal("communications triage conversion must not append generic realtime event rows")
 	}
 }
 
@@ -330,7 +329,7 @@ func TestPostgresMoveLogicGateAssignmentPreservesEmailReferencesWithoutLegacyCar
 	for _, required := range []string{
 		"updatePostgresCommunicationsEmailNodeReferenceForNodeTx",
 		"updatePostgresCommunicationsEmailAttachmentReferencesForNodeTx",
-		"applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx",
+		"syncNodeLogicGateAssignmentProjectionDependenciesTx",
 	} {
 		if !strings.Contains(body, required) {
 			t.Fatalf("MoveLogicGateNodeAssignment missing %s", required)

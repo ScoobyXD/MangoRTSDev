@@ -94,12 +94,13 @@ func TestPostgresResourcePermissionGroupRowsAndDescendantApplyStaySourceShaped(t
 		"descendantTargets, err := applyPostgresResourcePermissionPolicyToDescendantsTx",
 		"policySequence",
 		"changedTargets = append(changedTargets, descendantTargets...)",
-		"applyResourcePermissionProjectionDeltaDependenciesTx",
-		"PermissionChangedEventInput(companyID, target.ResourceType, target.ResourceID",
 	} {
 		if !strings.Contains(entityBody, required) {
 			t.Fatalf("SetEntityPermissions descendant refresh path missing %q", required)
 		}
+	}
+	if strings.Contains(entityBody, "appendEventRows") || strings.Contains(entityBody, "PermissionChangedEventInput") {
+		t.Fatal("permission writes must not append generic realtime event rows")
 	}
 }
 

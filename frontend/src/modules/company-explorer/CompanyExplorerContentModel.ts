@@ -15,11 +15,6 @@ import {
 } from "./companyExplorerTypes.js";
 import { isExplorerSystemFolderKey } from "./treePresentation.js";
 
-export type WorkspaceStreamEnvelope = {
-  company_id: string;
-  type: string;
-  data?: Record<string, unknown>;
-};
 
 export type CompanyExplorerFolderItemAssignment = {
   folder_id: string;

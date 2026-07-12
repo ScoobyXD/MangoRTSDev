@@ -22,14 +22,6 @@ func (r *MemoryRepo) UpsertNodeProjectionWithActor(input NodeInformationInput) (
 		return domain.NodeProjection{}, ErrNotFound
 	}
 	k := key(companyID, nodeID)
-	beforeText := cloneMemoryNodeProjectionMap(r.nodeText[k])
-	beforeChanges := cloneMemoryNodeContentChanges(r.nodeContentChanges)
-	beforeChangeSeen := cloneMemoryTimeMap(r.nodeContentChangeSeen)
-	rollback := func() {
-		r.nodeText[k] = beforeText
-		r.nodeContentChanges = beforeChanges
-		r.nodeContentChangeSeen = beforeChangeSeen
-	}
 	if r.nodeText[k] == nil {
 		r.nodeText[k] = map[string]domain.NodeProjection{}
 	}
@@ -63,12 +55,6 @@ func (r *MemoryRepo) UpsertNodeProjectionWithActor(input NodeInformationInput) (
 			now,
 		))
 	}
-	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, input.ActorUserID, "", EditorProjectionRowFromNode(projection)); ok {
-		if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
-			rollback()
-			return domain.NodeProjection{}, err
-		}
-	}
 	return projection, nil
 }
 
@@ -87,8 +73,6 @@ func (r *MemoryRepo) UpsertLogicGateProjection(input LogicGateProjectionInput) (
 		return domain.LogicGateProjection{}, ErrNotFound
 	}
 	k := key(companyID, logicGateID)
-	beforeText := cloneMemoryLogicGateProjectionMap(r.logicGateText[k])
-	rollback := func() { r.logicGateText[k] = beforeText }
 	if r.logicGateText[k] == nil {
 		r.logicGateText[k] = map[string]domain.LogicGateProjection{}
 	}
@@ -118,12 +102,6 @@ func (r *MemoryRepo) UpsertLogicGateProjection(input LogicGateProjectionInput) (
 		UpdatedTimestamp: now,
 	}
 	r.logicGateText[k][projectionID] = projection
-	if eventInput, ok := EditorProjectionUpsertEventInput(companyID, input.ActorUserID, "", EditorProjectionRowFromLogicGate(projection)); ok {
-		if _, err := r.appendEventRowsLocked([]EventRowInput{eventInput}); err != nil {
-			rollback()
-			return domain.LogicGateProjection{}, err
-		}
-	}
 	return projection, nil
 }
 
@@ -254,15 +232,10 @@ func (r *MemoryRepo) RestoreNodeEditorSaveVersion(input EditorSaveVersionRestore
 	}
 	k := key(companyID, nodeID)
 	beforeText := cloneMemoryNodeProjectionMap(r.nodeText[k])
-	rollback := func() { r.nodeText[k] = beforeText }
 	r.nodeText[k] = map[string]domain.NodeProjection{}
 	now := time.Now().UTC()
-	eventRows := make([]EventRowInput, 0, len(beforeText)+len(version.Items))
 	for _, existing := range beforeText {
 		if isEditorTextBoxType(existing.Type) {
-			if eventInput, ok := EditorProjectionDeleteEventInput(companyID, input.ActorUserID, "", EntityTypeNode, nodeID, existing.InformationID); ok {
-				eventRows = append(eventRows, eventInput)
-			}
 			continue
 		}
 		r.nodeText[k][existing.InformationID] = existing
@@ -282,15 +255,6 @@ func (r *MemoryRepo) RestoreNodeEditorSaveVersion(input EditorSaveVersionRestore
 			UpdatedTimestamp: now,
 		}
 		r.nodeText[k][sourceID] = projection
-		if eventInput, ok := EditorProjectionUpsertEventInput(companyID, input.ActorUserID, "", EditorProjectionRowFromNode(projection)); ok {
-			eventRows = append(eventRows, eventInput)
-		}
-	}
-	if len(eventRows) > 0 {
-		if _, err := r.appendEventRowsLocked(eventRows); err != nil {
-			rollback()
-			return domain.EditorSaveVersion{}, err
-		}
 	}
 	return version, nil
 }
@@ -310,15 +274,10 @@ func (r *MemoryRepo) RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRe
 	}
 	k := key(companyID, logicGateID)
 	beforeText := cloneMemoryLogicGateProjectionMap(r.logicGateText[k])
-	rollback := func() { r.logicGateText[k] = beforeText }
 	r.logicGateText[k] = map[string]domain.LogicGateProjection{}
 	now := time.Now().UTC()
-	eventRows := make([]EventRowInput, 0, len(beforeText)+len(version.Items))
 	for _, existing := range beforeText {
 		if isEditorTextBoxType(existing.Type) {
-			if eventInput, ok := EditorProjectionDeleteEventInput(companyID, input.ActorUserID, "", EntityTypeLogicGate, logicGateID, existing.InformationID); ok {
-				eventRows = append(eventRows, eventInput)
-			}
 			continue
 		}
 		r.logicGateText[k][existing.InformationID] = existing
@@ -338,15 +297,6 @@ func (r *MemoryRepo) RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRe
 			UpdatedTimestamp: now,
 		}
 		r.logicGateText[k][sourceID] = projection
-		if eventInput, ok := EditorProjectionUpsertEventInput(companyID, input.ActorUserID, "", EditorProjectionRowFromLogicGate(projection)); ok {
-			eventRows = append(eventRows, eventInput)
-		}
-	}
-	if len(eventRows) > 0 {
-		if _, err := r.appendEventRowsLocked(eventRows); err != nil {
-			rollback()
-			return domain.EditorSaveVersion{}, err
-		}
 	}
 	return version, nil
 }

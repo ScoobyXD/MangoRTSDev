@@ -1,4 +1,4 @@
-Last updated: 2026-06-20
+Last updated: 2026-07-12
 
 # Accounts Tests
 
@@ -24,8 +24,8 @@ ACC13 - Reading node account assignments requires view access to the node.
 ACC14 - Replacing node account assignments requires edit access to the node.
 ACC15 - Replacing node account assignments cleans blank IDs, dedupes repeated account IDs, sorts them, and validates that every account exists in the company.
 ACC16 - Updating node account assignments recomputes node projection dependencies.
-ACC17 - Updating node account assignments appends account-change event rows.
-ACC18 - Updating node account assignments emits a workspace node-updated event marked as accounts changed.
+ACC17 - Updating node account assignments does not append `event_rows`; the assignment mutation updates canonical projection dependencies and read versions synchronously.
+ACC18 - Updating node account assignments appends the independently required durable `node_updated` domain fact marked as accounts changed. That fact may produce a compact hint for each affected mounted `board:{board_id}`, but it does not publish a generic workspace browser event.
 ACC19 - Company account reference reads use one company-scoped shared singleflight/cache across editor and project consumers. Every account or folder create/update/delete invalidates that cache before emitting `mangorts:accounts-updated`, so an older in-flight result cannot repopulate stale account labels after a mutation.
 
 ## Scenarios
@@ -94,8 +94,8 @@ Expected:
 - Edit access is required to replace node account assignments.
 - Replacement cleans blanks, dedupes IDs, sorts IDs, and rejects invalid accounts.
 - Successful replacement recomputes node projection dependencies.
-- Successful replacement appends account-change event rows.
-- Successful replacement emits a workspace node-updated event with accounts-changed metadata.
+- Successful replacement appends no `event_rows`; canonical projection dependencies and read versions are current when the response commits.
+- Successful replacement appends the durable `node_updated` domain fact with accounts-changed metadata and can notify only affected mounted board scopes, never a generic workspace browser scope.
 
 ### Scenario ACC-S4: Shared Account Reference Cache
 

@@ -140,15 +140,13 @@ test("delete helpers can tag notification update event source", async () => {
   }
 });
 
-test("notification summary realtime refresh does not rebroadcast a second global update event", () => {
-  const source = readFileSync("frontend/src/modules/notifications/useNotificationSummary.ts", "utf8");
-  const start = source.indexOf("function ensureNotificationRealtime");
-  const end = source.indexOf("function currentUserCanUseCompany", start);
-  assert.notEqual(start, -1);
-  assert.notEqual(end, -1);
-  const realtimeBlock = source.slice(start, end);
-  assert.doesNotMatch(realtimeBlock, /emitNotificationsUpdated/);
-  assert.equal(realtimeBlock.match(/requestNotificationSummaryLoadsForCompany/g)?.length, 3);
+test("notification summary consumes the app-level coordinator without opening a duplicate socket", () => {
+  const summarySource = readFileSync("frontend/src/modules/notifications/useNotificationSummary.ts", "utf8");
+  const coordinatorSource = readFileSync("frontend/src/app/AppLiveFreshnessBridge.tsx", "utf8");
+  assert.doesNotMatch(summarySource, /subscribeRealtimeScope/);
+  assert.match(summarySource, /EVENT_NOTIFICATIONS_UPDATED/);
+  assert.equal(coordinatorSource.match(/subscribeRealtimeScope\(/g)?.length, 1);
+  assert.match(coordinatorSource, /notifications:user:/);
 });
 
 test("read and unread helpers still use notification read endpoints", async () => {

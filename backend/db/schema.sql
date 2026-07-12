@@ -1815,18 +1815,6 @@ do update set
   accounts = excluded.accounts,
   projection_updated_timestamp = now();
 
-create table if not exists company_projection_sequences (
-  company_id uuid not null,
-  projection_name text not null,
-  projection_scope text not null default '',
-  sequence bigint not null default 0,
-  updated_timestamp timestamptz not null default now(),
-  primary key (company_id, projection_name, projection_scope),
-  foreign key (company_id) references companies (company_id) on delete cascade,
-  constraint company_projection_sequences_name_nonblank_chk check (btrim(projection_name) <> ''),
-  constraint company_projection_sequences_scope_not_null_chk check (projection_scope is not null),
-  constraint company_projection_sequences_sequence_nonnegative_chk check (sequence >= 0)
-);
 
 create table if not exists logic_gate_work_versions (
   company_id uuid not null,
@@ -2229,7 +2217,6 @@ create table if not exists domain_events (
   actor_user_id uuid,
   idempotency_key text not null default '',
   payload jsonb not null default '{}'::jsonb,
-  published_timestamp timestamptz,
   created_timestamp timestamptz not null default now(),
   constraint domain_events_stream_type_nonblank_chk check (btrim(stream_type) <> ''),
   constraint domain_events_stream_id_nonblank_chk check (btrim(stream_id) <> ''),
@@ -2247,57 +2234,11 @@ create unique index if not exists idx_domain_events_idempotency_key
 create index if not exists idx_domain_events_stream_sequence
   on domain_events(company_id, stream_type, stream_id, sequence);
 
-create index if not exists idx_domain_events_pending
-  on domain_events(created_timestamp, company_id, event_id)
-  where published_timestamp is null;
 
 create index if not exists idx_domain_events_company_created
   on domain_events(company_id, created_timestamp desc, event_id desc);
 
-create table if not exists event_rows (
-  event_id uuid not null,
-  company_id uuid not null,
-  event_type text not null,
-  resource_type text not null default '',
-  resource_id text not null default '',
-  primary_scope text not null default '',
-  affected_scopes jsonb not null default '[]'::jsonb,
-  actor_user_id uuid,
-  idempotency_key text not null default '',
-  sequence_scope text not null,
-  sequence bigint not null,
-  payload jsonb not null default '{}'::jsonb,
-  created_timestamp timestamptz not null default now(),
-  available_at timestamptz not null default now(),
-  processing_started_at timestamptz,
-  processed_at timestamptz,
-  attempt_count integer not null default 0,
-  last_error text not null default '',
-  constraint event_rows_event_type_nonblank_chk check (btrim(event_type) <> ''),
-  constraint event_rows_sequence_scope_nonblank_chk check (btrim(sequence_scope) <> ''),
-  constraint event_rows_sequence_positive_chk check (sequence > 0),
-  constraint event_rows_attempt_count_nonnegative_chk check (attempt_count >= 0),
-  constraint event_rows_affected_scopes_array_chk check (jsonb_typeof(affected_scopes) = 'array'),
-  constraint event_rows_payload_object_chk check (jsonb_typeof(payload) = 'object'),
-  primary key (company_id, event_id),
-  unique (company_id, sequence_scope, sequence),
-  foreign key (actor_user_id) references users (user_id) on delete set null
-);
 
-create unique index if not exists idx_event_rows_idempotency_key
-  on event_rows(company_id, idempotency_key)
-  where btrim(idempotency_key) <> '';
-
-create index if not exists idx_event_rows_available_unprocessed
-  on event_rows(available_at, created_timestamp, company_id, event_id)
-  where processed_at is null and processing_started_at is null;
-
-create index if not exists idx_event_rows_processing_started
-  on event_rows(processing_started_at)
-  where processed_at is null and processing_started_at is not null;
-
-create index if not exists idx_event_rows_scope_sequence
-  on event_rows(company_id, sequence_scope, sequence);
 create table if not exists workspace_read_versions (
   company_id uuid not null,
   scope text not null,
@@ -2673,12 +2614,6 @@ do update set
   version = greatest(workspace_read_versions.version, excluded.version),
   updated_timestamp = greatest(workspace_read_versions.updated_timestamp, excluded.updated_timestamp);
 
-create table if not exists notification_domain_event_projection_checkpoints (
-  company_id uuid primary key,
-  checkpoint_timestamp timestamptz not null,
-  checkpoint_event_id uuid not null,
-  updated_timestamp timestamptz not null default now()
-);
 
 create table if not exists workspace_derived_domain_event_projection_checkpoints (
   company_id uuid primary key,
@@ -3324,51 +3259,6 @@ begin
 end;
 $$;
 
-create or replace function mangorts_trg_bump_logic_gate_work_from_projection_sequence()
-returns trigger language plpgsql as $$
-declare
-  gate_id uuid;
-  gate_text text;
-begin
-  if tg_op='INSERT' then
-    if new.projection_name='kanban_board' and new.projection_scope like 'board:logic-gate:%' then
-      gate_text := split_part(substr(new.projection_scope, length('board:logic-gate:')+1), '|', 1);
-      begin gate_id := gate_text::uuid; exception when invalid_text_representation then gate_id := null; end;
-      if gate_id is not null then
-        perform mangorts_bump_logic_gate_work_version(new.company_id, gate_id);
-      end if;
-    end if;
-    return new;
-  elsif tg_op='DELETE' then
-    if old.projection_name='kanban_board' and old.projection_scope like 'board:logic-gate:%' then
-      gate_text := split_part(substr(old.projection_scope, length('board:logic-gate:')+1), '|', 1);
-      begin gate_id := gate_text::uuid; exception when invalid_text_representation then gate_id := null; end;
-      if gate_id is not null then
-        perform mangorts_bump_logic_gate_work_version(old.company_id, gate_id);
-      end if;
-    end if;
-    return old;
-  end if;
-  if old.projection_name='kanban_board' and old.projection_scope like 'board:logic-gate:%' then
-    gate_text := split_part(substr(old.projection_scope, length('board:logic-gate:')+1), '|', 1);
-    begin gate_id := gate_text::uuid; exception when invalid_text_representation then gate_id := null; end;
-    if gate_id is not null then
-      perform mangorts_bump_logic_gate_work_version(old.company_id, gate_id);
-    end if;
-  end if;
-  if new.projection_name='kanban_board'
-     and new.projection_scope like 'board:logic-gate:%'
-     and (new.company_id, new.projection_name, new.projection_scope)
-         is distinct from (old.company_id, old.projection_name, old.projection_scope) then
-    gate_text := split_part(substr(new.projection_scope, length('board:logic-gate:')+1), '|', 1);
-    begin gate_id := gate_text::uuid; exception when invalid_text_representation then gate_id := null; end;
-    if gate_id is not null then
-      perform mangorts_bump_logic_gate_work_version(new.company_id, gate_id);
-    end if;
-  end if;
-  return new;
-end;
-$$;
 
 drop trigger if exists trg_logic_gate_work_version_seed on logic_gates;
 create trigger trg_logic_gate_work_version_seed after insert on logic_gates
@@ -3426,9 +3316,6 @@ for each row execute function mangorts_trg_bump_logic_gate_work_from_node();
 drop trigger if exists trg_logic_gate_work_version_email_origin on communications_email_nodes;
 create trigger trg_logic_gate_work_version_email_origin after insert or update or delete on communications_email_nodes
 for each row execute function mangorts_trg_bump_logic_gate_work_from_gate_row();
-drop trigger if exists trg_logic_gate_work_version_projection_sequence on company_projection_sequences;
-create trigger trg_logic_gate_work_version_projection_sequence after insert or update or delete on company_projection_sequences
-for each row execute function mangorts_trg_bump_logic_gate_work_from_projection_sequence();
 
 -- Cheap, canonical node-view validators. Do not apply from an agent session.
 

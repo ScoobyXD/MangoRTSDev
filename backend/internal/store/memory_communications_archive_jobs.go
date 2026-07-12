@@ -178,7 +178,7 @@ func (r *MemoryRepo) MarkCommunicationsArchiveJobItemFailed(jobItemID, lastError
 	}
 	now := time.Now().UTC()
 	item.ProcessingStartedAt = nil
-	item.LastError = trimEventLastError(lastError)
+	item.LastError = trimCommunicationsArchiveJobLastError(lastError)
 	item.UpdatedTimestamp = now
 	if final {
 		item.Status = CommunicationsArchiveJobItemStatusFailed

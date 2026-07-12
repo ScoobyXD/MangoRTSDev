@@ -65,14 +65,7 @@ gate_metadata as (
       order by assignment.principal_id
       limit 1
     ), '') as request_owner_user_id,
-    gate.created_timestamp,
-    coalesce((
-      select sequence.sequence
-      from company_projection_sequences sequence
-      where sequence.company_id=gate.company_id
-        and sequence.projection_name=$4
-        and sequence.projection_scope='board:' || 'logic-gate:' || gate.logic_gate_id::text
-    ), 0) as projection_sequence
+    gate.created_timestamp
   from logic_gates gate
   where gate.company_id=$1::uuid
     and gate.logic_gate_id=$2::uuid
@@ -84,7 +77,6 @@ select
   gate.default_access,
   gate.request_owner_user_id,
   gate.created_timestamp,
-  gate.projection_sequence,
   projection.compatibility_card_id::text,
   `+kanbanProjectionCanonicalStatusSQL+`,
   projection.node_id::text,
@@ -118,7 +110,6 @@ order by
 		companyID,
 		logicGateID,
 		resourcePermissionDefaultRuleKey,
-		ProjectionNameKanbanBoard,
 	)
 	if err != nil {
 		return domain.LogicGateWorkView{}, err
@@ -129,27 +120,26 @@ order by
 	var found bool
 	for rows.Next() {
 		var (
-			gateCompanyID      string
-			gateID             string
-			gateHeader         string
-			defaultAccess      string
-			requestOwnerID     string
-			gateCreated        sql.NullTime
-			projectionSequence int64
-			cardID             sql.NullString
-			columnID           sql.NullString
-			nodeID             sql.NullString
-			nodeTitle          sql.NullString
-			requestedByUserID  sql.NullString
-			placedByUserID     sql.NullString
-			isIssue            sql.NullBool
-			position           sql.NullInt64
-			dueDate            sql.NullString
-			priority           sql.NullInt64
-			createdFromEmail   bool
-			projectionUpdated  sql.NullTime
-			cardCreated        sql.NullTime
-			accountsJSON       sql.NullString
+			gateCompanyID     string
+			gateID            string
+			gateHeader        string
+			defaultAccess     string
+			requestOwnerID    string
+			gateCreated       sql.NullTime
+			cardID            sql.NullString
+			columnID          sql.NullString
+			nodeID            sql.NullString
+			nodeTitle         sql.NullString
+			requestedByUserID sql.NullString
+			placedByUserID    sql.NullString
+			isIssue           sql.NullBool
+			position          sql.NullInt64
+			dueDate           sql.NullString
+			priority          sql.NullInt64
+			createdFromEmail  bool
+			projectionUpdated sql.NullTime
+			cardCreated       sql.NullTime
+			accountsJSON      sql.NullString
 		)
 		if err := rows.Scan(
 			&gateCompanyID,
@@ -158,7 +148,6 @@ order by
 			&defaultAccess,
 			&requestOwnerID,
 			&gateCreated,
-			&projectionSequence,
 			&cardID,
 			&columnID,
 			&nodeID,
@@ -192,10 +181,9 @@ order by
 					DefaultAccess:      defaultResourceAccessOrEdit(defaultAccess),
 					RequestOwnerUserID: requestOwnerID,
 				},
-				Board:              board,
-				Columns:            synthesizeLogicGateWorkColumns(gateCompanyID, board.BoardID, gateCreated.Time),
-				Cards:              []domain.LogicGateWorkCard{},
-				ProjectionSequence: projectionSequence,
+				Board:   board,
+				Columns: synthesizeLogicGateWorkColumns(gateCompanyID, board.BoardID, gateCreated.Time),
+				Cards:   []domain.LogicGateWorkCard{},
 			}
 			found = true
 		}

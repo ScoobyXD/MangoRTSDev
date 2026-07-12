@@ -65,8 +65,10 @@ ED40 - Text highlighting uses one shared `EditorTabBar` color control and one `a
 ED41 - Focusing an attached-email reply invalidates the surrounding node/project text-block formatting target immediately. The outer toolbar must disable instead of retaining a stale controller that could format the previously focused text block; the reply's own shared toolbar remains the only formatting owner while the reply editor has focus.
 ED42 - External hydration preserves the shared logical selection by restoring the handler's last valid range, recording text offsets, replacing the DOM, and restoring those offsets. This applies while the document, numeric font input, highlight picker, or another shared toolbar control owns focus. A changed node/project text block received while the document itself is focused is deferred until blur: an untouched local DOM accepts the external value without flushing stale HTML, while a locally edited conflict keeps the local value and shows a conflict notice instead of silently overwriting either side.
 ED43 - Rich-document persistence queues are target-safe. Logic Gate/root editor saves retain the latest pending request for every target rather than one global overwrite slot; project text-block saves serialize and coalesce the latest full title/document/attachment envelope per block; and node text-block teardown drains every debounced changed block on close or company/node switch before clearing its target-scoped controller. Hidden documents never accept toolbar formatting commands.
-ED44 - Attachment-backed image hydration has exactly one owner for each rich-editor DOM/document update across `EditorContent`, `NodeTextBlockEditor`, and `UnifiedRichEditorSurface`. That owner returns cleanup, replaces prior cleanup before DOM replacement or context change, observes near-viewport frames relative to the actual editor scrollport, uses the shared bounded display-load queue/Blob singleflight, retries failed frames with bounded backoff, and revokes every consumer-owned object URL on replacement or unmount.
-ED45 - Node and Logic Gate saved-version history is progressive Save Settings data. The editor must not request history during initial document open; activating Save Settings loads it for the current target while manual Save, confirmed restore, sorting, and status behavior remain unchanged.
+ED44 - Node document typing and Logic Gate document typing use durable HTTP autosave only. No whole-document collaboration endpoint, socket scope, collaborator-presence UI, generic editor projection subscription, or full-document socket payload exists; future Huddle CRDT/OT is separate documentation only.
+ED45 - Durable Node chat create/delete publishes compact committed hints only to `chat:node:{node_id}` while that Node chat is mounted. Project chat has no retained realtime subscription, and Node chat publication never uses a generic editor/document or workspace scope.
+ED46 - Attachment-backed image hydration has exactly one owner for each rich-editor DOM/document update across `EditorContent`, `NodeTextBlockEditor`, and `UnifiedRichEditorSurface`. That owner returns cleanup, replaces prior cleanup before DOM replacement or context change, observes near-viewport frames relative to the actual editor scrollport, uses the shared bounded display-load queue/Blob singleflight, retries failed frames with bounded backoff, and revokes every consumer-owned object URL on replacement or unmount.
+ED47 - Node and Logic Gate saved-version history is progressive Save Settings data. The editor must not request history during initial document open; activating Save Settings loads it for the current target while manual Save, confirmed restore, sorting, and status behavior remain unchanged.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -1043,7 +1045,7 @@ Major coverage gaps:
 13. There are no browser rendering tests for line height, visible spaces, marker alignment, guide alignment, image/list adjacency, or email output.
 14. Cross-surface tests prove imports/source strings, not identical runtime behavior across Logic Gate, node, project, My Triage, Shared Triage, and attached-email surfaces.
 15. Node-based sanitizer tests do not exercise the browser DOM sanitizer. When `document` is unavailable, `sanitizeEditorDocumentHTML` uses a much smaller regex-only fallback.
-16. `editorProjectionDeltas.test.ts` exists but is not included in the frontend node-test runner or its test TypeScript configuration.
+16. Cross-user editor document refresh after another user saves is intentionally navigation/reopen based; no exact coediting behavior is currently specified outside future Huddle work.
 17. The specification does not define deterministic expected behavior for first-item Tab, Shift+Enter in automatic outlines, multiline selection indentation, pasted native ordered lists, image-only list items, mixed image/text paste, list paste at a mid-item caret, or lists inside tables.
 18. No literal TODO/FIXME in the core editor files calls out these gaps; the main documented signal is the generic Partial coverage status.
 
@@ -1101,8 +1103,8 @@ Business logic covered:
 - ED26
 - ED38
 - ED42
-- ED44
-- ED45
+- ED46
+- ED47
 
 Given:
 - A document contains repeated attachment-backed images and mounts under React StrictMode.

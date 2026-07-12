@@ -75,6 +75,14 @@ type CommunicationsArchiveJobItem struct {
 	UpdatedTimestamp         time.Time  `json:"updated_timestamp"`
 }
 
+func trimCommunicationsArchiveJobLastError(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 2000 {
+		return value[:2000]
+	}
+	return value
+}
+
 func NormalizeCommunicationsArchiveJobInput(input CommunicationsArchiveJobInput) (CommunicationsArchiveJobInput, error) {
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.CompanyID = strings.TrimSpace(input.CompanyID)

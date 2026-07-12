@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -10,8 +9,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 )
 
 const workspaceDomainStreamType = "workspace"
@@ -884,109 +881,17 @@ func (s *Server) handleKanbanWorkspaceSnapshot(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_cards")
 		return
 	}
-	sequence, err := s.currentKanbanBoardProjectionSequence(companyID, boardID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_read_kanban_projection_sequence")
-		return
-	}
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
-		"scope":               "kanban",
-		"company_id":          companyID,
-		"board_id":            boardID,
-		"columns":             columns,
-		"cards":               cards,
-		"cards_limit":         cardQuery.Limit,
-		"projection_sequence": sequence,
+		"scope":       "kanban",
+		"company_id":  companyID,
+		"board_id":    boardID,
+		"columns":     columns,
+		"cards":       cards,
+		"cards_limit": cardQuery.Limit,
 	}, etag)
 }
 
-type workspaceEventEnvelope struct {
-	EventID    string         `json:"event_id,omitempty"`
-	Sequence   int64          `json:"sequence,omitempty"`
-	StreamType string         `json:"stream_type,omitempty"`
-	StreamID   string         `json:"stream_id,omitempty"`
-	CompanyID  string         `json:"company_id"`
-	Type       string         `json:"type"`
-	TS         time.Time      `json:"ts"`
-	Data       map[string]any `json:"data,omitempty"`
-}
-
-type localWorkspaceEventBus struct {
-	mu          sync.RWMutex
-	subscribers map[string]map[chan []byte]struct{}
-}
-
-func workspaceSubscriptionKey(companyID, userID string) string {
-	companyID = strings.TrimSpace(companyID)
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return companyID
-	}
-	return companyID + ":" + userID
-}
-
-func newLocalWorkspaceEventBus() *localWorkspaceEventBus {
-	return &localWorkspaceEventBus{subscribers: map[string]map[chan []byte]struct{}{}}
-}
-
-func (h *localWorkspaceEventBus) subscribe(companyID string) chan []byte {
-	return h.subscribeUser(companyID, "")
-}
-
-func (h *localWorkspaceEventBus) subscribeUser(companyID, userID string) chan []byte {
-	ch := make(chan []byte, 24)
-	key := workspaceSubscriptionKey(companyID, userID)
-	h.mu.Lock()
-	bucket := h.subscribers[key]
-	if bucket == nil {
-		bucket = map[chan []byte]struct{}{}
-		h.subscribers[key] = bucket
-	}
-	bucket[ch] = struct{}{}
-	h.mu.Unlock()
-	return ch
-}
-
-func (h *localWorkspaceEventBus) unsubscribe(companyID string, ch chan []byte) {
-	h.unsubscribeUser(companyID, "", ch)
-}
-
-func (h *localWorkspaceEventBus) unsubscribeUser(companyID, userID string, ch chan []byte) {
-	key := workspaceSubscriptionKey(companyID, userID)
-	h.mu.Lock()
-	if bucket := h.subscribers[key]; bucket != nil {
-		delete(bucket, ch)
-		if len(bucket) == 0 {
-			delete(h.subscribers, key)
-		}
-	}
-	h.mu.Unlock()
-	close(ch)
-}
-
-func (h *localWorkspaceEventBus) hasSubscribers(companyID string) bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return len(h.subscribers[companyID]) > 0
-}
-
-func (h *localWorkspaceEventBus) publish(companyID string, payload []byte) {
-	h.publishUser(companyID, "", payload)
-}
-
-func (h *localWorkspaceEventBus) publishUser(companyID, userID string, payload []byte) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for ch := range h.subscribers[workspaceSubscriptionKey(companyID, userID)] {
-		select {
-		case ch <- payload:
-		default:
-		}
-	}
-}
-
 func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[string]any) (domain.DomainEvent, bool) {
-	data = workspaceEventPayloadWithAffectedScopes(companyID, eventType, data)
 	event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
 		CompanyID:  companyID,
 		StreamType: workspaceDomainStreamType,
@@ -1002,175 +907,23 @@ func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[str
 	return event, true
 }
 
-func workspaceEventPayloadWithAffectedScopes(companyID, eventType string, data map[string]any) map[string]any {
-	scopes := store.CompanyExplorerAffectedScopes(companyID, eventType, data)
-	if len(scopes) == 0 {
-		return data
-	}
-	out := make(map[string]any, len(data)+1)
-	for key, value := range data {
-		out[key] = value
-	}
-	out["affected_scopes"] = scopes
-	return out
-}
-
 func (s *Server) publishCommittedWorkspaceEvents(events []domain.DomainEvent) {
 	s.publishCommittedWorkspaceEventsWithTiming(events, nil)
 }
 
 func (s *Server) publishCommittedWorkspaceEventsWithTiming(events []domain.DomainEvent, timings *requestTimingRecorder) {
-	stop := timings.observeAccounted("events.publish.enqueue")
-	events = cloneDomainEventsForAsync(events)
+	stop := timings.observeAccounted("events.publish")
+	s.publishKanbanChangesForEvents(events)
 	stop()
-	if len(events) == 0 {
-		return
-	}
-	go s.publishCommittedWorkspaceEventsAsync(events)
-}
-
-func (s *Server) publishCommittedWorkspaceEventsAsync(events []domain.DomainEvent) {
-	start := time.Now()
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			log.Printf("async workspace event publish failed count=%d event_types=%s panic=%v", len(events), domainEventTypesForLog(events), recovered)
-		}
-	}()
-	for _, event := range events {
-		s.publishCommittedWorkspaceEventWithTiming(event, nil)
-	}
-	duration := time.Since(start)
-	log.Printf("async_workspace_events_publish count=%d duration=%s events.publish.total=%s event_types=%s", len(events), formatTimingDuration(duration), formatTimingDuration(duration), domainEventTypesForLog(events))
 }
 
 func (s *Server) publishCommittedWorkspaceEvent(event domain.DomainEvent) {
-	s.publishCommittedWorkspaceEventsWithTiming([]domain.DomainEvent{event}, nil)
+	s.publishCommittedWorkspaceEventWithTiming(event, nil)
 }
 
 func (s *Server) publishCommittedWorkspaceEventWithTiming(event domain.DomainEvent, timings *requestTimingRecorder) {
-	s.publishCommittedWorkspaceEventLocal(event, timings, true)
+	s.publishCommittedWorkspaceEventsWithTiming([]domain.DomainEvent{event}, timings)
 }
-
-func (s *Server) publishCommittedWorkspaceEventFromFanout(event domain.DomainEvent) {
-	s.publishCommittedWorkspaceEventLocal(event, nil, false)
-}
-
-func (s *Server) publishCommittedWorkspaceEventLocal(event domain.DomainEvent, timings *requestTimingRecorder, notifyFanout bool) {
-	if s.workspacePublishDedupe != nil && !s.workspacePublishDedupe.mark(event.CompanyID, event.Sequence) {
-		s.recordOperationalMetric("realtime.fanout_duplicate_suppression_count", "", 1, 0)
-		return
-	}
-	stop := timings.observe("events.publish.serialize")
-	envelope := workspaceEventEnvelopeFromDomainEvent(event)
-	payload, err := json.Marshal(envelope)
-	stop()
-	if err != nil {
-		log.Printf("failed to marshal committed workspace event company_id=%s sequence=%d event_id=%s: %v", event.CompanyID, event.Sequence, event.EventID, err)
-		return
-	}
-	stop = timings.observe("events.publish.client_send")
-	s.workspaceEvents.publish(event.CompanyID, payload)
-	stop()
-	stop = timings.observe("events.publish.fanout")
-	userIDs, err := s.repo.ListEffectiveUsersForWorkspaceEvent(event)
-	stop()
-	if err != nil {
-		log.Printf("failed to resolve workspace event recipients company_id=%s sequence=%d event_id=%s: %v", event.CompanyID, event.Sequence, event.EventID, err)
-	} else {
-		for _, userID := range userIDs {
-			stop = timings.observe("events.publish.client_send")
-			s.workspaceEvents.publishUser(event.CompanyID, userID, payload)
-			stop()
-		}
-	}
-	s.publishWorkspaceRealtimeEvent(event, envelope, userIDs)
-	stop = timings.observe("events.publish.listener_work")
-	if notifyFanout {
-		s.notifyWorkspaceEventFanout(event)
-	}
-	stop()
-}
-
-func (s *Server) publishWorkspaceRealtimeEvent(event domain.DomainEvent, envelope workspaceEventEnvelope, userIDs []string) {
-	if s == nil || s.realtimeRegistry == nil {
-		return
-	}
-	companyID := strings.TrimSpace(event.CompanyID)
-	if companyID == "" {
-		return
-	}
-	publishScope := func(scope string) {
-		scope = strings.TrimSpace(scope)
-		if scope == "" {
-			return
-		}
-		if !s.realtimeRegistry.hasSubscribers(companyID, scope) {
-			s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-			return
-		}
-		payload, err := json.Marshal(realtimeWorkspaceEventMessage{
-			Type:      realtimeMessageWorkspaceEvent,
-			CompanyID: companyID,
-			Scope:     scope,
-			Sequence:  event.Sequence,
-			Event:     envelope,
-		})
-		if err != nil {
-			log.Printf("failed to marshal realtime workspace event company_id=%s scope=%s sequence=%d event_id=%s: %v", companyID, scope, event.Sequence, event.EventID, err)
-			return
-		}
-		published := s.realtimeRegistry.publish(companyID, scope, payload)
-		if published == 0 {
-			s.recordOperationalMetric("realtime.publish_skipped_no_subscribers_count", realtimeScopeType(scope), 1, 0)
-			return
-		}
-		s.recordOperationalMetric("realtime.workspace_events_published", realtimeScopeType(scope), int64(published), 0)
-	}
-	for _, userID := range userIDs {
-		userID = strings.TrimSpace(userID)
-		if userID == "" {
-			continue
-		}
-		publishScope(realtimeWorkspaceScope(userID))
-		publishScope(realtimeCompanyExplorerScope(userID))
-		publishScope(realtimeNodeGraphScope(userID))
-		publishScope(realtimeLogicGateGraphScope(userID))
-	}
-	if scope := realtimeEditorCollaborationScope(envelope); scope != "" {
-		publishScope(scope)
-	}
-}
-
-func realtimeEditorCollaborationScope(envelope workspaceEventEnvelope) string {
-	if strings.TrimSpace(envelope.Type) != "editor_collaboration_event" {
-		return ""
-	}
-	entityKind := workspaceEnvelopeDataString(envelope.Data, "entity_kind")
-	entityID := workspaceEnvelopeDataString(envelope.Data, "entity_id")
-	return realtimeEditorScope(entityKind, entityID)
-}
-
-func workspaceEnvelopeDataString(data map[string]any, key string) string {
-	if data == nil {
-		return ""
-	}
-	value, ok := data[key]
-	if !ok || value == nil {
-		return ""
-	}
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	case *string:
-		if typed == nil {
-			return ""
-		}
-		return strings.TrimSpace(*typed)
-	default:
-		return strings.TrimSpace(fmt.Sprint(value))
-	}
-}
-
 func cloneDomainEventsForAsync(events []domain.DomainEvent) []domain.DomainEvent {
 	if len(events) == 0 {
 		return nil
@@ -1181,10 +934,6 @@ func cloneDomainEventsForAsync(events []domain.DomainEvent) []domain.DomainEvent
 		if event.ActorUserID != nil {
 			actorUserID := *event.ActorUserID
 			out[i].ActorUserID = &actorUserID
-		}
-		if event.PublishedTimestamp != nil {
-			publishedTimestamp := *event.PublishedTimestamp
-			out[i].PublishedTimestamp = &publishedTimestamp
 		}
 		if event.Payload != nil {
 			payload := make(map[string]any, len(event.Payload))
@@ -1222,17 +971,4 @@ func domainEventTypesForLog(events []domain.DomainEvent) string {
 		parts = append(parts, eventType)
 	}
 	return strings.Join(parts, ",")
-}
-
-func workspaceEventEnvelopeFromDomainEvent(event domain.DomainEvent) workspaceEventEnvelope {
-	return workspaceEventEnvelope{
-		EventID:    event.EventID,
-		Sequence:   event.Sequence,
-		StreamType: event.StreamType,
-		StreamID:   event.StreamID,
-		CompanyID:  event.CompanyID,
-		Type:       event.Type,
-		TS:         event.CreatedTimestamp,
-		Data:       event.Payload,
-	}
 }

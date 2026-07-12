@@ -33,8 +33,8 @@ The existing server-side streaming upload capability must remain available for n
 
 ## Fixed product decisions
 
-- The v1 browser upload limit is 250 MiB per file: 262,144,000 bytes.
-- The backend limit is authoritative and configurable. Use a clearly named setting such as MANGORTS_ATTACHMENT_MAX_BROWSER_UPLOAD_BYTES with the 250 MiB default.
+- The browser upload limit is 1 GiB per file: 1,073,741,824 bytes.
+- The backend limit is authoritative and configurable through MANGORTS_ATTACHMENT_MAX_BROWSER_UPLOAD_BYTES with the 1 GiB default.
 - Do not retain the current 12 MiB aggregate-per-text-box limit for the direct upload path.
 - Each selected file is an independent upload. One failed file must not discard files that already completed.
 - Use a single presigned PUT for files up to and including 64 MiB.
@@ -239,7 +239,7 @@ Example response:
 ~~~json
 {
   "directUploadEnabled": true,
-  "maxFileBytes": 262144000,
+  "maxFileBytes": 1073741824,
   "singlePutMaxBytes": 67108864,
   "multipartPartBytes": 16777216,
   "maxConcurrentParts": 3,
@@ -429,7 +429,7 @@ Requirements:
 
 The preferred frontend implementation uses a dedicated worker and an incremental hashing package already present in the repository, if one exists. If a dependency is required, select a small maintained package with browser and worker support. Add dependency lockfile changes intentionally. Do not implement cryptographic primitives from scratch.
 
-Memory must be O(part size times concurrency), not O(file size). With 16 MiB parts and concurrency three, file-processing memory should stay bounded near the active chunks plus normal browser/network overhead regardless of whether the file is 80 MiB or 250 MiB.
+Memory must be O(part size times concurrency), not O(file size). With 16 MiB parts and concurrency three, file-processing memory should stay bounded near the active chunks plus normal browser/network overhead regardless of whether the file is 80 MiB or 1 GiB.
 
 ## Browser transport implementation
 
@@ -699,7 +699,7 @@ Safe identifiers are intent ID, attachment ID, company ID according to existing 
 - Authenticated authorized intent creation.
 - Unauthenticated and unauthorized creation.
 - Wrong company, actor, or resource.
-- File exactly at 250 MiB accepted and one byte above rejected without touching S3.
+- File exactly at 1 GiB accepted and one byte above rejected without touching S3.
 - Zero-byte file uses single PUT and completes.
 - Single/multipart strategy boundary at 64 MiB.
 - Server-generated key/attachment ID; client cannot inject either.
@@ -821,7 +821,7 @@ This task is complete only when:
 
 - Normal browser attachment bytes go browser-to-S3 and never through Mango API.
 - Mango API remains authoritative for auth, permissions, IDs, keys, size policy, finalization, and metadata.
-- 250 MiB files are accepted and larger files are rejected before upload.
+- 1 GiB files are accepted and larger files are rejected before upload.
 - Single PUT and multipart upload both work with bounded memory.
 - Multipart retry, cancel, expiry, idempotent completion, and abandoned cleanup are implemented.
 - SHA-256 retains its raw-file meaning and S3 checksum metadata is represented honestly.

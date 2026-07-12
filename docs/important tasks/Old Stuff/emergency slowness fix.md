@@ -1,5 +1,7 @@
 # Emergency Slowness Fix
 
+Status note 2026-07-12: historical investigation. References below to editor projection event rows/realtime deltas describe the removed pre-simplification architecture; durable autosave remains, while document collaboration and generic editor projection delivery do not.
+
 Investigation date: 2026-07-08
 
 Environment: dev, us-west-1

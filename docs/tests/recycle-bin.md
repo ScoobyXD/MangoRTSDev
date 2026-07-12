@@ -1,4 +1,4 @@
-Last updated: 2026-07-02
+Last updated: 2026-07-12
 
 # Recycle Bin Tests
 
@@ -25,7 +25,7 @@ RB14 - Recycle-bin rows preserve the deleted root object's kind, ID, label, fold
 RB15 - Deleting a folder, project, or logic gate records contained objects so the UI can explain what will return with a restore.
 RB16 - Restoring one or more recycle-bin items merges their restore payloads and restores the underlying objects, relationships, placements, and related data captured at delete time.
 RB17 - A successful restore removes the restored recycle-bin rows.
-RB18 - A successful restore publishes created/restored workspace events for the restored targets.
+RB18 - A successful restore updates canonical rows, independently required domain facts, and read versions for the restored targets; it does not publish a generic workspace browser event.
 RB19 - Permanent delete removes only the selected recycle-bin rows and their restore payloads; the deleted objects remain gone.
 RB20 - Recycle-bin lists sort by deletion timestamp descending, then recycle-bin item ID descending.
 RB21 - The frontend prunes selected recycle-bin IDs after a reload so selection cannot reference rows that disappeared.
@@ -80,7 +80,7 @@ Expected:
 - User A can restore the item.
 - The object and captured relationships or placements return.
 - The restored recycle-bin row is removed.
-- Restore events are published for the restored targets.
+- Canonical rows and read versions are updated for the restored targets, and only independently required durable domain facts are appended; no generic workspace browser event is published.
 
 ### Scenario RB-S3: Permanent Delete Is Admin-Scoped
 

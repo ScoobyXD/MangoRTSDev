@@ -37,7 +37,7 @@ func TestProjectScopedNodeCreateRequiresInitialAssignmentLogicGateEditAccess(t *
 		t.Fatalf("SetEntityPermissions gate no access: %v", err)
 	}
 
-	server := NewServerWithOptions(repo, ServerOptions{DisableEventWorker: true})
+	server := NewServer(repo)
 	defer server.Close()
 	handler := server.Routes()
 	projectID := projectResult.Project.ProjectID
@@ -152,7 +152,7 @@ func TestProjectRelationshipsGETFiltersTargetsForViewer(t *testing.T) {
 	hideProjectRelationshipTargetForHTTPTest(t, repo, companyID, store.EntityTypeNode, hiddenNode.NodeID)
 	hideProjectRelationshipTargetForHTTPTest(t, repo, companyID, store.EntityTypeLogicGate, hiddenGate.LogicGateID)
 
-	server := NewServerWithOptions(repo, ServerOptions{DisableEventWorker: true})
+	server := NewServer(repo)
 	defer server.Close()
 	req := httptest.NewRequest(http.MethodGet, "/v1/projects/"+projectID+"/relationships?company_id="+companyID, nil)
 	req = requestWithLogicGateWorkActorForTest(req, viewer, companyID)

@@ -289,7 +289,6 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request, proje
 			s.writeProjectMutationError(w, err, "failed_to_update_project")
 			return
 		}
-		s.publishProjectionDeltas(result.ProjectionDeltas)
 		s.publishWorkspaceEvent(companyID, "project_updated", map[string]any{"project_id": projectID, "project": result.Project})
 		writeJSON(w, http.StatusOK, result)
 	case http.MethodDelete:

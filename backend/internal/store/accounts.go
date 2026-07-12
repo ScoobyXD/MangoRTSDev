@@ -181,52 +181,6 @@ order by node_id::text`, companyID, accountID)
 	return nodeIDs, rows.Err()
 }
 
-func postgresProjectionRowsForNodesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs []string) ([]ProjectionDelta, []KanbanBoardProjectionRow, []GVICMatrixProjectionRow, []ProjectManagementTimelineProjectionRow, error) {
-	kanbanRows := []KanbanBoardProjectionRow{}
-	GVICMatrixRows := []GVICMatrixProjectionRow{}
-	projectRows := []ProjectManagementTimelineProjectionRow{}
-	for _, nodeID := range cleanAccountIDs(nodeIDs) {
-		rows, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, companyID, nodeID)
-		if err != nil {
-			return nil, nil, nil, nil, err
-		}
-		kanbanRows = append(kanbanRows, rows...)
-		rRows, err := postgresGVICMatrixProjectionRowsForResourcesTx(ctx, tx, companyID, []string{nodeID}, nil)
-		if err != nil {
-			return nil, nil, nil, nil, err
-		}
-		GVICMatrixRows = append(GVICMatrixRows, rRows...)
-		pRows, err := projectManagementTimelineProjectionRowsForResource(ctx, tx, companyID, EntityTypeNode, nodeID)
-		if err != nil {
-			return nil, nil, nil, nil, err
-		}
-		projectRows = append(projectRows, pRows...)
-	}
-	return nil, kanbanRows, GVICMatrixRows, projectRows, nil
-}
-
-func syncPostgresAccountProjectionRowsForNodesTx(ctx context.Context, tx *sql.Tx, companyID string, nodeIDs []string) error {
-	for _, nodeID := range cleanAccountIDs(nodeIDs) {
-		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return err
-		}
-		if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return err
-		}
-		if err := syncProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func projectionDeltasForAccountNodeChange(beforeKanban []KanbanBoardProjectionRow, beforeGVICMatrix []GVICMatrixProjectionRow, beforeProject []ProjectManagementTimelineProjectionRow, afterKanban []KanbanBoardProjectionRow, afterGVICMatrix []GVICMatrixProjectionRow, afterProject []ProjectManagementTimelineProjectionRow) []ProjectionDelta {
-	deltas := diffKanbanProjectionRows(beforeKanban, afterKanban)
-	deltas = append(deltas, diffGVICMatrixProjectionRows(beforeGVICMatrix, afterGVICMatrix)...)
-	deltas = append(deltas, diffProjectManagementProjectionRows(beforeProject, afterProject)...)
-	return deltas
-}
-
 func (r *PostgresRepo) ListAccounts(companyID string) ([]domain.Account, error) {
 	companyID = cleanUUIDText(companyID)
 	if companyID == "" {
@@ -333,17 +287,14 @@ returning company_id::text, account_id::text, name, folder_id::text, position, c
 	if err != nil {
 		return AccountMutationResult{}, err
 	}
-	deltas, err := applyNodeProjectionDeltaDependenciesForNodesTx(ctx, tx, input.CompanyID, nodeIDs)
+	err = syncNodeProjectionDependenciesForNodesTx(ctx, tx, input.CompanyID, nodeIDs)
 	if err != nil {
-		return AccountMutationResult{}, err
-	}
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)); err != nil {
 		return AccountMutationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return AccountMutationResult{}, err
 	}
-	return AccountMutationResult{Account: &item, ProjectionDeltas: deltas}, nil
+	return AccountMutationResult{Account: &item}, nil
 }
 
 func (r *PostgresRepo) DeleteAccount(companyID, accountID, actorUserID string) (AccountMutationResult, error) {
@@ -373,17 +324,14 @@ func (r *PostgresRepo) DeleteAccount(companyID, accountID, actorUserID string) (
 	if affected == 0 {
 		return AccountMutationResult{}, ErrNotFound
 	}
-	deltas, err := applyNodeProjectionDeltaDependenciesForNodesTx(ctx, tx, companyID, nodeIDs)
+	err = syncNodeProjectionDependenciesForNodesTx(ctx, tx, companyID, nodeIDs)
 	if err != nil {
-		return AccountMutationResult{}, err
-	}
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, actorUserID, "", deltas)); err != nil {
 		return AccountMutationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return AccountMutationResult{}, err
 	}
-	return AccountMutationResult{DeletedAccountID: accountID, ProjectionDeltas: deltas}, nil
+	return AccountMutationResult{DeletedAccountID: accountID}, nil
 }
 
 func (r *PostgresRepo) ListAccountFolders(companyID string) ([]domain.AccountFolder, error) {
@@ -643,7 +591,7 @@ on conflict (company_id, node_id, account_id) do nothing`, input.CompanyID, inpu
 			return NodeAccountAssignmentUpdateResult{}, err
 		}
 	}
-	deltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+	err = syncNodeProjectionDependenciesTx(ctx, tx, NodeProjectionDependencyInput{
 		CompanyID: input.CompanyID,
 		NodeID:    input.NodeID,
 	})
@@ -670,18 +618,14 @@ where n.company_id=$1::uuid and n.node_id=$2::uuid`, input.CompanyID, input.Node
 	if err != nil {
 		return NodeAccountAssignmentUpdateResult{}, err
 	}
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, "", deltas)); err != nil {
-		return NodeAccountAssignmentUpdateResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return NodeAccountAssignmentUpdateResult{}, err
 	}
 	_ = beforeNode
 	return NodeAccountAssignmentUpdateResult{
-		Node:             afterNode,
-		Assignments:      assignments,
-		ProjectionDeltas: deltas,
-		Events:           []domain.DomainEvent{event},
+		Node:        afterNode,
+		Assignments: assignments,
+		Events:      []domain.DomainEvent{event},
 	}, nil
 }
 

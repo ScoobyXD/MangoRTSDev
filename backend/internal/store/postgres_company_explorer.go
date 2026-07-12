@@ -883,7 +883,6 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 	stop()
 
 	result := CompanyExplorerDeleteResult{Targets: make([]CompanyExplorerDeletedTarget, 0)}
-	projectionDeltas := make([]ProjectionDelta, 0)
 	seenDeleted := map[string]bool{}
 	appendSorted := func(kind string, ids map[string]bool) {
 		values := make([]string, 0, len(ids))
@@ -929,12 +928,11 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 	stop()
 	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.logic_gate_delete")
 	for logicGateID := range logicGateIDs {
-		deltas, err := postgresDeleteLogicGateWithProjectionDeltasTx(ctx, tx, companyID, logicGateID)
+		err := postgresDeleteLogicGateWithDependentProjectionsTx(ctx, tx, companyID, logicGateID)
 		if err != nil {
 			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
-		projectionDeltas = append(projectionDeltas, deltas...)
 	}
 	stop()
 	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.kanban_delete")
@@ -955,12 +953,11 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 	stop()
 	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.node_delete")
 	for nodeID := range nodeIDs {
-		deltas, err := postgresDeleteNodeWithProjectionDeltasTx(ctx, tx, companyID, nodeID)
+		err := postgresDeleteNodeWithDependentProjectionsTx(ctx, tx, companyID, nodeID)
 		if err != nil {
 			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
-		projectionDeltas = append(projectionDeltas, deltas...)
 	}
 	stop()
 	if len(folderIDs) > 0 {
@@ -989,12 +986,6 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
-	}
-	stop()
-	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.projection_event_append")
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(companyID, "", "", projectionDeltas)); err != nil {
-		stop()
-		return CompanyExplorerDeleteResult{}, err
 	}
 	stop()
 
@@ -1038,37 +1029,36 @@ func execOptionalPostgresShapeCleanupTx(tx *sql.Tx, tableName, query string, arg
 	}, args...)
 }
 
-func postgresDeleteNodeWithProjectionDeltasTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) ([]ProjectionDelta, error) {
-	defer observeTiming(ctx, "repo.postgresDeleteNodeWithProjectionDeltasTx.total")()
-	stop := observeTiming(ctx, "repo.postgresDeleteNodeWithProjectionDeltasTx.projection_dependencies")
-	deltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+func postgresDeleteNodeWithDependentProjectionsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
+	defer observeTiming(ctx, "repo.postgresDeleteNodeWithDependentProjectionsTx.total")()
+	stop := observeTiming(ctx, "repo.postgresDeleteNodeWithDependentProjectionsTx.projection_dependencies")
+	err := syncNodeProjectionDependenciesTx(ctx, tx, NodeProjectionDependencyInput{
 		CompanyID: companyID,
 		NodeID:    nodeID,
 		Delete:    true,
 	})
 	stop()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	stop = observeTiming(ctx, "repo.postgresDeleteNodeWithProjectionDeltasTx.project_relationship_delete")
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeWithDependentProjectionsTx.project_relationship_delete")
 	if _, err := tx.ExecContext(ctx, `
 delete from project_relationships
 where company_id=$1::uuid
   and resource_type='node'
   and resource_id=$2::uuid`, companyID, nodeID); err != nil {
 		stop()
-		return nil, err
+		return err
 	}
 	stop()
-	stop = observeTiming(ctx, "repo.postgresDeleteNodeWithProjectionDeltasTx.node_rows_delete")
+	stop = observeTiming(ctx, "repo.postgresDeleteNodeWithDependentProjectionsTx.node_rows_delete")
 	if err := postgresDeleteNodeRowsTx(ctx, tx, companyID, nodeID, false); err != nil {
 		stop()
-		return nil, err
+		return err
 	}
 	stop()
-	return deltas, nil
+	return nil
 }
-
 func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string) error {
 	return postgresDeleteNodeRowsTx(ctx, tx, companyID, nodeID, true)
 }
@@ -1190,42 +1180,38 @@ func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID
 	return nil
 }
 
-func postgresDeleteLogicGateWithProjectionDeltasTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) ([]ProjectionDelta, error) {
+func postgresDeleteLogicGateWithDependentProjectionsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
 	affectedNodeIDs, err := nodeIDsAssignedToLogicGatesTx(ctx, tx, companyID, []string{logicGateID})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	deltas, err := applyLogicGateProjectionDeltaDependenciesTx(ctx, tx, LogicGateProjectionDeltaDependencyInput{
+	if err := syncLogicGateProjectionDependenciesTx(ctx, tx, LogicGateProjectionDependencyInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGateID,
 		Delete:      true,
-	})
-	if err != nil {
-		return nil, err
+	}); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
 delete from project_relationships
 where company_id=$1::uuid
   and resource_type='logic_gate'
   and resource_id=$2::uuid`, companyID, logicGateID); err != nil {
-		return nil, err
+		return err
 	}
 	if err := postgresDeleteLogicGateRowsTx(ctx, tx, companyID, logicGateID, false); err != nil {
-		return nil, err
+		return err
 	}
 	for _, nodeID := range affectedNodeIDs {
-		nodeDeltas, err := applyNodeProjectionDeltaDependenciesTx(ctx, tx, NodeProjectionDeltaDependencyInput{
+		if err := syncNodeProjectionDependenciesTx(ctx, tx, NodeProjectionDependencyInput{
 			CompanyID: companyID,
 			NodeID:    nodeID,
-		})
-		if err != nil {
-			return nil, err
+		}); err != nil {
+			return err
 		}
-		deltas = append(deltas, nodeDeltas...)
 	}
-	return deltas, nil
+	return nil
 }
-
 func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
 	return postgresDeleteLogicGateRowsTx(ctx, tx, companyID, logicGateID, true)
 }

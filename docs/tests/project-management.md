@@ -31,7 +31,7 @@ PM20 - Critical path rows sort by position, then creation time, then ID.
 PM21 - Creating a node from a project context requires edit access to the project and creates the project relationship.
 PM22 - Creating a logic gate from a project context requires edit access to the project and creates the project relationship.
 PM23 - Project-scoped creation can include initial information, account data, or assignment data and must keep those records tied to the created resource.
-PM24 - Project Management timeline reads use the work-item read model with company, viewer, target user, scope, and sequence context.
+PM24 - Project Management timeline reads use the canonical work-item read model with company, authorized viewer, target user, bounded limit, and current rows; no realtime scope, projection sequence, or replay cursor is returned.
 PM25 - Timeline items can target only node or logic gate entities.
 PM26 - Creating a timeline item requires access to the target entity and a valid start date.
 PM27 - Timeline item duration is normalized into the supported range.
@@ -172,7 +172,7 @@ Given:
 - Timeline items target nodes or logic gates.
 
 Expected:
-- Timeline reads use the work-item read model with viewer, target user, scope, and sequence context.
+- Timeline reads use the canonical work-item read model with company, authorized viewer, target user, bounded limit, and current rows only.
 - Timeline items reject entity types other than node and logic gate.
 - Creating a timeline item requires entity access and a valid start date.
 - Duration is normalized into the supported range.

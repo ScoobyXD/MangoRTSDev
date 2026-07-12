@@ -234,17 +234,11 @@ func (s *Server) handleWorkItemGVICMatrixProjection(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusInternalServerError, "failed_to_list_gvic_matrix_projection")
 		return
 	}
-	sequence, err := s.repo.CurrentProjectionSequence(query.CompanyID, store.ProjectionNameGVICMatrix, projectionUserScope(query.UserID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_read_gvic_matrix_projection_sequence")
-		return
-	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
-		"company_id":          query.CompanyID,
-		"user_id":             query.UserID,
-		"limit":               query.Limit,
-		"projection":          "gvic_matrix",
-		"projection_sequence": sequence,
-		"rows":                rows,
+		"company_id": query.CompanyID,
+		"user_id":    query.UserID,
+		"limit":      query.Limit,
+		"projection": "gvic_matrix",
+		"rows":       rows,
 	})
 }

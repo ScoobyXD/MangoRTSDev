@@ -344,9 +344,6 @@ where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).S
 			return CommunicationsTriageConversionResult{}, err
 		}
 		result.Events = events
-		if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
 		if err := tx.Commit(); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
@@ -453,7 +450,7 @@ delete from communications_triage_items
 where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		projectionDeltas, err := applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDeltaDependencyInput{
+		err = syncNodeLogicGateAssignmentProjectionDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDependencyInput{
 			CompanyID:    input.CompanyID,
 			AssignmentID: assignment.AssignmentID,
 			NodeID:       nodeID,
@@ -461,7 +458,6 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		result.ProjectionDeltas = append(result.ProjectionDeltas, projectionDeltas...)
 		if projectedCard, err := kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, nodeID, input.LogicGateID); err == nil {
 			card = projectedCard
 		} else {
@@ -469,12 +465,11 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 		}
 		card.CreatedFromEmail = true
 		if input.Target.ProjectID != "" {
-			relationship, deltas, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
+			relationship, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
 			if err != nil {
 				return CommunicationsTriageConversionResult{}, err
 			}
 			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
-			result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
 		}
 		node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
@@ -507,9 +502,6 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 		return CommunicationsTriageConversionResult{}, err
 	}
 	result.Events = events
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
@@ -522,9 +514,6 @@ func (r *PostgresRepo) finishCommunicationsTriageConversionTx(ctx context.Contex
 		return CommunicationsTriageConversionResult{}, err
 	}
 	result.Events = events
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(input.CompanyID, input.ActorUserID, input.IdempotencyKey, result.ProjectionDeltas)); err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
@@ -642,12 +631,11 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		if input.Target.ProjectID != "" {
-			relationship, deltas, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
+			relationship, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
 			if err != nil {
 				return CommunicationsTriageConversionResult{}, err
 			}
 			result.ProjectRelationships = append(result.ProjectRelationships, relationship)
-			result.ProjectionDeltas = append(result.ProjectionDeltas, deltas...)
 		}
 		node, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
@@ -670,11 +658,11 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 	return result, nil
 }
 
-func upsertCommunicationsTriageProjectRelationshipTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, nodeID string) (domain.ProjectRelationshipProjection, []ProjectionDelta, error) {
+func upsertCommunicationsTriageProjectRelationshipTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, nodeID string) (domain.ProjectRelationshipProjection, error) {
 	position := input.Target.Position
 	if position <= 0 {
 		if err := tx.QueryRowContext(ctx, `select coalesce(max(position), 0) + 1000 from project_relationships where company_id=$1::uuid and project_id=$2::uuid`, input.CompanyID, input.Target.ProjectID).Scan(&position); err != nil {
-			return domain.ProjectRelationshipProjection{}, nil, err
+			return domain.ProjectRelationshipProjection{}, err
 		}
 	}
 	relationshipID := newUUIDv7String()
@@ -690,20 +678,20 @@ do update set
   updated_timestamp=now()
 returning relationship_id::text`, input.CompanyID, relationshipID, input.Target.ProjectID, EntityTypeNode, nodeID, position).Scan(&returnedID)
 	if err != nil {
-		return domain.ProjectRelationshipProjection{}, nil, err
+		return domain.ProjectRelationshipProjection{}, err
 	}
-	deltas, err := applyProjectRelationshipProjectionDeltaDependenciesTx(ctx, tx, ProjectRelationshipProjectionDeltaDependencyInput{
+	err = syncProjectRelationshipProjectionDependenciesTx(ctx, tx, ProjectRelationshipProjectionDependencyInput{
 		CompanyID:      input.CompanyID,
 		RelationshipID: returnedID,
 	})
 	if err != nil {
-		return domain.ProjectRelationshipProjection{}, nil, err
+		return domain.ProjectRelationshipProjection{}, err
 	}
 	projection, err := projectRelationshipProjectionByIDTx(ctx, tx, input.CompanyID, returnedID)
 	if err != nil {
-		return domain.ProjectRelationshipProjection{}, nil, err
+		return domain.ProjectRelationshipProjection{}, err
 	}
-	return projection, deltas, nil
+	return projection, nil
 }
 func (r *PostgresRepo) attachCommunicationsTriageItemsToExistingNodeTx(ctx context.Context, tx *sql.Tx, input CommunicationsTriageConversionInput, logicGate domain.LogicGate) (CommunicationsTriageConversionResult, error) {
 	assignment, err := nodeLogicGateAssignmentByNodeSQL(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID)
@@ -734,7 +722,7 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *input.Prior
 		Board:     board,
 	}
 	result.Target.Header = logicGate.Header
-	projectionDeltas, err := applyNodeLogicGateAssignmentProjectionDeltaDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDeltaDependencyInput{
+	err = syncNodeLogicGateAssignmentProjectionDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDependencyInput{
 		CompanyID:    input.CompanyID,
 		AssignmentID: assignment.AssignmentID,
 		NodeID:       input.NodeID,
@@ -742,7 +730,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, *input.Prior
 	if err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
-	result.ProjectionDeltas = append(result.ProjectionDeltas, projectionDeltas...)
 	if projectedCard, err := kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID); err == nil {
 		card = projectedCard
 	} else {

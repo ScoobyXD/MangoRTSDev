@@ -21,7 +21,7 @@ This makes normal view switching expensive, but the V1 correction should not rem
 The correct behavior should be fresh-first but bounded:
 
 - Keep existing visible mail state available while a provider refresh is running.
-- Rely on Nylas webhooks and communications realtime to patch/invalidate active mail state.
+- Let Nylas webhooks update backend state, while browsers reconcile on canonical mailbox loads/manual refresh; communications WebSocket delivery is intentionally removed.
 - Trigger at most one coalesced provider refresh for the active list identity.
 - Preserve visible cached/stale content on Nylas `429` instead of blanking the list.
 - Back off per grant/mailbox when Nylas returns `Retry-After`.

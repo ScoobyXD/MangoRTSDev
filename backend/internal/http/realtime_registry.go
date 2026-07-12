@@ -15,12 +15,6 @@ type realtimeSubscription struct {
 	Scope     string
 }
 
-type realtimeScopeConnection struct {
-	CompanyID  string
-	Scope      string
-	Connection *realtimeConnection
-}
-
 type realtimeSubscriptionRegistry struct {
 	mu               sync.RWMutex
 	connections      map[string]*realtimeConnection
@@ -220,25 +214,6 @@ func (r *realtimeSubscriptionRegistry) connectionsForScope(companyID, scope stri
 	connections := make([]*realtimeConnection, 0, len(bucket))
 	for _, conn := range bucket {
 		connections = append(connections, conn)
-	}
-	return connections
-}
-
-func (r *realtimeSubscriptionRegistry) workspaceScopeConnections(companyID string) []realtimeScopeConnection {
-	companyID = strings.TrimSpace(companyID)
-	if r == nil || companyID == "" {
-		return nil
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	connections := []realtimeScopeConnection{}
-	for key, bucket := range r.scopeConnections {
-		if key.companyID != companyID || realtimeWorkspaceDomainEventScopeType(key.scope) == "" {
-			continue
-		}
-		for _, conn := range bucket {
-			connections = append(connections, realtimeScopeConnection{CompanyID: key.companyID, Scope: key.scope, Connection: conn})
-		}
 	}
 	return connections
 }

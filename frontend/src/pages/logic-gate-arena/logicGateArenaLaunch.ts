@@ -4,7 +4,6 @@ export type PendingLogicGateArenaSelection = {
   label: string;
   nodeID?: string;
   informationID?: string;
-  suppressLegacyWorkspaceStream?: boolean;
   createdAt: number;
 };
 
@@ -15,7 +14,7 @@ function pendingSelectionStorageKey(companyID: string): string {
 }
 
 function parsePendingLogicGateArenaSelection(companyID: string, raw: string): PendingLogicGateArenaSelection | null {
-  const parsed = JSON.parse(raw) as Partial<PendingLogicGateArenaSelection> & { suppressWorkspaceStream?: boolean };
+  const parsed = JSON.parse(raw) as Partial<PendingLogicGateArenaSelection>;
   const logicGateID = typeof parsed.logicGateID === "string" ? parsed.logicGateID.trim() : "";
   if (!logicGateID) return null;
   return {
@@ -24,7 +23,6 @@ function parsePendingLogicGateArenaSelection(companyID: string, raw: string): Pe
     label: typeof parsed.label === "string" ? parsed.label.trim() : "",
     nodeID: typeof parsed.nodeID === "string" ? parsed.nodeID.trim() : undefined,
     informationID: typeof parsed.informationID === "string" ? parsed.informationID.trim() : undefined,
-    suppressLegacyWorkspaceStream: parsed.suppressLegacyWorkspaceStream === true || parsed.suppressWorkspaceStream === true,
     createdAt: typeof parsed.createdAt === "number" && Number.isFinite(parsed.createdAt) ? parsed.createdAt : Date.now(),
   };
 }
@@ -39,7 +37,6 @@ export function writePendingLogicGateArenaSelection(selection: Omit<PendingLogic
       label: selection.label.trim(),
       nodeID: selection.nodeID?.trim() || undefined,
       informationID: selection.informationID?.trim() || undefined,
-      suppressLegacyWorkspaceStream: selection.suppressLegacyWorkspaceStream === true || undefined,
       createdAt: Date.now(),
     }));
   } catch {

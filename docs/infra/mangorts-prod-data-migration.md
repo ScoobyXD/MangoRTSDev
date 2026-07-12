@@ -53,9 +53,9 @@ Recommended starting classification:
 | `invitations`, password reset tables | skip | Pending dev tokens and reset state are environment-bound. |
 | `user_email_connections`, `company_email_connections` | recreate | Do not copy dev Nylas grant IDs into prod. |
 | `communications_*` provider/cache/job/read tables | skip or rebuild | Avoid copying webhook/archive/read state unless explicitly approved. |
-| `event_rows`, outbox/job tables | skip | Do not replay dev events in prod. |
-| `notifications` and notification checkpoint tables | rebuild or skip | Derived/user-facing state; copy only with a deliberate decision. |
-| `*_projection*`, `workspace_read_versions`, checkpoint tables | rebuild | Derived hot-read state should be regenerated where possible. |
+| Archive/job tables | skip | Do not replay dev operational jobs in prod. `event_rows` was removed by `20260712_realtime_simplification.sql`. |
+| `notifications` | rebuild or skip | Derived/user-facing state; copy only with a deliberate decision. Notification replay checkpoints were removed by `20260712_realtime_simplification.sql`. |
+| `*_projection*`, `workspace_read_versions`, remaining workspace-derived checkpoints | rebuild | Derived hot-read state should be regenerated where possible. |
 
 The final migration inventory should live in a reviewed doc or script comments and include the exact table names found in the current schema.
 

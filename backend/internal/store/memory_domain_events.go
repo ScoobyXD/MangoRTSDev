@@ -90,37 +90,6 @@ func (r *MemoryRepo) appendDomainEventsLocked(inputs []DomainEventInput) ([]doma
 	}
 	return events, nil
 }
-func (r *MemoryRepo) ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error) {
-	limit = NormalizeDomainEventListLimit(limit)
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	items := make([]domain.DomainEvent, 0)
-	for _, item := range r.domainEvents {
-		if item.PublishedTimestamp != nil {
-			continue
-		}
-		items = append(items, cloneDomainEvent(item))
-	}
-	slices.SortFunc(items, func(a, b domain.DomainEvent) int {
-		if a.CreatedTimestamp.Before(b.CreatedTimestamp) {
-			return -1
-		}
-		if a.CreatedTimestamp.After(b.CreatedTimestamp) {
-			return 1
-		}
-		if a.CompanyID != b.CompanyID {
-			return strings.Compare(a.CompanyID, b.CompanyID)
-		}
-		return strings.Compare(a.EventID, b.EventID)
-	})
-	if len(items) > limit {
-		items = items[:limit]
-	}
-	return items, nil
-}
-
 func (r *MemoryRepo) ListDomainEventsAfter(query DomainEventReplayQuery) ([]domain.DomainEvent, error) {
 	query.CompanyID = strings.TrimSpace(query.CompanyID)
 	query.StreamType = strings.TrimSpace(query.StreamType)
@@ -273,21 +242,7 @@ func (r *MemoryRepo) updateWorkspaceReadVersionsLocked(event domain.DomainEvent)
 			r.workspaceReadVersions[key] = event.Sequence
 		}
 	}
-	userIDs := r.effectiveUsersForWorkspaceEventLocked(event)
-	for _, userID := range userIDs {
-		for _, row := range WorkspaceReadVersionStaticRows(event.CompanyID) {
-			key := workspaceReadVersionMemoryKey(row.CompanyID, row.Scope, WorkspaceReadVersionUserResourceKey(userID, row.ResourceKey))
-			if _, ok := r.workspaceReadVersions[key]; !ok {
-				r.workspaceReadVersions[key] = 0
-			}
-		}
-		for _, row := range workspaceReadVersionRowsForDomainEvent(event) {
-			key := workspaceReadVersionMemoryKey(row.CompanyID, row.Scope, WorkspaceReadVersionUserResourceKey(userID, row.ResourceKey))
-			if event.Sequence > r.workspaceReadVersions[key] {
-				r.workspaceReadVersions[key] = event.Sequence
-			}
-		}
-	}
+
 }
 
 func (r *MemoryRepo) bumpLogicGateWorkReadVersionLocked(companyID, logicGateID string) {
@@ -358,25 +313,4 @@ func (r *MemoryRepo) CurrentWorkspaceReadVersion(query WorkspaceReadVersionQuery
 	defer r.mu.RUnlock()
 	version, ok := r.workspaceReadVersions[workspaceReadVersionMemoryKey(query.CompanyID, query.Scope, WorkspaceReadVersionUserResourceKey(query.UserID, query.ResourceKey))]
 	return version, ok, nil
-}
-
-func (r *MemoryRepo) MarkDomainEventPublished(companyID, eventID string) error {
-	companyID = strings.TrimSpace(companyID)
-	eventID = strings.TrimSpace(eventID)
-	if companyID == "" || eventID == "" {
-		return ErrInvalid
-	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	key := domainEventMemoryKey(companyID, eventID)
-	item, ok := r.domainEvents[key]
-	if !ok {
-		return ErrNotFound
-	}
-	now := time.Now().UTC()
-	item.PublishedTimestamp = &now
-	r.domainEvents[key] = item
-	return nil
 }

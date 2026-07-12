@@ -112,13 +112,13 @@ func TestLogicGateWorkJSONContractIsKanbanSpecificAndNonRedundant(t *testing.T) 
 	if err := json.Unmarshal(payload, &top); err != nil {
 		t.Fatalf("Unmarshal LogicGateWorkView: %v", err)
 	}
-	for _, required := range []string{"logic_gate", "permissions", "board", "columns", "cards", "projection_sequence"} {
+	for _, required := range []string{"logic_gate", "permissions", "board", "columns", "cards"} {
 		if _, ok := top[required]; !ok {
 			t.Fatalf("work JSON missing %q: %s", required, payload)
 		}
 	}
-	if len(top) != 6 {
-		t.Fatalf("work JSON top-level keys = %v, want exactly six Kanban keys", top)
+	if len(top) != 5 {
+		t.Fatalf("work JSON top-level keys = %v, want exactly five Kanban keys", top)
 	}
 	for _, forbidden := range []string{"company_id", "logic_gate_id", "statuses", "assignments", "nodes", "cards_limit"} {
 		if _, ok := top[forbidden]; ok {
@@ -216,10 +216,6 @@ func TestMemoryLogicGateWorkVersionInvalidatesEveryResponseDependency(t *testing
 	} {
 		assertBump(item.name, appendEvent(item.eventType, item.payload))
 	}
-	assertBump("projection sequence", func() error {
-		_, err := repo.NextProjectionSequence(companyID, ProjectionNameKanbanBoard, "board:"+boardID)
-		return err
-	})
 }
 
 func TestMemoryLogicGateRequestedAssignmentsTrackRequester(t *testing.T) {
@@ -391,7 +387,6 @@ func TestPhase4LogicGateWorkSourceShape(t *testing.T) {
 		t.Fatalf("postgres logic gate work read does not select projection priority")
 	}
 	for _, required := range []string{
-		"company_projection_sequences",
 		"communications_email_nodes",
 		"resource_gvic_assignments",
 		"projection.status_rank",
@@ -512,7 +507,6 @@ func TestLogicGateWorkFastPathMigrationMatchesCanonicalSchema(t *testing.T) {
 			"trg_logic_gate_work_version_projection",
 			"trg_logic_gate_work_version_nodes",
 			"trg_logic_gate_work_version_email_origin",
-			"trg_logic_gate_work_version_projection_sequence",
 		} {
 			if !strings.Contains(normalized, required) {
 				t.Fatalf("%s missing Logic Gate fast-path contract %q", path, required)

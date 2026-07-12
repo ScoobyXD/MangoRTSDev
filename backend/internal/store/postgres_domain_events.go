@@ -14,11 +14,11 @@ import (
 
 const domainEventSelectColumns = `
 event_id::text, company_id::text, stream_type, stream_id, sequence, event_type,
-actor_user_id::text, idempotency_key, payload, published_timestamp, created_timestamp`
+actor_user_id::text, idempotency_key, payload, created_timestamp`
 
 const domainEventReturningColumns = `
 event_id, company_id, stream_type, stream_id, sequence, event_type,
-actor_user_id, idempotency_key, payload, published_timestamp, created_timestamp`
+actor_user_id, idempotency_key, payload, created_timestamp`
 
 func domainEventSelectColumnsForAlias(alias string) string {
 	alias = strings.TrimSpace(alias)
@@ -28,7 +28,7 @@ func domainEventSelectColumnsForAlias(alias string) string {
 	prefix := alias + "."
 	return `
 ` + prefix + `event_id::text, ` + prefix + `company_id::text, ` + prefix + `stream_type, ` + prefix + `stream_id, ` + prefix + `sequence, ` + prefix + `event_type,
-` + prefix + `actor_user_id::text, ` + prefix + `idempotency_key, ` + prefix + `payload, ` + prefix + `published_timestamp, ` + prefix + `created_timestamp`
+` + prefix + `actor_user_id::text, ` + prefix + `idempotency_key, ` + prefix + `payload, ` + prefix + `created_timestamp`
 }
 
 func scanDomainEvent(row interface{ Scan(dest ...any) error }) (domain.DomainEvent, error) {
@@ -45,7 +45,6 @@ func scanDomainEvent(row interface{ Scan(dest ...any) error }) (domain.DomainEve
 		&actorUserID,
 		&item.IdempotencyKey,
 		&payloadBytes,
-		&item.PublishedTimestamp,
 		&item.CreatedTimestamp,
 	)
 	if err != nil {
@@ -333,31 +332,6 @@ order by sequence asc, event_id asc`, args...)
 	}
 	return events, nil
 }
-func (r *PostgresRepo) ListPendingDomainEvents(limit int) ([]domain.DomainEvent, error) {
-	ctx := context.Background()
-	limit = NormalizeDomainEventListLimit(limit)
-	rows, err := r.db.QueryContext(ctx, `
-select `+domainEventSelectColumns+`
-from domain_events
-where published_timestamp is null
-order by created_timestamp asc, company_id asc, event_id asc
-limit $1`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := make([]domain.DomainEvent, 0)
-	for rows.Next() {
-		item, err := scanDomainEvent(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
 func (r *PostgresRepo) ListDomainEventsAfter(query DomainEventReplayQuery) ([]domain.DomainEvent, error) {
 	ctx := context.Background()
 	query.CompanyID = strings.TrimSpace(query.CompanyID)
@@ -506,27 +480,4 @@ select exists (
     and idempotency_key=$2
 )`, companyID, idempotencyKey).Scan(&exists)
 	return exists, err
-}
-
-func (r *PostgresRepo) MarkDomainEventPublished(companyID, eventID string) error {
-	companyID = strings.TrimSpace(companyID)
-	eventID = strings.TrimSpace(eventID)
-	if companyID == "" || eventID == "" {
-		return ErrInvalid
-	}
-	result, err := r.db.Exec(`
-update domain_events
-set published_timestamp=coalesce(published_timestamp, now())
-where company_id=$1::uuid and event_id=$2::uuid`, companyID, eventID)
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
 }

@@ -11,12 +11,6 @@ export type CompanyUser = {
   display_name?: string;
 };
 
-export type WorkspaceStreamEnvelope = {
-  company_id: string;
-  type: string;
-  data?: Record<string, unknown>;
-};
-
 export type ColumnResizeState = {
   axis: "width" | "height";
   columnID: string;
@@ -45,7 +39,6 @@ export type KanbanContentProps = {
   forcedHighlightedNodeID?: string;
   forcedOpenNodeID?: string;
   controlForcedOpenNode?: boolean;
-  suppressLegacyWorkspaceStream?: boolean;
   onCollapseArenaToTab?: () => void;
   onNodeEditorOverlayOpen?: (nodeID: string) => void;
   onNodeEditorOverlayClose?: () => void;

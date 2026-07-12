@@ -306,8 +306,8 @@ func TestAttachmentDirectUploadPolicyAndIntentBoundaries(t *testing.T) {
 		if !response.DirectUploadEnabled {
 			t.Fatal("direct upload policy unexpectedly disabled")
 		}
-		if response.MaxFileBytes != 250*1024*1024 {
-			t.Fatalf("maxFileBytes = %d, want 250 MiB", response.MaxFileBytes)
+		if response.MaxFileBytes != 1024*1024*1024 {
+			t.Fatalf("maxFileBytes = %d, want 1 GiB", response.MaxFileBytes)
 		}
 		if response.SinglePutMaxBytes != 64*1024*1024 {
 			t.Fatalf("singlePutMaxBytes = %d, want 64 MiB", response.SinglePutMaxBytes)
@@ -372,16 +372,16 @@ func TestAttachmentDirectUploadPolicyAndIntentBoundaries(t *testing.T) {
 		}
 	})
 
-	t.Run("exactly 250 MiB is accepted", func(t *testing.T) {
+	t.Run("exactly 1 GiB is accepted", func(t *testing.T) {
 		fixture := newAttachmentDirectUploadTestFixture(t)
 		payload := attachmentDirectUploadIntentPayload(fixture.node.NodeID, "max-accepted", defaultAttachmentMaxBrowserUploadBytes, directUploadTestSHA256Hex("max-accepted"))
 		response := createAttachmentDirectUploadIntent(t, fixture, payload)
-		if response.Upload.Strategy != domain.AttachmentUploadStrategyMultipart || response.Upload.PartCount != 16 {
+		if response.Upload.Strategy != domain.AttachmentUploadStrategyMultipart || response.Upload.PartCount != 64 {
 			t.Fatalf("max-size upload descriptor = %+v", response.Upload)
 		}
 	})
 
-	t.Run("one byte above 250 MiB is rejected before S3", func(t *testing.T) {
+	t.Run("one byte above 1 GiB is rejected before S3", func(t *testing.T) {
 		fixture := newAttachmentDirectUploadTestFixture(t)
 		payload := attachmentDirectUploadIntentPayload(fixture.node.NodeID, "too-large", defaultAttachmentMaxBrowserUploadBytes+1, directUploadTestSHA256Hex("too-large"))
 		recorder := performAttachmentDirectUploadRequest(t, fixture, http.MethodPost, "/v1/attachments/upload-intents", payload, &fixture.allowed)

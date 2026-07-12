@@ -25,13 +25,11 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkDisplayRows.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/myWorkMatrixLoader.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeCommands.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/workspace/workspaceRealtime.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/workspace/workspaceSnapshotCache.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/realtime/realtimeWebSocket.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/hooks/keyboardShortcutRouting.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/frameLinking.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/framePointerRouting.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/app/appLiveFreshnessBridge.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/deepLinkRoutes.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinDrops.test.js"),
@@ -59,9 +57,9 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/contextSyncContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/selectionCoordinator.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/shared.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanProjectionDeltas.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanBoardContentStore.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanCommands.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanRealtimeRefresh.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTabs.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorUndoHistory.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorMentions.test.js"),
@@ -112,7 +110,6 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/shared"', '"../../../../frontend/src/modules/kanban/shared.js"');
   contents = contents.replaceAll('"../../../../frontend/src/pages/home/myWorkGrouping"', '"../../../../frontend/src/pages/home/myWorkGrouping.js"');
   contents = contents.replaceAll('"../../../../frontend/src/pages/home/myWorkMatrixLoader"', '"../../../../frontend/src/pages/home/myWorkMatrixLoader.js"');
-  contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/kanbanProjectionDeltas"', '"../../../../frontend/src/modules/kanban/kanbanProjectionDeltas.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/KanbanBoardContentStore"', '"../../../../frontend/src/modules/kanban/KanbanBoardContentStore.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/plainTextEditing"', '"../../../../frontend/src/modules/editor/plainTextEditing.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/unifiedRichEditorContract"', '"../../../../frontend/src/modules/editor/unifiedRichEditorContract.js"');

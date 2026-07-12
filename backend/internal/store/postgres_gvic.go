@@ -237,28 +237,20 @@ where company_id=$1::uuid
 			return ResourceGVICAssignmentMutationResult{}, err
 		}
 	}
-	deltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, keyValue.companyID, affected)
-	if err != nil {
+	if err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, keyValue.companyID, affected); err != nil {
 		return ResourceGVICAssignmentMutationResult{}, err
 	}
 	for _, affectedKey := range affected {
 		switch affectedKey.resourceType {
 		case EntityTypeNode:
-			nodeDeltas, err := syncPostgresGVICMatrixProjectionForNodeDeltasTx(ctx, tx, affectedKey.companyID, affectedKey.resourceID)
-			if err != nil {
+			if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, affectedKey.companyID, affectedKey.resourceID); err != nil {
 				return ResourceGVICAssignmentMutationResult{}, err
 			}
-			deltas = append(deltas, nodeDeltas...)
 		case EntityTypeLogicGate:
-			logicGateDeltas, err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, affectedKey.companyID, affectedKey.resourceID, nil, nil)
-			if err != nil {
+			if err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx(ctx, tx, affectedKey.companyID, affectedKey.resourceID, nil, nil); err != nil {
 				return ResourceGVICAssignmentMutationResult{}, err
 			}
-			deltas = append(deltas, logicGateDeltas...)
 		}
-	}
-	if _, err := r.appendEventRowsTx(ctx, tx, ProjectionDeltaEventInputs(keyValue.companyID, input.ActorUserID, input.IdempotencyKey, deltas)); err != nil {
-		return ResourceGVICAssignmentMutationResult{}, err
 	}
 	sourceRows, err := postgresResourceGVICAssignmentsForResource(ctx, tx, keyValue)
 	if err != nil {
@@ -276,10 +268,9 @@ where company_id=$1::uuid
 		ResourceType:         keyValue.resourceType,
 		ResourceID:           keyValue.resourceID,
 		Operation:            operation,
-		Changed:              changed || len(deltas) > 0,
+		Changed:              changed,
 		GVICAssignments:      sourceRows,
 		EffectiveAssignments: effectiveRows,
-		ProjectionDeltas:     deltas,
 		Events:               []domain.DomainEvent{},
 	}, nil
 }
@@ -582,19 +573,19 @@ func postgresAffectedGVICResourceKeysTx(ctx context.Context, tx *sql.Tx, keyValu
 	return keys, nil
 }
 
-func syncResourceGVICEffectiveAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID string, keys []resourceGVICKey) ([]ProjectionDelta, error) {
+func syncResourceGVICEffectiveAssignmentsTx(ctx context.Context, tx *sql.Tx, companyID string, keys []resourceGVICKey) error {
 	companyID = cleanUUIDText(companyID)
 	if ctx == nil || tx == nil || companyID == "" {
-		return nil, ErrInvalid
+		return ErrInvalid
 	}
 	deduped := map[resourceGVICKey]bool{}
 	for _, keyValue := range keys {
 		normalized, err := normalizeResourceGVICKey(keyValue.companyID, keyValue.resourceType, keyValue.resourceID)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if normalized.companyID != companyID {
-			return nil, ErrInvalid
+			return ErrInvalid
 		}
 		deduped[normalized] = true
 	}
@@ -608,68 +599,42 @@ func syncResourceGVICEffectiveAssignmentsTx(ctx context.Context, tx *sql.Tx, com
 		}
 		return ordered[i].resourceID < ordered[j].resourceID
 	})
-
-	deltas := make([]ProjectionDelta, 0)
 	for _, keyValue := range ordered {
-		beforeDomain, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, keyValue)
-		if err != nil {
-			return nil, err
+		if err := syncDerivedResourceGVICEffectiveAssignmentsTx(ctx, tx, keyValue); err != nil {
+			return err
 		}
-		beforeRows := make([]GVICEffectiveAssignmentProjectionRow, 0, len(beforeDomain))
-		for _, item := range beforeDomain {
-			beforeRows = append(beforeRows, gvicEffectiveProjectionRowFromDomain(item))
-		}
-		if err := syncDerivedResourceGVICEffectiveAssignmentsDeltaTx(ctx, tx, keyValue); err != nil {
-			return nil, err
-		}
-		afterDomain, err := postgresResourceGVICEffectiveAssignmentsForResource(ctx, tx, keyValue)
-		if err != nil {
-			return nil, err
-		}
-		afterRows := make([]GVICEffectiveAssignmentProjectionRow, 0, len(afterDomain))
-		for _, item := range afterDomain {
-			afterRows = append(afterRows, gvicEffectiveProjectionRowFromDomain(item))
-		}
-		deltas = append(deltas, diffGVICEffectiveProjectionRows(beforeRows, afterRows)...)
 	}
-	return deltas, nil
+	return nil
 }
-
-func syncPostgresGVICForResourceKeysTx(ctx context.Context, tx *sql.Tx, companyID string, keys []resourceGVICKey) ([]ProjectionDelta, error) {
+func syncPostgresGVICForResourceKeysTx(ctx context.Context, tx *sql.Tx, companyID string, keys []resourceGVICKey) error {
 	companyID = cleanUUIDText(companyID)
 	if ctx == nil || tx == nil || companyID == "" {
-		return nil, ErrInvalid
+		return ErrInvalid
 	}
 	ordered, err := normalizeResourceGVICKeysForCompany(companyID, keys)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(ordered) == 0 {
-		return nil, nil
+		return nil
 	}
-	deltas, err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, ordered)
-	if err != nil {
-		return nil, err
+	if err := syncResourceGVICEffectiveAssignmentsTx(ctx, tx, companyID, ordered); err != nil {
+		return err
 	}
 	for _, keyValue := range ordered {
 		switch keyValue.resourceType {
 		case EntityTypeNode:
-			nodeDeltas, err := syncPostgresGVICMatrixProjectionForNodeDeltasTx(ctx, tx, keyValue.companyID, keyValue.resourceID)
-			if err != nil {
-				return nil, err
+			if err := syncPostgresGVICMatrixProjectionForNodeTx(ctx, tx, keyValue.companyID, keyValue.resourceID); err != nil {
+				return err
 			}
-			deltas = append(deltas, nodeDeltas...)
 		case EntityTypeLogicGate:
-			logicGateDeltas, err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx(ctx, tx, keyValue.companyID, keyValue.resourceID, nil, nil)
-			if err != nil {
-				return nil, err
+			if err := syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx(ctx, tx, keyValue.companyID, keyValue.resourceID, nil, nil); err != nil {
+				return err
 			}
-			deltas = append(deltas, logicGateDeltas...)
 		}
 	}
-	return deltas, nil
+	return nil
 }
-
 func normalizeResourceGVICKeysForCompany(companyID string, keys []resourceGVICKey) ([]resourceGVICKey, error) {
 	companyID = cleanUUIDText(companyID)
 	if companyID == "" {
@@ -827,7 +792,7 @@ derived as (
    and membership.user_id=member.user_id
 )`
 
-func syncDerivedResourceGVICEffectiveAssignmentsDeltaTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey) error {
+func syncDerivedResourceGVICEffectiveAssignmentsTx(ctx context.Context, tx *sql.Tx, keyValue resourceGVICKey) error {
 	if _, err := tx.ExecContext(ctx, postgresDerivedResourceGVICEffectiveAssignmentsCTE+`
 delete from resource_gvic_effective_assignments existing
 where existing.company_id=$1::uuid
@@ -1085,7 +1050,7 @@ func syncPostgresGVICForAffectedGroupsTx(ctx context.Context, tx *sql.Tx, compan
 	if err != nil {
 		return err
 	}
-	_, err = syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, keys)
+	err = syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, keys)
 	return err
 }
 
@@ -1100,7 +1065,7 @@ func syncPostgresGVICForAllGroupAssignmentsTx(ctx context.Context, tx *sql.Tx, c
 	if err != nil {
 		return err
 	}
-	_, err = syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, keys)
+	err = syncPostgresGVICForResourceKeysTx(ctx, tx, companyID, keys)
 	return err
 }
 

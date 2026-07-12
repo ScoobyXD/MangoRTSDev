@@ -181,13 +181,6 @@ func (r *MemoryRepo) syncGVICMatrixProjectionForNodeLocked(companyID, nodeID str
 	r.deleteStaleGVICMatrixProjectionForNodeLocked(companyID, nodeID, desired)
 }
 
-func (r *MemoryRepo) syncGVICMatrixProjectionForNodeDeltasLocked(companyID, nodeID string) []ProjectionDelta {
-	before := r.GVICMatrixProjectionRowsForResourcesLocked(companyID, []string{nodeID}, nil)
-	r.syncGVICMatrixProjectionForNodeLocked(companyID, nodeID)
-	after := r.GVICMatrixProjectionRowsForResourcesLocked(companyID, []string{nodeID}, nil)
-	return diffGVICMatrixProjectionRows(before, after)
-}
-
 func (r *MemoryRepo) syncGVICMatrixProjectionForLogicGateLocked(companyID, logicGateID string) {
 	r.syncResourceGVICEffectiveAssignmentsLocked([]resourceGVICKey{{companyID: companyID, resourceType: EntityTypeLogicGate, resourceID: logicGateID}})
 	users := r.GVICMatrixProjectionUsersForLogicGateLocked(companyID, logicGateID)
@@ -204,13 +197,6 @@ func (r *MemoryRepo) syncGVICMatrixProjectionForLogicGateLocked(companyID, logic
 
 func (r *MemoryRepo) syncGVICMatrixProjectionForLogicGateAssignmentsLocked(companyID, logicGateID string, before, after []domain.LogicGateGVICAssignment) {
 	r.syncGVICMatrixProjectionForLogicGateLocked(companyID, logicGateID)
-}
-
-func (r *MemoryRepo) syncGVICMatrixProjectionForLogicGateAssignmentsDeltasLocked(companyID, logicGateID string, before, after []domain.LogicGateGVICAssignment) []ProjectionDelta {
-	beforeRows := r.GVICMatrixProjectionRowsForLogicGateLocked(companyID, logicGateID)
-	r.syncGVICMatrixProjectionForLogicGateAssignmentsLocked(companyID, logicGateID, before, after)
-	afterRows := r.GVICMatrixProjectionRowsForLogicGateLocked(companyID, logicGateID)
-	return diffGVICMatrixProjectionRows(beforeRows, afterRows)
 }
 
 func (r *MemoryRepo) syncGVICMatrixProjectionForLogicGateUsersLocked(companyID, logicGateID string, userIDs []string) {
@@ -346,7 +332,7 @@ func (r *MemoryRepo) GVICMatrixProjectionRowsForResourcesLocked(companyID string
 			continue
 		}
 		for _, item := range r.myWorkFlatPathRowsForNodeProjectionLocked(row) {
-			key := GVICMatrixProjectionRowKeyString(GVICMatrixProjectionRowKey(item))
+			key := gvicMatrixProjectionRowIdentity(item)
 			if key == ":" || seen[key] {
 				continue
 			}
@@ -365,7 +351,7 @@ func (r *MemoryRepo) GVICMatrixProjectionRowsForResourcesLocked(companyID string
 			continue
 		}
 		item := memoryGVICMatrixProjectionRowToDTO(row)
-		key := GVICMatrixProjectionRowKeyString(GVICMatrixProjectionRowKey(item))
+		key := gvicMatrixProjectionRowIdentity(item)
 		if key == ":" || seen[key] {
 			continue
 		}
@@ -392,7 +378,7 @@ func (r *MemoryRepo) GVICMatrixProjectionRowsForLogicGateLocked(companyID, logic
 			continue
 		}
 		for _, item := range r.myWorkFlatPathRowsForNodeProjectionLocked(row) {
-			key := GVICMatrixProjectionRowKeyString(GVICMatrixProjectionRowKey(item))
+			key := gvicMatrixProjectionRowIdentity(item)
 			if key == ":" || seen[key] {
 				continue
 			}
@@ -405,7 +391,7 @@ func (r *MemoryRepo) GVICMatrixProjectionRowsForLogicGateLocked(companyID, logic
 			continue
 		}
 		item := memoryGVICMatrixProjectionRowToDTO(row)
-		key := GVICMatrixProjectionRowKeyString(GVICMatrixProjectionRowKey(item))
+		key := gvicMatrixProjectionRowIdentity(item)
 		if key == ":" || seen[key] {
 			continue
 		}
@@ -681,38 +667,6 @@ func (r *MemoryRepo) ListGVICMatrixProjectionRowsForLogicGate(companyID, logicGa
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.GVICMatrixProjectionRowsForLogicGateLocked(companyID, logicGateID), nil
-}
-
-func (r *MemoryRepo) CurrentProjectionSequence(companyID, projectionName, projectionScope string) (int64, error) {
-	companyID = strings.TrimSpace(companyID)
-	projectionName = strings.TrimSpace(projectionName)
-	projectionScope = strings.TrimSpace(projectionScope)
-	if companyID == "" || projectionName == "" {
-		return 0, ErrInvalid
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.projectionSequences[companyID+":"+projectionName+":"+projectionScope], nil
-}
-
-func (r *MemoryRepo) NextProjectionSequence(companyID, projectionName, projectionScope string) (int64, error) {
-	companyID = strings.TrimSpace(companyID)
-	projectionName = strings.TrimSpace(projectionName)
-	projectionScope = strings.TrimSpace(projectionScope)
-	if companyID == "" || projectionName == "" {
-		return 0, ErrInvalid
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	key := companyID + ":" + projectionName + ":" + projectionScope
-	r.projectionSequences[key]++
-	if projectionName == ProjectionNameKanbanBoard {
-		boardID := strings.TrimSpace(strings.TrimPrefix(projectionScope, "board:"))
-		if logicGateID := LogicGateIDFromKanbanBoardID(boardID); logicGateID != "" {
-			r.bumpLogicGateWorkReadVersionLocked(companyID, logicGateID)
-		}
-	}
-	return r.projectionSequences[key], nil
 }
 
 func memoryGVICMatrixProjectionRowToDTO(row memoryGVICMatrixProjectionRow) GVICMatrixProjectionRow {

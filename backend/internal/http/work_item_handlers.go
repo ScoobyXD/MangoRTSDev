@@ -301,7 +301,6 @@ func (s *Server) handleWorkItemMyWorkMatrixNodeMove(w http.ResponseWriter, r *ht
 		card = &cardValue
 		s.projectCommittedWorkspaceDerivedEventsWithTiming(moveResult.Events, timings)
 		s.publishCommittedWorkspaceEventsWithTiming(moveResult.Events, timings)
-		s.publishProjectionDeltasWithTiming(moveResult.ProjectionDeltas, timings)
 		s.projectCommittedNotificationEventsWithTiming(moveResult.Events, timings)
 	} else if mutatePlacement {
 		updateInput := store.UpdateNodeInput{CompanyID: companyID, NodeID: nodeID, Priority: moveInput.Priority, PrioritySet: moveInput.PrioritySet, ActorUserID: actorUserID}
@@ -336,7 +335,7 @@ func (s *Server) handleWorkItemMyWorkMatrixNodeMove(w http.ResponseWriter, r *ht
 	}
 
 	stop = timings.observeAccounted("source.gvic_role_update")
-	gvicResult, err := s.repo.AddResourceGVICAssignments(store.ResourceGVICAssignmentCommandInput{
+	_, err = s.repo.AddResourceGVICAssignments(store.ResourceGVICAssignmentCommandInput{
 		CompanyID:    companyID,
 		ResourceType: store.EntityTypeNode,
 		ResourceID:   nodeID,
@@ -365,7 +364,6 @@ func (s *Server) handleWorkItemMyWorkMatrixNodeMove(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusInternalServerError, "failed_to_update_my_work_gvic_role")
 		return
 	}
-	s.publishProjectionDeltasWithTiming(gvicResult.ProjectionDeltas, timings)
 
 	afterRows, err := s.repo.ListGVICMatrixProjectionRowsForResources(companyID, []string{nodeID}, nil)
 	if errors.Is(err, store.ErrInvalid) {
@@ -508,7 +506,6 @@ func (s *Server) handleWorkItemLogicGateAssignments(w http.ResponseWriter, r *ht
 		return
 	}
 	s.publishCommittedWorkspaceEvents(result.Events)
-	s.publishProjectionDeltas(result.ProjectionDeltas)
 	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
@@ -614,7 +611,6 @@ func (s *Server) handleWorkItemLogicGateAssignmentMove(w http.ResponseWriter, r 
 		return
 	}
 	s.publishCommittedWorkspaceEvents(result.Events)
-	s.publishProjectionDeltas(result.ProjectionDeltas)
 	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
@@ -689,7 +685,6 @@ func (s *Server) handleWorkItemLogicGateAssignmentRemove(w http.ResponseWriter, 
 		return
 	}
 	s.publishCommittedWorkspaceEvents(result.Events)
-	s.publishProjectionDeltas(result.ProjectionDeltas)
 	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
@@ -763,7 +758,6 @@ func (s *Server) handleWorkItemLogicGateAssignmentIssue(w http.ResponseWriter, r
 		return
 	}
 	s.publishCommittedWorkspaceEvents(result.Events)
-	s.publishProjectionDeltas(result.ProjectionDeltas)
 	s.projectCommittedNotificationEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }

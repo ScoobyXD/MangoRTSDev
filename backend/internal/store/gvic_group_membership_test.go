@@ -413,8 +413,8 @@ func TestPostgresGroupHierarchyGVICSyncUsesScopedHelpers(t *testing.T) {
 	syncBody := extractFunctionSourceForTest(t, gvicSource, "func syncPostgresGVICForResourceKeysTx")
 	for _, needle := range []string{
 		"syncResourceGVICEffectiveAssignmentsTx",
-		"syncPostgresGVICMatrixProjectionForNodeDeltasTx",
-		"syncPostgresGVICMatrixProjectionForLogicGateAssignmentsDeltasTx",
+		"syncPostgresGVICMatrixProjectionForNodeTx",
+		"syncPostgresGVICMatrixProjectionForLogicGateAssignmentsTx",
 	} {
 		if !strings.Contains(syncBody, needle) {
 			t.Fatalf("syncPostgresGVICForResourceKeysTx missing %q", needle)
@@ -435,21 +435,21 @@ func TestPostgresGroupHierarchyGVICSyncUsesScopedHelpers(t *testing.T) {
 	if !strings.Contains(affectedBody, "syncPostgresGVICForResourceKeysTx") || strings.Contains(affectedBody, "syncResourceGVICEffectiveAssignmentsTx") {
 		t.Fatalf("syncPostgresGVICForAffectedGroupsTx should delegate to resource-key GVIC+matrix sync, body:\n%s", affectedBody)
 	}
-	effectiveDeltaBody := extractFunctionSourceForTest(t, gvicSource, "func syncDerivedResourceGVICEffectiveAssignmentsDeltaTx")
+	effectiveSyncBody := extractFunctionSourceForTest(t, gvicSource, "func syncDerivedResourceGVICEffectiveAssignmentsTx")
 	for _, needle := range []string{
 		"not exists",
 		"do nothing",
 	} {
-		if !strings.Contains(effectiveDeltaBody, needle) {
-			t.Fatalf("syncDerivedResourceGVICEffectiveAssignmentsDeltaTx missing delta sync marker %q", needle)
+		if !strings.Contains(effectiveSyncBody, needle) {
+			t.Fatalf("syncDerivedResourceGVICEffectiveAssignmentsTx missing incremental sync marker %q", needle)
 		}
 	}
 	for _, forbidden := range []string{
 		"delete from resource_gvic_effective_assignments\nwhere company_id=$1::uuid",
 		"do update set updated_timestamp=now()",
 	} {
-		if strings.Contains(effectiveDeltaBody, forbidden) {
-			t.Fatalf("syncDerivedResourceGVICEffectiveAssignmentsDeltaTx contains rebuild/retimestamp pattern %q", forbidden)
+		if strings.Contains(effectiveSyncBody, forbidden) {
+			t.Fatalf("syncDerivedResourceGVICEffectiveAssignmentsTx contains rebuild/retimestamp pattern %q", forbidden)
 		}
 	}
 }
