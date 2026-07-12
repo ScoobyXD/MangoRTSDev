@@ -761,6 +761,54 @@ func (s *Server) handleNodeContentChanges(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if len(parts) == 1 && parts[0] == "anchor-clean" {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		var req struct {
+			CompanyID string `json:"company_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		req.CompanyID = strings.TrimSpace(req.CompanyID)
+		if req.CompanyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		if !s.requireEntityView(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
+			return
+		}
+		actorUserID, _ := nodeChangeActorPayload(r)
+		if actorUserID == "" {
+			writeError(w, http.StatusUnauthorized, "authenticated_user_required")
+			return
+		}
+		count, err := s.repo.AnchorCleanNodeProjections(store.NodeProjectionAnchorInput{
+			CompanyID: req.CompanyID,
+			NodeID:    nodeID,
+			UserID:    actorUserID,
+		})
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "node_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_node_projection_anchor")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_anchor_node_projections")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":   "anchored",
+			"anchored": count,
+		})
+		return
+	}
 	if len(parts) == 1 && parts[0] == "seen-all" {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

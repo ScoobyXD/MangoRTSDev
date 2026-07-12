@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"mime"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type attachmentUploadResponse struct {
@@ -99,7 +101,7 @@ func (s *Server) handleAttachmentContent(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusBadRequest, "invalid_attachment_variant")
 		return
 	}
-	attachment, err := s.repo.GetAttachment(companyID, attachmentID)
+	content, err := s.repo.ReadAttachmentContent(r.Context(), companyID, attachmentID, variantType)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_attachment")
 		return
@@ -112,47 +114,116 @@ func (s *Server) handleAttachmentContent(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusInternalServerError, "failed_to_load_attachment")
 		return
 	}
-	if !s.canReadAttachmentThroughResourceLink(w, r, companyID, attachment.AttachmentID) {
+	if !s.canReadAttachmentThroughLinks(w, r, companyID, content.ResourceLinks) {
 		return
 	}
-	variant, err := s.repo.GetAttachmentVariant(companyID, attachment.AttachmentID, variantType)
-	if errors.Is(err, store.ErrNotFound) && variantType != store.AttachmentVariantOriginal {
-		variant, err = s.repo.GetAttachmentVariant(companyID, attachment.AttachmentID, store.AttachmentVariantOriginal)
-	}
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_attachment_variant")
+	if writeAttachmentContentNotModified(w, r, content) {
 		return
 	}
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "attachment_variant_not_found")
-		return
+	output, err := s.attachmentStorage.GetObject(r.Context(), AttachmentGetObjectInput{Key: content.StorageKey})
+	if errors.Is(err, ErrAttachmentObjectNotFound) && content.ServedVariant != store.AttachmentVariantOriginal {
+		content = attachmentOriginalContentRead(content)
+		if writeAttachmentContentNotModified(w, r, content) {
+			return
+		}
+		output, err = s.attachmentStorage.GetObject(r.Context(), AttachmentGetObjectInput{Key: content.StorageKey})
 	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_load_attachment_variant")
-		return
-	}
-	output, err := s.attachmentStorage.GetObject(r.Context(), AttachmentGetObjectInput{Key: variant.StorageKey})
 	if err != nil {
 		writeAttachmentStorageError(w, err)
 		return
 	}
 	defer output.Body.Close()
+	if output.ContentLength != content.ByteSize {
+		writeError(w, http.StatusBadGateway, "attachment_content_length_mismatch")
+		return
+	}
 	contentType := strings.TrimSpace(output.ContentType)
 	if contentType == "" {
-		contentType = variant.MimeType
+		contentType = content.MimeType
 	}
 	if contentType == "" {
-		contentType = attachment.MimeType
+		contentType = content.OriginalMimeType
 	}
 	w.Header().Set("Content-Type", contentType)
-	if variant.ByteSize >= 0 {
-		w.Header().Set("Content-Length", strconv.FormatInt(variant.ByteSize, 10))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	setAttachmentContentCacheHeaders(w, content)
+	if content.ByteSize >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(content.ByteSize, 10))
 	}
-	if attachment.OriginalFilename != "" {
-		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": attachment.OriginalFilename}))
+	if content.OriginalFilename != "" {
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": content.OriginalFilename}))
 	}
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, output.Body)
+	if _, err := io.Copy(w, output.Body); err != nil {
+		log.Printf("attachment_content_stream status=failed attachment_id=%s variant=%s", content.AttachmentID, content.ServedVariant)
+		return
+	}
+}
+
+func (s *Server) canReadAttachmentThroughLinks(w http.ResponseWriter, r *http.Request, companyID string, links []domain.ResourceAttachment) bool {
+	for _, link := range links {
+		allowed, err := s.canViewAttachmentResource(r, companyID, link.ResourceType, link.ResourceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_check_attachment_permission")
+			return false
+		}
+		if allowed {
+			return true
+		}
+	}
+	writeAccessResourceNotFound(w)
+	return false
+}
+
+func attachmentOriginalContentRead(content store.AttachmentContentRead) store.AttachmentContentRead {
+	content.ServedVariant = store.AttachmentVariantOriginal
+	content.MimeType = content.OriginalMimeType
+	content.ByteSize = content.OriginalByteSize
+	content.SHA256 = content.OriginalSHA256
+	content.GenerationVersion = 0
+	content.StorageBucket = content.OriginalStorageBucket
+	content.StorageKey = content.OriginalStorageKey
+	content.CreatedTimestamp = content.OriginalCreatedTimestamp
+	content.UpdatedTimestamp = content.OriginalUpdatedTimestamp
+	return content
+}
+
+func attachmentContentETag(content store.AttachmentContentRead) string {
+	return strongETagFromString(strings.Join([]string{
+		content.AttachmentID,
+		content.ServedVariant,
+		content.SHA256,
+		strconv.FormatInt(content.ByteSize, 10),
+		strconv.Itoa(content.GenerationVersion),
+		content.StorageKey,
+		content.UpdatedTimestamp.UTC().Format(time.RFC3339Nano),
+	}, "\n"))
+}
+
+func setAttachmentContentCacheHeaders(w http.ResponseWriter, content store.AttachmentContentRead) {
+	w.Header().Set("ETag", attachmentContentETag(content))
+	w.Header().Set("Last-Modified", content.UpdatedTimestamp.UTC().Truncate(time.Second).Format(http.TimeFormat))
+	w.Header().Set("Cache-Control", "private, max-age=0, no-cache, must-revalidate")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Add("Vary", "Authorization")
+	w.Header().Add("Vary", "X-Mango-Company-ID")
+}
+
+func writeAttachmentContentNotModified(w http.ResponseWriter, r *http.Request, content store.AttachmentContentRead) bool {
+	setAttachmentContentCacheHeaders(w, content)
+	if requestETagMatches(r, attachmentContentETag(content)) {
+		w.WriteHeader(http.StatusNotModified)
+		return true
+	}
+	if strings.TrimSpace(r.Header.Get("If-None-Match")) != "" {
+		return false
+	}
+	modifiedSince, err := http.ParseTime(strings.TrimSpace(r.Header.Get("If-Modified-Since")))
+	if err == nil && !content.UpdatedTimestamp.UTC().Truncate(time.Second).After(modifiedSince.UTC()) {
+		w.WriteHeader(http.StatusNotModified)
+		return true
+	}
+	return false
 }
 
 func (s *Server) handleResourceAttachments(w http.ResponseWriter, r *http.Request, resourceType, resourceID string, parts []string) {

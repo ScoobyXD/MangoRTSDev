@@ -6,6 +6,7 @@ import (
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -29,10 +30,21 @@ func (s *Server) handleNodeViewV2(w http.ResponseWriter, r *http.Request, nodeID
 	if !ok {
 		return
 	}
-	view, err := s.repo.GetNodeView(store.NodeViewInput{
-		CompanyID: companyID,
-		NodeID:    nodeID,
-		UserID:    actorUserID,
+	etag, err := s.nodeViewETag(companyID, nodeID, actorUserID, flags)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "node_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_read_node_view_version")
+		return
+	}
+	if writeNotModifiedWithETag(w, r, etag) {
+		return
+	}
+	view, err := s.repo.GetNodeView(store.NodeViewInput{CompanyID: companyID,
+		NodeID: nodeID,
+		UserID: actorUserID,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_node_view_request")
@@ -48,9 +60,21 @@ func (s *Server) handleNodeViewV2(w http.ResponseWriter, r *http.Request, nodeID
 		return
 	}
 	view.EffectiveAccessFlags = flags
-	writeJSONMaybeNotModified(w, r, http.StatusOK, view)
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, view, etag)
 }
 
+func (s *Server) nodeViewETag(companyID, nodeID, actorUserID string, flags domain.EffectiveAccessFlags) (string, error) {
+	version, err := s.repo.CurrentNodeViewVersion(companyID, nodeID, actorUserID)
+	if err != nil {
+		return "", err
+	}
+	permissionKey := strconv.FormatBool(flags.CanView) + ":" + strconv.FormatBool(flags.CanEdit) + ":" + strconv.FormatBool(flags.CanAdmin)
+	return strongETagFromString(
+		"node-view:v1:" + strings.TrimSpace(companyID) + ":" + strings.TrimSpace(nodeID) + ":" +
+			strings.TrimSpace(actorUserID) + ":" + permissionKey + ":" +
+			strconv.FormatInt(version.Shared, 10) + ":" + strconv.FormatInt(version.User, 10),
+	), nil
+}
 func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, logicGateID string) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

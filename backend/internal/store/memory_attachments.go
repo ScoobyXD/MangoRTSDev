@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -50,7 +51,10 @@ func (r *MemoryRepo) GetAttachment(companyID, attachmentID string) (domain.Attac
 	return cloneAttachment(attachment), nil
 }
 
-func (r *MemoryRepo) GetAttachmentVariant(companyID, attachmentID, variantType string) (domain.AttachmentVariant, error) {
+func (r *MemoryRepo) GetAttachmentVariant(ctx context.Context, companyID, attachmentID, variantType string) (domain.AttachmentVariant, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.AttachmentVariant{}, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -73,6 +77,7 @@ func (r *MemoryRepo) GetAttachmentVariant(companyID, attachmentID, variantType s
 			StorageBucket:    attachment.StorageBucket,
 			StorageKey:       attachment.StorageKey,
 			CreatedTimestamp: attachment.CreatedTimestamp,
+			UpdatedTimestamp: attachment.CreatedTimestamp,
 		}, nil
 	}
 	variant, ok := r.attachmentVariants[attachmentVariantKey(attachmentID, variantType)]
@@ -80,6 +85,123 @@ func (r *MemoryRepo) GetAttachmentVariant(companyID, attachmentID, variantType s
 		return domain.AttachmentVariant{}, ErrNotFound
 	}
 	return cloneAttachmentVariant(variant), nil
+}
+
+func (r *MemoryRepo) ReadAttachmentContent(ctx context.Context, companyID, attachmentID, variantType string) (AttachmentContentRead, error) {
+	if err := ctx.Err(); err != nil {
+		return AttachmentContentRead{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	companyID = strings.TrimSpace(companyID)
+	attachmentID = cleanUUIDText(attachmentID)
+	variantType = NormalizeAttachmentVariantType(variantType)
+	if companyID == "" || attachmentID == "" || variantType == "" {
+		return AttachmentContentRead{}, ErrInvalid
+	}
+	attachment, ok := r.attachments[attachmentKey(companyID, attachmentID)]
+	if !ok || attachment.DeletedTimestamp != nil {
+		return AttachmentContentRead{}, ErrNotFound
+	}
+	variant := domain.AttachmentVariant{
+		AttachmentID: attachment.AttachmentID, VariantType: AttachmentVariantOriginal,
+		MimeType: attachment.MimeType, ByteSize: attachment.ByteSize,
+		Width: cloneAttachmentIntPointer(attachment.OriginalWidth), Height: cloneAttachmentIntPointer(attachment.OriginalHeight),
+		StorageBucket: attachment.StorageBucket, StorageKey: attachment.StorageKey, CreatedTimestamp: attachment.CreatedTimestamp,
+		UpdatedTimestamp: attachment.CreatedTimestamp,
+	}
+	if variantType != AttachmentVariantOriginal {
+		if stored, exists := r.attachmentVariants[attachmentVariantKey(attachmentID, variantType)]; exists {
+			if stored.SHA256 != nil && stored.GenerationVersion != nil && *stored.GenerationVersion == AttachmentVariantGenerationVersion {
+				variant = cloneAttachmentVariant(stored)
+			}
+		}
+	}
+	contentSHA := attachment.SHA256
+	generationVersion := 0
+	if variant.VariantType != AttachmentVariantOriginal {
+		contentSHA = ""
+		if variant.SHA256 != nil {
+			contentSHA = *variant.SHA256
+		}
+		if variant.GenerationVersion != nil {
+			generationVersion = *variant.GenerationVersion
+		}
+	}
+	return AttachmentContentRead{
+		CompanyID: attachment.CompanyID, AttachmentID: attachment.AttachmentID,
+		OriginalFilename: attachment.OriginalFilename, OriginalMimeType: attachment.MimeType, OriginalSHA256: attachment.SHA256,
+		OriginalByteSize: attachment.ByteSize, OriginalStorageBucket: attachment.StorageBucket,
+		OriginalStorageKey: attachment.StorageKey, OriginalCreatedTimestamp: attachment.CreatedTimestamp,
+		OriginalUpdatedTimestamp: attachment.CreatedTimestamp,
+		RequestedVariant:         variantType, ServedVariant: variant.VariantType, MimeType: variant.MimeType, ByteSize: variant.ByteSize,
+		SHA256: contentSHA, GenerationVersion: generationVersion,
+		Width: cloneAttachmentIntPointer(variant.Width), Height: cloneAttachmentIntPointer(variant.Height),
+		StorageBucket: variant.StorageBucket, StorageKey: variant.StorageKey, CreatedTimestamp: variant.CreatedTimestamp,
+		UpdatedTimestamp: variant.UpdatedTimestamp,
+		ResourceLinks:    r.resourceAttachmentLinksLocked(companyID, attachmentID, false),
+	}, nil
+}
+
+func (r *MemoryRepo) UpsertAttachmentVariants(ctx context.Context, companyID string, inputs []AttachmentVariantInput) ([]domain.AttachmentVariant, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" || len(inputs) == 0 {
+		return nil, ErrInvalid
+	}
+	items := make([]domain.AttachmentVariant, 0, len(inputs))
+	for _, input := range inputs {
+		attachmentID := cleanUUIDText(input.AttachmentID)
+		variantType := NormalizeAttachmentVariantType(input.VariantType)
+		if variantType == "" || variantType == AttachmentVariantOriginal || attachmentID == "" ||
+			strings.TrimSpace(input.MimeType) == "" || input.ByteSize < 0 || strings.TrimSpace(input.StorageBucket) == "" ||
+			strings.TrimSpace(input.StorageKey) == "" || !validAttachmentVariantGeneration(input) {
+			return nil, ErrInvalid
+		}
+		attachment, ok := r.attachments[attachmentKey(companyID, attachmentID)]
+		if !ok || attachment.DeletedTimestamp != nil {
+			return nil, ErrNotFound
+		}
+		created := input.CreatedTimestamp
+		if created.IsZero() {
+			created = time.Now().UTC()
+		}
+		variant := domain.AttachmentVariant{AttachmentID: attachmentID, VariantType: variantType,
+			MimeType: strings.TrimSpace(input.MimeType), ByteSize: input.ByteSize,
+			SHA256: cloneAttachmentStringPointer(input.SHA256), GenerationVersion: cloneAttachmentIntPointer(input.GenerationVersion),
+			Width: cloneAttachmentIntPointer(input.Width), Height: cloneAttachmentIntPointer(input.Height),
+			StorageBucket: strings.TrimSpace(input.StorageBucket), StorageKey: strings.TrimSpace(input.StorageKey),
+			CreatedTimestamp: created, UpdatedTimestamp: created}
+		key := attachmentVariantKey(attachmentID, variantType)
+		if existing, exists := r.attachmentVariants[key]; exists && sameAttachmentVariantStorage(existing, variant) {
+			variant.CreatedTimestamp = existing.CreatedTimestamp
+			variant.UpdatedTimestamp = existing.UpdatedTimestamp
+		}
+		r.attachmentVariants[key] = variant
+		items = append(items, cloneAttachmentVariant(variant))
+	}
+	return items, nil
+}
+
+func sameAttachmentVariantStorage(a, b domain.AttachmentVariant) bool {
+	return a.AttachmentID == b.AttachmentID && a.VariantType == b.VariantType && a.MimeType == b.MimeType &&
+		a.ByteSize == b.ByteSize && attachmentOptionalStringEqual(a.SHA256, b.SHA256) && attachmentOptionalIntEqual(a.GenerationVersion, b.GenerationVersion) &&
+		attachmentOptionalIntEqual(a.Width, b.Width) && attachmentOptionalIntEqual(a.Height, b.Height) &&
+		a.StorageBucket == b.StorageBucket && a.StorageKey == b.StorageKey
+}
+
+func attachmentOptionalIntEqual(a, b *int) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
+}
+
+func attachmentOptionalStringEqual(a, b *string) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }
 
 func (r *MemoryRepo) ListAttachmentResourceLinks(companyID, attachmentID string) ([]domain.ResourceAttachment, error) {
@@ -356,9 +478,19 @@ func cloneAttachment(input domain.Attachment) domain.Attachment {
 }
 
 func cloneAttachmentVariant(input domain.AttachmentVariant) domain.AttachmentVariant {
+	input.SHA256 = cloneAttachmentStringPointer(input.SHA256)
+	input.GenerationVersion = cloneAttachmentIntPointer(input.GenerationVersion)
 	input.Width = cloneAttachmentIntPointer(input.Width)
 	input.Height = cloneAttachmentIntPointer(input.Height)
 	return input
+}
+
+func cloneAttachmentStringPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
 }
 
 func cloneResourceAttachment(input domain.ResourceAttachment) domain.ResourceAttachment {

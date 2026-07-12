@@ -114,6 +114,9 @@ func (r *MemoryRepo) UpdateAccount(input AccountInput) (AccountMutationResult, e
 	existing.UpdatedTimestamp = time.Now().UTC()
 	r.accounts[accountKey(input.CompanyID, input.AccountID)] = existing
 	r.syncProjectionsForAccountNodeIDsLocked(input.CompanyID, nodeIDs)
+	for _, nodeID := range nodeIDs {
+		r.bumpNodeViewVersionLocked(input.CompanyID, nodeID)
+	}
 	return AccountMutationResult{Account: &existing}, nil
 }
 
@@ -136,6 +139,9 @@ func (r *MemoryRepo) DeleteAccount(companyID, accountID, actorUserID string) (Ac
 		}
 	}
 	r.syncProjectionsForAccountNodeIDsLocked(companyID, nodeIDs)
+	for _, nodeID := range nodeIDs {
+		r.bumpNodeViewVersionLocked(companyID, nodeID)
+	}
 	_ = actorUserID
 	return AccountMutationResult{DeletedAccountID: accountID}, nil
 }
@@ -319,6 +325,7 @@ func (r *MemoryRepo) SetNodeAccountAssignments(input NodeAccountAssignmentUpdate
 	if err != nil {
 		return NodeAccountAssignmentUpdateResult{}, err
 	}
+	r.bumpNodeViewVersionLocked(input.CompanyID, input.NodeID)
 	return NodeAccountAssignmentUpdateResult{
 		Node:        node,
 		Assignments: r.nodeAccountAssignmentsForNodeLocked(input.CompanyID, input.NodeID),

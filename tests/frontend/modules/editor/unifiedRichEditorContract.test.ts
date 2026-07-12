@@ -704,7 +704,7 @@ test("signature Save persists the exact serialized editor HTML returned by flush
   assert.match(flushImplementation, /editorRef\.current \? serializeEditorDocumentHTML\(editorRef\.current\) : lastAppliedValueRef\.current/);
   assert.match(flushImplementation, /return nextValue/);
   assert.match(unifiedRichEditorSurface, /flush: \(\) => flushDocumentSave\(\)/);
-  assert.match(unifiedRichEditorSurface, /if \(lastAppliedValueRef\.current === value\) return/);
+  assert.match(unifiedRichEditorSurface, /if \(lastAppliedValueRef\.current === value && attachmentHydrationContextKeyRef\.current === hydrationContextKey\) return/);
   assert.doesNotMatch(unifiedRichEditorSurface, /editorHasFocus/);
   assert.match(unifiedRichEditorSurface, /restoreSelectionForHydrationRef\.current\?\.\(editor\);\s*const selectionOffsets = getEditorSelectionOffsets\(editor\)/);
   assert.match(unifiedRichEditorSurface, /setEditorSelectionByOffsets\(editor, selectionOffsets\.start, selectionOffsets\.end\)/);

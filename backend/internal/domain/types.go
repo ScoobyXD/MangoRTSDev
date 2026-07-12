@@ -236,8 +236,8 @@ type Attachment struct {
 	StorageChecksumAlgorithm string               `json:"storage_checksum_algorithm,omitempty"`
 	StorageChecksumValue     string               `json:"storage_checksum_value,omitempty"`
 	StorageChecksumType      string               `json:"storage_checksum_type,omitempty"`
-	StorageBucket            string               `json:"storage_bucket"`
-	StorageKey               string               `json:"storage_key"`
+	StorageBucket            string               `json:"-"`
+	StorageKey               string               `json:"-"`
 	OriginalWidth            *int                 `json:"original_width,omitempty"`
 	OriginalHeight           *int                 `json:"original_height,omitempty"`
 	SourceKind               string               `json:"source_kind"`
@@ -323,15 +323,18 @@ type AttachmentUploadPart struct {
 }
 
 type AttachmentVariant struct {
-	AttachmentID     string    `json:"attachment_id"`
-	VariantType      string    `json:"variant_type"`
-	MimeType         string    `json:"mime_type"`
-	ByteSize         int64     `json:"byte_size"`
-	Width            *int      `json:"width,omitempty"`
-	Height           *int      `json:"height,omitempty"`
-	StorageBucket    string    `json:"storage_bucket"`
-	StorageKey       string    `json:"storage_key"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
+	AttachmentID      string    `json:"attachment_id"`
+	VariantType       string    `json:"variant_type"`
+	MimeType          string    `json:"mime_type"`
+	ByteSize          int64     `json:"byte_size"`
+	SHA256            *string   `json:"sha256,omitempty"`
+	GenerationVersion *int      `json:"generation_version,omitempty"`
+	Width             *int      `json:"width,omitempty"`
+	Height            *int      `json:"height,omitempty"`
+	StorageBucket     string    `json:"-"`
+	StorageKey        string    `json:"-"`
+	CreatedTimestamp  time.Time `json:"created_timestamp"`
+	UpdatedTimestamp  time.Time `json:"updated_timestamp"`
 }
 
 type ResourceAttachment struct {
@@ -590,13 +593,13 @@ type NodeView struct {
 	Projections          []NodeProjection          `json:"projections"`
 	Relationships        []NodeRelationship        `json:"relationships"`
 	LogicGateAssignments []NodeLogicGateAssignment `json:"logic_gate_assignments"`
+	GVICAssignments      []ResourceGVICAssignment  `json:"gvic_assignments"`
 	ContentChanges       []NodeContentChange       `json:"content_changes"`
 	InformationCount     int                       `json:"information_count"`
 	ProjectionCount      int                       `json:"projection_count"`
 	RelationshipsCount   int                       `json:"relationships_count"`
 	AssignmentCount      int                       `json:"assignment_count"`
 	ContentChangeCount   int                       `json:"content_change_count"`
-	EditorSequence       int64                     `json:"editor_sequence,omitempty"`
 	EffectiveAccessFlags
 }
 

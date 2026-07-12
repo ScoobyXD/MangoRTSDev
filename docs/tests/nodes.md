@@ -112,6 +112,10 @@ N83 - Node text-block save controllers are scoped by company and node. Closing a
 N84 - External node text-block hydration preserves the logical selection while the document or a shared toolbar control owns focus. Remote content received while the document itself is focused is deferred until blur; an untouched local DOM accepts it without flushing stale HTML, while a locally edited conflict keeps and saves the local version and shows a conflict notice.
 N85 - Focusing a node-attached email reply immediately clears the surrounding text block as the outer formatting target. The outer node toolbar disables its formatting controls, the reply toolbar becomes the only formatting owner, and node navigation tabs remain usable.
 N86 - Opening Metadata, History, or Save Settings hides the node document workspace and prevents toolbar formatting against the hidden editor without unmounting or resetting its text-block layout. Only formatting controls are disabled; editor navigation tabs remain operable.
+N87 - Node saved-version history is not loaded during ordinary node open. It loads on Save Settings activation, preserves manual save/restore behavior, and is cleared/reloaded for the current company/node target rather than blocking initial editor content.
+N88 - Node-open reference reads use StrictMode-safe shared ownership: node resource-attachment metadata is one node-scope cached request with explicit mutation invalidation, project relationships are singleflight/cached with invalidation before relationship refresh, and company accounts/users/group reference data is shared across editor instances with mutation/auth-scope invalidation.
+N89 - `GET /v2/nodes/{node_id}/view` authorizes first, then reads dedicated shared and actor-specific node-view versions to calculate a salted ETag before building the consolidated payload. A matching request returns `304` without loading/serializing/hash-building the full view, without reading `event_rows`, and without writing seen state; ordinary `200` reads are also write-free.
+N90 - Establishing the first-clean-view projection baseline is an explicit idempotent bulk node-changes command outside the canonical GET. It anchors only current text projections that have no unseen other-actor change, derives each baseline from the observed projection update timestamp rather than wall-clock time, uses one bulk repository operation, and never consumes genuinely unseen changes. Clean-anchor snapshot writes do not bump the actor node-view version because the response body is unchanged. The frontend tracks a bounded last-success ETag per cache key and retries failures with bounded same-generation backoff.
 
 ## Scenarios
 
@@ -284,6 +288,7 @@ Given:
 Expected:
 - Regular typing updates `node_projection_table` for the current text box state instead of appending repeated full-document rows to `node_information`.
 - Save Settings shows saved versions with save kind, saving user, timestamp, and text box count.
+- Saved-version history is requested only after Save Settings is activated; opening the node document does not request it.
 - Manual Save first flushes pending projection updates, then writes one saved-version batch to `node_information`.
 - Automatic saved-version creation does not run in the background during the emergency slowness fix.
 - Restoring a saved version asks for confirmation and replaces the current node editor projection with the selected saved content.
@@ -518,3 +523,28 @@ Expected:
 - The deleted text-box projection stays deleted. Its completed attachment remains node-owned, appears in the node-wide list with deleted-origin context, and is previewable/downloadable through the authenticated Mango content path.
 - The failed sibling remains a retryable/failed progress item and does not remove the completed attachment.
 - Normal counts change only after successful completion and the shared node metadata query refreshes once for that completion, not on each part.
+
+### Scenario N-S17: Cheap Read-Only Node View And Shared Open Resources
+
+Business logic covered:
+- N51
+- N65
+- N66
+- N69
+- N81
+- N87
+- N88
+- N89
+- N90
+
+Given:
+- React StrictMode opens the same node in more than one editor instance.
+- The client has a current node-view ETag and the node contains text boxes with and without unseen other-actor changes.
+
+Expected:
+- Initial document rendering does not wait for saved-version history, and Save Settings activation loads that history once for the active target.
+- Attachment metadata, project relationships, company accounts, and company people/group references coalesce compatible in-flight reads and reuse authorized cached results.
+- Attachment and relationship mutations invalidate their cache before emitting a refresh; account/user/group mutations invalidate shared reference data before their update event.
+- The backend authorizes the conditional node view, reads one indexed shared/user version pair, and returns `304` before consolidated payload construction.
+- Neither a node-view `200` nor `304` writes projection seen snapshots or reads editor/event-row sequence state.
+- The separate clean-anchor command uses one bulk write, anchors clean text projections at their observed update timestamps, leaves unseen/later changes present, does not churn the view ETag for baseline-only writes, and is issued at most once for the successful view cache key/ETag with bounded retry after failure.

@@ -24,6 +24,8 @@ AST9 - The legacy inline-attachment migration may begin with already-decoded byt
 
 AST10 - Postgres stores durable metadata, checksum provenance, intent/part state, and resource links only. It never stores presigned URLs, S3 upload IDs exposed to clients, browser file bytes, base64, or data URLs.
 
+AST11 - Static JPEG/PNG display and thumbnail generation begins only after original upload finalization/linking commits. It is bounded and best-effort, uses exact-length seekable derivative uploads plus content-addressed immutable keys, records derivative SHA/version metadata idempotently, and processes/persists each derivative independently. It never turns derivative failure into original-upload failure. Unsupported/animated, non-default JPEG-orientation, or over-limit images remain on original fallback.
+
 ## Scenarios
 
 ### Scenario AST-S1: Browser Upload Bypasses Mango API Bytes
@@ -64,6 +66,16 @@ Given invalid dimensions, invalid source/relationship kinds, a failed read, a ne
 - The request fails clearly.
 - No S3 request is issued when validation can fail before storage.
 - No attachment metadata or resource link is created.
+
+### Scenario AST-S5: Post-Finalization Image Derivatives
+
+Given a supported still image, unsupported/animated image, and a completed-intent replay:
+
+- Original attachment/link finalization completes before any decode, encode, derivative storage write, or variant upsert.
+- Supported static JPEG/PNG processing is magic-sniffed before a full bounded source copy, then capped by source bytes, dimensions, pixels, output size, timeout, and concurrency one; display fits within 2048x2048 and thumbnail within 384x384 without upscaling. A JPEG whose EXIF orientation is not safely normalized is skipped.
+- GIF/WebP/APNG/SVG/AVIF/HEIC and over-limit inputs skip generation and retain original fallback.
+- First completion and completed replay may invoke the idempotent ensure service, so a prior best-effort failure can retry.
+- Timeout, decode, encode, storage, or upsert failure is logged with a bounded reason and the completed original response still succeeds; one derivative's failure cannot discard the successfully stored/upserted sibling.
 
 ## Required Automated Coverage
 

@@ -42,6 +42,8 @@ RW31 - Arena HTTP reads accept an `AbortSignal`; selecting another Logic Gate ca
 RW32 - A `kanban.changed` hint on the mounted `board:{board_id}` scope coalesces one targeted canonical `/work` revalidation. There is no browser projection delta, sequence, replay, or broad workspace refetch.
 RW33 - One committed card-visible change publishes only to each affected mounted board scope, and one logical change cannot start duplicate board revalidations.
 RW34 - `304 Not Modified` reuses the current complete snapshot without clearing board state or creating duplicate render churn.
+RW35 - A conditional `GET /v2/nodes/{node_id}/view` performs effective Node authorization first, then reads one dedicated shared node-view version and one actor-specific version. Its ETag includes company, node, actor, effective permission flags, response-contract salt, and both versions; a match returns `304` before `GetNodeView`, serialization, body hashing, object reads, or seen-state writes and never depends on `event_rows`.
+RW36 - Attachment content conditionals remain HTTP-authorized: one repository read selects attachment, requested-or-original variant, and active links; specialized resource checks authorize those links; and a strong validator match returns private `304` before the single object-storage read.
 
 ## Scenarios
 
@@ -299,3 +301,19 @@ Expected:
 - Duplicate hints do not start a second concurrent revalidation.
 - No projection-delta sequence or replay path exists.
 - A `304` keeps the complete snapshot unchanged, and a `200` body contains no redundant collections.
+
+### Scenario RW-S13: Conditional Node View And Attachment Content
+
+Business logic covered:
+- RW24
+- RW35
+- RW36
+
+Given:
+- An authorized client has current ETags for a consolidated Node view and one attachment variant.
+
+Expected:
+- Each conditional request reauthorizes the caller before evaluating its validator.
+- The node-view match reads dedicated shared/user version rows and returns `304` without building the consolidated response or writing seen state.
+- The attachment match uses the minimal attachment/link/variant read and returns `304` before S3/object storage.
+- Neither route uses `event_rows` as canonical version state or exposes object-storage keys.

@@ -70,6 +70,7 @@ type Server struct {
 	nylasClient                             NylasClient
 	nylasConfig                             NylasConfig
 	attachmentStorage                       AttachmentObjectStorage
+	attachmentVariantEnsurer                AttachmentImageVariantEnsurer
 	attachmentDirectUpload                  attachmentDirectUploadConfig
 	attachmentUploadCleanupCancel           context.CancelFunc
 	attachmentUploadCleanupDisabled         bool
@@ -89,6 +90,7 @@ type ServerOptions struct {
 	NylasClient                             NylasClient
 	NylasConfig                             NylasConfig
 	AttachmentStorage                       AttachmentObjectStorage
+	AttachmentVariantEnsurer                AttachmentImageVariantEnsurer
 	RealtimeTicketSecret                    string
 	MaxRequestBodyBytes                     int64
 	LegacyMapRoutesEnabled                  bool
@@ -193,10 +195,14 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		nylasClient:                             options.NylasClient,
 		nylasConfig:                             options.NylasConfig,
 		attachmentStorage:                       options.AttachmentStorage,
+		attachmentVariantEnsurer:                options.AttachmentVariantEnsurer,
 		attachmentDirectUpload:                  attachmentDirectUploadConfigFromEnv(),
 		attachmentUploadCleanupDisabled:         options.DisableAttachmentUploadCleanup,
 		maxBodyBytes:                            options.MaxRequestBodyBytes,
 		legacyMapRoutesEnabled:                  options.LegacyMapRoutesEnabled || isTruthyQueryValue(os.Getenv("MANGORTS_ENABLE_LEGACY_MAP_ROUTES")),
+	}
+	if server.attachmentVariantEnsurer == nil && server.attachmentStorage != nil {
+		server.attachmentVariantEnsurer = repositoryAttachmentImageVariantEnsurer{repo: repo, storage: server.attachmentStorage}
 	}
 	server.initializeWorkspaceDerivedDomainEventCheckpoints(context.Background())
 	server.startAttachmentUploadCleanup()

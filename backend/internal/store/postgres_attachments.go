@@ -6,6 +6,7 @@ import (
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
+	"time"
 )
 
 const attachmentSelectColumns = `
@@ -42,6 +43,20 @@ ra.relationship_kind,
 coalesce(ra.created_by_user_id::text, ''),
 ra.created_timestamp,
 ra.deleted_timestamp`
+
+const attachmentVariantSelectColumns = `
+v.attachment_id::text,
+v.variant_type,
+v.mime_type,
+v.byte_size,
+v.sha256,
+v.generation_version,
+v.width,
+v.height,
+v.storage_bucket,
+v.storage_key,
+v.created_timestamp,
+v.updated_timestamp`
 
 func (r *PostgresRepo) CreateAttachmentWithResourceLink(input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error) {
 	attachment, link, err := normalizeAttachmentCreateInput(input)
@@ -168,7 +183,7 @@ where a.company_id=$1::uuid
 	return attachment, nil
 }
 
-func (r *PostgresRepo) GetAttachmentVariant(companyID, attachmentID, variantType string) (domain.AttachmentVariant, error) {
+func (r *PostgresRepo) GetAttachmentVariant(ctx context.Context, companyID, attachmentID, variantType string) (domain.AttachmentVariant, error) {
 	companyID = strings.TrimSpace(companyID)
 	attachmentID = cleanUUIDText(attachmentID)
 	variantType = NormalizeAttachmentVariantType(variantType)
@@ -176,7 +191,9 @@ func (r *PostgresRepo) GetAttachmentVariant(companyID, attachmentID, variantType
 		return domain.AttachmentVariant{}, ErrInvalid
 	}
 	if variantType == AttachmentVariantOriginal {
-		attachment, err := r.GetAttachment(companyID, attachmentID)
+		attachment, err := scanAttachment(r.db.QueryRowContext(ctx, `
+select `+attachmentSelectColumns+` from attachments a
+where a.company_id=$1::uuid and a.attachment_id=$2::uuid and a.deleted_timestamp is null`, companyID, attachmentID))
 		if err != nil {
 			return domain.AttachmentVariant{}, err
 		}
@@ -190,31 +207,207 @@ func (r *PostgresRepo) GetAttachmentVariant(companyID, attachmentID, variantType
 			StorageBucket:    attachment.StorageBucket,
 			StorageKey:       attachment.StorageKey,
 			CreatedTimestamp: attachment.CreatedTimestamp,
+			UpdatedTimestamp: attachment.CreatedTimestamp,
 		}, nil
 	}
-	variant, err := scanAttachmentVariant(r.db.QueryRowContext(context.Background(), `
-select
-  v.attachment_id::text,
-  v.variant_type,
-  v.mime_type,
-  v.byte_size,
-  v.width,
-  v.height,
-  v.storage_bucket,
-  v.storage_key,
-  v.created_timestamp
+	variant, err := scanAttachmentVariant(r.db.QueryRowContext(ctx, `
+select `+attachmentVariantSelectColumns+`
 from attachment_variants v
 join attachments a on a.attachment_id = v.attachment_id
 where a.company_id=$1::uuid
   and a.attachment_id=$2::uuid
   and a.deleted_timestamp is null
-  and v.variant_type=$3`,
-		companyID, attachmentID, variantType,
+  and v.variant_type=$3
+  and v.sha256 is not null
+  and v.generation_version=$4`,
+		companyID, attachmentID, variantType, AttachmentVariantGenerationVersion,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.AttachmentVariant{}, ErrNotFound
 	}
 	return variant, err
+}
+
+func (r *PostgresRepo) ReadAttachmentContent(ctx context.Context, companyID, attachmentID, variantType string) (AttachmentContentRead, error) {
+	companyID = strings.TrimSpace(companyID)
+	attachmentID = cleanUUIDText(attachmentID)
+	variantType = NormalizeAttachmentVariantType(variantType)
+	if companyID == "" || attachmentID == "" || variantType == "" {
+		return AttachmentContentRead{}, ErrInvalid
+	}
+	rows, err := r.db.QueryContext(ctx, `
+select
+  a.company_id::text,
+  a.attachment_id::text,
+  a.original_filename,
+  a.mime_type,
+  a.sha256,
+  a.byte_size,
+  a.storage_bucket,
+  a.storage_key,
+  a.created_timestamp,
+  a.created_timestamp,
+  $3,
+  case when v.attachment_id is null then 'original' else v.variant_type end,
+  coalesce(v.mime_type, a.mime_type),
+  coalesce(v.byte_size, a.byte_size),
+  case when v.attachment_id is null then a.sha256 else coalesce(v.sha256, '') end,
+  coalesce(v.generation_version, 0),
+  coalesce(v.width, a.original_width),
+  coalesce(v.height, a.original_height),
+  coalesce(v.storage_bucket, a.storage_bucket),
+  coalesce(v.storage_key, a.storage_key),
+  coalesce(v.created_timestamp, a.created_timestamp),
+  coalesce(v.updated_timestamp, a.created_timestamp),
+  `+resourceAttachmentSelectColumns+`
+from attachments a
+left join attachment_variants v
+  on v.attachment_id=a.attachment_id
+ and v.variant_type=$3
+ and $3 <> 'original'
+	and v.sha256 is not null
+	and v.generation_version=1
+join resource_attachments ra
+  on ra.company_id=a.company_id
+ and ra.attachment_id=a.attachment_id
+ and ra.deleted_timestamp is null
+where a.company_id=$1::uuid
+  and a.attachment_id=$2::uuid
+  and a.deleted_timestamp is null
+order by ra.created_timestamp desc, ra.resource_attachment_id desc`, companyID, attachmentID, variantType)
+	if err != nil {
+		return AttachmentContentRead{}, err
+	}
+	defer rows.Close()
+	var result AttachmentContentRead
+	for rows.Next() {
+		var link domain.ResourceAttachment
+		var width, height sql.NullInt64
+		var linkDeleted sql.NullTime
+		if err := rows.Scan(
+			&result.CompanyID, &result.AttachmentID, &result.OriginalFilename, &result.OriginalMimeType, &result.OriginalSHA256,
+			&result.OriginalByteSize, &result.OriginalStorageBucket, &result.OriginalStorageKey, &result.OriginalCreatedTimestamp,
+			&result.OriginalUpdatedTimestamp,
+			&result.RequestedVariant, &result.ServedVariant, &result.MimeType, &result.ByteSize, &result.SHA256,
+			&result.GenerationVersion, &width, &height, &result.StorageBucket, &result.StorageKey, &result.CreatedTimestamp,
+			&result.UpdatedTimestamp,
+			&link.ResourceAttachmentID, &link.CompanyID, &link.ResourceType, &link.ResourceID, &link.AttachmentID,
+			&link.InformationID, &link.MessageID, &link.EditorSurface, &link.RelationshipKind, &link.CreatedByUserID,
+			&link.CreatedTimestamp, &linkDeleted,
+		); err != nil {
+			return AttachmentContentRead{}, err
+		}
+		if width.Valid {
+			value := int(width.Int64)
+			result.Width = &value
+		}
+		if height.Valid {
+			value := int(height.Int64)
+			result.Height = &value
+		}
+		result.ResourceLinks = append(result.ResourceLinks, link)
+	}
+	if err := rows.Err(); err != nil {
+		return AttachmentContentRead{}, err
+	}
+	if result.AttachmentID == "" {
+		return AttachmentContentRead{}, ErrNotFound
+	}
+	return result, nil
+}
+
+func (r *PostgresRepo) UpsertAttachmentVariants(ctx context.Context, companyID string, inputs []AttachmentVariantInput) ([]domain.AttachmentVariant, error) {
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" || len(inputs) == 0 {
+		return nil, ErrInvalid
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	for _, input := range inputs {
+		attachmentID := cleanUUIDText(input.AttachmentID)
+		variantType := NormalizeAttachmentVariantType(input.VariantType)
+		mimeType := strings.TrimSpace(input.MimeType)
+		bucket := strings.TrimSpace(input.StorageBucket)
+		key := strings.TrimSpace(input.StorageKey)
+		if attachmentID == "" || variantType == "" || variantType == AttachmentVariantOriginal || mimeType == "" ||
+			input.ByteSize < 0 || bucket == "" || key == "" || !validAttachmentVariantGeneration(input) {
+			return nil, ErrInvalid
+		}
+		created := input.CreatedTimestamp
+		if created.IsZero() {
+			created = time.Now().UTC()
+		}
+		result, err := tx.ExecContext(ctx, `
+insert into attachment_variants (
+  attachment_id, variant_type, mime_type, byte_size, sha256, generation_version,
+  width, height, storage_bucket, storage_key, created_timestamp, updated_timestamp
+)
+select $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12
+from attachments a
+where a.company_id=$1::uuid and a.attachment_id=$2::uuid and a.deleted_timestamp is null
+on conflict (attachment_id, variant_type) do update
+set mime_type=excluded.mime_type,
+    byte_size=excluded.byte_size,
+    sha256=excluded.sha256,
+    generation_version=excluded.generation_version,
+    width=excluded.width,
+    height=excluded.height,
+    storage_bucket=excluded.storage_bucket,
+    storage_key=excluded.storage_key,
+    updated_timestamp=excluded.updated_timestamp
+where (attachment_variants.mime_type, attachment_variants.byte_size, attachment_variants.sha256,
+       attachment_variants.generation_version, attachment_variants.width, attachment_variants.height,
+       attachment_variants.storage_bucket, attachment_variants.storage_key)
+  is distinct from
+      (excluded.mime_type, excluded.byte_size, excluded.sha256,
+       excluded.generation_version, excluded.width, excluded.height,
+       excluded.storage_bucket, excluded.storage_key)`,
+			companyID, attachmentID, variantType, mimeType, input.ByteSize, nullableStringPointer(input.SHA256),
+			nullableInt(input.GenerationVersion), nullableInt(input.Width), nullableInt(input.Height), bucket, key, created)
+		if err != nil {
+			return nil, err
+		}
+		if count, err := result.RowsAffected(); err != nil {
+			return nil, err
+		} else if count == 0 {
+			var exists bool
+			if err := tx.QueryRowContext(ctx, `select exists(select 1 from attachments where company_id=$1::uuid and attachment_id=$2::uuid and deleted_timestamp is null)`, companyID, attachmentID).Scan(&exists); err != nil {
+				return nil, err
+			}
+			if !exists {
+				return nil, ErrNotFound
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	items := make([]domain.AttachmentVariant, 0, len(inputs))
+	for _, input := range inputs {
+		item, err := r.GetAttachmentVariant(ctx, companyID, input.AttachmentID, input.VariantType)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func validAttachmentVariantGeneration(input AttachmentVariantInput) bool {
+	if input.SHA256 != nil && !validRawSHA256(strings.TrimSpace(*input.SHA256)) {
+		return false
+	}
+	return input.GenerationVersion == nil || *input.GenerationVersion > 0
+}
+
+func nullableStringPointer(value *string) any {
+	if value == nil {
+		return nil
+	}
+	return strings.TrimSpace(*value)
 }
 
 func (r *PostgresRepo) ListAttachmentResourceLinks(companyID, attachmentID string) ([]domain.ResourceAttachment, error) {
@@ -287,13 +480,46 @@ order by ra.created_timestamp desc, ra.resource_attachment_id desc`,
 		if err != nil {
 			return nil, err
 		}
-		variants, err := r.listAttachmentVariants(context.Background(), companyID, attachment.AttachmentID)
+		link.Attachment = &attachment
+		items = append(items, link)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	variants, err := r.listResourceAttachmentVariants(context.Background(), companyID, resourceType, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range items {
+		items[index].Attachment.Variants = variants[items[index].AttachmentID]
+	}
+	return items, nil
+}
+
+func (r *PostgresRepo) listResourceAttachmentVariants(ctx context.Context, companyID, resourceType, resourceID string) (map[string][]domain.AttachmentVariant, error) {
+	rows, err := r.db.QueryContext(ctx, `
+select `+attachmentVariantSelectColumns+`
+from attachment_variants v
+join attachments a on a.attachment_id=v.attachment_id
+where a.company_id=$1::uuid
+  and a.deleted_timestamp is null
+  and exists (
+    select 1 from resource_attachments ra
+    where ra.company_id=$1::uuid and ra.resource_type=$2 and ra.resource_id=$3
+      and ra.attachment_id=v.attachment_id and ra.deleted_timestamp is null
+  )
+order by v.attachment_id, v.variant_type`, companyID, resourceType, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make(map[string][]domain.AttachmentVariant)
+	for rows.Next() {
+		item, err := scanAttachmentVariant(rows)
 		if err != nil {
 			return nil, err
 		}
-		attachment.Variants = variants
-		link.Attachment = &attachment
-		items = append(items, link)
+		items[item.AttachmentID] = append(items[item.AttachmentID], item)
 	}
 	return items, rows.Err()
 }
@@ -457,16 +683,7 @@ from inserted ra`,
 
 func (r *PostgresRepo) listAttachmentVariants(ctx context.Context, companyID, attachmentID string) ([]domain.AttachmentVariant, error) {
 	rows, err := r.db.QueryContext(ctx, `
-select
-  v.attachment_id::text,
-  v.variant_type,
-  v.mime_type,
-  v.byte_size,
-  v.width,
-  v.height,
-  v.storage_bucket,
-  v.storage_key,
-  v.created_timestamp
+select `+attachmentVariantSelectColumns+`
 from attachment_variants v
 join attachments a on a.attachment_id = v.attachment_id
 where a.company_id=$1::uuid
@@ -534,6 +751,8 @@ func scanAttachment(row interface{ Scan(dest ...any) error }) (domain.Attachment
 
 func scanAttachmentVariant(row interface{ Scan(dest ...any) error }) (domain.AttachmentVariant, error) {
 	var item domain.AttachmentVariant
+	var sha sql.NullString
+	var generation sql.NullInt64
 	var width sql.NullInt64
 	var height sql.NullInt64
 	err := row.Scan(
@@ -541,12 +760,23 @@ func scanAttachmentVariant(row interface{ Scan(dest ...any) error }) (domain.Att
 		&item.VariantType,
 		&item.MimeType,
 		&item.ByteSize,
+		&sha,
+		&generation,
 		&width,
 		&height,
 		&item.StorageBucket,
 		&item.StorageKey,
 		&item.CreatedTimestamp,
+		&item.UpdatedTimestamp,
 	)
+	if sha.Valid {
+		value := sha.String
+		item.SHA256 = &value
+	}
+	if generation.Valid {
+		value := int(generation.Int64)
+		item.GenerationVersion = &value
+	}
 	if width.Valid {
 		value := int(width.Int64)
 		item.Width = &value

@@ -6,6 +6,7 @@ import {
   type Account,
   type AccountsUpdatedDetail,
 } from "./accountsApi.js";
+import { isAbortError } from "../api/requestJSON.js";
 
 type UseCompanyAccountsResult = {
   accounts: Account[];
@@ -40,6 +41,7 @@ export function useCompanyAccounts(companyID: string, enabled = true): UseCompan
       })
       .catch((loadError) => {
         if (requestIDRef.current !== requestID) return;
+        if (isAbortError(loadError)) return;
         setError(loadError instanceof Error ? loadError.message : "Failed to load accounts");
         setAccounts([]);
       })

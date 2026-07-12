@@ -62,9 +62,15 @@ ATT29 - Upload intents and multipart part state are durable and idempotent. Crea
 ATT30 - Only completed intents create/list permanent attachments. Node-level progress preserves filename/extension/size, byte progress, cancel/retry, and the states preparing, uploading, retrying, completing, complete, canceled, and failed. Each selected file is independent and one failure cannot discard completed siblings.
 ATT31 - Server-side streaming PutObject, including non-seekable producer streams, remains available for incoming email, provider imports, migrations, and backend jobs. Removing the old browser multipart-byte path must not remove or weaken backend-originated streaming or authenticated GetObject reads.
 ATT32 - Pasting an existing attachment-backed editor image into another unified rich editor target must create the destination resource's authorized `inline_image` link before inserting the image reference. An asynchronous upload or existing-attachment link may commit only while its originating editor root, document target, attachment resource context, and saved range are still current; switching targets or unmounting must not insert it into the next document.
-ATT33 - Incoming email body text and HTML never wait for inline attachment bytes. CID images resolve independently through authenticated Mango/provider reads, and a slow, failed, or aborted image leaves the body readable.
-ATT34 - Collapsed historical email cards issue no attachment-content reads. Expanded-card reads are abortable when scope, thread, message, or attachment changes and release transient object URLs during cleanup.
-ATT35 - Initial body detail carries provider attachment metadata and only the inline content required by concrete CID recovery; ordinary body-only or ordinary file-attachment detail does not fetch or embed raw MIME bytes. Calendar RSVP may still authenticate and parse raw MIME at the action boundary.
+ATT33 - During one browser page/app session, authenticated attachment content uses one shared Blob singleflight/cache across mounted editor windows, keyed by API base, company, auth-session generation, attachment ID, and requested variant. Failures evict immediately; auth generation is checked again before delivery so stale in-flight prior-user data is rejected; completed cache entries obey expiry/LRU byte bounds and large originals are not retained. Object URLs are never shared cache values: every consumer creates and revokes its own URL. One consumer abort only detaches that consumer, and the last-consumer upstream abort is deferred through the StrictMode cleanup/setup turn so a replay owner can attach without starting a duplicate GET.
+ATT34 - Each mounted rich-editor DOM has exactly one attachment-image hydration owner for each document update. Hydration observes image frames relative to the editor's nested scrollport with a near-viewport margin, schedules visible display-image reads through one bounded priority queue, marks queued/in-flight frames so duplicate owners cannot race, and returns cleanup that detaches observers/tasks and revokes every URL created for that DOM before replacement, context change, or unmount. A failed frame is unscheduled and re-observed with bounded retry/backoff instead of remaining permanently unhydrated.
+ATT35 - A node uses one StrictMode-safe resource-attachment metadata singleflight/cache for its node-wide and per-text-box attachment lists. The canonical node-scope response is reused by every list, is loaded without one variant query per attachment, and is explicitly invalidated before upload completion, link, unlink, or another local attachment refresh signal can reload it.
+ATT36 - Successful supported still-image uploads create repository-backed high-quality `display` and small `thumbnail` variants after the original attachment and resource link have committed. Generation is bounded, best-effort, idempotent, and retryable on completed-intent replay; it currently server-sniffs static JPEG/PNG only, never upscales, and safely leaves GIF/WebP/APNG/SVG/AVIF/HEIC or over-limit inputs on authorized original fallback. Derivative failure must never change a completed original into a failed upload.
+ATT37 - Each attachment variant row owns nullable content SHA-256, generation version, and update time while `attachments.sha256` remains the original-file hash. Derivative object keys include the generated digest and are immutable for that content. The content route performs one minimal repository read for attachment, requested-or-original variant, and active authorization links; authorizes those links; emits strong validators only for verified current rows plus `Cache-Control: private, max-age=0, no-cache, must-revalidate` and `X-Content-Type-Options: nosniff`; validates object length against repository metadata; and returns a matching `304` before object storage. A legacy/stale or missing derivative falls back once to the authorized original without exposing a bucket or key.
+ATT38 - Existing supported images are repaired through the human-only `mango-attachment-variants` repository command. It requires company scope and an explicit limit, defaults to dry-run, requires both apply and a scary confirmation string to write, runs with concurrency one, and resumes deterministically with `-after-attachment-id` plus a reported next cursor. Apply reports failures and exits nonzero when any item failed. Current-generation rows are included so storage existence checks can heal missing objects. Normal tests cover the command without any agent running it against dev or production storage; the database-agent boundary verifier does not authorize this writer/S3 operation.
+ATT39 - Incoming email body text and HTML never wait for inline attachment bytes. CID images resolve independently through authenticated Mango/provider reads, and a slow, failed, or aborted image leaves the body readable.
+ATT40 - Collapsed historical email cards issue no attachment-content reads. Expanded-card reads are abortable when scope, thread, message, or attachment changes and release transient object URLs during cleanup.
+ATT41 - Initial body detail carries provider attachment metadata and only the inline content required by concrete CID recovery; ordinary body-only or ordinary file-attachment detail does not fetch or embed raw MIME bytes. Calendar RSVP may still authenticate and parse raw MIME at the action boundary.
 
 ## Scenarios
 
@@ -105,6 +111,7 @@ Expected:
 - The shared rich-editor image path uploads the file through the Mango attachment API.
 - The saved editor/email body stores an attachment reference, not a data URL or base64 blob.
 - The first rendered inline image is high quality.
+- Inline image hydration has one DOM owner, starts only when a frame is visible or near-visible, coalesces repeated display reads by attachment/variant/auth generation, and revokes each consumer-owned URL during document cleanup.
 - Clicking an email-body image selects it and exposes an authenticated download action; double-click/fullscreen opens the original or highest-quality available variant.
 - In editable content, image selection establishes a usable caret immediately before the image, and the same drag and resize behavior works in node, Logic Gate, project, compose, and reply editors.
 - Copying an attachment-backed image creates the destination resource link before the reference is inserted; a stale asynchronous completion does not mutate a different or unmounted editor target.
@@ -129,6 +136,7 @@ Expected:
 - When a multi-file upload only partly succeeds, every successfully uploaded attachment remains linked, visible, and downloadable; the failed files are reported without discarding the successful results.
 - Upload completion is scoped to the authenticated company/actor and durable node resource. Deleting the origin text box does not invalidate node ownership or recreate the projection; completion still succeeds when the node exists and current node edit authorization passes. Node deletion or permission loss rejects completion and cleans up the unfinalized object.
 - Each node text box exposes a list/count containing only file attachments linked to that text block, while one node-wide list/count contains the union across all text boxes without issuing one attachment-list request per text box.
+- React StrictMode remounts and multiple node-window consumers share one node-scope metadata request; upload completion, linking, and unlinking invalidate that cache before the next refresh.
 - Node-wide and per-text-box rows show a recognizable image, spreadsheet, document, presentation, PDF, archive, text/code, audio, video, or generic-file icon. A recognized final extension takes precedence over an unhelpful MIME value; unknown types use the generic fallback rather than appearing broken.
 - Image rows use visibility observation with a small vertical prefetch margin, so only visible or near-visible rows request bytes; closed menus and off-screen aggregate rows do not fetch thumbnails.
 - A visible image row requests the authenticated `thumbnail` variant first and retries the authenticated `display` variant when that read fails; the backend may resolve a missing variant to the original. Each request is abortable, and the browser revokes temporary object URLs on image failure, dependency change, menu close, or unmount. A failed preview returns to the classified image/file icon instead of breaking the row.
@@ -272,9 +280,9 @@ Business logic covered:
 - ATT24
 - ATT25
 - ATT32
-- ATT33
-- ATT34
-- ATT35
+- ATT39
+- ATT40
+- ATT41
 
 Given:
 - A personal, shared, or node-attached email body contains an inline screenshot referenced by `cid:` or provider attachment metadata.
@@ -314,3 +322,28 @@ Expected:
 - Cancel aborts active browser requests and best-effort aborts the intent. Expired or abandoned objects are cleaned by the application, with AbortIncompleteMultipartUpload lifecycle as a backstop.
 - Completed siblings remain in node lists, while pending/failed/canceled rows remain progress state only and trigger no permanent attachment count.
 - The backend-originated producer still streams through PutObject without a redundant full-file copy.
+
+### Scenario ATT-S12: Variants, Conditional Reads, And Existing-Image Repair
+
+Business logic covered:
+- ATT13
+- ATT21
+- ATT33
+- ATT34
+- ATT35
+- ATT36
+- ATT37
+- ATT38
+
+Given:
+- A static JPEG or PNG completes upload and the same image appears more than once in one or more editor DOMs.
+- A supported image has no current display/thumbnail generation, an unsupported or animated image is opened, and a caller repeats an authorized conditional content request.
+
+Expected:
+- Original metadata/link finalization succeeds before bounded derivative work begins, and derivative failure leaves the original readable.
+- Display and thumbnail are generated and persisted independently with content-addressed immutable keys and idempotent repository upserts; replay or the guarded repair command may retry missing/current-version objects without duplicating variants or discarding a successful sibling.
+- Unsupported, animated, oversized, or over-dimension input is not decoded into a misleading derivative and falls back to the original.
+- Repeated consumers share one Blob request per auth-scoped key while owning separate revocable object URLs; only visible/near-visible frames enter the bounded hydration queue.
+- Authorization runs on every content request. A matching validator returns `304` before S3/object storage, uses private cache semantics and `nosniff`, and never exposes storage identifiers.
+- A derivative row whose object is missing falls back to the original once.
+- Existing-image repair is human-only, dry-run by default, requires company plus limit, reports a deterministic next cursor, cannot apply without the explicit confirmation guard, and exits nonzero after its report when apply has failures.

@@ -67,6 +67,8 @@ ED42 - External hydration preserves the shared logical selection by restoring th
 ED43 - Rich-document persistence queues are target-safe. Logic Gate/root editor saves retain the latest pending request for every target rather than one global overwrite slot; project text-block saves serialize and coalesce the latest full title/document/attachment envelope per block; and node text-block teardown drains every debounced changed block on close or company/node switch before clearing its target-scoped controller. Hidden documents never accept toolbar formatting commands.
 ED44 - Node document typing and Logic Gate document typing use durable HTTP autosave only. No whole-document collaboration endpoint, socket scope, collaborator-presence UI, generic editor projection subscription, or full-document socket payload exists; future Huddle CRDT/OT is separate documentation only.
 ED45 - Durable Node chat create/delete publishes compact committed hints only to `chat:node:{node_id}` while that Node chat is mounted. Project chat has no retained realtime subscription, and Node chat publication never uses a generic editor/document or workspace scope.
+ED46 - Attachment-backed image hydration has exactly one owner for each rich-editor DOM/document update across `EditorContent`, `NodeTextBlockEditor`, and `UnifiedRichEditorSurface`. That owner returns cleanup, replaces prior cleanup before DOM replacement or context change, observes near-viewport frames relative to the actual editor scrollport, uses the shared bounded display-load queue/Blob singleflight, retries failed frames with bounded backoff, and revokes every consumer-owned object URL on replacement or unmount.
+ED47 - Node and Logic Gate saved-version history is progressive Save Settings data. The editor must not request history during initial document open; activating Save Settings loads it for the current target while manual Save, confirmed restore, sorting, and status behavior remain unchanged.
 
 ### Required Unified Rich-Editor Surface Inventory
 
@@ -129,6 +131,7 @@ Expected:
 - Mail compose/reply, attached-email reply, and signature adapters expose numbered list, indent, outdent, bullet list, checklist, font size, bold, underline, highlight color, link, and table controls where table insertion is supported.
 - Font size, bold, underline, highlight color, the outline-style dropdown, and table insertion where supported are supplied by the shared editor toolbar control source rather than a compose-only, signature-only, project-only, Logic Gate-only, node-only, or attached-reply-only toolbar implementation.
 - The same visible toolbar styling is used for the format controls wherever the shared toolbar appears.
+- Each target DOM has one attachment hydration owner; duplicate passive/layout hydration effects are forbidden, and cleanup runs before external HTML replacement or unmount.
 - The outline-style dropdown lists Automatic Numbering, Indent Guides, Bullet Points, and Checklist from the shared inventory.
 - Font-size minus/value/plus actions route through the shared formatting helper/controller for selected text and sticky collapsed-caret formatting.
 - Toolbar focus changes do not discard the editor range; Bold and Underline toggle off on their second activation; font state follows the caret, selection, or pending collapsed-caret format; and highlight state follows the selected range.
@@ -1093,3 +1096,22 @@ Expected:
 - Typing or pressing Space inserts content before the image.
 - Dragging the image body still moves it, dragging an edge/corner still resizes it, Delete/Backspace still removes a selected image, and double-click still opens preview.
 - The behavior is identical in node, Logic Gate, project, My Triage, Shared Triage, and attached-email reply editors.
+
+### Scenario ED-S9: Single Hydration Ownership And Progressive Save History
+
+Business logic covered:
+- ED26
+- ED38
+- ED42
+- ED46
+- ED47
+
+Given:
+- A document contains repeated attachment-backed images and mounts under React StrictMode.
+- The user opens the editor document, later activates Save Settings, then switches document targets.
+
+Expected:
+- One hydration owner observes and schedules each unique visible/near-visible attachment+variant load; passive and external-value paths do not race a second hydration pass.
+- Compatible consumers share Blob work but create and revoke their own object URLs.
+- Replacing external HTML, switching attachment/auth context, or unmounting runs the previous hydration cleanup before new work can mutate the DOM.
+- Opening the document does not load saved versions. Activating Save Settings loads the current target's history without changing manual save or restore behavior.

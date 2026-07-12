@@ -1,4 +1,4 @@
-import { apiFetchJSON } from "../../auth/cognitoAuth.js";
+import { apiFetchJSON, getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 
 export const EVENT_ACCOUNTS_UPDATED = "mangorts:accounts-updated";
 
@@ -38,6 +38,38 @@ export type AccountsUpdatedDetail = {
   companyID?: string;
 };
 
+type CompanyAccountsCacheEntry = {
+  authGeneration: number;
+  expiresAt: number;
+  value?: Account[];
+  inflight?: Promise<Account[]>;
+};
+
+const COMPANY_ACCOUNTS_CACHE_TTL_MS = 30_000;
+const companyAccountsCache = new Map<string, CompanyAccountsCacheEntry>();
+const companyAccountsGeneration = new Map<string, number>();
+
+function readCompanyAccountsGeneration(companyID: string): number {
+  return companyAccountsGeneration.get(companyID) ?? 0;
+}
+
+function cloneAccounts(accounts: readonly Account[]): Account[] {
+  return accounts.map((account) => ({ ...account }));
+}
+
+export function invalidateCompanyAccountsCache(companyID = ""): void {
+  const cleanCompanyID = companyID.trim();
+  if (!cleanCompanyID) {
+    for (const companyKey of new Set([...companyAccountsCache.keys(), ...companyAccountsGeneration.keys()])) {
+      companyAccountsGeneration.set(companyKey, readCompanyAccountsGeneration(companyKey) + 1);
+    }
+    companyAccountsCache.clear();
+    return;
+  }
+  companyAccountsGeneration.set(cleanCompanyID, readCompanyAccountsGeneration(cleanCompanyID) + 1);
+  companyAccountsCache.delete(cleanCompanyID);
+}
+
 function query(params: Record<string, string | number | undefined>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -48,6 +80,7 @@ function query(params: Record<string, string | number | undefined>): string {
 }
 
 export function emitAccountsUpdated(companyID: string): void {
+  invalidateCompanyAccountsCache(companyID);
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent<AccountsUpdatedDetail>(EVENT_ACCOUNTS_UPDATED, {
     detail: { companyID: companyID.trim() },
@@ -81,9 +114,45 @@ export function entityMatchesAccountFilter(entity: AccountBearingEntity | null |
 }
 
 export async function listAccounts(companyID: string): Promise<Account[]> {
-  const params = query({ company_id: companyID.trim() });
-  const payload = await apiFetchJSON<{ accounts?: Account[] }>(`/v1/accounts?${params}`);
-  return sortAccountsByName(payload.accounts ?? []);
+  const cleanCompanyID = companyID.trim();
+  const authGeneration = getAuthSessionCacheGeneration();
+  const invalidationGeneration = readCompanyAccountsGeneration(cleanCompanyID);
+  const cached = companyAccountsCache.get(cleanCompanyID);
+  if (cached?.authGeneration === authGeneration && cached.value && cached.expiresAt > Date.now()) {
+    return cloneAccounts(cached.value);
+  }
+  if (cached?.authGeneration === authGeneration && cached.inflight) {
+    const accounts = await cached.inflight;
+    if (getAuthSessionCacheGeneration() !== authGeneration || readCompanyAccountsGeneration(cleanCompanyID) !== invalidationGeneration) {
+      throw new DOMException("The company accounts read became stale.", "AbortError");
+    }
+    return cloneAccounts(accounts);
+  }
+  const params = query({ company_id: cleanCompanyID });
+  const inflight = apiFetchJSON<{ accounts?: Account[] }>(`/v1/accounts?${params}`)
+    .then((payload) => sortAccountsByName(payload.accounts ?? []))
+    .then((accounts) => {
+      if (getAuthSessionCacheGeneration() === authGeneration
+        && readCompanyAccountsGeneration(cleanCompanyID) === invalidationGeneration
+        && companyAccountsCache.get(cleanCompanyID)?.inflight === inflight) {
+        companyAccountsCache.set(cleanCompanyID, {
+          authGeneration,
+          expiresAt: Date.now() + COMPANY_ACCOUNTS_CACHE_TTL_MS,
+          value: cloneAccounts(accounts),
+        });
+      }
+      return accounts;
+    })
+    .catch((cause) => {
+      if (companyAccountsCache.get(cleanCompanyID)?.inflight === inflight) companyAccountsCache.delete(cleanCompanyID);
+      throw cause;
+    });
+  companyAccountsCache.set(cleanCompanyID, { authGeneration, expiresAt: 0, inflight });
+  const accounts = await inflight;
+  if (getAuthSessionCacheGeneration() !== authGeneration || readCompanyAccountsGeneration(cleanCompanyID) !== invalidationGeneration) {
+    throw new DOMException("The company accounts read became stale.", "AbortError");
+  }
+  return cloneAccounts(accounts);
 }
 
 export async function createAccount(input: {

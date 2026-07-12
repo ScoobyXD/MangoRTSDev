@@ -26,6 +26,7 @@ ACC15 - Replacing node account assignments cleans blank IDs, dedupes repeated ac
 ACC16 - Updating node account assignments recomputes node projection dependencies.
 ACC17 - Updating node account assignments does not append `event_rows`; the assignment mutation updates canonical projection dependencies and read versions synchronously.
 ACC18 - Updating node account assignments appends the independently required durable `node_updated` domain fact marked as accounts changed. That fact may produce a compact hint for each affected mounted `board:{board_id}`, but it does not publish a generic workspace browser event.
+ACC19 - Company account reference reads use one company-scoped shared singleflight/cache across editor and project consumers. Every account or folder create/update/delete invalidates that cache before emitting `mangorts:accounts-updated`, so an older in-flight result cannot repopulate stale account labels after a mutation.
 
 ## Scenarios
 
@@ -95,3 +96,19 @@ Expected:
 - Successful replacement recomputes node projection dependencies.
 - Successful replacement appends no `event_rows`; canonical projection dependencies and read versions are current when the response commits.
 - Successful replacement appends the durable `node_updated` domain fact with accounts-changed metadata and can notify only affected mounted board scopes, never a generic workspace browser scope.
+
+### Scenario ACC-S4: Shared Account Reference Cache
+
+Business logic covered:
+- ACC1
+- ACC4
+- ACC19
+
+Given:
+- Multiple mounted editor/project surfaces request the same company's accounts under React StrictMode.
+- An account or account folder is then created, updated, or deleted.
+
+Expected:
+- Compatible reads share one in-flight request and reuse the company-scoped result.
+- The mutation invalidates cached and older in-flight account data before the account-updated event asks consumers to reload.
+- The next read returns the post-mutation sorted account list, and another auth/company scope cannot reuse it.

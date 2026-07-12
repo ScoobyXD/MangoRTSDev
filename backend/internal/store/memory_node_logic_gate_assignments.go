@@ -120,6 +120,7 @@ func (r *MemoryRepo) upsertNodeLogicGateAssignmentLocked(input nodeLogicGateAssi
 	}
 	assignment.UpdatedTimestamp = input.UpdatedTimestamp
 	r.nodeLogicGateAssignments[assignmentKeyValue] = assignment
+	r.bumpNodeViewVersionLocked(input.CompanyID, input.NodeID)
 	return assignment
 }
 
@@ -156,6 +157,7 @@ func (r *MemoryRepo) clearLogicGateAssignmentMemberReferencesLocked(companyID, u
 		}
 		if changed {
 			r.nodeLogicGateAssignments[assignmentKeyValue] = assignment
+			r.bumpNodeViewVersionLocked(assignment.CompanyID, assignment.NodeID)
 		}
 	}
 }
@@ -167,6 +169,7 @@ func (r *MemoryRepo) deleteNodeLogicGateAssignmentForCardLocked(card domain.Kanb
 	}
 	if assignment.CompatibilityBoardID == card.BoardID && assignment.CompatibilityCardID == card.CardID {
 		delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(card.CompanyID, card.NodeID))
+		r.bumpNodeViewVersionLocked(card.CompanyID, card.NodeID)
 	}
 }
 
@@ -174,6 +177,7 @@ func (r *MemoryRepo) deleteNodeLogicGateAssignmentsForLogicGateLocked(companyID,
 	for assignmentKeyValue, assignment := range r.nodeLogicGateAssignments {
 		if assignment.CompanyID == companyID && assignment.LogicGateID == logicGateID {
 			delete(r.nodeLogicGateAssignments, assignmentKeyValue)
+			r.bumpNodeViewVersionLocked(assignment.CompanyID, assignment.NodeID)
 		}
 	}
 }

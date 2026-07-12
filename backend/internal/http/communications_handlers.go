@@ -2141,7 +2141,7 @@ func (s *Server) resolveCommunicationsSendAttachments(w http.ResponseWriter, r *
 			writeError(w, http.StatusInternalServerError, "failed_to_load_attachment")
 			return nil, false
 		}
-		variant, err := s.repo.GetAttachmentVariant(companyID, attachment.AttachmentID, store.AttachmentVariantOriginal)
+		variant, err := s.repo.GetAttachmentVariant(r.Context(), companyID, attachment.AttachmentID, store.AttachmentVariantOriginal)
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_email_attachment")
 			return nil, false

@@ -50,6 +50,46 @@ export type EditorAttachmentImageObjectURLLoader = (
   options?: { signal?: AbortSignal },
 ) => Promise<string>;
 
+type EditorAttachmentHydrationTask = {
+  cancelled: boolean;
+  order: number;
+  priority: number;
+  run: () => Promise<void>;
+};
+
+const EDITOR_ATTACHMENT_HYDRATION_ROOT_MARGIN = "800px 0px";
+const EDITOR_ATTACHMENT_HYDRATION_MAX_CONCURRENCY = 4;
+const EDITOR_ATTACHMENT_HYDRATION_RETRY_DELAYS_MS = [100, 500] as const;
+const editorAttachmentHydrationQueue: EditorAttachmentHydrationTask[] = [];
+const editorAttachmentHydrationCleanupByRoot = new WeakMap<HTMLElement, () => void>();
+let editorAttachmentHydrationActive = 0;
+let editorAttachmentHydrationOrder = 0;
+
+function drainEditorAttachmentHydrationQueue(): void {
+  while (editorAttachmentHydrationActive < EDITOR_ATTACHMENT_HYDRATION_MAX_CONCURRENCY && editorAttachmentHydrationQueue.length > 0) {
+    editorAttachmentHydrationQueue.sort((left, right) => left.priority - right.priority || left.order - right.order);
+    const task = editorAttachmentHydrationQueue.shift();
+    if (!task || task.cancelled) continue;
+    editorAttachmentHydrationActive += 1;
+    void task.run().finally(() => {
+      editorAttachmentHydrationActive -= 1;
+      drainEditorAttachmentHydrationQueue();
+    });
+  }
+}
+
+function enqueueEditorAttachmentHydration(priority: number, run: () => Promise<void>): () => void {
+  const task: EditorAttachmentHydrationTask = {
+    cancelled: false,
+    order: editorAttachmentHydrationOrder += 1,
+    priority,
+    run,
+  };
+  editorAttachmentHydrationQueue.push(task);
+  drainEditorAttachmentHydrationQueue();
+  return () => { task.cancelled = true; };
+}
+
 export function isSafeEditorImageSource(src: string): boolean {
   return SAFE_IMAGE_DATA_URL_PATTERN.test(src.trim());
 }
@@ -307,19 +347,120 @@ export function setEditorImageFrameDisplaySource(frame: HTMLElement, src: string
   return true;
 }
 
-export function hydrateEditorAttachmentImageFrames(root: HTMLElement, loadObjectURL: EditorAttachmentImageObjectURLLoader): void {
+export function hydrateEditorAttachmentImageFrames(root: HTMLElement, loadObjectURL: EditorAttachmentImageObjectURLLoader): () => void {
+  editorAttachmentHydrationCleanupByRoot.get(root)?.();
   const frames = Array.from(root.querySelectorAll(`span[${EDITOR_IMAGE_NODE_ATTRIBUTE}="true"], span[${EDITOR_IMAGE_ATTACHMENT_ID_ATTRIBUTE}]`))
     .filter((node): node is HTMLSpanElement => node instanceof HTMLSpanElement);
+  const framesByAttachmentID = new Map<string, HTMLSpanElement[]>();
   for (const frame of frames) {
     if (!editorImageFrameNeedsAttachmentHydration(frame)) continue;
     const attachmentID = readEditorImageData(frame)?.attachmentID?.trim() ?? "";
     if (!attachmentID) continue;
-    void loadObjectURL(attachmentID, "display").then((objectURL) => {
-      if (!root.contains(frame) || !setEditorImageFrameDisplaySource(frame, objectURL)) {
-        URL.revokeObjectURL(objectURL);
-      }
-    }).catch(() => undefined);
+    const matchingFrames = framesByAttachmentID.get(attachmentID) ?? [];
+    matchingFrames.push(frame);
+    framesByAttachmentID.set(attachmentID, matchingFrames);
   }
+
+  let disposed = false;
+  const objectURLs = new Set<string>();
+  const hydratedFramesByObjectURL = new Map<string, Array<{ attachmentID: string; frame: HTMLSpanElement }>>();
+  const activeControllers = new Set<AbortController>();
+  const cancelQueuedTasks = new Set<() => void>();
+  const scheduledAttachmentIDs = new Set<string>();
+  const retryCountByAttachmentID = new Map<string, number>();
+  const retryTimers = new Set<ReturnType<typeof setTimeout>>();
+  let observer: IntersectionObserver | null = null;
+
+  const scheduleAttachment = (attachmentID: string, priority: number) => {
+    if (disposed || scheduledAttachmentIDs.has(attachmentID)) return;
+    scheduledAttachmentIDs.add(attachmentID);
+    const attachmentFrames = framesByAttachmentID.get(attachmentID) ?? [];
+    attachmentFrames.forEach((frame) => observer?.unobserve(frame));
+    const cancel = enqueueEditorAttachmentHydration(priority, async () => {
+      if (disposed) return;
+      const controller = new AbortController();
+      activeControllers.add(controller);
+      let objectURL = "";
+      try {
+        objectURL = await loadObjectURL(attachmentID, "display", { signal: controller.signal });
+        if (disposed) {
+          URL.revokeObjectURL(objectURL);
+          return;
+        }
+        let applied = false;
+        for (const frame of attachmentFrames) {
+          if (root.contains(frame) && setEditorImageFrameDisplaySource(frame, objectURL)) applied = true;
+        }
+        if (applied) {
+          objectURLs.add(objectURL);
+          hydratedFramesByObjectURL.set(objectURL, attachmentFrames.map((frame) => ({ attachmentID, frame })));
+        }
+        else URL.revokeObjectURL(objectURL);
+      } catch {
+        if (objectURL) URL.revokeObjectURL(objectURL);
+        if (disposed || controller.signal.aborted) return;
+        scheduledAttachmentIDs.delete(attachmentID);
+        const retryCount = retryCountByAttachmentID.get(attachmentID) ?? 0;
+        const retryDelay = EDITOR_ATTACHMENT_HYDRATION_RETRY_DELAYS_MS[retryCount];
+        if (retryDelay === undefined) return;
+        retryCountByAttachmentID.set(attachmentID, retryCount + 1);
+        const retryTimer = setTimeout(() => {
+          retryTimers.delete(retryTimer);
+          if (disposed) return;
+          if (observer) attachmentFrames.forEach((frame) => observer?.observe(frame));
+          else scheduleAttachment(attachmentID, priority + retryCount + 1);
+        }, retryDelay);
+        retryTimers.add(retryTimer);
+      } finally {
+        activeControllers.delete(controller);
+      }
+    });
+    cancelQueuedTasks.add(cancel);
+  };
+
+  if (framesByAttachmentID.size > 0 && typeof IntersectionObserver !== "undefined") {
+    observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const frame = entry.target as HTMLSpanElement;
+        const attachmentID = readEditorImageData(frame)?.attachmentID?.trim() ?? "";
+        if (attachmentID) scheduleAttachment(attachmentID, -Math.max(0, entry.intersectionRatio));
+      }
+    }, { root, rootMargin: EDITOR_ATTACHMENT_HYDRATION_ROOT_MARGIN });
+    for (const attachmentFrames of framesByAttachmentID.values()) {
+      attachmentFrames.forEach((frame) => observer?.observe(frame));
+    }
+  } else {
+    for (const attachmentID of framesByAttachmentID.keys()) scheduleAttachment(attachmentID, 0);
+  }
+
+  const cleanup = () => {
+    if (disposed) return;
+    disposed = true;
+    observer?.disconnect();
+    activeControllers.forEach((controller) => controller.abort());
+    activeControllers.clear();
+    retryTimers.forEach((timer) => clearTimeout(timer));
+    retryTimers.clear();
+    cancelQueuedTasks.forEach((cancel) => cancel());
+    cancelQueuedTasks.clear();
+    objectURLs.forEach((objectURL) => {
+      for (const { attachmentID, frame } of hydratedFramesByObjectURL.get(objectURL) ?? []) {
+        const image = frame.querySelector("img[src]") as HTMLImageElement | null;
+        if (root.contains(frame) && image?.getAttribute("src") === objectURL) {
+          setEditorImageFrameDisplaySource(frame, editorAttachmentImageSource(attachmentID));
+        }
+      }
+      URL.revokeObjectURL(objectURL);
+    });
+    hydratedFramesByObjectURL.clear();
+    objectURLs.clear();
+    if (editorAttachmentHydrationCleanupByRoot.get(root) === cleanup) {
+      editorAttachmentHydrationCleanupByRoot.delete(root);
+    }
+  };
+  editorAttachmentHydrationCleanupByRoot.set(root, cleanup);
+  return cleanup;
 }
 
 export function clearEditorImageSelection(root: HTMLElement) {
